@@ -2,7 +2,7 @@
 id: ER-006
 title: "src/er/lake/columns.py: VOLATILE_COLUMNS, GOLDEN_SURVIVABLE_COLUMNS, STD_RECORD_COLUMNS (dependency-free single definitions)"
 milestone: M1
-status: in_progress
+status: done
 kind: code
 size: S
 gates: fast
@@ -17,9 +17,9 @@ extra_paths: []
 attempts: 1
 verify: "uv run pytest tests/unit/test_columns.py -q && uv run mypy --strict src/er/lake/columns.py"
 branch: "ticket/ER-006-src-er-lake-columns-py-volatile"
-commit: ""
+commit: "f93d81d252ba1d12e5438591e3db1617384c983e"
 spec_sha: "28d8d8e366a7b49b"
-updated_at: "2026-08-14T23:43:57Z"
+updated_at: "2026-08-14T23:48:34Z"
 session: 4bfbc5e4-4dcb-4f3d-8d5a-d8ff0cf70906
 ---
 ## Description
