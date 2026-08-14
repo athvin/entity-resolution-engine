@@ -2,7 +2,7 @@
 id: ER-014
 title: "errors.py + CLI skeleton: S4.0 contract, exit codes 0/1/2/3/10, NoOpStage vs NotImplementedStage, run-all chain, --json, dbt_vars(cfg)"
 milestone: M1
-status: todo
+status: in_progress
 kind: code
 size: L
 gates: fast
@@ -14,12 +14,13 @@ consumes: ["src/er/config/loader.py::load_config", "src/er/config/loader.py::Con
 owns: ["src/er/errors.py", "src/er/cli.py", "tests/unit/test_cli_contract.py"]
 protected_paths: []
 extra_paths: ["pyproject.toml"]
-attempts: 0
+attempts: 1
 verify: "uv run pytest tests/unit/test_cli_contract.py -q && uv run mypy --strict src/er/cli.py src/er/errors.py"
-branch: ""
+branch: "ticket/ER-014-errors-py-cli-skeleton-s4-0"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "28d8d8e366a7b49b"
+updated_at: "2026-08-14T23:32:04Z"
+session: 829df09b-beae-49e4-ba6c-4057f841b536
 ---
 ## Description
 
