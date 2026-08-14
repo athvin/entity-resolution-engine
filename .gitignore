@@ -1,0 +1,25 @@
+# Loop working state: change plans, gate receipts, logs, per-run transcripts.
+# Never committed -- receipts must not be forgeable through a merge.
+.loop/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+
+# dbt
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+
+# Pipeline outputs
+artifacts/
+models/
+*.duckdb
+*.duckdb.wal
+
+.DS_Store

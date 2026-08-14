@@ -1,0 +1,83 @@
+---
+id: ER-077
+title: "split_scenario (bridge, machine-checked) + split_scenario_tie_2_2 + T-PERM-2"
+milestone: M3
+status: todo
+kind: fixture
+size: M
+gates: full
+depends_on: ["ER-028", "ER-074", "ER-076"]
+spec_refs: ["s8-2", "s8-2-1", "s8-3", "s4-4", "s4-4-2", "s4-5-1", "s4-5-3", "s5-0"]
+gap_refs: ["B5", "M6", "M5"]
+provides: ["fixtures/static/split_scenario/", "fixtures/static/split_scenario_tie_2_2/", "tests/integration/scenarios/test_split_scenario.py::test_split_retains_id_for_rank_1_fragment", "tests/unit/fixtures/test_split_scenario.py::assert_pair_is_bridge"]
+consumes: ["ER-028::load_scenario", "ER-028::validate_fixtures", "tests/helpers/compare.py::assert_ids_stable", "src/er/review/never_cut.py::never_cut_fixpoint", "src/er/entities/reconcile_stage.py::run_reconcile_stage", "src/er/entities/reconcile.py::fragment_rank", "fixtures/static/model_test_v1.json"]
+owns: ["fixtures/static/split_scenario/", "fixtures/static/split_scenario_tie_2_2/", "tests/integration/scenarios/test_split_scenario.py", "tests/unit/fixtures/test_split_scenario.py"]
+protected_paths: []
+extra_paths: []
+attempts: 0
+verify: "bash scripts/ci/itest.sh tests/integration/scenarios/test_split_scenario.py -q && uv run pytest tests/unit/fixtures/test_split_scenario.py -q"
+branch: ""
+commit: ""
+spec_sha: ""
+updated_at: "2026-08-14T20:02:00Z"
+---
+## Description
+
+Commit `split_scenario` — a `never` assertion on a **bridge** edge that severs a previously merged entity (S8.2) — with the bridge property machine-checked rather than asserted in prose, plus `split_scenario_tie_2_2` for the even fragment tie. The scenario's `assertions.csv` applies before the `batch` phase and the asserted records appear in no batch delivery, so the split is driven purely by the assertion delta of the affected node set (S4.5.1), which is what makes `never` 'applied identically in incremental and full modes' true. The integration body is T-PERM-2: fragments ranked `(member_count DESC, min member record_key ASC)`, rank 1 keeps the `entity_id` under `assert_ids_stable`, the other fragment mints a new ULID, exactly one `split` event.
+
+## Scope
+
+### In scope
+
+- `fixtures/static/split_scenario/{base,batch,assertions.csv,expected/{base,batch}}` in the S8.2.1 shape
+- `fixtures/static/split_scenario_tie_2_2/` producing two equal-sized fragments
+- a fixture unit test that rebuilds the component from the committed base expectation and proves the asserted pair is a bridge
+- the T-PERM-2 integration body over `base -> batch`
+
+### Out of scope
+
+- the never-cut algorithm itself (ER-076)
+- the assertion fixture family and the cut/path tie fixtures (ER-078)
+- T-ASSERT-1 (ER-079)
+- golden expectations (deferred to M4)
+- deletion-driven splits (ER-083)
+
+## Design decisions applied
+
+Implements B5's fragment total order and 'the asserted edge must be a bridge', M6 (assertion applied identically in both modes), M5 (rank 1 retains the id). Easy to miss: because the asserted pair **is** the only connection, the S4.4 pre-clustering edge adjustment removes it directly and **no** partition-level cut is required — this scenario must therefore write zero `cut_edges` rows and emit zero `edge_cut` events, which is exactly what distinguishes it from `assertions_scenario`'s A3 case. Also: the `batch/` delivery must contain none of the asserted records, or the scenario proves nothing about the assertion-delta arm. Node-id divergence: S8.3 lists T-PERM-2 at `tests/integration/test_permanence.py::test_split_retains_id_for_rank_1_fragment`; the board realises it at `tests/integration/scenarios/test_split_scenario.py` — keep the function name and do not duplicate it under `test_permanence.py`.
+
+## Acceptance criteria
+
+- [ ] AC1: `tests/unit/fixtures/test_split_scenario.py` rebuilds the base-phase component from the committed expectation and asserts the asserted pair is a bridge: removing it yields exactly two non-empty parts; adding any other edge to the fixture makes the assertion fail.
+- [ ] AC2: `split_scenario/assertions.csv` has the literal S8.2.1 header, one row with `phase=batch`, `kind=never`, and `rec_a_key < rec_b_key`.
+- [ ] AC3: The `batch/` CSVs contain none of the asserted records (asserted from the committed files), so the affected set is reached only through the assertion delta.
+- [ ] AC4: After the batch phase the rank-1 fragment by `(member_count DESC, min record_key ASC)` retains the base-phase `entity_id` under `assert_ids_stable`, and the other fragment's `entity_id` does not appear anywhere in the base-phase membership.
+- [ ] AC5: Exactly one `entity_events` row with `event_type='split'` exists for the batch `run_id`, and `expected/batch/events.csv` encodes it.
+- [ ] AC6: Zero `cut_edges` rows and zero `edge_cut` events are produced by either scenario — the asserted edge is removed by the S4.4 adjustment, not by a partition-level cut.
+- [ ] AC7: In `split_scenario_tie_2_2` the 4-member entity yields two 2-member fragments and the one with the smaller minimum `record_key` keeps the `entity_id`; reversing the committed expectation fails the test.
+- [ ] AC8: `assert_membership_equals_components` passes after both phases of both scenarios.
+
+## Tests
+
+- tests/unit/fixtures/test_split_scenario.py::test_asserted_pair_is_a_bridge
+- tests/unit/fixtures/test_split_scenario.py::test_batch_contains_no_asserted_record
+- tests/unit/fixtures/test_split_scenario.py::test_expected_files_sorted_and_headers_literal
+- tests/integration/scenarios/test_split_scenario.py::test_split_retains_id_for_rank_1_fragment
+- tests/integration/scenarios/test_split_scenario.py::test_minority_fragment_gets_new_ulid_and_one_split_event
+- tests/integration/scenarios/test_split_scenario.py::test_two_two_split_resolved_by_min_record_key
+- tests/integration/scenarios/test_split_scenario.py::test_no_cut_edges_written
+
+## Verification
+
+```bash
+bash scripts/ci/itest.sh tests/integration/scenarios/test_split_scenario.py -q && uv run pytest tests/unit/fixtures/test_split_scenario.py -q
+uv run python fixtures/validate_fixtures.py fixtures/static/split_scenario fixtures/static/split_scenario_tie_2_2
+```
+
+## Definition of Done
+
+- Bridge property is machine-checked in a unit test, not documented in a comment
+- `assertions.csv` phase column drawn from the S8.2.1 vocabulary
+- No golden expectation committed; `expected/<phase>/golden.csv` absent for both scenarios
+- T-PERM-2's function name matches S8.3
+- Both scenarios pass the fixture validator and both verify commands are green
