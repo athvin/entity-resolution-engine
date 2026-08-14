@@ -7,6 +7,7 @@ effort: high
 allowed-tools: >-
   Bash(python3 ${CLAUDE_PROJECT_DIR}/scripts/board.py *)
   Bash(bash ${CLAUDE_PROJECT_DIR}/scripts/gates.sh *)
+  Bash(python3 scripts/board.py *) Bash(bash scripts/gates.sh *) Bash(./scripts/gates.sh *)
   Bash(uv run pytest *) Bash(uv run ruff *) Bash(uv run mypy *) Bash(uv run dbt *)
   Bash(uv run python *) Bash(uv sync *) Bash(uv lock *) Bash(uv add *)
   Bash(uv --version) Bash(command -v *)
@@ -19,8 +20,7 @@ disallowed-tools: >-
   Bash(git push *) Bash(git reset --hard *) Bash(git rebase *) Bash(git clean *)
   Bash(git restore *) Bash(git checkout *) Bash(git branch -D *) Bash(gh *)
   Bash(bash scripts/run-loop.sh *) Bash(scripts/run-loop.sh *)
-  Edit(docs/implementation/**) Write(docs/implementation/**)
-  Edit(.loop/receipts/**) Write(.loop/receipts/**)
+  Edit(docs/implementation/**) Edit(.loop/receipts/**)
   AskUserQuestion
 ---
 

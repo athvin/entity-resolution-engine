@@ -158,6 +158,14 @@ root = sys.argv[1]
 allow = [
     f"Bash(python3 {root}/scripts/board.py *)",
     f"Bash(bash {root}/scripts/gates.sh *)",
+    # Both spellings. SKILL.md tells the agent to use the absolute path, but agents
+    # routinely shorten to the repo-relative form, and a permission rule matches the
+    # literal string -- so a relative call matches no absolute rule and dontAsk denies
+    # it. That cost a whole run (two iterations, no progress) before it was caught.
+    # The cwd is always the repo root, so both spellings name the same script.
+    "Bash(python3 scripts/board.py *)",
+    "Bash(bash scripts/gates.sh *)",
+    "Bash(./scripts/gates.sh *)",
     "Bash(uv run pytest *)", "Bash(uv run ruff *)", "Bash(uv run mypy *)",
     "Bash(uv run dbt *)",
     "Bash(uv sync *)", "Bash(uv lock *)", "Bash(uv add *)",
@@ -188,16 +196,19 @@ deny = [
     "Bash(git clean *)", "Bash(git restore *)", "Bash(git checkout *)",
     "Bash(git branch -D *)", "Bash(gh *)", "Bash(curl *)",
     f"Bash(bash {root}/scripts/run-loop.sh *)",
-    "Edit(DesignDoc.md)", "Write(DesignDoc.md)",
-    "Edit(docs/implementation/**)", "Write(docs/implementation/**)",
+    # Only Edit(...) rules are consulted by file permission checks; a Write(...) deny
+    # rule is silently inert and merely warns. Edit rules cover every file-editing
+    # tool, Write included, so these are the real protection.
+    "Edit(DesignDoc.md)",
+    "Edit(docs/implementation/**)",
     # NOT all of .loop/: the agent must write .loop/change-plan.json and its logs.
     # Only the artifacts that attest to its work are out of reach.
-    "Edit(.loop/receipts/**)", "Write(.loop/receipts/**)",
-    "Edit(.loop/gate-cache/**)", "Write(.loop/gate-cache/**)",
-    "Edit(.claude/**)", "Write(.claude/**)",
-    "Edit(scripts/board.py)", "Write(scripts/board.py)",
-    "Edit(scripts/gates.sh)", "Write(scripts/gates.sh)",
-    "Edit(scripts/run-loop.sh)", "Write(scripts/run-loop.sh)",
+    "Edit(.loop/receipts/**)",
+    "Edit(.loop/gate-cache/**)",
+    "Edit(.claude/**)",
+    "Edit(scripts/board.py)",
+    "Edit(scripts/gates.sh)",
+    "Edit(scripts/run-loop.sh)",
     "AskUserQuestion",
 ]
 print(json.dumps({"permissions": {"allow": allow, "deny": deny}}))
