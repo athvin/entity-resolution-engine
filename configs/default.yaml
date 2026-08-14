@@ -1,0 +1,108 @@
+# Reference configuration: every one of the fourteen S6 blocks, with the values a
+# new tenant starts from. `configs/test.yaml` is the fixture/CI document and is
+# equal to the S6 listing verbatim; this file is the one a deployment copies.
+# Nothing here is read by the fixtures, so a value may differ from test.yaml only
+# where the difference is deliberate (tenant, model prefix, drop directory).
+tenant: default
+
+thresholds:
+  auto_merge: 0.95
+  review_low: 0.60
+
+standardization:
+  email_strip_plus_addressing: false
+  email_placeholders: []                # tenant-specific junk addresses go here
+  phone_default_region: US
+
+sources:
+  crm:
+    adapter: csv
+    priority_rank: 1
+    record_id_column: crm_id
+    updated_at_column: last_modified
+    date_format: "%Y-%m-%d"
+    columns:
+      given_name:   first_name
+      family_name:  last_name
+      email:        email_address
+      phone:        phone
+      address_line: street_address
+      addr_city:    city
+      addr_region:  state
+      addr_postal:  zip
+      birth_date:   dob
+  billing:
+    adapter: csv
+    priority_rank: 2
+    record_id_column: account_no
+    updated_at_column: updated_ts
+    date_format: "%m/%d/%Y"
+    columns:
+      given_name:   fname
+      family_name:  lname
+      email:        billing_email
+      phone:        contact_phone
+      address_line: addr1
+      addr_city:    addr_city
+      addr_region:  addr_state
+      addr_postal:  postal_code
+      birth_date:   birth_date
+
+blocking:
+  - { key_type: email_exact, expr: "email" }
+  - { key_type: phone_exact, expr: "phone_e164" }
+  - { key_type: name_postal, expr: "substr(family_name,1,4) || '|' || addr_postal" }
+  - { key_type: dob_name,    expr: "birth_date || '|' || substr(given_name,1,3)" }
+
+comparisons:
+  given_name:  { levels: [exact, jaro_winkler:0.90, variant_match, null], tf: true }
+  family_name: { levels: [exact, jaro_winkler:0.90, null], tf: true }
+  email:       { levels: [exact, username_exact, null], tf: true }
+  phone_e164:  { levels: [exact, null] }
+  birth_date:  { levels: [exact, dob_same_year_month, null] }
+  addr_postal: { levels: [exact, null] }
+
+survivorship:
+  email:       [validated, source_priority, recency]
+  phone_e164:  [validated, source_priority, recency]
+  given_name:  [source_priority, frequency, completeness]
+  family_name: [source_priority, frequency, completeness]
+  address:     [recency, source_priority]
+  birth_date:  [frequency, source_priority]
+
+training:
+  deterministic_rules:
+    - "l.email = r.email"
+    - "l.phone_e164 = r.phone_e164"
+    - "l.family_name = r.family_name and l.birth_date = r.birth_date"
+  recall: 0.85
+  u_max_pairs: 1000000
+  u_seed: 20260101              # required, no default: an unseeded u estimate is not reproducible
+  em_blocking_rules:
+    - "l.email = r.email"
+    - "l.family_name = r.family_name and l.addr_postal = r.addr_postal"
+  em:
+    fix_u_probabilities: true
+
+storage:
+  data_path: "s3://lake/er/"
+  drop_dir: "/app/drop"
+  model_uri_prefix: "s3://lake/models/default/"   # already names the tenant (V14, S4.3.2)
+
+versions:
+  std_version: "1"
+  survivorship_version: "1"
+  address_parser_version: "1"
+
+generator:
+  seed: 42
+
+clustering:
+  max_iterations: 50
+  cut_protect_probability: 1.0
+
+coherence:
+  scorer: noop
+
+correction_pass:
+  cadence: "0 3 * * 0"     # weekly, Sunday 03:00 UTC
