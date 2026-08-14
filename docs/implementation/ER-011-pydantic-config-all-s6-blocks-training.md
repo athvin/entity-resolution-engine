@@ -2,24 +2,24 @@
 id: ER-011
 title: "Pydantic config: all S6 blocks (training/storage/versions/generator/clustering/coherence/correction_pass/sources.columns) + config_hash"
 milestone: M1
-status: blocked
+status: todo
 kind: code
 size: L
 gates: fast
 depends_on: ["ER-001", "ER-003"]
-spec_refs: ["s6", "s6-1", "s5-2", "s4-0", "s4-3-2"]
+spec_refs: ["s6", "s6-1", "s5-2", "s4-0", "s4-3-2", "s2-1"]
 gap_refs: ["M26", "M8", "M14", "B5"]
 provides: ["src/er/config/schema.py::Config", "src/er/config/schema.py::Thresholds", "src/er/config/schema.py::Standardization", "src/er/config/schema.py::SourceSpec", "src/er/config/schema.py::BlockingRule", "src/er/config/schema.py::ComparisonSpec", "src/er/config/schema.py::Training", "src/er/config/schema.py::TrainingEm", "src/er/config/schema.py::Storage", "src/er/config/schema.py::Versions", "src/er/config/schema.py::Generator", "src/er/config/schema.py::Clustering", "src/er/config/schema.py::Coherence", "src/er/config/schema.py::CorrectionPass", "src/er/config/schema.py::CONFIG_BLOCKS", "src/er/config/schema.py::normalize", "src/er/config/loader.py::load_config", "src/er/config/loader.py::ConfigValidationError", "src/er/config/hashing.py::config_hash", "src/er/config/hashing.py::canonical_document", "configs/default.yaml", "configs/test.yaml"]
 consumes: ["src/er/__init__.py", "pyproject.toml::pydantic==2.13.4"]
 owns: ["src/er/config/schema.py", "src/er/config/loader.py", "src/er/config/hashing.py", "configs/default.yaml", "configs/test.yaml", "tests/unit/test_config_schema.py"]
 protected_paths: []
 extra_paths: ["src/er/config/__init__.py"]
-attempts: 1
+attempts: 0
 verify: "uv run pytest tests/unit/test_config_schema.py -q && uv run mypy --strict src/er/config"
-branch: "ticket/ER-011-pydantic-config-all-s6-blocks-training"
+branch: ""
 commit: ""
 spec_sha: "2e60a757351fe5ce"
-updated_at: "2026-08-14T23:01:29Z"
+updated_at: "2026-08-14T23:10:51Z"
 session: 2816104e-7a5e-4c7d-8ce1-d94e54c2aa99
 ---
 ## Description
@@ -88,6 +88,26 @@ uv run ruff format --check src/er/config tests/unit/test_config_schema.py
 - No `ER_*` variable other than `$ER_CONFIG` is read by this package
 
 ## Blocker log
+### Resolution of attempt 1 (applied by the board owner, 2026-08-14)
+
+The contradiction attempt 1 found was real and the spec has been amended: **S2.1 now carries a
+`PyYAML` row pinning `pyyaml==6.0.3` and `types-PyYAML==6.0.12.20260724`** (commit on `main`,
+"spec: pin PyYAML + types-PyYAML in S2.1"). Attempt 1's note below is retained for the reasoning,
+but its conclusion is **no longer current** — re-read S2.1 before acting on it.
+
+What this means for the next attempt:
+
+- Declare `pyyaml==6.0.3` in the default dependency group and `types-PyYAML==6.0.12.20260724` in the
+  dev group of `pyproject.toml`, then re-lock. Both now have the S2.1 row that S2.1's closing rule
+  requires, so this is no longer an undeclared dependency.
+- `pyproject.toml` and `uv.lock` are owned by ER-003, which is `done`, so `plan-check` permits your
+  plan to touch them — `owns_index` skips completed tickets. Name them in `.loop/change-plan.json`.
+- `uv add` and `uv lock` are both in the permitted command set. Attempt 1 asserted they were not;
+  that assertion was wrong. Verify a command's permission status by running it, not by assuming.
+- The two routes attempt 1 correctly rejected — an `ignore_missing_imports` override and a
+  hand-written `src/yaml.pyi` typing `safe_load` as `Any` — remain forbidden. With the stub
+  distribution declared, neither is needed.
+
 
 ### Attempt 1 — spec_contradiction (2026-08-14T23:01:29Z)
 
