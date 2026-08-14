@@ -97,11 +97,12 @@ but its conclusion is **no longer current** — re-read S2.1 before acting on it
 
 What this means for the next attempt:
 
-- Declare `pyyaml==6.0.3` in the default dependency group and `types-PyYAML==6.0.12.20260724` in the
-  dev group of `pyproject.toml`, then re-lock. Both now have the S2.1 row that S2.1's closing rule
-  requires, so this is no longer an undeclared dependency.
-- `pyproject.toml` and `uv.lock` are owned by ER-003, which is `done`, so `plan-check` permits your
-  plan to touch them — `owns_index` skips completed tickets. Name them in `.loop/change-plan.json`.
+- **The dependency is already declared and locked.** `pyproject.toml` carries `pyyaml==6.0.3` in the
+  default group and `types-PyYAML==6.0.12.20260724` in the dev group, and `uv.lock` resolves both.
+  This was done as part of the spec amendment, because ER-003's `test_uv_lock_matches_s2_1_pins`
+  fails the moment an S2.1 row asserting `uv.lock` has no lockfile entry — the row and the lock have
+  to land together. You do not need to touch `pyproject.toml` or `uv.lock`; `import yaml` type-checks
+  under `mypy --strict` today.
 - `uv add` and `uv lock` are both in the permitted command set. Attempt 1 asserted they were not;
   that assertion was wrong. Verify a command's permission status by running it, not by assuming.
 - The two routes attempt 1 correctly rejected — an `ignore_missing_imports` override and a

@@ -23,6 +23,7 @@ dependencies = [
   "python-ulid==4.0.1",
   "boto3==1.43.72",
   "psycopg[binary]==3.3.4",
+  "pyyaml==6.0.3",
 ]
 
 # The `er` console script belongs to ER-014, which builds src/er/cli.py; declaring
@@ -36,6 +37,7 @@ dev = [
   "ruff==0.16.3",
   "mypy==2.3.0",
   "actionlint-py==1.7.7.23",
+  "types-PyYAML==6.0.12.20260724",
 ]
 
 [build-system]
