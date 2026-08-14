@@ -2,7 +2,7 @@
 id: ER-003
 title: "Repo skeleton: pyproject + uv.lock (full pinned runtime set), ruff, mypy --strict src/er, package tree, Makefile, pinned actionlint installer"
 milestone: M1
-status: in_progress
+status: blocked
 kind: code
 size: M
 gates: fast
@@ -19,7 +19,7 @@ verify: "uv sync --frozen && uv run ruff check . && uv run ruff format --check .
 branch: "ticket/ER-003-repo-skeleton-pyproject-uv-lock-full"
 commit: ""
 spec_sha: "2e60a757351fe5ce"
-updated_at: "2026-08-14T21:19:09Z"
+updated_at: "2026-08-14T21:21:17Z"
 session: 7104a6b7-c393-4d4d-8f16-5c44089825c0
 ---
 ## Description
@@ -88,3 +88,26 @@ bash scripts/gates.sh --fast
 - `scripts/actionlint.py` contains no download (`curl`/`wget`/`urlopen`)
 - DesignDoc.md, lint_spec.py, board.py and gates.sh unmodified
 - Committed on main
+
+## Blocker log
+
+### Attempt 1 — underspecified (2026-08-14T21:21:17Z)
+
+- **Failing command:** `python3 scripts/lint_spec.py --part a DesignDoc.md   # and: git ls-files dbt`
+- **Assertion / contradiction:** Two acceptance criteria are unsatisfiable by construction, so no plan-check-valid plan for ER-003 exists.
+
+(1) AC6 requires "--part a/--part b exit 0 against DesignDoc.md and exit 1 against tests/fixtures/designdoc_v1.0.md", and names four tests (test_part_a_passes_on_designdoc, test_part_a_fails_on_v1_0_fixture, test_part_b_passes_on_designdoc, test_part_b_fails_on_v1_0_fixture). But scripts/lint_spec.py has no --part flag: "lint_spec.py: error: unrecognized arguments: --part DesignDoc.md" (exit 2). Its only arms are the bare path and --expect-fail. ER-001, status done, lists "scripts/lint_spec.py --part {a,b}", "scripts/lint_spec.py::PART_A_SECTIONS" and "scripts/lint_spec.py::PART_A_TOKENS" in provides; grep -c for all three in scripts/lint_spec.py returns 0. ER-001 was seeded done against an unmet provides contract. ER-003 cannot repair it: scripts/lint_spec.py is in ER-003 protected_paths, and ER-003 Scope/Out of scope says "Editing DesignDoc.md or scripts/lint_spec.py to make a parity assertion pass - both are protected".
+
+(2) AC5 requires that for each of src/, dbt/, configs/, benchmarks/, fixtures/, tests/, scripts/, "git ls-files <dir> returns at least one entry". git ls-files dbt returns 0 entries. ER-003 owns no path under dbt/; ER-008 (status todo) owns dbt/dbt_project.yml, dbt/profiles/profiles.yml, dbt/models/.gitkeep and the rest, and ER-003 Out of scope defers "The dbt project (ER-008)". plan-check rejects a plan touching a path another unfinished ticket owns, so AC5 cannot be covered from inside ER-003.
+
+The spec is not at fault. DesignDoc.md S2.1, S3, S8.1 and S9.1 are all consistent and implementable; these are two ticket-authoring defects.
+- **Smallest change that would unblock:** Two edits to ticket text, no code and no spec change.
+
+(1) AC6: drop --part entirely and assert the two arms the linter actually has. Replace AC6 with: "uv run pytest tests/unit/test_spec_lint.py -q passes, with one case per linter arm: python3 scripts/lint_spec.py DesignDoc.md exits 0, python3 scripts/lint_spec.py tests/fixtures/designdoc_v1.0.md exits 1, and python3 scripts/lint_spec.py --expect-fail tests/fixtures/designdoc_v1.0.md exits 0 while the same flag against DesignDoc.md exits 1." Rename the four Tests node ids to test_lint_passes_on_designdoc, test_lint_fails_on_v1_0_fixture, test_expect_fail_passes_on_v1_0_fixture, test_expect_fail_fails_on_designdoc. Then remove "scripts/lint_spec.py --part {a,b}", "::PART_A_SECTIONS" and "::PART_A_TOKENS" from ER-001 provides, and "scripts/lint_spec.py --part {a,b}" from ER-002 and ER-003 consumes. Nothing is lost: the non-vacuity property the --part split was meant to guarantee is already enforced by --expect-fail, which CI runs on the committed v1.0 copy. The alternative - reopening ER-001 to actually build a PART_A/PART_B split - is strictly more work for the same guarantee.
+
+(2) AC5: delete dbt/ from the AC5 path list in ER-003, leaving src/, configs/, benchmarks/, fixtures/, tests/, scripts/. Add the dbt/ arm to ER-008 instead, as a new acceptance criterion: "git ls-files dbt returns at least one entry, so docker/Dockerfile can COPY it." ER-008 owns dbt/ and ER-007 (the Dockerfile) depends on it, so the assertion lands on the ticket that can satisfy it.
+
+After both edits, re-run python3 scripts/board.py validate, then python3 scripts/board.py unblock ER-003.
+
+Worth a wider pass while you are in there: this is a provides-vs-reality drift, and ER-001/ER-002 were seeded done in Phase A rather than built by the loop, so their other provides entries were never executed either. Checking every ER-001/ER-002 provides symbol against scripts/lint_spec.py and DesignDoc.md now would catch the rest of this class before it stops another ticket.
+- **Log:** `.loop/logs/ER-003.attempt-1.log`
