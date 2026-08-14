@@ -16,9 +16,16 @@ dbt/target/
 dbt/dbt_packages/
 dbt/logs/
 
-# Pipeline outputs
-artifacts/
-models/
+# Pipeline outputs. Both are S3 working directories, not sources of truth, but
+# the directory itself must exist in a fresh clone: docker/Dockerfile COPYs it and
+# artifacts/ is a Compose bind mount. Ignore the contents, track the marker.
+# The pattern must be `dir/*`, not `dir/`: git cannot re-include a file whose
+# parent directory is itself excluded, so `artifacts/` + `!artifacts/.gitkeep`
+# silently keeps the marker untracked.
+artifacts/*
+!artifacts/.gitkeep
+models/*
+!models/.gitkeep
 *.duckdb
 *.duckdb.wal
 

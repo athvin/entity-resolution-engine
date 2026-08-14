@@ -1,0 +1,77 @@
+[project]
+name = "er"
+version = "0.1.0"
+description = "Entity resolution and golden record pipeline (DesignDoc.md v1.1)"
+requires-python = ">=3.12,<3.13"
+license = { file = "LICENSE" }
+
+# Every distribution below has a row in DesignDoc.md S2.1 and is pinned to the
+# literal there. S2.1's last rule makes this a closed set: adding a dependency
+# means adding a row to the spec first, never a quiet edit here.
+# dbt-adapters and dbt-common are transitive through dbt-core, but S5.0 relies on
+# their contract-enforcement machinery, so S2.1 pins them and they are declared
+# directly rather than left to the resolver.
+dependencies = [
+  "splink==4.0.16",
+  "duckdb==1.5.5",
+  "dbt-core==1.12.2",
+  "dbt-duckdb==1.11.0",
+  "dbt-adapters==1.24.5",
+  "dbt-common==1.39.0",
+  "typer==0.27.1",
+  "pydantic==2.13.4",
+  "python-ulid==4.0.1",
+  "boto3==1.43.72",
+  "psycopg[binary]==3.3.4",
+]
+
+# The `er` console script belongs to ER-014, which builds src/er/cli.py; declaring
+# an entry point at a module that does not exist yet would ship a broken script.
+
+[dependency-groups]
+dev = [
+  "pytest==9.1.1",
+  "pytest-xdist==3.8.0",
+  "hypothesis==6.165.7",
+  "ruff==0.16.3",
+  "mypy==2.3.0",
+  "actionlint-py==1.7.7.23",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/er"]
+
+[tool.ruff]
+target-version = "py312"
+# 100 rather than the 88 default: the Python already in this repo is authored at
+# 95-103 columns and the pipeline's SQL-bearing strings read badly narrower.
+line-length = 100
+# Two exclusions, both about files this project must not rewrite:
+#   *.md            - ruff formats fenced python blocks inside Markdown. The only
+#                     Markdown here is DesignDoc.md (the authority every gate is
+#                     graded against), the board, and the committed v1.0 spec
+#                     fixture. Their snippets are illustrative and elided, and
+#                     MUST read as authored.
+#   the loop scripts - scripts/board.py and scripts/lint_spec.py are the
+#                     implementation loop's own machinery. They predate this gate,
+#                     are not ruff-clean at any line length (F401, UP035, UP037,
+#                     B904 and lines the formatter both splits and collapses), and
+#                     every ticket lists them as protected_paths. Linting a file no
+#                     ticket may edit turns the gate into a permanent red light
+#                     rather than a check. Reformatting them needs its own ticket.
+extend-exclude = ["*.md", "scripts/board.py", "scripts/lint_spec.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "W"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src/er"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
