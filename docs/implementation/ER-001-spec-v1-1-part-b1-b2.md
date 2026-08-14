@@ -9,7 +9,7 @@ gates: fast
 depends_on: []
 spec_refs: ["s1", "s2", "s2-1", "s3", "s4", "s4-0", "s4-0b", "s5", "s5-0", "s5-1", "s5-2", "s6", "s6-1", "s7", "s7-1", "s7-2", "s7-3", "s7-4", "s8-1", "s8-2", "s8-2-1", "s9-1", "s12", "s12-1"]
 gap_refs: ["B1", "B2", "B5", "M1", "M2", "M3", "M4", "M11", "M14", "M19", "M22", "M25", "M26", "MINOR-tenancy", "MINOR-event_id", "MINOR-lake-maint", "MINOR-golden_display", "NEW-S2.1/S4.0/S4.0b/S5.0/S5.1/S5.2/S8.2.1/S12.1/Observability"]
-provides: ["DesignDoc.md::s2-1", "DesignDoc.md::s4-0", "DesignDoc.md::s4-0b", "DesignDoc.md::s5", "DesignDoc.md::s5-0", "DesignDoc.md::s5-1", "DesignDoc.md::s5-2", "DesignDoc.md::s6", "DesignDoc.md::s6-1", "DesignDoc.md::s7-1", "DesignDoc.md::s8-1", "DesignDoc.md::s8-2-1", "DesignDoc.md::s12-1", "scripts/lint_spec.py::lint", "scripts/lint_spec.py::main", "scripts/lint_spec.py::PART_A_SECTIONS", "scripts/lint_spec.py::PART_A_TOKENS", "scripts/lint_spec.py::FORBIDDEN", "scripts/lint_spec.py --part {a,b}", "tests/fixtures/designdoc_v1.0.md"]
+provides: ["DesignDoc.md::s2-1", "DesignDoc.md::s4-0", "DesignDoc.md::s4-0b", "DesignDoc.md::s5", "DesignDoc.md::s5-0", "DesignDoc.md::s5-1", "DesignDoc.md::s5-2", "DesignDoc.md::s6", "DesignDoc.md::s6-1", "DesignDoc.md::s7-1", "DesignDoc.md::s8-1", "DesignDoc.md::s8-2-1", "DesignDoc.md::s12-1", "scripts/lint_spec.py::lint", "scripts/lint_spec.py::main", "scripts/lint_spec.py::FORBIDDEN", "tests/fixtures/designdoc_v1.0.md"]
 consumes: []
 owns: ["scripts/lint_spec.py", "tests/fixtures/designdoc_v1.0.md"]
 protected_paths: []

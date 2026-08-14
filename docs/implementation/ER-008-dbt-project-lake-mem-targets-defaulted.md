@@ -56,6 +56,7 @@ Implements M23 (two targets, defaulted `env_var`, static job cannot connect), M4
 - [ ] AC6: `dbt_project.yml` sets `+contract: {enforced: true}` and `+on_schema_change: 'sync_all_columns'` at the `models:` root, and declares `vars` for `std_version` and `survivorship_version` — the test asserts a comment or config note marking them fallbacks, since the CLI's `--vars` always wins (S6).
 - [ ] AC7: `uv run dbt ls --project-dir dbt --profiles-dir dbt/profiles --target mem --resource-type model` lists zero models: M1 ships none.
 - [ ] AC8: Every `env_var(` occurrence in `profiles.yml` has a second argument — asserted by a regex test, so a future edit that drops a default fails on the unit layer rather than in the static CI job.
+- [ ] AC9: `git ls-files dbt` returns at least one entry, so `docker/Dockerfile` (ER-007) can COPY `dbt/` in a fresh clone. Moved here from ER-003 AC5, which could not satisfy it: this ticket owns every path under `dbt/`.
 
 ## Tests
 
