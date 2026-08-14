@@ -2,7 +2,7 @@
 id: ER-011
 title: "Pydantic config: all S6 blocks (training/storage/versions/generator/clustering/coherence/correction_pass/sources.columns) + config_hash"
 milestone: M1
-status: in_progress
+status: done
 kind: code
 size: L
 gates: fast
@@ -17,9 +17,9 @@ extra_paths: ["src/er/config/__init__.py"]
 attempts: 1
 verify: "uv run pytest tests/unit/test_config_schema.py -q && uv run mypy --strict src/er/config"
 branch: "ticket/ER-011-pydantic-config-all-s6-blocks-training"
-commit: ""
+commit: "3bdb896220c45648592c1dcfbc1ee20e37085886"
 spec_sha: "28d8d8e366a7b49b"
-updated_at: "2026-08-14T23:14:44Z"
+updated_at: "2026-08-14T23:22:31Z"
 session: 6ad276cf-22c8-4d7c-93b1-04ef34ce2dca
 ---
 ## Description
