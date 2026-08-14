@@ -26,8 +26,10 @@ dependencies = [
   "pyyaml==6.0.3",
 ]
 
-# The `er` console script belongs to ER-014, which builds src/er/cli.py; declaring
-# an entry point at a module that does not exist yet would ship a broken script.
+[project.scripts]
+# The single entry point of S4.0's orchestration contract. `main` exists so the
+# script name is stable while the Typer app underneath it can be restructured.
+er = "er.cli:main"
 
 [dependency-groups]
 dev = [
