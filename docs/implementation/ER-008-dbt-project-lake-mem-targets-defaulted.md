@@ -2,7 +2,7 @@
 id: ER-008
 title: "dbt project: lake/mem targets, defaulted env_var, ER_LAKE_METADATA_SCHEMA, threads:1, pinned dbt_utils, +contract:{enforced:true} + on_schema_change defaults"
 milestone: M1
-status: todo
+status: in_progress
 kind: code
 size: M
 gates: fast
@@ -14,12 +14,13 @@ consumes: ["pyproject.toml", "uv.lock", "DesignDoc.md::s4-0b", "dir:tests/unit/"
 owns: ["dbt/dbt_project.yml", "dbt/packages.yml", "dbt/package-lock.yml", "dbt/profiles/profiles.yml", "dbt/models/.gitkeep", "dbt/macros/.gitkeep", "dbt/seeds/.gitkeep", "dbt/tests/.gitkeep", "tests/unit/test_dbt_profiles.py"]
 protected_paths: ["DesignDoc.md"]
 extra_paths: []
-attempts: 0
+attempts: 1
 verify: "uv run dbt deps --project-dir dbt && uv run dbt parse --project-dir dbt --profiles-dir dbt/profiles --target mem && uv run dbt compile --project-dir dbt --profiles-dir dbt/profiles --target mem && uv run pytest tests/unit/test_dbt_profiles.py -q"
-branch: ""
+branch: "ticket/ER-008-dbt-project-lake-mem-targets-defaulted"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "28d8d8e366a7b49b"
+updated_at: "2026-08-14T23:23:18Z"
+session: 6e4d48da-2f63-455e-88ba-461b5c472d43
 ---
 ## Description
 
