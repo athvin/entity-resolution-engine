@@ -2,7 +2,7 @@
 id: ER-003
 title: "Repo skeleton: pyproject + uv.lock (full pinned runtime set), ruff, mypy --strict src/er, package tree, Makefile, pinned actionlint installer"
 milestone: M1
-status: in_progress
+status: todo
 kind: code
 size: M
 gates: fast
@@ -14,12 +14,12 @@ consumes: ["DesignDoc.md::s2-1", "scripts/lint_spec.py::main"]
 owns: ["pyproject.toml", "uv.lock", "Makefile", "src/er/__init__.py", "src/er/py.typed", "src/er/config/__init__.py", "src/er/lake/__init__.py", "src/er/ingest/__init__.py", "src/er/matching/__init__.py", "src/er/entities/__init__.py", "src/er/golden/__init__.py", "src/er/review/__init__.py", "src/er/eval/__init__.py", "src/er/embeddings/__init__.py", "scripts/actionlint.py", "tests/unit/test_package_layout.py", "tests/unit/test_spec_lint.py", "configs/.gitkeep", "fixtures/static/.gitkeep", "fixtures/generator/.gitkeep", "benchmarks/baselines/.gitkeep", "models/.gitkeep", "artifacts/.gitkeep", "scripts/ci/.gitkeep", "tests/integration/.gitkeep", "tests/helpers/.gitkeep"]
 protected_paths: ["DesignDoc.md", "scripts/lint_spec.py", "scripts/board.py", "scripts/gates.sh"]
 extra_paths: [".gitignore"]
-attempts: 2
+attempts: 1
 verify: "uv sync --frozen && uv run ruff check . && uv run ruff format --check . && uv run mypy --strict src/er && uv run pytest tests/unit/test_package_layout.py tests/unit/test_spec_lint.py -q"
-branch: "ticket/ER-003-repo-skeleton-pyproject-uv-lock-full"
+branch: ""
 commit: ""
 spec_sha: "2e60a757351fe5ce"
-updated_at: "2026-08-14T22:26:45Z"
+updated_at: "2026-08-14T22:29:01Z"
 session: 54bc35ae-3e38-4663-8c27-4837fb7e4485
 ---
 ## Description
@@ -111,3 +111,10 @@ After both edits, re-run python3 scripts/board.py validate, then python3 scripts
 
 Worth a wider pass while you are in there: this is a provides-vs-reality drift, and ER-001/ER-002 were seeded done in Phase A rather than built by the loop, so their other provides entries were never executed either. Checking every ER-001/ER-002 provides symbol against scripts/lint_spec.py and DesignDoc.md now would catch the rest of this class before it stops another ticket.
 - **Log:** `.loop/logs/ER-003.attempt-1.log`
+
+### Attempt 2 — environment (2026-08-14T22:29:01Z)
+
+- **Failing command:** `uv --version`
+- **Assertion / contradiction:** Permission to use Bash has been denied because Claude Code is running in don't ask mode. Every uv invocation is refused by the harness before the process starts (tried 'uv --version', 'uv version', 'command -v uv'), while git, python3 scripts/board.py and bash scripts/gates.sh are permitted in the same session. ER-003's verify command is five consecutive uv invocations and 6 of its 7 acceptance criteria are uv invocations, so none of them can be executed. AC2 additionally requires a uv.lock produced by uv 0.11.3, a full transitive resolution that cannot be hand-authored without fabricating the artifact its own test exists to catch.
+- **Smallest change that would unblock:** Add "Bash(uv:*)" to permissions.allow in .claude/settings.json (or settings.local.json) and re-run the loop; the first 'uv lock'/'uv sync' also needs network egress to pypi.org. No repo, board or spec change is required - attempt 1's two ticket defects were already fixed in f547709 and the ticket is now implementable.
+- **Log:** `.loop/logs/ER-003.attempt-2.log`
