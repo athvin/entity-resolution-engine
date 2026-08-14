@@ -2,7 +2,7 @@
 id: ER-011
 title: "Pydantic config: all S6 blocks (training/storage/versions/generator/clustering/coherence/correction_pass/sources.columns) + config_hash"
 milestone: M1
-status: in_progress
+status: blocked
 kind: code
 size: L
 gates: fast
@@ -19,7 +19,7 @@ verify: "uv run pytest tests/unit/test_config_schema.py -q && uv run mypy --stri
 branch: "ticket/ER-011-pydantic-config-all-s6-blocks-training"
 commit: ""
 spec_sha: "2e60a757351fe5ce"
-updated_at: "2026-08-14T22:55:13Z"
+updated_at: "2026-08-14T23:01:29Z"
 session: 2816104e-7a5e-4c7d-8ce1-d94e54c2aa99
 ---
 ## Description
@@ -86,3 +86,12 @@ uv run ruff format --check src/er/config tests/unit/test_config_schema.py
 - `config_hash` computed post-normalization over the canonicalised document (sorted keys, no aliases, UTF-8, compact separators)
 - Verify command passes; `mypy --strict src/er/config` clean; ruff check and format clean
 - No `ER_*` variable other than `$ER_CONFIG` is read by this package
+
+## Blocker log
+
+### Attempt 1 — spec_contradiction (2026-08-14T23:01:29Z)
+
+- **Failing command:** `uv run mypy --strict src/er/config`
+- **Assertion / contradiction:** S6 mandates a YAML config document and S4.0 validates it at process start, but S2.1's pin table is closed by its own final rule ('Adding a dependency means adding a row here') and names no YAML parser. PyYAML 6.0.3 is in uv.lock only transitively (via dbt-core/dbt-common), is not declared in pyproject.toml, and ships no py.typed; mypy 2.3.0 bundles no third-party stubs. So 'import yaml' yields: src/er/config/loader.py:14: error: Library stubs not installed for "yaml" [import-untyped] -- Found 1 error in 1 file. That is the only error. ER-011 AC7 requires 'uv run mypy --strict src/er/config' to exit 0, so AC7, S6 and S2.1's closing rule cannot all hold. types-PyYAML is absent from uv.lock and the permitted command set has no 'uv add'/'uv lock', so it cannot be installed from inside an iteration; and the remaining routes are all forbidden (a mypy per-module ignore_missing_imports override loosens the type gate; a hand-written src/yaml.pyi works but types safe_load as Any, which is the same suppression wearing a stub's clothes).
+- **Smallest change that would unblock:** Add one row to the S2.1 table via a kind: spec-amendment ticket, then let ER-003's pyproject.toml/uv.lock gain the pins. Proposed row, to sit directly after the 'typer / pydantic / python-ulid' row: '| PyYAML | `PyYAML==6.0.3`, `types-PyYAML==6.0.12.20250915` | The S6 configuration document is YAML; it arrives transitively through dbt-core, but S6 and S4.0 depend on it directly, so it is rowed for the same reason dbt-adapters and dbt-common are. The stub distribution is what makes `mypy --strict src/er/config` (S9.1) checkable at all, since PyYAML ships no py.typed | `er doctor`: `yaml.__version__`; `uv.lock` |'. Then add `pyyaml==6.0.3` to pyproject.toml [project].dependencies and `types-PyYAML==6.0.12.20250915` to [dependency-groups].dev, re-lock, and unblock ER-011. Confirm the types-PyYAML version resolves; any current release works, only the S2.1 row and uv.lock must agree. The plan at .loop/change-plan.json already passes plan-check and the loader skeleton is on branch ticket/ER-011-pydantic-config-all-s6-blocks-training at ad9287b.
+- **Log:** `.loop/logs/ER-011.attempt-1.log`
