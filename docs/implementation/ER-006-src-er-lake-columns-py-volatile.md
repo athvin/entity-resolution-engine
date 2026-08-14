@@ -2,7 +2,7 @@
 id: ER-006
 title: "src/er/lake/columns.py: VOLATILE_COLUMNS, GOLDEN_SURVIVABLE_COLUMNS, STD_RECORD_COLUMNS (dependency-free single definitions)"
 milestone: M1
-status: todo
+status: in_progress
 kind: code
 size: S
 gates: fast
@@ -14,12 +14,13 @@ consumes: ["src/er/lake/__init__.py", "DesignDoc.md::s5-0", "pyproject.toml"]
 owns: ["src/er/lake/columns.py", "tests/unit/test_columns.py"]
 protected_paths: ["DesignDoc.md"]
 extra_paths: []
-attempts: 0
+attempts: 1
 verify: "uv run pytest tests/unit/test_columns.py -q && uv run mypy --strict src/er/lake/columns.py"
-branch: ""
+branch: "ticket/ER-006-src-er-lake-columns-py-volatile"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "28d8d8e366a7b49b"
+updated_at: "2026-08-14T23:43:57Z"
+session: 4bfbc5e4-4dcb-4f3d-8d5a-d8ff0cf70906
 ---
 ## Description
 
