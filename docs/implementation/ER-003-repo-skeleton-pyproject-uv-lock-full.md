@@ -2,7 +2,7 @@
 id: ER-003
 title: "Repo skeleton: pyproject + uv.lock (full pinned runtime set), ruff, mypy --strict src/er, package tree, Makefile, pinned actionlint installer"
 milestone: M1
-status: blocked
+status: todo
 kind: code
 size: M
 gates: fast
@@ -10,16 +10,16 @@ depends_on: ["ER-001"]
 spec_refs: ["s2", "s2-1", "s3", "s8-1", "s9-1"]
 gap_refs: ["M4", "M25"]
 provides: ["pyproject.toml", "uv.lock", "Makefile", "src/er/__init__.py::__version__", "src/er/py.typed", "src/er/config/__init__.py", "src/er/lake/__init__.py", "src/er/ingest/__init__.py", "src/er/matching/__init__.py", "src/er/entities/__init__.py", "src/er/golden/__init__.py", "src/er/review/__init__.py", "src/er/eval/__init__.py", "src/er/embeddings/__init__.py", "scripts/actionlint.py::main", "tests/unit/test_package_layout.py", "tests/unit/test_spec_lint.py", "dir:configs/", "dir:fixtures/static/", "dir:fixtures/generator/", "dir:benchmarks/baselines/", "dir:models/", "dir:artifacts/", "dir:scripts/ci/", "dir:tests/unit/", "dir:tests/integration/", "dir:tests/helpers/"]
-consumes: ["DesignDoc.md::s2-1", "scripts/lint_spec.py::main", "scripts/lint_spec.py --part {a,b}"]
+consumes: ["DesignDoc.md::s2-1", "scripts/lint_spec.py::main"]
 owns: ["pyproject.toml", "uv.lock", "Makefile", "src/er/__init__.py", "src/er/py.typed", "src/er/config/__init__.py", "src/er/lake/__init__.py", "src/er/ingest/__init__.py", "src/er/matching/__init__.py", "src/er/entities/__init__.py", "src/er/golden/__init__.py", "src/er/review/__init__.py", "src/er/eval/__init__.py", "src/er/embeddings/__init__.py", "scripts/actionlint.py", "tests/unit/test_package_layout.py", "tests/unit/test_spec_lint.py", "configs/.gitkeep", "fixtures/static/.gitkeep", "fixtures/generator/.gitkeep", "benchmarks/baselines/.gitkeep", "models/.gitkeep", "artifacts/.gitkeep", "scripts/ci/.gitkeep", "tests/integration/.gitkeep", "tests/helpers/.gitkeep"]
 protected_paths: ["DesignDoc.md", "scripts/lint_spec.py", "scripts/board.py", "scripts/gates.sh"]
 extra_paths: [".gitignore"]
 attempts: 1
 verify: "uv sync --frozen && uv run ruff check . && uv run ruff format --check . && uv run mypy --strict src/er && uv run pytest tests/unit/test_package_layout.py tests/unit/test_spec_lint.py -q"
-branch: "ticket/ER-003-repo-skeleton-pyproject-uv-lock-full"
+branch: ""
 commit: ""
 spec_sha: "2e60a757351fe5ce"
-updated_at: "2026-08-14T21:21:17Z"
+updated_at: "2026-08-14T22:25:37Z"
 session: 7104a6b7-c393-4d4d-8f16-5c44089825c0
 ---
 ## Description
@@ -55,8 +55,8 @@ Implements M25 (nothing is pinned) and M4 (the mypy contradiction: the gate is `
 - [ ] AC2: For every S2.1 row whose *Asserted by* cell names `uv.lock`, `tests/unit/test_package_layout.py` parses that row out of DesignDoc.md and asserts `uv.lock` resolves that distribution to that exact version — covering splink 4.0.16, duckdb 1.5.5, dbt-core 1.12.2, dbt-duckdb 1.11.0, dbt-adapters 1.24.5, dbt-common 1.39.0, ruff 0.16.3, mypy 2.3.0, pytest 9.1.1, pytest-xdist 3.8.0, hypothesis 6.165.7, actionlint-py 1.7.7.23, typer 0.27.1, pydantic 2.13.4, python-ulid 4.0.1; a version bump in either place with no matching edit in the other fails the test.
 - [ ] AC3: `uv run mypy --strict src/er` exits 0, `src/er/py.typed` is committed, and every directory under `src/er/` named in S3 contains an `__init__.py` (asserted by test_package_layout).
 - [ ] AC4: `uv run ruff check .` and `uv run ruff format --check .` both exit 0, and `[tool.ruff]` pins `target-version = "py312"`.
-- [ ] AC5: Every path `docker/Dockerfile` will COPY — `src/`, `dbt/`, `configs/`, `benchmarks/`, `fixtures/`, `tests/`, `scripts/` — exists in a fresh clone: for each, `git ls-files <dir>` returns at least one entry.
-- [ ] AC6: `uv run pytest tests/unit/test_spec_lint.py -q` passes, with one case per linter arm: `--part a`/`--part b` exit 0 against DesignDoc.md and exit 1 against `tests/fixtures/designdoc_v1.0.md`, and the no-`--part` invocation exits 0.
+- [ ] AC5: Every path `docker/Dockerfile` will COPY that this ticket owns — `src/`, `configs/`, `benchmarks/`, `fixtures/`, `tests/`, `scripts/` — exists in a fresh clone: for each, `git ls-files <dir>` returns at least one entry. `dbt/` is asserted by ER-008, which owns it.
+- [ ] AC6: `uv run pytest tests/unit/test_spec_lint.py -q` passes, with one case per linter arm: `python3 scripts/lint_spec.py DesignDoc.md` exits 0; `python3 scripts/lint_spec.py tests/fixtures/designdoc_v1.0.md` exits 1; `python3 scripts/lint_spec.py --expect-fail tests/fixtures/designdoc_v1.0.md` exits 0; and `python3 scripts/lint_spec.py --expect-fail DesignDoc.md` exits 1. The last two arms are what prove the linter is not vacuous.
 - [ ] AC7: Each Makefile recipe is byte-equal to the command `bash scripts/gates.sh --list` prints for the gate of the same name (asserted by test_package_layout), and `uv run python scripts/actionlint.py --version` prints the S2.1 actionlint version without any network access.
 
 ## Tests
@@ -65,10 +65,10 @@ Implements M25 (nothing is pinned) and M4 (the mypy contradiction: the gate is `
 - tests/unit/test_package_layout.py::test_every_src_subpackage_is_importable
 - tests/unit/test_package_layout.py::test_s3_directories_exist_in_git
 - tests/unit/test_package_layout.py::test_makefile_recipes_match_gates_sh
-- tests/unit/test_spec_lint.py::test_part_a_passes_on_designdoc
-- tests/unit/test_spec_lint.py::test_part_a_fails_on_v1_0_fixture
-- tests/unit/test_spec_lint.py::test_part_b_passes_on_designdoc
-- tests/unit/test_spec_lint.py::test_part_b_fails_on_v1_0_fixture
+- tests/unit/test_spec_lint.py::test_lint_passes_on_designdoc
+- tests/unit/test_spec_lint.py::test_lint_fails_on_v1_0_fixture
+- tests/unit/test_spec_lint.py::test_expect_fail_passes_on_v1_0_fixture
+- tests/unit/test_spec_lint.py::test_expect_fail_fails_on_designdoc
 
 ## Verification
 
