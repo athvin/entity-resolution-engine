@@ -1,0 +1,56 @@
+# The dbt side of the S4.0b connection contract.
+#
+# Exactly two targets (S9.1):
+#   lake - in-container, performs the S4.0b attach, the default for every `er`
+#          invocation. Its `settings:` / `secrets:` / `attach:` keys MUST equal
+#          the S4.0b SQL statement block FIELD FOR FIELD; that block and this
+#          file are the one place the Python and dbt renderings can drift, and
+#          tests/unit/test_dbt_profiles.py is what stops them.
+#   mem  - `:memory:`, no attach, no extensions, no services, so `dbt parse`
+#          (static) and `dbt compile` (unit) run on a bare runner.
+#
+# Every env_var() call supplies a default, deliberately empty or inert, because a
+# *wrong* default would attach a different lake -- which is what `er init`'s
+# DATA_PATH immutability check exists to catch (S4.0b). A default is what lets the
+# service-less static job parse this file at all.
+er:
+  target: lake
+  outputs:
+    lake:
+      type: duckdb
+      # The primary database is :memory:; DuckLake is ATTACHed as `lake` and is
+      # never the default catalog (S4.0b, first bullet).
+      path: ':memory:'
+      # dbt's OWN concurrency, pinned to 1 by S4.0b. This is a different key from
+      # settings.threads below, which is DuckDB's and is env-derived; the two must
+      # not be conflated.
+      threads: 1
+      extensions: [ducklake, postgres, httpfs]
+      # Emitted as SET <key> = <value> -- the five SET statements of S4.0b.
+      settings:
+        extension_directory: /opt/duckdb_extensions
+        autoinstall_known_extensions: false
+        autoload_known_extensions: false
+        threads: "{{ env_var('ER_DUCKDB_THREADS', '2') | int }}"
+        memory_limit: "{{ env_var('ER_DUCKDB_MEMORY_LIMIT', '4GB') }}"
+      # Emitted as CREATE OR REPLACE SECRET er_s3 -- the six option values of S4.0b.
+      secrets:
+        - name: er_s3
+          type: s3
+          key_id: "{{ env_var('ER_S3_ACCESS_KEY_ID', '') }}"
+          secret: "{{ env_var('ER_S3_SECRET_ACCESS_KEY', '') }}"
+          endpoint: "{{ env_var('ER_S3_ENDPOINT', '') }}"
+          url_style: "{{ env_var('ER_S3_URL_STYLE', 'path') }}"
+          use_ssl: "{{ env_var('ER_S3_USE_SSL', 'false') }}"
+          region: "{{ env_var('ER_S3_REGION', 'us-east-1') }}"
+      # Emitted as ATTACH <path> AS <alias> (...) -- the ATTACH of S4.0b.
+      attach:
+        - path: "ducklake:postgres:{{ env_var('ER_CATALOG_DSN', '') }}"
+          alias: lake
+          options:
+            data_path: "{{ env_var('ER_LAKE_DATA_PATH', '') }}"
+            metadata_schema: "{{ env_var('ER_LAKE_METADATA_SCHEMA', '') }}"
+    mem:
+      type: duckdb
+      path: ':memory:'
+      threads: 1

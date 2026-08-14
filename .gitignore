@@ -15,6 +15,10 @@ __pycache__/
 dbt/target/
 dbt/dbt_packages/
 dbt/logs/
+# Written next to the profile by every dbt invocation: a per-user anonymous-usage
+# id. It is machine-local, so committing it would put one developer's id in every
+# clone and every container image.
+dbt/profiles/.user.yml
 
 # Pipeline outputs. Both are S3 working directories, not sources of truth, but
 # the directory itself must exist in a fresh clone: docker/Dockerfile COPYs it and

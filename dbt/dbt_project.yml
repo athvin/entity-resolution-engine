@@ -1,0 +1,35 @@
+name: er
+version: "1.0.0"
+config-version: 2
+
+# The profile name `er` is the one key in profiles.yml; `--target lake|mem` picks
+# the output (S9.1). Never a second profile: two profiles is two attach models.
+profile: er
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+
+clean-targets: ["target", "dbt_packages"]
+
+# FALLBACKS ONLY. S6 is the single source of truth for both versions, and the CLI
+# passes `--vars '{std_version: ..., survivorship_version: ..., run_id: ...}'` on
+# EVERY dbt invocation, so the override always wins over these values. They exist
+# so that a bare `dbt parse` / `dbt compile --target mem` on a runner with no
+# config document still renders; a divergence from configs/*.yaml is invisible to
+# the pipeline for exactly that reason and is not a defect.
+vars:
+  std_version: "1"
+  survivorship_version: "1"
+
+# Set at the `models:` root rather than per model so that no future model can
+# silently omit either one.
+#   +contract: every dbt-owned relation is contract-enforced (S5.0), so a column
+#     or type drift fails `dbt build` and S5 stays the review-time authority.
+#   +on_schema_change: the dbt-duckdb default of `ignore` silently swallows the
+#     columns a std_version bump introduces, defeating the whole mechanism (S4.2).
+models:
+  +contract:
+    enforced: true
+  +on_schema_change: sync_all_columns

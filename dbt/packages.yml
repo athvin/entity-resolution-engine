@@ -1,0 +1,7 @@
+packages:
+  # Exact version, never a range: `unique_combination_of_columns` is the enforcer
+  # of nine of the S5.0 logical keys, and a range would let a resolver change what
+  # those tests mean between two runs of the same commit. `dbt deps` writes
+  # dbt/package-lock.yml, which is committed alongside this file.
+  - package: dbt-labs/dbt_utils
+    version: 1.4.1
