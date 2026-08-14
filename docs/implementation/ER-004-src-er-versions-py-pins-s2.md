@@ -2,7 +2,7 @@
 id: ER-004
 title: "src/er/versions.py PINS + S2.1 parity + installed-version parity + Splink 5 migration note"
 milestone: M1
-status: todo
+status: in_progress
 kind: code
 size: S
 gates: fast
@@ -14,12 +14,13 @@ consumes: ["pyproject.toml", "uv.lock", "DesignDoc.md::s2-1", "src/er/__init__.p
 owns: ["src/er/versions.py", "tests/unit/test_versions.py"]
 protected_paths: ["DesignDoc.md"]
 extra_paths: []
-attempts: 0
+attempts: 1
 verify: "uv run pytest tests/unit/test_versions.py -q"
-branch: ""
+branch: "ticket/ER-004-src-er-versions-py-pins-s2"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "28d8d8e366a7b49b"
+updated_at: "2026-08-14T23:49:15Z"
+session: 36c43c95-016c-4c6c-a902-45f38cc95f9b
 ---
 ## Description
 
