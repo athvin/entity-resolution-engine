@@ -2,7 +2,7 @@
 id: ER-008
 title: "dbt project: lake/mem targets, defaulted env_var, ER_LAKE_METADATA_SCHEMA, threads:1, pinned dbt_utils, +contract:{enforced:true} + on_schema_change defaults"
 milestone: M1
-status: in_progress
+status: done
 kind: code
 size: M
 gates: fast
@@ -17,9 +17,9 @@ extra_paths: []
 attempts: 1
 verify: "uv run dbt deps --project-dir dbt && uv run dbt parse --project-dir dbt --profiles-dir dbt/profiles --target mem && uv run dbt compile --project-dir dbt --profiles-dir dbt/profiles --target mem && uv run pytest tests/unit/test_dbt_profiles.py -q"
 branch: "ticket/ER-008-dbt-project-lake-mem-targets-defaulted"
-commit: ""
+commit: "bd6137711a71ee95228ec843c1b2f0c722a96ab5"
 spec_sha: "28d8d8e366a7b49b"
-updated_at: "2026-08-14T23:23:18Z"
+updated_at: "2026-08-14T23:30:48Z"
 session: 6e4d48da-2f63-455e-88ba-461b5c472d43
 ---
 ## Description
