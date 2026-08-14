@@ -2,7 +2,7 @@
 id: ER-013
 title: "ids.py: record_key, canonicalize_pair, IdFactory/UlidFactory/MonotonicUlidFactory/CountingIdFactory, resolve() + cycle guard"
 milestone: M1
-status: in_progress
+status: done
 kind: code
 size: M
 gates: fast
@@ -17,9 +17,9 @@ extra_paths: ["src/er/entities/__init__.py"]
 attempts: 1
 verify: "uv run pytest tests/unit/test_ids.py -q && uv run mypy --strict src/er/entities/ids.py"
 branch: "ticket/ER-013-ids-py-record-key-canonicalize-pair"
-commit: ""
+commit: "4ef98a2bc01b7a34a706710e88d80c9c4eb6d67b"
 spec_sha: "2e60a757351fe5ce"
-updated_at: "2026-08-14T23:02:06Z"
+updated_at: "2026-08-14T23:08:20Z"
 session: 4fe4c58b-a2c6-4495-900e-5cb4360eea1a
 ---
 ## Description
