@@ -161,6 +161,18 @@ allow = [
     "Bash(uv run pytest *)", "Bash(uv run ruff *)", "Bash(uv run mypy *)",
     "Bash(uv run dbt *)",
     "Bash(uv sync *)", "Bash(uv lock *)", "Bash(uv add *)",
+    # `uv --version` is the first thing anyone runs to check the toolchain exists.
+    # Without it the agent probes, gets denied, and concludes uv is unavailable --
+    # a false `environment` block on a machine where `uv sync --frozen` works fine.
+    "Bash(uv --version)", "Bash(command -v *)",
+    # ER-003 AC1 (`uv run python -c "import er"`) and AC7 (`uv run python
+    # scripts/actionlint.py --version`) cannot be satisfied without this, so the
+    # board does not start without it. It IS arbitrary code execution and so makes
+    # the Edit/Write deny rules advisory rather than absolute; the backstops are the
+    # hygiene gate's protected-path diff and this driver's own post-iteration
+    # `git diff` over the spec, skill and machinery (exit 8), neither of which the
+    # agent can reach.
+    "Bash(uv run python *)",
     "Bash(docker compose *)", "Bash(docker build *)", "Bash(docker info)",
     "Bash(git status *)", "Bash(git diff *)", "Bash(git log *)", "Bash(git show *)",
     "Bash(git rev-parse *)", "Bash(git switch *)", "Bash(git add *)",

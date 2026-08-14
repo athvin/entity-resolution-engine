@@ -35,6 +35,20 @@ without the refund, one missing daemon would permanently block every integration
 in about twenty minutes. That forgiveness is also why it must not be abused: a test you could not
 make pass is `verify_failed`, not `environment`.
 
+### A denial is about the argument form, not the tool
+
+Permission rules match a command's **exact argument form**, so one denied invocation says nothing
+about a different invocation of the same binary. `Bash(uv sync *)` permits `uv sync --frozen` while
+`uv --version` is denied, because the second matches no rule. An agent that probes with
+`uv --version`, `uv version` and `command -v uv`, gets three denials and concludes "uv is
+unavailable" has proved only that those three forms are unlisted — and blocking `environment` on that
+basis costs the board an iteration and refunds nothing, because nothing was wrong.
+
+**Before blocking `environment` on a denied tool call, run the ticket's `verify` command itself.**
+That is the only invocation whose permission status actually decides whether the ticket is workable.
+If `verify` runs, you do not have an environment failure, whatever else was denied. Quote the verify
+command and its denial in `--assertion`, not a probe you invented.
+
 ## The blocker-note quality bar
 
 `board.py block` requires four fields and rejects anything under twelve characters, because a note a
