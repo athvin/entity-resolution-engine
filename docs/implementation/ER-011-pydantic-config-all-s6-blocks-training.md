@@ -2,7 +2,7 @@
 id: ER-011
 title: "Pydantic config: all S6 blocks (training/storage/versions/generator/clustering/coherence/correction_pass/sources.columns) + config_hash"
 milestone: M1
-status: todo
+status: in_progress
 kind: code
 size: L
 gates: fast
@@ -14,13 +14,13 @@ consumes: ["src/er/__init__.py", "pyproject.toml::pydantic==2.13.4"]
 owns: ["src/er/config/schema.py", "src/er/config/loader.py", "src/er/config/hashing.py", "configs/default.yaml", "configs/test.yaml", "tests/unit/test_config_schema.py"]
 protected_paths: []
 extra_paths: ["src/er/config/__init__.py"]
-attempts: 0
+attempts: 1
 verify: "uv run pytest tests/unit/test_config_schema.py -q && uv run mypy --strict src/er/config"
-branch: ""
+branch: "ticket/ER-011-pydantic-config-all-s6-blocks-training"
 commit: ""
-spec_sha: "2e60a757351fe5ce"
-updated_at: "2026-08-14T23:10:51Z"
-session: 2816104e-7a5e-4c7d-8ce1-d94e54c2aa99
+spec_sha: "28d8d8e366a7b49b"
+updated_at: "2026-08-14T23:14:44Z"
+session: 6ad276cf-22c8-4d7c-93b1-04ef34ce2dca
 ---
 ## Description
 
