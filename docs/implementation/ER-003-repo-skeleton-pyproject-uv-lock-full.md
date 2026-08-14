@@ -2,7 +2,7 @@
 id: ER-003
 title: "Repo skeleton: pyproject + uv.lock (full pinned runtime set), ruff, mypy --strict src/er, package tree, Makefile, pinned actionlint installer"
 milestone: M1
-status: in_progress
+status: done
 kind: code
 size: M
 gates: fast
@@ -17,9 +17,9 @@ extra_paths: [".gitignore"]
 attempts: 2
 verify: "uv sync --frozen && uv run ruff check . && uv run ruff format --check . && uv run mypy --strict src/er && uv run pytest tests/unit/test_package_layout.py tests/unit/test_spec_lint.py -q"
 branch: "ticket/ER-003-repo-skeleton-pyproject-uv-lock-full"
-commit: ""
+commit: "9e3aa826c246385e08cc07bacd4a3c036a9a6a9d"
 spec_sha: "2e60a757351fe5ce"
-updated_at: "2026-08-14T22:33:53Z"
+updated_at: "2026-08-14T22:54:08Z"
 session: 1e655209-70f6-48b3-a8f6-a09d7609c61e
 ---
 ## Description
