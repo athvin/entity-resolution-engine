@@ -2,7 +2,7 @@
 id: ER-013
 title: "ids.py: record_key, canonicalize_pair, IdFactory/UlidFactory/MonotonicUlidFactory/CountingIdFactory, resolve() + cycle guard"
 milestone: M1
-status: todo
+status: in_progress
 kind: code
 size: M
 gates: fast
@@ -14,12 +14,13 @@ consumes: ["src/er/__init__.py", "pyproject.toml::python-ulid==4.0.1"]
 owns: ["src/er/entities/ids.py", "tests/unit/test_ids.py"]
 protected_paths: []
 extra_paths: ["src/er/entities/__init__.py"]
-attempts: 0
+attempts: 1
 verify: "uv run pytest tests/unit/test_ids.py -q && uv run mypy --strict src/er/entities/ids.py"
-branch: ""
+branch: "ticket/ER-013-ids-py-record-key-canonicalize-pair"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "2e60a757351fe5ce"
+updated_at: "2026-08-14T23:02:06Z"
+session: 4fe4c58b-a2c6-4495-900e-5cb4360eea1a
 ---
 ## Description
 
