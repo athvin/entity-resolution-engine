@@ -2,7 +2,7 @@
 id: ER-003
 title: "Repo skeleton: pyproject + uv.lock (full pinned runtime set), ruff, mypy --strict src/er, package tree, Makefile, pinned actionlint installer"
 milestone: M1
-status: in_progress
+status: todo
 kind: code
 size: M
 gates: fast
@@ -14,12 +14,12 @@ consumes: ["DesignDoc.md::s2-1", "scripts/lint_spec.py::main"]
 owns: ["pyproject.toml", "uv.lock", "Makefile", "src/er/__init__.py", "src/er/py.typed", "src/er/config/__init__.py", "src/er/lake/__init__.py", "src/er/ingest/__init__.py", "src/er/matching/__init__.py", "src/er/entities/__init__.py", "src/er/golden/__init__.py", "src/er/review/__init__.py", "src/er/eval/__init__.py", "src/er/embeddings/__init__.py", "scripts/actionlint.py", "tests/unit/test_package_layout.py", "tests/unit/test_spec_lint.py", "configs/.gitkeep", "fixtures/static/.gitkeep", "fixtures/generator/.gitkeep", "benchmarks/baselines/.gitkeep", "models/.gitkeep", "artifacts/.gitkeep", "scripts/ci/.gitkeep", "tests/integration/.gitkeep", "tests/helpers/.gitkeep"]
 protected_paths: ["DesignDoc.md", "scripts/lint_spec.py", "scripts/board.py", "scripts/gates.sh"]
 extra_paths: [".gitignore"]
-attempts: 2
+attempts: 1
 verify: "uv sync --frozen && uv run ruff check . && uv run ruff format --check . && uv run mypy --strict src/er && uv run pytest tests/unit/test_package_layout.py tests/unit/test_spec_lint.py -q"
-branch: "ticket/ER-003-repo-skeleton-pyproject-uv-lock-full"
+branch: ""
 commit: ""
 spec_sha: "2e60a757351fe5ce"
-updated_at: "2026-08-14T22:29:44Z"
+updated_at: "2026-08-14T22:31:17Z"
 session: 15919bcc-f1e1-40c6-ba91-865b2fa305d1
 ---
 ## Description
@@ -118,3 +118,10 @@ Worth a wider pass while you are in there: this is a provides-vs-reality drift, 
 - **Assertion / contradiction:** Permission to use Bash has been denied because Claude Code is running in don't ask mode. Every uv invocation is refused by the harness before the process starts (tried 'uv --version', 'uv version', 'command -v uv'), while git, python3 scripts/board.py and bash scripts/gates.sh are permitted in the same session. ER-003's verify command is five consecutive uv invocations and 6 of its 7 acceptance criteria are uv invocations, so none of them can be executed. AC2 additionally requires a uv.lock produced by uv 0.11.3, a full transitive resolution that cannot be hand-authored without fabricating the artifact its own test exists to catch.
 - **Smallest change that would unblock:** Add "Bash(uv:*)" to permissions.allow in .claude/settings.json (or settings.local.json) and re-run the loop; the first 'uv lock'/'uv sync' also needs network egress to pypi.org. No repo, board or spec change is required - attempt 1's two ticket defects were already fixed in f547709 and the ticket is now implementable.
 - **Log:** `.loop/logs/ER-003.attempt-2.log`
+
+### Attempt 2 — environment (2026-08-14T22:31:17Z)
+
+- **Failing command:** `uv --version`
+- **Assertion / contradiction:** Permission to use Bash has been denied because Claude Code is running in dont ask mode. The uv executable is refused by the harness permission layer before the process starts, identically to attempt 2 (see .loop/logs/ER-003.attempt-2.log). ER-003 verify is five consecutive uv invocations and 6 of its 7 acceptance criteria are uv invocations, so none can be executed. AC2 additionally requires a uv.lock produced by uv 0.11.3 - a full transitive resolution that cannot be hand-authored without fabricating the exact artifact its own test exists to catch. New this attempt: the fix recommended by attempt 2 was never applied - .claude/settings.json does not exist, so no uv permission grant was added. Also ls is itself denied, so it could NOT be determined whether uv is even installed; a missing binary and a denied binary are indistinguishable from inside the session.
+- **Smallest change that would unblock:** 1) Create .claude/settings.json (or settings.local.json) with Bash(uv:*) in permissions.allow. 2) Independently confirm uv is installed and is 0.11.3 - if absent, the permission grant alone is insufficient. 3) Ensure network egress to pypi.org for the first uv lock / uv sync, as no resolution cache exists in this checkout. 4) STOP the driver loop until 1-3 are done: environment refunds the attempt and returns ER-003 to todo, and ER-003 is the next READY ticket, so the loop will re-select it, hit this same denial, and spin indefinitely without the attempt counter ever advancing. No repo, board or spec change is required - attempt 1 ticket defects were already fixed in f547709.
+- **Log:** `.loop/logs/ER-003.attempt-2b.log`
