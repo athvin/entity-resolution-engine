@@ -2,7 +2,7 @@
 id: ER-003
 title: "Repo skeleton: pyproject + uv.lock (full pinned runtime set), ruff, mypy --strict src/er, package tree, Makefile, pinned actionlint installer"
 milestone: M1
-status: todo
+status: in_progress
 kind: code
 size: M
 gates: fast
@@ -14,12 +14,13 @@ consumes: ["DesignDoc.md::s2-1", "scripts/lint_spec.py::main", "scripts/lint_spe
 owns: ["pyproject.toml", "uv.lock", "Makefile", "src/er/__init__.py", "src/er/py.typed", "src/er/config/__init__.py", "src/er/lake/__init__.py", "src/er/ingest/__init__.py", "src/er/matching/__init__.py", "src/er/entities/__init__.py", "src/er/golden/__init__.py", "src/er/review/__init__.py", "src/er/eval/__init__.py", "src/er/embeddings/__init__.py", "scripts/actionlint.py", "tests/unit/test_package_layout.py", "tests/unit/test_spec_lint.py", "configs/.gitkeep", "fixtures/static/.gitkeep", "fixtures/generator/.gitkeep", "benchmarks/baselines/.gitkeep", "models/.gitkeep", "artifacts/.gitkeep", "scripts/ci/.gitkeep", "tests/integration/.gitkeep", "tests/helpers/.gitkeep"]
 protected_paths: ["DesignDoc.md", "scripts/lint_spec.py", "scripts/board.py", "scripts/gates.sh"]
 extra_paths: [".gitignore"]
-attempts: 0
+attempts: 1
 verify: "uv sync --frozen && uv run ruff check . && uv run ruff format --check . && uv run mypy --strict src/er && uv run pytest tests/unit/test_package_layout.py tests/unit/test_spec_lint.py -q"
-branch: ""
+branch: "ticket/ER-003-repo-skeleton-pyproject-uv-lock-full"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "2e60a757351fe5ce"
+updated_at: "2026-08-14T21:19:09Z"
+session: 7104a6b7-c393-4d4d-8f16-5c44089825c0
 ---
 ## Description
 
