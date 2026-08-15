@@ -2,7 +2,7 @@
 id: ER-032
 title: "Deletion ingest arm: is_deleted/deleted_at, tombstone content_hash sentinel, --full-refresh-keys, empty-delivery guard, resurrection"
 milestone: M1
-status: todo
+status: in_progress
 kind: code
 size: M
 gates: full
@@ -14,12 +14,13 @@ consumes: ["src/er/ingest/landing.py::ingest_delivery", "src/er/ingest/landing.p
 owns: ["tests/integration/test_ingest_deletion.py", "tests/unit/test_tombstone_hash.py", "tests/integration/data/ingest_deletion"]
 protected_paths: ["tests/integration/test_ingest_idempotence.py"]
 extra_paths: ["src/er/ingest/landing.py", "src/er/cli.py"]
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_ingest_deletion.py -q && uv run pytest tests/unit/test_tombstone_hash.py -q"
-branch: ""
+branch: "ticket/ER-032-deletion-ingest-arm-is-deleted-deleted"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "2abcfe433c322f74"
+updated_at: "2026-08-15T16:40:31Z"
+session: 8df1d201-459c-4f64-95d6-62605feccd0b
 ---
 ## Description
 
