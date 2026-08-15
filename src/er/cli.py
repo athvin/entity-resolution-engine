@@ -21,10 +21,11 @@ Four rules govern this module and are stated nowhere else in Python:
   ``er.errors`` and :func:`er.errors.exit_code_for` produces the status, so the
   ``error_class`` recorded and the code exited with cannot disagree.
 
-``er init``, ``er lake reset`` (ER-020) and ``er ingest`` (ER-031) are the commands
-that do real lake work here; the work itself lives in :mod:`er.lake.init` and
-:mod:`er.ingest.landing`, and this module owns only their S4.0 stdout and the exit
-status derived from what they returned. Every other command is still a stub.
+``er init``, ``er lake reset`` (ER-020), ``er ingest`` (ER-031) and ``er lake
+maintain`` (ER-025) are the commands that do real lake work here; the work itself
+lives in :mod:`er.lake.init`, :mod:`er.ingest.landing` and :mod:`er.lake.maintain`,
+and this module owns only their S4.0 stdout and the exit status derived from what
+they returned. Every other command is still a stub.
 
 ``er run-all``'s ingest slot is deliberately still a :class:`NoOpStage`: the chain's
 composition is ER-014's contract, and wiring the real stage into it belongs with the
@@ -89,6 +90,7 @@ from er.lake.catalog import tenant_lock
 from er.lake.ducklake import connect
 from er.lake.env import MissingEnvError
 from er.lake.init import init_lake, reset_lake
+from er.lake.maintain import DEFAULT_RETAIN_DAYS, maintain
 from er.obs.logging import emit_stage_record
 from er.obs.runctx import RunContext, StageRun
 from er.resume import ResumePlan, read_resume_rows, resume_plan
@@ -366,6 +368,51 @@ class _ResetStage:
         _write_stdout(
             {"dropped_schema": result.dropped_schema, "deleted_prefix": result.deleted_prefix},
             f"dropped_schema={result.dropped_schema}, deleted_prefix={result.deleted_prefix}",
+            options,
+        )
+        return int(ExitCode.SUCCESS)
+
+
+@dataclass
+class _MaintainStage:
+    """`er lake maintain`: reclaim files and snapshot history (S4.0, S3).
+
+    The three calls, their order and the retention guard are
+    :func:`~er.lake.maintain.maintain`'s; this class owns the S4.0 surface — the
+    ``--retain-days`` flag, the three-count stdout line, and the counters on the
+    `run_stages` row S5.2 puts them on.
+
+    Unlike `er lake reset`, this is an ordinary writer: it takes the lock through
+    :func:`_writer_lock` like every other mutating command, and its `runs` and
+    `run_stages` rows are persisted, because maintenance neither creates nor
+    destroys the relations they live in.
+    """
+
+    retain_days: int = DEFAULT_RETAIN_DAYS
+    args: tuple[str, ...] = ()
+    name: str = "maintain"
+    stage_run: StageRun | None = None
+
+    def bind(self, stage_run: StageRun) -> None:
+        self.stage_run = stage_run
+
+    def run(self, options: GlobalOptions) -> int:
+        with connect() as connection:
+            result = maintain(connection, self.retain_days)
+        counts: dict[str, object] = {
+            "files_merged": result.files_merged,
+            "snapshots_expired": result.snapshots_expired,
+            "files_deleted": result.files_deleted,
+        }
+        if self.stage_run is not None:
+            # S4 declares no counter list for `maintain`, so these are free-form
+            # names in the `counters` payload (S5.2) — the three counts the command
+            # printed, recorded where a later run can read them back.
+            for counter, value in counts.items():
+                self.stage_run.counters.set(counter, value)
+        _write_stdout(
+            counts,
+            ", ".join(f"{counter}={value}" for counter, value in counts.items()),
             options,
         )
         return int(ExitCode.SUCCESS)
@@ -719,10 +766,11 @@ def _run_command(
     """Execute a stage that writes its OWN stdout, and exit with its code.
 
     Distinct from :func:`_run_single` in exactly one way, and it is a contract and
-    not a preference: S4.0 gives `er init`, `er lake reset` and `er ingest` a stdout
-    of their own — one line per relation, the reset summary, the S4.1 manifest line —
-    so the per-stage summary :func:`_report` writes would be a second, differently
-    shaped line in a ``--json`` stream that S4.0 says holds only the command's output.
+    not a preference: S4.0 gives `er init`, `er lake reset`, `er ingest` and `er lake
+    maintain` a stdout of their own — one line per relation, the reset summary, the
+    S4.1 manifest line, the three maintenance counts — so the per-stage summary
+    :func:`_report` writes would be a second, differently shaped line in a ``--json``
+    stream that S4.0 says holds only the command's output.
 
     The failure message is repeated as a bare stderr line beside the S5.2 record.
     The record is telemetry a caller parses; the line is what an operator reads, and
@@ -1259,7 +1307,9 @@ def review(
 
 @lake_app.command("maintain")
 def lake_maintain(
-    retain_days: Annotated[int, typer.Option("--retain-days", help="Snapshot retention.")] = 7,
+    retain_days: Annotated[
+        int, typer.Option("--retain-days", help="Snapshot retention.")
+    ] = DEFAULT_RETAIN_DAYS,
     config: ConfigOption = None,
     run_id: RunIdOption = None,
     json_output: JsonOption = False,
@@ -1268,12 +1318,12 @@ def lake_maintain(
     options = GlobalOptions.resolve(
         config_path=config, run_id=run_id, json_output=json_output, require_config=False
     )
-    _run_single(
-        "maintain",
+    _run_command(
+        _MaintainStage(retain_days=retain_days, args=("--retain-days", str(retain_days))),
         options,
-        ("--retain-days", str(retain_days)),
         mode="maintain",
         command="lake maintain",
+        persist=True,
     )
 
 
