@@ -2,7 +2,7 @@
 id: ER-050
 title: "Generator part 1: personas.py, weighted-frequency name lists, household rate, seeded RNG"
 milestone: M2
-status: todo
+status: in_progress
 kind: code
 size: M
 gates: fast
@@ -14,12 +14,13 @@ consumes: ["src/er/config/schema.py::Config", "configs/test.yaml", "src/er/std/a
 owns: ["fixtures/generator/__init__.py", "fixtures/generator/personas.py", "fixtures/generator/data/given_names.csv", "fixtures/generator/data/family_names.csv", "tests/unit/generator/test_personas.py"]
 protected_paths: ["src/er/std/address_parser.py"]
 extra_paths: []
-attempts: 0
+attempts: 1
 verify: "uv run pytest tests/unit/generator/test_personas.py -q"
-branch: ""
+branch: "ticket/ER-050-generator-part-1-personas-py-weighted"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "2abcfe433c322f74"
+updated_at: "2026-08-15T06:36:34Z"
+session: 38369bd7-43d1-4c65-b350-30259812687d
 ---
 ## Description
 
