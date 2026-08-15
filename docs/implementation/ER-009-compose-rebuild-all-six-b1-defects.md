@@ -2,7 +2,7 @@
 id: ER-009
 title: "Compose rebuild (all six B1 defects) + itest.sh/bench.sh/compose_smoke.sh + first real integration test"
 milestone: M1
-status: in_progress
+status: todo
 kind: code
 size: M
 gates: full
@@ -16,10 +16,10 @@ protected_paths: ["DesignDoc.md", "docker/Dockerfile"]
 extra_paths: []
 attempts: 1
 verify: "bash scripts/ci/compose_smoke.sh && uv run pytest tests/unit/test_compose_contract.py -q && bash scripts/ci/itest.sh tests/integration/test_compose_substrate.py -q"
-branch: "ticket/ER-009-compose-rebuild-all-six-b1-defects"
+branch: ""
 commit: ""
 spec_sha: "28d8d8e366a7b49b"
-updated_at: "2026-08-15T00:17:35Z"
+updated_at: "2026-08-15T00:27:36Z"
 session: d37325e0-1c8d-41e3-8bab-ea7da0e77386
 ---
 ## Description
