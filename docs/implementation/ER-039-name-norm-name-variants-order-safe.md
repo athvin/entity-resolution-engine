@@ -2,7 +2,7 @@
 id: ER-039
 title: "name_norm + name_variants (order-safe SYMMETRY construction) + nickname_variants.csv seed (12 pairs incl. robert/bob/bobby)"
 milestone: M2
-status: todo
+status: in_progress
 kind: code
 size: M
 gates: fast
@@ -14,12 +14,13 @@ consumes: ["tests/unit/dbt/harness.py::MacroHarness", "tests/unit/dbt/harness.py
 owns: ["dbt/macros/std/name_norm.sql", "dbt/macros/std/name_variants.sql", "dbt/seeds/nickname_variants.csv", "tests/unit/dbt/test_name_norm.py", "tests/unit/dbt/test_name_variants.py"]
 protected_paths: []
 extra_paths: []
-attempts: 0
+attempts: 1
 verify: "uv run pytest tests/unit/dbt/test_name_norm.py tests/unit/dbt/test_name_variants.py -q"
-branch: ""
+branch: "ticket/ER-039-name-norm-name-variants-order-safe"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "28d8d8e366a7b49b"
+updated_at: "2026-08-15T05:19:21Z"
+session: 1673d8f7-25ae-49db-8207-d6c092e7d84b
 ---
 ## Description
 
