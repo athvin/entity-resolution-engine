@@ -524,7 +524,7 @@ from {{ ref('int_std_records') }}
 where <expr> is not null and <expr> <> ''
 ```
 
-Splink receives `block_on('<expr>')` for the **identical** `expr` string. **NULL/empty policy:** a NULL or empty-string key value is never emitted and never blocks — on either side. The dbt-derived pair set MUST be computed with `SELECT DISTINCT` over canonicalised `(rec_a_key, rec_b_key)`: Splink deduplicates across rules via preceding-rule exclusion, a key-table self-join does not, and without `DISTINCT` the two candidate sets differ by multiplicity alone.
+Splink receives `block_on('<expr>')` for the **identical** `expr` string. That byte-identity is required at the `block_on` **input**, never in its rendered SQL: `block_on` re-renders the expression through sqlglot (`substr` becomes `SUBSTRING`, spacing changes) and qualifies every column with `l.` / `r.` *inside* the expression, so for any expr wider than one bare column the raw string is deliberately NOT a substring of the generated blocking-rule SQL. A test asserting such containment is asserting something false. What actually checks the dbt/Splink mirror is T-BLK-1 (S8.3) pair-set parity, not string inspection of the rule. **NULL/empty policy:** a NULL or empty-string key value is never emitted and never blocks — on either side. The dbt-derived pair set MUST be computed with `SELECT DISTINCT` over canonicalised `(rec_a_key, rec_b_key)`: Splink deduplicates across rules via preceding-rule exclusion, a key-table self-join does not, and without `DISTINCT` the two candidate sets differ by multiplicity alone.
 
 **T-BLK-1** is the parity check: on `base_10`, the DISTINCT canonicalised pair set derived from `int_blocking_keys` equals Splink's blocked pair set exactly. It is the only thing converting "mirrored" from aspiration into a checked invariant.
 
@@ -1654,6 +1654,8 @@ fixtures/static/<scenario>/
 ├── assertions.csv            # input assertions, applied before the phase named in its `phase` column
 ├── parity_pairs.csv          # optional: the pairs T-INC-3 scores through both code paths
 ├── tf_flip_pairs.csv         # optional: the edges T-INC-1b / T-TF-1 allow to cross auto_merge
+├── truth.csv                 # ground truth: persona label per input row (hand-authored scenarios only)
+├── traps.csv                 # ground truth: the designed traps and the rows that construct them
 └── expected/
     ├── base/                 # expected state after the base phase
     │   ├── membership.csv
@@ -1670,7 +1672,13 @@ fixtures/static/<scenario>/
 
 A phase directory that does not exist means the scenario has no such phase; an `expected/<phase>/` file that does not exist means that phase makes no claim about that relation.
 
-The three scenario-root files are inputs and bounds, not expectations, which is why they sit beside `base/` rather than under `expected/`. `assertions.csv` exists wherever a scenario asserts (`split_scenario`, `assertions_scenario`); `parity_pairs.csv` and `tf_flip_pairs.csv` exist only in the scenarios whose tests name them — `base_10` for T-TF-1, `incremental_batch` for T-INC-3 and T-INC-1b. `parity_pairs.csv` lives in `incremental_batch` and not in `base_10` because T-INC-3 exercises the incremental two-pass path, which has no input in a scenario with no `batch/` phase.
+The scenario-root files are inputs, bounds and ground truth — never expectations — which is why they sit beside `base/` rather than under `expected/`. They fall into two kinds, and the distinction is normative because the fixture linter enumerates the root by name and rejects anything unlisted.
+
+**Inputs and bounds** — `assertions.csv`, `parity_pairs.csv`, `tf_flip_pairs.csv`. These are fed to the pipeline or bound what it may do.
+
+**Ground truth** — `truth.csv` and `traps.csv`. These are read only by tests and by the quality metrics of S8.5; the pipeline never sees them, and no phase consumes them. `truth.csv` carries one row per input record giving its persona label, and is what makes pairwise precision/recall computable at all (S8.5). `traps.csv` indexes each designed trap of S8.2 to the `(source_system, source_record_id)` rows that construct it, so a fixture edit that dissolves a trap fails a test instead of silently weakening the corpus. Both exist only in hand-authored scenarios; generated corpora (S8.4) carry their labels in the generator manifest instead, so a generated scenario has neither file.
+
+`assertions.csv` exists wherever a scenario asserts (`split_scenario`, `assertions_scenario`); `parity_pairs.csv` and `tf_flip_pairs.csv` exist only in the scenarios whose tests name them — `base_10` for T-TF-1, `incremental_batch` for T-INC-3 and T-INC-1b. `parity_pairs.csv` lives in `incremental_batch` and not in `base_10` because T-INC-3 exercises the incremental two-pass path, which has no input in a scenario with no `batch/` phase.
 
 **`parity_pairs.csv` is DERIVED, not invented (normative).** Its contents are the canonicalised pair set
 
