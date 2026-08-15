@@ -2,7 +2,7 @@
 id: ER-018
 title: "Test harness A: session-namespaced lake fixture (lake_ns, lake_conn, er_env), METADATA_SCHEMA er_test_{ns}, DATA_PATH s3://lake/test/{ns}/, drop-schema teardown"
 milestone: M1
-status: in_progress
+status: todo
 kind: code
 size: M
 gates: full
@@ -14,12 +14,12 @@ consumes: ["src/er/lake/ducklake.py::connect", "src/er/lake/ducklake.py::detach"
 owns: ["tests/conftest.py", "tests/integration/conftest.py", "tests/integration/test_harness_namespace.py"]
 protected_paths: ["docker/compose.yaml"]
 extra_paths: []
-attempts: 2
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_harness_namespace.py -q"
-branch: "ticket/ER-018-test-harness-session-namespaced-lake-fixture"
+branch: ""
 commit: ""
 spec_sha: "28d8d8e366a7b49b"
-updated_at: "2026-08-15T01:09:26Z"
+updated_at: "2026-08-15T01:30:20Z"
 session: d730f949-712c-4c6d-b03a-4bb3047cf68e
 ---
 ## Description
@@ -80,3 +80,12 @@ uv run ruff check tests/conftest.py tests/integration
 - Teardown expires snapshots, cleans files, deletes the prefix, DETACHes and drops the schema, under `try/finally`
 - Namespace yields empty — no relation created by the harness
 - Verify command passes, including the deliberate-failure teardown test
+
+## Blocker log
+
+### Attempt 2 — environment (2026-08-15T01:30:20Z)
+
+- **Failing command:** `git switch main && git merge --ff-only ticket/ER-018-test-harness-session-namespaced-lake-fixture`
+- **Assertion / contradiction:** fatal: Not possible to fast-forward, aborting. -- the ticket branch already existed from attempt 1 at 31dc421, so step 2's 'git switch -c' failed with 'a branch named ticket/ER-018-... already exists' and work proceeded on that stale tip, one commit behind main's 'bd188ef board(ER-018): claim attempt 2'. main and the branch now carry conflicting board.py edits to the same frontmatter lines (main: in_progress/attempts 2/session d730f949; branch: done/attempts 1/session 4a1ce021, because 'board.py complete' ran against the stale checkout). 'board.py audit' on main reports 'DRIFT ER-018: left in_progress'. The implementation itself is FINISHED and fully green: commit 1cc86c53b7834e9ba64d0d5bd94c5f1284664e46 passed the full gate ladder (integration 28 passed, verify 6 passed, receipt .loop/receipts/ER-018-1.json).
+- **Smallest change that would unblock:** Delete the stale branch and replay the finished commit onto a correctly-based one, then re-run: (1) git branch -m ticket/ER-018-test-harness-session-namespaced-lake-fixture ER-018-attempt2-keep ; (2) board.py claim ER-018 ; (3) git switch -c ticket/ER-018-test-harness-session-namespaced-lake-fixture ; (4) git checkout ER-018-attempt2-keep -- tests/conftest.py tests/integration/conftest.py tests/integration/test_harness_namespace.py (the three files are complete and need no edits) ; (5) rewrite .loop/change-plan.json for ER-018 and plan-check, then gates.sh, commit, complete, merge. Separately: S8.1 step 4's first two statements do not exist in the pinned duckdb==1.5.5 ducklake extension and need a spec amendment -- replace 'CALL lake.expire_snapshots(older_than => now())' and 'CALL lake.cleanup_old_files(cleanup_all => true)' with 'CALL ducklake_expire_snapshots($ER_LAKE_ALIAS, older_than => now())' and 'CALL ducklake_cleanup_old_files($ER_LAKE_ALIAS, cleanup_all => true)', since DuckDB reads 'lake.' there as a schema qualifier, not the attached catalog.
+- **Log:** `.loop/logs/ER-018.attempt-2.log`
