@@ -2,7 +2,7 @@
 id: ER-031
 title: "er ingest: anti-join append to raw_records, ingest_batches manifest, counters, T-IDEM-1"
 milestone: M1
-status: in_progress
+status: done
 kind: code
 size: M
 gates: full
@@ -17,9 +17,9 @@ extra_paths: ["src/er/cli.py"]
 attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_ingest_idempotence.py -q"
 branch: "ticket/ER-031-er-ingest-anti-join-append-raw"
-commit: ""
+commit: "35c01ca137dc09f362630eed9d279ec9a7cd53e9"
 spec_sha: "2abcfe433c322f74"
-updated_at: "2026-08-15T16:11:18Z"
+updated_at: "2026-08-15T16:33:17Z"
 session: 9a16cd7d-3901-4bd5-9bb8-6c73f6b4aa0b
 ---
 ## Description
