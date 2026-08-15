@@ -96,6 +96,13 @@ services:
     environment: *er-env
     volumes:
       - ../artifacts:/app/artifacts        # junit, dbt logs, run manifests reach the host/runner
+      # The S12 M1 exit gate (tests/integration/test_m1_exit.py) asserts that every
+      # clause it enforces is still verbatim in the S12 M1 exit-criteria cell, so a
+      # spec edit fails the gate instead of silently drifting from it. S7.3's image
+      # deliberately COPYs no documentation -- it is later the k8s job image -- so the
+      # spec reaches the suite as a read-only bind mount on the `test` profile only,
+      # and never as a layer. Read-only: the suite reads the spec, it never writes it.
+      - ../DesignDoc.md:/app/DesignDoc.md:ro
     command: ["pytest", "tests/integration", "-q", "--maxfail=3",
               "--junitxml=/app/artifacts/junit.xml", "--durations=20"]
     deploy: { resources: { limits: { cpus: "${ER_CPU_LIMIT:-2}", memory: "${ER_MEM_LIMIT:-6g}" } } }
