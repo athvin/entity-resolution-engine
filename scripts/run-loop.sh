@@ -276,6 +276,31 @@ print(len(d.get('blocked',[]))+len(d.get('starved',[])))" 2>/dev/null || echo 0)
     TICKET_ID="$ONLY_TICKET"
   fi
 
+  # A leftover ticket branch from an abandoned attempt is poison. SKILL.md step 2
+  # runs `git switch -c <branch>`; if the branch already exists that fails, and an
+  # agent that presses on lands on the STALE tip -- behind main's own claim commit --
+  # finishes the work there, and then cannot ff-merge. That is exactly how ER-018
+  # burned two iterations. Clear the branch before handing the ticket over: delete it
+  # when it is already merged, otherwise rename it so the work is preserved but the
+  # name is free.
+  TICKET_BRANCH="$(python3 -c "
+import json
+d=json.loads('''$NEXT_JSON''')
+print(d.get('branch') or '')" 2>/dev/null || echo "")"
+  if [[ -n "$TICKET_BRANCH" ]] && git show-ref --verify --quiet "refs/heads/$TICKET_BRANCH"; then
+    if git merge-base --is-ancestor "$TICKET_BRANCH" HEAD 2>/dev/null; then
+      git branch -d "$TICKET_BRANCH" >/dev/null 2>&1 \
+        && log "removed already-merged branch $TICKET_BRANCH"
+    else
+      ABANDONED="abandoned/${TICKET_BRANCH#ticket/}-$(date -u +%Y%m%dT%H%M%SZ)"
+      if git branch -m "$TICKET_BRANCH" "$ABANDONED" >/dev/null 2>&1; then
+        log "unmerged branch $TICKET_BRANCH preserved as $ABANDONED"
+      else
+        log "WARNING: could not clear $TICKET_BRANCH; the iteration may collide"
+      fi
+    fi
+  fi
+
   ITERATION=$((ITERATION + 1))
   PRE_MAIN="$(git rev-parse HEAD)"
   PRE_DONE="$(python3 -c "

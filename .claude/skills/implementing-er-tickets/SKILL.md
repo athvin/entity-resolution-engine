@@ -99,6 +99,12 @@ git switch -c ticket/<ID>-<slug>
 ticket cannot spin forever. It commits its own board write. If it refuses, report the reason verbatim
 and stop — never work an unclaimed ticket.
 
+**If `git switch -c` fails because the branch already exists, stop.** Block with class
+`environment`, naming the branch. A leftover branch is an abandoned earlier attempt whose tip is
+*behind* the `claim` commit `board.py` just wrote to `main`. Switching to it puts you on stale code,
+and everything you build there will fail `merge --ff-only` at step 8 after the work is done. Never
+`git switch` to an existing ticket branch, and never rebase or force it into shape.
+
 ### 3. Read
 
 - The **whole** ticket file, including any `## Blocker log`. A previous attempt's note is the most
