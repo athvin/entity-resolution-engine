@@ -19,6 +19,8 @@ counters — is in ``tests/integration/test_ingest_idempotence.py``.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -27,9 +29,12 @@ import pytest
 from typer.testing import CliRunner
 
 from er import cli
+from er.cli import GlobalOptions
 from er.errors import ExitCode
 from er.ingest import hashing, landing
 from er.lake.model import REGISTRY, SCHEMA_QUALIFIER
+from er.obs.counters import DECLARED_COUNTERS, StageCounters
+from er.obs.runctx import StageRun
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -107,18 +112,63 @@ def test_landing_content_hash_is_the_hashing_module_function() -> None:
     assert "content_hash" in landing.__all__
 
 
-def test_full_refresh_keys_is_refused_rather_than_silently_ignored(tmp_path: Path) -> None:
-    """S4.1.1's deletion arm is a later ticket, and an unwritten arm is exit 1.
+def test_full_refresh_keys_reaches_the_write(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """S4.1.1's flag is passed through, never interpreted in the command layer.
 
-    Never `10`: "nothing to do" does not abort an `er run-all` chain, so a
-    ``--full-refresh-keys`` delivery that quietly tombstoned nothing would let the
-    chain continue against a corpus the operator believes was pruned.
+    A flag the CLI accepted and dropped would produce an `ingest_batches` row claiming
+    a full-refresh delivery that tombstoned nothing — which is a delivery the operator
+    believes pruned the source and that in fact appended to it. So what is asserted is
+    the value that reached :func:`~er.ingest.landing.ingest_delivery`, on both settings
+    of the flag, and not the exit code, which would be the same either way.
+
+    The lake is stubbed out because this is the unit layer (S8.1: no services); the
+    write itself is asserted in `tests/integration/test_ingest_deletion.py`.
     """
-    result = invoke("ingest", "--source", "crm", "--path", str(tmp_path), "--full-refresh-keys")
+    seen: list[bool] = []
 
-    assert result.exit_code == int(ExitCode.STAGE_FAILURE)
-    assert result.exit_code != int(ExitCode.NOTHING_TO_DO)
-    assert "--full-refresh-keys is not implemented" in result.stderr
+    @contextmanager
+    def fake_connect() -> Iterator[None]:
+        yield None
+
+    def spy(*_args: Any, full_refresh_keys: bool = False, **_kwargs: Any) -> Any:
+        seen.append(full_refresh_keys)
+        return landing.IngestManifest(
+            ingest_batch_id="01J",
+            run_id="01K",
+            source_system="crm",
+            path=str(tmp_path),
+            new_count=0,
+            changed_count=0,
+            unchanged_count=0,
+            tombstone_count=0,
+            resurrected_count=0,
+            full_refresh_keys=full_refresh_keys,
+            created_at=landing._now(),
+            files=0,
+            rows_in=0,
+            rows_out=0,
+        )
+
+    monkeypatch.setattr(cli, "connect", fake_connect)
+    monkeypatch.setattr(cli, "ingest_delivery", spy)
+
+    options = GlobalOptions.resolve(config_path=TEST_CONFIG, run_id="01K", json_output=False)
+    for requested in (True, False):
+        stage = cli._IngestStage(source="crm", path=tmp_path, full_refresh_keys=requested)
+        stage.bind(
+            StageRun(
+                run_id="01K",
+                stage="ingest",
+                seq=1,
+                started_at=landing._now(),
+                counters=StageCounters(DECLARED_COUNTERS["ingest"]),
+            )
+        )
+        stage.run(options)
+
+    assert seen == [True, False]
 
 
 def test_manifest_renders_the_same_five_numbers_under_three_spellings() -> None:

@@ -32,10 +32,41 @@ counters, and the five short labels on the S4.0 stdout manifest line — the sam
 numbers under three spellings, and :class:`IngestManifest` is the single object all
 three are rendered from so no sixth counter can appear.
 
-Out of scope by construction and owned by ER-032: tombstones, ``--full-refresh-keys``,
-the S4.1.1 empty-delivery guard and resurrection. This stage writes
-``tombstone_count = 0``, ``resurrected_count = 0`` and ``full_refresh_keys = false``
-because those are the true values of the only arm it implements.
+**The S4.1.1 deletion arm.** ``--full-refresh-keys`` treats the delivery as the
+complete key set for one source, and three of its rules are decisions rather than
+implementation detail:
+
+* **A tombstone is a version row, not an erasure.** :func:`derive_tombstones` appends
+  one row per live key the delivery omits, carrying
+  :data:`TOMBSTONE_CONTENT_HASH`, ``is_deleted = true`` and ``deleted_at`` equal to
+  the batch's ``ingested_at``. Nothing is updated and nothing is deleted, so the arm
+  obeys D7 exactly as the content arm does. It is idempotent for the same reason the
+  content append is: a key whose current version is already a tombstone is not live,
+  so a repeated full refresh derives nothing.
+* **`payload` is the JSON null document.** S4.1.1 writes ``payload = NULL`` while S5
+  declares ``payload JSON NOT NULL`` and DuckLake enforces `NOT NULL` (S5.0). The
+  reconciling reading is ``'null'::JSON`` — a document carrying no source row, which
+  satisfies the constraint — so a tombstone answers ``json_type(payload) = 'NULL'``
+  and never holds a SQL NULL. Changing the column to nullable would be a spec
+  amendment.
+* **The empty-delivery guard fires before any write.** It is a refusal to destroy, so
+  it is an :class:`~er.errors.ConfigError` (exit `2`, which aborts an ``er run-all``
+  chain) and not "nothing to do"; it is raised while the delivery is still staged in
+  the ``:memory:`` database, so a refused invocation persists no `raw_records` row and
+  no `ingest_batches` row.
+
+One consequence of the anti-join is worth stating because it is forced by the data
+model rather than chosen here: a key that re-appears carrying content **byte-identical
+to its pre-tombstone version** cannot append a row, because
+`(source_system, source_record_id, content_hash)` is `raw_records`'s logical key
+(S5.0) and the row already exists. It is still counted in ``resurrected_count``, which
+is defined over the delivered keys whose current version is a tombstone. Making such a
+key live again would require widening that key, which is a spec amendment and not this
+module's to make.
+
+Out of scope by construction: edge invalidation and the ``member_removed`` / ``split``
+/ ``retired`` retraction path of S4.5.5, and the exclusion of tombstones from
+`int_std_records` (S4.2) — both consume what this module writes.
 """
 
 from __future__ import annotations
@@ -51,8 +82,8 @@ import duckdb
 
 from er.config.schema import Config
 from er.entities.ids import IdFactory, UlidFactory
-from er.errors import ExitCode
-from er.ingest.hashing import content_hash
+from er.errors import ConfigError, ExitCode
+from er.ingest.hashing import TOMBSTONE_CONTENT_HASH, content_hash
 from er.ingest.sources import SourceAdapter, SourceRow, adapter_for
 from er.lake.model import REGISTRY, SCHEMA_QUALIFIER
 from er.obs.runctx import StageRun
@@ -60,11 +91,16 @@ from er.obs.runctx import StageRun
 __all__ = [
     "ANTI_JOIN_KEY",
     "APPENDED_IS_DELETED",
+    "EMPTY_FULL_REFRESH_MESSAGE",
     "STAGING_TABLE",
+    "TOMBSTONE_CONTENT_HASH",
+    "TOMBSTONE_PAYLOAD",
     "AppendResult",
     "IngestManifest",
     "anti_join_append",
     "content_hash",
+    "count_resurrected",
+    "derive_tombstones",
     "ingest_delivery",
     "write_ingest_batch",
 ]
@@ -75,9 +111,23 @@ __all__ = [
 #: and a second spelling here would be the one place they could drift apart.
 ANTI_JOIN_KEY: Final[tuple[str, ...]] = REGISTRY["raw_records"].keys[0].columns
 
-#: Every row this stage appends is a live content version. The tombstone arm that
-#: writes ``true`` — with the S4.1.1 sentinel hash and a NULL payload — is ER-032.
+#: What the content arm writes into `is_deleted`. The tombstone arm writes ``true``,
+#: and :func:`derive_tombstones` is the only place it does.
 APPENDED_IS_DELETED: Final[bool] = False
+
+#: S4.1.1's tombstone `payload`, reconciled with S5's `JSON NOT NULL` (see the module
+#: docstring): the JSON **null document**, never a SQL NULL. Held as the text DuckDB
+#: casts, so the one statement that writes it and the tests that assert
+#: ``json_type(payload) = 'NULL'`` are reading the same decision.
+TOMBSTONE_PAYLOAD: Final[str] = "null"
+
+#: S4.1.1's empty-delivery refusal, verbatim. A format string rather than an f-string
+#: at the raise site, so the literal the spec pins and the message an operator reads
+#: are the same object — and so a test can assert against the spec's wording rather
+#: than against a rendering of it.
+EMPTY_FULL_REFRESH_MESSAGE: Final[str] = (
+    "empty full-refresh delivery: refusing to tombstone {live} live keys for source {source}"
+)
 
 #: Where the delivery lands before the single write statement reads it. A TEMP
 #: relation, so it lives in the ``:memory:`` primary database and never commits a
@@ -199,6 +249,94 @@ WHERE NOT EXISTS (
 """
 
 
+# The current version of every key of ONE source, which is what "live" and
+# "tombstoned" are both defined against (S4.1.1, S4.2's supersession rule).
+#
+# `raw_records` is version history, so a key has no single row: the current version is
+# the latest-ingested one. `ingested_at` alone is not a total order — a batch stamps
+# one instant on every row it appends, and two batches can share it on a fast clock —
+# so `ingest_batch_id` (a ULID, therefore time-ordered) and `content_hash` break the
+# tie. The order has to be total, not merely usually-unique: a non-deterministic
+# "current version" would make a key's liveness depend on which row the engine
+# happened to return, and tombstoning is not a decision to take twice.
+#
+# Parameters: the source system.
+_CURRENT_VERSION: Final[str] = f"""
+SELECT source_system, source_record_id, is_deleted
+FROM (
+    SELECT
+        source_system,
+        source_record_id,
+        is_deleted,
+        row_number() OVER (
+            PARTITION BY source_system, source_record_id
+            ORDER BY ingested_at DESC, ingest_batch_id DESC, content_hash DESC
+        ) AS version_rank
+    FROM {SCHEMA_QUALIFIER}.{_RAW_RECORDS}
+    WHERE source_system = ?
+)
+WHERE version_rank = 1
+"""
+
+#: The keys of one source that a full refresh may tombstone: those whose current
+#: version is a content version. A key already tombstoned is not live, which is what
+#: makes the arm idempotent (AC3) without a second uniqueness check.
+_LIVE_KEYS: Final[str] = f"""
+SELECT source_system, source_record_id
+FROM ({_CURRENT_VERSION})
+WHERE NOT is_deleted
+"""
+
+# The `<n>` of S4.1.1's guard message: how many live keys the refused delivery would
+# have destroyed. Parameters: the source system.
+_COUNT_LIVE_KEYS: Final[str] = f"SELECT count(*) FROM ({_LIVE_KEYS})"
+
+# `resurrected_count` (S4.1.1): delivered keys whose current version is a tombstone.
+# Evaluated, like the other four counts, against the lake as it stands BEFORE the
+# append — afterwards the resurrecting version is itself the current one and every
+# such key would report as ordinary.
+#
+# Parameters: the source system.
+_COUNT_RESURRECTED: Final[str] = f"""
+SELECT count(*)
+FROM (SELECT DISTINCT source_system, source_record_id FROM {STAGING_TABLE}) AS d
+JOIN ({_CURRENT_VERSION}) AS c
+    ON c.source_system = d.source_system
+   AND c.source_record_id = d.source_record_id
+WHERE c.is_deleted
+"""
+
+# THE tombstone write (S4.1.1). One statement, append-only like the content arm, and
+# an anti-join in the same sense: the delivery IS the complete key set, so every live
+# key it omits gets a version row saying so. `WHERE source_system = ?` inside
+# `_CURRENT_VERSION` is what keeps a `crm` refresh from touching `billing` or
+# `webforms` — a full-refresh delivery is scoped to one source (S4.1.1).
+#
+# Parameters, in the order DuckDB binds them (textual, left to right): the sentinel
+# hash, `deleted_at`, the batch id, `ingested_at`, then the source system.
+_APPEND_TOMBSTONES: Final[str] = f"""
+INSERT INTO {SCHEMA_QUALIFIER}.{_RAW_RECORDS}
+    (source_system, source_record_id, payload, content_hash,
+     is_deleted, deleted_at, ingest_batch_id, ingested_at)
+SELECT
+    live.source_system,
+    live.source_record_id,
+    CAST('{TOMBSTONE_PAYLOAD}' AS JSON),
+    ?,
+    TRUE,
+    ?,
+    ?,
+    ?
+FROM ({_LIVE_KEYS}) AS live
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM {STAGING_TABLE} AS s
+    WHERE s.source_system = live.source_system
+      AND s.source_record_id = live.source_record_id
+)
+"""
+
+
 def _now() -> datetime:
     """The naive UTC instant a `TIMESTAMP` column takes (S5.0: no `TIMESTAMPTZ`)."""
     return datetime.now(UTC).replace(tzinfo=None)
@@ -217,6 +355,12 @@ class AppendResult:
         changed_count: known keys carrying at least one unseen `content_hash`.
         unchanged_count: known keys every one of whose delivered versions was
             already present — counted, and deliberately not appended.
+        tombstone_count: live keys of this source the delivery omitted, each of
+            which gained a tombstone version row. Always zero without
+            ``full_refresh_keys``, because only a complete key set can say that an
+            absent key is a deleted one.
+        resurrected_count: delivered keys whose current version was a tombstone
+            (S4.1.1).
     """
 
     rows_in: int
@@ -224,6 +368,8 @@ class AppendResult:
     new_count: int
     changed_count: int
     unchanged_count: int
+    tombstone_count: int = 0
+    resurrected_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -389,6 +535,74 @@ def _classify(connection: duckdb.DuckDBPyConnection, source: str) -> tuple[int, 
     return (int(row[0]), int(row[1]), int(row[2]))
 
 
+def count_resurrected(connection: duckdb.DuckDBPyConnection, source: str) -> int:
+    """S4.1.1's `resurrected_count`: delivered keys whose current version is a tombstone.
+
+    Reads the staged delivery, so it is only meaningful between
+    :func:`_stage_delivery` and the append — and it MUST be called before the append,
+    for the reason the other four counts are: afterwards the resurrecting version is
+    the current one and no key looks resurrected at all.
+
+    It is a property of the delivery and not of the flag: an ordinary delivery is
+    exactly how S4.1.1 says a key comes back, so this is counted on every invocation.
+    """
+    row = connection.execute(_COUNT_RESURRECTED, [source]).fetchone()
+    return 0 if row is None else int(row[0])
+
+
+def derive_tombstones(
+    connection: duckdb.DuckDBPyConnection,
+    source: str,
+    *,
+    ingest_batch_id: str,
+    ingested_at: datetime,
+) -> int:
+    """Append a tombstone version row per live key of ``source`` the delivery omits.
+
+    The S4.1.1 write, and the whole of it: one statement, append-only (D7), scoped to
+    one `source_system`, and idempotent because a key whose current version is already
+    a tombstone is not live. `deleted_at` is the batch's own ``ingested_at``, which is
+    what makes the tombstone's instant the instant the delivery asserted the deletion
+    rather than the instant a row happened to be written.
+
+    Reads the staged delivery, so it runs inside :func:`anti_join_append` while
+    :data:`STAGING_TABLE` exists.
+
+    Args:
+        connection: an attached lake connection (S4.0b).
+        source: the source whose key set the delivery is complete for.
+        ingest_batch_id: the batch's ULID, stamped on every tombstone.
+        ingested_at: the batch's instant, written to both `ingested_at` and
+            `deleted_at`.
+
+    Returns:
+        The number of tombstone rows appended — S4.1.1's `tombstone_count`.
+    """
+    appended = connection.execute(
+        _APPEND_TOMBSTONES,
+        [TOMBSTONE_CONTENT_HASH, ingested_at, ingest_batch_id, ingested_at, source],
+    ).fetchone()
+    return 0 if appended is None else int(appended[0])
+
+
+def _refuse_empty_full_refresh(connection: duckdb.DuckDBPyConnection, source: str) -> None:
+    """Raise S4.1.1's empty-delivery refusal, naming the live keys it protected.
+
+    Exit `2` and not `10`: this is a *refusal to destroy*, so the input is rejected as
+    invalid rather than accepted as a no-op — and a `10` would leave an `er run-all`
+    chain running against a corpus the operator believes was pruned. The genuine full
+    deletion of a source is `er lake reset --confirm-tenant` followed by re-ingestion
+    (S4.0, S4.7), never an empty file.
+
+    Raises:
+        er.errors.ConfigError: always. The caller reaches this only for a
+            ``--full-refresh-keys`` delivery that parsed to zero records.
+    """
+    row = connection.execute(_COUNT_LIVE_KEYS, [source]).fetchone()
+    live = 0 if row is None else int(row[0])
+    raise ConfigError(EMPTY_FULL_REFRESH_MESSAGE.format(live=live, source=source))
+
+
 def anti_join_append(
     connection: duckdb.DuckDBPyConnection,
     source: str,
@@ -397,13 +611,16 @@ def anti_join_append(
     *,
     ingest_batch_id: str,
     ingested_at: datetime,
+    full_refresh_keys: bool = False,
 ) -> AppendResult:
     """Append ``rows`` to `raw_records` as an anti-join on the S4.1 key.
 
-    The three steps are ordered and the order is the contract: stage the delivery,
-    classify it against the lake **as it stands**, then append. Classifying after the
-    append would report every delivered key as `unchanged` and would make a write
-    that appended nothing indistinguishable from one that appended everything.
+    The steps are ordered and the order is the contract: stage the delivery, refuse it
+    if it is an empty full refresh, classify it against the lake **as it stands**, then
+    append — and only then, for a full refresh, tombstone what it omitted. Classifying
+    after the append would report every delivered key as `unchanged` and would make a
+    write that appended nothing indistinguishable from one that appended everything;
+    refusing after it would have destroyed nothing but written everything.
 
     Args:
         connection: an attached lake connection (S4.0b).
@@ -414,17 +631,34 @@ def anti_join_append(
             declared order** — the input tuple :func:`content_hash` is defined over.
         ingest_batch_id: the batch's ULID, stamped on every appended row.
         ingested_at: the batch's instant, stamped on every appended row.
+        full_refresh_keys: ``--full-refresh-keys`` (S4.1.1) — treat the delivery as
+            the complete key set for ``source``.
 
     Returns:
-        The rows read, the rows appended, and the three S4.1 counts.
+        The rows read, the rows appended, and the five S4.1/S4.1.1 counts.
+
+    Raises:
+        er.errors.ConfigError: a ``--full-refresh-keys`` delivery parsed to zero
+            records (exit `2`). Raised before anything is written, so the lake is
+            exactly as the invocation found it.
     """
     try:
         rows_in = _stage_delivery(connection, rows, columns)
+        if full_refresh_keys and rows_in == 0:
+            _refuse_empty_full_refresh(connection, source)
         new_count, changed_count, unchanged_count = _classify(connection, source)
+        resurrected_count = count_resurrected(connection, source)
         appended = connection.execute(
             _APPEND, [APPENDED_IS_DELETED, ingest_batch_id, ingested_at]
         ).fetchone()
         rows_out = 0 if appended is None else int(appended[0])
+        tombstone_count = (
+            derive_tombstones(
+                connection, source, ingest_batch_id=ingest_batch_id, ingested_at=ingested_at
+            )
+            if full_refresh_keys
+            else 0
+        )
     finally:
         # The staging relation is scratch, and a connection is reused across stages
         # in-process (S8.1's harness does exactly that). Leaving it behind would let
@@ -432,10 +666,12 @@ def anti_join_append(
         connection.execute(f"DROP TABLE IF EXISTS {STAGING_TABLE}")
     return AppendResult(
         rows_in=rows_in,
-        rows_out=rows_out,
+        rows_out=rows_out + tombstone_count,
         new_count=new_count,
         changed_count=changed_count,
         unchanged_count=unchanged_count,
+        tombstone_count=tombstone_count,
+        resurrected_count=resurrected_count,
     )
 
 
@@ -474,6 +710,7 @@ def ingest_delivery(
     conn: duckdb.DuckDBPyConnection,
     run_ctx: StageRun,
     *,
+    full_refresh_keys: bool = False,
     id_factory: IdFactory | None = None,
 ) -> IngestManifest:
     """Run the S4.1 ingest stage over one delivery: read, hash, append, manifest.
@@ -487,6 +724,8 @@ def ingest_delivery(
         conn: an attached lake connection (S4.0b).
         run_ctx: the stage's `run_stages` row — the source of `run_id` for the
             `ingest_batches` row, and the recorder the S4.1.1 counters are written to.
+        full_refresh_keys: ``--full-refresh-keys`` (S4.1.1) — the delivery is the
+            complete key set for ``source``, so every live key it omits is tombstoned.
         id_factory: the source of the batch ULID; production ULIDs by default.
 
     Returns:
@@ -494,9 +733,13 @@ def ingest_delivery(
         :attr:`~IngestManifest.exit_code` is the stage's S4.0 status.
 
     Raises:
-        er.errors.ConfigError: `sources.<source>` is unknown (exit `2`). Raised by
-            :func:`~er.ingest.sources.adapter_for` before the drop directory is
-            touched, so a typo cannot read a file.
+        er.errors.ConfigError: `sources.<source>` is unknown, or a
+            ``--full-refresh-keys`` delivery parsed to zero records (exit `2`). The
+            first is raised by :func:`~er.ingest.sources.adapter_for` before the drop
+            directory is touched, so a typo cannot read a file; the second before
+            anything is written, so a refusal persists no row at all — not the
+            `raw_records` rows it declined to tombstone and not an `ingest_batches`
+            row claiming a delivery that was rejected.
         er.errors.StageFailure: a delivered file is unreadable or unparsable, or a
             row is malformed (exit `1`, S4.7's `data` class).
     """
@@ -512,6 +755,7 @@ def ingest_delivery(
         adapter.columns,
         ingest_batch_id=ingest_batch_id,
         ingested_at=ingested_at,
+        full_refresh_keys=full_refresh_keys,
     )
     manifest = IngestManifest(
         ingest_batch_id=ingest_batch_id,
@@ -521,11 +765,9 @@ def ingest_delivery(
         new_count=appended.new_count,
         changed_count=appended.changed_count,
         unchanged_count=appended.unchanged_count,
-        # S4.1.1's deletion arm is ER-032; zero is the true count of what this arm
-        # writes, not a placeholder for a number it failed to compute.
-        tombstone_count=0,
-        resurrected_count=0,
-        full_refresh_keys=False,
+        tombstone_count=appended.tombstone_count,
+        resurrected_count=appended.resurrected_count,
+        full_refresh_keys=full_refresh_keys,
         created_at=ingested_at,
         files=files,
         rows_in=appended.rows_in,

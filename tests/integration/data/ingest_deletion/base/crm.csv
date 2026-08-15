@@ -1,0 +1,6 @@
+crm_id,first_name,last_name,email_address,phone,street_address,city,state,zip,dob,last_modified
+C1,Ada,Lovelace,ada@example.com,555-0100,1 Analytical Way,London,LN,10001,1815-12-10,2026-01-01T00:00:00
+C2,Grace,Hopper,grace@example.com,555-0101,2 Compiler St,Arlington,VA,22201,1906-12-09,2026-01-01T00:00:00
+C3,Alan,Turing,alan@example.com,555-0102,3 Enigma Rd,Wilmslow,CH,33101,1912-06-23,2026-01-01T00:00:00
+C4,Katherine,Johnson,katherine@example.com,555-0103,4 Orbit Ave,Hampton,VA,23666,1918-08-26,2026-01-01T00:00:00
+C5,Edsger,Dijkstra,edsger@example.com,555-0104,5 Shortest Path,Rotterdam,ZH,30001,1930-05-11,2026-01-01T00:00:00

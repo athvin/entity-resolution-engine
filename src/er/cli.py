@@ -371,12 +371,12 @@ class _IngestStage:
     (the manifest line, and the exit status derived from the manifest) and not the
     write.
 
-    ``--full-refresh-keys`` is refused rather than ignored. S4.1.1's tombstone arm,
-    empty-delivery guard and resurrection counting are ER-032, and accepting the flag
-    would record an `ingest_batches` row claiming a full-refresh delivery that
-    tombstoned nothing. Exit `1` and never `10`, for the reason
-    :class:`NotImplementedStage` gives: an unwritten arm must not be readable as a
-    delivery with nothing to do.
+    ``--full-refresh-keys`` is passed through and never interpreted here. S4.1.1's
+    tombstone derivation, its empty-delivery guard and resurrection counting all need
+    the delivery and the live key set in front of them, so they live in
+    :func:`~er.ingest.landing.ingest_delivery` with the rest of the write; the guard's
+    exit `2` reaches the process the way every other classified failure does, through
+    :func:`~er.errors.exit_code_for`.
     """
 
     source: str
@@ -390,11 +390,6 @@ class _IngestStage:
         self.stage_run = stage_run
 
     def run(self, options: GlobalOptions) -> int:
-        if self.full_refresh_keys:
-            raise StageFailure(
-                "--full-refresh-keys is not implemented: S4.1.1's tombstone arm, "
-                "empty-delivery guard and resurrection counting are a later ticket"
-            )
         if options.config is None or self.stage_run is None:
             # Unreachable through the command tree: S4.0 lists `ER_CONFIG` in this
             # command's required-env column, so `GlobalOptions.resolve` has already
@@ -404,7 +399,12 @@ class _IngestStage:
             raise StageFailure("er ingest was invoked without a config or a run_stages row")
         with connect() as connection:
             manifest = ingest_delivery(
-                options.config, self.source, self.path, connection, self.stage_run
+                options.config,
+                self.source,
+                self.path,
+                connection,
+                self.stage_run,
+                full_refresh_keys=self.full_refresh_keys,
             )
         _write_stdout(manifest.manifest(), manifest.stdout_line(), options)
         return manifest.exit_code

@@ -1,0 +1,3 @@
+account_no,fname,lname,billing_email,contact_phone,addr1,addr_city,addr_state,postal_code,birth_date,updated_ts
+B1,Ada,Lovelace,ada@example.com,555-0100,1 Analytical Way,London,LN,10001,12/10/1815,2026-01-01T00:00:00
+B2,Grace,Hopper,grace@example.com,555-0101,2 Compiler St,Arlington,VA,22201,12/09/1906,2026-01-01T00:00:00

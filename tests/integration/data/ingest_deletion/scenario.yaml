@@ -1,0 +1,12 @@
+# The S4.1.1 deletion arm, as an S8.2.1 scenario.
+#
+# It lives under `tests/integration/data/` and not under `fixtures/static/` because
+# it makes no claim about entities: `expected/` files are membership, golden, events,
+# std_hashes and assertions, and none of those relations exists in M1. The committed
+# `fixtures/static/deletion_scenario/` that T-DEL-1 runs end to end is ER-083's.
+#
+# `refresh` and `resurrect` are two phases and not one for the reason S8.2.1 gives:
+# reusing `refresh` for the resurrection delivery would tombstone every key that
+# delivery omits, which is the opposite of what it exists to show.
+scenario: ingest_deletion
+phases: [base, refresh, resurrect]
