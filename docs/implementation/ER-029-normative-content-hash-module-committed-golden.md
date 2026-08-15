@@ -2,7 +2,7 @@
 id: ER-029
 title: "Normative content_hash module + committed golden vector (pure-Python oracle)"
 milestone: M1
-status: todo
+status: in_progress
 kind: code
 size: S
 gates: fast
@@ -14,12 +14,13 @@ consumes: ["src/er/config/schema.py::ErConfig"]
 owns: ["src/er/ingest/hashing.py", "tests/unit/test_content_hash.py", "tests/fixtures/content_hash_vectors.json"]
 protected_paths: []
 extra_paths: []
-attempts: 0
+attempts: 1
 verify: "uv run pytest tests/unit/test_content_hash.py -q && uv run mypy --strict src/er/ingest/hashing.py"
-branch: ""
+branch: "ticket/ER-029-normative-content-hash-module-committed-golden"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "28d8d8e366a7b49b"
+updated_at: "2026-08-15T02:07:32Z"
+session: 039fd346-da14-4b11-a7a8-370943b16dfc
 ---
 ## Description
 
