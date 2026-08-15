@@ -2,7 +2,7 @@
 id: ER-012
 title: "Config cross-field validators: threshold order, survivorship↔GOLDEN_SURVIVABLE_COLUMNS equality, validated↔_valid, referential blocking/comparison checks"
 milestone: M1
-status: in_progress
+status: done
 kind: code
 size: M
 gates: fast
@@ -17,9 +17,9 @@ extra_paths: ["src/er/config/schema.py", "src/er/config/loader.py"]
 attempts: 1
 verify: "uv run pytest tests/unit/test_config_validators.py -q && uv run mypy --strict src/er/config"
 branch: "ticket/ER-012-config-cross-field-validators-threshold-order"
-commit: ""
+commit: "a22299bbf397fd0b9cbfb81de0bb40389fb63053"
 spec_sha: "28d8d8e366a7b49b"
-updated_at: "2026-08-15T04:22:23Z"
+updated_at: "2026-08-15T04:32:11Z"
 session: 2cf4efdc-a295-472c-9565-ed94b916f200
 ---
 ## Description
