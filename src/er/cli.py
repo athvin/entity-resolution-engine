@@ -67,6 +67,8 @@ from er.config.hashing import config_hash
 from er.config.loader import ConfigValidationError, load_config
 from er.config.schema import Config
 from er.dbt_runner import render_dbt_vars
+from er.doctor import check_lines, check_record, run_checks
+from er.doctor import exit_code as doctor_exit_code
 from er.entities.ids import IdFactory, UlidFactory
 from er.errors import (
     ConfigError,
@@ -888,11 +890,26 @@ def doctor(
     run_id: RunIdOption = None,
     json_output: JsonOption = False,
 ) -> None:
-    """Assert every pinned version and runtime invariant (S2.1, T-DOCTOR-1)."""
+    """Assert every pinned version and runtime invariant (S2.1, T-DOCTOR-1).
+
+    The one command that is neither a :class:`Stage` nor run inside a
+    :class:`~er.obs.runctx.RunContext`, and both halves of that are S5's decision
+    rather than a shortcut: ``run_stages.stage`` has no ``doctor`` value in the S5
+    enum, so there is no row this could legally write, and the doctor mutates nothing
+    — it is already in :data:`READ_ONLY_COMMANDS`, so it takes no writer lock and a
+    second concurrent `er doctor` is not a second writer.
+
+    Exit ``1`` on any failed check, never ``3``: a pin mismatch is a check failure
+    under S4.0's exit-code table (S2.1 says so in as many words). Every check prints
+    first, including the ones after a failure.
+    """
     options = GlobalOptions.resolve(
         config_path=config, run_id=run_id, json_output=json_output, require_config=False
     )
-    _run_single("doctor", options)
+    results = run_checks()
+    for result, line in zip(results, check_lines(results), strict=True):
+        _write_stdout(check_record(result), line, options)
+    raise typer.Exit(doctor_exit_code(results))
 
 
 @app.command()

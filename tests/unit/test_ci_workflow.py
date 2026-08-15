@@ -286,6 +286,37 @@ def test_integration_job_teardown_and_uploads() -> None:
         assert step["with"]["path"] == "artifacts/"
 
 
+def test_doctor_is_first_integration_step() -> None:
+    """AC7: the integration job's order is checkout/build/reset, `er doctor`, pytest.
+
+    S9.1 and S2.1 both say `er doctor` runs *first* in this job, and S13 gives the
+    reason: version skew and a broken substrate are what the doctor exists to catch,
+    so the six T-DOCTOR-1 assertions have to fail before twenty minutes of suite time
+    is spent discovering the same thing one test at a time. Asserted by step *index*
+    rather than by presence, because a `er doctor` step that has drifted below the
+    pytest step is still present and still passes -- and proves nothing.
+    """
+    steps = job("integration")["steps"]
+
+    def index(predicate: Any) -> int:
+        return next(position for position, step in enumerate(steps) if predicate(step))
+
+    checkout = index(lambda step: str(step.get("uses", "")).startswith("actions/checkout@"))
+    build = index(lambda step: str(step.get("uses", "")).startswith("docker/build-push-action@"))
+    reset = index(lambda step: "run" in step and TEARDOWN in step["run"])
+    doctor = index(lambda step: "run" in step and step["run"].strip().endswith("er doctor"))
+    suite = index(lambda step: "run" in step and "pytest tests/integration" in step["run"])
+
+    assert checkout < build < reset < doctor < suite, (
+        "the integration job must check out, build the image, reset the substrate, "
+        "run `er doctor` (T-DOCTOR-1) and only then run the suite; got indexes "
+        f"checkout={checkout} build={build} reset={reset} doctor={doctor} suite={suite}"
+    )
+    # The doctor runs against the same Compose substrate the suite does, in the
+    # `pipeline` service -- not on the runner, where there is no lake to assert.
+    assert "--profile test run --rm pipeline er doctor" in steps[doctor]["run"]
+
+
 def test_actionlint_wrapper_is_pinned_and_fetches_nothing() -> None:
     source = ACTIONLINT_WRAPPER.read_text(encoding="utf-8")
     for token in FETCH_TOKENS:
