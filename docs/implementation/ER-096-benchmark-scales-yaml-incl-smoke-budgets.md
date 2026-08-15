@@ -2,7 +2,7 @@
 id: ER-096
 title: "Benchmark A: scales.yaml (incl. smoke, budgets), bench_result.schema.json, validate-before-write, bench compose service"
 milestone: M5
-status: in_progress
+status: done
 kind: code
 size: M
 gates: fast
@@ -17,9 +17,9 @@ extra_paths: ["docker/compose.yaml"]
 attempts: 1
 verify: "uv run pytest tests/unit/bench/test_scales_and_schema.py -q"
 branch: "ticket/ER-096-benchmark-scales-yaml-incl-smoke-budgets"
-commit: ""
+commit: "2b7682feb7c2be2646341a653bb4cf87d44227f7"
 spec_sha: "2abcfe433c322f74"
-updated_at: "2026-08-15T07:20:10Z"
+updated_at: "2026-08-15T13:03:08Z"
 session: 3e89c849-0d74-48a0-8ba5-c82111eb4769
 ---
 ## Description
