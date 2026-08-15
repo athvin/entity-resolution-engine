@@ -2,7 +2,7 @@
 id: ER-025
 title: "er lake maintain: compaction, expiry, cleanup, run_stages retention guard"
 milestone: M1
-status: todo
+status: in_progress
 kind: code
 size: M
 gates: full
@@ -14,12 +14,13 @@ consumes: ["src/er/obs/runctx.py::RunContext", "src/er/lake/catalog.py::tenant_l
 owns: ["src/er/lake/maintain.py", "tests/unit/test_retention_cutoff.py", "tests/integration/test_lake_maintain.py"]
 protected_paths: ["tests/unit/test_cli_contract.py"]
 extra_paths: ["src/er/cli.py"]
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_lake_maintain.py -q"
-branch: ""
+branch: "ticket/ER-025-er-lake-maintain-compaction-expiry-cleanup"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "2abcfe433c322f74"
+updated_at: "2026-08-15T20:26:40Z"
+session: 221e5e98-7c99-41b9-9ad6-08764503975a
 ---
 ## Description
 
