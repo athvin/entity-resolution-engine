@@ -2,7 +2,7 @@
 id: ER-024
 title: "S4.7 failure semantics: error taxonomy, --resume <run_id>, tenant advisory lock on every mutating command (exit 3), tenancy statement enforcement"
 milestone: M1
-status: todo
+status: blocked
 kind: code
 size: M
 gates: full
@@ -19,7 +19,7 @@ verify: "bash scripts/ci/itest.sh tests/integration/test_failure_resume.py tests
 branch: ""
 commit: ""
 spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+updated_at: "2026-08-15T15:00:12Z"
 ---
 ## Description
 
@@ -92,3 +92,12 @@ uv run mypy --strict src/er/resume.py src/er/errors.py
 - `--resume` re-executes whole stages only and refuses on config drift (2) or a succeeded run (3)
 - No retry loop and no rollback path added anywhere
 - ruff + `mypy --strict src/er` clean; verify command passes
+
+## Blocker log
+
+### Attempt 0 — gate_failed (2026-08-15T15:00:12Z)
+
+- **Failing command:** `bash scripts/gates.sh --scope full --no-cache (driver re-verification on main)`
+- **Assertion / contradiction:** The ticket was marked done, but an independent full-ladder run on merged main failed. See /Users/athvin/github.com/athvin/entity-resolution-engine/.loop/runs/abc08182-6ae5-45da-9564-e634d85fe45c/reverify-ER-024.log
+- **Smallest change that would unblock:** Inspect branch loop-quarantine/ER-024, fix the failing gate, then unblock the ticket.
+- **Log:** `/Users/athvin/github.com/athvin/entity-resolution-engine/.loop/runs/abc08182-6ae5-45da-9564-e634d85fe45c/reverify-ER-024.log`
