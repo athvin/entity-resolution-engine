@@ -25,10 +25,15 @@ Four rules govern this module and are stated nowhere else in Python:
 (ER-020); the work itself lives in :mod:`er.lake.init` and this module owns only
 their S4.0 stdout. Every other command is still a stub.
 
-Out of scope by construction, and owned by later tickets: the
-``runs``/``run_stages`` writes (ER-023, which extends :func:`emit_stage_line`
-rather than adding a second emitter), the advisory lock on every other mutating
-command and ``--resume`` (ER-024),
+Every invocation now runs inside an :class:`~er.obs.runctx.RunContext` (ER-023), so
+the ``runs`` row, each stage's ``run_stages`` row and its snapshot range are written
+by one recorder rather than by each command. Two commands deliberately persist
+nothing: `er init` creates the very relations the rows go in, and `er lake reset`
+destroys them — and S4.0b forbids holding an attachment across either. They still
+emit their stage record, because telemetry is unconditional.
+
+Out of scope by construction, and owned by later tickets: the advisory lock on every
+other mutating command and ``--resume`` (ER-024),
 and the ``--mode incremental`` config-drift guard (ER-034). The dbt subprocess and
 the ``--vars`` payload moved to ``er.dbt_runner`` with ER-033; ``dbt_vars`` here is
 that module's :func:`~er.dbt_runner.render_dbt_vars` under its ER-014 name, not a
@@ -41,9 +46,8 @@ import json
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Protocol, TextIO
+from typing import Annotated, Protocol
 
 import typer
 
@@ -53,7 +57,10 @@ from er.config.schema import Config
 from er.dbt_runner import render_dbt_vars
 from er.entities.ids import IdFactory, UlidFactory
 from er.errors import ErError, ErrorClass, ExitCode, StageFailure, exit_code_for
+from er.lake.ducklake import connect
 from er.lake.init import init_lake, reset_lake
+from er.obs.logging import emit_stage_record
+from er.obs.runctx import RunContext
 
 __all__ = [
     "COMMANDS",
@@ -99,17 +106,9 @@ _CHAINED_STAGES: frozenset[str] = frozenset(
 #: The two values ``--mode`` accepts on ``er run-all`` and ``er match`` (S4.0).
 _MODES: tuple[str, str] = ("incremental", "full")
 
-#: ``run_stages.status`` is ``{running, succeeded, failed}`` (S5). A stage that
-#: exits ``10`` is *succeeded* — S4.0 makes "nothing to do" a successful no-op —
-#: so the log line carries ``exit_code`` as well, since the status alone cannot
-#: distinguish a ``0`` from a ``10``.
-_STATUS_SUCCEEDED = "succeeded"
-_STATUS_FAILED = "failed"
-
-
-def _utc_now() -> str:
-    """Now, as the ISO-8601 UTC instant the S5.2 log line carries."""
-    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+#: ``runs.mode`` for a standalone stage invocation outside a ``run-all`` chain (S5);
+#: the chains and the lifecycle verbs pass their own value.
+_MODE_STAGE: str = "stage"
 
 
 @dataclass(frozen=True)
@@ -339,21 +338,17 @@ def run_all_chain(
     return stages
 
 
-def emit_stage_line(record: Mapping[str, object], *, stream: TextIO | None = None) -> None:
-    """Write one stage record as exactly one JSON line on stderr (S4 preamble, S5.2).
-
-    THE emitter. ER-023 extends the record this is called with — snapshot range,
-    promoted counters, the ``counters`` payload — rather than adding a second
-    writer, because "exactly one line per stage" is only checkable if there is one
-    place that writes it.
-
-    ``--json`` is not a parameter here: it switches *stdout*, and moving this line
-    would break the guarantee that a caller can pipe stdout and still read
-    telemetry.
-    """
-    target = sys.stderr if stream is None else stream
-    target.write(json.dumps(dict(record), separators=(",", ":"), ensure_ascii=False) + "\n")
-    target.flush()
+#: THE emitter of the S5.2 stderr line, under its ER-014 name.
+#:
+#: Bound rather than wrapped, for the reason ER-014 gave it: "exactly one line per
+#: stage" is only checkable while exactly one function writes one. ER-023 moved the
+#: body to :mod:`er.obs.logging`, next to :data:`~er.obs.logging.STAGE_RECORD_KEYS`,
+#: which is what it now validates the record against.
+#:
+#: ``--json`` is not a parameter of it: that flag switches *stdout*, and moving this
+#: line would break the guarantee that a caller can pipe stdout and still read
+#: telemetry.
+emit_stage_line = emit_stage_record
 
 
 #: The ``--vars`` payload every dbt invocation carries (S6, S4.2, S4.6).
@@ -377,39 +372,55 @@ class _Outcome:
     record: dict[str, object] = field(default_factory=dict)
 
 
-def _execute(stage: Stage, options: GlobalOptions, seq: int) -> _Outcome:
-    """Run one stage and emit its S5.2 line, whatever the stage did."""
-    started_at = _utc_now()
-    error_class: ErrorClass | None = None
-    error_detail: str | None = None
-    try:
-        code = stage.run(options)
-    except ErError as exc:
-        code = exit_code_for(exc)
-        error_class = exc.error_class
-        error_detail = exc.detail
-    succeeded = code in (ExitCode.SUCCESS, ExitCode.NOTHING_TO_DO)
-    status = _STATUS_SUCCEEDED if succeeded else _STATUS_FAILED
-    record: dict[str, object] = {
-        "run_id": options.run_id,
-        "stage": stage.name,
-        "seq": seq,
-        "status": status,
-        "exit_code": code,
-        "started_at": started_at,
-        "ended_at": _utc_now(),
-        "config_hash": options.config_hash,
-        "error_class": None if error_class is None else str(error_class),
-        "error_detail": error_detail,
-    }
-    emit_stage_line(record)
+def _run_context(options: GlobalOptions, *, mode: str, persist: bool = True) -> RunContext:
+    """The recorder this invocation runs inside (S5.2).
+
+    ``persist=False`` is for the two namespace lifecycle verbs and nothing else:
+    `er init` creates the relations the rows would go in, and `er lake reset` drops
+    them, so both would be writing to a target that does not exist on one side of
+    the command. Their S5.2 stderr record is emitted either way.
+
+    An invocation with no validated document also persists nothing — `runs` requires
+    ``tenant``, ``config_hash``, ``std_version`` and ``survivorship_version``, and
+    all four come from the document — which :class:`~er.obs.runctx.RunContext`
+    decides for itself from the values it is given.
+    """
+    document = options.config
+    return RunContext(
+        run_id=options.run_id,
+        mode=mode,
+        tenant=None if document is None else document.tenant,
+        config_hash=options.config_hash,
+        std_version=None if document is None else document.versions.std_version,
+        survivorship_version=(None if document is None else document.versions.survivorship_version),
+        source=connect if persist else None,
+    )
+
+
+def _execute(stage: Stage, options: GlobalOptions, run: RunContext) -> _Outcome:
+    """Run one stage inside its `run_stages` row, whatever the stage did.
+
+    The row, its snapshot range and the S5.2 line are all the context's; this
+    function's only job is to turn a raised :class:`~er.errors.ErError` into the
+    exit code S4.0 derives from its class, and to hand both to
+    :meth:`~er.obs.runctx.StageRun.finish` so the class recorded and the code
+    exited with cannot disagree.
+    """
+    with run.stage(stage.name) as stage_run:
+        try:
+            code = stage.run(options)
+        except ErError as exc:
+            code = exit_code_for(exc)
+            stage_run.finish(code, error_class=exc.error_class, error_detail=exc.detail)
+        else:
+            stage_run.finish(code)
     return _Outcome(
         stage=stage.name,
         exit_code=code,
-        status=status,
-        error_class=error_class,
-        error_detail=error_detail,
-        record=record,
+        status=stage_run.status,
+        error_class=stage_run.error_class,
+        error_detail=stage_run.error_detail,
+        record=stage_run.record(),
     )
 
 
@@ -446,14 +457,26 @@ def _report(outcome: _Outcome, options: GlobalOptions) -> None:
     )
 
 
-def _run_single(name: str, options: GlobalOptions, args: Sequence[str] = ()) -> None:
-    """Execute one stage as a standalone command and exit with its code."""
-    outcome = _execute(_stage_for(name, args), options, seq=1)
+def _run_single(
+    name: str,
+    options: GlobalOptions,
+    args: Sequence[str] = (),
+    *,
+    mode: str = _MODE_STAGE,
+) -> None:
+    """Execute one stage as a standalone command and exit with its code.
+
+    ``typer.Exit`` is raised after the context closes, never inside it: an exception
+    escaping the stage body is how :class:`~er.obs.runctx.RunContext` learns the run
+    failed, and an ordinary exit code is not a failure.
+    """
+    with _run_context(options, mode=mode) as run:
+        outcome = _execute(_stage_for(name, args), options, run)
     _report(outcome, options)
     raise typer.Exit(outcome.exit_code)
 
 
-def _run_command(stage: Stage, options: GlobalOptions) -> None:
+def _run_command(stage: Stage, options: GlobalOptions, *, mode: str) -> None:
     """Execute a stage that writes its OWN stdout, and exit with its code.
 
     Distinct from :func:`_run_single` in exactly one way, and it is a contract and
@@ -465,14 +488,18 @@ def _run_command(stage: Stage, options: GlobalOptions) -> None:
     The failure message is repeated as a bare stderr line beside the S5.2 record.
     The record is telemetry a caller parses; the line is what an operator reads, and
     for `er init` it is the literal S4.0 immutability message.
+
+    Both commands it serves are namespace lifecycle verbs, so neither persists a
+    `runs` row (see :func:`_run_context`).
     """
-    outcome = _execute(stage, options, seq=1)
+    with _run_context(options, mode=mode, persist=False) as run:
+        outcome = _execute(stage, options, run)
     if outcome.error_detail is not None:
         sys.stderr.write(outcome.error_detail + "\n")
     raise typer.Exit(outcome.exit_code)
 
 
-def _run_chain(stages: Sequence[Stage], options: GlobalOptions) -> None:
+def _run_chain(stages: Sequence[Stage], options: GlobalOptions, *, mode: str) -> None:
     """Execute a chain, apply the S4.0 propagation rule, and exit with its code.
 
     ``10`` never aborts: a stage with nothing to do leaves the downstream stages
@@ -481,13 +508,14 @@ def _run_chain(stages: Sequence[Stage], options: GlobalOptions) -> None:
     """
     final = int(ExitCode.SUCCESS)
     executed = 0
-    for seq, stage in enumerate(stages, start=1):
-        outcome = _execute(stage, options, seq=seq)
-        executed += 1
-        _report(outcome, options)
-        if outcome.exit_code not in (ExitCode.SUCCESS, ExitCode.NOTHING_TO_DO):
-            final = outcome.exit_code
-            break
+    with _run_context(options, mode=mode) as run:
+        for stage in stages:
+            outcome = _execute(stage, options, run)
+            executed += 1
+            _report(outcome, options)
+            if outcome.exit_code not in (ExitCode.SUCCESS, ExitCode.NOTHING_TO_DO):
+                final = outcome.exit_code
+                break
     _write_stdout(
         {"run_id": options.run_id, "stages": executed, "exit_code": final},
         f"run {options.run_id}: {executed} stage(s), exit {final}",
@@ -553,7 +581,7 @@ def init(
     options = GlobalOptions.resolve(
         config_path=config, run_id=run_id, json_output=json_output, require_config=False
     )
-    _run_command(_InitStage(args=("--force",) if force else ()), options)
+    _run_command(_InitStage(args=("--force",) if force else ()), options, mode="init")
 
 
 @app.command()
@@ -619,7 +647,7 @@ def train(
     explicit, separate invocation (S4.0).
     """
     options = GlobalOptions.resolve(config_path=config, run_id=run_id, json_output=json_output)
-    _run_single("train", options, ("--if-changed",) if if_changed else ())
+    _run_single("train", options, ("--if-changed",) if if_changed else (), mode="train")
 
 
 @app.command()
@@ -710,7 +738,7 @@ def run_all(
     chain = run_all_chain(
         mode, skip_ingest, source=source, path=None if path is None else str(path)
     )
-    _run_chain(chain, options)
+    _run_chain(chain, options, mode=mode)
 
 
 @app.command()
@@ -726,7 +754,7 @@ def correct(
     (D4). It never trains.
     """
     options = GlobalOptions.resolve(config_path=config, run_id=run_id, json_output=json_output)
-    _run_single("correct", options)
+    _run_single("correct", options, mode="correction_pass")
 
 
 @app.command("assert")
@@ -784,7 +812,7 @@ def lake_maintain(
     options = GlobalOptions.resolve(
         config_path=config, run_id=run_id, json_output=json_output, require_config=False
     )
-    _run_single("maintain", options, ("--retain-days", str(retain_days)))
+    _run_single("maintain", options, ("--retain-days", str(retain_days)), mode="maintain")
 
 
 @lake_app.command("reset")
@@ -806,6 +834,7 @@ def lake_reset(
     _run_command(
         _ResetStage(confirm_tenant=confirm_tenant, args=("--confirm-tenant", confirm_tenant)),
         options,
+        mode="reset",
     )
 
 

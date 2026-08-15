@@ -63,7 +63,11 @@ REQUIRED_MAKE_TARGETS = {"spec", "board", "lint", "types", "unit", "dbt", "gates
 #         interface, which S3's tree gives no home; the board pins the test node id
 #         `tests/unit/std/test_address_parser.py`. Amending the S3 tree is a spec
 #         ticket, and a code ticket may not edit DesignDoc.md.
-UNSPECIFIED_SUBPACKAGES = {"std"}
+#   obs/  ER-023. S5.2's observability layer -- `RunContext`, the counter vocabulary,
+#         the stage log line, the touched-set accessor -- is owned by one package
+#         rather than scattered across every stage module. S3's tree draws no row for
+#         it, and its three normative layout rules are unaffected by the extra one.
+UNSPECIFIED_SUBPACKAGES = {"obs", "std"}
 
 PIN_RE = re.compile(r"`([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]*\])?==([A-Za-z0-9][A-Za-z0-9._-]*)`")
 
