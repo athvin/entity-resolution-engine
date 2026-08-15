@@ -2,7 +2,7 @@
 id: ER-041
 title: "base_10 inputs: 3 CSVs + literal headers into S8.2, truth.csv, machine-checked trap index, designed rule-coverage + gray-band + recency guards, sources.columns in configs/test.yaml"
 milestone: M2
-status: in_progress
+status: blocked
 kind: fixture
 size: L
 gates: fast
@@ -19,7 +19,7 @@ verify: "uv run pytest tests/unit/fixtures/test_base_10.py -q"
 branch: "ticket/ER-041-base-10-inputs-3-csvs-literal"
 commit: ""
 spec_sha: "28d8d8e366a7b49b"
-updated_at: "2026-08-15T05:54:18Z"
+updated_at: "2026-08-15T05:58:34Z"
 session: af8ee4fe-bc99-47ee-a9cf-3575332b8c09
 ---
 ## Description
@@ -87,3 +87,12 @@ python3 scripts/lint_spec.py --part a DesignDoc.md && python3 scripts/lint_spec.
 - `fixtures/static/base_10/` contains only `base/`, `truth.csv` and `traps.csv` — no `expected/` directory is created here
 - `persona_id` is present on every input row and is documented as truth-only
 - Committed on main with the board updated
+
+## Blocker log
+
+### Attempt 1 — spec_contradiction (2026-08-15T05:58:34Z)
+
+- **Failing command:** `uv run python scripts/validate_fixtures.py .loop/probe/base_10`
+- **Assertion / contradiction:** unknown-file: 'truth.csv'/'traps.csv' is not part of the scenario format; the root holds scenario.yaml, the phase directories, expected/ and ['assertions.csv', 'parity_pairs.csv', 'tf_flip_pairs.csv'] -- ER-041 requires fixtures/static/base_10/truth.csv and traps.csv at the scenario root, but S8.2.1 pins that root to exactly three aux files and its literal-header block to exactly eight entries (enforced by scenario.py::AUX_FILES/EXPECTED_HEADERS, validate_fixtures.py rule unknown-file, and test_fixture_format.py::test_expected_headers_match_s8_2_1_literals asserting len(EXPECTED_HEADERS)==8). test_fixture_lint.py lints every directory under fixtures/static/, so committing the fixture fails the unit gate; no authoring avoids it and every fix needs a DesignDoc edit ER-041 (kind: fixture) may not make.
+- **Smallest change that would unblock:** Land a kind: spec-amendment ticket that adds truth.csv (header persona_id,source_system,source_record_id) and traps.csv (header trap,source_system,source_record_id) to S8.2.1's scenario-root file list and literal-header block -- 'The three scenario-root files' becomes 'The five' -- then the three forced mechanical edits: AUX_FILES 3->5 and EXPECTED_HEADERS 8->10 in tests/helpers/scenario.py, the same two blocks in fixtures/static/FORMAT.md, and S8_2_1_HEADER_ROWS + the ==8 count in tests/unit/fixtures/test_fixture_format.py. Also add fixtures/static/base_10/scenario.yaml to ER-041's provides/owns: no ticket owns it and validate_fixtures.py requires every scenario to carry one. Full proposed wording in the log.
+- **Log:** `.loop/logs/ER-041.attempt-1.log`
