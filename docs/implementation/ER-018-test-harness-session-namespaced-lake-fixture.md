@@ -2,7 +2,7 @@
 id: ER-018
 title: "Test harness A: session-namespaced lake fixture (lake_ns, lake_conn, er_env), METADATA_SCHEMA er_test_{ns}, DATA_PATH s3://lake/test/{ns}/, drop-schema teardown"
 milestone: M1
-status: in_progress
+status: done
 kind: code
 size: M
 gates: full
@@ -17,9 +17,9 @@ extra_paths: []
 attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_harness_namespace.py -q"
 branch: "ticket/ER-018-test-harness-session-namespaced-lake-fixture"
-commit: ""
+commit: "c11421f"
 spec_sha: "2abcfe433c322f74"
-updated_at: "2026-08-15T13:05:44Z"
+updated_at: "2026-08-15T13:10:46Z"
 session: 6b9cd60a-cac8-4d4b-8da1-8b362c1b1678
 ---
 ## Description
