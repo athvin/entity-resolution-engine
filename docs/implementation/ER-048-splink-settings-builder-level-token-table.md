@@ -2,7 +2,7 @@
 id: ER-048
 title: "Splink settings builder: level-token table, NullLevel-first/ElseLevel-last, variant_match, dob_same_year_month + birth_date_precision eligibility, tf mapping"
 milestone: M2
-status: in_progress
+status: done
 kind: code
 size: L
 gates: fast
@@ -17,9 +17,9 @@ extra_paths: ["src/er/matching/model.py"]
 attempts: 1
 verify: "uv run pytest tests/unit/matching/test_settings_builder.py -q"
 branch: "ticket/ER-048-splink-settings-builder-level-token-table"
-commit: ""
+commit: "0973a8c2a6e49a1ac0efd70730a482c66db4528e"
 spec_sha: "2abcfe433c322f74"
-updated_at: "2026-08-15T06:54:07Z"
+updated_at: "2026-08-15T07:02:16Z"
 session: c42092ac-b8ac-4ffa-b4bf-2567b6bbba00
 ---
 ## Description
