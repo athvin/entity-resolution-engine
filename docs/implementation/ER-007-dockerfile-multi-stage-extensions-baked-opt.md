@@ -2,7 +2,7 @@
 id: ER-007
 title: "Dockerfile: multi-stage, extensions baked to /opt/duckdb_extensions, autoinstall off, check_extensions.py"
 milestone: M1
-status: todo
+status: in_progress
 kind: code
 size: M
 gates: full
@@ -14,12 +14,13 @@ consumes: ["pyproject.toml", "uv.lock", "src/er/versions.py::EXTENSION_PINS", "s
 owns: ["docker/Dockerfile", ".dockerignore", "scripts/check_extensions.py", "tests/unit/test_dockerfile_contract.py"]
 protected_paths: ["DesignDoc.md", "pyproject.toml", "uv.lock"]
 extra_paths: []
-attempts: 0
+attempts: 1
 verify: "docker build -f docker/Dockerfile -t er-pipeline:verify . && docker run --rm --network none er-pipeline:verify python /app/scripts/check_extensions.py && uv run pytest tests/unit/test_dockerfile_contract.py -q"
-branch: ""
+branch: "ticket/ER-007-dockerfile-multi-stage-extensions-baked-opt"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "28d8d8e366a7b49b"
+updated_at: "2026-08-15T00:05:57Z"
+session: bc962b73-0b6b-4e2e-b1f6-630555548a4e
 ---
 ## Description
 
