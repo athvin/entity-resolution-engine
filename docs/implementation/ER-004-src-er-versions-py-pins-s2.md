@@ -2,7 +2,7 @@
 id: ER-004
 title: "src/er/versions.py PINS + S2.1 parity + installed-version parity + Splink 5 migration note"
 milestone: M1
-status: in_progress
+status: done
 kind: code
 size: S
 gates: fast
@@ -17,9 +17,9 @@ extra_paths: []
 attempts: 1
 verify: "uv run pytest tests/unit/test_versions.py -q"
 branch: "ticket/ER-004-src-er-versions-py-pins-s2"
-commit: ""
+commit: "16d0f48fe5c48615a5402a76fd10b87e638084a2"
 spec_sha: "28d8d8e366a7b49b"
-updated_at: "2026-08-14T23:49:15Z"
+updated_at: "2026-08-15T00:05:06Z"
 session: 36c43c95-016c-4c6c-a902-45f38cc95f9b
 ---
 ## Description
