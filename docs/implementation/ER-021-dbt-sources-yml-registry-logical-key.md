@@ -2,7 +2,7 @@
 id: ER-021
 title: "dbt sources.yml from the registry + logical-key/accepted_values tests + canonical-pair singular test + T-KEY-1"
 milestone: M1
-status: in_progress
+status: todo
 kind: code
 size: M
 gates: full
@@ -16,10 +16,10 @@ protected_paths: []
 extra_paths: ["dbt/dbt_project.yml", "dbt/packages.yml"]
 attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_logical_keys.py -q && uv run pytest tests/unit/test_dbt_sources_parity.py -q"
-branch: "ticket/ER-021-dbt-sources-yml-registry-logical-key"
+branch: ""
 commit: ""
 spec_sha: "2abcfe433c322f74"
-updated_at: "2026-08-15T15:01:25Z"
+updated_at: "2026-08-15T15:03:26Z"
 session: 1edf5b0f-ea7d-4c46-82fc-ef17d631e62e
 ---
 ## Description
