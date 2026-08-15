@@ -50,6 +50,15 @@ the last successful run's, a difference refuses the invocation with exit ``3``, 
 ``--allow-escalate`` promotes the whole invocation — chain and ``runs.mode`` alike —
 to ``--mode full``. The comparison itself is :mod:`er.versions`'.
 
+Every command that reaches the lake now runs the S5.1 schema preflight (ER-035) in the
+same window: after the writer lock, before the :class:`~er.obs.runctx.RunContext`. A
+breaking difference between `ddl.py` and the live catalog exits ``3`` with the literal
+``ERR_SCHEMA_BREAKING`` message and leaves no `runs` row, no `run_stages` row and no
+committed snapshot behind. `er init` and `er lake reset` are exempt and both
+exemptions are the spec's — see :data:`_PREFLIGHT_EXEMPT`. The same window also decides
+``runs.rebuild_reason``: a `std_version` or `survivorship_version` bump makes the run a
+planned rebuild, which is why it runs the full chain AND is recorded as one.
+
 The dbt subprocess and the ``--vars`` payload moved to ``er.dbt_runner`` with ER-033;
 ``dbt_vars`` here is that module's :func:`~er.dbt_runner.render_dbt_vars` under its
 ER-014 name, not a second builder of the mapping.
@@ -87,6 +96,7 @@ from er.errors import (
 from er.ingest.landing import ingest_delivery
 from er.ingest.sources import adapter_for
 from er.lake.catalog import tenant_lock
+from er.lake.ddl import SchemaBreakingError, preflight_schema
 from er.lake.ducklake import connect
 from er.lake.env import MissingEnvError
 from er.lake.init import init_lake, reset_lake
@@ -95,10 +105,12 @@ from er.obs.logging import emit_stage_record
 from er.obs.runctx import RunContext, StageRun
 from er.resume import ResumePlan, read_resume_rows, resume_plan
 from er.versions import (
+    MODE_CORRECTION_PASS,
     ModeDecision,
     RunFingerprint,
     check_mode_preconditions,
     last_successful_run,
+    rebuild_reason_for,
 )
 
 __all__ = [
@@ -184,6 +196,15 @@ READ_ONLY_COMMANDS: frozenset[str] = frozenset({"doctor", "review list"})
 #: than merely after it — so taking the lock here as well would be a second session
 #: contending with the first, and every `er lake reset` would refuse itself.
 _LOCKED_DEEPER: frozenset[str] = frozenset({"lake reset"})
+
+#: The two commands the S5.1 stage preflight does NOT run for, and both exemptions
+#: are the spec's rather than a shortcut. `er init` classifies the very same
+#: differences itself, before it applies anything (:func:`~er.lake.init.init_lake`),
+#: and refusing it here would only move its exit `3` earlier while adding a second
+#: place the same message is produced. `er lake reset` destroys the namespace: a
+#: breaking difference is one of the states an operator resets *out of*, so refusing
+#: to drop a drifted schema would strand them inside the failure.
+_PREFLIGHT_EXEMPT: frozenset[str] = frozenset({"init", "lake reset"})
 
 
 @dataclass(frozen=True)
@@ -546,6 +567,41 @@ def _writer_lock(command: str, options: GlobalOptions) -> Iterator[None]:
         yield
 
 
+def _preflight_schema(command: str) -> None:
+    """Refuse a command whose lake has drifted breakingly from S5 (S5.1, S4.7).
+
+    S5.1: "`er init` and every stage's preflight detect a breaking difference between
+    `ddl.py` and the live catalog and abort with exit code `3` … No snapshot is
+    committed." Called with the writer lock already held and BEFORE the
+    :class:`~er.obs.runctx.RunContext` is entered, which is what makes that last clause
+    true of the control flow: there is no `runs` row, no `run_stages` row and no
+    committed snapshot at the moment it refuses.
+
+    A process with no lake environment passes through, exactly as
+    :func:`_last_successful_run` and :func:`_writer_lock` do: the S8.4 unit layer
+    drives the command tree on a bare runner with no services, and a namespace nothing
+    can reach has no schema to have drifted.
+
+    Raises:
+        typer.Exit: exit ``3``, after writing the literal S5.1 message to stderr.
+            :class:`~er.lake.ddl.SchemaBreakingError` already carries the S4.7
+            `precondition` class and the code that follows from it, so nothing here
+            chooses either.
+    """
+    if command in _PREFLIGHT_EXEMPT:
+        return
+    try:
+        with connect() as connection:
+            preflight_schema(connection)
+    except MissingEnvError:
+        return
+    except SchemaBreakingError as exc:
+        # stderr, not stdout: the message is the operator's grep token, and a caller
+        # piping the command's output must not have to parse a refusal out of it.
+        sys.stderr.write(f"{exc}\n")
+        raise typer.Exit(exit_code_for(exc)) from exc
+
+
 def _stage_for(name: str, args: Sequence[str] = ()) -> Stage:
     """The stage M1 ships for ``name``: a no-op stub if ``run-all`` chains it."""
     flags = tuple(args)
@@ -634,6 +690,7 @@ def _run_context(
     mode: str,
     persist: bool = True,
     model_version: str | None = None,
+    rebuild_reason: str | None = None,
 ) -> RunContext:
     """The recorder this invocation runs inside (S5.2).
 
@@ -650,6 +707,12 @@ def _run_context(
     ``model_version`` is supplied only by `--resume`, which pins the resumed run to
     the one it was recorded under (S4.7). Every other invocation leaves it ``None``
     and the stage that resolves the ``status='active'`` row sets it.
+
+    ``rebuild_reason`` is :func:`~er.versions.rebuild_reason_for`'s verdict and is
+    non-``None`` only for a planned rebuild: a `std_version` or `survivorship_version`
+    bump, or `er correct` (S5.1, S4.0). It is what puts the run outside T-INC-2's
+    accounting, so it is decided once by the caller that also decided the run's mode
+    rather than by each stage.
     """
     document = options.config
     return RunContext(
@@ -660,6 +723,7 @@ def _run_context(
         model_version=model_version,
         std_version=None if document is None else document.versions.std_version,
         survivorship_version=(None if document is None else document.versions.survivorship_version),
+        rebuild_reason=rebuild_reason,
         source=connect if persist else None,
     )
 
@@ -739,6 +803,7 @@ def _run_single(
     *,
     mode: str = _MODE_STAGE,
     command: str | None = None,
+    rebuild_reason: str | None = None,
 ) -> None:
     """Execute one stage as a standalone command and exit with its code.
 
@@ -746,16 +811,23 @@ def _run_single(
     escaping the stage body is how :class:`~er.obs.runctx.RunContext` learns the run
     failed, and an ordinary exit code is not a failure.
 
+    The S5.1 preflight runs between the lock and the context, which is the only place
+    it can: after the lock, so the schema it reads cannot change underneath it, and
+    before the context, so a refusal leaves no `run_stages` row behind.
+
     Args:
         command: the S4.0 command path, when it differs from the stage name — `er lake
             maintain` writes a `maintain` stage, and `er review` is two commands under
-            one stage. It decides whether the writer lock is taken (S4.7).
+            one stage. It decides whether the writer lock is taken (S4.7) and whether
+            the S5.1 preflight runs.
+        rebuild_reason: `runs.rebuild_reason` for this invocation; `er correct` is the
+            one standalone command that has one (S4.0).
     """
-    with (
-        _writer_lock(name if command is None else command, options),
-        _run_context(options, mode=mode) as run,
-    ):
-        outcome = _execute(_stage_for(name, args), options, run)
+    path = name if command is None else command
+    with _writer_lock(path, options):
+        _preflight_schema(path)
+        with _run_context(options, mode=mode, rebuild_reason=rebuild_reason) as run:
+            outcome = _execute(_stage_for(name, args), options, run)
     _report(outcome, options)
     raise typer.Exit(outcome.exit_code)
 
@@ -781,11 +853,10 @@ def _run_command(
     drops them, while `er ingest` is an ordinary writer whose `runs` and `run_stages`
     rows are exactly what S5.2 asks for (see :func:`_run_context`).
     """
-    with (
-        _writer_lock(command, options),
-        _run_context(options, mode=mode, persist=persist) as run,
-    ):
-        outcome = _execute(stage, options, run)
+    with _writer_lock(command, options):
+        _preflight_schema(command)
+        with _run_context(options, mode=mode, persist=persist) as run:
+            outcome = _execute(stage, options, run)
     if outcome.error_detail is not None:
         sys.stderr.write(outcome.error_detail + "\n")
     raise typer.Exit(outcome.exit_code)
@@ -797,6 +868,7 @@ def _run_chain(
     *,
     mode: str,
     model_version: str | None = None,
+    rebuild_reason: str | None = None,
 ) -> None:
     """Execute a chain, apply the S4.0 propagation rule, and exit with its code.
 
@@ -811,7 +883,9 @@ def _run_chain(
     """
     final = int(ExitCode.SUCCESS)
     executed = 0
-    with _run_context(options, mode=mode, model_version=model_version) as run:
+    with _run_context(
+        options, mode=mode, model_version=model_version, rebuild_reason=rebuild_reason
+    ) as run:
         for stage in stages:
             outcome = _execute(stage, options, run)
             executed += 1
@@ -852,30 +926,19 @@ def _resume(run_id: str, options: GlobalOptions) -> ResumePlan:
         raise typer.Exit(_refuse(run_id, exc)) from exc
 
 
-def _guarded_mode(mode: str, options: GlobalOptions, *, allow_escalate: bool) -> str:
-    """The S4.0 config-drift guard: the mode to run under, or the refusal it earns.
+def _current_fingerprint(options: GlobalOptions) -> RunFingerprint | None:
+    """The fingerprint this invocation would be recorded under, or ``None``.
 
-    Called with the writer lock already held and before the first stage runs, which is
-    what makes a refusal an S4.7 `precondition` rather than a failed run: no `runs`
-    row, no `run_stages` row and no committed snapshot exist yet to be left behind.
-
-    `--mode full` and a namespace with no prior successful run both reach
-    :func:`~er.versions.check_mode_preconditions` and are decided there, not short-cut
-    here — one guard, one place it says yes.
-
-    Raises:
-        typer.Exit: exit `3` when an incremental run's fingerprint has drifted and
-            ``--allow-escalate`` was not given, after naming every drifted field and
-            both its values on stderr.
+    ``None`` is unreachable through the command tree for the commands that ask —
+    S4.0 lists `ER_CONFIG` in `run-all`'s and `er correct`'s required-env column, so
+    :meth:`GlobalOptions.resolve` has already exited ``2`` without a document. It is
+    stated rather than asserted so that a guard with nothing to compare cannot
+    silently compare two ``None``s and call them equal.
     """
     document = options.config
     if document is None or options.config_hash is None:
-        # Unreachable through the command tree: S4.0 lists ER_CONFIG in `run-all`'s
-        # required-env column, so `GlobalOptions.resolve` has already exited 2 without
-        # a document. Stated rather than asserted, so a guard with nothing to compare
-        # cannot silently compare two `None`s and call them equal.
-        return mode
-    current = RunFingerprint(
+        return None
+    return RunFingerprint(
         config_hash=options.config_hash,
         # The value this run's `runs.model_version` will hold, which is NULL until a
         # stage resolves the `status='active'` row — the same value `_run_chain` hands
@@ -886,10 +949,63 @@ def _guarded_mode(mode: str, options: GlobalOptions, *, allow_escalate: bool) ->
         std_version=document.versions.std_version,
         survivorship_version=document.versions.survivorship_version,
     )
-    decision = check_mode_preconditions(
-        _last_successful_run(document.tenant), current, mode, allow_escalate=allow_escalate
-    )
+
+
+def _guarded_mode(
+    mode: str,
+    options: GlobalOptions,
+    *,
+    prior: RunFingerprint | None,
+    allow_escalate: bool,
+) -> str:
+    """The S4.0 config-drift guard: the mode to run under, or the refusal it earns.
+
+    Called with the writer lock already held and before the first stage runs, which is
+    what makes a refusal an S4.7 `precondition` rather than a failed run: no `runs`
+    row, no `run_stages` row and no committed snapshot exist yet to be left behind.
+
+    `--mode full` and a namespace with no prior successful run both reach
+    :func:`~er.versions.check_mode_preconditions` and are decided there, not short-cut
+    here — one guard, one place it says yes.
+
+    ``prior`` is passed in rather than read here because the caller reads it once and
+    asks it two questions: this one, and what :func:`~er.versions.rebuild_reason_for`
+    records the run as. Reading it twice would let a run be escalated for a version
+    bump and recorded without the reason for it (S5.1).
+
+    Raises:
+        typer.Exit: exit `3` when an incremental run's fingerprint has drifted and
+            ``--allow-escalate`` was not given, after naming every drifted field and
+            both its values on stderr.
+    """
+    current = _current_fingerprint(options)
+    if current is None:
+        return mode
+    decision = check_mode_preconditions(prior, current, mode, allow_escalate=allow_escalate)
     return _apply_mode_decision(decision)
+
+
+def _prior_run(options: GlobalOptions) -> RunFingerprint | None:
+    """The last successful run for this invocation's tenant, or ``None``.
+
+    ``None`` for an invocation with no validated document, which has no tenant to key
+    the query on — the same judgement :func:`_writer_lock` makes about the lock.
+    """
+    tenant = _tenant_of(options)
+    return None if tenant is None else _last_successful_run(tenant)
+
+
+def _rebuild_reason(options: GlobalOptions, prior: RunFingerprint | None) -> str | None:
+    """`runs.rebuild_reason` for this `run-all` invocation (S5.1).
+
+    Non-``None`` only for a planned rebuild: a `std_version` or `survivorship_version`
+    bump against the last successful run. `--mode full` is included and that is
+    deliberate — S5.1 ties the reason to the *bump*, not to how the run reached full
+    mode, so a bump run explicitly as `--mode full` and one promoted there by
+    ``--allow-escalate`` are recorded identically and are equally outside T-INC-2.
+    """
+    current = _current_fingerprint(options)
+    return None if current is None else rebuild_reason_for(prior, current)
 
 
 def _last_successful_run(tenant: str) -> RunFingerprint | None:
@@ -1214,14 +1330,25 @@ def run_all(
     options = GlobalOptions.resolve(config_path=config, run_id=run_id, json_output=json_output)
     delivery = None if path is None else str(path)
     with _writer_lock("run-all", options):
+        _preflight_schema("run-all")
         if resume is None:
+            # Read once and asked twice: the guard decides whether this run may
+            # proceed, and `rebuild_reason_for` decides what the run that proceeded is
+            # recorded as. Two reads could answer the two questions differently and
+            # leave a version-bump rebuild inside T-INC-2's accounting (S5.1).
+            prior = _prior_run(options)
             # One mode for both: the chain and `runs.mode` are built from the guard's
             # verdict, so an escalated run executes the full chain AND is recorded as
             # a full run. Recording one and executing the other would leave
             # `run_stages` describing a chain that never ran (S4.0, S5.2).
-            effective = _guarded_mode(mode, options, allow_escalate=allow_escalate)
+            effective = _guarded_mode(mode, options, prior=prior, allow_escalate=allow_escalate)
             chain = run_all_chain(effective, skip_ingest, source=source, path=delivery)
-            _run_chain(chain, options, mode=effective)
+            _run_chain(
+                chain,
+                options,
+                mode=effective,
+                rebuild_reason=_rebuild_reason(options, prior),
+            )
             return
         plan = _resume(resume, options)
         try:
@@ -1252,9 +1379,24 @@ def correct(
     Its chain is ``match --mode full --new-tf-snapshot`` -> ``reconcile`` ->
     ``assemble``, and it is the only caller allowed to pass ``--new-tf-snapshot``
     (D4). It never trains.
+
+    S4.0 gives it ``runs.rebuild_reason='correction_pass'`` unconditionally: the pass
+    rebuilds by definition, so the reason does not depend on whether anything drifted,
+    and the run is outside T-INC-2's accounting like every other planned rebuild
+    (S5.1).
     """
     options = GlobalOptions.resolve(config_path=config, run_id=run_id, json_output=json_output)
-    _run_single("correct", options, mode="correction_pass")
+    current = _current_fingerprint(options)
+    _run_single(
+        "correct",
+        options,
+        mode=MODE_CORRECTION_PASS,
+        rebuild_reason=(
+            None
+            if current is None
+            else rebuild_reason_for(None, current, mode=MODE_CORRECTION_PASS)
+        ),
+    )
 
 
 @app.command("assert")

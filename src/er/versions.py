@@ -26,6 +26,12 @@ The split between the two functions is the point: :func:`check_mode_precondition
 **pure**, so the drift matrix an operator meets at the worst possible moment is
 testable without a lake, and :func:`last_successful_run` is the only impure half.
 
+:func:`rebuild_reason_for` reads the same two fingerprints and answers the other half
+of S5.1's version-bump rule: not "may this run proceed" but "what is the run that
+proceeded recorded as". :func:`run_is_inc_accountable` is the consequence — a run with
+a non-NULL `runs.rebuild_reason` is a planned rebuild and is outside T-INC-2's
+accounting — shipped here so the test that consumes it does not re-derive the rule.
+
 **Keying.** A component name is the PEP 503 canonical form of what S2.1 writes:
 lowercased with runs of ``-_.`` and whitespace collapsed to ``-``. A row that pins
 distributions contributes one entry *per distribution*, because that is the
@@ -64,9 +70,14 @@ __all__ = [
     "EXTENSION_PINS",
     "FINGERPRINT_FIELDS",
     "IMAGE_PINS",
+    "MODE_CORRECTION_PASS",
     "MODE_FULL",
     "MODE_INCREMENTAL",
     "PINS",
+    "REBUILD_CORRECTION_PASS",
+    "REBUILD_OPERATOR",
+    "REBUILD_STD_VERSION_BUMP",
+    "REBUILD_SURVIVORSHIP_VERSION_BUMP",
     "REFUSAL_MESSAGE",
     "SPLINK_MIGRATION_NOTE",
     "STATUS_SUCCEEDED",
@@ -85,6 +96,8 @@ __all__ = [
     "code_version",
     "installed_version",
     "last_successful_run",
+    "rebuild_reason_for",
+    "run_is_inc_accountable",
 ]
 
 
@@ -359,6 +372,20 @@ STATUS_SUCCEEDED: Final[str] = "succeeded"
 MODE_INCREMENTAL: Final[str] = "incremental"
 MODE_FULL: Final[str] = "full"
 
+#: `runs.mode` for the S4.0 correction pass. Not a ``--mode`` value: `er correct` is
+#: its own verb, and S4.0 gives it a `runs.mode` of its own to be recorded under.
+MODE_CORRECTION_PASS: Final[str] = "correction_pass"
+
+#: The four values `runs.rebuild_reason` may take (S5, S5.1, S4.0). Spelled here
+#: rather than imported from :data:`~er.lake.model.REBUILD_REASONS`, which is an
+#: unordered vocabulary for an `accepted_values` test and cannot name one member;
+#: ``tests/unit/test_schema_evolution.py`` asserts each of these IS a member of it, so
+#: a divergence fails on the unit layer rather than becoming a value dbt rejects.
+REBUILD_STD_VERSION_BUMP: Final[str] = "std_version_bump"
+REBUILD_SURVIVORSHIP_VERSION_BUMP: Final[str] = "survivorship_version_bump"
+REBUILD_CORRECTION_PASS: Final[str] = "correction_pass"
+REBUILD_OPERATOR: Final[str] = "operator"
+
 #: The four `runs` columns the guard compares, in the order S5's DDL declares them —
 #: which is also the order :class:`RunFingerprint` declares its fields and the order
 #: :func:`last_successful_run` selects them, so the SELECT list is this tuple rather
@@ -544,6 +571,80 @@ def check_mode_preconditions(
         drift=drift,
         message=REFUSAL_MESSAGE.format(drift=rendered),
     )
+
+
+def rebuild_reason_for(
+    prior: RunFingerprint | None,
+    current: RunFingerprint,
+    *,
+    mode: str | None = None,
+    operator: bool = False,
+) -> str | None:
+    """The value `runs.rebuild_reason` takes for this invocation (S5.1, S4.0).
+
+    Pure, and the companion of :func:`check_mode_preconditions`: that function decides
+    whether a run may proceed, this one decides what the run it produced is *recorded
+    as*. They read the same two fingerprints on purpose — a run escalated for a
+    `std_version` bump and a run recorded without a reason for the same bump would put
+    a planned rebuild back inside T-INC-2's accounting, which is the one thing S5.1
+    says it is outside of.
+
+    ``None`` is the ordinary case and means the run is an ordinary one: T-INC-2
+    asserts ``rewritten ∪ reaped == touched`` for exactly the runs whose reason is
+    NULL (S5.1), so a reason invented for a run that rebuilt nothing would silently
+    exempt it from the invariant.
+
+    The order of the five outcomes is the order of their causes, not a preference:
+
+    * ``correction_pass`` first, because `er correct` (S4.0) records it
+      unconditionally — the pass rebuilds by definition, whatever the fingerprints say.
+    * ``operator`` next: an explicitly requested rebuild is a rebuild even when
+      nothing drifted.
+    * no prior successful run is no rebuild. A first run builds; it does not rebuild.
+    * ``std_version_bump`` before ``survivorship_version_bump`` when both moved.
+      Standardization is upstream of survivorship, so a `std_version` bump already
+      implies re-assembly, and naming the downstream half would understate the run.
+
+    Args:
+        prior: the fingerprint of the last `status='succeeded'` run for this tenant.
+        current: the fingerprint this invocation is recorded under.
+        mode: `runs.mode` for this invocation, when the caller has one.
+        operator: an operator-declared rebuild.
+    """
+    if mode == MODE_CORRECTION_PASS:
+        return REBUILD_CORRECTION_PASS
+    if operator:
+        return REBUILD_OPERATOR
+    if prior is None:
+        return None
+    if prior.std_version != current.std_version:
+        return REBUILD_STD_VERSION_BUMP
+    if prior.survivorship_version != current.survivorship_version:
+        return REBUILD_SURVIVORSHIP_VERSION_BUMP
+    return None
+
+
+def run_is_inc_accountable(connection: duckdb.DuckDBPyConnection, run_id: str) -> bool:
+    """Whether ``run_id`` is inside T-INC-2's accounting (S5.1, S8.3).
+
+    S5.1: a planned rebuild "is **explicitly outside** T-INC-2's accounting — T-INC-2
+    asserts ``rewritten ∪ reaped == touched`` only for runs whose ``rebuild_reason`` is
+    NULL". This is that predicate, shipped here rather than re-derived inside the test
+    that consumes it, so the rule has one reading.
+
+    Raises:
+        ValueError: there is no `runs` row for ``run_id``. Absence is a caller fault
+            and not a verdict: answering ``True`` would put a run that does not exist
+            inside the accounting, and answering ``False`` would exempt every typo
+            from an invariant that is meant to be hard to escape.
+    """
+    row = connection.execute(
+        f"SELECT rebuild_reason FROM {SCHEMA_QUALIFIER}.{_RUNS} WHERE run_id = ?",
+        [run_id],
+    ).fetchone()
+    if row is None:
+        raise ValueError(f"no {_RUNS} row for run_id {run_id!r}")
+    return row[0] is None
 
 
 def last_successful_run(

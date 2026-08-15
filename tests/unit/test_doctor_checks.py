@@ -3,9 +3,11 @@
 Three properties belong to the unit layer because none of them needs a lake, and all
 three fail silently if they are only checked inside the integration job:
 
-* the check set IS S2.1's doctor-asserted rows plus T-DOCTOR-1's six, in both
-  directions — an S2.1 row that gains `er doctor` in its *Asserted by* cell without
-  gaining a probe would otherwise be a pin nothing asserts;
+* the check set IS S2.1's doctor-asserted rows plus T-DOCTOR-1's six plus S5.1's one
+  drift row per `ddl.py`-owned relation, in both directions — an S2.1 row that gains
+  `er doctor` in its *Asserted by* cell without gaining a probe would otherwise be a
+  pin nothing asserts, and a relation added to S5 with no drift row would be a
+  relation nothing compares against the registry;
 * the `postgres` extension is read under its **registered** name. This is the failure
   S2.1 spells out: `duckdb_extensions()` has no row called `postgres`, so a check
   filtered on the install name matches nothing, disagrees with nothing, and passes;
@@ -31,6 +33,8 @@ from er.cli import app
 from er.doctor import (
     CHECKS,
     RUNTIME_CHECK_NAMES,
+    SCHEMA_DRIFT_CHECK_NAMES,
+    SCHEMA_DRIFT_PREFIX,
     DoctorCheck,
     MissingProbeError,
     build_checks,
@@ -39,6 +43,7 @@ from er.doctor import (
     extension_version,
     run_checks,
 )
+from er.lake.model import DDL_OWNED
 from er.versions import EXTENSION_PINS, PINS, Pin
 
 runner = CliRunner()
@@ -75,22 +80,32 @@ class RecordingConnection:
 
 
 def test_check_set_equals_s2_1_rows_plus_runtime_names() -> None:
-    """AC1: the table is exactly S2.1's doctor rows plus the six, both directions."""
+    """AC1: the table is exactly S2.1's doctor rows, the six and S5.1's drift rows."""
     names = [check.name for check in CHECKS]
     assert len(names) == len(set(names)), f"duplicate check names: {names}"
 
     doctor_rows = {component for component, pin in PINS.items() if pin.asserted_by_doctor}
-    assert set(names) == doctor_rows | set(RUNTIME_CHECK_NAMES)
+    behavioural = set(RUNTIME_CHECK_NAMES) | set(SCHEMA_DRIFT_CHECK_NAMES)
+    assert set(names) == doctor_rows | behavioural
 
     # Both directions, spelled out: a row S2.1 assigns to `er doctor` with no check
     # here is a pin nothing asserts, and a check here with no S2.1 row is an
     # assertion no spec sentence backs.
     assert doctor_rows - set(names) == set()
-    assert set(names) - doctor_rows == set(RUNTIME_CHECK_NAMES)
+    assert set(names) - doctor_rows == behavioural
 
-    # Print order is S2.1's row order first, T-DOCTOR-1's six after it: the operator
-    # reads the pin table then the behaviour, and the six are the tail.
-    assert names[-len(RUNTIME_CHECK_NAMES) :] == list(RUNTIME_CHECK_NAMES)
+    # The S5.1 family is one row per `ddl.py`-owned relation, in registry order —
+    # which is the order `er init` visits them in, so the doctor's tail and the
+    # command's stdout name them the same way.
+    assert SCHEMA_DRIFT_CHECK_NAMES == tuple(
+        f"{SCHEMA_DRIFT_PREFIX}{relation}" for relation in DDL_OWNED
+    )
+
+    # Print order is S2.1's row order, then T-DOCTOR-1's six, then S5.1's: the
+    # operator reads the pin table, then the behaviour, then the lake.
+    assert names[-len(SCHEMA_DRIFT_CHECK_NAMES) :] == list(SCHEMA_DRIFT_CHECK_NAMES)
+    tail = len(SCHEMA_DRIFT_CHECK_NAMES) + len(RUNTIME_CHECK_NAMES)
+    assert names[-tail : -len(SCHEMA_DRIFT_CHECK_NAMES)] == list(RUNTIME_CHECK_NAMES)
 
 
 def test_a_doctor_asserted_row_without_a_probe_is_an_error() -> None:

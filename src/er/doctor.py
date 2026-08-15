@@ -30,6 +30,14 @@ decision rather than this module's:
   is what :meth:`DoctorContext.close_lake` is for, and it is why the connection is
   opened lazily rather than held for the length of the run.
 
+The table has a third family after S2.1's rows and T-DOCTOR-1's six: one **schema
+drift** row per `ddl.py`-owned relation, comparing the live columns against the S5
+registry (S5.1). It is the read-only view of the same difference `er init` and every
+stage preflight abort on — and it is the reason the two exit codes have to be
+different. The same drifted lake exits ``3`` from a preflight, because a breaking
+schema change is an S4.7 `precondition`, and ``1`` from here, because a doctor check
+failure is a check failure under the S4.0 table.
+
 **Every check runs.** A probe that raises produces a failed row carrying the exception
 text, never a traceback that hides the twenty checks after it — the command's contract
 is a table with one line per check plus an exit code, and a table that stops at the
@@ -57,9 +65,10 @@ from botocore.exceptions import ClientError
 
 from er.dbt_runner import DBT_PROFILES_DIR, DBT_PROJECT_DIR
 from er.lake.catalog import catalog_connect, server_version
+from er.lake.ddl import live_columns, plan_evolution
 from er.lake.ducklake import LAKE_ALIAS, connect
 from er.lake.env import require_env
-from er.lake.model import SCHEMA_QUALIFIER
+from er.lake.model import DDL_OWNED, REGISTRY, SCHEMA_QUALIFIER
 from er.lake.objectstore import ObjectStore
 from er.versions import EXTENSION_PINS, IMAGE_PINS, PINS, ExtensionPin, Pin, installed_version
 
@@ -68,6 +77,8 @@ __all__ = [
     "ERROR_PREFIX",
     "OK",
     "RUNTIME_CHECK_NAMES",
+    "SCHEMA_DRIFT_CHECK_NAMES",
+    "SCHEMA_DRIFT_PREFIX",
     "CheckResult",
     "DoctorCheck",
     "DoctorContext",
@@ -98,6 +109,19 @@ RUNTIME_CHECK_NAMES: Final[tuple[str, ...]] = (
     "data path round-trip",
     "catalog round-trip",
     "no __splink__ relations",
+)
+
+#: What a schema-drift row is called, one per `ddl.py`-owned relation. A prefix and
+#: not a bare relation name, so the fourteen rows read as one family in the table and
+#: cannot collide with an S2.1 component name.
+SCHEMA_DRIFT_PREFIX: Final[str] = "schema drift: "
+
+#: The S5.1 drift rows, in registry order — the order `er init` visits the relations
+#: in, so the doctor's tail and the command's stdout name them the same way. Derived
+#: from :data:`~er.lake.model.DDL_OWNED` rather than listed: a relation added to S5
+#: with no row here would be a relation nothing checks.
+SCHEMA_DRIFT_CHECK_NAMES: Final[tuple[str, ...]] = tuple(
+    f"{SCHEMA_DRIFT_PREFIX}{relation}" for relation in DDL_OWNED
 )
 
 #: The object the DATA_PATH round-trip writes and reads back. Under
@@ -533,6 +557,42 @@ def _pin_check(pin: Pin) -> DoctorCheck:
     raise MissingProbeError(pin.component)
 
 
+def _schema_drift_probe(relation: str) -> Callable[[DoctorContext], str]:
+    """A probe comparing one relation's live columns against the S5 registry (S5.1).
+
+    Two states are :data:`OK` and only one is not.
+
+    A relation that does not exist yet is not drift — an uninitialised namespace must
+    not read as a corrupted one, which is the same judgement :func:`~er.lake.ddl.diff`
+    makes. And an *additive* difference is not drift either: it is precisely what
+    `er init` repairs, so failing the doctor over one would report a lake that is one
+    idempotent command away from correct as broken.
+
+    A **breaking** difference is the failure, and its ``actual`` carries the S5.1
+    message verbatim, so the row names the relation and the column an operator has to
+    go and look at. Exit ``1`` and never ``3``: a doctor check failure is a check
+    failure under S4.0's exit-code table, while the SAME difference met by `er init`
+    or by a stage preflight is a `precondition` and exits ``3`` (S5.1, S4.7).
+    """
+
+    def probe(context: DoctorContext) -> str:
+        live = live_columns(context.lake(), relation)
+        if not live:
+            return OK
+        breaking = plan_evolution(live, REGISTRY[relation]).breaking
+        return OK if not breaking else f"{ERROR_PREFIX}{breaking[0].message}"
+
+    return probe
+
+
+def _schema_drift_checks() -> tuple[DoctorCheck, ...]:
+    """One S5.1 drift row per `ddl.py`-owned relation, in :data:`DDL_OWNED` order."""
+    return tuple(
+        DoctorCheck(name, OK, _schema_drift_probe(relation))
+        for name, relation in zip(SCHEMA_DRIFT_CHECK_NAMES, DDL_OWNED, strict=True)
+    )
+
+
 def _runtime_checks() -> tuple[DoctorCheck, ...]:
     """The six T-DOCTOR-1 rows, in :data:`RUNTIME_CHECK_NAMES` order.
 
@@ -562,7 +622,11 @@ def _runtime_checks() -> tuple[DoctorCheck, ...]:
 
 
 def build_checks(pins: Mapping[str, Pin] = PINS) -> tuple[DoctorCheck, ...]:
-    """The doctor's table: every ``asserted_by_doctor`` S2.1 row, then the six.
+    """The doctor's table: the S2.1 rows, then the six, then the S5.1 drift rows.
+
+    The order is what an operator reads: what is pinned, then whether the substrate
+    works, then whether the lake still matches S5. The drift family is last because it
+    is the only part that says anything about *data* rather than about the environment.
 
     ``pins`` is a parameter so the unit layer can build a table from a *mutated* S2.1
     and watch the corresponding line go red without touching the real one.
@@ -571,10 +635,10 @@ def build_checks(pins: Mapping[str, Pin] = PINS) -> tuple[DoctorCheck, ...]:
         MissingProbeError: a row names `er doctor` and has no probe here.
     """
     asserted = tuple(_pin_check(pin) for pin in pins.values() if pin.asserted_by_doctor)
-    return (*asserted, *_runtime_checks())
+    return (*asserted, *_runtime_checks(), *_schema_drift_checks())
 
 
-#: The table `er doctor` runs, in print order: S2.1's rows, then T-DOCTOR-1's six.
+#: The table `er doctor` runs, in print order: S2.1's rows, T-DOCTOR-1's six, S5.1's.
 CHECKS: Final[tuple[DoctorCheck, ...]] = build_checks()
 
 

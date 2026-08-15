@@ -21,6 +21,13 @@ dbt materializes those under an enforced contract, and two systems claiming one
 relation is the M4 defect this split exists to close. Every emitter here goes
 through :func:`assert_ddl_owned`, so the refusal is a guard rather than a habit.
 
+The classification the last two bullets rest on is :func:`plan_evolution`, and it is
+**pure**: two column lists in, an :class:`EvolutionPlan` out, no connection anywhere.
+That is what lets the additive/breaking decision — the one that turns a run into an
+exit ``3`` — be asserted on a bare runner over hand-built registry pairs, and it is
+why :func:`preflight_schema`, the entry path `er init` and every stage run through,
+is a loop over it rather than a second opinion about the same question.
+
 Every statement is derived from :mod:`er.lake.model`. Nothing here restates a
 column list: a second copy of the S5 columns is exactly how the registry and the
 live catalog would stop agreeing, which is the drift the diff below is meant to
@@ -49,17 +56,23 @@ from er.lake.model import (
 )
 
 __all__ = [
+    "ERR_SCHEMA_BREAKING",
+    "ChangeKind",
     "ColumnDiff",
+    "EvolutionPlan",
     "OwnershipViolation",
     "RelationAction",
     "RelationResult",
     "SchemaBreakingError",
+    "add_column_statement",
     "apply",
     "assert_ddl_owned",
     "create_statement",
     "diff",
     "evolve",
     "live_columns",
+    "plan_evolution",
+    "preflight_schema",
 ]
 
 # S5 puts every relation under `lake.main`; `model.py` owns that spelling and this
@@ -80,6 +93,12 @@ _CATALOG_SPELLING: Final[Mapping[str, str]] = MappingProxyType({LIST_VARCHAR: "V
 # not declare. The message shape stays `<live_type> -> <declared_type>`.
 _UNDECLARED: Final[str] = "(undeclared)"
 
+# How a domain renders in the two type slots of the S5.1 message. S5.1 makes
+# "removing a value from an `accepted_values` domain" breaking in the same breath as
+# a re-typed column and gives all of them ONE message shape, so the vocabulary goes
+# where the type does rather than earning a second sentence an operator has to learn.
+_DOMAIN_RENDERING: Final[str] = "accepted_values({members})"
+
 #: The literal token S5.1 names. Operators and tests match on it, so it is spelled
 #: once.
 ERR_SCHEMA_BREAKING: Final[str] = "ERR_SCHEMA_BREAKING"
@@ -95,6 +114,20 @@ class RelationAction(StrEnum):
 
     CREATED = "created"
     EXISTS = "exists"
+
+
+class ChangeKind(StrEnum):
+    """S5.1's verdict on one relation's difference set.
+
+    Three values and not two: ``noop`` is what an idempotent `er init` must find on
+    an unchanged lake, and folding it into ``add_column`` with an empty statement
+    list would make "issued zero DDL" indistinguishable from "issued none of the
+    statements it planned".
+    """
+
+    NOOP = "noop"
+    ADD_COLUMN = "add_column"
+    BREAKING = "breaking"
 
 
 class OwnershipViolation(ValueError):
@@ -180,6 +213,63 @@ class RelationResult:
     relation: str
     action: RelationAction
     statement: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class EvolutionPlan:
+    """What S5.1 permits between one relation's live shape and its declared spec.
+
+    The unit of the classification, and the reason :func:`plan_evolution` is pure:
+    "is this change additive or breaking" is decidable from two column lists, so it
+    is decided where a test can put both of them in front of it rather than inside
+    the call that is about to execute DDL against a lake.
+
+    ``differences`` is in the order :func:`plan_evolution` produced it — declared
+    columns, then live columns the registry does not declare, then domains — because
+    :attr:`breaking` reports the *first* one and two runs against the same lake must
+    name the same column.
+    """
+
+    relation: str
+    differences: tuple[ColumnDiff, ...]
+
+    @property
+    def additive(self) -> tuple[ColumnDiff, ...]:
+        """The differences an `ALTER TABLE … ADD COLUMN` repairs (S5.1)."""
+        return tuple(difference for difference in self.differences if difference.additive)
+
+    @property
+    def breaking(self) -> tuple[ColumnDiff, ...]:
+        """The differences S5.1 refuses to migrate, in the order they were found."""
+        return tuple(difference for difference in self.differences if difference.breaking)
+
+    @property
+    def kind(self) -> ChangeKind:
+        """The plan's verdict: breaking wins, then additive, then no-op.
+
+        Breaking wins over additive on purpose. A plan holding both — which is what a
+        *renamed* column looks like, the old name undeclared and the new one absent —
+        must abort rather than add the new column and leave the old one behind.
+        """
+        if self.breaking:
+            return ChangeKind.BREAKING
+        if self.additive:
+            return ChangeKind.ADD_COLUMN
+        return ChangeKind.NOOP
+
+    @property
+    def statements(self) -> tuple[str, ...]:
+        """The `ADD COLUMN` statements this plan applies, in registry order.
+
+        Raises:
+            SchemaBreakingError: the plan is breaking. Returning an empty tuple would
+                let a caller execute "nothing" and call the relation reconciled, which
+                is the silent destructive migration S5.1 forbids.
+        """
+        breaking = self.breaking
+        if breaking:
+            raise SchemaBreakingError(breaking[0])
+        return tuple(add_column_statement(difference) for difference in self.additive)
 
 
 def assert_ddl_owned(relation: str) -> TableSpec:
@@ -273,6 +363,95 @@ def _relation_diff(spec: TableSpec, live: Mapping[str, str]) -> tuple[ColumnDiff
     return tuple(differences)
 
 
+def _rendered_domain(members: frozenset[str]) -> str:
+    """A domain as the S5.1 message renders it, in a stable order."""
+    return _DOMAIN_RENDERING.format(members=", ".join(sorted(members)))
+
+
+def _domain_diff(
+    spec: TableSpec, live_enums: Mapping[str, frozenset[str]]
+) -> tuple[ColumnDiff, ...]:
+    """The domains that lost a member between ``live_enums`` and ``spec`` (S5.1).
+
+    Only a *removal* is a difference. Adding a member widens the domain, which no
+    stored row can violate; removing one orphans every row already carrying it, which
+    is why S5.1 lists it beside a dropped column rather than beside an added one.
+
+    A column the live side declares no domain for is not compared: DuckLake has no
+    `ENUM` (S5.0), so a domain is a dbt `accepted_values` test and the live catalog
+    cannot be asked what vocabulary it was written under. That is exactly why this arm
+    is reachable only from a registry pair and never from :func:`preflight_schema`.
+    """
+    differences: list[ColumnDiff] = []
+    for column, declared in spec.enums.items():
+        live_domain = live_enums.get(column)
+        if live_domain is None or live_domain <= declared:
+            continue
+        differences.append(
+            ColumnDiff(spec.name, column, _rendered_domain(live_domain), _rendered_domain(declared))
+        )
+    return tuple(differences)
+
+
+def plan_evolution(live: Mapping[str, str] | TableSpec, spec: TableSpec) -> EvolutionPlan:
+    """Classify every difference between a relation's live shape and ``spec`` (S5.1).
+
+    Pure. It opens nothing, executes nothing and reads no catalog, which is what makes
+    the additive/breaking classification — the decision that turns a run into an exit
+    ``3`` — assertable on a bare runner over hand-built pairs.
+
+    ``live`` takes either shape the two callers have. A :class:`~collections.abc.Mapping`
+    of column name to type is what :func:`live_columns` reads off the catalog, and it
+    is all a preflight can know. A :class:`~er.lake.model.TableSpec` is the *previous
+    registry* — the shape a lake built by an earlier revision of this code has — and it
+    additionally carries the `accepted_values` domains, so that arm of S5.1's breaking
+    list is decidable at all.
+
+    The four breaking shapes S5.1 names all fall out of the column comparison: a
+    **dropped** column is live and undeclared, a **renamed** one is a drop and an add
+    together, a **narrowed or changed type** is a declared column whose live type
+    differs, and a **removed domain member** is :func:`_domain_diff`'s. Nullability is
+    deliberately not compared — see :func:`_relation_diff`.
+    """
+    live_columns_map = _live_columns_of(live)
+    differences = _relation_diff(spec, live_columns_map)
+    if isinstance(live, TableSpec):
+        differences = (*differences, *_domain_diff(spec, live.enums))
+    return EvolutionPlan(relation=spec.name, differences=differences)
+
+
+def _live_columns_of(live: Mapping[str, str] | TableSpec) -> Mapping[str, str]:
+    """``live`` as the name-to-type mapping the column comparison works over."""
+    if isinstance(live, TableSpec):
+        return MappingProxyType(
+            {column.name: _catalog_type(column.type) for column in live.columns}
+        )
+    return live
+
+
+def preflight_schema(connection: duckdb.DuckDBPyConnection) -> None:
+    """Abort if any live `ddl.py`-owned relation has drifted breakingly (S5.1).
+
+    The entry path S5.1 gives `er init` and *every* stage: it reads, classifies and
+    raises, and it never executes a statement — so a lake carrying a breaking
+    difference is left exactly as it was found and no snapshot is committed.
+
+    Relations that do not exist yet are not differences, for the reason :func:`diff`
+    gives: an uninitialised namespace must be distinguishable from a drifted one, and
+    a preflight that refused the former would refuse the very `er init` that repairs it.
+
+    Raises:
+        SchemaBreakingError: on the first breaking difference, in registry order.
+    """
+    for relation in DDL_OWNED:
+        live = live_columns(connection, relation)
+        if not live:
+            continue
+        breaking = plan_evolution(live, REGISTRY[relation]).breaking
+        if breaking:
+            raise SchemaBreakingError(breaking[0])
+
+
 def diff(connection: duckdb.DuckDBPyConnection) -> tuple[ColumnDiff, ...]:
     """Every difference between the registry and the live `ddl.py`-owned relations.
 
@@ -286,7 +465,7 @@ def diff(connection: duckdb.DuckDBPyConnection) -> tuple[ColumnDiff, ...]:
         live = live_columns(connection, relation)
         if not live:
             continue
-        differences.extend(_relation_diff(REGISTRY[relation], live))
+        differences.extend(plan_evolution(live, REGISTRY[relation]).differences)
     return tuple(differences)
 
 
@@ -323,11 +502,8 @@ def evolve(connection: duckdb.DuckDBPyConnection) -> tuple[str, ...]:
     Raises:
         SchemaBreakingError: on the first breaking difference, in registry order.
     """
-    differences = diff(connection)
-    for difference in differences:
-        if difference.breaking:
-            raise SchemaBreakingError(difference)
-    statements = tuple(add_column_statement(difference) for difference in differences)
+    preflight_schema(connection)
+    statements = tuple(add_column_statement(difference) for difference in diff(connection))
     for statement in statements:
         connection.execute(statement)
     return statements
