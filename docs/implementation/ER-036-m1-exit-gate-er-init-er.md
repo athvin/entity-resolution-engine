@@ -2,7 +2,7 @@
 id: ER-036
 title: "M1 exit gate: er init && er doctor && er run-all on an empty lake, tagged M1-EXIT-<k> parity with S12"
 milestone: M1
-status: in_progress
+status: done
 kind: code
 size: S
 gates: full
@@ -17,9 +17,9 @@ extra_paths: []
 attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_m1_exit.py -q"
 branch: "ticket/ER-036-m1-exit-gate-er-init-er"
-commit: ""
+commit: "27b674b6c2da17823cfbb4fb282db186e212b5ea"
 spec_sha: "2abcfe433c322f74"
-updated_at: "2026-08-15T22:39:06Z"
+updated_at: "2026-08-15T23:19:11Z"
 session: 7f236e11-ecaf-4251-b9c7-d5d01a0a4081
 ---
 ## Description
