@@ -2,7 +2,7 @@
 id: ER-024
 title: "S4.7 failure semantics: error taxonomy, --resume <run_id>, tenant advisory lock on every mutating command (exit 3), tenancy statement enforcement"
 milestone: M1
-status: in_progress
+status: done
 kind: code
 size: M
 gates: full
@@ -17,9 +17,9 @@ extra_paths: ["src/er/cli.py", "src/er/errors.py", "src/er/lake/catalog.py"]
 attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_failure_resume.py tests/integration/test_concurrency.py -q && uv run pytest tests/unit/test_locking.py -q"
 branch: "ticket/ER-024-s4-7-failure-semantics-error-taxonomy"
-commit: ""
+commit: "cfe41af7e3bbec1b52a516340cd535a4701c3f0c"
 spec_sha: "2abcfe433c322f74"
-updated_at: "2026-08-15T15:08:37Z"
+updated_at: "2026-08-15T15:35:18Z"
 session: f07cef19-133b-4e83-be6f-dd5baa8f89af
 ---
 ## Description
