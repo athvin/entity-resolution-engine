@@ -2,7 +2,7 @@
 id: ER-023
 title: "Run metadata + Observability: RunContext, run_stages ten-counter vocabulary, one JSON line per stage, stdout purity, er_touched_entities accessor"
 milestone: M1
-status: in_progress
+status: done
 kind: code
 size: M
 gates: full
@@ -17,9 +17,9 @@ extra_paths: ["src/er/cli.py"]
 attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_run_metadata.py -q && uv run pytest tests/unit/obs -q"
 branch: "ticket/ER-023-run-metadata-observability-runcontext-run-stages"
-commit: ""
+commit: "e9fe6b541e3496aa35be34f57c10859ae130fa50"
 spec_sha: "2abcfe433c322f74"
-updated_at: "2026-08-15T13:47:01Z"
+updated_at: "2026-08-15T14:12:02Z"
 session: 72646373-668a-45a2-9880-e8e9fc620073
 ---
 ## Description
