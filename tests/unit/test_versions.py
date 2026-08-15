@@ -60,10 +60,37 @@ REQUIREMENT = re.compile(r"([A-Za-z0-9_.-]+?)(?:\[[a-z0-9,-]+\])?==([^`\s,]+)")
 # The three service images are pinned by digest, never by a mutable tag (S2.1).
 IMAGE_REFERENCE = re.compile(r"(\S+):([^@\s]+)@(sha256:[0-9a-f]{64})")
 
-# The only stdlib names `src/er/versions.py` may reach for, plus its own package.
-# Anything that opens a connection or shells out belongs to `er doctor` (ER-022).
+# The only names `src/er/versions.py` may reach for. Anything that opens a connection
+# or shells out belongs to `er doctor` (ER-022), and :data:`FORBIDDEN_CALLS` below is
+# what now enforces that half — the list has to admit the three modules S3's second
+# assignment to this file needs ("version-compat guards for run-all", ER-034): the
+# guard's `last_successful_run` is HANDED a connection and reads `runs` through it, so
+# it needs `duckdb` for the annotation, the lake alias and the schema qualifier. All
+# three are import-safe: none of them opens anything at import time, so the pin table
+# stays readable without an engine.
 ALLOWED_IMPORTS = frozenset(
-    {"__future__", "collections.abc", "dataclasses", "er", "importlib.metadata", "typing"}
+    {
+        "__future__",
+        "collections.abc",
+        "dataclasses",
+        "duckdb",
+        "enum",
+        "er",
+        "er.lake.ducklake",
+        "er.lake.model",
+        "importlib.metadata",
+        "typing",
+    }
+)
+
+# What "pure" actually protects, now that the module is allowed to name the lake: it
+# may READ through a connection it was given and it may never OPEN one or shell out,
+# because `er doctor` imports this module before it knows whether it can reach the lake
+# at all and ER-007's Dockerfile check imports it in a build stage that has neither a
+# catalog nor an object store. Matched on the last segment of a called name, so
+# `duckdb.connect`, `ducklake.connect` and a bare `connect` are one rule.
+FORBIDDEN_CALL_NAMES = frozenset(
+    {"connect", "catalog_connect", "run", "Popen", "check_output", "check_call", "urlopen"}
 )
 
 
@@ -319,8 +346,9 @@ def test_module_is_pure() -> None:
     # The pin table must be readable without an engine: `er doctor` imports it before
     # it knows whether it can reach the lake at all, and ER-007's Dockerfile check
     # imports it inside a build stage that has no catalog and no object store.
+    tree = ast.parse(VERSIONS_SOURCE.read_text(encoding="utf-8"))
     imported: set[str] = set()
-    for node in ast.walk(ast.parse(VERSIONS_SOURCE.read_text(encoding="utf-8"))):
+    for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             imported |= {alias.name for alias in node.names}
         elif isinstance(node, ast.ImportFrom):
@@ -329,3 +357,10 @@ def test_module_is_pure() -> None:
             imported.add(node.module)
 
     assert imported <= ALLOWED_IMPORTS, f"versions.py imports {sorted(imported - ALLOWED_IMPORTS)}"
+
+    # The half the allowlist can no longer carry on its own. `er.lake.ducklake` is
+    # importable here precisely because importing it opens nothing; calling its
+    # `connect()` would open everything, and this module must never be the caller.
+    called = {ast.unparse(node.func) for node in ast.walk(tree) if isinstance(node, ast.Call)}
+    opened = {name for name in called if name.rsplit(".", 1)[-1] in FORBIDDEN_CALL_NAMES}
+    assert not opened, f"versions.py calls {sorted(opened)}; opening one belongs to its caller"

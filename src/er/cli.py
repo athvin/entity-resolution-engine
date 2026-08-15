@@ -43,12 +43,15 @@ nothing at all — not even the `runs` row that would otherwise record a run tha
 ran (T-CONC-1). ``er run-all --resume`` restarts a failed run from its first
 non-`succeeded` stage under that same lock.
 
-Out of scope by construction, and owned by a later ticket: the ``--mode incremental``
-config-drift guard on `(config_hash, model_version, std_version)` and
-``--allow-escalate`` (ER-034). The dbt subprocess and
-the ``--vars`` payload moved to ``er.dbt_runner`` with ER-033; ``dbt_vars`` here is
-that module's :func:`~er.dbt_runner.render_dbt_vars` under its ER-014 name, not a
-second builder of the mapping.
+``er run-all --mode incremental`` now runs the S4.0 config-drift guard (ER-034) after
+the lock is held and before the first stage: the run fingerprint is compared against
+the last successful run's, a difference refuses the invocation with exit ``3``, and
+``--allow-escalate`` promotes the whole invocation — chain and ``runs.mode`` alike —
+to ``--mode full``. The comparison itself is :mod:`er.versions`'.
+
+The dbt subprocess and the ``--vars`` payload moved to ``er.dbt_runner`` with ER-033;
+``dbt_vars`` here is that module's :func:`~er.dbt_runner.render_dbt_vars` under its
+ER-014 name, not a second builder of the mapping.
 """
 
 from __future__ import annotations
@@ -89,6 +92,12 @@ from er.lake.init import init_lake, reset_lake
 from er.obs.logging import emit_stage_record
 from er.obs.runctx import RunContext, StageRun
 from er.resume import ResumePlan, read_resume_rows, resume_plan
+from er.versions import (
+    ModeDecision,
+    RunFingerprint,
+    check_mode_preconditions,
+    last_successful_run,
+)
 
 __all__ = [
     "COMMANDS",
@@ -795,6 +804,80 @@ def _resume(run_id: str, options: GlobalOptions) -> ResumePlan:
         raise typer.Exit(_refuse(run_id, exc)) from exc
 
 
+def _guarded_mode(mode: str, options: GlobalOptions, *, allow_escalate: bool) -> str:
+    """The S4.0 config-drift guard: the mode to run under, or the refusal it earns.
+
+    Called with the writer lock already held and before the first stage runs, which is
+    what makes a refusal an S4.7 `precondition` rather than a failed run: no `runs`
+    row, no `run_stages` row and no committed snapshot exist yet to be left behind.
+
+    `--mode full` and a namespace with no prior successful run both reach
+    :func:`~er.versions.check_mode_preconditions` and are decided there, not short-cut
+    here — one guard, one place it says yes.
+
+    Raises:
+        typer.Exit: exit `3` when an incremental run's fingerprint has drifted and
+            ``--allow-escalate`` was not given, after naming every drifted field and
+            both its values on stderr.
+    """
+    document = options.config
+    if document is None or options.config_hash is None:
+        # Unreachable through the command tree: S4.0 lists ER_CONFIG in `run-all`'s
+        # required-env column, so `GlobalOptions.resolve` has already exited 2 without
+        # a document. Stated rather than asserted, so a guard with nothing to compare
+        # cannot silently compare two `None`s and call them equal.
+        return mode
+    current = RunFingerprint(
+        config_hash=options.config_hash,
+        # The value this run's `runs.model_version` will hold, which is NULL until a
+        # stage resolves the `status='active'` row — the same value `_run_chain` hands
+        # `_run_context` on this path. The two MUST move together: a prior run recorded
+        # under a resolved `model_version` would otherwise drift against a current one
+        # that has merely not been resolved yet.
+        model_version=None,
+        std_version=document.versions.std_version,
+        survivorship_version=document.versions.survivorship_version,
+    )
+    decision = check_mode_preconditions(
+        _last_successful_run(document.tenant), current, mode, allow_escalate=allow_escalate
+    )
+    return _apply_mode_decision(decision)
+
+
+def _last_successful_run(tenant: str) -> RunFingerprint | None:
+    """The baseline the guard compares against, or ``None`` when there is no lake.
+
+    A process with no lake environment has no `runs` relation to read — that is how
+    the S8.4 unit layer drives the command tree on a bare runner — and a first run
+    cannot drift. Both are the same answer, exactly as
+    :class:`~er.obs.runctx.RunContext` treats a missing environment as "persist
+    nothing" rather than as a failure of the run.
+    """
+    try:
+        with connect() as connection:
+            return last_successful_run(connection, tenant)
+    except MissingEnvError:
+        return None
+
+
+def _apply_mode_decision(decision: ModeDecision) -> str:
+    """Report the guard's verdict and return the mode the chain is built from.
+
+    stderr for both lines, not stdout: S4.0 gives `run-all`'s stdout one line per
+    stage plus a run summary, and a caller piping it must not have to parse a refusal
+    out of it.
+    """
+    if decision.refused:
+        # Raised as a classified failure rather than exiting `3` directly, so the
+        # status comes from the S4.7 table the same way every other refusal's does.
+        refusal = PreconditionFailure(decision.message)
+        sys.stderr.write(f"{refusal}\n")
+        raise typer.Exit(exit_code_for(refusal))
+    if decision.escalated:
+        sys.stderr.write(f"{decision.message}\n")
+    return decision.mode
+
+
 def _refuse(run_id: str, exc: ErError) -> int:
     """Report a `--resume` refusal on stderr and return its S4.0 exit status."""
     sys.stderr.write(f"--resume {run_id}: {exc}\n")
@@ -1056,12 +1139,22 @@ def run_all(
 
     It never trains, and it mints exactly one ``run_id`` for every child stage.
 
+    ``--mode incremental`` is guarded: the run fingerprint `(config_hash,
+    model_version, std_version, survivorship_version)` is compared against the last
+    successful run for this tenant, and a difference refuses the invocation with exit
+    ``3`` before any stage runs. ``--allow-escalate`` promotes the run to ``--mode
+    full`` instead — the chain S5.1 requires after a version bump. ``--mode full`` is
+    never guarded: it rebuilds exactly what the drift invalidated.
+
     ``--resume RUN_ID`` restarts that run from its first non-`succeeded` stage under
     its original `run_id` and `config_hash` (S4.7). The chain it restarts is the one
     the run was recorded under — `runs.mode`, not the ``--mode`` on this command line:
     the stages already in `run_stages` belong to that chain, and re-executing the rest
     of a different one would append stages to a run they were never part of. ``--mode``
-    stays required because S4.0's table requires it.
+    stays required because S4.0's table requires it. A resumed run is NOT re-guarded:
+    S4.7 gives `--resume` its own config-hash precondition with its own exit code
+    (``2``), and running both against one invocation would refuse the same drift twice
+    under two different codes.
     """
     if not skip_ingest and (source is None or path is None):
         # Rejected before ANY stage runs, and exit 2 rather than 3: this is a
@@ -1074,8 +1167,13 @@ def run_all(
     delivery = None if path is None else str(path)
     with _writer_lock("run-all", options):
         if resume is None:
-            chain = run_all_chain(mode, skip_ingest, source=source, path=delivery)
-            _run_chain(chain, options, mode=mode)
+            # One mode for both: the chain and `runs.mode` are built from the guard's
+            # verdict, so an escalated run executes the full chain AND is recorded as
+            # a full run. Recording one and executing the other would leave
+            # `run_stages` describing a chain that never ran (S4.0, S5.2).
+            effective = _guarded_mode(mode, options, allow_escalate=allow_escalate)
+            chain = run_all_chain(effective, skip_ingest, source=source, path=delivery)
+            _run_chain(chain, options, mode=effective)
             return
         plan = _resume(resume, options)
         try:

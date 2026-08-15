@@ -1,4 +1,4 @@
-"""The S2.1 pin table in Python, and the installed-environment parity check.
+"""The S2.1 pin table in Python, the parity check, and the S4.0 config-drift guard.
 
 S2.1 is the authority for every version this project pins; this module is the one
 Python restatement of it. `er doctor` (S4.0, T-DOCTOR-1) iterates :data:`PINS`, the
@@ -6,10 +6,25 @@ Dockerfile extension check reads :data:`EXTENSION_PINS`, and the Compose contrac
 test reads :data:`IMAGE_PINS` — so a bump lands in one table rather than in three
 copies of a version string that drift apart silently.
 
-The module is pure: it opens no connection, runs no subprocess and touches nothing
+The pin half is pure: it opens no connection, runs no subprocess and touches nothing
 but the ``importlib.metadata`` database. Everything that needs a *running* engine —
 `duckdb_extensions()`, the catalog round-trip, the S3 round-trip — belongs to
 `er doctor` (ER-022), not here.
+
+The second half is the **run fingerprint** and the guard S4.0 builds on it: `er
+run-all --mode incremental` "refuses to proceed (exit `3`) when `(config_hash,
+model_version, std_version)` differ from the last successful run for this tenant;
+`--allow-escalate` promotes the run to `--mode full` instead of failing". S5.1 adds
+the fourth field by stating that changing `versions.std_version` **or**
+`versions.survivorship_version` invalidates the derived corpus and that "a version
+bump is exactly the drift the S4.0 config-drift guard catches" — and `runs` carries
+all four as columns, so :class:`RunFingerprint` is the four-tuple and
+:func:`last_successful_run` reads it off those columns rather than recomputing it
+from a second source.
+
+The split between the two functions is the point: :func:`check_mode_preconditions` is
+**pure**, so the drift matrix an operator meets at the worst possible moment is
+testable without a lake, and :func:`last_successful_run` is the only impure half.
 
 **Keying.** A component name is the PEP 503 canonical form of what S2.1 writes:
 lowercased with runs of ``-_.`` and whitespace collapsed to ``-``. A row that pins
@@ -33,25 +48,43 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from enum import StrEnum
 from importlib.metadata import PackageNotFoundError, version
 from typing import Final
 
+import duckdb
+
 from er import __version__
+from er.lake.ducklake import LAKE_ALIAS
+from er.lake.model import SCHEMA_QUALIFIER
 
 __all__ = [
     "CODE_DISTRIBUTION",
+    "ESCALATION_MESSAGE",
     "EXTENSION_PINS",
+    "FINGERPRINT_FIELDS",
     "IMAGE_PINS",
+    "MODE_FULL",
+    "MODE_INCREMENTAL",
     "PINS",
+    "REFUSAL_MESSAGE",
     "SPLINK_MIGRATION_NOTE",
+    "STATUS_SUCCEEDED",
+    "UNSET_VALUE",
     "ExtensionPin",
+    "FieldDrift",
     "ImagePin",
     "MigrationNote",
+    "ModeDecision",
+    "ModeOutcome",
     "Pin",
+    "RunFingerprint",
     "VersionCheck",
     "check_installed_versions",
+    "check_mode_preconditions",
     "code_version",
     "installed_version",
+    "last_successful_run",
 ]
 
 
@@ -308,3 +341,257 @@ def code_version() -> str:
     """
     installed = installed_version(CODE_DISTRIBUTION)
     return installed if installed is not None else __version__
+
+
+# --- the S4.0 config-drift guard -------------------------------------------
+
+_RUNS: Final[str] = "runs"
+
+#: `runs.status` for a run that reached its end (S5). Spelled here rather than
+#: imported from :mod:`er.obs.runctx`, where the vocabulary's named constants live:
+#: that module imports :func:`code_version` from this one, so importing it back would
+#: be an import cycle. ``tests/unit/test_mode_preconditions.py`` asserts this value is
+#: a member of S5's :data:`~er.lake.model.RUN_STATUSES`, so a divergence fails on the
+#: unit layer instead of becoming a predicate that silently matches nothing.
+STATUS_SUCCEEDED: Final[str] = "succeeded"
+
+#: The two values ``--mode`` takes on `er run-all` (S4.0). Only the first is guarded.
+MODE_INCREMENTAL: Final[str] = "incremental"
+MODE_FULL: Final[str] = "full"
+
+#: The four `runs` columns the guard compares, in the order S5's DDL declares them —
+#: which is also the order :class:`RunFingerprint` declares its fields and the order
+#: :func:`last_successful_run` selects them, so the SELECT list is this tuple rather
+#: than a second transcription of it. A field added to the dataclass and not here
+#: would be silently uncompared.
+FINGERPRINT_FIELDS: Final[tuple[str, ...]] = (
+    "config_hash",
+    "model_version",
+    "std_version",
+    "survivorship_version",
+)
+
+#: How a NULL renders in a refusal. `model_version` is the one nullable field of the
+#: four (S5), and an empty string beside ``last=`` would read as a value.
+UNSET_VALUE: Final[str] = "(unset)"
+
+#: The refusal S4.0 gives exit `3`. It names every field that drifted and both of its
+#: values, because the operator's next act is either to accept the rebuild or to undo
+#: the edit, and neither is decidable from "the config changed".
+REFUSAL_MESSAGE: Final[str] = (
+    "incremental run refused: the run fingerprint differs from the last successful "
+    "run: {drift}. Re-run with --mode full, or with --allow-escalate to promote this "
+    "run to --mode full."
+)
+
+#: What ``--allow-escalate`` says instead. The same drift, reported rather than
+#: refused: a promoted run is a planned full rebuild (S5.1) and an operator reading
+#: the log has to be able to see which edit caused it.
+ESCALATION_MESSAGE: Final[str] = (
+    "--allow-escalate: the run fingerprint differs from the last successful run: "
+    "{drift}. Promoting this run to --mode full."
+)
+
+
+@dataclass(frozen=True, slots=True)
+class RunFingerprint:
+    """The four `runs` columns that decide whether an incremental run may proceed.
+
+    S4.0 names three of them and S5.1 adds ``survivorship_version`` by making a bump
+    of either derived-corpus version "exactly the drift the S4.0 config-drift guard
+    catches". All four are columns of `runs` (S5), which is what lets the prior half
+    of the comparison be *read* rather than reconstructed.
+
+    ``model_version`` is the one nullable field: a run that never resolved the
+    ``status='active'`` row records NULL, and S5 declares the column nullable for it.
+    """
+
+    config_hash: str
+    model_version: str | None
+    std_version: str
+    survivorship_version: str
+
+    def value(self, field_name: str) -> str | None:
+        """The value of one :data:`FINGERPRINT_FIELDS` entry.
+
+        Raises:
+            ValueError: ``field_name`` is not one of the four. A typo would otherwise
+                reach :func:`getattr` and compare two ``None``s as equal, which is the
+                shape of a guard that silently stops guarding.
+        """
+        if field_name not in FINGERPRINT_FIELDS:
+            raise ValueError(f"not a fingerprint field: {field_name!r}")
+        value: str | None = getattr(self, field_name)
+        return value
+
+
+@dataclass(frozen=True, slots=True)
+class FieldDrift:
+    """One field of the fingerprint that moved, with both of its values."""
+
+    field: str
+    prior: str | None
+    current: str | None
+
+    def __str__(self) -> str:
+        return f"{self.field} last={_rendered(self.prior)} now={_rendered(self.current)}"
+
+
+def _rendered(value: str | None) -> str:
+    """``value`` as a refusal renders it, with NULL spelled :data:`UNSET_VALUE`."""
+    return UNSET_VALUE if value is None else value
+
+
+class ModeOutcome(StrEnum):
+    """What the guard decided (S4.0).
+
+    Three outcomes and not two: ``escalate`` is a *success* that changed the run's
+    mode, so a caller that only asked "was this refused?" would run the incremental
+    chain under `runs.mode='full'`.
+    """
+
+    PROCEED = "proceed"
+    ESCALATE = "escalate"
+    REFUSE = "refuse"
+
+
+@dataclass(frozen=True, slots=True)
+class ModeDecision:
+    """The guard's verdict: the mode to run under, and why it is that mode.
+
+    :attr:`mode` is what the caller MUST build its chain from and what it MUST record
+    in `runs.mode` — the escalated run is a full run in both, or `run_stages` would
+    describe a chain the run did not execute (S4.0, S5.2).
+    """
+
+    outcome: ModeOutcome
+    mode: str
+    drift: tuple[FieldDrift, ...]
+    #: The operator-facing line, empty when nothing drifted. Never ``None``, so a
+    #: caller can write it without deciding whether there is one.
+    message: str
+
+    @property
+    def refused(self) -> bool:
+        """Whether this invocation must exit `3` without running a stage."""
+        return self.outcome is ModeOutcome.REFUSE
+
+    @property
+    def escalated(self) -> bool:
+        """Whether ``--allow-escalate`` promoted the run to `--mode full`."""
+        return self.outcome is ModeOutcome.ESCALATE
+
+
+def check_mode_preconditions(
+    prior: RunFingerprint | None,
+    current: RunFingerprint,
+    mode: str,
+    *,
+    allow_escalate: bool = False,
+) -> ModeDecision:
+    """Decide whether ``mode`` may run against ``prior``, per S4.0.
+
+    Pure: it opens nothing and reads nothing. Both fingerprints are handed in, which
+    is what makes the drift matrix — the part an operator meets when a run refuses at
+    03:00 — assertable on a bare runner.
+
+    Four rules, each of them S4.0's or S5.1's rather than this function's:
+
+    * ``--mode full`` is never guarded. A full run recomputes the derived corpus, so
+      there is nothing for a version bump to invalidate underneath it.
+    * With no prior successful run there is no drift. A first run cannot differ from
+      a baseline that does not exist.
+    * Every one of :data:`FINGERPRINT_FIELDS` is compared, and any single difference
+      is drift. S4.0 names three fields and S5.1 the fourth; none is advisory.
+    * ``--allow-escalate`` promotes rather than refuses, and the promotion is to
+      ``full`` — the mode whose chain rebuilds what the drift invalidated (S5.1).
+
+    Args:
+        prior: the fingerprint of the last `status='succeeded'` run for this tenant,
+            or ``None`` when there is none.
+        current: the fingerprint this invocation would be recorded under.
+        mode: ``incremental`` or ``full``, as typed on the command line.
+        allow_escalate: the ``--allow-escalate`` flag.
+
+    Raises:
+        ValueError: ``mode`` is neither ``incremental`` nor ``full`` — the same
+            refusal :func:`er.cli.run_all_chain` makes of the same value.
+    """
+    if mode not in (MODE_INCREMENTAL, MODE_FULL):
+        raise ValueError(f"unknown run-all mode: {mode!r}")
+    if mode != MODE_INCREMENTAL or prior is None:
+        return ModeDecision(outcome=ModeOutcome.PROCEED, mode=mode, drift=(), message="")
+
+    drift = tuple(
+        FieldDrift(field=name, prior=prior.value(name), current=current.value(name))
+        for name in FINGERPRINT_FIELDS
+        if prior.value(name) != current.value(name)
+    )
+    if not drift:
+        return ModeDecision(outcome=ModeOutcome.PROCEED, mode=mode, drift=(), message="")
+
+    rendered = "; ".join(str(item) for item in drift)
+    if allow_escalate:
+        return ModeDecision(
+            outcome=ModeOutcome.ESCALATE,
+            mode=MODE_FULL,
+            drift=drift,
+            message=ESCALATION_MESSAGE.format(drift=rendered),
+        )
+    return ModeDecision(
+        outcome=ModeOutcome.REFUSE,
+        mode=mode,
+        drift=drift,
+        message=REFUSAL_MESSAGE.format(drift=rendered),
+    )
+
+
+def last_successful_run(
+    connection: duckdb.DuckDBPyConnection, tenant: str
+) -> RunFingerprint | None:
+    """The fingerprint of the most recent succeeded run for ``tenant`` (S4.0, S5).
+
+    Ordered by `run_id` descending, which is chronological because `run_id` is a ULID
+    (S5): `started_at` would order the same way but is a `TIMESTAMP` two runs can tie
+    on, and a tie here would make the baseline depend on the engine's row order.
+
+    Only ``status='succeeded'`` is a baseline. A failed run may have committed part of
+    a corpus under a fingerprint nothing ever finished, so comparing against it would
+    refuse the next run for drift away from a state that was never reached (S4.7).
+
+    Returns ``None`` when there is no such run — including a namespace `er init` has
+    not reached, which has no `runs` relation to read and therefore no prior run by
+    construction. A first run cannot drift, and neither can a run in an empty
+    namespace.
+    """
+    if not _runs_relation_present(connection):
+        return None
+    row = connection.execute(
+        f"SELECT {', '.join(FINGERPRINT_FIELDS)} FROM {SCHEMA_QUALIFIER}.{_RUNS} "
+        f"WHERE tenant = ? AND status = ? ORDER BY run_id DESC LIMIT 1",
+        [tenant, STATUS_SUCCEEDED],
+    ).fetchone()
+    if row is None:
+        return None
+    # Positional, against the SELECT list built from FINGERPRINT_FIELDS above: the
+    # tuple is the single declaration of both the order and the membership.
+    return RunFingerprint(
+        config_hash=str(row[0]),
+        model_version=None if row[1] is None else str(row[1]),
+        std_version=str(row[2]),
+        survivorship_version=str(row[3]),
+    )
+
+
+def _runs_relation_present(connection: duckdb.DuckDBPyConnection) -> bool:
+    """Whether this namespace has been through `er init` yet.
+
+    `runs` is created by `er init` and by nothing else (S7.1), so its absence means
+    the lake is not initialised — which is a namespace with no prior run, not a fault
+    of the invocation that noticed it.
+    """
+    row = connection.execute(
+        "SELECT count(*) FROM duckdb_tables() WHERE database_name = ? AND table_name = ?",
+        [LAKE_ALIAS, _RUNS],
+    ).fetchone()
+    return row is not None and int(row[0]) > 0

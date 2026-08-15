@@ -15,7 +15,13 @@ invocation is a real `er run-all` that has no way to tell the difference. Racing
 subprocesses would assert the same thing only when the scheduler happened to overlap
 them, and would silently assert nothing when it did not.
 
-ER-034 adds T-CFG-1 to this file.
+T-CFG-1 is the second S8.3 row pinned to this file: "mutate `thresholds.auto_merge`,
+run `er run-all --mode incremental`: exit 3, named message, no snapshot; re-run with
+`--allow-escalate`: promotes to full mode and succeeds". Both arms are here, in one
+test, because the row is one guarantee — a guard that refuses and an escalation that
+never rebuilds would satisfy either half alone. The wider drift matrix around it,
+including the arms that need no prior run at all, is
+`tests/integration/test_mode_guard.py`'s.
 """
 
 from __future__ import annotations
@@ -23,13 +29,17 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from pathlib import Path
 from typing import Any
 
 import duckdb
+import yaml
 from ulid import ULID
 
+from er.config.hashing import config_hash
+from er.config.loader import load_config
 from er.lake.catalog import LOCK_HELD_MESSAGE, tenant_lock, try_advisory_lock
-from er.lake.ducklake import connect
+from er.lake.ducklake import connect, current_snapshot
 from er.lake.model import SCHEMA_QUALIFIER
 
 # `configs/test.yaml`'s tenant, which Compose supplies as `ER_CONFIG` (S7.1). A
@@ -106,3 +116,62 @@ def test_the_refusal_leaves_the_tenant_unlocked(
     assert try_advisory_lock(TENANT) is True
     after = run_er("run-all", "--mode", "incremental", "--skip-ingest")
     assert after.returncode == 0, after.stdout + after.stderr
+
+
+def test_incremental_refuses_on_config_drift(
+    initialised_lake: duckdb.DuckDBPyConnection, tmp_path: Path
+) -> None:
+    """T-CFG-1/AC7: config drift is caught, not absorbed — and escalation rebuilds.
+
+    The prior run is a real `er run-all`, not a seeded row: "the last successful run
+    for this tenant" (S4.0) has to be a run the CLI itself recorded, or the guard could
+    be reading a baseline no invocation would ever produce.
+    """
+    baseline = run_er("run-all", "--mode", "incremental", "--skip-ingest")
+    assert baseline.returncode == 0, baseline.stdout + baseline.stderr
+    on_disk_hash = config_hash(load_config(Path(os.environ["ER_CONFIG"])))
+
+    # `thresholds.auto_merge`, the field S8.3 names. `0.96` keeps S6's
+    # `0 < review_low < auto_merge <= 1` satisfied, so what the run meets is the drift
+    # guard and not a validation error that would also exit non-zero.
+    document = yaml.safe_load(Path(os.environ["ER_CONFIG"]).read_text(encoding="utf-8"))
+    document["thresholds"]["auto_merge"] = 0.96
+    edited = tmp_path / "drifted.yaml"
+    edited.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+    drifted_hash = config_hash(load_config(edited))
+    assert drifted_hash != on_disk_hash, "the edit did not move the config_hash"
+
+    with connect() as connection:
+        snapshot_before = current_snapshot(connection)
+
+    refused = run_er("run-all", "--mode", "incremental", "--skip-ingest", "--config", str(edited))
+
+    assert refused.returncode == 3, refused.stdout + refused.stderr
+    assert "config_hash" in refused.stderr
+    assert on_disk_hash in refused.stderr and drifted_hash in refused.stderr
+    # "no snapshot": the refusal is an S4.7 `precondition`, so nothing was committed
+    # and no stage announced itself.
+    with connect() as connection:
+        assert current_snapshot(connection) == snapshot_before
+    assert stage_records(refused.stderr) == []
+
+    escalated = run_er(
+        "run-all",
+        "--mode",
+        "incremental",
+        "--skip-ingest",
+        "--allow-escalate",
+        "--config",
+        str(edited),
+    )
+
+    assert escalated.returncode == 0, escalated.stdout + escalated.stderr
+    escalated_run_id = {record["run_id"] for record in stage_records(escalated.stderr)}
+    assert len(escalated_run_id) == 1
+    with connect() as connection:
+        # "promotes to full mode": recorded as one, so `run_stages` describes the chain
+        # that actually ran (S5.2).
+        assert connection.execute(
+            f"SELECT mode, status FROM {SCHEMA_QUALIFIER}.runs WHERE run_id = ?",
+            [escalated_run_id.pop()],
+        ).fetchall() == [("full", "succeeded")]
