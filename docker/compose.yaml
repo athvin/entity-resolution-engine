@@ -8,9 +8,9 @@
 # tests/unit/test_compose_contract.py greps for it (S7.4).
 # scripts/ci/{itest,bench,compose_smoke}.sh are the only supported entry points.
 #
-# `catalog-init` (ER-020) is not here yet. Until it lands, `pipeline` and `benchmark`
-# gate directly on `catalog` being healthy and `objectstore-init` having completed;
-# ER-020 inserts `er init` between them and moves both `depends_on` blocks onto it.
+# `catalog-init` runs `er init` once per stack and is what creates the ddl.py-owned
+# relations (S4.0, S7.1); `pipeline` and `benchmark` gate on it having completed, so
+# neither can start against a lake that holds no relations.
 
 name: er                                   # fixed project name; without it Compose derives `docker`
                                            # from the directory and the prebuilt image is never found
@@ -77,12 +77,22 @@ services:
       MINIO_ROOT_USER:     erminio
       MINIO_ROOT_PASSWORD: erminiopassword
 
+  catalog-init:                            # one-shot lake bootstrap: extensions, secret, ATTACH, ddl.py tables
+    <<: *er-image
+    # NO `profiles:` key, so it is enabled under every profile: both consumers gate
+    # on it, and a profile that skipped it would run against an empty lake (S7.1).
+    depends_on:
+      catalog:          { condition: service_healthy }
+      objectstore-init: { condition: service_completed_successfully }
+    environment: *er-env
+    command: ["er", "init"]                # idempotent; exit 0 on an already-initialised lake
+    restart: "no"
+
   pipeline:
     <<: *er-image
     profiles: [test]
     depends_on:
-      catalog:          { condition: service_healthy }
-      objectstore-init: { condition: service_completed_successfully }
+      catalog-init: { condition: service_completed_successfully }
     environment: *er-env
     volumes:
       - ../artifacts:/app/artifacts        # junit, dbt logs, run manifests reach the host/runner
@@ -94,8 +104,7 @@ services:
     <<: *er-image
     profiles: [bench]
     depends_on:
-      catalog:          { condition: service_healthy }
-      objectstore-init: { condition: service_completed_successfully }
+      catalog-init: { condition: service_completed_successfully }
     environment:
       <<: *er-env
       BENCH_SCALE: ${BENCH_SCALE:-smoke}

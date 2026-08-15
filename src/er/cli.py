@@ -21,9 +21,14 @@ Four rules govern this module and are stated nowhere else in Python:
   ``er.errors`` and :func:`er.errors.exit_code_for` produces the status, so the
   ``error_class`` recorded and the code exited with cannot disagree.
 
-Out of scope by construction, and owned by later tickets: the lake connection and
-the ``runs``/``run_stages`` writes (ER-023, which extends :func:`emit_stage_line`
-rather than adding a second emitter), the advisory lock and ``--resume`` (ER-024),
+``er init`` and ``er lake reset`` are the two commands that do real lake work here
+(ER-020); the work itself lives in :mod:`er.lake.init` and this module owns only
+their S4.0 stdout. Every other command is still a stub.
+
+Out of scope by construction, and owned by later tickets: the
+``runs``/``run_stages`` writes (ER-023, which extends :func:`emit_stage_line`
+rather than adding a second emitter), the advisory lock on every other mutating
+command and ``--resume`` (ER-024),
 and the ``--mode incremental`` config-drift guard (ER-034). The dbt subprocess and
 the ``--vars`` payload moved to ``er.dbt_runner`` with ER-033; ``dbt_vars`` here is
 that module's :func:`~er.dbt_runner.render_dbt_vars` under its ER-014 name, not a
@@ -48,6 +53,7 @@ from er.config.schema import Config
 from er.dbt_runner import render_dbt_vars
 from er.entities.ids import IdFactory, UlidFactory
 from er.errors import ErError, ErrorClass, ExitCode, StageFailure, exit_code_for
+from er.lake.init import init_lake, reset_lake
 
 __all__ = [
     "COMMANDS",
@@ -231,6 +237,60 @@ class NotImplementedStage:
         raise StageFailure(f"stage not implemented: {self.name}")
 
 
+@dataclass(frozen=True)
+class _InitStage:
+    """`er init`: apply the `ddl.py`-owned registry to the namespace (S4.0, S5.1).
+
+    Writes its own stdout — S4.0 gives the command "one line per relation" — and
+    nothing else: the ``--json`` stream is a sequence of ``{relation, action}``
+    objects with no summary object among them.
+    """
+
+    args: tuple[str, ...] = ()
+    name: str = "init"
+
+    def run(self, options: GlobalOptions) -> int:
+        for result in init_lake(tenant=_tenant_of(options)):
+            _write_stdout(
+                {"relation": result.relation, "action": result.action.value},
+                f"{result.relation} {result.action.value}",
+                options,
+            )
+        return int(ExitCode.SUCCESS)
+
+
+@dataclass(frozen=True)
+class _ResetStage:
+    """`er lake reset`: destroy the namespace behind ``--confirm-tenant`` (S4.0).
+
+    The guard is not applied here. :func:`~er.lake.init.reset_lake` compares the
+    flag against the validated config before it opens anything, so there is one
+    place a typo can be caught and it is the one that also takes the lock.
+    """
+
+    confirm_tenant: str
+    args: tuple[str, ...] = ()
+    name: str = "reset"
+
+    def run(self, options: GlobalOptions) -> int:
+        result = reset_lake(tenant=_tenant_of(options), confirm_tenant=self.confirm_tenant)
+        _write_stdout(
+            {"dropped_schema": result.dropped_schema, "deleted_prefix": result.deleted_prefix},
+            f"dropped_schema={result.dropped_schema}, deleted_prefix={result.deleted_prefix}",
+            options,
+        )
+        return int(ExitCode.SUCCESS)
+
+
+def _tenant_of(options: GlobalOptions) -> str | None:
+    """The tenant this invocation runs under, or ``None`` when it has no document.
+
+    S4.0's required-env column for `er init` names lake variables only, so a run
+    without an S6 document is legitimate and the tenant is then simply unknown.
+    """
+    return None if options.config is None else options.config.tenant
+
+
 def _stage_for(name: str, args: Sequence[str] = ()) -> Stage:
     """The stage M1 ships for ``name``: a no-op stub if ``run-all`` chains it."""
     flags = tuple(args)
@@ -393,6 +453,25 @@ def _run_single(name: str, options: GlobalOptions, args: Sequence[str] = ()) -> 
     raise typer.Exit(outcome.exit_code)
 
 
+def _run_command(stage: Stage, options: GlobalOptions) -> None:
+    """Execute a stage that writes its OWN stdout, and exit with its code.
+
+    Distinct from :func:`_run_single` in exactly one way, and it is a contract and
+    not a preference: S4.0 gives `er init` and `er lake reset` a stdout of their own,
+    so the per-stage summary :func:`_report` writes would be a second, differently
+    shaped line in a ``--json`` stream that S4.0 says is one ``{relation, action}``
+    object per relation.
+
+    The failure message is repeated as a bare stderr line beside the S5.2 record.
+    The record is telemetry a caller parses; the line is what an operator reads, and
+    for `er init` it is the literal S4.0 immutability message.
+    """
+    outcome = _execute(stage, options, seq=1)
+    if outcome.error_detail is not None:
+        sys.stderr.write(outcome.error_detail + "\n")
+    raise typer.Exit(outcome.exit_code)
+
+
 def _run_chain(stages: Sequence[Stage], options: GlobalOptions) -> None:
     """Execute a chain, apply the S4.0 propagation rule, and exit with its code.
 
@@ -456,16 +535,25 @@ def _mode_option(mode: str) -> str:
 
 @app.command()
 def init(
-    force: Annotated[bool, typer.Option("--force", help="Recreate relations that exist.")] = False,
+    force: Annotated[
+        bool, typer.Option("--force", help="Recorded on the stage; recreates nothing.")
+    ] = False,
     config: ConfigOption = None,
     run_id: RunIdOption = None,
     json_output: JsonOption = False,
 ) -> None:
-    """Create the ddl.py-owned relations in the attached lake (S4.0, S5.0)."""
+    """Create the ddl.py-owned relations in the attached lake (S4.0, S5.0).
+
+    ``--force`` is accepted because S4.0's flag column lists it, and it recreates
+    nothing: S5.0 puts every statement against a `ddl.py`-owned relation in
+    :mod:`er.lake.ddl`, so a destructive recreate would have to emit a ``DROP`` from
+    outside the module that owns the ownership guard. It travels on the stage record
+    so an operator can see what was asked for.
+    """
     options = GlobalOptions.resolve(
         config_path=config, run_id=run_id, json_output=json_output, require_config=False
     )
-    _run_single("init", options, ("--force",) if force else ())
+    _run_command(_InitStage(args=("--force",) if force else ()), options)
 
 
 @app.command()
@@ -715,13 +803,10 @@ def lake_reset(
     deliberate act compares against ``tenant`` in the document.
     """
     options = GlobalOptions.resolve(config_path=config, run_id=run_id, json_output=json_output)
-    if options.config is not None and confirm_tenant != options.config.tenant:
-        sys.stderr.write(
-            f"tenant mismatch: --confirm-tenant {confirm_tenant!r} "
-            f"is not {options.config.tenant!r}\n"
-        )
-        raise typer.Exit(int(ExitCode.CONFIG))
-    _run_single("reset", options, ("--confirm-tenant", confirm_tenant))
+    _run_command(
+        _ResetStage(confirm_tenant=confirm_tenant, args=("--confirm-tenant", confirm_tenant)),
+        options,
+    )
 
 
 def main() -> None:

@@ -45,6 +45,8 @@ from ulid import ULID
 
 from er.lake.catalog import CatalogConnection, catalog_connect, drop_metadata_schema
 from er.lake.ducklake import LAKE_ALIAS, connect, detach
+from er.lake.init import init_lake
+from er.lake.model import SCHEMA_QUALIFIER
 from er.lake.objectstore import ObjectStore
 
 __all__ = [
@@ -56,6 +58,7 @@ __all__ = [
     "catalog",
     "compose_env",
     "er_env",
+    "initialised_lake",
     "lake_conn",
     "lake_ns",
     "mint_namespace",
@@ -235,3 +238,38 @@ def lake_conn(
             yield connection
         finally:
             reclaim_namespace(connection, object_store, catalog, er_env)
+
+
+def _drop_every_relation(connection: duckdb.DuckDBPyConnection) -> None:
+    """Return the namespace to the relation-free state :func:`lake_conn` yields."""
+    rows = connection.execute(
+        "SELECT table_name FROM duckdb_tables() WHERE database_name = ?", [LAKE_ALIAS]
+    ).fetchall()
+    for (name,) in sorted(rows):
+        connection.execute(f"DROP TABLE {SCHEMA_QUALIFIER}.{name}")
+
+
+@pytest.fixture
+def initialised_lake(
+    lake_conn: duckdb.DuckDBPyConnection,
+) -> Iterator[duckdb.DuckDBPyConnection]:
+    """S8.1 step 3, layered onto the session namespace: the lake after `er init`.
+
+    Function-scoped, and it drops what it created. S8.1 puts step 3 in the session
+    fixture, but ER-018's own contract is that the namespace it yields holds zero
+    relations, and a session-scoped `er init` would make that claim true or false
+    depending on which suite happened to run first -- which is the ordering
+    dependence M22 exists to remove. Reclaiming here restores the precondition for
+    every other suite and leaves ER-018's teardown untouched.
+
+    `er init`'s implementation is called on the session connection rather than
+    spawned as a subprocess: a second attachment would create the relations in a
+    transaction this connection does not share, so the fixture could yield a handle
+    that cannot see them. What it applies is still exactly what the CLI applies --
+    there is one :func:`~er.lake.init.init_lake`.
+    """
+    init_lake(connection=lake_conn)
+    try:
+        yield lake_conn
+    finally:
+        _drop_every_relation(lake_conn)

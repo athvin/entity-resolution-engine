@@ -52,6 +52,10 @@ MINIO_PASSWORD_MINIMUM = 8
 
 SERVICES_UNDER_BOTH_PROFILES = ("pipeline", "benchmark")
 
+# The one-shot lake bootstrap (S7.1, B1). Both services above gate on it, and it is
+# what makes `er init` the only creator of the ddl.py-owned relations (M19).
+CATALOG_INIT = "catalog-init"
+
 
 def section(anchor: str) -> str:
     text = DESIGN_DOC.read_text(encoding="utf-8")
@@ -276,9 +280,48 @@ def test_objectstore_credentials_and_readiness() -> None:
     # and no HTTP client, so anything gated on `service_healthy` here hangs forever.
     assert "healthcheck" not in server, "objectstore must declare no healthcheck (S7.1)"
 
-    # Readiness is the bucket existing, which is what the init container completing
-    # means. Until ER-020 lands `catalog-init`, both consumers gate on it directly.
+
+def test_catalog_init_service_contract() -> None:
+    """S7.1: the one-shot that makes `er init` the only creator of ddl.py tables (B1)."""
+    service = authored_service(CATALOG_INIT)
+
+    assert service["command"] == ["er", "init"], (
+        f"{CATALOG_INIT} must run `er init`, which is the only thing that ever creates "
+        "the ddl.py-owned relations (S4.0, S5.0)"
+    )
+    # A one-shot that restarts is a one-shot that never completes, and everything
+    # downstream waits on `service_completed_successfully`.
+    assert service["restart"] == "no"
+    assert "profiles" not in service, (
+        f"{CATALOG_INIT} must declare NO profiles key so it is enabled under every "
+        "profile; a profile that skipped it would run against an empty lake (S7.1)"
+    )
+    # The same image and the same environment as its consumers: `er init` reads the
+    # S4.0b block out of `x-er-env`, so a service with its own copy would attach a
+    # different namespace than the suite that follows it.
+    assert service["image"] == "er-pipeline:ci"
+    assert service["pull_policy"] == "never"
+    assert (
+        rendered_service(CATALOG_INIT)["environment"] == rendered_service("pipeline")["environment"]
+    )
+
+    depends_on = service["depends_on"]
+    assert depends_on["catalog"]["condition"] == "service_healthy"
+    assert depends_on["objectstore-init"]["condition"] == "service_completed_successfully", (
+        "bucket existence, not container liveness, is the object store's readiness "
+        "signal, and `er init` writes into that bucket (S7.1)"
+    )
+
+
+def test_pipeline_and_benchmark_gate_on_catalog_init() -> None:
+    """S7.1: both consumers wait for the lake to exist, not merely for its services."""
     for name in SERVICES_UNDER_BOTH_PROFILES:
         depends_on = authored_service(name)["depends_on"]
-        assert depends_on["objectstore-init"]["condition"] == "service_completed_successfully"
-        assert depends_on["catalog"]["condition"] == "service_healthy"
+        assert depends_on[CATALOG_INIT]["condition"] == "service_completed_successfully", (
+            f"{name} must gate on {CATALOG_INIT}; M19 is that nothing invoked ddl.py, "
+            "so the suite ran against a lake with no relations in it"
+        )
+        # Transitively satisfied through `catalog-init`, which is the point: one
+        # service owns the ordering, so the two consumers cannot drift apart.
+        assert "objectstore-init" not in depends_on
+        assert "catalog" not in depends_on
