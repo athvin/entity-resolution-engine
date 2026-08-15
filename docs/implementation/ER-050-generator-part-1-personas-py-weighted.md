@@ -2,7 +2,7 @@
 id: ER-050
 title: "Generator part 1: personas.py, weighted-frequency name lists, household rate, seeded RNG"
 milestone: M2
-status: in_progress
+status: done
 kind: code
 size: M
 gates: fast
@@ -17,9 +17,9 @@ extra_paths: []
 attempts: 1
 verify: "uv run pytest tests/unit/generator/test_personas.py -q"
 branch: "ticket/ER-050-generator-part-1-personas-py-weighted"
-commit: ""
+commit: "88add40a6da0ce87890b4ecada99e4f8db549817"
 spec_sha: "2abcfe433c322f74"
-updated_at: "2026-08-15T06:36:34Z"
+updated_at: "2026-08-15T06:52:41Z"
 session: 38369bd7-43d1-4c65-b350-30259812687d
 ---
 ## Description
