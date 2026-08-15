@@ -77,5 +77,22 @@ python_version = "3.12"
 strict = true
 files = ["src/er"]
 
+# boto3 and botocore ship no `py.typed` and S2.1 pins no stub distribution for them,
+# so `src/er/lake/objectstore.py` cannot even `import boto3` under the gate. The
+# override is deliberately narrow: it names those two distributions and nothing else,
+# so every module under `src/er` is still checked at full `--strict`. `psycopg` needs
+# no entry here -- it ships `py.typed`, which is why `lake/catalog.py` is fully typed.
+#
+# `follow_untyped_imports` was tried first and is worse: mypy then reads boto3's
+# unannotated source, and `--strict`'s disallow_untyped_calls rejects every call into
+# it, which could only be silenced by weakening the gate on our own code.
+#
+# The durable fix is S2.1's own precedent -- its PyYAML row pins `types-PyYAML`
+# precisely because an `ignore_missing_imports` override loosens this gate. boto3 has
+# the same problem and no such row; adding one is a spec amendment, not a code ticket.
+[[tool.mypy.overrides]]
+module = ["boto3", "boto3.*", "botocore", "botocore.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
