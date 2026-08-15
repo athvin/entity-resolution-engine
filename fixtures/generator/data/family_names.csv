@@ -1,0 +1,143 @@
+# Weighted family-name frequency list for the S10.1 generator.
+#
+# Vocabulary: 120 common US family names, ASCII-lowercase and free of apostrophes,
+# hyphens and diacritics, so `name_norm` (S4.2) is the identity on every one of
+# them and the `<given>.<family>@<domain>` addresses `personas.py` derives stay
+# syntactically valid. Surface variation -- casing, accents, typos -- is the job of
+# `corruptions.py` (ER-051), not of the ground truth.
+#
+# Weights: NOT observed census frequencies, and deliberately not. They are a
+# hand-authored four-tier shape (300..125, then 110, 70, 50; total 10010) chosen so
+# that at S10.2's `10k` scale of 4,000 personas:
+#   * the head is heavy enough for S4.3.3's term-frequency adjustment to have skew
+#     to see -- the real US distribution's most common surname covers under 1% of
+#     people, which at 4,000 draws is 35 records and no measurable TF signal, and
+#   * the lightest name still expects ~20 draws, so no row is dead weight and the
+#     empirical distribution can be checked against this file within binomial noise.
+# Real frequencies would make this file a claim about the world; these weights are a
+# claim only about the corpus, which is what a fixture is.
+#
+# Format: `name,weight`; weight is a positive integer and ties keep file order, so
+# the cumulative weights `personas.py` draws against are a function of this file
+# alone. Lines beginning with `#` are provenance and are skipped by the reader.
+name,weight
+smith,300
+johnson,260
+williams,230
+brown,205
+jones,185
+garcia,170
+miller,155
+davis,145
+rodriguez,135
+martinez,125
+hernandez,110
+lopez,110
+gonzalez,110
+wilson,110
+anderson,110
+thomas,110
+taylor,110
+moore,110
+jackson,110
+martin,110
+lee,110
+perez,110
+thompson,110
+white,110
+harris,110
+sanchez,110
+clark,110
+ramirez,110
+lewis,110
+robinson,110
+walker,110
+young,110
+allen,110
+king,110
+wright,110
+scott,110
+torres,110
+nguyen,110
+hill,110
+flores,110
+green,70
+adams,70
+nelson,70
+baker,70
+hall,70
+rivera,70
+campbell,70
+mitchell,70
+carter,70
+roberts,70
+gomez,70
+phillips,70
+evans,70
+turner,70
+diaz,70
+parker,70
+cruz,70
+edwards,70
+collins,70
+reyes,70
+stewart,70
+morris,70
+morales,70
+murphy,70
+cook,70
+rogers,70
+gutierrez,70
+ortiz,70
+morgan,70
+cooper,70
+peterson,70
+bailey,70
+reed,70
+kelly,70
+howard,70
+ramos,70
+kim,70
+cox,70
+ward,70
+richardson,70
+watson,50
+brooks,50
+chavez,50
+wood,50
+james,50
+bennett,50
+gray,50
+mendoza,50
+ruiz,50
+hughes,50
+price,50
+alvarez,50
+castillo,50
+sanders,50
+patel,50
+myers,50
+long,50
+ross,50
+foster,50
+jimenez,50
+powell,50
+jenkins,50
+perry,50
+russell,50
+sullivan,50
+bell,50
+coleman,50
+butler,50
+henderson,50
+barnes,50
+gonzales,50
+fisher,50
+vasquez,50
+simmons,50
+romero,50
+jordan,50
+patterson,50
+alexander,50
+hamilton,50
+graham,50

@@ -1,0 +1,117 @@
+# Weighted given-name frequency list for the S10.1 generator.
+#
+# Vocabulary: 100 common US given names under the same ASCII-only rule as
+# `family_names.csv` -- `name_norm` (S4.2) must be the identity on the ground truth
+# so that a normalized value differing from the persona's is evidence of a
+# corruption (ER-051) and never of the generator.
+#
+# Weights: a three-tier shape (200..100, then 60, then 30; total 5002), flatter than
+# the family-name list on purpose. S4.3.3 applies term frequency to `given_name` and
+# `family_name` both, and giving the two lists the same shape would make a TF bug
+# that only affects one of them invisible -- the two columns would move together.
+# The nickname axis (`name_variants`, S4.2) belongs to `corruptions.py`, so no
+# diminutive appears here beside its formal name.
+#
+# Format: `name,weight`; weight is a positive integer and ties keep file order.
+# Lines beginning with `#` are provenance and are skipped by the reader.
+name,weight
+james,200
+mary,180
+robert,165
+patricia,150
+john,140
+jennifer,130
+michael,120
+linda,112
+david,105
+elizabeth,100
+william,60
+barbara,60
+richard,60
+susan,60
+joseph,60
+jessica,60
+thomas,60
+sarah,60
+charles,60
+karen,60
+christopher,60
+nancy,60
+daniel,60
+lisa,60
+matthew,60
+betty,60
+anthony,60
+margaret,60
+mark,60
+sandra,60
+donald,60
+ashley,60
+steven,60
+kimberly,60
+andrew,60
+emily,60
+paul,60
+donna,60
+joshua,60
+michelle,60
+kenneth,30
+carol,30
+kevin,30
+amanda,30
+brian,30
+dorothy,30
+george,30
+melissa,30
+timothy,30
+deborah,30
+ronald,30
+stephanie,30
+jason,30
+rebecca,30
+edward,30
+sharon,30
+jeffrey,30
+laura,30
+ryan,30
+cynthia,30
+jacob,30
+kathleen,30
+gary,30
+amy,30
+nicholas,30
+angela,30
+eric,30
+shirley,30
+jonathan,30
+anna,30
+stephen,30
+brenda,30
+larry,30
+pamela,30
+justin,30
+emma,30
+scott,30
+nicole,30
+brandon,30
+helen,30
+benjamin,30
+samantha,30
+samuel,30
+katherine,30
+gregory,30
+christine,30
+alexander,30
+debra,30
+patrick,30
+rachel,30
+frank,30
+carolyn,30
+raymond,30
+janet,30
+jack,30
+catherine,30
+dennis,30
+maria,30
+jerry,30
+heather,30
