@@ -55,6 +55,16 @@ TRACKED_MARKERS = ("models/.gitkeep", "artifacts/.gitkeep")
 
 REQUIRED_MAKE_TARGETS = {"spec", "board", "lint", "types", "unit", "dbt", "gates"}
 
+# Subpackages that exist on disk with no row in the S3 tree, listed one by one with
+# the reason. The equality below is deliberately NOT relaxed to a subset check: an
+# unlisted directory is still a failure, so this set is the record of every place
+# the code and S3 disagree rather than a hole in the check.
+#   std/  ER-040. S4.2 puts `address_parse` behind a versioned `AddressParser`
+#         interface, which S3's tree gives no home; the board pins the test node id
+#         `tests/unit/std/test_address_parser.py`. Amending the S3 tree is a spec
+#         ticket, and a code ticket may not edit DesignDoc.md.
+UNSPECIFIED_SUBPACKAGES = {"std"}
+
 PIN_RE = re.compile(r"`([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]*\])?==([A-Za-z0-9][A-Za-z0-9._-]*)`")
 
 
@@ -129,7 +139,7 @@ def s3_subpackages() -> set[str]:
 
 
 def test_every_src_subpackage_is_importable() -> None:
-    expected = s3_subpackages()
+    expected = s3_subpackages() | UNSPECIFIED_SUBPACKAGES
     package_root = REPO_ROOT / "src" / "er"
     on_disk = {
         child.name
@@ -137,6 +147,10 @@ def test_every_src_subpackage_is_importable() -> None:
         if child.is_dir() and not child.name.startswith("__")
     }
     assert on_disk == expected, "src/er/ and the S3 tree disagree about the subpackages"
+    # A directory that gains an S3 row should lose its exemption in the same change.
+    assert not (s3_subpackages() & UNSPECIFIED_SUBPACKAGES), (
+        "S3 now names a subpackage that UNSPECIFIED_SUBPACKAGES still exempts"
+    )
 
     assert (package_root / "py.typed").is_file(), "src/er/py.typed is missing"
     assert importlib.import_module("er").__version__
