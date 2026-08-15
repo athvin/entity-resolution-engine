@@ -2,7 +2,7 @@
 id: ER-028
 title: "S8.2.1 fixture machinery: FORMAT.md, phase dirs (base/,batch/,refresh/), base_scenario manifest, load_scenario, validate_fixtures.py + self-test fixtures"
 milestone: M1
-status: todo
+status: in_progress
 kind: code
 size: M
 gates: fast
@@ -14,12 +14,13 @@ consumes: ["src/er/lake/columns.py::VOLATILE_COLUMNS", "tests/helpers/expected.p
 owns: ["fixtures/static/FORMAT.md", "scripts/validate_fixtures.py", "tests/helpers/scenario.py", "tests/unit/fixtures/__init__.py", "tests/unit/fixtures/test_fixture_format.py", "tests/unit/test_fixture_lint.py", "tests/fixtures/scenarios"]
 protected_paths: []
 extra_paths: []
-attempts: 0
+attempts: 1
 verify: "uv run pytest tests/unit/fixtures/test_fixture_format.py -q"
-branch: ""
+branch: "ticket/ER-028-s8-2-1-fixture-machinery-format"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "28d8d8e366a7b49b"
+updated_at: "2026-08-15T03:36:07Z"
+session: d453cfe7-4537-494b-86cc-b38cb65936e8
 ---
 ## Description
 
