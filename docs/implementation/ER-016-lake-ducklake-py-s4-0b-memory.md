@@ -2,7 +2,7 @@
 id: ER-016
 title: "lake/ducklake.py S4.0b: memory primary catalog, ATTACH lake, S3 secret, splink_scratch, thread/memory pinning, snapshot helpers, extension-dir fallback"
 milestone: M1
-status: todo
+status: in_progress
 kind: code
 size: M
 gates: full
@@ -14,12 +14,13 @@ consumes: ["src/er/lake/env.py::require_env", "src/er/lake/env.py::require_int_e
 owns: ["src/er/lake/ducklake.py", "tests/integration/test_connection_model.py"]
 protected_paths: ["docker/Dockerfile", "docker/compose.yaml"]
 extra_paths: []
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_connection_model.py -q"
-branch: ""
+branch: "ticket/ER-016-lake-ducklake-py-s4-0b-memory"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "28d8d8e366a7b49b"
+updated_at: "2026-08-15T00:53:59Z"
+session: 3338210e-7856-4ac3-bfa6-15d039de2852
 ---
 ## Description
 
