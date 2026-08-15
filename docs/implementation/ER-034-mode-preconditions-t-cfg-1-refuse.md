@@ -2,7 +2,7 @@
 id: ER-034
 title: "Mode preconditions + T-CFG-1: refuse incremental on config_hash/model_version/std_version/survivorship_version drift; --allow-escalate"
 milestone: M1
-status: todo
+status: in_progress
 kind: code
 size: S
 gates: full
@@ -14,12 +14,13 @@ consumes: ["src/er/config/hashing.py::config_hash", "src/er/config/schema.py::Co
 owns: ["tests/integration/test_mode_guard.py", "tests/unit/test_mode_preconditions.py"]
 protected_paths: []
 extra_paths: ["src/er/versions.py", "src/er/cli.py", "tests/integration/test_cli_contract.py"]
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_mode_guard.py -q && uv run pytest tests/unit/test_mode_preconditions.py -q"
-branch: ""
+branch: "ticket/ER-034-mode-preconditions-t-cfg-1-refuse"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "2abcfe433c322f74"
+updated_at: "2026-08-15T19:13:40Z"
+session: b46c088b-88b9-41a4-b808-8ca7e9a75bef
 ---
 ## Description
 
