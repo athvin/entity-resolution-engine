@@ -30,7 +30,7 @@ import unicodedata
 
 import pytest
 from harness import MacroHarness
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 #: U+212B ANGSTROM SIGN, which NFC replaces outright with U+00C5.
@@ -101,6 +101,11 @@ def test_punctuation_diacritics_and_whitespace_rules(
     assert normalize(harness, value) == expected
 
 
+# deadline=None, not a longer deadline: the first example pays the MacroHarness
+# DuckDB warm-up (hypothesis measured 560ms first call, 10ms after), so ANY fixed
+# deadline is a race against machine load, not a property of the macro. The
+# property itself is unchanged and still runs on every generated example.
+@settings(deadline=None)
 @given(st.text(alphabet=NAME_ALPHABET, max_size=12))
 def test_idempotent_and_casing_invariant(harness: MacroHarness, value: str) -> None:
     once = normalize(harness, value)

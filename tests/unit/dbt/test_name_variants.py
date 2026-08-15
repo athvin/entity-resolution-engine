@@ -34,7 +34,7 @@ from typing import Any
 
 import pytest
 from harness import MacroHarness
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 #: The seed S3 places at `dbt/seeds/`, from `tests/unit/dbt/test_name_variants.py`.
@@ -105,6 +105,11 @@ def has_any(harness: MacroHarness, left: str | None, right: str | None) -> bool 
     return hit
 
 
+# deadline=None, not a longer deadline: the first example pays the MacroHarness
+# DuckDB warm-up (hypothesis measured 560ms first call, 10ms after), so ANY fixed
+# deadline is a race against machine load, not a property of the macro. The
+# property itself is unchanged and still runs on every generated example.
+@settings(deadline=None)
 @given(st.text(alphabet=VARIANT_ALPHABET, max_size=12))
 def test_normalized_name_is_element_zero(seeded: MacroHarness, value: str) -> None:
     """AC3: the S4.2 symmetry guarantee, over generated names."""

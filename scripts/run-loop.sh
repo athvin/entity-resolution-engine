@@ -492,6 +492,12 @@ print(hashlib.sha256(p.read_bytes()).hexdigest()[:16] if p.exists() else "")')"
       INFRA_RE="$INFRA_RE"'|Cannot connect to the Docker daemon|docker daemon is not running'
       INFRA_RE="$INFRA_RE"'|failed to solve: failed to fetch|context deadline exceeded'
       INFRA_RE="$INFRA_RE"'|Client.Timeout exceeded|EOF$|503 Service Unavailable|429 Too Many'
+      # Timing flakes are load artefacts, not defects. ER-021 was quarantined for a
+      # hypothesis DeadlineExceeded in tests it does not own (ER-039's), where the
+      # first example paid a 560ms DuckDB warm-up that hypothesis itself flagged as
+      # "Unreliable test timings". A wall-clock assertion failing under load is never
+      # evidence that THIS ticket's code is wrong.
+      INFRA_RE="$INFRA_RE"'|DeadlineExceeded|Unreliable test timings|exceeds the deadline'
       if grep -Eiq "$INFRA_RE" "$REVERIFY_LOG" 2>/dev/null; then
         log "re-verify failed on INFRASTRUCTURE, not code -- retrying once before judging"
         grep -Eio "$INFRA_RE" "$REVERIFY_LOG" 2>/dev/null | sort -u | head -3 | sed 's/^/         /'
