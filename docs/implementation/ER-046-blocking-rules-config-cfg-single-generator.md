@@ -2,7 +2,7 @@
 id: ER-046
 title: "blocking_rules_from_config(cfg): the single generator, NULL/empty policy, duplicate/unknown-column rejection"
 milestone: M2
-status: in_progress
+status: blocked
 kind: code
 size: M
 gates: fast
@@ -19,7 +19,7 @@ verify: "uv run pytest tests/unit/matching/test_blocking_generator.py -q"
 branch: "ticket/ER-046-blocking-rules-config-cfg-single-generator"
 commit: ""
 spec_sha: "28d8d8e366a7b49b"
-updated_at: "2026-08-15T05:59:16Z"
+updated_at: "2026-08-15T06:08:49Z"
 session: b45db92e-2ecd-4639-a589-613e258fa81e
 ---
 ## Description
@@ -83,3 +83,12 @@ bash scripts/gates.sh
 - `mypy --strict` clean on `src/er/matching`
 - No config schema or validator was modified — rejection paths reuse the existing error taxonomy
 - Committed on main with the board updated
+
+## Blocker log
+
+### Attempt 1 — spec_contradiction (2026-08-15T06:08:49Z)
+
+- **Failing command:** `uv run pytest tests/unit/matching/test_blocking_generator.py -q`
+- **Assertion / contradiction:** ER-046 AC1 ends: '...and the returned rule list has 4 entries whose generated SQL each contains its corresponding expr.' That clause cannot hold together with DesignDoc S4.2, which mandates: 'Splink receives block_on(<expr>) for the identical expr string.' Failing assertion, verbatim: assert "substr(family_name,1,4) || '|' || addr_postal" in "SUBSTRING(l.family_name, 1, 4) || '|' || l.addr_postal = SUBSTRING(r.family_name, 1, 4) || '|' || r.addr_postal". Two independent causes, so this is not a splink-version accident: (1) block_on re-renders the expression through sqlglot, so substr becomes SUBSTRING and argument spacing changes; (2) a Splink blocking rule is a join condition and must qualify every column with l. / r., and those prefixes are inserted INSIDE the expression, so the raw expr is not a substring of any blocking-rule SQL for any expr wider than one bare column. This was confirmed against the byte-preserving CustomRule as well. Containment holds only for the two single-column rules (email, phone_e164); it fails for name_postal and dob_name, i.e. for half of the shipped configs/test.yaml. AC1's other three clauses and AC2-AC7 all pass; mypy --strict and ruff are clean.
+- **Smallest change that would unblock:** Reword the last clause of AC1 only. Replace: 'and the returned rule list has 4 entries whose generated SQL each contains its corresponding expr' with: 'and the returned rule list has 4 entries, the i-th of which generates the same SQL as block_on applied to the i-th payload entry expr (element-wise equality of blocking_rule_sql for the duckdb dialect), which is what makes the two consumers one string; Splink qualifies each column with l. / r. and re-renders the expression through sqlglot, so the raw expr is deliberately NOT asserted to be a substring of the generated SQL.' Then change the one assertion in tests/unit/matching/test_blocking_generator.py::test_payload_matches_config_order_and_exprs from 'assert entry[expr] in rule_sql(rule)' to 'assert rule_sql(rule) == rule_sql(block_on(entry[expr]))'. Everything else on branch ticket/ER-046-blocking-rules-config-cfg-single-generator (commit 2dbab6c) is complete and gate-clean and needs no change. Consider also noting in S4.2 that byte-identity of expr is required at the block_on INPUT, not in the rendered SQL, since ER-057 T-BLK-1 parity is what actually checks the mirror.
+- **Log:** `.loop/logs/ER-046.attempt-1.log`
