@@ -2,7 +2,7 @@
 id: ER-010
 title: "ci.yaml rebuild: static/unit/integration, permissions, concurrency, timeouts, SHA-pinned actions, quoted cache-to, actionlint + spec lint + board lint"
 milestone: M1
-status: in_progress
+status: done
 kind: code
 size: M
 gates: fast
@@ -17,9 +17,9 @@ extra_paths: [".github/workflows/ci.yaml", ".github/dependabot.yml"]
 attempts: 1
 verify: "bash scripts/ci/actionlint.sh && uv run pytest tests/unit/test_ci_workflow.py -q"
 branch: "ticket/ER-010-ci-yaml-rebuild-static-unit-integration"
-commit: ""
+commit: "db1c71c0449d43a05940a2affd3ed229eb71a354"
 spec_sha: "28d8d8e366a7b49b"
-updated_at: "2026-08-15T04:55:40Z"
+updated_at: "2026-08-15T05:02:40Z"
 session: 8835c27d-492a-4392-a6ca-f572338a9ec1
 ---
 ## Description
