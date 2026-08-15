@@ -21,9 +21,14 @@ Four rules govern this module and are stated nowhere else in Python:
   ``er.errors`` and :func:`er.errors.exit_code_for` produces the status, so the
   ``error_class`` recorded and the code exited with cannot disagree.
 
-``er init`` and ``er lake reset`` are the two commands that do real lake work here
-(ER-020); the work itself lives in :mod:`er.lake.init` and this module owns only
-their S4.0 stdout. Every other command is still a stub.
+``er init``, ``er lake reset`` (ER-020) and ``er ingest`` (ER-031) are the commands
+that do real lake work here; the work itself lives in :mod:`er.lake.init` and
+:mod:`er.ingest.landing`, and this module owns only their S4.0 stdout and the exit
+status derived from what they returned. Every other command is still a stub.
+
+``er run-all``'s ingest slot is deliberately still a :class:`NoOpStage`: the chain's
+composition is ER-014's contract, and wiring the real stage into it belongs with the
+ticket that gives ``run-all`` a ``--source``/``--path`` it has to thread.
 
 Every invocation now runs inside an :class:`~er.obs.runctx.RunContext` (ER-023), so
 the ``runs`` row, each stage's ``run_stages`` row and its snapshot range are written
@@ -54,7 +59,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Annotated, Protocol
+from typing import Annotated, Protocol, runtime_checkable
 
 import typer
 
@@ -73,12 +78,14 @@ from er.errors import (
     classify,
     exit_code_for,
 )
+from er.ingest.landing import ingest_delivery
+from er.ingest.sources import adapter_for
 from er.lake.catalog import tenant_lock
 from er.lake.ducklake import connect
 from er.lake.env import MissingEnvError
 from er.lake.init import init_lake, reset_lake
 from er.obs.logging import emit_stage_record
-from er.obs.runctx import RunContext
+from er.obs.runctx import RunContext, StageRun
 from er.resume import ResumePlan, read_resume_rows, resume_plan
 
 __all__ = [
@@ -88,6 +95,7 @@ __all__ = [
     "GlobalOptions",
     "NoOpStage",
     "NotImplementedStage",
+    "RecordingStage",
     "Stage",
     "app",
     "dbt_vars",
@@ -257,6 +265,23 @@ class Stage(Protocol):
         """Do the work and return an S4.0 exit code, or raise an ``ErError``."""
 
 
+@runtime_checkable
+class RecordingStage(Protocol):
+    """A stage that reports counters, and so needs the row it is being recorded in.
+
+    S5.2 puts a stage's counters on its own ``run_stages`` row, and
+    :class:`~er.obs.runctx.StageRun` is that row — but it is minted by
+    :meth:`~er.obs.runctx.RunContext.stage` *around* the body, so a stage cannot be
+    constructed holding one. :meth:`bind` is how :func:`_execute` hands it over,
+    and it is opt-in rather than a parameter of :meth:`Stage.run` because the M1
+    stubs have nothing to count and a fourth argument they all ignored would be a
+    signature every future stage had to satisfy to say nothing.
+    """
+
+    def bind(self, stage_run: StageRun) -> None:
+        """Receive the ``run_stages`` row this execution records into."""
+
+
 @dataclass(frozen=True)
 class NoOpStage:
     """A stage with nothing to do: exit ``10`` (S4.0, S12 M1).
@@ -335,6 +360,56 @@ class _ResetStage:
         return int(ExitCode.SUCCESS)
 
 
+@dataclass
+class _IngestStage:
+    """`er ingest`: append a delivery to `raw_records` as version history (S4.1).
+
+    Mutable, unlike the other stages here, for exactly one reason: it is the first
+    stage with counters to report, so it holds the :class:`~er.obs.runctx.StageRun`
+    :meth:`bind` hands it. Everything else it does is
+    :func:`~er.ingest.landing.ingest_delivery`'s — this class owns the S4.0 surface
+    (the manifest line, and the exit status derived from the manifest) and not the
+    write.
+
+    ``--full-refresh-keys`` is refused rather than ignored. S4.1.1's tombstone arm,
+    empty-delivery guard and resurrection counting are ER-032, and accepting the flag
+    would record an `ingest_batches` row claiming a full-refresh delivery that
+    tombstoned nothing. Exit `1` and never `10`, for the reason
+    :class:`NotImplementedStage` gives: an unwritten arm must not be readable as a
+    delivery with nothing to do.
+    """
+
+    source: str
+    path: Path
+    full_refresh_keys: bool = False
+    args: tuple[str, ...] = ()
+    name: str = "ingest"
+    stage_run: StageRun | None = None
+
+    def bind(self, stage_run: StageRun) -> None:
+        self.stage_run = stage_run
+
+    def run(self, options: GlobalOptions) -> int:
+        if self.full_refresh_keys:
+            raise StageFailure(
+                "--full-refresh-keys is not implemented: S4.1.1's tombstone arm, "
+                "empty-delivery guard and resurrection counting are a later ticket"
+            )
+        if options.config is None or self.stage_run is None:
+            # Unreachable through the command tree: S4.0 lists `ER_CONFIG` in this
+            # command's required-env column, so `GlobalOptions.resolve` has already
+            # exited 2 without a document, and `_execute` binds before the body runs.
+            # Stated rather than asserted, so a stage driven some other way fails
+            # loudly instead of ingesting against a half-built invocation.
+            raise StageFailure("er ingest was invoked without a config or a run_stages row")
+        with connect() as connection:
+            manifest = ingest_delivery(
+                options.config, self.source, self.path, connection, self.stage_run
+            )
+        _write_stdout(manifest.manifest(), manifest.stdout_line(), options)
+        return manifest.exit_code
+
+
 def _tenant_of(options: GlobalOptions) -> str | None:
     """The tenant this invocation runs under, or ``None`` when it has no document.
 
@@ -342,6 +417,34 @@ def _tenant_of(options: GlobalOptions) -> str | None:
     without an S6 document is legitimate and the tenant is then simply unknown.
     """
     return None if options.config is None else options.config.tenant
+
+
+def _require_known_source(options: GlobalOptions, source: str, path: Path) -> None:
+    """Refuse an unknown ``--source`` before any lake connection is opened (S4.0).
+
+    S4.0 puts "unknown source" in the same exit-`2` row as a failed Pydantic
+    validation, and gives that row the same timing: *before any connection is
+    opened*. The stage body cannot supply that, because the writer lock and the
+    `runs` row are both taken before it runs — so the check happens here, where
+    ``--mode`` and `run-all`'s ``--source``/``--path`` pairing are also checked.
+
+    :func:`~er.ingest.sources.adapter_for` is THE judge of whether a source is
+    known, and it is pure: it resolves `sources.<name>` and its adapter token and
+    touches no file. Calling it again inside the stage is the same question asked of
+    the same function, not a second vocabulary of source names.
+
+    Raises:
+        typer.Exit: exit ``2``, after naming the offending config key on stderr.
+    """
+    if options.config is None:
+        return
+    try:
+        adapter_for(options.config, source, path)
+    except ErError as exc:
+        # stderr, not stdout: a caller piping the manifest must not have to parse a
+        # refusal out of it.
+        sys.stderr.write(f"{exc}\n")
+        raise typer.Exit(exit_code_for(exc)) from exc
 
 
 @contextmanager
@@ -511,8 +614,14 @@ def _execute(stage: Stage, options: GlobalOptions, run: RunContext) -> _Outcome:
     exit code S4.0 derives from its class, and to hand both to
     :meth:`~er.obs.runctx.StageRun.finish` so the class recorded and the code
     exited with cannot disagree.
+
+    A :class:`RecordingStage` is handed its row before the body runs, so the counters
+    it writes are on the row the context persists rather than on one it built for
+    itself (S5.2).
     """
     with run.stage(stage.name) as stage_run:
+        if isinstance(stage, RecordingStage):
+            stage.bind(stage_run)
         try:
             code = stage.run(options)
         except ErError as exc:
@@ -593,25 +702,29 @@ def _run_single(
     raise typer.Exit(outcome.exit_code)
 
 
-def _run_command(stage: Stage, options: GlobalOptions, *, mode: str, command: str) -> None:
+def _run_command(
+    stage: Stage, options: GlobalOptions, *, mode: str, command: str, persist: bool = False
+) -> None:
     """Execute a stage that writes its OWN stdout, and exit with its code.
 
     Distinct from :func:`_run_single` in exactly one way, and it is a contract and
-    not a preference: S4.0 gives `er init` and `er lake reset` a stdout of their own,
+    not a preference: S4.0 gives `er init`, `er lake reset` and `er ingest` a stdout
+    of their own — one line per relation, the reset summary, the S4.1 manifest line —
     so the per-stage summary :func:`_report` writes would be a second, differently
-    shaped line in a ``--json`` stream that S4.0 says is one ``{relation, action}``
-    object per relation.
+    shaped line in a ``--json`` stream that S4.0 says holds only the command's output.
 
     The failure message is repeated as a bare stderr line beside the S5.2 record.
     The record is telemetry a caller parses; the line is what an operator reads, and
     for `er init` it is the literal S4.0 immutability message.
 
-    Both commands it serves are namespace lifecycle verbs, so neither persists a
-    `runs` row (see :func:`_run_context`).
+    ``persist`` is false for the two namespace lifecycle verbs and true for every
+    real stage: `er init` creates the relations the rows go in and `er lake reset`
+    drops them, while `er ingest` is an ordinary writer whose `runs` and `run_stages`
+    rows are exactly what S5.2 asks for (see :func:`_run_context`).
     """
     with (
         _writer_lock(command, options),
-        _run_context(options, mode=mode, persist=False) as run,
+        _run_context(options, mode=mode, persist=persist) as run,
     ):
         outcome = _execute(stage, options, run)
     if outcome.error_detail is not None:
@@ -794,12 +907,26 @@ def ingest(
     run_id: RunIdOption = None,
     json_output: JsonOption = False,
 ) -> None:
-    """Append source deliveries to raw_records as version history (S4.1)."""
+    """Append source deliveries to raw_records as version history (S4.1).
+
+    ``--path`` is the drop-folder ROOT, not the source directory: S4.1 reads
+    ``storage.drop_dir/<source>/``, and this flag overrides the root half of that
+    (:func:`~er.ingest.sources.discover_files`).
+    """
     options = GlobalOptions.resolve(config_path=config, run_id=run_id, json_output=json_output)
     args = ["--source", source, "--path", str(path)]
     if full_refresh_keys:
         args.append("--full-refresh-keys")
-    _run_single("ingest", options, args)
+    _require_known_source(options, source, path)
+    _run_command(
+        _IngestStage(
+            source=source, path=path, full_refresh_keys=full_refresh_keys, args=tuple(args)
+        ),
+        options,
+        mode=_MODE_STAGE,
+        command="ingest",
+        persist=True,
+    )
 
 
 @app.command()
