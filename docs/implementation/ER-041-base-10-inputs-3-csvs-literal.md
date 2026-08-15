@@ -2,7 +2,7 @@
 id: ER-041
 title: "base_10 inputs: 3 CSVs + literal headers into S8.2, truth.csv, machine-checked trap index, designed rule-coverage + gray-band + recency guards, sources.columns in configs/test.yaml"
 milestone: M2
-status: in_progress
+status: done
 kind: fixture
 size: L
 gates: fast
@@ -17,9 +17,9 @@ extra_paths: ["configs/test.yaml", "configs/default.yaml"]
 attempts: 1
 verify: "uv run pytest tests/unit/fixtures/test_base_10.py -q"
 branch: "ticket/ER-041-base-10-inputs-3-csvs-literal"
-commit: ""
+commit: "b7458b2d53a6144e5d2bdae1a8dbbdf3b10f5f88"
 spec_sha: "2abcfe433c322f74"
-updated_at: "2026-08-15T06:12:04Z"
+updated_at: "2026-08-15T06:29:03Z"
 session: fabbfb18-d55d-4359-b64b-550ba4a5b949
 ---
 ## Description
