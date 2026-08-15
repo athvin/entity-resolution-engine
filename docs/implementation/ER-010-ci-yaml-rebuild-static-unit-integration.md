@@ -2,7 +2,7 @@
 id: ER-010
 title: "ci.yaml rebuild: static/unit/integration, permissions, concurrency, timeouts, SHA-pinned actions, quoted cache-to, actionlint + spec lint + board lint"
 milestone: M1
-status: todo
+status: in_progress
 kind: code
 size: M
 gates: fast
@@ -14,12 +14,13 @@ consumes: ["scripts/actionlint.py::main", "scripts/lint_spec.py::main", "scripts
 owns: [".github/workflows/ci.yaml", ".github/dependabot.yml", "scripts/ci/actionlint.sh", "tests/unit/test_ci_workflow.py"]
 protected_paths: ["DesignDoc.md", "docker/compose.yaml", "scripts/ci/itest.sh"]
 extra_paths: [".github/workflows/ci.yaml", ".github/dependabot.yml"]
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/actionlint.sh && uv run pytest tests/unit/test_ci_workflow.py -q"
-branch: ""
+branch: "ticket/ER-010-ci-yaml-rebuild-static-unit-integration"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "28d8d8e366a7b49b"
+updated_at: "2026-08-15T04:55:40Z"
+session: 8835c27d-492a-4392-a6ca-f572338a9ec1
 ---
 ## Description
 
