@@ -2,7 +2,7 @@
 id: ER-019
 title: "lake/ddl.py: apply/evolve/ownership guard over the registry"
 milestone: M1
-status: in_progress
+status: done
 kind: code
 size: M
 gates: full
@@ -17,9 +17,9 @@ extra_paths: []
 attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_ddl_apply.py -q"
 branch: "ticket/ER-019-lake-ddl-py-apply-evolve-ownership"
-commit: ""
+commit: "f41117608883cd5df17c259d907af4aeb2439c96"
 spec_sha: "2abcfe433c322f74"
-updated_at: "2026-08-15T13:12:56Z"
+updated_at: "2026-08-15T13:23:37Z"
 session: d2cee831-7040-46ad-b16f-53881432d5a3
 ---
 ## Description
