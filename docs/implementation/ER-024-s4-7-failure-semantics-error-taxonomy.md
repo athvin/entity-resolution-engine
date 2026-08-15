@@ -2,7 +2,7 @@
 id: ER-024
 title: "S4.7 failure semantics: error taxonomy, --resume <run_id>, tenant advisory lock on every mutating command (exit 3), tenancy statement enforcement"
 milestone: M1
-status: blocked
+status: todo
 kind: code
 size: M
 gates: full
@@ -19,7 +19,7 @@ verify: "bash scripts/ci/itest.sh tests/integration/test_failure_resume.py tests
 branch: ""
 commit: ""
 spec_sha: ""
-updated_at: "2026-08-15T15:00:12Z"
+updated_at: "2026-08-15T15:03:53Z"
 ---
 ## Description
 
@@ -94,6 +94,30 @@ uv run mypy --strict src/er/resume.py src/er/errors.py
 - ruff + `mypy --strict src/er` clean; verify command passes
 
 ## Blocker log
+### Resolution of the driver quarantine (applied by the board owner, 2026-08-15)
+
+**This ticket was quarantined in error. Its code was never shown to be wrong.**
+
+The agent's own full ladder passed (all eight gates 0, receipt bound to the committed tree). The
+driver's independent re-verify on merged `main` then failed on a network fault while pulling a base
+image, and the driver treated any non-zero re-verify as a code defect:
+
+```
+failed to solve: failed to fetch oauth token: Post "https://ghcr.io/token":
+    net/http: TLS handshake timeout
+itest: docker compose build pipeline failed
+```
+
+Everything else in that same re-verify passed: 332 unit tests, `mypy --strict` on 38 files, dbt parse.
+
+Two fixes landed. `ghcr.io/astral-sh/uv:0.11.3` is now pulled into the local image cache, so a build
+no longer reaches the network. And the driver now distinguishes an infrastructure failure from a gate
+failure: it retries once, and if infrastructure fails again it STOPS rather than rewinding `main` --
+quarantining is destructive and is reserved for evidence the code is wrong.
+
+The previous attempt's work is on `loop-quarantine/ER-024-20260815150012`. It is being re-done from
+scratch rather than restored, so that `done` continues to mean the loop earned it end to end.
+
 
 ### Attempt 0 — gate_failed (2026-08-15T15:00:12Z)
 
