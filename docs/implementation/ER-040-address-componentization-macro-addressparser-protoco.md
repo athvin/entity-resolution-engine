@@ -2,7 +2,7 @@
 id: ER-040
 title: "Address componentization macro + AddressParser Protocol + RegexV1Parser Python oracle + address_parser_version"
 milestone: M2
-status: in_progress
+status: done
 kind: code
 size: M
 gates: fast
@@ -17,9 +17,9 @@ extra_paths: ["src/er/versions.py", "tests/unit/test_package_layout.py"]
 attempts: 1
 verify: "uv run pytest tests/unit/dbt/test_address.py tests/unit/std/test_address_parser.py -q"
 branch: "ticket/ER-040-address-componentization-macro-addressparser-protoco"
-commit: ""
+commit: "95dae0b3f67753828332fa70828cd5b159c24908"
 spec_sha: "28d8d8e366a7b49b"
-updated_at: "2026-08-15T05:32:27Z"
+updated_at: "2026-08-15T05:45:49Z"
 session: 8b2e9167-38bb-42f0-ae77-07e276928103
 ---
 ## Description
