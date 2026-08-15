@@ -2,7 +2,7 @@
 id: ER-051
 title: "Generator part 2: corruptions.py, profiles.yaml, emit.py (base_10-identical headers), cli.py"
 milestone: M2
-status: todo
+status: in_progress
 kind: code
 size: M
 gates: fast
@@ -14,12 +14,13 @@ consumes: ["fixtures/generator/personas.py::Persona", "fixtures/generator/person
 owns: ["fixtures/generator/corruptions.py", "fixtures/generator/profiles.yaml", "fixtures/generator/emit.py", "fixtures/generator/cli.py", "tests/unit/generator/test_corruptions.py", "tests/unit/generator/test_emit.py"]
 protected_paths: ["fixtures/static/base_10/", "fixtures/generator/personas.py", "configs/test.yaml", "dbt/seeds/nickname_variants.csv"]
 extra_paths: []
-attempts: 0
+attempts: 1
 verify: "uv run pytest tests/unit/generator/test_corruptions.py tests/unit/generator/test_emit.py -q"
-branch: ""
+branch: "ticket/ER-051-generator-part-2-corruptions-py-profiles"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "2abcfe433c322f74"
+updated_at: "2026-08-15T07:03:52Z"
+session: b0d01122-928d-494b-887e-440c8837d061
 ---
 ## Description
 
