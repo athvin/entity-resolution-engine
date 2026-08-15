@@ -2,7 +2,7 @@
 id: ER-042
 title: "stg_crm/stg_billing/stg_webforms + incremental config + staging schema.yml"
 milestone: M2
-status: todo
+status: in_progress
 kind: code
 size: M
 gates: full
@@ -14,12 +14,13 @@ consumes: ["relation:raw_records", "src/er/dbt_runner.py::run_dbt", "src/er/dbt_
 owns: ["dbt/models/staging/stg_crm.sql", "dbt/models/staging/stg_billing.sql", "dbt/models/staging/stg_webforms.sql", "dbt/models/staging/schema.yml", "tests/integration/scenarios/test_staging.py", "tests/unit/dbt/test_incremental_configs.py"]
 protected_paths: ["fixtures/static/base_10/base/crm.csv", "fixtures/static/base_10/base/billing.csv", "fixtures/static/base_10/base/webforms.csv"]
 extra_paths: ["dbt/dbt_project.yml"]
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/scenarios/test_staging.py -q && uv run pytest tests/unit/dbt/test_incremental_configs.py -q"
-branch: ""
+branch: "ticket/ER-042-stg-crm-stg-billing-stg-webforms"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "2abcfe433c322f74"
+updated_at: "2026-08-15T23:35:21Z"
+session: 8688ed0e-f55b-4955-8371-f16c2e0fbef5
 ---
 ## Description
 
