@@ -152,6 +152,9 @@ print(hashlib.sha256(p.read_bytes()).hexdigest()[:16] if p.exists() else "")')"
 # turn-scoped `allowed-tools` grant satisfying `dontAsk` -- that interaction is
 # not documented, and if it does not hold every board.py call is denied.
 # Paths are absolute and byte-identical to the ones SKILL.md tells Claude to run.
+# NO APOSTROPHES BELOW until the PY terminator. bash 3.2 (macOS) mis-parses an odd
+# number of ' characters inside a quoted heredoc nested in $( ), and the script
+# then dies with 'unexpected EOF while looking for matching'. Verified the hard way.
 SETTINGS_JSON="$(python3 - "$REPO_ROOT" <<'PY'
 import json, sys
 root = sys.argv[1]
@@ -166,6 +169,25 @@ allow = [
     "Bash(python3 scripts/board.py *)",
     "Bash(bash scripts/gates.sh *)",
     "Bash(./scripts/gates.sh *)",
+    # Step 6 runs each ticket OWN verify command, and 61 of the 104 tickets have a
+    # verify that is not a `uv` call. Derived by enumerating every verify on the
+    # board rather than guessing: itest.sh alone appears in 62 of them. Without these
+    # the agent cannot execute step 6 for most of the remaining board -- which is how
+    # ER-018 burned three attempts. Bare and argument forms both, because several
+    # verifies (actionlint.sh, compose_smoke.sh) take no arguments and `*` does not
+    # match empty.
+    "Bash(bash scripts/ci/itest.sh *)", "Bash(bash scripts/ci/itest.sh)",
+    "Bash(bash scripts/ci/bench.sh *)", "Bash(bash scripts/ci/bench.sh)",
+    "Bash(bash scripts/ci/actionlint.sh *)", "Bash(bash scripts/ci/actionlint.sh)",
+    "Bash(bash scripts/ci/compose_smoke.sh *)", "Bash(bash scripts/ci/compose_smoke.sh)",
+    f"Bash(bash {root}/scripts/ci/itest.sh *)",
+    f"Bash(bash {root}/scripts/ci/bench.sh *)",
+    f"Bash(bash {root}/scripts/ci/actionlint.sh *)",
+    f"Bash(bash {root}/scripts/ci/compose_smoke.sh *)",
+    "Bash(python3 scripts/lint_spec.py *)", "Bash(python3 scripts/lint_board.py *)",
+    f"Bash(python3 {root}/scripts/lint_spec.py *)",
+    f"Bash(python3 {root}/scripts/lint_board.py *)",
+    "Bash(docker run *)",
     "Bash(uv run pytest *)", "Bash(uv run ruff *)", "Bash(uv run mypy *)",
     "Bash(uv run dbt *)",
     "Bash(uv sync *)", "Bash(uv lock *)", "Bash(uv add *)",
@@ -177,7 +199,7 @@ allow = [
     # scripts/actionlint.py --version`) cannot be satisfied without this, so the
     # board does not start without it. It IS arbitrary code execution and so makes
     # the Edit/Write deny rules advisory rather than absolute; the backstops are the
-    # hygiene gate's protected-path diff and this driver's own post-iteration
+    # hygiene gate protected-path diff and this driver own post-iteration
     # `git diff` over the spec, skill and machinery (exit 8), neither of which the
     # agent can reach.
     "Bash(uv run python *)",
@@ -214,6 +236,19 @@ deny = [
 print(json.dumps({"permissions": {"allow": allow, "deny": deny}}))
 PY
 )"
+
+# Every ticket's verify command must be executable under the sandbox we just built.
+# Discovering otherwise costs three attempts and an auto-block per ticket, and it is
+# entirely knowable up front: the board declares every verify command, and the allow
+# list is right here. ER-018 burned three attempts proving this check was needed.
+VERIFY_UNCOVERED="$(printf '%s' "$SETTINGS_JSON" | python3 scripts/check_verify_perms.py 2>&1)"
+VERIFY_RC=$?
+if [[ $VERIFY_RC -ne 0 ]]; then
+  log "PREFLIGHT FAIL: some ticket verify commands are not permitted by the sandbox."
+  echo "$VERIFY_UNCOVERED"
+  die "add the missing allow rules to run-loop.sh before starting" 3
+fi
+[[ -n "$VERIFY_UNCOVERED" ]] && echo "$VERIFY_UNCOVERED"
 
 if [[ $DRY_RUN -eq 1 ]]; then
   log "dry run: preflight passed"
