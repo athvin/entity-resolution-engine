@@ -1,0 +1,67 @@
+# Per-source corruption profiles for the seeded synthetic corpus (DesignDoc.md S10.1).
+#
+# One block per `sources.<name>` of S6; `corruptions.py::load_profiles` rejects a
+# name absent from the config and a config source with no block here, so this file
+# and `configs/*.yaml` cannot drift apart silently.
+#
+# Every value is a rate in [0, 1] -- the fraction of a source's records the axis
+# fires on -- except `phone_form_weights`, which is an integer weight per surface.
+#
+# The three sources differ on purpose, and the ordering of the rates is the point
+# rather than the literals themselves: a corpus where every system is equally dirty
+# would make `sources.<name>.priority_rank` (S6 survivorship) untestable, because no
+# rule could prefer the better source's value over the worse one's.
+#
+#   crm       the operational system of record. Cleanest: entered by staff against a
+#             customer on the phone, so few typos and almost no missing contact
+#             details, but the most nickname use, because that is what the customer
+#             said their name was.
+#   billing   fed from contracts. Formal names (so the lowest nickname rate) and the
+#             lowest typo rate, but the staleness lives here: a billing address is
+#             updated when someone remembers to, which is what the S6
+#             `address: [recency, source_priority]` chain exists to arbitrate.
+#   webforms  self-service. The dirtiest on every axis: typed by the person
+#             themselves on a phone keyboard, with optional fields left blank.
+#
+# Missing rates name only `email`, `phone` and `birth_date`; `load_profiles` rejects
+# any other field, because the excluded ones feed the S6 blocking keys and nulling
+# one removes the record from candidate generation instead of corrupting it.
+
+crm:
+  typo_rate: 0.03
+  nickname_rate: 0.35
+  stale_address_rate: 0.04
+  missing_rates:
+    email: 0.03
+    phone: 0.02
+    birth_date: 0.06
+  phone_form_weights:
+    parens: 5
+    dashed: 3
+    e164: 2
+
+billing:
+  typo_rate: 0.02
+  nickname_rate: 0.05
+  stale_address_rate: 0.12
+  missing_rates:
+    email: 0.05
+    phone: 0.04
+    birth_date: 0.02
+  phone_form_weights:
+    dashed: 6
+    parens: 2
+    e164: 2
+
+webforms:
+  typo_rate: 0.08
+  nickname_rate: 0.25
+  stale_address_rate: 0.06
+  missing_rates:
+    email: 0.09
+    phone: 0.12
+    birth_date: 0.15
+  phone_form_weights:
+    e164: 4
+    dashed: 4
+    parens: 2
