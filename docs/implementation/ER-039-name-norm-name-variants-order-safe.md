@@ -2,7 +2,7 @@
 id: ER-039
 title: "name_norm + name_variants (order-safe SYMMETRY construction) + nickname_variants.csv seed (12 pairs incl. robert/bob/bobby)"
 milestone: M2
-status: in_progress
+status: done
 kind: code
 size: M
 gates: fast
@@ -17,9 +17,9 @@ extra_paths: []
 attempts: 1
 verify: "uv run pytest tests/unit/dbt/test_name_norm.py tests/unit/dbt/test_name_variants.py -q"
 branch: "ticket/ER-039-name-norm-name-variants-order-safe"
-commit: ""
+commit: "411befc594d43ed7028252f79808402958c2530a"
 spec_sha: "28d8d8e366a7b49b"
-updated_at: "2026-08-15T05:19:21Z"
+updated_at: "2026-08-15T05:31:12Z"
 session: 1673d8f7-25ae-49db-8207-d6c092e7d84b
 ---
 ## Description
