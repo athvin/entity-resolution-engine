@@ -2,7 +2,7 @@
 id: ER-021
 title: "dbt sources.yml from the registry + logical-key/accepted_values tests + canonical-pair singular test + T-KEY-1"
 milestone: M1
-status: todo
+status: blocked
 kind: code
 size: M
 gates: full
@@ -19,7 +19,7 @@ verify: "bash scripts/ci/itest.sh tests/integration/test_logical_keys.py -q && u
 branch: ""
 commit: ""
 spec_sha: "2abcfe433c322f74"
-updated_at: "2026-08-15T15:03:26Z"
+updated_at: "2026-08-15T17:47:09Z"
 session: 1edf5b0f-ea7d-4c46-82fc-ef17d631e62e
 ---
 ## Description
@@ -91,3 +91,12 @@ uv run mypy --strict src/er/lake/dbt_sources.py
 - No dbt model file and no model contract added
 - `dbt parse --target mem` green on a bare runner (no services)
 - ruff + `mypy --strict src/er` clean; verify command passes; board entry updated with provides
+
+## Blocker log
+
+### Attempt 1 — gate_failed (2026-08-15T17:47:09Z)
+
+- **Failing command:** `bash scripts/gates.sh --scope full --no-cache (driver re-verification on main)`
+- **Assertion / contradiction:** The ticket was marked done, but an independent full-ladder run on merged main failed. See /Users/athvin/github.com/athvin/entity-resolution-engine/.loop/runs/a7f1bd92-db8f-4c5f-b03a-f20830406907/reverify-ER-021.log
+- **Smallest change that would unblock:** Inspect branch loop-quarantine/ER-021, fix the failing gate, then unblock the ticket.
+- **Log:** `/Users/athvin/github.com/athvin/entity-resolution-engine/.loop/runs/a7f1bd92-db8f-4c5f-b03a-f20830406907/reverify-ER-021.log`
