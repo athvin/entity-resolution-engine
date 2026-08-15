@@ -1,0 +1,15 @@
+# SHA-pinned `uses:` references cannot float, which is the point of S9 -- so the only
+# way a pinned action is ever updated is a reviewed pull request. This file is what
+# opens it: Dependabot resolves each pinned SHA's tag from the trailing comment,
+# proposes the next release's SHA and rewrites the comment with it.
+#
+# Only the `github-actions` ecosystem. Python dependencies are pinned by `uv.lock`
+# against the literal versions of DesignDoc.md S2.1, and a bot bumping one of those
+# would put `uv.lock` and the spec table out of agreement -- which the static job's
+# spec lint fails on. Those bumps are spec amendments, not dependency updates.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

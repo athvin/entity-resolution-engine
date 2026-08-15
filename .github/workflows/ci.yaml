@@ -1,0 +1,116 @@
+# The PR path (DesignDoc.md S9.1). `benchmark.yaml` never runs here (G4).
+#
+# Three properties are load-bearing and are asserted by tests/unit/test_ci_workflow.py
+# rather than left to review:
+#   - every `uses:` is pinned to a release commit SHA with its tag in a trailing
+#     comment, which is what Dependabot bumps and what scripts/ci/actionlint.sh fails
+#     on; a tag is a moving target and a moving target is not a pin (S9);
+#   - `cache-to` is a QUOTED scalar -- unquoted, the comma would end the flow-mapping
+#     entry if this value were ever moved into flow style, and the buildx cache would
+#     silently degrade to inline-only;
+#   - `static` and `unit` have no `needs:`, so they run concurrently and the <10 min
+#     budget of S9.1 is enforced by the timeouts rather than hoped for.
+#
+# Deliberately absent until M5 (S12), because each references an artefact no earlier
+# milestone produces and a step that names a missing file turns every PR red for three
+# milestones:
+#   - `Baseline/dispatch parity` (`benchmarks/report.py --validate-baselines`), which
+#     needs report.py, the committed baselines and benchmark.yaml;
+#   - `Single metrics implementation` (`scripts/lint_metrics.py`), whose S8.5 subject
+#     `src/er/eval/metrics.py` does not exist yet.
+# `test_run_steps_reference_existing_files` enforces that absence mechanically.
+name: ci
+
+on:
+  pull_request:
+  push: { branches: [main] }
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@f0ec1fc3b38f5e7cd3d55c029b73096c30f19b40 # v10.0.1
+        with:
+          version: 0.11.3
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy --strict src/er
+      - name: actionlint
+        run: bash scripts/ci/actionlint.sh # downloads nothing; wraps the pinned binary
+      - name: Spec lint
+        run: uv run python scripts/lint_spec.py DesignDoc.md
+      - name: Board lint
+        run: uv run python scripts/lint_board.py
+      - run: uv run dbt deps --project-dir dbt
+      - run: uv run dbt parse --project-dir dbt --profiles-dir dbt/profiles --target mem
+
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@f0ec1fc3b38f5e7cd3d55c029b73096c30f19b40 # v10.0.1
+        with:
+          version: 0.11.3
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --frozen
+      - run: mkdir -p artifacts
+      - run: uv run dbt deps --project-dir dbt
+      - run: uv run dbt compile --project-dir dbt --profiles-dir dbt/profiles --target mem
+      - run: uv run pytest tests/unit -n auto -q --junitxml=artifacts/junit-unit.xml
+      - if: always()
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        with:
+          name: unit-artifacts
+          path: artifacts/
+          if-no-files-found: error
+
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: [static, unit]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3.7.1
+      - name: Build pipeline image (cached)
+        uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6.9.0
+        with:
+          context: .
+          file: docker/Dockerfile
+          load: true
+          tags: er-pipeline:ci
+          cache-from: type=gha
+          cache-to: "type=gha,mode=max" # quoted: unquoted, the comma ends the flow-mapping entry
+      - name: Reset substrate
+        run: |
+          mkdir -p artifacts
+          docker compose -f docker/compose.yaml --profile test down -v --remove-orphans
+      - name: Environment check (T-DOCTOR-1)
+        run: docker compose -f docker/compose.yaml --profile test run --rm pipeline er doctor
+      - name: Run integration suite
+        run: docker compose -f docker/compose.yaml --profile test run --rm pipeline
+             pytest tests/integration -q --maxfail=3
+             --junitxml=/app/artifacts/junit.xml --durations=20
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker/compose.yaml --profile test down -v --remove-orphans
+      - name: Collect artifacts (junit, dbt logs, run manifests)
+        if: always()
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        with:
+          name: integration-artifacts
+          path: artifacts/
+          if-no-files-found: error
