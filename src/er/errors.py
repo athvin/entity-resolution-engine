@@ -1,6 +1,8 @@
 """The S4.7 failure taxonomy and the S4.0 exit-code contract (DesignDoc.md S4.0, S4.7).
 
-Two tables are normative and live only here:
+:data:`ERROR_CLASS_TABLE` is S4.7's table, transcribed row for row, and it is the
+only place either of its columns is written down. Two views of it are exported
+because two callers ask different questions of the same row:
 
 * :data:`ERROR_CLASS_TO_EXIT` — every value of ``run_stages.error_class`` maps to
   exactly one S4.0 exit status. No stage may pick an exit code directly; it raises
@@ -9,6 +11,9 @@ Two tables are normative and live only here:
 * :data:`RETRYABLE` — S4.7's "Retryable" column. It is advisory to an operator and
   to nothing else: S4.7's non-goals forbid automatic retry loops anywhere in the
   CLI, so nothing in this package may read it and re-run a stage.
+
+Both are *derived* from the table rather than written beside it: a class whose exit
+code and retryability were stated in two places could be edited in one of them.
 
 Exit ``10`` sits deliberately outside the taxonomy. S4.0 makes it "nothing to do",
 which is a *successful* no-op that never aborts an ``er run-all`` chain, so it has
@@ -23,20 +28,25 @@ exposing an int ``code`` attribute instead of importing these types, and
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from enum import IntEnum, StrEnum
 from types import MappingProxyType
 from typing import ClassVar
 
 __all__ = [
+    "ERROR_CLASS_TABLE",
     "ERROR_CLASS_TO_EXIT",
     "RETRYABLE",
+    "UNCLASSIFIED",
     "ConfigError",
     "ErError",
     "ErrorClass",
+    "ErrorClassRow",
     "ExitCode",
     "NothingToDo",
     "PreconditionFailure",
     "StageFailure",
+    "classify",
     "exit_code_for",
 ]
 
@@ -68,33 +78,51 @@ class ErrorClass(StrEnum):
     DATA = "data"
 
 
-#: S4.7's "Exit" column. Total over :class:`ErrorClass` by construction — a class
-#: with no exit code would leave a stage unable to terminate.
-ERROR_CLASS_TO_EXIT: Mapping[ErrorClass, ExitCode] = MappingProxyType(
+@dataclass(frozen=True)
+class ErrorClassRow:
+    """One row of S4.7's table: a class, its exit status, its retry verdict."""
+
+    error_class: ErrorClass
+    exit_code: ExitCode
+    retryable: bool
+
+
+#: S4.7's table. Total over :class:`ErrorClass` by construction — a class with no
+#: row would leave a stage unable to terminate — and it is the only transcription
+#: of it in the codebase.
+#:
+#: ``retryable`` is true for exactly the two classes whose cause is outside the run:
+#: a transient I/O fault, and another writer holding the tenant lock.
+ERROR_CLASS_TABLE: Mapping[ErrorClass, ErrorClassRow] = MappingProxyType(
     {
-        ErrorClass.TRANSIENT_IO: ExitCode.STAGE_FAILURE,
-        ErrorClass.LOCK_CONFLICT: ExitCode.PRECONDITION,
-        ErrorClass.PRECONDITION: ExitCode.PRECONDITION,
-        ErrorClass.CONFIG: ExitCode.CONFIG,
-        ErrorClass.CONTRADICTION: ExitCode.STAGE_FAILURE,
-        ErrorClass.NON_CONVERGENCE: ExitCode.STAGE_FAILURE,
-        ErrorClass.DATA: ExitCode.STAGE_FAILURE,
+        row.error_class: row
+        for row in (
+            ErrorClassRow(ErrorClass.TRANSIENT_IO, ExitCode.STAGE_FAILURE, True),
+            ErrorClassRow(ErrorClass.LOCK_CONFLICT, ExitCode.PRECONDITION, True),
+            ErrorClassRow(ErrorClass.PRECONDITION, ExitCode.PRECONDITION, False),
+            ErrorClassRow(ErrorClass.CONFIG, ExitCode.CONFIG, False),
+            ErrorClassRow(ErrorClass.CONTRADICTION, ExitCode.STAGE_FAILURE, False),
+            ErrorClassRow(ErrorClass.NON_CONVERGENCE, ExitCode.STAGE_FAILURE, False),
+            ErrorClassRow(ErrorClass.DATA, ExitCode.STAGE_FAILURE, False),
+        )
     }
 )
 
-#: S4.7's "Retryable" column: true for exactly the two classes whose cause is
-#: outside the run — a transient I/O fault and another writer holding the lock.
-RETRYABLE: Mapping[ErrorClass, bool] = MappingProxyType(
-    {
-        ErrorClass.TRANSIENT_IO: True,
-        ErrorClass.LOCK_CONFLICT: True,
-        ErrorClass.PRECONDITION: False,
-        ErrorClass.CONFIG: False,
-        ErrorClass.CONTRADICTION: False,
-        ErrorClass.NON_CONVERGENCE: False,
-        ErrorClass.DATA: False,
-    }
+#: S4.7's "Exit" column, as ER-014 named it.
+ERROR_CLASS_TO_EXIT: Mapping[ErrorClass, ExitCode] = MappingProxyType(
+    {error_class: row.exit_code for error_class, row in ERROR_CLASS_TABLE.items()}
 )
+
+#: S4.7's "Retryable" column, as ER-014 named it.
+RETRYABLE: Mapping[ErrorClass, bool] = MappingProxyType(
+    {error_class: row.retryable for error_class, row in ERROR_CLASS_TABLE.items()}
+)
+
+#: The class an unclassified failure is recorded under. S4.7 gives `data` the
+#: broadest examples ("unparsable source file … uniqueness test failure") and exit
+#: `1`, which is also what an unhandled exception must exit with, so an unclassified
+#: failure lands in a row that is true of it rather than in an eighth invented one.
+UNCLASSIFIED: ErrorClass = ErrorClass.DATA
 
 
 class ErError(Exception):
@@ -209,3 +237,26 @@ def exit_code_for(exc: BaseException) -> int:
     if isinstance(code, bool) or not isinstance(code, int):
         return int(ExitCode.STAGE_FAILURE)
     return code if code in _KNOWN_EXITS else int(ExitCode.STAGE_FAILURE)
+
+
+def classify(exc: BaseException) -> ErrorClass:
+    """Return the S4.7 row ``exc`` is recorded under in ``run_stages.error_class``.
+
+    The question is "which row does this FAILURE go in", and it is total over every
+    exception because a ``failed`` stage with a NULL ``error_class`` tells an operator
+    nothing at all. An exception that names its class is honoured; everything else is
+    :data:`UNCLASSIFIED`.
+
+    The exit status is deliberately NOT re-derived here. :func:`exit_code_for` also
+    honours the bare int ``code`` attribute of the modules that predate the taxonomy
+    (``er.lake.env.EnvError.code == 2``), and those carry no class — so for them the
+    code is right and the class is a fallback, which is only sound because they raise
+    before any ``run_stages`` row exists to be classified.
+
+    :class:`NothingToDo` is not a failure and is never passed here by the CLI; it has
+    no class, and calling this on it would answer a question S4.7 does not ask.
+    """
+    error_class = getattr(exc, "error_class", None)
+    if isinstance(error_class, ErrorClass):
+        return error_class
+    return UNCLASSIFIED

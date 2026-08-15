@@ -32,9 +32,15 @@ nothing: `er init` creates the very relations the rows go in, and `er lake reset
 destroys them — and S4.0b forbids holding an attachment across either. They still
 emit their stage record, because telemetry is unconditional.
 
-Out of scope by construction, and owned by later tickets: the advisory lock on every
-other mutating command and ``--resume`` (ER-024),
-and the ``--mode incremental`` config-drift guard (ER-034). The dbt subprocess and
+Every mutating command now runs inside the S4.0b writer lock (ER-024), taken before
+the :class:`~er.obs.runctx.RunContext` is entered so a refused invocation writes
+nothing at all — not even the `runs` row that would otherwise record a run that never
+ran (T-CONC-1). ``er run-all --resume`` restarts a failed run from its first
+non-`succeeded` stage under that same lock.
+
+Out of scope by construction, and owned by a later ticket: the ``--mode incremental``
+config-drift guard on `(config_hash, model_version, std_version)` and
+``--allow-escalate`` (ER-034). The dbt subprocess and
 the ``--vars`` payload moved to ``er.dbt_runner`` with ER-033; ``dbt_vars`` here is
 that module's :func:`~er.dbt_runner.render_dbt_vars` under its ER-014 name, not a
 second builder of the mapping.
@@ -44,8 +50,9 @@ from __future__ import annotations
 
 import json
 import sys
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import ExitStack, contextmanager
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Annotated, Protocol
 
@@ -56,14 +63,28 @@ from er.config.loader import ConfigValidationError, load_config
 from er.config.schema import Config
 from er.dbt_runner import render_dbt_vars
 from er.entities.ids import IdFactory, UlidFactory
-from er.errors import ErError, ErrorClass, ExitCode, StageFailure, exit_code_for
+from er.errors import (
+    ConfigError,
+    ErError,
+    ErrorClass,
+    ExitCode,
+    PreconditionFailure,
+    StageFailure,
+    classify,
+    exit_code_for,
+)
+from er.lake.catalog import tenant_lock
 from er.lake.ducklake import connect
+from er.lake.env import MissingEnvError
 from er.lake.init import init_lake, reset_lake
 from er.obs.logging import emit_stage_record
 from er.obs.runctx import RunContext
+from er.resume import ResumePlan, read_resume_rows, resume_plan
 
 __all__ = [
     "COMMANDS",
+    "MUTATING_COMMANDS",
+    "READ_ONLY_COMMANDS",
     "GlobalOptions",
     "NoOpStage",
     "NotImplementedStage",
@@ -109,6 +130,39 @@ _MODES: tuple[str, str] = ("incremental", "full")
 #: ``runs.mode`` for a standalone stage invocation outside a ``run-all`` chain (S5);
 #: the chains and the lifecycle verbs pass their own value.
 _MODE_STAGE: str = "stage"
+
+#: Every command that mutates the namespace and therefore takes the S4.0b writer
+#: lock, as the path a user types after ``er``. S4.7 names this set; ``assert`` is
+#: here for all three of its verbs, and ``review`` only for ``resolve``.
+MUTATING_COMMANDS: frozenset[str] = frozenset(
+    {
+        "init",
+        "ingest",
+        "standardize",
+        "train",
+        "match",
+        "reconcile",
+        "assemble",
+        "run-all",
+        "correct",
+        "assert",
+        "review resolve",
+        "lake maintain",
+        "lake reset",
+    }
+)
+
+#: The two commands S4.7 excludes from the lock: both only read. Stated as its own
+#: set rather than inferred from the complement, so a command added to S4.0's table
+#: and to neither set here is a visible omission rather than a silent read-only one.
+READ_ONLY_COMMANDS: frozenset[str] = frozenset({"doctor", "review list"})
+
+#: The mutating command that takes the lock deeper down instead of here.
+#: :func:`~er.lake.init.reset_lake` drops the catalog metadata schema on the lock's
+#: OWN connection, because the drop has to happen inside the critical section rather
+#: than merely after it — so taking the lock here as well would be a second session
+#: contending with the first, and every `er lake reset` would refuse itself.
+_LOCKED_DEEPER: frozenset[str] = frozenset({"lake reset"})
 
 
 @dataclass(frozen=True)
@@ -290,6 +344,47 @@ def _tenant_of(options: GlobalOptions) -> str | None:
     return None if options.config is None else options.config.tenant
 
 
+@contextmanager
+def _writer_lock(command: str, options: GlobalOptions) -> Iterator[None]:
+    """Hold the S4.0b writer lock for ``command``, or refuse the invocation (S4.7).
+
+    Entered **outside** the :class:`~er.obs.runctx.RunContext` by every caller, which
+    is the whole point: S4.7 requires a refused writer to write nothing at all, and a
+    `runs` row minted before the lock was tried would be a ledger entry for a run that
+    never ran. T-CONC-1 asserts exactly that absence.
+
+    Two invocations pass through unlocked, and both are the same judgement the rest of
+    this module already makes:
+
+    * a command with no validated document has no ``tenant`` to key the lock on — S4.0
+      lists lake env only for `er init`, `er doctor` and `er lake maintain`, so running
+      without one is legitimate — exactly as :func:`_run_context` persists nothing when
+      the document is absent;
+    * a process with no ``$ER_CATALOG_DSN`` has no catalog to take a lock on, and so no
+      second writer that could exist to contend with it. This is what lets the S8.4
+      unit layer exercise the command tree on a bare runner with no services.
+
+    Raises:
+        typer.Exit: exit ``3`` when another writer holds the lock, after writing S4.7's
+            literal message to stderr.
+    """
+    tenant = _tenant_of(options)
+    if tenant is None or command not in MUTATING_COMMANDS or command in _LOCKED_DEEPER:
+        yield
+        return
+    with ExitStack() as held:
+        try:
+            held.enter_context(tenant_lock(tenant, run_id=options.run_id))
+        except MissingEnvError:
+            pass
+        except PreconditionFailure as exc:
+            # stderr, not stdout: stdout is the command's output, and a caller piping
+            # it must not have to parse a refusal out of the manifest it asked for.
+            sys.stderr.write(f"{exc}\n")
+            raise typer.Exit(exit_code_for(exc)) from exc
+        yield
+
+
 def _stage_for(name: str, args: Sequence[str] = ()) -> Stage:
     """The stage M1 ships for ``name``: a no-op stub if ``run-all`` chains it."""
     flags = tuple(args)
@@ -372,7 +467,13 @@ class _Outcome:
     record: dict[str, object] = field(default_factory=dict)
 
 
-def _run_context(options: GlobalOptions, *, mode: str, persist: bool = True) -> RunContext:
+def _run_context(
+    options: GlobalOptions,
+    *,
+    mode: str,
+    persist: bool = True,
+    model_version: str | None = None,
+) -> RunContext:
     """The recorder this invocation runs inside (S5.2).
 
     ``persist=False`` is for the two namespace lifecycle verbs and nothing else:
@@ -384,6 +485,10 @@ def _run_context(options: GlobalOptions, *, mode: str, persist: bool = True) -> 
     ``tenant``, ``config_hash``, ``std_version`` and ``survivorship_version``, and
     all four come from the document — which :class:`~er.obs.runctx.RunContext`
     decides for itself from the values it is given.
+
+    ``model_version`` is supplied only by `--resume`, which pins the resumed run to
+    the one it was recorded under (S4.7). Every other invocation leaves it ``None``
+    and the stage that resolves the ``status='active'`` row sets it.
     """
     document = options.config
     return RunContext(
@@ -391,6 +496,7 @@ def _run_context(options: GlobalOptions, *, mode: str, persist: bool = True) -> 
         mode=mode,
         tenant=None if document is None else document.tenant,
         config_hash=options.config_hash,
+        model_version=model_version,
         std_version=None if document is None else document.versions.std_version,
         survivorship_version=(None if document is None else document.versions.survivorship_version),
         source=connect if persist else None,
@@ -411,7 +517,9 @@ def _execute(stage: Stage, options: GlobalOptions, run: RunContext) -> _Outcome:
             code = stage.run(options)
         except ErError as exc:
             code = exit_code_for(exc)
-            stage_run.finish(code, error_class=exc.error_class, error_detail=exc.detail)
+            # Classified through the S4.7 table rather than off the exception, so the
+            # value reaching `run_stages.error_class` is always one of the seven rows.
+            stage_run.finish(code, error_class=classify(exc), error_detail=exc.detail)
         else:
             stage_run.finish(code)
     return _Outcome(
@@ -463,20 +571,29 @@ def _run_single(
     args: Sequence[str] = (),
     *,
     mode: str = _MODE_STAGE,
+    command: str | None = None,
 ) -> None:
     """Execute one stage as a standalone command and exit with its code.
 
     ``typer.Exit`` is raised after the context closes, never inside it: an exception
     escaping the stage body is how :class:`~er.obs.runctx.RunContext` learns the run
     failed, and an ordinary exit code is not a failure.
+
+    Args:
+        command: the S4.0 command path, when it differs from the stage name — `er lake
+            maintain` writes a `maintain` stage, and `er review` is two commands under
+            one stage. It decides whether the writer lock is taken (S4.7).
     """
-    with _run_context(options, mode=mode) as run:
+    with (
+        _writer_lock(name if command is None else command, options),
+        _run_context(options, mode=mode) as run,
+    ):
         outcome = _execute(_stage_for(name, args), options, run)
     _report(outcome, options)
     raise typer.Exit(outcome.exit_code)
 
 
-def _run_command(stage: Stage, options: GlobalOptions, *, mode: str) -> None:
+def _run_command(stage: Stage, options: GlobalOptions, *, mode: str, command: str) -> None:
     """Execute a stage that writes its OWN stdout, and exit with its code.
 
     Distinct from :func:`_run_single` in exactly one way, and it is a contract and
@@ -492,23 +609,37 @@ def _run_command(stage: Stage, options: GlobalOptions, *, mode: str) -> None:
     Both commands it serves are namespace lifecycle verbs, so neither persists a
     `runs` row (see :func:`_run_context`).
     """
-    with _run_context(options, mode=mode, persist=False) as run:
+    with (
+        _writer_lock(command, options),
+        _run_context(options, mode=mode, persist=False) as run,
+    ):
         outcome = _execute(stage, options, run)
     if outcome.error_detail is not None:
         sys.stderr.write(outcome.error_detail + "\n")
     raise typer.Exit(outcome.exit_code)
 
 
-def _run_chain(stages: Sequence[Stage], options: GlobalOptions, *, mode: str) -> None:
+def _run_chain(
+    stages: Sequence[Stage],
+    options: GlobalOptions,
+    *,
+    mode: str,
+    model_version: str | None = None,
+) -> None:
     """Execute a chain, apply the S4.0 propagation rule, and exit with its code.
 
     ``10`` never aborts: a stage with nothing to do leaves the downstream stages
     to discover the same thing for themselves. The first exit that is neither
     ``0`` nor ``10`` stops the chain and becomes the process's status.
+
+    Unlike :func:`_run_single`, this does NOT take the writer lock: its one caller
+    holds it already, because with ``--resume`` the chain itself is only knowable from
+    `run_stages`, and reading that ledger while another writer is midway through it
+    would plan a restart from a stage that is running.
     """
     final = int(ExitCode.SUCCESS)
     executed = 0
-    with _run_context(options, mode=mode) as run:
+    with _run_context(options, mode=mode, model_version=model_version) as run:
         for stage in stages:
             outcome = _execute(stage, options, run)
             executed += 1
@@ -522,6 +653,58 @@ def _run_chain(stages: Sequence[Stage], options: GlobalOptions, *, mode: str) ->
         options,
     )
     raise typer.Exit(final)
+
+
+def _resume(run_id: str, options: GlobalOptions) -> ResumePlan:
+    """The S4.7 plan for ``--resume <run_id>``, or the refusal it earns.
+
+    Called with the writer lock already held, so the ledger it reads cannot change
+    underneath it. The refusals are :mod:`er.resume`'s — exit ``2`` on a config-hash
+    mismatch, exit ``3`` on a run with nothing to resume — and this only gives them
+    the run id and a stderr line, because an operator who typed a `run_id` needs to
+    see which one was refused.
+    """
+    if options.config_hash is None:
+        # Unreachable through the command tree: `run-all` lists ER_CONFIG in its S4.0
+        # required-env column, so `GlobalOptions.resolve` has already exited 2 without
+        # a document. Stated rather than asserted, so the value that is compared
+        # against `runs.config_hash` can never be a `None` that matches nothing.
+        raise typer.Exit(
+            _refuse(run_id, ConfigError("--resume needs the S6 document the run was hashed from"))
+        )
+    try:
+        with connect() as connection:
+            rows = read_resume_rows(connection, run_id)
+        return resume_plan(rows, options.config_hash)
+    except ErError as exc:
+        raise typer.Exit(_refuse(run_id, exc)) from exc
+
+
+def _refuse(run_id: str, exc: ErError) -> int:
+    """Report a `--resume` refusal on stderr and return its S4.0 exit status."""
+    sys.stderr.write(f"--resume {run_id}: {exc}\n")
+    return exit_code_for(exc)
+
+
+def _resume_chain(plan: ResumePlan, stages: Sequence[Stage]) -> list[Stage]:
+    """``stages`` from :attr:`~er.resume.ResumePlan.resume_from` onwards (S4.7).
+
+    Sliced, never filtered: S4.7 restarts *the chain* from the failed stage, so every
+    stage after it runs again too — the failed stage's downstream neighbours never ran
+    at all, and the ones that did are before the slice.
+
+    Raises:
+        er.errors.PreconditionFailure: the stage to restart from is not in this chain,
+            which is what `--resume` of a run that ingested plus ``--skip-ingest``
+            looks like. Exit ``3``, and no stage runs.
+    """
+    names = [stage.name for stage in stages]
+    if plan.resume_from not in names:
+        raise PreconditionFailure(
+            f"run {plan.run_id} stopped at stage {plan.resume_from!r}, "
+            f"which is not in the {plan.mode} chain being resumed: {names}"
+        )
+    return list(stages[names.index(plan.resume_from) :])
 
 
 # --- the S4.0 command tree -------------------------------------------------
@@ -581,7 +764,9 @@ def init(
     options = GlobalOptions.resolve(
         config_path=config, run_id=run_id, json_output=json_output, require_config=False
     )
-    _run_command(_InitStage(args=("--force",) if force else ()), options, mode="init")
+    _run_command(
+        _InitStage(args=("--force",) if force else ()), options, mode="init", command="init"
+    )
 
 
 @app.command()
@@ -726,6 +911,13 @@ def run_all(
     """Run the whole chain under one run_id (S4.0).
 
     It never trains, and it mints exactly one ``run_id`` for every child stage.
+
+    ``--resume RUN_ID`` restarts that run from its first non-`succeeded` stage under
+    its original `run_id` and `config_hash` (S4.7). The chain it restarts is the one
+    the run was recorded under — `runs.mode`, not the ``--mode`` on this command line:
+    the stages already in `run_stages` belong to that chain, and re-executing the rest
+    of a different one would append stages to a run they were never part of. ``--mode``
+    stays required because S4.0's table requires it.
     """
     if not skip_ingest and (source is None or path is None):
         # Rejected before ANY stage runs, and exit 2 rather than 3: this is a
@@ -735,10 +927,28 @@ def run_all(
             param_hint="--source/--path",
         )
     options = GlobalOptions.resolve(config_path=config, run_id=run_id, json_output=json_output)
-    chain = run_all_chain(
-        mode, skip_ingest, source=source, path=None if path is None else str(path)
-    )
-    _run_chain(chain, options, mode=mode)
+    delivery = None if path is None else str(path)
+    with _writer_lock("run-all", options):
+        if resume is None:
+            chain = run_all_chain(mode, skip_ingest, source=source, path=delivery)
+            _run_chain(chain, options, mode=mode)
+            return
+        plan = _resume(resume, options)
+        try:
+            chain = _resume_chain(
+                plan, run_all_chain(plan.mode, skip_ingest, source=source, path=delivery)
+            )
+        except ErError as exc:
+            raise typer.Exit(_refuse(resume, exc)) from exc
+        # The run is re-entered, not re-minted: `RunContext` returns the existing
+        # `runs` row to `running` and each re-executed stage updates its own row and
+        # keeps its `seq`, so `(run_id, stage)` still holds exactly one row (S5.2).
+        _run_chain(
+            chain,
+            replace(options, run_id=plan.run_id, config_hash=plan.config_hash),
+            mode=plan.mode,
+            model_version=plan.model_version,
+        )
 
 
 @app.command()
@@ -798,7 +1008,11 @@ def review(
 ) -> None:
     """List or resolve the gray-band review queue (S4.3.5)."""
     options = GlobalOptions.resolve(config_path=config, run_id=run_id, json_output=json_output)
-    _run_single("review", options, (action,))
+    # `list` is the only read-only verb S4.7 names, so anything else takes the lock —
+    # including a verb that does not exist. A misspelling that skipped the lock would
+    # be a writer's refusal turned into an unlocked run by a typo.
+    verb = "review list" if action == "list" else "review resolve"
+    _run_single("review", options, (action,), command=verb)
 
 
 @lake_app.command("maintain")
@@ -812,7 +1026,13 @@ def lake_maintain(
     options = GlobalOptions.resolve(
         config_path=config, run_id=run_id, json_output=json_output, require_config=False
     )
-    _run_single("maintain", options, ("--retain-days", str(retain_days)), mode="maintain")
+    _run_single(
+        "maintain",
+        options,
+        ("--retain-days", str(retain_days)),
+        mode="maintain",
+        command="lake maintain",
+    )
 
 
 @lake_app.command("reset")
@@ -835,6 +1055,7 @@ def lake_reset(
         _ResetStage(confirm_tenant=confirm_tenant, args=("--confirm-tenant", confirm_tenant)),
         options,
         mode="reset",
+        command="lake reset",
     )
 
 

@@ -30,13 +30,18 @@ from er.errors import ErrorClass, PreconditionFailure
 from er.lake.env import require_env
 
 __all__ = [
+    "LOCK_APPLICATION_PREFIX",
+    "LOCK_HELD_MESSAGE",
+    "UNKNOWN_RUN",
     "advisory_lock",
     "advisory_lock_key",
     "catalog_connect",
     "drop_metadata_schema",
+    "lock_holder_run_id",
     "metadata_schema_exists",
     "read_data_path",
     "server_version",
+    "tenant_lock",
     "try_advisory_lock",
 ]
 
@@ -53,6 +58,30 @@ _DATA_PATH_KEY: Final[str] = "data_path"
 # `hash()` per process, and two processes that derived different keys for one tenant
 # would both believe they held the lock.
 _KEY_BYTES: Final[int] = 8
+
+#: The refusal S4.7 spells literally: "failure to acquire exits `3` with the literal
+#: message ``writer lock held for tenant <t> by run <run_id>``". A format string
+#: rather than an f-string at the raise site, so the wording has one definition and a
+#: test can assert the rendered message against it.
+LOCK_HELD_MESSAGE: Final[str] = "writer lock held for tenant {tenant} by run {run_id}"
+
+#: How a writer advertises which run holds the lock: its `application_name` becomes
+#: this prefix followed by the `run_id`. Postgres already ties that string to the
+#: session, so a writer that dies takes its advertisement with it exactly as it takes
+#: the lock -- which a row in a table naming the holder would not.
+LOCK_APPLICATION_PREFIX: Final[str] = "er-writer:"
+
+#: The `<run_id>` of the message when the holder did not advertise one, or released
+#: between the refused acquire and the lookup. The refusal is still exit `3` and the
+#: message still has S4.7's shape; only the name of the other writer is unavailable.
+UNKNOWN_RUN: Final[str] = "unknown"
+
+# `pg_locks` splits a 64-bit advisory key across two `oid` columns and records
+# `objsubid = 1` for the single-bigint form of the lock (`= 2` is the 32/32 form,
+# which this project never takes).
+_ADVISORY_OBJSUBID: Final[int] = 1
+_UINT32_MASK: Final[int] = 0xFFFFFFFF
+_UINT64_MASK: Final[int] = 0xFFFFFFFFFFFFFFFF
 
 
 @contextmanager
@@ -138,8 +167,38 @@ def advisory_lock_key(tenant: str) -> int:
     return int.from_bytes(digest, "big", signed=True)
 
 
+def lock_holder_run_id(connection: CatalogConnection, key: int) -> str:
+    """The `run_id` of the session currently holding ``key``, or :data:`UNKNOWN_RUN`.
+
+    Read from ``pg_locks`` joined to ``pg_stat_activity`` rather than from a table of
+    this project's own: the holder is identified by a live session, and any record
+    outside Postgres could outlive the session it names — which is the one thing a
+    contended-lock message must never do.
+
+    ``classid``/``objid`` are compared as ``bigint`` because they are declared ``oid``,
+    which has no implicit comparison against a 64-bit parameter.
+    """
+    unsigned = key & _UINT64_MASK
+    row = connection.execute(
+        "SELECT activity.application_name "
+        "FROM pg_locks AS lock "
+        "JOIN pg_stat_activity AS activity ON activity.pid = lock.pid "
+        "WHERE lock.locktype = 'advisory' AND lock.granted "
+        "AND lock.classid::bigint = %s AND lock.objid::bigint = %s AND lock.objsubid = %s",
+        (unsigned >> 32, unsigned & _UINT32_MASK, _ADVISORY_OBJSUBID),
+    ).fetchone()
+    if row is None or not row[0]:
+        return UNKNOWN_RUN
+    name = str(row[0])
+    if not name.startswith(LOCK_APPLICATION_PREFIX):
+        return UNKNOWN_RUN
+    return name[len(LOCK_APPLICATION_PREFIX) :]
+
+
 @contextmanager
-def advisory_lock(tenant: str, dsn: str | None = None) -> Iterator[CatalogConnection]:
+def tenant_lock(
+    tenant: str, *, run_id: str | None = None, dsn: str | None = None
+) -> Iterator[CatalogConnection]:
     """Hold the S4.0b single-writer lock for ``tenant`` for the life of the block.
 
     The lock takes a connection of its own, opened here and closed in the ``finally``.
@@ -148,24 +207,56 @@ def advisory_lock(tenant: str, dsn: str | None = None) -> Iterator[CatalogConnec
     silently disappear while the writer kept running. Closing the connection is also
     what makes release unconditional — an explicit ``pg_advisory_unlock`` that never
     ran because the block raised would leave the namespace locked until the process
-    died.
+    died, and S4.7 requires a failed run to be followed by a successful acquire with
+    no manual unlock step.
 
     Refusal is exit ``3`` (S4.0b: "Failure to acquire exits 3"), raised as a
     :class:`~er.errors.PreconditionFailure` classified ``lock_conflict`` so the
-    operator sees a contended namespace rather than a generic precondition.
+    operator sees a contended namespace rather than a generic precondition, and
+    carrying S4.7's literal :data:`LOCK_HELD_MESSAGE`. It happens **before** anything
+    is written: a caller that had already recorded its `runs` row would leave a ledger
+    entry for a run that never ran (T-CONC-1).
+
+    Args:
+        tenant: the namespace this writer locks, per S1 and S4.0b — the name of the
+            (metadata schema, data path) pair, never a row-level discriminator.
+        run_id: advertised on the session so the next contender can name this writer.
+            ``None`` for a caller that has no run to name, whose contender then reads
+            :data:`UNKNOWN_RUN`.
+        dsn: defaults to ``$ER_CATALOG_DSN``.
     """
     key = advisory_lock_key(tenant)
     with catalog_connect(dsn) as connection:
+        if run_id is not None:
+            # `set_config` rather than `SET application_name = …`: SET takes no bound
+            # parameter, and a run id pasted into the statement text would be the one
+            # unescaped value in this module.
+            connection.execute(
+                "SELECT set_config('application_name', %s, false)",
+                (f"{LOCK_APPLICATION_PREFIX}{run_id}",),
+            )
         row = connection.execute("SELECT pg_try_advisory_lock(%s)", (key,)).fetchone()
         if row is None or not row[0]:
             raise PreconditionFailure(
-                f"advisory lock for tenant {tenant!r} is held by another writer",
+                LOCK_HELD_MESSAGE.format(tenant=tenant, run_id=lock_holder_run_id(connection, key)),
                 error_class=ErrorClass.LOCK_CONFLICT,
             )
         try:
             yield connection
         finally:
             connection.execute("SELECT pg_advisory_unlock(%s)", (key,))
+
+
+@contextmanager
+def advisory_lock(tenant: str, dsn: str | None = None) -> Iterator[CatalogConnection]:
+    """ER-015's name for :func:`tenant_lock`, kept for the callers that use it.
+
+    It delegates rather than duplicating: two functions able to acquire the lock is
+    two places the S4.0b critical section could be entered, and the second one would
+    inevitably drift from the first.
+    """
+    with tenant_lock(tenant, dsn=dsn) as connection:
+        yield connection
 
 
 def try_advisory_lock(tenant: str, dsn: str | None = None) -> bool:
