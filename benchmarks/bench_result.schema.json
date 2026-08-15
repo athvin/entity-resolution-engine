@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/athvin/entity-resolution-engine/benchmarks/bench_result.schema.json",
+  "title": "benchmark run document",
+  "description": "The shape of artifacts/bench/latest.json and of every committed baseline under benchmarks/baselines/ (DesignDoc.md S10.3, S10.4, S10.5). Additional keys are permitted so a later measurement can be added without invalidating committed baselines; the `required` sets below are the contract, and every one of them is something a downstream consumer would otherwise KeyError on.",
+  "type": "object",
+  "required": [
+    "scale",
+    "verdict",
+    "repeat",
+    "incremental_ratio",
+    "blocking_recall",
+    "fingerprint",
+    "phases",
+    "memory",
+    "quality"
+  ],
+  "properties": {
+    "scale": {
+      "description": "The S10.2 scale this run measured. A run is compared against its own scale's row and no other.",
+      "type": "string",
+      "enum": ["smoke", "10k", "100k", "1m"]
+    },
+    "verdict": {
+      "description": "S10.3's verdict, written into the run JSON and printed as the last line of stdout.",
+      "type": "string",
+      "enum": ["OK", "NO_BASELINE", "REGRESSION", "NON_COMPARABLE"]
+    },
+    "repeat": {
+      "description": "Number of measured passes the medians and CVs below were computed over (--repeat, default 3).",
+      "type": "integer",
+      "minimum": 1
+    },
+    "incremental_ratio": {
+      "description": "S10.3's headline G3 number: phase 6 wall time divided by the summed wall time of phases 1+2+4+5.",
+      "type": "number",
+      "minimum": 0
+    },
+    "blocking_recall": {
+      "description": "S8.5 pins this as a required key of artifacts/bench/latest.json, so it is hoisted to the top level rather than left inside `quality`: it is the only quality number that can fall when a blocking rule stops emitting a key, and edge-level recall hides that failure entirely.",
+      "type": "number",
+      "minimum": 0
+    },
+    "fingerprint": {
+      "description": "S10.4's environment fingerprint. Every field is either an input to the NON-COMPARABLE rule or the diagnostic that identifies the host class.",
+      "type": "object",
+      "required": [
+        "scale",
+        "image_digest",
+        "git_sha",
+        "runner",
+        "cgroup_cpu_max",
+        "cgroup_memory_max",
+        "cgroup_memory_peak",
+        "nproc",
+        "er_duckdb_threads",
+        "er_duckdb_memory_limit",
+        "duckdb_version",
+        "splink_version",
+        "dbt_core_version",
+        "dbt_duckdb_version",
+        "ducklake_extension_version",
+        "config_hash",
+        "generator_seed",
+        "model_version",
+        "tf_snapshot_id"
+      ],
+      "properties": {
+        "scale": { "type": "string" },
+        "image_digest": { "type": "string" },
+        "git_sha": { "type": "string" },
+        "runner": { "type": "string" },
+        "cgroup_cpu_max": {
+          "description": "/sys/fs/cgroup/cpu.max as read, e.g. \"600000 100000\". Stored verbatim because S10.4 derives the quota as quota/period and a pre-divided number loses the period the division used.",
+          "type": "string"
+        },
+        "cgroup_memory_max": { "type": "integer", "minimum": 0 },
+        "cgroup_memory_peak": { "type": "integer", "minimum": 0 },
+        "nproc": {
+          "description": "In-container nproc. A DIAGNOSTIC with no gate authority: `cpus` is a quota and not a cpuset, so this reports the host core count regardless of the limit (S10.4).",
+          "type": "integer",
+          "minimum": 1
+        },
+        "er_duckdb_threads": { "type": "integer", "minimum": 1 },
+        "er_duckdb_memory_limit": { "type": "string" },
+        "duckdb_version": { "type": "string" },
+        "splink_version": { "type": "string" },
+        "dbt_core_version": { "type": "string" },
+        "dbt_duckdb_version": { "type": "string" },
+        "ducklake_extension_version": { "type": "string" },
+        "config_hash": { "type": "string" },
+        "generator_seed": { "type": "integer" },
+        "model_version": { "type": "string" },
+        "tf_snapshot_id": { "type": "string" }
+      }
+    },
+    "phases": {
+      "description": "The S10.3 measured phases in execution order, each carrying the six per-phase metrics plus the coefficient of variation of wall_ms across the --repeat passes.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "wall_ms",
+          "wall_ms_cv",
+          "records_per_sec",
+          "candidate_pair_count",
+          "pairs_above_auto_merge",
+          "memory_peak_bytes",
+          "snapshot_count"
+        ],
+        "properties": {
+          "name": { "type": "string" },
+          "wall_ms": {
+            "description": "Median across passes of the monotonic clock around the stage.",
+            "type": "number",
+            "minimum": 0
+          },
+          "wall_ms_cv": {
+            "description": "stdev/mean of wall_ms across passes. Above 0.15 the run is NON_COMPARABLE (S10.4).",
+            "type": "number",
+            "minimum": 0
+          },
+          "records_per_sec": {
+            "description": "rows_out / (wall_ms / 1000) -- per second, not per millisecond.",
+            "type": "number",
+            "minimum": 0
+          },
+          "candidate_pair_count": { "type": "integer", "minimum": 0 },
+          "pairs_above_auto_merge": { "type": "integer", "minimum": 0 },
+          "memory_peak_bytes": { "type": "integer", "minimum": 0 },
+          "snapshot_count": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "memory": {
+      "description": "The peak of each of S10.3's three sampled series, reported separately. The cgroup peak is the number S10.4 feeds to k8s sizing; it is the only one that includes DuckDB's out-of-buffer allocations, the Python heap and the dbt subprocess.",
+      "type": "object",
+      "required": ["duckdb_buffer_peak_bytes", "rss_peak_bytes", "cgroup_peak_bytes"],
+      "properties": {
+        "duckdb_buffer_peak_bytes": { "type": "integer", "minimum": 0 },
+        "rss_peak_bytes": { "type": "integer", "minimum": 0 },
+        "cgroup_peak_bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "quality": {
+      "description": "S10.5's reported-never-gated block, computed by er.eval.pairwise_metrics -- the same implementation the tests call (S8.5). Blocking recall lives at the top level; the edge- and cluster-level triples live here.",
+      "type": "object",
+      "required": [
+        "edge_precision",
+        "edge_recall",
+        "edge_f1",
+        "cluster_precision",
+        "cluster_recall",
+        "cluster_f1"
+      ],
+      "properties": {
+        "edge_precision": { "type": "number", "minimum": 0 },
+        "edge_recall": { "type": "number", "minimum": 0 },
+        "edge_f1": { "type": "number", "minimum": 0 },
+        "cluster_precision": { "type": "number", "minimum": 0 },
+        "cluster_recall": { "type": "number", "minimum": 0 },
+        "cluster_f1": { "type": "number", "minimum": 0 }
+      }
+    }
+  }
+}

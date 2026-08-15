@@ -1,0 +1,84 @@
+# The benchmark scales, and the resource envelope each one is measured under.
+#
+# This file is the single source of truth for DesignDoc.md S10.2. Three consumers
+# read it and none of them restates it:
+#
+#   * the S9.2 preflight, through `python benchmarks/scales.py --scale S --field F`,
+#     which exports `ER_CPU_LIMIT` / `ER_MEM_LIMIT` / `ER_DUCKDB_MEMORY_LIMIT` into
+#     `$GITHUB_ENV` before `docker compose` reads them, and checks free disk against
+#     `min_free_gb`;
+#   * the S10.4 comparability rule, which marks a run NON_COMPARABLE when the
+#     measured cgroup quota, cgroup memory limit, `ER_DUCKDB_THREADS` or
+#     `ER_DUCKDB_MEMORY_LIMIT` disagree with its own scale's row here;
+#   * `--validate-baselines`, which asserts the workflow's `scale` choice options
+#     equal the set of scales with `baseline_committed: true`.
+#
+# Rules that bind the envelope columns, all normative in S10.2 and enforced by
+# `scales.py::load_scales` rather than left to review:
+#
+#   * `cpu_limit` MUST NOT exceed the runner's vCPU count -- a quota above the
+#     machine's capacity is unenforceable, and S10.4 would then compare against a
+#     limit no run could reach. It reserves nothing and is deliberately the runner's
+#     full count on the two small scales: `deploy.resources.limits.cpus` is a CPU
+#     quota, not a cpuset.
+#   * `mem_limit` MUST leave host RAM for `catalog` and `objectstore`, because a
+#     container memory limit is a hard ceiling: 6g of the 2-vCPU runner's 8 GiB,
+#     24g of 32 GiB, 56g of 64 GiB.
+#   * `duckdb_memory_limit` is roughly 70% of `mem_limit`, and MUST be below it:
+#     DuckDB's `memory_limit` bounds the buffer manager only, not the Python heap
+#     and not the dbt subprocess.
+#   * `dispatchable` implies `baseline_committed`. A scale becomes dispatchable only
+#     once `benchmarks/baselines/<scale>.json` is committed, so `1m` is defined here
+#     and cannot be dispatched; adding it to the workflow's choice list is a separate,
+#     later change that commits its baseline first.
+#
+# `smoke` exists so the weekly cron and any first-run bootstrap complete inside a
+# 40-minute job on a 2-vCPU runner, which is why it is present AND dispatchable.
+
+smoke:
+  personas: 400
+  records: 1000
+  incremental_batch: 50
+  min_free_gb: 4
+  baseline_committed: true
+  dispatchable: true
+  runner: ubuntu-latest
+  cpu_limit: 2
+  mem_limit: 6g
+  duckdb_memory_limit: 4GB
+
+10k:
+  personas: 4000
+  records: 10000
+  incremental_batch: 100
+  min_free_gb: 8
+  baseline_committed: true
+  dispatchable: true
+  runner: ubuntu-latest
+  cpu_limit: 2
+  mem_limit: 6g
+  duckdb_memory_limit: 4GB
+
+100k:
+  personas: 40000
+  records: 100000
+  incremental_batch: 1000
+  min_free_gb: 24
+  baseline_committed: true
+  dispatchable: true
+  runner: ubuntu-latest-8-cores
+  cpu_limit: 6
+  mem_limit: 24g
+  duckdb_memory_limit: 16GB
+
+1m:
+  personas: 400000
+  records: 1000000
+  incremental_batch: 10000
+  min_free_gb: 120
+  baseline_committed: false
+  dispatchable: false
+  runner: ubuntu-latest-16-cores
+  cpu_limit: 12
+  mem_limit: 56g
+  duckdb_memory_limit: 40GB
