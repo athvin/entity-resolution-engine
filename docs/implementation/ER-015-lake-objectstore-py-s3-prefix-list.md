@@ -2,7 +2,7 @@
 id: ER-015
 title: "lake/objectstore.py (S3 prefix list/delete) + lake/catalog.py (direct psycopg catalog connection)"
 milestone: M1
-status: in_progress
+status: done
 kind: code
 size: S
 gates: full
@@ -17,9 +17,9 @@ extra_paths: ["pyproject.toml", "uv.lock", "src/er/lake/__init__.py"]
 attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_objectstore_catalog.py -q"
 branch: "ticket/ER-015-lake-objectstore-py-s3-prefix-list"
-commit: ""
+commit: "42e6ff440af496e2e0876b19ec3e441e7ede8147"
 spec_sha: "28d8d8e366a7b49b"
-updated_at: "2026-08-15T00:40:55Z"
+updated_at: "2026-08-15T00:52:25Z"
 session: a0405b5f-5796-474d-a04b-84c780fc646d
 ---
 ## Description
