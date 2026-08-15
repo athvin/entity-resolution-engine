@@ -2,7 +2,7 @@
 id: ER-021
 title: "dbt sources.yml from the registry + logical-key/accepted_values tests + canonical-pair singular test + T-KEY-1"
 milestone: M1
-status: todo
+status: in_progress
 kind: code
 size: M
 gates: full
@@ -14,12 +14,13 @@ consumes: ["src/er/lake/model.py::TABLES", "src/er/lake/model.py::TableSpec", "s
 owns: ["src/er/lake/dbt_sources.py", "dbt/models/sources.yml", "dbt/tests/assert_canonical_pair_ordering.sql", "dbt/tests/assert_single_active_model.sql", "tests/unit/test_dbt_sources_parity.py", "tests/integration/test_logical_keys.py", "tests/integration/test_keys.py"]
 protected_paths: []
 extra_paths: ["dbt/dbt_project.yml", "dbt/packages.yml"]
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_logical_keys.py -q && uv run pytest tests/unit/test_dbt_sources_parity.py -q"
-branch: ""
+branch: "ticket/ER-021-dbt-sources-yml-registry-logical-key"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "2abcfe433c322f74"
+updated_at: "2026-08-15T15:01:25Z"
+session: 1edf5b0f-ea7d-4c46-82fc-ef17d631e62e
 ---
 ## Description
 
