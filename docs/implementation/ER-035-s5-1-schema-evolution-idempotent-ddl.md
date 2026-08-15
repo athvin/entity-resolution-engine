@@ -2,7 +2,7 @@
 id: ER-035
 title: "S5.1 schema evolution: idempotent DDL, additive ALTER, breaking-change exit 3, version-bump full rebuild + rebuild_reason, bounded time travel, doctor drift check"
 milestone: M1
-status: todo
+status: in_progress
 kind: code
 size: M
 gates: full
@@ -14,12 +14,13 @@ consumes: ["src/er/lake/ddl.py::apply", "src/er/lake/model.py::TableSpec", "src/
 owns: ["tests/integration/test_schema_evolution.py", "tests/unit/test_schema_evolution.py"]
 protected_paths: []
 extra_paths: ["src/er/lake/ddl.py", "src/er/versions.py", "src/er/cli.py", "src/er/doctor.py"]
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_schema_evolution.py -q && uv run pytest tests/unit/test_schema_evolution.py -q"
-branch: ""
+branch: "ticket/ER-035-s5-1-schema-evolution-idempotent-ddl"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "2abcfe433c322f74"
+updated_at: "2026-08-15T21:25:33Z"
+session: cd78362e-44af-4243-957e-9a4e433a4b4d
 ---
 ## Description
 
