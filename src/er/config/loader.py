@@ -22,6 +22,7 @@ from pydantic import ValidationError
 from pydantic_core import ErrorDetails
 
 from er.config.schema import Config, normalize
+from er.config.validators import CrossFieldError, validate_cross_fields
 
 __all__ = ["CONFIG_ENV_VAR", "ConfigError", "ConfigValidationError", "load_config"]
 
@@ -34,7 +35,8 @@ _VALUE_ERROR_PREFIX = "Value error, "
 
 # Every S6.1 failure message key is a dotted lowercase token, and the schema's
 # validators put theirs first in the message. Matching the shape rather than a
-# fixed list means the ticket that adds V1-V8 does not have to edit this module.
+# fixed list keeps the S6.1 key table out of this module: `schema` and `validators`
+# each own their rows, and this only has to recover the key from the message.
 _MESSAGE_KEY_RE = re.compile(r"(?P<key>[a-z0-9_]+(?:\.[a-z0-9_]+)+):")
 
 
@@ -147,5 +149,16 @@ def load_config(path: str | os.PathLike[str] | None = None) -> Config:
         summary = "; ".join(f"{error.pointer}: {error.key}" for error in errors)
         raise ConfigValidationError(
             f"{document_path} failed S6 validation: {summary}", errors
+        ) from exc
+    # V1-V8 read two blocks at once or the S5 column lists, so they run here rather
+    # than as field validators -- and before `normalize`, whose two rewrites would
+    # hide the terminal rule from V3 and the `null` token from V8 (S6.1).
+    try:
+        validate_cross_fields(config)
+    except CrossFieldError as exc:
+        failure = ConfigError(loc=exc.loc, key=exc.key, message=exc.message)
+        raise ConfigValidationError(
+            f"{document_path} failed S6 validation: {failure.pointer}: {failure.key}",
+            (failure,),
         ) from exc
     return normalize(config)
