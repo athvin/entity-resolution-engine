@@ -1,0 +1,45 @@
+# What the build context must not carry.
+#
+# docker/Dockerfile names every COPY path explicitly, so this file is not the only
+# thing keeping junk out of the image -- but the daemon transfers the whole context
+# before the first COPY runs, and .venv alone is larger than the image. The entries
+# below are also the guarantee behind AC8: nothing here can reach /app even if a
+# later ticket adds a broader COPY.
+
+# Git metadata: an image that shipped .git would ship every prior revision of the
+# source it was built from.
+.git
+.gitattributes
+.gitignore
+
+# The host virtualenv. The image builds its own with `uv sync --frozen`; copying
+# the host's would put macOS/arm64 wheels into a linux image.
+.venv
+
+# Implementation-loop working state: change plans, gate receipts, logs.
+.loop
+
+# S3 working directories, not sources of truth. The Dockerfile mkdirs /app/artifacts
+# itself, and models/ is staged output on its way to storage.model_uri_prefix.
+artifacts
+models
+
+# dbt build output and vendored packages; `dbt deps` regenerates them in-container.
+dbt/target
+dbt/dbt_packages
+dbt/logs
+dbt/profiles/.user.yml
+
+# Caches, byte-code and editor droppings.
+**/__pycache__
+**/*.py[cod]
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.hypothesis
+**/.DS_Store
+
+# Documentation and agent tooling: neither is read at runtime.
+docs
+.claude
+.github
