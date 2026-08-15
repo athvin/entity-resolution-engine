@@ -2,7 +2,7 @@
 id: ER-033
 title: "src/er/dbt_runner.py: render_dbt_vars(cfg) + run_dbt(); config is the single source of truth, dbt_project.yml holds only fallbacks"
 milestone: M1
-status: todo
+status: in_progress
 kind: code
 size: S
 gates: fast
@@ -14,12 +14,13 @@ consumes: ["src/er/config/schema.py::Config", "src/er/config/loader.py::load_con
 owns: ["src/er/dbt_runner.py", "tests/unit/test_dbt_runner.py"]
 protected_paths: []
 extra_paths: ["src/er/cli.py", "dbt/dbt_project.yml"]
-attempts: 0
+attempts: 1
 verify: "uv run pytest tests/unit/test_dbt_runner.py -q"
-branch: ""
+branch: "ticket/ER-033-src-er-dbt-runner-py-render"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "28d8d8e366a7b49b"
+updated_at: "2026-08-15T01:55:44Z"
+session: 9eb28383-adeb-4b4c-b590-a57f035007f4
 ---
 ## Description
 
