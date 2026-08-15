@@ -1,0 +1,113 @@
+# The test/dev substrate, and the only substrate CI uses (S7).
+#
+# Profiles: `test` (PR path) and `bench` (workflow_dispatch / weekly). The stack is
+# driven with `docker compose run --rm`, never with `up` and the abort-on-exit flag
+# S7.4 forbids: the one-shot initialiser below exits as soon as it succeeds, and
+# under `up` that exit tears the whole stack down and reports a teardown signal as
+# the test result. The flag is named nowhere in this tree, and
+# tests/unit/test_compose_contract.py greps for it (S7.4).
+# scripts/ci/{itest,bench,compose_smoke}.sh are the only supported entry points.
+#
+# `catalog-init` (ER-020) is not here yet. Until it lands, `pipeline` and `benchmark`
+# gate directly on `catalog` being healthy and `objectstore-init` having completed;
+# ER-020 inserts `er init` between them and moves both `depends_on` blocks onto it.
+
+name: er                                   # fixed project name; without it Compose derives `docker`
+                                           # from the directory and the prebuilt image is never found
+
+x-er-env: &er-env
+  ER_CONFIG:                 /app/configs/test.yaml
+  ER_CATALOG_DSN:            postgresql://er:erpassword@catalog:5432/ducklake
+  ER_S3_ENDPOINT:            objectstore:9000        # host:port — NO scheme; DuckDB httpfs rejects a URL
+  ER_S3_ACCESS_KEY_ID:       erminio
+  ER_S3_SECRET_ACCESS_KEY:   erminiopassword
+  ER_S3_REGION:              us-east-1
+  ER_S3_URL_STYLE:           path
+  ER_S3_USE_SSL:             "false"
+  ER_LAKE_DATA_PATH:         s3://lake/er/
+  ER_LAKE_ALIAS:             lake
+  ER_LAKE_METADATA_SCHEMA:   er_main
+  ER_DUCKDB_THREADS:         "${ER_CPU_LIMIT:-2}"          # == the cpus quota below, always
+  ER_DUCKDB_MEMORY_LIMIT:    "${ER_DUCKDB_MEMORY_LIMIT:-4GB}"
+
+x-er-image: &er-image
+  image: er-pipeline:ci          # built once by CI (or `docker compose build`) and consumed as-is
+  pull_policy: never             # never attempt a registry pull for a local-only tag
+  build: { context: .., dockerfile: docker/Dockerfile }
+
+services:
+  catalog:                                 # DuckLake catalog database
+    image: postgres:16@sha256:11a9d238fbb48bab14599c57e41123254452b1a2d93c6c8595bce96f346bd082
+    environment:
+      POSTGRES_DB: ducklake
+      POSTGRES_USER: er
+      POSTGRES_PASSWORD: erpassword
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U er -d ducklake"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  objectstore:                             # S3-compatible storage for DuckLake data files
+    # EOL upstream; pinned by digest so the substrate cannot drift (S2.1, S13)
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER:     erminio         # >= 3 chars — MinIO refuses to start below the minimum
+      MINIO_ROOT_PASSWORD: erminiopassword # >= 8 chars
+    # NO healthcheck: the server image ships no `mc` binary and holds no `local` alias, so a
+    # `mc ready local` probe can never pass, objectstore-init would never start, and the stack
+    # would hang exactly as it did before. Readiness is proven by objectstore-init instead.
+
+  objectstore-init:                        # create the bucket; same credentials as the server
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    depends_on:
+      objectstore: { condition: service_started }
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        for i in $$(seq 1 60); do
+          mc alias set local http://objectstore:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" && break;
+          sleep 1;
+        done &&
+        mc ready local &&
+        mc mb -p local/lake
+    environment:
+      MINIO_ROOT_USER:     erminio
+      MINIO_ROOT_PASSWORD: erminiopassword
+
+  pipeline:
+    <<: *er-image
+    profiles: [test]
+    depends_on:
+      catalog:          { condition: service_healthy }
+      objectstore-init: { condition: service_completed_successfully }
+    environment: *er-env
+    volumes:
+      - ../artifacts:/app/artifacts        # junit, dbt logs, run manifests reach the host/runner
+    command: ["pytest", "tests/integration", "-q", "--maxfail=3",
+              "--junitxml=/app/artifacts/junit.xml", "--durations=20"]
+    deploy: { resources: { limits: { cpus: "${ER_CPU_LIMIT:-2}", memory: "${ER_MEM_LIMIT:-6g}" } } }
+
+  benchmark:
+    <<: *er-image
+    profiles: [bench]
+    depends_on:
+      catalog:          { condition: service_healthy }
+      objectstore-init: { condition: service_completed_successfully }
+    environment:
+      <<: *er-env
+      BENCH_SCALE: ${BENCH_SCALE:-smoke}
+    volumes:
+      - ../artifacts:/app/artifacts        # artifacts/bench/latest.json + report.md
+      - benchdata:/app/.bench              # generated corpus; kept out of the artifacts mount
+    command: ["python", "benchmarks/report.py", "--run",
+              "--scale", "${BENCH_SCALE:-smoke}", "--repeat", "3",
+              "--out", "/app/artifacts/bench/latest.json"]
+    # The envelope is a property of the SCALE (S10.2), exported by the S9.2 preflight.
+    # Defaults are the smoke/10k row, which is also the `test` profile's envelope.
+    deploy: { resources: { limits: { cpus: "${ER_CPU_LIMIT:-2}", memory: "${ER_MEM_LIMIT:-6g}" } } }
+
+volumes:
+  benchdata:
