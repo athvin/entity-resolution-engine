@@ -2,7 +2,7 @@
 id: ER-027
 title: "tests/helpers/compare.py + expected.py: assert_partition_equal, assert_ids_stable, assert_golden_equal, content_digest, label-space loader"
 milestone: M1
-status: todo
+status: in_progress
 kind: code
 size: M
 gates: fast
@@ -14,12 +14,13 @@ consumes: ["src/er/lake/columns.py::VOLATILE_COLUMNS", "src/er/lake/columns.py::
 owns: ["tests/helpers/__init__.py", "tests/helpers/compare.py", "tests/helpers/expected.py", "tests/unit/test_compare_helpers.py"]
 protected_paths: []
 extra_paths: ["pyproject.toml"]
-attempts: 0
+attempts: 1
 verify: "uv run pytest tests/unit/test_compare_helpers.py -q && uv run mypy --strict tests/helpers"
-branch: ""
+branch: "ticket/ER-027-tests-helpers-compare-py-expected-py"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "28d8d8e366a7b49b"
+updated_at: "2026-08-15T03:21:13Z"
+session: ad0622cb-92ac-495c-8c42-3e14b7d453d8
 ---
 ## Description
 
