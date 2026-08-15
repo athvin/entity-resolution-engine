@@ -2,7 +2,7 @@
 id: ER-030
 title: "Ingest source adapters: drop-dir discovery, CSV/Parquet, sources.columns projection, date_format, deterministic order"
 milestone: M1
-status: in_progress
+status: done
 kind: code
 size: M
 gates: fast
@@ -17,9 +17,9 @@ extra_paths: []
 attempts: 1
 verify: "uv run pytest tests/unit/test_sources.py -q && uv run mypy --strict src/er/ingest/sources.py"
 branch: "ticket/ER-030-ingest-source-adapters-drop-dir-discovery"
-commit: ""
+commit: "8db187847c02bc01c802015cc97708e240e9dd0a"
 spec_sha: "28d8d8e366a7b49b"
-updated_at: "2026-08-15T04:33:26Z"
+updated_at: "2026-08-15T04:45:16Z"
 session: 094e97af-c94b-4e3c-96b5-3aff2e9bae39
 ---
 ## Description
