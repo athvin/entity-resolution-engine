@@ -2,7 +2,7 @@
 id: ER-023
 title: "Run metadata + Observability: RunContext, run_stages ten-counter vocabulary, one JSON line per stage, stdout purity, er_touched_entities accessor"
 milestone: M1
-status: todo
+status: in_progress
 kind: code
 size: M
 gates: full
@@ -14,12 +14,13 @@ consumes: ["src/er/cli.py::app", "src/er/errors.py::ExitCode", "src/er/config/ha
 owns: ["src/er/obs/__init__.py", "src/er/obs/runctx.py", "src/er/obs/counters.py", "src/er/obs/logging.py", "src/er/obs/touched.py", "tests/unit/obs/__init__.py", "tests/unit/obs/test_counters.py", "tests/unit/obs/test_stage_log_line.py", "tests/unit/obs/test_stdout_purity.py", "tests/integration/test_run_metadata.py"]
 protected_paths: ["tests/unit/test_cli_contract.py"]
 extra_paths: ["src/er/cli.py"]
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_run_metadata.py -q && uv run pytest tests/unit/obs -q"
-branch: ""
+branch: "ticket/ER-023-run-metadata-observability-runcontext-run-stages"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "2abcfe433c322f74"
+updated_at: "2026-08-15T13:47:01Z"
+session: 72646373-668a-45a2-9880-e8e9fc620073
 ---
 ## Description
 
