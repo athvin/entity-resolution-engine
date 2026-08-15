@@ -2,7 +2,7 @@
 id: ER-040
 title: "Address componentization macro + AddressParser Protocol + RegexV1Parser Python oracle + address_parser_version"
 milestone: M2
-status: todo
+status: in_progress
 kind: code
 size: M
 gates: fast
@@ -14,12 +14,13 @@ consumes: ["tests/unit/dbt/harness.py::MacroHarness", "tests/unit/dbt/harness.py
 owns: ["dbt/macros/std/address_parse.sql", "src/er/std/__init__.py", "src/er/std/address.py", "tests/unit/std/__init__.py", "tests/unit/std/address_cases.py", "tests/unit/std/test_address_parser.py", "tests/unit/dbt/test_address.py"]
 protected_paths: []
 extra_paths: ["src/er/versions.py", "tests/unit/test_package_layout.py"]
-attempts: 0
+attempts: 1
 verify: "uv run pytest tests/unit/dbt/test_address.py tests/unit/std/test_address_parser.py -q"
-branch: ""
+branch: "ticket/ER-040-address-componentization-macro-addressparser-protoco"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "28d8d8e366a7b49b"
+updated_at: "2026-08-15T05:32:27Z"
+session: 8b2e9167-38bb-42f0-ae77-07e276928103
 ---
 ## Description
 
