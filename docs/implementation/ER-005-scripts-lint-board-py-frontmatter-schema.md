@@ -2,7 +2,7 @@
 id: ER-005
 title: "scripts/lint_board.py: frontmatter schema, id↔filename, acyclic depends_on, enum + non-empty verify/spec_refs, milestone↔S12 parity"
 milestone: M1
-status: in_progress
+status: done
 kind: code
 size: S
 gates: fast
@@ -17,9 +17,9 @@ extra_paths: ["docs/implementation/README.md"]
 attempts: 1
 verify: "uv run pytest tests/unit/test_board_lint.py -q && python3 scripts/lint_board.py docs/implementation"
 branch: "ticket/ER-005-scripts-lint-board-py-frontmatter-schema"
-commit: ""
+commit: "f378fe2b11b219e0425d3f8cb613338be3a79791"
 spec_sha: "28d8d8e366a7b49b"
-updated_at: "2026-08-15T04:46:16Z"
+updated_at: "2026-08-15T04:54:28Z"
 session: 4ff08244-c658-4e21-8fae-46892891d1f5
 ---
 ## Description
