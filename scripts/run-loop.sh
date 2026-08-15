@@ -34,7 +34,10 @@ LOCK_FILE="$LOOP_DIR/loop.lock"
 
 MAX_ITERATIONS=25           # bounded by default; pass 0 to run until the board is clear
 MAX_TURNS=200
-MAX_BUDGET_USD=10
+MAX_BUDGET_USD=30           # per ITERATION. 15 completions ran $2.93-$8.18 (mean $5.09), but
+                            # ER-028 exhausted a $10 ceiling at 99 turns without finishing and
+                            # was retried into the same wall. This is a runaway guard, not a
+                            # work budget -- set it well above the largest honest ticket.
 TOTAL_BUDGET_USD=25         # bounded by default; pass 0 to remove the cap
 ONLY_TICKET=""
 DRY_RUN=0
