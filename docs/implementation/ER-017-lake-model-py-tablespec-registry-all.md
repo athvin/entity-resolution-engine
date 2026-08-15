@@ -2,7 +2,7 @@
 id: ER-017
 title: "lake/model.py TableSpec registry (all relations, owners, logical keys, enums incl. edge_cut/retired/member_removed, seq/details_hash, cut_edges, full runs/run_stages column set) — pure"
 milestone: M1
-status: in_progress
+status: done
 kind: code
 size: M
 gates: fast
@@ -17,9 +17,9 @@ extra_paths: []
 attempts: 1
 verify: "uv run pytest tests/unit/test_ddl_registry.py -q && uv run mypy --strict src/er/lake/model.py"
 branch: "ticket/ER-017-lake-model-py-tablespec-registry-all"
-commit: ""
+commit: "6fa7b81fc4ad180640a7141c04199f10b9132ab8"
 spec_sha: "28d8d8e366a7b49b"
-updated_at: "2026-08-15T01:43:22Z"
+updated_at: "2026-08-15T01:54:33Z"
 session: 54b7ebbc-9561-4cef-9574-23f6aac094bb
 ---
 ## Description
