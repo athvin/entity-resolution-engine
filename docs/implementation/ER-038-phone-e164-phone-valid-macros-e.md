@@ -2,7 +2,7 @@
 id: ER-038
 title: "phone_e164 + phone_valid macros with E.164 round-trip properties"
 milestone: M2
-status: in_progress
+status: done
 kind: code
 size: S
 gates: fast
@@ -17,9 +17,9 @@ extra_paths: []
 attempts: 1
 verify: "uv run pytest tests/unit/dbt/test_phone_e164.py -q"
 branch: "ticket/ER-038-phone-e164-phone-valid-macros-e"
-commit: ""
+commit: "f3278adafdbf2adebe64ccc52c42d42e3cef68b5"
 spec_sha: "28d8d8e366a7b49b"
-updated_at: "2026-08-15T05:47:06Z"
+updated_at: "2026-08-15T05:52:44Z"
 session: 03061036-0d0e-4c61-80b4-368a0bd419f0
 ---
 ## Description
