@@ -1,0 +1,559 @@
+# GENERATED FILE -- do not edit by hand.
+#
+# Rendered from the S5 TableSpec registry by
+# `er.lake.dbt_sources.render_sources_yml`. `tests/unit/test_dbt_sources_parity.py`
+# asserts byte equality with that renderer, so an edit here is a second authority
+# for S5 and fails the unit gate rather than drifting silently.
+#
+# DuckLake enforces NOT NULL and nothing else (S5.0), so every logical key below is
+# a test or it is nothing. The `keys` tag is what T-KEY-1a's
+# `dbt test --select tag:keys` selects.
+version: 2
+
+sources:
+  - name: lake
+    database: lake
+    schema: main
+    tables:
+      - name: raw_records
+        columns:
+          - name: source_system
+            data_tests:
+              - not_null
+          - name: source_record_id
+            data_tests:
+              - not_null
+          - name: payload
+            data_tests:
+              - not_null
+          - name: content_hash
+            data_tests:
+              - not_null
+          - name: is_deleted
+            data_tests:
+              - not_null
+          - name: deleted_at
+          - name: ingest_batch_id
+            data_tests:
+              - not_null
+          - name: ingested_at
+            data_tests:
+              - not_null
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: ['source_system', 'source_record_id', 'content_hash']
+              config:
+                tags: ['keys']
+      - name: match_scores
+        columns:
+          - name: rec_a_key
+            data_tests:
+              - not_null
+          - name: rec_b_key
+            data_tests:
+              - not_null
+          - name: match_probability
+            data_tests:
+              - not_null
+          - name: model_version
+            data_tests:
+              - not_null
+          - name: tf_snapshot_id
+            data_tests:
+              - not_null
+          - name: rec_a_content_hash
+            data_tests:
+              - not_null
+          - name: rec_b_content_hash
+            data_tests:
+              - not_null
+          - name: evidence
+            data_tests:
+              - not_null
+          - name: is_active
+            data_tests:
+              - not_null
+          - name: invalidated_at
+          - name: invalidated_run_id
+          - name: run_id
+            data_tests:
+              - not_null
+          - name: scored_at
+            data_tests:
+              - not_null
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: ['rec_a_key', 'rec_b_key', 'model_version', 'tf_snapshot_id']
+              config:
+                tags: ['keys']
+      - name: entity_membership
+        columns:
+          - name: source_system
+            data_tests:
+              - not_null
+          - name: source_record_id
+            data_tests:
+              - not_null
+          - name: record_key
+            data_tests:
+              - not_null
+          - name: entity_id
+            data_tests:
+              - not_null
+              - relationships:
+                  arguments:
+                    to: "source('lake', 'entities')"
+                    field: entity_id
+                  config:
+                    tags: ['refs']
+          - name: assigned_at
+            data_tests:
+              - not_null
+          - name: run_id
+            data_tests:
+              - not_null
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: ['source_system', 'source_record_id']
+              config:
+                tags: ['keys']
+      - name: entities
+        columns:
+          - name: entity_id
+            data_tests:
+              - not_null
+              - unique:
+                  config:
+                    tags: ['keys']
+          - name: status
+            data_tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: ['active', 'merged', 'retired']
+                  config:
+                    tags: ['keys']
+          - name: merged_into
+          - name: created_at
+            data_tests:
+              - not_null
+          - name: updated_at
+            data_tests:
+              - not_null
+          - name: created_run_id
+            data_tests:
+              - not_null
+          - name: updated_run_id
+            data_tests:
+              - not_null
+      - name: entity_events
+        columns:
+          - name: event_id
+            data_tests:
+              - not_null
+              - unique:
+                  config:
+                    tags: ['keys']
+          - name: seq
+            data_tests:
+              - not_null
+          - name: run_id
+            data_tests:
+              - not_null
+          - name: entity_id
+            data_tests:
+              - not_null
+          - name: event_type
+            data_tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: ['created', 'edge_cut', 'member_added', 'member_removed', 'merged', 'retired', 'split']
+                  config:
+                    tags: ['keys']
+          - name: details
+            data_tests:
+              - not_null
+          - name: details_hash
+            data_tests:
+              - not_null
+          - name: occurred_at
+            data_tests:
+              - not_null
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: ['run_id', 'entity_id', 'event_type', 'details_hash']
+              config:
+                tags: ['keys']
+      - name: assertions
+        columns:
+          - name: assertion_id
+            data_tests:
+              - not_null
+              - unique:
+                  config:
+                    tags: ['keys']
+          - name: rec_a_key
+            data_tests:
+              - not_null
+          - name: rec_b_key
+            data_tests:
+              - not_null
+          - name: kind
+            data_tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: ['always', 'never']
+                  config:
+                    tags: ['keys']
+          - name: active
+            data_tests:
+              - not_null
+          - name: created_by
+            data_tests:
+              - not_null
+          - name: created_at
+            data_tests:
+              - not_null
+          - name: retracted_by
+          - name: retracted_at
+          - name: note
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: ['rec_a_key', 'rec_b_key']
+              config:
+                tags: ['keys']
+                where: "active"
+      - name: review_queue
+        columns:
+          - name: review_id
+            data_tests:
+              - not_null
+              - unique:
+                  config:
+                    tags: ['keys']
+          - name: subject_type
+            data_tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: ['entity', 'pair']
+                  config:
+                    tags: ['keys']
+          - name: rec_a_key
+          - name: rec_b_key
+          - name: entity_id
+          - name: reason
+            data_tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: ['coherence', 'gray_band', 'never_unsatisfiable']
+                  config:
+                    tags: ['keys']
+          - name: match_probability
+          - name: waterfall
+          - name: status
+            data_tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: ['dismissed', 'open', 'resolved_match', 'resolved_no_match']
+                  config:
+                    tags: ['keys']
+          - name: first_seen_run_id
+            data_tests:
+              - not_null
+          - name: last_seen_run_id
+            data_tests:
+              - not_null
+          - name: resolved_by
+          - name: resolved_at
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: ['subject_type', 'rec_a_key', 'rec_b_key', 'entity_id', 'reason']
+              config:
+                tags: ['keys']
+                where: "status='open'"
+      - name: model_registry
+        columns:
+          - name: model_version
+            data_tests:
+              - not_null
+              - unique:
+                  config:
+                    tags: ['keys']
+          - name: status
+            data_tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: ['active', 'superseded']
+                  config:
+                    tags: ['keys']
+          - name: trained_at
+            data_tests:
+              - not_null
+          - name: corpus_snapshot
+            data_tests:
+              - not_null
+          - name: params_path
+            data_tests:
+              - not_null
+          - name: tf_tables_path
+            data_tests:
+              - not_null
+          - name: tf_snapshot_id
+            data_tests:
+              - not_null
+          - name: config_hash
+            data_tests:
+              - not_null
+          - name: metrics
+            data_tests:
+              - not_null
+          - name: run_id
+            data_tests:
+              - not_null
+      - name: tf_lookup
+        columns:
+          - name: model_version
+            data_tests:
+              - not_null
+          - name: tf_snapshot_id
+            data_tests:
+              - not_null
+          - name: column_name
+            data_tests:
+              - not_null
+          - name: value
+            data_tests:
+              - not_null
+          - name: tf_value
+            data_tests:
+              - not_null
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: ['model_version', 'tf_snapshot_id', 'column_name', 'value']
+              config:
+                tags: ['keys']
+      - name: cut_edges
+        columns:
+          - name: cut_id
+            data_tests:
+              - not_null
+              - unique:
+                  config:
+                    tags: ['keys']
+          - name: rec_a_key
+            data_tests:
+              - not_null
+          - name: rec_b_key
+            data_tests:
+              - not_null
+          - name: match_probability
+            data_tests:
+              - not_null
+          - name: model_version
+          - name: tf_snapshot_id
+          - name: assertion_id
+            data_tests:
+              - not_null
+          - name: active
+            data_tests:
+              - not_null
+          - name: cut_run_id
+            data_tests:
+              - not_null
+          - name: cut_at
+            data_tests:
+              - not_null
+          - name: released_run_id
+          - name: released_at
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: ['rec_a_key', 'rec_b_key']
+              config:
+                tags: ['keys']
+                where: "active"
+      - name: runs
+        columns:
+          - name: run_id
+            data_tests:
+              - not_null
+              - unique:
+                  config:
+                    tags: ['keys']
+          - name: tenant
+            data_tests:
+              - not_null
+          - name: mode
+            data_tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: ['correction_pass', 'full', 'incremental', 'init', 'maintain', 'reset', 'stage', 'train']
+                  config:
+                    tags: ['keys']
+          - name: status
+            data_tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: ['failed', 'running', 'succeeded']
+                  config:
+                    tags: ['keys']
+          - name: started_at
+            data_tests:
+              - not_null
+          - name: ended_at
+          - name: config_hash
+            data_tests:
+              - not_null
+          - name: model_version
+          - name: tf_snapshot_id
+          - name: std_version
+            data_tests:
+              - not_null
+          - name: survivorship_version
+            data_tests:
+              - not_null
+          - name: code_version
+            data_tests:
+              - not_null
+          - name: rebuild_reason
+            data_tests:
+              - accepted_values:
+                  arguments:
+                    values: ['correction_pass', 'operator', 'std_version_bump', 'survivorship_version_bump']
+                  config:
+                    tags: ['keys']
+          - name: snapshot_start
+          - name: snapshot_end
+      - name: run_stages
+        columns:
+          - name: run_id
+            data_tests:
+              - not_null
+          - name: stage
+            data_tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: ['assemble', 'ingest', 'init', 'maintain', 'match', 'reconcile', 'reset', 'standardize', 'train']
+                  config:
+                    tags: ['keys']
+          - name: seq
+            data_tests:
+              - not_null
+          - name: status
+            data_tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: ['failed', 'running', 'succeeded']
+                  config:
+                    tags: ['keys']
+          - name: started_at
+            data_tests:
+              - not_null
+          - name: ended_at
+          - name: snapshot_start
+          - name: snapshot_end
+          - name: rows_in
+          - name: rows_out
+          - name: candidate_pairs
+          - name: pairs_above_auto_merge
+          - name: entities_created
+          - name: entities_merged
+          - name: entities_split
+          - name: entities_retired
+          - name: edges_cut
+          - name: review_queue_added
+          - name: duration_ms
+          - name: counters
+          - name: error_class
+          - name: error_detail
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: ['run_id', 'seq']
+              config:
+                tags: ['keys']
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: ['run_id', 'stage']
+              config:
+                tags: ['keys']
+      - name: ingest_batches
+        columns:
+          - name: ingest_batch_id
+            data_tests:
+              - not_null
+              - unique:
+                  config:
+                    tags: ['keys']
+          - name: run_id
+            data_tests:
+              - not_null
+          - name: source_system
+            data_tests:
+              - not_null
+          - name: path
+            data_tests:
+              - not_null
+          - name: new_count
+            data_tests:
+              - not_null
+          - name: changed_count
+            data_tests:
+              - not_null
+          - name: unchanged_count
+            data_tests:
+              - not_null
+          - name: tombstone_count
+            data_tests:
+              - not_null
+          - name: resurrected_count
+            data_tests:
+              - not_null
+          - name: full_refresh_keys
+            data_tests:
+              - not_null
+          - name: created_at
+            data_tests:
+              - not_null
+      - name: er_touched_entities
+        columns:
+          - name: run_id
+            data_tests:
+              - not_null
+          - name: entity_id
+            data_tests:
+              - not_null
+          - name: disposition
+            data_tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: ['rebuild', 'retire']
+                  config:
+                    tags: ['keys']
+          - name: created_at
+            data_tests:
+              - not_null
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: ['run_id', 'entity_id']
+              config:
+                tags: ['keys']
