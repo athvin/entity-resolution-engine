@@ -123,7 +123,12 @@ def validate_scenario(directory: Path) -> list[Violation]:
 
 
 def _check_root_entries(directory: Path, loaded: scenario.Scenario) -> list[Violation]:
-    """The scenario root holds the manifest, the phase dirs, `expected/` and the aux files."""
+    """The root holds the manifest, the phase dirs, `expected/` and the S8.2.1 root files.
+
+    The root files are of two kinds and the distinction is what this rule enforces:
+    an INPUT or BOUND must additionally be declared in `aux_files`, while GROUND
+    TRUTH is recognised by name alone.
+    """
     declared = set(loaded.phases)
     aux_declared = set(loaded.manifest.aux_files)
     manifest_path = directory / scenario.MANIFEST_NAME
@@ -155,7 +160,7 @@ def _check_root_entries(directory: Path, loaded: scenario.Scenario) -> list[Viol
                         f"{scenario.MANIFEST_NAME} declares {sorted(declared)}",
                     )
                 )
-        elif entry.name not in scenario.AUX_FILES:
+        elif entry.name not in scenario.ROOT_FILES:
             violations.append(
                 Violation(
                     entry,
@@ -163,10 +168,13 @@ def _check_root_entries(directory: Path, loaded: scenario.Scenario) -> list[Viol
                     "unknown-file",
                     f"{entry.name!r} is not part of the scenario format; the root holds "
                     f"{scenario.MANIFEST_NAME}, the phase directories, {scenario.EXPECTED_DIR}/ "
-                    f"and {list(scenario.AUX_FILES)}",
+                    f"and {list(scenario.ROOT_FILES)}",
                 )
             )
-        elif entry.name not in aux_declared:
+        # Ground truth is not declared: S8.2.1 gives it no literal header and no
+        # manifest key, because nothing is fed to the pipeline from it. Requiring a
+        # declaration would invent a spelling the spec does not state.
+        elif entry.name in scenario.AUX_FILES and entry.name not in aux_declared:
             violations.append(
                 Violation(
                     entry,
@@ -256,7 +264,12 @@ def _check_expected_tree(directory: Path, loaded: scenario.Scenario) -> list[Vio
 
 
 def _check_aux_files(loaded: scenario.Scenario) -> list[Violation]:
-    """The three scenario-root files: header literals, plus the assertion phase vocabulary."""
+    """The scenario-root INPUTS and BOUNDS: header literals, plus the assertion phases.
+
+    Ground truth is deliberately absent: S8.2.1 pins no literal header for
+    `truth.csv` or `traps.csv`, so there is nothing here to grade them against and
+    a header invented here would be a second, unstated authority.
+    """
     violations: list[Violation] = []
     for name, path in sorted(loaded.aux.items()):
         violations += _check_csv(path, name)

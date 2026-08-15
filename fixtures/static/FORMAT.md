@@ -22,6 +22,8 @@ fixtures/static/<scenario>/
 ├── assertions.csv            # input assertions, applied before the phase in their `phase` column
 ├── parity_pairs.csv          # optional: the pairs T-INC-3 scores through both code paths
 ├── tf_flip_pairs.csv         # optional: the edges T-INC-1b / T-TF-1 allow to cross auto_merge
+├── truth.csv                 # ground truth: the persona label of each input row
+├── traps.csv                 # ground truth: the designed traps and the rows that construct them
 └── expected/
     ├── base/                 # expected state after the base phase
     │   ├── membership.csv
@@ -75,6 +77,25 @@ replays that scenario's deliveries for any phase it does not provide itself, but
 expectations, its `assertions.csv` and its aux files are its own — absence-is-no-claim is only
 readable when absence is local, and an inherited claim would be one no file in the scenario
 states. A cycle in the chain is an error naming both scenarios.
+
+## The two kinds of scenario-root file
+
+The root holds no expectations, which is why its files sit beside `base/` rather than under
+`expected/`. They fall into two kinds, and the distinction is normative because the linter
+enumerates the root by name and rejects anything unlisted.
+
+**Inputs and bounds** — `assertions.csv`, `parity_pairs.csv`, `tf_flip_pairs.csv`. These are fed
+to the pipeline or bound what it may do. Each has a literal header below, and each must be
+declared in the manifest's `aux_files`.
+
+**Ground truth** — `truth.csv` and `traps.csv`. These are read only by tests and by the S8.5
+metrics; the pipeline never sees them and no phase consumes them. `truth.csv` carries one row per
+input record giving its persona label, and is what makes pairwise precision/recall computable at
+all. `traps.csv` indexes each designed trap of S8.2 to the `(source_system, source_record_id)`
+rows that construct it, so a fixture edit that dissolves a trap fails a test instead of silently
+weakening the corpus. Both exist only in hand-authored scenarios — a generated corpus carries its
+labels in the generator manifest instead — and neither is declared in `aux_files` nor carries a
+pinned header below, because S8.2.1 states none.
 
 ## Headers (literal)
 
@@ -143,7 +164,7 @@ prints the vocabulary.
 | `manifest` | a missing or malformed `scenario.yaml`, a phase outside the vocabulary, `batch` without `base`, an `aux_files` entry that is not there |
 | `phase-dir` | a directory that is not a phase, a phase directory the manifest does not declare, a declared phase with no delivery |
 | `expected-phase` | an `expected/<phase>/` for a phase the scenario does not have |
-| `unknown-file` | a scenario-root or `expected/` file the format does not define |
+| `unknown-file` | a scenario-root or `expected/` file the format does not define, or an input/bound the manifest does not declare |
 | `header` | a header row that is not the S8.2.1 literal, or a row whose field count differs from it |
 | `volatile-column` | a `VOLATILE_COLUMNS` member committed as a column |
 | `entity-label` | an `entity_label` that is empty, NULL or a ULID |

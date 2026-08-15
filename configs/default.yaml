@@ -47,6 +47,22 @@ sources:
       addr_region:  addr_state
       addr_postal:  postal_code
       birth_date:   birth_date
+  webforms:
+    adapter: csv
+    priority_rank: 3
+    record_id_column: submission_id
+    updated_at_column: submitted_at
+    date_format: "%Y-%m-%d"
+    columns:
+      given_name:   name_first
+      family_name:  name_last
+      email:        email
+      phone:        phone_number
+      address_line: address
+      addr_city:    city
+      addr_region:  region
+      addr_postal:  postcode
+      birth_date:   date_of_birth
 
 blocking:
   - { key_type: email_exact, expr: "email" }

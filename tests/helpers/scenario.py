@@ -50,6 +50,8 @@ __all__ = [
     "MANIFEST_NAME",
     "PHASES",
     "PHASE_PLACEHOLDER",
+    "ROOT_FILES",
+    "TRUTH_FILES",
     "Manifest",
     "Scenario",
     "ScenarioError",
@@ -79,9 +81,28 @@ MANIFEST_NAME: Final[str] = "scenario.yaml"
 #: (S3: there is no top-level `fixtures/expected/`).
 EXPECTED_DIR: Final[str] = "expected"
 
-#: The three scenario-root files. They are inputs and bounds, not expectations,
-#: which is why they sit beside `base/` rather than under `expected/`.
+#: The scenario root's INPUTS AND BOUNDS. They are fed to the pipeline or bound
+#: what it may do, which is why they sit beside `base/` rather than under
+#: `expected/`, and each has a literal header in :data:`EXPECTED_HEADERS`.
 AUX_FILES: Final[tuple[str, ...]] = ("assertions.csv", "parity_pairs.csv", "tf_flip_pairs.csv")
+
+#: The scenario root's GROUND TRUTH -- S8.2.1's second kind. `truth.csv` gives one
+#: row per input record its persona label; `traps.csv` indexes each designed trap
+#: of S8.2 to the rows that construct it. The pipeline never sees either: they are
+#: read only by tests and by the S8.5 metrics, and exist only in hand-authored
+#: scenarios, since a generated corpus carries its labels in the generator
+#: manifest instead.
+#:
+#: They are NOT declared in the manifest's `aux_files` and carry no entry in
+#: :data:`EXPECTED_HEADERS`, and both omissions are deliberate: S8.2.1 pins a
+#: literal header for every INPUT and BOUND and for none of the ground truth, so a
+#: header pinned here would be one the spec does not state.
+TRUTH_FILES: Final[tuple[str, ...]] = ("truth.csv", "traps.csv")
+
+#: Every file S8.2.1 admits at the scenario root, of either kind. This is the list
+#: the `unknown-file` lint rule enumerates: the spec's distinction is normative
+#: precisely because the linter rejects anything outside it.
+ROOT_FILES: Final[tuple[str, ...]] = (*AUX_FILES, *TRUTH_FILES)
 
 #: The five relations a phase may make a claim about.
 EXPECTED_RELATIONS: Final[tuple[str, ...]] = (
@@ -345,6 +366,10 @@ class Scenario:
     restricted to the phases the manifest declares. ``expected[phase][relation]``
     is ``None`` when the file is absent, which is a phase making no claim about
     that relation rather than an empty expectation.
+
+    ``aux`` and ``truth`` are S8.2.1's two kinds of scenario-root file, kept apart
+    rather than merged: ``aux`` is declared in the manifest and header-pinned,
+    ``truth`` is neither and is never fed to the pipeline.
     """
 
     name: str
@@ -356,6 +381,7 @@ class Scenario:
     expected: Mapping[str, Mapping[str, Path | None]]
     assertions: Mapping[str, tuple[Row, ...]]
     aux: Mapping[str, Path]
+    truth: Mapping[str, Path]
 
     def inputs_for(self, phase: str) -> Mapping[str, Path]:
         """The phase's per-source input CSVs, keyed by source name."""
@@ -395,6 +421,7 @@ def load_scenario_dir(directory: Path) -> Scenario:
         expected={phase: _phase_expected(directory, phase) for phase in phases},
         assertions=_assertions(directory),
         aux={name: directory / name for name in AUX_FILES if (directory / name).is_file()},
+        truth={name: directory / name for name in TRUTH_FILES if (directory / name).is_file()},
     )
 
 
