@@ -2,7 +2,7 @@
 id: ER-038
 title: "phone_e164 + phone_valid macros with E.164 round-trip properties"
 milestone: M2
-status: todo
+status: in_progress
 kind: code
 size: S
 gates: fast
@@ -14,12 +14,13 @@ consumes: ["tests/unit/dbt/harness.py::MacroHarness", "tests/unit/dbt/harness.py
 owns: ["dbt/macros/std/phone_e164.sql", "tests/unit/dbt/test_phone_e164.py"]
 protected_paths: []
 extra_paths: []
-attempts: 0
+attempts: 1
 verify: "uv run pytest tests/unit/dbt/test_phone_e164.py -q"
-branch: ""
+branch: "ticket/ER-038-phone-e164-phone-valid-macros-e"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "28d8d8e366a7b49b"
+updated_at: "2026-08-15T05:47:06Z"
+session: 03061036-0d0e-4c61-80b4-368a0bd419f0
 ---
 ## Description
 
