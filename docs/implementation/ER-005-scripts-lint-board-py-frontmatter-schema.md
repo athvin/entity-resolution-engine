@@ -2,7 +2,7 @@
 id: ER-005
 title: "scripts/lint_board.py: frontmatter schema, id↔filename, acyclic depends_on, enum + non-empty verify/spec_refs, milestone↔S12 parity"
 milestone: M1
-status: todo
+status: in_progress
 kind: code
 size: S
 gates: fast
@@ -14,12 +14,13 @@ consumes: ["scripts/board.py", "DesignDoc.md::s8-3", "DesignDoc.md::s12", "Desig
 owns: ["scripts/lint_board.py", "tests/unit/test_board_lint.py"]
 protected_paths: ["DesignDoc.md", "scripts/board.py"]
 extra_paths: ["docs/implementation/README.md"]
-attempts: 0
+attempts: 1
 verify: "uv run pytest tests/unit/test_board_lint.py -q && python3 scripts/lint_board.py docs/implementation"
-branch: ""
+branch: "ticket/ER-005-scripts-lint-board-py-frontmatter-schema"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:39Z"
+spec_sha: "28d8d8e366a7b49b"
+updated_at: "2026-08-15T04:46:16Z"
+session: 4ff08244-c658-4e21-8fae-46892891d1f5
 ---
 ## Description
 
