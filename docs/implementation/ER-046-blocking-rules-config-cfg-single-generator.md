@@ -2,7 +2,7 @@
 id: ER-046
 title: "blocking_rules_from_config(cfg): the single generator, NULL/empty policy, duplicate/unknown-column rejection"
 milestone: M2
-status: in_progress
+status: done
 kind: code
 size: M
 gates: fast
@@ -17,9 +17,9 @@ extra_paths: ["src/er/matching/__init__.py"]
 attempts: 1
 verify: "uv run pytest tests/unit/matching/test_blocking_generator.py -q"
 branch: "ticket/ER-046-blocking-rules-config-cfg-single-generator"
-commit: ""
+commit: "cb9f23fa27414da1089c5f76dce294a1fdb129b7"
 spec_sha: "2abcfe433c322f74"
-updated_at: "2026-08-15T06:30:30Z"
+updated_at: "2026-08-15T06:35:04Z"
 session: 153f9a52-e00a-4c6a-b1d1-0902355e6138
 ---
 ## Description
