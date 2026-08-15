@@ -2,7 +2,7 @@
 id: ER-026
 title: "Test harness B: function isolation, snapshot-literal collection guard, --keep-lake, xdist ns derivation, teardown-on-failure, sub-namespace factory (for T-INC-1)"
 milestone: M1
-status: in_progress
+status: done
 kind: code
 size: M
 gates: full
@@ -17,9 +17,9 @@ extra_paths: ["tests/conftest.py"]
 attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_harness_isolation.py -q"
 branch: "ticket/ER-026-test-harness-b-function-isolation-snapshot"
-commit: ""
+commit: "47634326e5193b690cd899fae5b3115c9796d56c"
 spec_sha: "2abcfe433c322f74"
-updated_at: "2026-08-15T15:40:57Z"
+updated_at: "2026-08-15T16:05:51Z"
 session: 3d18930e-be66-4693-bf9d-829670e87edb
 ---
 ## Description
