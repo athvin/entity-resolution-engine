@@ -1,0 +1,7 @@
+# The linter's own valid scenario: the smallest directory that is a scenario.
+# `expected/base/golden.csv` is deliberately absent -- a phase that makes no
+# claim about a relation is the case `load_scenario` must return None for
+# rather than raise on, and it needs a committed subject.
+scenario: ok_minimal
+phases: [base]
+aux_files: [assertions.csv]

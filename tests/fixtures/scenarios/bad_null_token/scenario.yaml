@@ -1,0 +1,4 @@
+# Negative fixture for the `null-token` rule: a NULL written as the word an
+# exporter emits rather than as S8.2.1's two-character token.
+scenario: bad_null_token
+phases: [base]

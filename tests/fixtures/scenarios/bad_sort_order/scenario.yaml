@@ -1,0 +1,5 @@
+# Negative fixture for the `sort-order` rule: two rows in descending order. The
+# comparison helpers re-sort both sides, so this can only ever surface as a lint
+# failure -- which is the point of committing it.
+scenario: bad_sort_order
+phases: [base]

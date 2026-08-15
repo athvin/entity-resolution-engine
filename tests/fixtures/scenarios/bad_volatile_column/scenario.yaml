@@ -1,0 +1,6 @@
+# Negative fixture for the `volatile-column` rule: `ingested_at` is a
+# VOLATILE_COLUMNS member (S5.0). Committing one freezes a run-scoped stamp into
+# an expectation, so the file passes on the run it was captured from and on no
+# other.
+scenario: bad_volatile_column
+phases: [base]

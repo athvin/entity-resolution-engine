@@ -1,0 +1,1 @@
+A file the scenario format does not define. Its presence is the defect.

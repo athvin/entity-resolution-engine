@@ -1,0 +1,4 @@
+# The other half of the cycle cycle_a opens.
+scenario: cycle_b
+phases: [base]
+base_scenario: cycle_a

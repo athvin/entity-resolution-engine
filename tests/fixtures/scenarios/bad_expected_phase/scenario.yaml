@@ -1,0 +1,4 @@
+# Negative fixture for the `expected-phase` rule: expectations for a batch phase
+# the scenario does not have, so nothing would ever compare them.
+scenario: bad_expected_phase
+phases: [base]

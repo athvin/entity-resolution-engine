@@ -1,0 +1,6 @@
+# Composition: this scenario has no base/ of its own and replays ok_minimal's.
+# `phases` is declared out of order on purpose -- S8.2.1 fixes the run order, so
+# a manifest is a set and load_scenario must return base before batch anyway.
+scenario: composed
+phases: [batch, base]
+base_scenario: ok_minimal

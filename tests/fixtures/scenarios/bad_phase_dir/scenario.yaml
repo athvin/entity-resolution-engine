@@ -1,0 +1,4 @@
+# Negative fixture for the `phase-dir` rule: `staging/` is a delivery directory
+# drawn from outside the vocabulary, so nothing would ever run it.
+scenario: bad_phase_dir
+phases: [base]

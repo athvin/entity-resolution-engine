@@ -1,0 +1,4 @@
+# Negative fixture for the `header` rule: membership.csv names its label column
+# `entity`, so every helper that reads `entity_label` would see no label at all.
+scenario: bad_header
+phases: [base]

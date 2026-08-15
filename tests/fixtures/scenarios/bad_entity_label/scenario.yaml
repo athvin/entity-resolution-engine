@@ -1,0 +1,4 @@
+# Negative fixture for the `entity-label` rule: a minted ULID pasted where a
+# symbolic E1..En label belongs.
+scenario: bad_entity_label
+phases: [base]

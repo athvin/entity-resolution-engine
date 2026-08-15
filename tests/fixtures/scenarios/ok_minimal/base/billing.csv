@@ -1,0 +1,2 @@
+account_no,fname,lname,billing_email,contact_phone,addr1,addr_city,addr_state,postal_code,birth_date,updated_ts,persona_id
+b1,Ada,Lovelace,ada@example.com,+14155550101,10 Foundry St,Reno,NV,89501,12/10/1815,01/03/2024,P1

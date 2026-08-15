@@ -1,0 +1,5 @@
+# Negative fixture for the `assertion-phase` rule: an assertion whose phase
+# column is drawn from outside the vocabulary, so it would never be applied.
+scenario: bad_assertion_phase
+phases: [base]
+aux_files: [assertions.csv]

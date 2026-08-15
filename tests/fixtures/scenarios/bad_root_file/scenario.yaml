@@ -1,0 +1,5 @@
+# Negative fixture for the `unknown-file` rule: a scenario-root file the format
+# does not define. The root is a closed set, so a stray file is either a lost
+# expectation or a note that will drift out of date unread.
+scenario: bad_root_file
+phases: [base]

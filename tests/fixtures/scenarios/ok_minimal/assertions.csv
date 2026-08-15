@@ -1,0 +1,2 @@
+phase,rec_a_key,rec_b_key,kind,created_by,note
+base,billing:b1,crm:c1,always,fixture,one persona delivered by two sources

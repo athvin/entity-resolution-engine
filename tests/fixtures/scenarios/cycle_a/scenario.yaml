@@ -1,0 +1,5 @@
+# Half of a base_scenario cycle. Left uncomposable on purpose: the loader must
+# name both scenarios rather than recurse until the stack runs out.
+scenario: cycle_a
+phases: [base]
+base_scenario: cycle_b

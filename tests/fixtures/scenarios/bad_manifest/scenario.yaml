@@ -1,0 +1,5 @@
+# Negative fixture for the `manifest` rule: batch without base. `base` is always
+# present and always first, so a scenario whose first delivery is an incremental
+# one has no corpus to be incremental against.
+scenario: bad_manifest
+phases: [batch]

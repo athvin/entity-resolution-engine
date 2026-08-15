@@ -1,0 +1,2 @@
+phase,rec_a_key,rec_b_key,kind,created_by,note
+staging,crm:c1,crm:c2,always,fixture,phase drawn from outside the vocabulary

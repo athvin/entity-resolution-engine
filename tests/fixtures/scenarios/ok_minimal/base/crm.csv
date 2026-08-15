@@ -1,0 +1,2 @@
+crm_id,first_name,last_name,email_address,phone,street_address,city,state,zip,dob,last_modified,persona_id
+c1,Ada,Lovelace,ada@example.com,+14155550101,10 Foundry St,Reno,NV,89501,1815-12-10,2024-01-02,P1
