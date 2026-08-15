@@ -24,8 +24,10 @@ Four rules govern this module and are stated nowhere else in Python:
 Out of scope by construction, and owned by later tickets: the lake connection and
 the ``runs``/``run_stages`` writes (ER-023, which extends :func:`emit_stage_line`
 rather than adding a second emitter), the advisory lock and ``--resume`` (ER-024),
-the ``--mode incremental`` config-drift guard (ER-034), and the dbt subprocess
-(ER-033, which MUST import :func:`dbt_vars` rather than rebuild the mapping).
+and the ``--mode incremental`` config-drift guard (ER-034). The dbt subprocess and
+the ``--vars`` payload moved to ``er.dbt_runner`` with ER-033; ``dbt_vars`` here is
+that module's :func:`~er.dbt_runner.render_dbt_vars` under its ER-014 name, not a
+second builder of the mapping.
 """
 
 from __future__ import annotations
@@ -43,6 +45,7 @@ import typer
 from er.config.hashing import config_hash
 from er.config.loader import ConfigValidationError, load_config
 from er.config.schema import Config
+from er.dbt_runner import render_dbt_vars
 from er.entities.ids import IdFactory, UlidFactory
 from er.errors import ErError, ErrorClass, ExitCode, StageFailure, exit_code_for
 
@@ -293,18 +296,13 @@ def emit_stage_line(record: Mapping[str, object], *, stream: TextIO | None = Non
     target.flush()
 
 
-def dbt_vars(cfg: Config, run_id: str) -> dict[str, str]:
-    """The ``--vars`` payload every dbt invocation carries (S6, S4.0).
-
-    The single builder of the mapping: ``dbt_project.yml`` declares the same vars
-    only as fallbacks for a bare ``dbt parse``, and the override always wins, so
-    the config document stays the single source of truth for both versions.
-    """
-    return {
-        "std_version": cfg.versions.std_version,
-        "survivorship_version": cfg.versions.survivorship_version,
-        "run_id": run_id,
-    }
+#: The ``--vars`` payload every dbt invocation carries (S6, S4.2, S4.6).
+#:
+#: THE builder, and it lives in ``er.dbt_runner`` next to the subprocess that
+#: passes it (ER-033). Bound here rather than wrapped: a wrapper would be a second
+#: function able to produce a payload, and "``dbt_project.yml`` holds only
+#: fallbacks" is only true while exactly one function renders the override.
+dbt_vars = render_dbt_vars
 
 
 @dataclass

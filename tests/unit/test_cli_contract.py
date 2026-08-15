@@ -37,6 +37,7 @@ from er.cli import (
     run_all_chain,
 )
 from er.config.loader import load_config
+from er.dbt_runner import render_dbt_vars
 from er.errors import (
     ERROR_CLASS_TO_EXIT,
     RETRYABLE,
@@ -297,12 +298,21 @@ def test_json_flag_switches_stdout_only() -> None:
 
 
 def test_dbt_vars_key_set() -> None:
-    """AC8: the dbt --vars payload is exactly S6's three keys."""
-    config = load_config(TEST_CONFIG)
-    variables = dbt_vars(config, SUPPLIED_RUN_ID)
+    """AC8: the dbt --vars payload is exactly the S6 keys, from the document.
 
+    ER-033 moved the builder to ``er.dbt_runner.render_dbt_vars`` and widened the
+    payload with the two vars S4.2 needs — the ``sources`` column mapping and the
+    ``standardization`` block — so this asserts the wider payload and that the CLI
+    exports THE builder rather than a second copy of it.
+    """
+    config = load_config(TEST_CONFIG)
+    assert dbt_vars is render_dbt_vars
+
+    variables = dbt_vars(config, SUPPLIED_RUN_ID)
     assert variables == {
         "std_version": config.versions.std_version,
         "survivorship_version": config.versions.survivorship_version,
         "run_id": SUPPLIED_RUN_ID,
+        "sources": {name: source.model_dump() for name, source in config.sources.items()},
+        "standardization": config.standardization.model_dump(),
     }
