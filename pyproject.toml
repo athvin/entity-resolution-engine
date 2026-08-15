@@ -94,5 +94,27 @@ files = ["src/er"]
 module = ["boto3", "boto3.*", "botocore", "botocore.*"]
 ignore_missing_imports = true
 
+# pandas has the same shape as boto3 above and reaches the gate for the same reason:
+# S8.2.1 pins `assert_golden_equal(actual: pd.DataFrame, ...)` verbatim, so
+# `tests/helpers/compare.py` must name that type, and `mypy --strict tests/helpers` is
+# ER-027's verify command. pandas 3.0.5 ships no `py.typed`, and S2.1 pins no
+# `pandas-stubs` row -- pandas is present only transitively through Splink. Adding that
+# row is a spec amendment, which a code ticket may not make, so the narrow override is
+# the same trade S2.1's PyYAML/boto3 split already records.
+#
+# Deliberately narrow, and narrower in effect than it looks: it names pandas alone, and
+# the only module under this override's influence is `tests/helpers/compare.py`, which
+# `[tool.mypy] files` does not even check -- every module under `src/er` is still
+# checked at full `--strict` with no pandas import anywhere in it.
+[[tool.mypy.overrides]]
+module = ["pandas", "pandas.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# `tests/` on sys.path so `helpers.compare` is the module name under pytest as well as
+# under `mypy --strict tests/helpers`, which derives it by walking up while
+# `__init__.py` exists and stops at `tests/` (which has none). One spelling in both
+# tools, and no `tests/__init__.py` -- pytest's rootdir-based collection does not want
+# one, and `tests/conftest.py` belongs to ER-018.
+pythonpath = ["tests"]
