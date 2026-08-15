@@ -2,7 +2,7 @@
 id: ER-036
 title: "M1 exit gate: er init && er doctor && er run-all on an empty lake, tagged M1-EXIT-<k> parity with S12"
 milestone: M1
-status: todo
+status: in_progress
 kind: code
 size: S
 gates: full
@@ -14,12 +14,13 @@ consumes: ["src/er/cli.py::app", "src/er/cli.py::doctor", "src/er/lake/ddl.py::a
 owns: ["tests/integration/test_m1_exit.py"]
 protected_paths: ["tests/integration/test_doctor.py", "tests/integration/test_logical_keys.py", "tests/integration/test_concurrency.py", "tests/integration/test_cli_contract.py"]
 extra_paths: []
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_m1_exit.py -q"
-branch: ""
+branch: "ticket/ER-036-m1-exit-gate-er-init-er"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "2abcfe433c322f74"
+updated_at: "2026-08-15T22:39:06Z"
+session: 7f236e11-ecaf-4251-b9c7-d5d01a0a4081
 ---
 ## Description
 
