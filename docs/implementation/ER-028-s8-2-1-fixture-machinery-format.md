@@ -2,7 +2,7 @@
 id: ER-028
 title: "S8.2.1 fixture machinery: FORMAT.md, phase dirs (base/,batch/,refresh/), base_scenario manifest, load_scenario, validate_fixtures.py + self-test fixtures"
 milestone: M1
-status: in_progress
+status: todo
 kind: code
 size: M
 gates: fast
@@ -16,10 +16,10 @@ protected_paths: []
 extra_paths: []
 attempts: 1
 verify: "uv run pytest tests/unit/fixtures/test_fixture_format.py -q"
-branch: "ticket/ER-028-s8-2-1-fixture-machinery-format"
+branch: ""
 commit: ""
 spec_sha: "28d8d8e366a7b49b"
-updated_at: "2026-08-15T03:36:07Z"
+updated_at: "2026-08-15T03:54:42Z"
 session: d453cfe7-4537-494b-86cc-b38cb65936e8
 ---
 ## Description
