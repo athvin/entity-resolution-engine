@@ -2,7 +2,7 @@
 id: ER-018
 title: "Test harness A: session-namespaced lake fixture (lake_ns, lake_conn, er_env), METADATA_SCHEMA er_test_{ns}, DATA_PATH s3://lake/test/{ns}/, drop-schema teardown"
 milestone: M1
-status: in_progress
+status: todo
 kind: code
 size: M
 gates: full
@@ -14,12 +14,12 @@ consumes: ["src/er/lake/ducklake.py::connect", "src/er/lake/ducklake.py::detach"
 owns: ["tests/conftest.py", "tests/integration/conftest.py", "tests/integration/test_harness_namespace.py"]
 protected_paths: ["docker/compose.yaml"]
 extra_paths: []
-attempts: 3
+attempts: 2
 verify: "bash scripts/ci/itest.sh tests/integration/test_harness_namespace.py -q"
-branch: "ticket/ER-018-test-harness-session-namespaced-lake-fixture"
+branch: ""
 commit: ""
 spec_sha: "28d8d8e366a7b49b"
-updated_at: "2026-08-15T01:34:01Z"
+updated_at: "2026-08-15T01:38:06Z"
 session: ccfd1b99-9588-4cf8-a0e1-67796a4e82d2
 ---
 ## Description
@@ -89,3 +89,10 @@ uv run ruff check tests/conftest.py tests/integration
 - **Assertion / contradiction:** fatal: Not possible to fast-forward, aborting. -- the ticket branch already existed from attempt 1 at 31dc421, so step 2's 'git switch -c' failed with 'a branch named ticket/ER-018-... already exists' and work proceeded on that stale tip, one commit behind main's 'bd188ef board(ER-018): claim attempt 2'. main and the branch now carry conflicting board.py edits to the same frontmatter lines (main: in_progress/attempts 2/session d730f949; branch: done/attempts 1/session 4a1ce021, because 'board.py complete' ran against the stale checkout). 'board.py audit' on main reports 'DRIFT ER-018: left in_progress'. The implementation itself is FINISHED and fully green: commit 1cc86c53b7834e9ba64d0d5bd94c5f1284664e46 passed the full gate ladder (integration 28 passed, verify 6 passed, receipt .loop/receipts/ER-018-1.json).
 - **Smallest change that would unblock:** Delete the stale branch and replay the finished commit onto a correctly-based one, then re-run: (1) git branch -m ticket/ER-018-test-harness-session-namespaced-lake-fixture ER-018-attempt2-keep ; (2) board.py claim ER-018 ; (3) git switch -c ticket/ER-018-test-harness-session-namespaced-lake-fixture ; (4) git checkout ER-018-attempt2-keep -- tests/conftest.py tests/integration/conftest.py tests/integration/test_harness_namespace.py (the three files are complete and need no edits) ; (5) rewrite .loop/change-plan.json for ER-018 and plan-check, then gates.sh, commit, complete, merge. Separately: S8.1 step 4's first two statements do not exist in the pinned duckdb==1.5.5 ducklake extension and need a spec amendment -- replace 'CALL lake.expire_snapshots(older_than => now())' and 'CALL lake.cleanup_old_files(cleanup_all => true)' with 'CALL ducklake_expire_snapshots($ER_LAKE_ALIAS, older_than => now())' and 'CALL ducklake_cleanup_old_files($ER_LAKE_ALIAS, cleanup_all => true)', since DuckDB reads 'lake.' there as a schema qualifier, not the attached catalog.
 - **Log:** `.loop/logs/ER-018.attempt-2.log`
+
+### Attempt 3 — environment (2026-08-15T01:38:06Z)
+
+- **Failing command:** `bash scripts/ci/itest.sh tests/integration/test_harness_namespace.py -q`
+- **Assertion / contradiction:** Permission to use Bash has been denied because Claude Code is running in don't ask mode. The session's permission mode refuses any Bash invocation whose leading binary is 'bash', so the ticket verify never executed -- no pytest output, no exit code, no gate receipt. 'bash scripts/gates.sh --ticket ER-018' (step 7) and 'docker info' are refused by the same mechanism; git, grep and python3 (including scripts/board.py) are permitted. No workaround was attempted: re-spelling the command as 'sh' or calling pytest directly would violate the run-verbatim rule and evade a deliberate permission decision. Steps 0-5 are complete -- claim, branch (attempt 2's leftover branch was already renamed to abandoned/ER-018-...-20260815T013324Z, so that block is resolved), plan-check OK, and all three owned files written and committed as wip 9493dfa, byte-identical to the tree attempt 2 took through a green full-scope ladder.
+- **Smallest change that would unblock:** Re-run ER-018 in a session that allows 'bash scripts/ci/itest.sh ...' and 'bash scripts/gates.sh ...' -- interactive, or headless with those two allowlisted in .claude/settings.json. The implementation needs no edits: recover the three files from wip 9493dfa on ticket/ER-018-... or from abandoned/ER-018-...-20260815T013324Z, then run steps 6-8 straight through. Separately, amend S8.1 step 4 to 'CALL ducklake_expire_snapshots($ER_LAKE_ALIAS, older_than => now())' and 'CALL ducklake_cleanup_old_files($ER_LAKE_ALIAS, cleanup_all => true)': the catalog-scoped spelling in the spec raises 'Catalog Error: Table Function with name expire_snapshots does not exist!' on the pinned duckdb==1.5.5, because DuckDB reads 'lake.' there as a schema qualifier, not the attached catalog.
+- **Log:** `.loop/logs/ER-018.attempt-3.log`
