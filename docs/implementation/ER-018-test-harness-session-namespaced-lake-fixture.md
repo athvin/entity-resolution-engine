@@ -14,12 +14,12 @@ consumes: ["src/er/lake/ducklake.py::connect", "src/er/lake/ducklake.py::detach"
 owns: ["tests/conftest.py", "tests/integration/conftest.py", "tests/integration/test_harness_namespace.py"]
 protected_paths: ["docker/compose.yaml"]
 extra_paths: []
-attempts: 3
+attempts: 0
 verify: "bash scripts/ci/itest.sh tests/integration/test_harness_namespace.py -q"
 branch: ""
 commit: ""
 spec_sha: "28d8d8e366a7b49b"
-updated_at: "2026-08-15T01:39:23Z"
+updated_at: "2026-08-15T13:04:55Z"
 session: b6576bdb-c89f-4192-937e-5931837c17f5
 ---
 ## Description
