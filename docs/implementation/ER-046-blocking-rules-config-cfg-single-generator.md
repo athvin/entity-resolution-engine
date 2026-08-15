@@ -2,7 +2,7 @@
 id: ER-046
 title: "blocking_rules_from_config(cfg): the single generator, NULL/empty policy, duplicate/unknown-column rejection"
 milestone: M2
-status: blocked
+status: todo
 kind: code
 size: M
 gates: fast
@@ -14,12 +14,12 @@ consumes: ["src/er/config/schema.py::Config", "src/er/config/loader.py::load_con
 owns: ["src/er/matching/model.py", "tests/unit/matching/test_blocking_generator.py"]
 protected_paths: ["src/er/config/schema.py"]
 extra_paths: ["src/er/matching/__init__.py"]
-attempts: 1
+attempts: 0
 verify: "uv run pytest tests/unit/matching/test_blocking_generator.py -q"
-branch: "ticket/ER-046-blocking-rules-config-cfg-single-generator"
+branch: ""
 commit: ""
 spec_sha: "28d8d8e366a7b49b"
-updated_at: "2026-08-15T06:08:49Z"
+updated_at: "2026-08-15T06:11:21Z"
 session: b45db92e-2ecd-4639-a589-613e258fa81e
 ---
 ## Description
@@ -49,7 +49,7 @@ Closes M12 (three descriptions of blocking with no generation direction, no NULL
 
 ## Acceptance criteria
 
-- [ ] AC1: For `configs/test.yaml`, the payload is a 4-element sequence in config order whose `key_type` values are `['email_exact','phone_exact','name_postal','dob_name']` and whose `expr` strings are byte-identical to the config values, and the returned rule list has 4 entries whose generated SQL each contains its corresponding `expr`.
+- [ ] AC1: For `configs/test.yaml`, the payload is a 4-element sequence in config order whose `key_type` values are `['email_exact','phone_exact','name_postal','dob_name']` and whose `expr` strings are byte-identical to the config values, and the returned rule list has 4 entries, the i-th of which generates the same SQL as `block_on` applied to the i-th payload entry `expr` (element-wise equality of `blocking_rule_sql` for the duckdb dialect) — which is what makes the two consumers one string. Splink qualifies each column with `l.` / `r.` and re-renders through sqlglot, so the raw `expr` is deliberately NOT asserted to be a substring of the generated SQL (S4.2).
 - [ ] AC2: The payload is JSON-round-trippable and stable: `json.dumps(payload, sort_keys=True)` is byte-identical across two calls on the same config and across a config whose unrelated mapping keys were reordered.
 - [ ] AC3: A config with two entries sharing a `key_type` raises the config error carrying `blocking.duplicate_key_type` and names the repeated value.
 - [ ] AC4: A config whose `expr` references a column absent from the S5 `int_std_records` column list (e.g. `nickname`) raises the config error carrying `columns.unknown` and names the offending column; an `expr` over `addr_postal`, `family_name`, `email`, `phone_e164`, `birth_date` or `given_name` is accepted.
@@ -85,6 +85,19 @@ bash scripts/gates.sh
 - Committed on main with the board updated
 
 ## Blocker log
+### Resolution of attempt 1 (applied by the board owner, 2026-08-15)
+
+Attempt 1 was right and its evidence is reproducible. AC1's final clause has been **reworded**: it now
+asserts `rule_sql(rule) == rule_sql(block_on(expr))` element-wise, instead of raw-substring containment
+that `block_on` can never satisfy for a multi-column expr. **S4.2 has also been amended** to say where
+byte-identity is required (the `block_on` input, not the rendered SQL), so no later ticket re-derives
+this.
+
+For the next attempt: the assertion in `tests/unit/matching/test_blocking_generator.py` should be
+`assert rule_sql(rule) == rule_sql(block_on(entry["expr"]))`. Everything else attempt 1 built was
+gate-clean; its work is preserved on `abandoned/ER-046-...` if useful, but write it fresh rather than
+reusing that branch.
+
 
 ### Attempt 1 — spec_contradiction (2026-08-15T06:08:49Z)
 
