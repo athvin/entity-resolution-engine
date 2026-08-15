@@ -2,7 +2,7 @@
 id: ER-037
 title: "dbt macro harness (Jinja render + duckdb + seed() stub) + lowercase_trim, null_semantics, email_norm"
 milestone: M2
-status: in_progress
+status: done
 kind: code
 size: M
 gates: fast
@@ -17,9 +17,9 @@ extra_paths: []
 attempts: 1
 verify: "uv run pytest tests/unit/dbt/test_macro_harness.py tests/unit/dbt/test_lowercase_trim.py tests/unit/dbt/test_null_semantics.py tests/unit/dbt/test_email_norm.py -q"
 branch: "ticket/ER-037-dbt-macro-harness-jinja-render-duckdb"
-commit: ""
+commit: "652a02836b61a2842a4df2e01f22361e1c786921"
 spec_sha: "28d8d8e366a7b49b"
-updated_at: "2026-08-15T05:03:47Z"
+updated_at: "2026-08-15T05:18:01Z"
 session: ff6a3c9c-21b5-4d00-bab3-57ccf6856113
 ---
 ## Description
