@@ -2,7 +2,7 @@
 id: ER-018
 title: "Test harness A: session-namespaced lake fixture (lake_ns, lake_conn, er_env), METADATA_SCHEMA er_test_{ns}, DATA_PATH s3://lake/test/{ns}/, drop-schema teardown"
 milestone: M1
-status: todo
+status: in_progress
 kind: code
 size: M
 gates: full
@@ -14,12 +14,13 @@ consumes: ["src/er/lake/ducklake.py::connect", "src/er/lake/ducklake.py::detach"
 owns: ["tests/conftest.py", "tests/integration/conftest.py", "tests/integration/test_harness_namespace.py"]
 protected_paths: ["docker/compose.yaml"]
 extra_paths: []
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_harness_namespace.py -q"
-branch: ""
+branch: "ticket/ER-018-test-harness-session-namespaced-lake-fixture"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "28d8d8e366a7b49b"
+updated_at: "2026-08-15T01:07:30Z"
+session: 4a1ce021-5b63-4478-b4e0-26cdfbeec9cb
 ---
 ## Description
 
