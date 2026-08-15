@@ -2,7 +2,7 @@
 id: ER-022
 title: "er doctor with the exact M25 assertion list + T-DOCTOR-1 + wire as first integration step"
 milestone: M1
-status: todo
+status: in_progress
 kind: code
 size: M
 gates: full
@@ -14,12 +14,13 @@ consumes: ["src/er/versions.py::PINS", "src/er/cli.py::app", "src/er/errors.py::
 owns: ["src/er/doctor.py", "tests/unit/test_doctor_checks.py", "tests/integration/test_doctor.py"]
 protected_paths: []
 extra_paths: ["src/er/cli.py", ".github/workflows/ci.yaml", "tests/unit/test_ci_workflow.py", "scripts/ci/itest.sh"]
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_doctor.py -q && uv run pytest tests/unit/test_ci_workflow.py -q"
-branch: ""
+branch: "ticket/ER-022-er-doctor-exact-m25-assertion-list"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "2abcfe433c322f74"
+updated_at: "2026-08-15T17:47:32Z"
+session: ee55901a-9ba6-4734-8110-495b0e5e5466
 ---
 ## Description
 
