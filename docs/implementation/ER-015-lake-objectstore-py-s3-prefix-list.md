@@ -2,7 +2,7 @@
 id: ER-015
 title: "lake/objectstore.py (S3 prefix list/delete) + lake/catalog.py (direct psycopg catalog connection)"
 milestone: M1
-status: todo
+status: in_progress
 kind: code
 size: S
 gates: full
@@ -14,12 +14,13 @@ consumes: ["src/er/config/schema.py::Config", "scripts/ci/itest.sh", "docker/com
 owns: ["src/er/lake/env.py", "src/er/lake/objectstore.py", "src/er/lake/catalog.py", "tests/integration/test_objectstore_catalog.py"]
 protected_paths: ["docker/compose.yaml"]
 extra_paths: ["pyproject.toml", "uv.lock", "src/er/lake/__init__.py"]
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_objectstore_catalog.py -q"
-branch: ""
+branch: "ticket/ER-015-lake-objectstore-py-s3-prefix-list"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "28d8d8e366a7b49b"
+updated_at: "2026-08-15T00:40:55Z"
+session: a0405b5f-5796-474d-a04b-84c780fc646d
 ---
 ## Description
 
