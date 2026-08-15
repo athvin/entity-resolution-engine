@@ -2,7 +2,7 @@
 id: ER-041
 title: "base_10 inputs: 3 CSVs + literal headers into S8.2, truth.csv, machine-checked trap index, designed rule-coverage + gray-band + recency guards, sources.columns in configs/test.yaml"
 milestone: M2
-status: blocked
+status: todo
 kind: fixture
 size: L
 gates: fast
@@ -14,12 +14,12 @@ consumes: ["tests/helpers/expected.py::load_scenario", "scripts/validate_fixture
 owns: ["fixtures/static/base_10/base/crm.csv", "fixtures/static/base_10/base/billing.csv", "fixtures/static/base_10/base/webforms.csv", "fixtures/static/base_10/truth.csv", "fixtures/static/base_10/traps.csv", "tests/unit/fixtures/test_base_10.py"]
 protected_paths: []
 extra_paths: ["configs/test.yaml", "configs/default.yaml"]
-attempts: 1
+attempts: 0
 verify: "uv run pytest tests/unit/fixtures/test_base_10.py -q"
-branch: "ticket/ER-041-base-10-inputs-3-csvs-literal"
+branch: ""
 commit: ""
 spec_sha: "28d8d8e366a7b49b"
-updated_at: "2026-08-15T05:58:34Z"
+updated_at: "2026-08-15T06:11:20Z"
 session: af8ee4fe-bc99-47ee-a9cf-3575332b8c09
 ---
 ## Description
@@ -89,6 +89,20 @@ python3 scripts/lint_spec.py --part a DesignDoc.md && python3 scripts/lint_spec.
 - Committed on main with the board updated
 
 ## Blocker log
+### Resolution of attempt 1 (applied by the board owner, 2026-08-15)
+
+Attempt 1 was correct: S8.2.1 enumerated the scenario root as exactly three files, so `truth.csv` and
+`traps.csv` had nowhere to live and the fixture linter rejected them. **S8.2.1 has been amended.** The
+root now has two documented kinds: *inputs and bounds* (`assertions.csv`, `parity_pairs.csv`,
+`tf_flip_pairs.csv`) and *ground truth* (`truth.csv`, `traps.csv`) — the latter read only by tests and
+the S8.5 metrics, never fed to the pipeline, and present only in hand-authored scenarios.
+
+For the next attempt: the enforcing code still carries the old three-file list and **you must update it
+to match the amended spec** — `tests/helpers/scenario.py::AUX_FILES`, the `unknown-file` rule in
+`validate_fixtures.py`, and any test that counts those entries. Those paths belong to ER-028, which is
+`done`, so `plan-check` permits your plan to touch them (`owns_index` skips completed tickets); name
+them in `.loop/change-plan.json`. Do not weaken the linter to pass — extend its file list.
+
 
 ### Attempt 1 — spec_contradiction (2026-08-15T05:58:34Z)
 
