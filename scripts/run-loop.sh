@@ -479,6 +479,45 @@ print(hashlib.sha256(p.read_bytes()).hexdigest()[:16] if p.exists() else "")')"
     log "re-running the full gate ladder on merged main (independent of the agent)"
     if ! bash "$GATES" --scope full --no-cache --no-receipt --ticket "$TICKET_ID" \
          > "$RUN_DIR/reverify-$TICKET_ID.log" 2>&1; then
+
+      # A failed re-verify is not automatically a code defect. ER-024 passed every
+      # gate, then its re-verify died on `net/http: TLS handshake timeout` fetching
+      # a base image -- and the driver rewound main and blocked 43 minutes of
+      # verified work over a network blip. Infrastructure failures must be retried,
+      # never quarantined: quarantining is destructive and irreversible-by-the-loop,
+      # so it must be reserved for evidence the CODE is wrong.
+      REVERIFY_LOG="$RUN_DIR/reverify-$TICKET_ID.log"
+      INFRA_RE='TLS handshake timeout|failed to fetch oauth token|net/http|i/o timeout'
+      INFRA_RE="$INFRA_RE"'|connection refused|no such host|temporary failure in name resolution'
+      INFRA_RE="$INFRA_RE"'|Cannot connect to the Docker daemon|docker daemon is not running'
+      INFRA_RE="$INFRA_RE"'|failed to solve: failed to fetch|context deadline exceeded'
+      INFRA_RE="$INFRA_RE"'|Client.Timeout exceeded|EOF$|503 Service Unavailable|429 Too Many'
+      if grep -Eiq "$INFRA_RE" "$REVERIFY_LOG" 2>/dev/null; then
+        log "re-verify failed on INFRASTRUCTURE, not code -- retrying once before judging"
+        grep -Eio "$INFRA_RE" "$REVERIFY_LOG" 2>/dev/null | sort -u | head -3 | sed 's/^/         /'
+        sleep 30
+        if bash "$GATES" --scope full --no-cache --no-receipt --ticket "$TICKET_ID" \
+             > "$REVERIFY_LOG.retry" 2>&1; then
+          log "re-verify PASSED on retry; $TICKET_ID stands (the first failure was infrastructure)"
+          REVERIFY_OK=1
+        elif grep -Eiq "$INFRA_RE" "$REVERIFY_LOG.retry" 2>/dev/null; then
+          log "re-verify hit infrastructure again; STOPPING rather than quarantining good work."
+          log "       $TICKET_ID is left done and main is NOT rewound. Fix the environment,"
+          log "       then re-run: bash scripts/gates.sh --scope full --no-cache --ticket $TICKET_ID"
+          EXIT_CODE=7
+          break
+        else
+          log "re-verify failed again, this time on a real gate -- proceeding to quarantine"
+          REVERIFY_OK=0
+        fi
+      else
+        REVERIFY_OK=0
+      fi
+    else
+      REVERIFY_OK=1
+    fi
+
+    if [[ "${REVERIFY_OK:-1}" -eq 0 ]]; then
       log "REVERIFY FAILED for $TICKET_ID -- quarantining and rewinding main"
       QBRANCH="loop-quarantine/$TICKET_ID-$(date -u +%Y%m%d%H%M%S)"
       if ! git branch "$QBRANCH" HEAD; then
