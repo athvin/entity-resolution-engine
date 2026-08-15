@@ -161,8 +161,11 @@ suite when the change warrants it, then re-runs the ticket verify and writes a *
 result to the exact tree it tested. On failure, fix and re-run the **whole ladder** — a fix can break
 an earlier gate. After 3 failed cycles, block with class `gate_failed`.
 
-The full-scope run can take several minutes. Run it with `run_in_background: true` and poll, rather
-than blocking a foreground call on it. What each gate proves: [references/gates.md](references/gates.md).
+A full-scope run can take fifteen minutes or more. **Run it in the foreground with
+`timeout: 3600000` and wait for it to finish.** You are a headless single-shot session: if you end
+your turn while a gate is still running, the session ends, the gate dies unrecorded, and the ticket is
+left `in_progress` having consumed an attempt. There is no "pick it up when it finishes".
+What each gate proves: [references/gates.md](references/gates.md).
 
 ### 8. Commit, complete, merge
 

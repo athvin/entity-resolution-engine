@@ -71,12 +71,21 @@ cannot grant that to yourself — it is ticket data, set when the ticket was wri
 
 ## Running the slow gate
 
-A cold full-scope run builds an image and runs the Compose integration suite; it can take several
-minutes and will exceed a foreground shell call. Run it in the background and poll:
+A cold full-scope run builds an image and runs the Compose integration suite. It can take fifteen
+minutes or more. **Run it in the foreground and wait for it.** The driver exports
+`BASH_MAX_TIMEOUT_MS=3600000`, so a foreground call has a full hour before it is cut off — far longer
+than the ladder needs.
 
 ```bash
-bash ${CLAUDE_PROJECT_DIR}/scripts/gates.sh --ticket <ID>   # with run_in_background: true
+bash ${CLAUDE_PROJECT_DIR}/scripts/gates.sh --ticket <ID>   # timeout: 3600000
 ```
+
+**Never end your turn while a gate is still running.** You are a headless single-shot session: when
+you stop producing turns the session ends, and a backgrounded gate dies unfinished and unrecorded.
+"I'll pick this up when the ladder finishes" is not a thing that can happen — there is no later. An
+iteration that stops mid-gate leaves the ticket `in_progress`, costs an attempt, and forces the
+driver to release it. If you genuinely must background something, poll it to completion in this same
+turn and do not stop until you have its exit code.
 
 Results are cached by tree hash, so re-running an unchanged tree is free. Pass `--no-cache` only when
 you have a specific reason to distrust the cache.
