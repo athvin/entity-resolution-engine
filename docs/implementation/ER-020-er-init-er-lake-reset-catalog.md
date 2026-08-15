@@ -2,7 +2,7 @@
 id: ER-020
 title: "er init + er lake reset + catalog-init compose service (+ compose contract test update)"
 milestone: M1
-status: todo
+status: in_progress
 kind: code
 size: M
 gates: full
@@ -14,12 +14,13 @@ consumes: ["src/er/cli.py::app", "src/er/cli.py::emit_stage_line", "src/er/error
 owns: ["src/er/lake/init.py", "tests/integration/test_init.py"]
 protected_paths: ["src/er/lake/ddl.py", "src/er/lake/model.py"]
 extra_paths: ["src/er/cli.py", "docker/compose.yaml", "tests/unit/test_compose_contract.py", "tests/conftest.py"]
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_init.py -q && uv run pytest tests/unit/test_compose_contract.py -q"
-branch: ""
+branch: "ticket/ER-020-er-init-er-lake-reset-catalog"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "2abcfe433c322f74"
+updated_at: "2026-08-15T13:25:38Z"
+session: ac254179-9f04-46be-a9ca-af5810892f53
 ---
 ## Description
 
