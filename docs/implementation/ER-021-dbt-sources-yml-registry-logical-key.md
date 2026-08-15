@@ -2,7 +2,7 @@
 id: ER-021
 title: "dbt sources.yml from the registry + logical-key/accepted_values tests + canonical-pair singular test + T-KEY-1"
 milestone: M1
-status: blocked
+status: todo
 kind: code
 size: M
 gates: full
@@ -14,12 +14,12 @@ consumes: ["src/er/lake/model.py::TABLES", "src/er/lake/model.py::TableSpec", "s
 owns: ["src/er/lake/dbt_sources.py", "dbt/models/sources.yml", "dbt/tests/assert_canonical_pair_ordering.sql", "dbt/tests/assert_single_active_model.sql", "tests/unit/test_dbt_sources_parity.py", "tests/integration/test_logical_keys.py", "tests/integration/test_keys.py"]
 protected_paths: []
 extra_paths: ["dbt/dbt_project.yml", "dbt/packages.yml"]
-attempts: 1
+attempts: 0
 verify: "bash scripts/ci/itest.sh tests/integration/test_logical_keys.py -q && uv run pytest tests/unit/test_dbt_sources_parity.py -q"
 branch: ""
 commit: ""
 spec_sha: "2abcfe433c322f74"
-updated_at: "2026-08-15T17:47:09Z"
+updated_at: "2026-08-15T17:50:34Z"
 session: 1edf5b0f-ea7d-4c46-82fc-ef17d631e62e
 ---
 ## Description
@@ -93,6 +93,23 @@ uv run mypy --strict src/er/lake/dbt_sources.py
 - ruff + `mypy --strict src/er` clean; verify command passes; board entry updated with provides
 
 ## Blocker log
+### Resolution of the driver quarantine (applied by the board owner, 2026-08-15)
+
+**Quarantined in error, for a defect in another ticket's tests.** ER-021's own ladder passed. The
+driver's re-verify then failed on `hypothesis.errors.DeadlineExceeded` in
+`tests/unit/dbt/test_name_norm.py` and `test_name_variants.py` — files owned by ER-039 and untouched
+by this ticket, which only adds `dbt/models/sources.yml`.
+
+The tests were genuinely at fault: the first generated example pays the `MacroHarness` DuckDB
+warm-up. Hypothesis reported 560ms on the first call versus 10ms afterwards and printed
+*"Unreliable test timings! ... consider turning deadlines off for this test by setting
+deadline=None"*. Both property tests now carry `@settings(deadline=None)`; no assertion was
+weakened, and both properties still run on every generated example. Stable over 5 consecutive runs.
+
+The driver additionally now classes a timing flake as infrastructure, so it retries instead of
+rewinding `main`. Previous work is on `loop-quarantine/ER-021-20260815174709`; this ticket is being
+re-done from scratch so `done` continues to mean the loop earned it.
+
 
 ### Attempt 1 — gate_failed (2026-08-15T17:47:09Z)
 
