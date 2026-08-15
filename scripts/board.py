@@ -1056,6 +1056,44 @@ def cmd_unblock(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def cmd_reset_attempts(args: argparse.Namespace) -> int:
+    """Refund the attempts of a `todo` ticket that starved on harness faults.
+
+    `unblock` only accepts a `blocked` ticket, so a ticket whose attempts were
+    consumed by RELEASES rather than blocks -- a killed driver, a branch collision,
+    a permission gap -- lands in `todo` at MAX_ATTEMPTS and becomes permanently
+    unselectable, with no verb able to recover it. `next` then reports it `starved`
+    and the whole board stalls behind it. ER-018 hit this after three consecutive
+    harness faults, none of them its own fault.
+
+    This is a human action and is deliberately not in the agent's permitted set:
+    refunding your own attempts would defeat the attempt cap entirely.
+    """
+    with BoardLock():
+        ticket = find_ticket(args.id)
+        if ticket.status != "todo":
+            raise BoardError(
+                f"{ticket.id} is '{ticket.status}', not todo; "
+                "use 'unblock' for a blocked ticket or 'release' for an in_progress one",
+                EXIT_REFUSED,
+            )
+        if ticket.attempts == 0:
+            raise BoardError(f"{ticket.id} already has 0 attempts", EXIT_REFUSED)
+        before = ticket.attempts
+        ticket.fields["attempts"] = 0
+        ticket.fields["branch"] = ""
+        ticket.save()
+        commit_board_change(
+            [ticket.path], f"board({ticket.id}): attempts reset {before} -> 0 ({args.reason})"
+        )
+    _emit(
+        {"status": "todo", "id": ticket.id, "attempts": 0, "was": before},
+        args.json,
+        f"RESET {ticket.id} attempts {before} -> 0",
+    )
+    return EXIT_OK
+
+
 def cmd_release(args: argparse.Namespace) -> int:
     """Return an interrupted in_progress ticket to todo without consuming state."""
     with BoardLock():
@@ -1384,6 +1422,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = add("release", cmd_release, "return an interrupted in_progress ticket to todo")
     p.add_argument("id")
+
+    p = add(
+        "reset-attempts",
+        cmd_reset_attempts,
+        "refund a todo ticket's attempts after harness faults starved it (human action)",
+    )
+    p.add_argument("id")
+    p.add_argument("--reason", required=True, help="why the attempts were not the ticket's fault")
 
     p = add("plan-check", cmd_plan_check, "validate a change plan before any code is written")
     p.add_argument("plan")
