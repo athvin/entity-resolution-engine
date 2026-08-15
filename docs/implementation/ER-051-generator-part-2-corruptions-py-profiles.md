@@ -2,7 +2,7 @@
 id: ER-051
 title: "Generator part 2: corruptions.py, profiles.yaml, emit.py (base_10-identical headers), cli.py"
 milestone: M2
-status: in_progress
+status: done
 kind: code
 size: M
 gates: fast
@@ -17,9 +17,9 @@ extra_paths: []
 attempts: 1
 verify: "uv run pytest tests/unit/generator/test_corruptions.py tests/unit/generator/test_emit.py -q"
 branch: "ticket/ER-051-generator-part-2-corruptions-py-profiles"
-commit: ""
+commit: "07b648175c8d4104670722f43da609065fd888c3"
 spec_sha: "2abcfe433c322f74"
-updated_at: "2026-08-15T07:03:52Z"
+updated_at: "2026-08-15T07:18:23Z"
 session: b0d01122-928d-494b-887e-440c8837d061
 ---
 ## Description
