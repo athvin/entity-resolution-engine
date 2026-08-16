@@ -1,0 +1,113 @@
+# The S5 contract for `int_std_records`.
+#
+# S5.0 gives every dbt-owned relation an ENFORCED contract, so the column list below
+# is S5's `int_std_records` listing -- column for column, type for type, in its order
+# -- and a drift from it fails `dbt build` instead of landing. `record_key` leads,
+# because it is the relation's logical key and Splink's `unique_id_column_name`
+# (S5.0, D6); everything after it is the `stg_<source>` payload unchanged, which is
+# what makes `int_std_records` a union of the three rather than a reshaping of them.
+#
+# The two spellings that differ from S5's prose are the same two `dbt/models/staging/
+# schema.yml` explains, and for the same reasons:
+#   LIST(VARCHAR) is written `VARCHAR[]`, DuckDB's own name for it, because the
+#     contract's `data_type` is rendered verbatim into `CREATE TABLE`.
+#   NOT NULL is a `constraints:` entry rather than a `not_null` data test, because
+#     S5.0 makes NOT NULL the one constraint DuckLake enforces and a test alone would
+#     leave the physical column nullable.
+#
+# `email_valid` and `phone_valid` are both here and both `BOOLEAN`. They are the
+# inputs the `validated` survivorship rule needs for `email` and `phone_e164`
+# (S6.1 V4), and they are deliberately NOT `golden_records` columns -- S5.0's
+# `GOLDEN_SURVIVABLE_COLUMNS` names neither.
+#
+# TWO key tests, because S4.2 asks for two and they are not the same claim. `unique`
+# on `record_key` is S5.0's logical key for this relation. The
+# `unique_combination_of_columns` on `(source_system, source_record_id)` is the
+# supersession rule -- exactly one CURRENT row per record -- which is a statement
+# about the pair the model partitions by, not about the string it derives from it.
+# Both carry the `keys` tag, which is what T-KEY-1b's `dbt test --select tag:keys`
+# selects, and which is the same tag `models/staging/schema.yml` and
+# `models/sources.yml` put on their own logical keys.
+version: 2
+
+models:
+  - name: int_std_records
+    description: >
+      The single current-state standardized relation (S4.2): one row per
+      (source_system, source_record_id), taken from the greatest-ingested_at
+      raw_records version and excluding keys whose winner is a tombstone.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: record_key
+        description: "source_system || ':' || source_record_id (S5.0, D6)."
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+        data_tests:
+          - unique:
+              config:
+                tags: ['keys']
+      - name: source_system
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+      - name: source_record_id
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+      - name: content_hash
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+      - name: std_version
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+      - name: given_name
+        data_type: VARCHAR
+      - name: family_name
+        data_type: VARCHAR
+      - name: name_variants
+        data_type: VARCHAR[]
+        constraints:
+          - type: not_null
+      - name: email
+        data_type: VARCHAR
+      - name: email_valid
+        data_type: BOOLEAN
+      - name: phone_e164
+        data_type: VARCHAR
+      - name: phone_valid
+        data_type: BOOLEAN
+      - name: addr_number
+        data_type: VARCHAR
+      - name: addr_street
+        data_type: VARCHAR
+      - name: addr_unit
+        data_type: VARCHAR
+      - name: addr_city
+        data_type: VARCHAR
+      - name: addr_region
+        data_type: VARCHAR
+      - name: addr_postal
+        data_type: VARCHAR
+      - name: birth_date
+        data_type: DATE
+      - name: updated_at_source
+        data_type: TIMESTAMP
+      - name: ingest_batch_id
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+      - name: ingested_at
+        data_type: TIMESTAMP
+        constraints:
+          - type: not_null
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['source_system', 'source_record_id']
+          config:
+            tags: ['keys']

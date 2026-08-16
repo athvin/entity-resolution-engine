@@ -74,6 +74,10 @@ TOTAL_ROWS = 23
 #: What `--select staging` names, and what `dbt-selector:staging` promises callers.
 STAGING_SELECTOR = "staging"
 
+#: The sibling selector, needed only as setup for `tag:keys` — see
+#: `test_duplicate_key_fails_tag_keys`. This module asserts nothing about it.
+INTERMEDIATE_SELECTOR = "intermediate"
+
 #: T-KEY-1's selector, from the tag ER-021 puts on every logical-key test.
 KEYS_SELECTOR = f"tag:{KEYS_TAG}"
 
@@ -468,6 +472,12 @@ def test_duplicate_key_fails_tag_keys(
     initialised_lake: duckdb.DuckDBPyConnection, staged: Dbt
 ) -> None:
     """AC7: the `stg_*` logical key is a dbt test or it is nothing (S5.0)."""
+    # The `keys` tag covers `int_std_records` from ER-043 onwards, and a selector is
+    # not an arm: `tag:keys` names every dbt-owned logical key there is, so the
+    # relations behind them have to exist before it can report on any of them. The
+    # intermediate build is setup for the selector, not a claim this test makes --
+    # what it asserts is still the `stg_*` key and nothing else.
+    staged("build", select=INTERMEDIATE_SELECTOR)
     staged("test", select=KEYS_SELECTOR)
 
     # DuckLake enforces no uniqueness, so this lands silently -- which is precisely

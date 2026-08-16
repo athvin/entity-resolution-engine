@@ -145,11 +145,19 @@ def _total(completed: subprocess.CompletedProcess[str]) -> int:
 
 
 def _rendered_keys_tests() -> int:
-    """How many `keys`-tagged tests the renderer emitted, plus the two singular ones.
+    """How many `keys`-tagged tests the renderer emitted, plus the source-only singular ones.
 
     Counted from :func:`~er.lake.dbt_sources.render_sources_yml` rather than from the
     committed file, so this is the renderer's own claim; the unit parity test is what
     binds the committed file to it.
+
+    A singular test that reaches a MODEL with `ref()` is counted out, because
+    :data:`KEYS_EXCLUSION` takes it out of the run: dbt's indirect selection is eager
+    on `--exclude` too, so excluding every model excludes the tests standing on one.
+    From M2 the singular tests split the same way the tag does -- `assert_record_key
+    _no_colon` and `assert_one_current_std_row_per_record` stand on `int_std_records`
+    and belong to the dbt-owned arm this module does not build -- so counting them
+    here would compare what this arm ran against a total that includes the other one.
     """
     document = yaml.safe_load(render_sources_yml(REGISTRY.values()))
     tagged = 0
@@ -165,7 +173,8 @@ def _rendered_keys_tests() -> int:
     singular = [
         path
         for path in sorted(SINGULAR_TESTS.glob("*.sql"))
-        if f"tags=['{KEYS_TAG}']" in path.read_text(encoding="utf-8")
+        if f"tags=['{KEYS_TAG}']" in (body := path.read_text(encoding="utf-8"))
+        and "ref(" not in body
     ]
     return tagged + len(singular)
 
