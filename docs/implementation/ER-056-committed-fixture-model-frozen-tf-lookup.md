@@ -2,7 +2,7 @@
 id: ER-056
 title: "Committed fixture model + frozen tf_lookup + meta sidecar + regen_fixture_model.py + T-TRAIN-1 (slow-marked) + \"scenarios never train\" guard"
 milestone: M3
-status: todo
+status: in_progress
 kind: code
 size: L
 gates: full
@@ -14,12 +14,13 @@ consumes: ["src/er/matching/train.py::train_model", "src/er/matching/train.py::r
 owns: ["fixtures/static/model_test_v1.json", "fixtures/static/model_test_v1.tf.csv", "fixtures/static/model_test_v1.meta.json", "scripts/regen_fixture_model.py", "tests/helpers/model.py", "tests/integration/test_train_reproducibility.py", "tests/unit/test_no_training_in_scenarios.py", "tests/unit/fixtures/test_fixture_model.py"]
 protected_paths: ["configs/test.yaml", "fixtures/static/base_10/", "fixtures/generator/"]
 extra_paths: ["pyproject.toml", ".github/workflows/ci.yaml"]
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_train_reproducibility.py -m slow -q && uv run pytest tests/unit/test_no_training_in_scenarios.py -q"
-branch: ""
+branch: "ticket/ER-056-committed-fixture-model-frozen-tf-lookup"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "2e62460d9f41a842"
+updated_at: "2026-08-16T16:14:44Z"
+session: a63a301e-656f-4128-b5fd-844f1a369b46
 ---
 ## Description
 
