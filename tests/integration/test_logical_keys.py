@@ -46,6 +46,17 @@ SINGULAR_TESTS = DBT_DIR / "tests"
 KEYS_SELECTOR = f"tag:{KEYS_TAG}"
 PAIR_ORDERING_TEST = "assert_canonical_pair_ordering"
 
+# T-KEY-1a is the `ddl.py`-owned arm, and this module builds no dbt model: function
+# isolation drops the dbt-owned relations (S8.1) and nothing here recreates them. From
+# M2 the `keys` tag also covers model-attached tests -- `stg_<source>`'s logical key is
+# a `dbt_utils.unique_combination_of_columns` like every other -- and those ERROR
+# against a relation that was never built, which would report a missing *build* as a
+# failed *key*. Excluding the model nodes removes their attached tests with them, so
+# what runs here is exactly the renderer's source tests plus the singular ones, which
+# is what `_rendered_keys_tests` counts. The dbt-owned arm is asserted where those
+# relations exist, in `tests/integration/scenarios/test_staging.py` (S12's arm rule).
+KEYS_EXCLUSION = "resource_type:model"
+
 # dbt's own summary line, which is the only place the number of tests it actually
 # ran is reported: `Done. PASS=34 WARN=0 ERROR=0 SKIP=0 TOTAL=34`.
 _TOTAL_RE = re.compile(r"TOTAL=(\d+)")
@@ -123,7 +134,7 @@ def _dbt_test(
     connection: duckdb.DuckDBPyConnection, select: str = KEYS_SELECTOR
 ) -> subprocess.CompletedProcess[str]:
     with _detached(connection):
-        return _dbt("test", "--select", select, "--target", "lake")
+        return _dbt("test", "--select", select, "--exclude", KEYS_EXCLUSION, "--target", "lake")
 
 
 def _total(completed: subprocess.CompletedProcess[str]) -> int:

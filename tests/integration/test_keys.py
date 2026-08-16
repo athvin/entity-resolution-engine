@@ -37,6 +37,14 @@ DBT_PROFILES_DIR = DBT_DIR / "profiles"
 
 KEYS_SELECTOR = f"tag:{KEYS_TAG}"
 
+# The `ddl.py`-owned arm, and nothing else. From M2 the `keys` tag also covers the
+# `stg_<source>` model tests, which ERROR on a lake where no dbt model was ever built
+# -- and this test builds none. Excluding the model nodes removes their attached tests
+# with them, so a missing build cannot present here as a violated `raw_records` key.
+# The dbt-owned arm lives where those relations exist:
+# `tests/integration/scenarios/test_staging.py` (S12's split-into-arms rule).
+KEYS_EXCLUSION = "resource_type:model"
+
 #: The relation B2 is about: DuckLake supports no `PRIMARY KEY`, so this statement
 #: MUST raise. Named `t_pk` per the acceptance criterion.
 PK_RELATION = "t_pk"
@@ -117,14 +125,18 @@ def test_ddl_owned_duplicate_key_fails_dbt_test(
     """T-KEY-1a: the duplicate lands, the engine says nothing, and `tag:keys` goes red."""
     _insert_raw_record(initialised_lake)
     with _detached(initialised_lake):
-        clean = _dbt("test", "--select", KEYS_SELECTOR, "--target", "lake")
+        clean = _dbt(
+            "test", "--select", KEYS_SELECTOR, "--exclude", KEYS_EXCLUSION, "--target", "lake"
+        )
     assert clean.returncode == 0, clean.stdout
 
     # The engine accepts the duplicate: `raw_records`' key is logical, and this
     # INSERT is the whole reason it has to be a test (S5.0).
     _insert_raw_record(initialised_lake)
     with _detached(initialised_lake):
-        duplicated = _dbt("test", "--select", KEYS_SELECTOR, "--target", "lake")
+        duplicated = _dbt(
+            "test", "--select", KEYS_SELECTOR, "--exclude", KEYS_EXCLUSION, "--target", "lake"
+        )
     assert duplicated.returncode != 0, duplicated.stdout
     assert "raw_records" in duplicated.stdout
 

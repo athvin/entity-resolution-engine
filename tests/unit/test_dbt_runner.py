@@ -151,9 +151,22 @@ def test_project_vars_are_all_overridden() -> None:
     )
 
     # And the override wins on value, not merely on presence: each declared var
-    # must equal the document's field, whatever dbt_project.yml happens to say.
+    # must equal the document's field, whatever dbt_project.yml happens to say. The
+    # source block differs per var — S4.2's staging models read `sources` and
+    # `standardization`, which are not `versions` fields — so the document's value is
+    # looked up per var rather than resolved against one block.
+    from_document: dict[str, object] = {
+        "std_version": cfg.versions.std_version,
+        "survivorship_version": cfg.versions.survivorship_version,
+        "standardization": cfg.standardization.model_dump(),
+        "sources": {name: spec.model_dump() for name, spec in cfg.sources.items()},
+    }
     for key in sorted(declared):
-        assert payload[key] == getattr(cfg.versions, key)
+        assert key in from_document, (
+            f"dbt_project.yml declares '{key}' with no S6 block named here, so this "
+            f"test could not tell an override from a fallback"
+        )
+        assert payload[key] == from_document[key]
 
 
 def test_extra_cannot_shadow_config_vars() -> None:

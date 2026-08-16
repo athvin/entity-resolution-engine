@@ -19,6 +19,8 @@ from typing import Any
 
 import yaml
 
+from er.lake.model import DBT_OWNED
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DESIGN_DOC = REPO_ROOT / "DesignDoc.md"
 DBT_DIR = REPO_ROOT / "dbt"
@@ -199,7 +201,17 @@ def test_project_sets_contract_and_on_schema_change() -> None:
     # both satisfy. Asserted together, because the constraint is on the PAIR.
     assert models["+on_schema_change"] == "append_new_columns"
 
-    assert set(project["vars"]) == {"std_version", "survivorship_version"}
+    # The two version vars, plus the two the S4.2 staging models read AT RENDER
+    # TIME: a missing var is tolerated by `dbt parse` and is a hard error in
+    # `dbt compile --target mem`, and S9.1 runs both on a runner with no services and
+    # no config document. Exact, not a subset: a fifth var here would be a value the
+    # pipeline never passes and therefore a real fallback rather than a rendering aid.
+    assert set(project["vars"]) == {
+        "std_version",
+        "survivorship_version",
+        "sources",
+        "standardization",
+    }
 
     # S6: the CLI's `--vars` override always wins, so these two are fallbacks for a
     # bare `dbt parse` / `dbt compile --target mem` and nothing else. The note
@@ -214,16 +226,24 @@ def test_project_sets_contract_and_on_schema_change() -> None:
     )
 
 
-def test_no_models_ship_in_m1() -> None:
-    # S12: M1 ships no dbt model — the first dbt-owned relation does not exist
-    # until M2 — so `dbt ls --resource-type model` selects nothing. Source and
-    # test declarations (`schema.yml`) are not models and are deliberately allowed.
+def test_every_shipped_model_materializes_a_dbt_owned_relation() -> None:
+    # S12: M1 shipped no dbt model at all — the first dbt-owned relation does not
+    # exist until M2 — and that milestone has now landed the S4.2 staging models, so
+    # the empty-set form of this assertion has been overtaken by the board.
+    #
+    # What survives it is the rule the M1 wording was protecting: a model file
+    # materializes a relation, and S5.0 gives every relation exactly two possible
+    # owners. A model named outside `DBT_OWNED` is a relation `ddl.py` believes it
+    # owns and dbt would create anyway, which is the ownership collision S5.0 exists
+    # to prevent. Source and test declarations (`schema.yml`) are not models and are
+    # deliberately allowed.
     model_files = sorted(
-        path.relative_to(REPO_ROOT).as_posix()
-        for path in (DBT_DIR / "models").rglob("*")
-        if path.suffix in (".sql", ".py")
+        path for path in (DBT_DIR / "models").rglob("*") if path.suffix in (".sql", ".py")
     )
-    assert not model_files, f"M1 ships no dbt model, found: {model_files}"
+    strays = sorted(
+        path.relative_to(REPO_ROOT).as_posix() for path in model_files if path.stem not in DBT_OWNED
+    )
+    assert not strays, f"models materializing relations S5 does not declare dbt-owned: {strays}"
 
 
 def test_dbt_utils_is_pinned_exactly_and_locked() -> None:

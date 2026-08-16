@@ -1,0 +1,230 @@
+# The S5 contract for the three staging relations.
+#
+# S5.0 gives every dbt-owned relation an ENFORCED contract so that a column or type
+# drift fails `dbt build` and S5 stays the review-time authority; the column lists
+# below are S5's `stg_<source>` listing, column for column, type for type and in its
+# order. The three are deliberately spelled out rather than anchored and re-used: an
+# anchor would make one source's shape editable from another source's block, and
+# S4.2's whole claim is that the three models have the SAME shape independently.
+#
+# Two spellings differ from S5's prose and neither is a different type:
+#   LIST(VARCHAR) is written `VARCHAR[]`, which is DuckDB's own name for it -- the
+#     contract's `data_type` is rendered verbatim into `CREATE TABLE`, and DuckDB's
+#     parser rejects the `LIST(...)` spelling there.
+#   NOT NULL is a `constraints:` entry rather than a `not_null` data test, because
+#     S5.0 makes NOT NULL the one constraint DuckLake enforces and a contract that
+#     only tested it would leave the physical column nullable.
+#
+# DuckLake enforces nothing else (S5.0), so the logical key
+# `(source_system, source_record_id, content_hash)` is a test or it is nothing. It
+# carries the `keys` tag, which is what T-KEY-1a's `dbt test --select tag:keys`
+# selects -- the same tag `models/sources.yml` puts on the ddl.py-owned keys.
+version: 2
+
+models:
+  - name: stg_crm
+    description: "sources.crm projected into the S5 stg_<source> shape (S4.2)."
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: source_system
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+      - name: source_record_id
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+      - name: content_hash
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+      - name: std_version
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+      - name: given_name
+        data_type: VARCHAR
+      - name: family_name
+        data_type: VARCHAR
+      - name: name_variants
+        data_type: VARCHAR[]
+        constraints:
+          - type: not_null
+      - name: email
+        data_type: VARCHAR
+      - name: email_valid
+        data_type: BOOLEAN
+      - name: phone_e164
+        data_type: VARCHAR
+      - name: phone_valid
+        data_type: BOOLEAN
+      - name: addr_number
+        data_type: VARCHAR
+      - name: addr_street
+        data_type: VARCHAR
+      - name: addr_unit
+        data_type: VARCHAR
+      - name: addr_city
+        data_type: VARCHAR
+      - name: addr_region
+        data_type: VARCHAR
+      - name: addr_postal
+        data_type: VARCHAR
+      - name: birth_date
+        data_type: DATE
+      - name: updated_at_source
+        data_type: TIMESTAMP
+      - name: ingest_batch_id
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+      - name: ingested_at
+        data_type: TIMESTAMP
+        constraints:
+          - type: not_null
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['source_system', 'source_record_id', 'content_hash']
+          config:
+            tags: ['keys']
+
+  - name: stg_billing
+    description: "sources.billing projected into the S5 stg_<source> shape (S4.2)."
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: source_system
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+      - name: source_record_id
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+      - name: content_hash
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+      - name: std_version
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+      - name: given_name
+        data_type: VARCHAR
+      - name: family_name
+        data_type: VARCHAR
+      - name: name_variants
+        data_type: VARCHAR[]
+        constraints:
+          - type: not_null
+      - name: email
+        data_type: VARCHAR
+      - name: email_valid
+        data_type: BOOLEAN
+      - name: phone_e164
+        data_type: VARCHAR
+      - name: phone_valid
+        data_type: BOOLEAN
+      - name: addr_number
+        data_type: VARCHAR
+      - name: addr_street
+        data_type: VARCHAR
+      - name: addr_unit
+        data_type: VARCHAR
+      - name: addr_city
+        data_type: VARCHAR
+      - name: addr_region
+        data_type: VARCHAR
+      - name: addr_postal
+        data_type: VARCHAR
+      - name: birth_date
+        data_type: DATE
+      - name: updated_at_source
+        data_type: TIMESTAMP
+      - name: ingest_batch_id
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+      - name: ingested_at
+        data_type: TIMESTAMP
+        constraints:
+          - type: not_null
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['source_system', 'source_record_id', 'content_hash']
+          config:
+            tags: ['keys']
+
+  - name: stg_webforms
+    description: "sources.webforms projected into the S5 stg_<source> shape (S4.2)."
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: source_system
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+      - name: source_record_id
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+      - name: content_hash
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+      - name: std_version
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+      - name: given_name
+        data_type: VARCHAR
+      - name: family_name
+        data_type: VARCHAR
+      - name: name_variants
+        data_type: VARCHAR[]
+        constraints:
+          - type: not_null
+      - name: email
+        data_type: VARCHAR
+      - name: email_valid
+        data_type: BOOLEAN
+      - name: phone_e164
+        data_type: VARCHAR
+      - name: phone_valid
+        data_type: BOOLEAN
+      - name: addr_number
+        data_type: VARCHAR
+      - name: addr_street
+        data_type: VARCHAR
+      - name: addr_unit
+        data_type: VARCHAR
+      - name: addr_city
+        data_type: VARCHAR
+      - name: addr_region
+        data_type: VARCHAR
+      - name: addr_postal
+        data_type: VARCHAR
+      - name: birth_date
+        data_type: DATE
+      - name: updated_at_source
+        data_type: TIMESTAMP
+      - name: ingest_batch_id
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+      - name: ingested_at
+        data_type: TIMESTAMP
+        constraints:
+          - type: not_null
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['source_system', 'source_record_id', 'content_hash']
+          config:
+            tags: ['keys']

@@ -13,23 +13,94 @@ test-paths: ["tests"]
 
 clean-targets: ["target", "dbt_packages"]
 
-# FALLBACKS ONLY. S6 is the single source of truth for both versions, and the CLI
-# passes `--vars '{std_version: ..., survivorship_version: ..., run_id: ...}'` on
-# EVERY dbt invocation, so the override always wins over these values. They exist
-# so that a bare `dbt parse` / `dbt compile --target mem` on a runner with no
-# config document still renders; a divergence from configs/*.yaml is invisible to
-# the pipeline for exactly that reason and is not a defect.
+# FALLBACKS ONLY. S6 is the single source of truth for every var below, and the CLI
+# passes them all -- `std_version`, `survivorship_version`, `run_id`, `sources` and
+# `standardization` (src/er/dbt_runner.py::render_dbt_vars) -- on EVERY dbt
+# invocation, so the override always wins over these values. They exist so that a
+# bare `dbt parse` / `dbt compile --target mem` on a runner with no config document
+# still renders; a divergence from configs/*.yaml is invisible to the pipeline for
+# exactly that reason and is not a defect.
+#
+# `sources` and `standardization` joined the block with the S4.2 staging models,
+# which read their column mapping and date format out of them AT RENDER TIME. A
+# missing var is tolerated by `dbt parse` and is a hard error in `dbt compile
+# --target mem`, and S9.1 runs both on a runner with no services and no config
+# document. The SHAPE, not the values, is what those two commands need: one entry
+# per source carrying `columns`, `updated_at_column` and `date_format`, and S6's
+# three `standardization` keys.
 vars:
   std_version: "1"
   survivorship_version: "1"
+  standardization:
+    email_strip_plus_addressing: false
+    email_placeholders: []
+    phone_default_region: US
+  sources:
+    crm:
+      updated_at_column: last_modified
+      date_format: "%Y-%m-%d"
+      columns:
+        given_name: first_name
+        family_name: last_name
+        email: email_address
+        phone: phone
+        address_line: street_address
+        addr_city: city
+        addr_region: state
+        addr_postal: zip
+        birth_date: dob
+    billing:
+      updated_at_column: updated_ts
+      date_format: "%m/%d/%Y"
+      columns:
+        given_name: fname
+        family_name: lname
+        email: billing_email
+        phone: contact_phone
+        address_line: addr1
+        addr_city: addr_city
+        addr_region: addr_state
+        addr_postal: postal_code
+        birth_date: birth_date
+    webforms:
+      updated_at_column: submitted_at
+      date_format: "%Y-%m-%d"
+      columns:
+        given_name: name_first
+        family_name: name_last
+        email: email
+        phone: phone_number
+        address_line: address
+        addr_city: city
+        addr_region: region
+        addr_postal: postcode
+        birth_date: date_of_birth
 
 # Set at the `models:` root rather than per model so that no future model can
-# silently omit either one.
+# silently omit any of them.
+#   +database: every relation lives in the ATTACHED DuckLake catalog, alias `lake`,
+#     schema `main` (S5). dbt-duckdb derives the target database from the profile's
+#     `path`, and S4.0b pins that to `:memory:`, which yields `memory` -- so without
+#     this every model would materialize into the in-memory primary database and
+#     vanish when the dbt subprocess exits. It is set here and not in profiles.yml
+#     because that file must equal the S4.0b statement block field for field, and
+#     `database:` is not one of its fields. `schema` is deliberately NOT set: the
+#     profile's own `main` is already S5's schema, and a custom one would be
+#     appended to it as `main_<custom>`.
 #   +contract: every dbt-owned relation is contract-enforced (S5.0), so a column
 #     or type drift fails `dbt build` and S5 stays the review-time authority.
 #   +on_schema_change: the dbt-duckdb default of `ignore` silently swallows the
 #     columns a std_version bump introduces, defeating the whole mechanism (S4.2).
 models:
+  +database: lake
   +contract:
     enforced: true
   +on_schema_change: append_new_columns
+
+# The seed lands in the lake for the same reason, and one more: `name_variants`
+# reaches it with `ref()` (S4.2), while `er standardize` selects `staging+
+# intermediate` -- a selection that does not include the seed. A seed materialized
+# into the in-memory database would therefore be gone by the time the model that
+# joins it runs, so it is loaded once into the lake and read from there.
+seeds:
+  +database: lake
