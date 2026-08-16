@@ -1,4 +1,5 @@
-# The S5 contract for `int_std_records`.
+# The S5 contracts for the `int_*` relations. `int_std_records` first, then
+# `int_blocking_keys`, which has its own header above its entry.
 #
 # S5.0 gives every dbt-owned relation an ENFORCED contract, so the column list below
 # is S5's `int_std_records` listing -- column for column, type for type, in its order
@@ -109,5 +110,81 @@ models:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: ['source_system', 'source_record_id']
+          config:
+            tags: ['keys']
+
+  # The S5 contract for `int_blocking_keys`, on the same terms: S5's five columns in
+  # S5's order, `NOT NULL` as a `constraints:` entry rather than a data test because
+  # S5.0 makes it the one constraint DuckLake physically enforces, and the contract
+  # enforced so a drift fails `dbt build` rather than landing.
+  #
+  # `key_type`'s domain is DERIVED, not transcribed. S4.2 makes `configs/*.yaml`
+  # `blocking:` the single source of truth for what key types exist, so a literal list
+  # here would be a second one -- and it would be the one that silently stops agreeing
+  # the day a `blocking:` entry is added. `blocking_key_types()` reads the same payload
+  # the model's branches are rendered from (`macros/blocking/int_blocking_keys_union.
+  # sql`), so the domain and the emitted values cannot disagree.
+  #
+  # dbt renders a generic test's keyword arguments through its NATIVE renderer -- late,
+  # in a context that has the project's macros in it -- so the quoted Jinja below is
+  # evaluated and `literal_eval`'d back into a real list. The surrounding quotes are
+  # what make the line valid YAML before that happens; removing them makes the file
+  # unparsable, because `{{` opens a flow mapping in YAML.
+  #
+  # ONE key test, tagged `keys` like every other logical key on the board (T-KEY-1b
+  # selects `tag:keys`). S5.0's logical key for this relation is
+  # `(key_type, key_value, record_key)` -- not `(source_system, source_record_id)`,
+  # which is the incremental `unique_key` and is deliberately non-unique here, one row
+  # per key type per record. `accepted_values` carries no `keys` tag: it is a domain
+  # check, not a key.
+  - name: int_blocking_keys
+    description: >
+      The blocking key set (S4.2): one row per (configured key type, non-empty key
+      value, record), macro-generated from the `blocking` var so that the config is
+      the only place a key type is declared. It is a candidate-generation and
+      touched-subgraph source and is never an input to scoring (S4.3.4).
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: key_type
+        description: "The `blocking[].key_type` this row was emitted by (S4.2, S6)."
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+        data_tests:
+          - accepted_values:
+              # Named, because dbt derives a generic test's name from its arguments
+              # and the derived one here would be the Jinja expression mangled into
+              # an identifier -- unreadable in exactly the log a failing domain check
+              # sends someone to.
+              name: accepted_values_int_blocking_keys_key_type
+              arguments:
+                values: "{{ blocking_key_types() }}"
+      - name: key_value
+        description: >
+          The `blocking[].expr` evaluated on this record. Never NULL and never the
+          empty string -- S4.2's NULL/empty policy drops both, on this side and on
+          Splink's.
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+      - name: record_key
+        description: "source_system || ':' || source_record_id (S5.0, D6)."
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+      - name: source_system
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+      - name: source_record_id
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['key_type', 'key_value', 'record_key']
           config:
             tags: ['keys']
