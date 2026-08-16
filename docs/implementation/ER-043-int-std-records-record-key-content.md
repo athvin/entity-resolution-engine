@@ -2,7 +2,7 @@
 id: ER-043
 title: "int_std_records: record_key, content_hash, greatest-ingested_at current-row rule, tombstone exclusion, contract, phone_valid/email_valid"
 milestone: M2
-status: in_progress
+status: done
 kind: code
 size: M
 gates: full
@@ -17,9 +17,9 @@ extra_paths: []
 attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/scenarios/test_int_std_records.py -q"
 branch: "ticket/ER-043-int-std-records-record-key-content"
-commit: ""
+commit: "9cbc958a8acdad6ab9c6ae2c16a3d2483dce7858"
 spec_sha: "2e62460d9f41a842"
-updated_at: "2026-08-16T02:05:19Z"
+updated_at: "2026-08-16T03:50:54Z"
 session: 0da2708a-7ad5-4d65-9857-ef484e33db06
 ---
 ## Description
