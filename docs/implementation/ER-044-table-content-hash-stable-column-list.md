@@ -2,7 +2,7 @@
 id: ER-044
 title: "table_content_hash (stable column list, VOLATILE_COLUMNS excluded) + T-STD-1"
 milestone: M2
-status: in_progress
+status: done
 kind: code
 size: S
 gates: full
@@ -17,9 +17,9 @@ extra_paths: []
 attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_std_determinism.py -q && uv run pytest tests/unit/lake/test_hashing.py -q"
 branch: "ticket/ER-044-table-content-hash-stable-column-list"
-commit: ""
+commit: "f45f06c06ad12110744da9ebc482cc9a58c89443"
 spec_sha: "2e62460d9f41a842"
-updated_at: "2026-08-16T05:25:17Z"
+updated_at: "2026-08-16T06:03:23Z"
 session: 4c0f1bc3-c077-42f0-a523-08a309197b5b
 ---
 ## Description
