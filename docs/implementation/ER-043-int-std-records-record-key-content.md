@@ -2,7 +2,7 @@
 id: ER-043
 title: "int_std_records: record_key, content_hash, greatest-ingested_at current-row rule, tombstone exclusion, contract, phone_valid/email_valid"
 milestone: M2
-status: todo
+status: in_progress
 kind: code
 size: M
 gates: full
@@ -14,12 +14,13 @@ consumes: ["relation:stg_crm", "relation:stg_billing", "relation:stg_webforms", 
 owns: ["dbt/models/intermediate/int_std_records.sql", "dbt/models/intermediate/schema.yml", "dbt/tests/assert_record_key_no_colon.sql", "dbt/tests/assert_one_current_std_row_per_record.sql", "tests/integration/scenarios/test_int_std_records.py"]
 protected_paths: ["dbt/models/staging/stg_crm.sql", "dbt/models/staging/stg_billing.sql", "dbt/models/staging/stg_webforms.sql", "fixtures/static/base_10/base/crm.csv", "fixtures/static/base_10/base/billing.csv", "fixtures/static/base_10/base/webforms.csv"]
 extra_paths: []
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/scenarios/test_int_std_records.py -q"
-branch: ""
+branch: "ticket/ER-043-int-std-records-record-key-content"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "2e62460d9f41a842"
+updated_at: "2026-08-16T02:05:19Z"
+session: 0da2708a-7ad5-4d65-9857-ef484e33db06
 ---
 ## Description
 
