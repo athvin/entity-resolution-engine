@@ -2,7 +2,7 @@
 id: ER-047
 title: "int_blocking_keys macro-generated from the payload + contract + accepted_values"
 milestone: M2
-status: in_progress
+status: done
 kind: code
 size: S
 gates: full
@@ -17,9 +17,9 @@ extra_paths: ["dbt/models/intermediate/schema.yml"]
 attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/scenarios/test_blocking_keys.py -q"
 branch: "ticket/ER-047-int-blocking-keys-macro-generated-payload"
-commit: ""
+commit: "ba58b7165c86bebc8d873600b360c55089153d9f"
 spec_sha: "2e62460d9f41a842"
-updated_at: "2026-08-16T06:31:09Z"
+updated_at: "2026-08-16T07:58:48Z"
 session: d99dc4ff-62e9-4219-bd48-a8baa9fee813
 ---
 ## Description
