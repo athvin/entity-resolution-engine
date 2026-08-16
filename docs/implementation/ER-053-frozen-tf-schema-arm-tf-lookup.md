@@ -2,7 +2,7 @@
 id: ER-053
 title: "Frozen-TF schema arm: tf_lookup, tf_snapshot_id/tf_tables_path, materialize_tf_lookup, register_tf, compute_tf_table confinement guard"
 milestone: M3
-status: in_progress
+status: done
 kind: code
 size: M
 gates: full
@@ -17,9 +17,9 @@ extra_paths: []
 attempts: 1
 verify: "uv run pytest tests/unit/matching/test_tf_registration.py -q && bash scripts/ci/itest.sh tests/integration/test_tf_schema.py -q"
 branch: "ticket/ER-053-frozen-tf-schema-arm-tf-lookup"
-commit: ""
+commit: "dde7502395bb13a8df7d2b9fe126d47823b11e6b"
 spec_sha: "2e62460d9f41a842"
-updated_at: "2026-08-16T11:19:43Z"
+updated_at: "2026-08-16T12:14:53Z"
 session: bdf3070a-d7b1-46ae-b25c-821e5fa30e42
 ---
 ## Description
