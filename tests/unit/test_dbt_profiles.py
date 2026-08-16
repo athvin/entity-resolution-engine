@@ -193,7 +193,11 @@ def test_project_sets_contract_and_on_schema_change() -> None:
     models = project["models"]
     # At the `models:` root, so no future model can silently omit either one.
     assert models["+contract"] == {"enforced": True}
-    assert models["+on_schema_change"] == "sync_all_columns"
+    # append_new_columns, not sync_all_columns: dbt-core 1.12.2 raises
+    # ValidationError for any other value once `contract.enforced` is set on an
+    # incremental model, so this pair is the only one the two S4.2/S5.0 rules can
+    # both satisfy. Asserted together, because the constraint is on the PAIR.
+    assert models["+on_schema_change"] == "append_new_columns"
 
     assert set(project["vars"]) == {"std_version", "survivorship_version"}
 
