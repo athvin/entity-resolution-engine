@@ -118,3 +118,13 @@ testpaths = ["tests"]
 # tools, and no `tests/__init__.py` -- pytest's rootdir-based collection does not want
 # one, and `tests/conftest.py` belongs to ER-018.
 pythonpath = ["tests"]
+# The one marker this suite defines. T-TRAIN-1 (S8.3) refits the committed fixture
+# model over the S10.2 `10k` corpus, which is minutes of EM on its own, and M4's exit
+# criterion is a full PR path under ten minutes -- so the PR path runs
+# `-m "not slow"` and the artifact's cheap assertions live in
+# tests/unit/fixtures/test_fixture_model.py instead. Registered here because an
+# unregistered marker is a warning rather than a selector, and a typo in it would
+# deselect nothing while appearing to.
+markers = [
+  "slow: refits or regenerates a committed artifact; excluded from the PR path",
+]

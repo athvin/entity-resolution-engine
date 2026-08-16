@@ -101,8 +101,11 @@ jobs:
       - name: Environment check (T-DOCTOR-1)
         run: docker compose -f docker/compose.yaml --profile test run --rm pipeline er doctor
       - name: Run integration suite
+        # `-m "not slow"`: T-TRAIN-1 refits the committed fixture model over the S10.2
+        # `10k` corpus (S8.3), which does not fit inside M4's ten-minute PR path. It is
+        # run deliberately, not on every pull request.
         run: docker compose -f docker/compose.yaml --profile test run --rm pipeline
-             pytest tests/integration -q --maxfail=3
+             pytest tests/integration -q --maxfail=3 -m "not slow"
              --junitxml=/app/artifacts/junit.xml --durations=20
       - name: Tear down
         if: always()

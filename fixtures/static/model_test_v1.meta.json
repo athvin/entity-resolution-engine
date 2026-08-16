@@ -1,0 +1,34 @@
+{
+  "artifact": "model_test_v1.json",
+  "config_hash": "530a272840204f6f9944df4a9e8b84852eb85134225280b00b161811a097c438",
+  "corpus_digest": "9fa17301c53b6357cd47ac17a563e1b139a160b369d6c993c9e5dfc85938b730",
+  "duckdb_version": "1.5.5",
+  "generator_seed": 42,
+  "model_version": "v0001",
+  "scale": {
+    "name": "10k",
+    "personas": 4000,
+    "records": 10000
+  },
+  "sha256": "9d5b22288fc90f089792ea38af30a5c66ce59db7969ef44a32ab473538625c83",
+  "splink_version": "4.0.16",
+  "tf_rows": 4554,
+  "tf_snapshot_id": "01JWMDTFSNAP00000000000001",
+  "training": {
+    "deterministic_rules": [
+      "l.email = r.email",
+      "l.phone_e164 = r.phone_e164",
+      "l.family_name = r.family_name and l.birth_date = r.birth_date"
+    ],
+    "em": {
+      "fix_u_probabilities": true
+    },
+    "em_blocking_rules": [
+      "l.email = r.email",
+      "l.family_name = r.family_name and l.addr_postal = r.addr_postal"
+    ],
+    "recall": 0.85,
+    "u_max_pairs": 1000000,
+    "u_seed": 20260101
+  }
+}
