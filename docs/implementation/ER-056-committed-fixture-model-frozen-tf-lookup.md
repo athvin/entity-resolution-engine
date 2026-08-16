@@ -2,7 +2,7 @@
 id: ER-056
 title: "Committed fixture model + frozen tf_lookup + meta sidecar + regen_fixture_model.py + T-TRAIN-1 (slow-marked) + \"scenarios never train\" guard"
 milestone: M3
-status: in_progress
+status: done
 kind: code
 size: L
 gates: full
@@ -17,9 +17,9 @@ extra_paths: ["pyproject.toml", ".github/workflows/ci.yaml"]
 attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_train_reproducibility.py -m slow -q && uv run pytest tests/unit/test_no_training_in_scenarios.py -q"
 branch: "ticket/ER-056-committed-fixture-model-frozen-tf-lookup"
-commit: ""
+commit: "2984aa81830baaa45e6c6a028b609307d81f0a77"
 spec_sha: "2e62460d9f41a842"
-updated_at: "2026-08-16T16:14:44Z"
+updated_at: "2026-08-16T17:28:05Z"
 session: a63a301e-656f-4128-b5fd-844f1a369b46
 ---
 ## Description
