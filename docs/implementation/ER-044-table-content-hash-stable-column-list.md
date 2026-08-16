@@ -2,7 +2,7 @@
 id: ER-044
 title: "table_content_hash (stable column list, VOLATILE_COLUMNS excluded) + T-STD-1"
 milestone: M2
-status: todo
+status: in_progress
 kind: code
 size: S
 gates: full
@@ -14,12 +14,13 @@ consumes: ["src/er/lake/columns.py::VOLATILE_COLUMNS", "src/er/lake/columns.py::
 owns: ["src/er/lake/hashing.py", "tests/unit/lake/test_hashing.py", "tests/integration/test_std_determinism.py"]
 protected_paths: ["dbt/models/intermediate/int_std_records.sql", "src/er/lake/columns.py"]
 extra_paths: []
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_std_determinism.py -q && uv run pytest tests/unit/lake/test_hashing.py -q"
-branch: ""
+branch: "ticket/ER-044-table-content-hash-stable-column-list"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "2e62460d9f41a842"
+updated_at: "2026-08-16T05:25:17Z"
+session: 4c0f1bc3-c077-42f0-a523-08a309197b5b
 ---
 ## Description
 
