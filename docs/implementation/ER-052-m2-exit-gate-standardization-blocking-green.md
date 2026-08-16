@@ -2,7 +2,7 @@
 id: ER-052
 title: "M2 exit gate: standardization + blocking green on base_10 under the namespaced harness"
 milestone: M2
-status: todo
+status: in_progress
 kind: code
 size: S
 gates: full
@@ -14,12 +14,13 @@ consumes: ["fixtures/static/base_10/expected/base/std_hashes.csv", "src/er/match
 owns: ["tests/integration/test_m2_exit.py"]
 protected_paths: ["fixtures/static/base_10/", "dbt/models/", "dbt/macros/", "src/er/", "fixtures/generator/"]
 extra_paths: []
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_m2_exit.py -q"
-branch: ""
+branch: "ticket/ER-052-m2-exit-gate-standardization-blocking-green"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "2e62460d9f41a842"
+updated_at: "2026-08-16T09:54:05Z"
+session: e48423c1-0473-4042-a493-201b77e3c69f
 ---
 ## Description
 
