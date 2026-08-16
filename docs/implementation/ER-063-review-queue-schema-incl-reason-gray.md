@@ -2,7 +2,7 @@
 id: ER-063
 title: "review_queue: schema incl. reason ∈ {gray_band, never_unsatisfiable, coherence}, idempotent upsert, er review list|resolve, resolution→assertion in one transaction"
 milestone: M3
-status: todo
+status: in_progress
 kind: code
 size: M
 gates: full
@@ -14,12 +14,13 @@ consumes: ["src/er/review/assertions.py::add_assertion", "src/er/review/assertio
 owns: ["src/er/review/queue.py", "tests/unit/review/test_queue_upsert.py", "tests/integration/test_review_cli.py"]
 protected_paths: []
 extra_paths: ["src/er/cli.py"]
-attempts: 0
+attempts: 1
 verify: "uv run pytest tests/unit/review/test_queue_upsert.py -q && bash scripts/ci/itest.sh tests/integration/test_review_cli.py -q"
-branch: ""
+branch: "ticket/ER-063-review-queue-schema-incl-reason-gray"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "2e62460d9f41a842"
+updated_at: "2026-08-16T20:04:22Z"
+session: 4e767667-8bff-4482-b427-b2a234453e5f
 ---
 ## Description
 
