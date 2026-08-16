@@ -2,7 +2,7 @@
 id: ER-042
 title: "stg_crm/stg_billing/stg_webforms + incremental config + staging schema.yml"
 milestone: M2
-status: in_progress
+status: blocked
 kind: code
 size: M
 gates: full
@@ -19,7 +19,7 @@ verify: "bash scripts/ci/itest.sh tests/integration/scenarios/test_staging.py -q
 branch: "ticket/ER-042-stg-crm-stg-billing-stg-webforms"
 commit: ""
 spec_sha: "2abcfe433c322f74"
-updated_at: "2026-08-15T23:35:21Z"
+updated_at: "2026-08-16T00:00:42Z"
 session: 8688ed0e-f55b-4955-8371-f16c2e0fbef5
 ---
 ## Description
@@ -85,3 +85,12 @@ bash scripts/gates.sh
 - No fixture CSV under `fixtures/static/base_10/base/` was modified
 - `dbt parse` and `dbt compile --target mem` green on a bare runner (no services)
 - Committed on main with the board updated
+
+## Blocker log
+
+### Attempt 1 — spec_contradiction (2026-08-16T00:00:42Z)
+
+- **Failing command:** `uv run dbt parse --project-dir dbt --profiles-dir dbt/profiles --target mem`
+- **Assertion / contradiction:** Parsing Error at path []: Invalid value for on_schema_change: sync_all_columns. Models materialized as incremental with contracts enabled must set on_schema_change to 'append_new_columns' or 'fail'. S4.2 requires on_schema_change='sync_all_columns' on every incremental model AND contract: {enforced: true} on every dbt-owned model (S4.2, S5.0); dbt-core==1.12.2 (S2.1) refuses that pairing in dbt/artifacts/resources/v1/config.py:150-157, validating the MERGED model config, so no spelling of the two values escapes it. The staging models are the first contract-enforced incremental models on the board; ER-043, ER-047 and ER-088 state the same value and hit the same wall.
+- **Smallest change that would unblock:** Land a kind: spec-amendment ticket replacing sync_all_columns with append_new_columns in DesignDoc.md S4.2 (the two code blocks at lines 495/506 and the MUST sentence at line 509), S4.6 line 793 and S5.1 line 1158, adding the reason: every model there is contract-enforced, and the half of sync_all_columns dbt refuses (dropping and retyping columns) is the half S5.1 already classifies as breaking, so the permitted value is also the correct one; append_new_columns propagates the additive std_version-bump column that S4.2 and S5.1 say the setting exists for, while 'fail' would make a legitimate additive S5.1 evolution a hard error. Then the forced mechanical edits: tests/unit/test_dbt_profiles.py:196 (ER-008's committed test, which is why ER-042 cannot resolve this itself), ER-008 AC6 + Scope, ER-042 Description + AC6, ER-043 Scope + AC7, ER-047 Scope, ER-088 design item (5) + DoD. Verified: with that one token changed and nothing else, dbt parse and dbt compile --target mem both exit 0 on the branch's tree.
+- **Log:** `.loop/logs/ER-042.attempt-1.log`
