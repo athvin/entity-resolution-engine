@@ -110,7 +110,9 @@ from er.lake.ducklake import connect
 from er.lake.env import MissingEnvError
 from er.lake.init import init_lake, reset_lake
 from er.lake.maintain import DEFAULT_RETAIN_DAYS, maintain
+from er.lake.model_registry import active_model, load_model_settings
 from er.lake.objectstore import ObjectStore
+from er.matching.full import MODE_FULL, score_full
 from er.matching.train import run_train_stage
 from er.obs.logging import emit_stage_record
 from er.obs.runctx import RunContext, StageRun
@@ -554,6 +556,85 @@ class _TrainStage:
                 config_hash=options.config_hash,
                 if_changed=self.if_changed,
                 stage_run=self.stage_run,
+            )
+        _write_stdout(result.manifest(), result.stdout_line(), options)
+        return result.exit_code
+
+
+@dataclass
+class _MatchStage:
+    """`er match`: score candidate pairs into `match_scores` (S4.3.4, S4.3.5).
+
+    The stage owns the S4.0 surface — the three flags, the seven-field stdout line and
+    the exit codes — and none of the scoring:
+    :func:`~er.matching.full.score_full` does that, and every exit code but ``0``
+    arrives here as a raised error that :func:`~er.errors.exit_code_for` translates.
+    ``3`` in particular is :func:`~er.lake.model_registry.active_model` refusing a
+    registry with no active row, which is exactly S4.0's "no active model".
+
+    **Two flags of S4.0's table are accepted and refused rather than honoured**, and
+    both refusals are deliberate. ``--mode incremental`` is the S4.3.4 two-pass scorer,
+    which is a ticket of its own; ``--new-tf-snapshot`` is the only path that mints a
+    `tf_snapshot_id` outside `er train` (D4) and is likewise unwritten. Refusing is the
+    one behaviour that is never wrong: silently scoring in full mode under
+    ``--mode incremental`` would write a corpus-wide result an operator asked to have
+    scoped to a batch, and silently ignoring ``--new-tf-snapshot`` would leave
+    `er correct` believing it had rebuilt term frequency when it had not.
+
+    ``--model-version`` is honoured for the active version, which is the value S4.0
+    gives it as a default. Scoring at a *superseded* version needs a registry lookup by
+    version that :mod:`er.lake.model_registry` does not expose, so it is refused with
+    exit ``3`` rather than quietly scored at the active one — a run that scored a
+    different model than the operator named would put two `model_version`s above
+    `review_low` in `match_scores`, which is the state S4.3.2's activation guard exists
+    to make `er reconcile` refuse.
+    """
+
+    mode: str
+    model_version: str | None = None
+    new_tf_snapshot: bool = False
+    args: tuple[str, ...] = ()
+    name: str = "match"
+    stage_run: StageRun | None = None
+
+    def bind(self, stage_run: StageRun) -> None:
+        self.stage_run = stage_run
+
+    def run(self, options: GlobalOptions) -> int:
+        if options.config is None or self.stage_run is None:
+            # Unreachable through the command tree: S4.0 lists `ER_CONFIG` in this
+            # command's required-env column, so `GlobalOptions.resolve` has already
+            # exited 2 without a document, and `_execute` binds before the body runs.
+            raise StageFailure("er match was invoked without a config or a run_stages row")
+        if self.mode != MODE_FULL:
+            raise StageFailure(
+                f"er match --mode {self.mode} is not implemented; S4.3.4's two-pass "
+                f"incremental scoring is a separate stage, and only --mode {MODE_FULL} scores"
+            )
+        if self.new_tf_snapshot:
+            raise StageFailure(
+                "er match --new-tf-snapshot is not implemented; it is the only path that "
+                "mints a tf_snapshot_id outside `er train` (D4, S4.3.3) and rebuilding "
+                "tf_lookup under a new one is not wired yet"
+            )
+        store = ObjectStore.from_env()
+        with connect() as connection:
+            active = active_model(connection)
+            if self.model_version is not None and self.model_version != active.model_version:
+                raise PreconditionFailure(
+                    f"--model-version {self.model_version!r} is not the active model "
+                    f"({active.model_version!r}); scoring at a superseded version is not "
+                    f"implemented, and scoring at the active one instead would silently "
+                    f"answer a different question (S4.3.2)"
+                )
+            settings = load_model_settings(connection, store, active.model_version)
+            result = score_full(
+                connection,
+                options.config,
+                self.stage_run,
+                model_version=active.model_version,
+                tf_snapshot_id=active.tf_snapshot_id,
+                settings=settings,
             )
         _write_stdout(result.manifest(), result.stdout_line(), options)
         return result.exit_code
@@ -1454,8 +1535,25 @@ def match(
     run_id: RunIdOption = None,
     json_output: JsonOption = False,
 ) -> None:
-    """Score candidate pairs into match_scores (S4.3)."""
-    if new_tf_snapshot and mode != "full":
+    """Score candidate pairs into match_scores (S4.3).
+
+    ``--mode full`` is one corpus-wide `predict` at `review_low` over the active
+    model's frozen settings and frozen term frequency, persisted to
+    `lake.main.match_scores` in a single `MERGE INTO` on `(rec_a_key, rec_b_key,
+    model_version, tf_snapshot_id)` (S4.3.4, S4.0b). The gray band
+    (`review_low <= p < auto_merge`) is upserted to `review_queue` and is not
+    clustered (S4.3.5).
+
+    Exit codes (S4.0): ``0`` success; ``3`` no `status='active'` model; ``1`` scoring
+    failure. The ``10`` of S4.0's table belongs to ``--mode incremental`` — "no
+    unscored records" — and full mode never returns it.
+
+    A :func:`_run_command` stage rather than a :func:`_run_single` one: S4.0 gives the
+    command a stdout of its own (`mode, model_version, tf_snapshot_id, candidate_pairs,
+    pairs_scored, pairs_above_auto_merge, review_queue_added`), so the generic
+    per-stage summary would be a second, differently shaped line in a ``--json`` stream.
+    """
+    if new_tf_snapshot and mode != MODE_FULL:
         # D4: outside `er train`, `er correct` is the ONLY path that mints a
         # tf_snapshot_id, and it does so through `--mode full`.
         raise typer.BadParameter("--new-tf-snapshot requires --mode full", param_hint="--mode")
@@ -1465,7 +1563,18 @@ def match(
         args += ["--model-version", model_version]
     if new_tf_snapshot:
         args.append("--new-tf-snapshot")
-    _run_single("match", options, args)
+    _run_command(
+        _MatchStage(
+            mode=mode,
+            model_version=model_version,
+            new_tf_snapshot=new_tf_snapshot,
+            args=tuple(args),
+        ),
+        options,
+        mode=_MODE_STAGE,
+        command="match",
+        persist=True,
+    )
 
 
 @app.command()

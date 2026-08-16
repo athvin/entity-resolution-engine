@@ -84,10 +84,16 @@ COMPUTE_TF_CALL_SITES: Mapping[str, str] = {
 #: Where a `tf_snapshot_id` may be minted, and why. The two production entries are the
 #: two D4 names; neither module exists yet (ER-054, ER-055), and the scan tolerates
 #: that rather than pinning the guard to the order the board happens to run in.
+#:
+#: D4's second name is `er match --mode full --new-tf-snapshot`, and it is deliberately
+#: NOT listed: `src/er/matching/full.py` now exists and scores without minting, because
+#: the flag's rebuild semantics are a later ticket's. An entry for a call site that is
+#: not there is the standing exemption :func:`assert_allowlist_is_not_stale` refuses —
+#: so the ticket that adds the mint adds the entry back with it, which is the only
+#: order in which the allowlist ever describes the tree it is guarding.
 MINT_CALL_SITES: Mapping[str, str] = {
     "src/er/matching/tf.py": "the definition, and the single mint site D4 requires",
     "src/er/matching/train.py": "`er train` mints when it materializes tf_lookup (D4)",
-    "src/er/matching/full.py": "`er match --mode full --new-tf-snapshot`: the `er correct` path",
     "tests/integration/test_tf_schema.py": (
         "the materialization suite, which must have a snapshot id to materialize under. "
         "D4 confines the mint in the pipeline; a test that never scores cannot cross a "
