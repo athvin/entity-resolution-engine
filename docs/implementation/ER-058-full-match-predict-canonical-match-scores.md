@@ -2,7 +2,7 @@
 id: ER-058
 title: "Full match: predict → canonical match_scores single INSERT, evidence payload schema, half-open gray band, prob_to_weight, counters"
 milestone: M3
-status: in_progress
+status: done
 kind: code
 size: M
 gates: full
@@ -17,9 +17,9 @@ extra_paths: ["src/er/cli.py"]
 attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_full_match.py -q"
 branch: "ticket/ER-058-full-match-predict-canonical-match-scores"
-commit: ""
+commit: "8e85c64daf2187f16748e4be03489d6e6a39d6cd"
 spec_sha: "2e62460d9f41a842"
-updated_at: "2026-08-16T21:52:06Z"
+updated_at: "2026-08-16T23:33:29Z"
 session: 9e0ef860-5643-4d7b-b395-c829fa4931f6
 ---
 ## Description
