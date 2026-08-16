@@ -2,7 +2,7 @@
 id: ER-055
 title: "er train part B: S3 artifact URI, model_version allocation, active/superseded pointer, corpus_snapshot, run_stages"
 milestone: M3
-status: in_progress
+status: done
 kind: code
 size: M
 gates: full
@@ -17,9 +17,9 @@ extra_paths: ["src/er/cli.py", "src/er/matching/train.py"]
 attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_train.py -q"
 branch: "ticket/ER-055-er-train-part-b-s3-artifact"
-commit: ""
+commit: "67eb80b514fdd5ff161f8e6b6811915aa5ab0a46"
 spec_sha: "2e62460d9f41a842"
-updated_at: "2026-08-16T14:24:13Z"
+updated_at: "2026-08-16T15:29:41Z"
 session: d27a1aca-d791-47ad-8b50-bc86ed79290b
 ---
 ## Description
