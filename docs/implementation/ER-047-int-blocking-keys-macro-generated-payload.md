@@ -30,7 +30,7 @@ Materialize `int_blocking_keys` as a macro-generated `UNION ALL` over the blocki
 ### In scope
 
 - `dbt/macros/blocking/int_blocking_keys_union.sql`: renders one branch per payload entry using the S4.2 template verbatim
-- `dbt/models/intermediate/int_blocking_keys.sql`: the S4.2 `delete+insert` incremental config on `unique_key=['source_system','source_record_id']`, `on_schema_change='sync_all_columns'`, calling the macro
+- `dbt/models/intermediate/int_blocking_keys.sql`: the S4.2 `delete+insert` incremental config on `unique_key=['source_system','source_record_id']`, `on_schema_change='append_new_columns'`, calling the macro
 - `schema.yml` additions: enforced contract, `unique_combination_of_columns` on `(key_type, key_value, record_key)` tagged `keys`, `accepted_values` on `key_type`, `not_null` on all five columns
 - An integration scenario over `base_10` asserting key-type coverage, the NULL/empty policy and the trap-derived key expectations
 - `blocking_rows` / `blocking_keys_by_type` available as standardize-stage counter inputs

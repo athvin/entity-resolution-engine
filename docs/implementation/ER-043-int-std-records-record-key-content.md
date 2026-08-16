@@ -29,7 +29,7 @@ Build `int_std_records`, the single current-state standardized relation: it unio
 
 ### In scope
 
-- `int_std_records.sql` with the S4.2 `delete+insert` incremental config on `unique_key=['source_system','source_record_id']` and `on_schema_change='sync_all_columns'`
+- `int_std_records.sql` with the S4.2 `delete+insert` incremental config on `unique_key=['source_system','source_record_id']` and `on_schema_change='append_new_columns'`
 - The greatest-`ingested_at` current-row selection with the `ingest_batch_id DESC` tiebreak, and exclusion of rows whose winning version has `is_deleted = true`
 - `record_key := source_system || ':' || source_record_id`, `content_hash`, `std_version` from the CLI `--vars` override, `updated_at_source`
 - `dbt/models/intermediate/schema.yml`: enforced contract with the S5 column list, `unique` on `record_key`, `unique_combination_of_columns` on `(source_system, source_record_id)`, both tagged `keys`
@@ -57,7 +57,7 @@ Implements D6 (`record_key` as the canonical scalar identity, `':'` banned in `s
 - [ ] AC4: The relation's columns, order and types read back from the lake equal the S5 `int_std_records` listing exactly, including `name_variants LIST(VARCHAR) NOT NULL`, `email_valid BOOLEAN` and `phone_valid BOOLEAN`.
 - [ ] AC5: Inserting a staged row whose `source_record_id` contains `':'` makes `dbt test --select tag:keys` exit non-zero and name `int_std_records`; so does inserting a second current row for one `(source_system, source_record_id)`.
 - [ ] AC6: Every row with a non-NULL `email` has a non-NULL `email_valid`, every row with a non-NULL `phone_e164` has a non-NULL `phone_valid`, and the two `test@test.com` records have `email IS NULL`.
-- [ ] AC7: Re-running `er standardize` with no new deliveries leaves the row count at 23 and every non-`VOLATILE_COLUMNS` value unchanged, and the compiled model declares `incremental_strategy='delete+insert'` with `unique_key=['source_system','source_record_id']` and `on_schema_change='sync_all_columns'`.
+- [ ] AC7: Re-running `er standardize` with no new deliveries leaves the row count at 23 and every non-`VOLATILE_COLUMNS` value unchanged, and the compiled model declares `incremental_strategy='delete+insert'` with `unique_key=['source_system','source_record_id']` and `on_schema_change='append_new_columns'`.
 
 ## Tests
 

@@ -24,13 +24,13 @@ session: 6e4d48da-2f63-455e-88ba-461b5c472d43
 ---
 ## Description
 
-Stand up the dbt project M1's own exit gate needs: `dbt_project.yml`, `packages.yml` pinning `dbt_utils` (the source of `unique_combination_of_columns`), and `profiles/profiles.yml` carrying the two targets S9.1 requires — `lake`, whose `settings:`/`secrets:`/`attach:` keys must equal the S4.0b SQL block field for field, and `mem` (`:memory:`, no attach) so `dbt parse` and `dbt compile` run on a bare service-less runner. Every `env_var()` call carries a default, which is the direct fix for M23's static job that could not parse. Project-level `+contract: {enforced: true}` and `+on_schema_change: sync_all_columns` are set here so that no future model can silently omit them (M4, M16).
+Stand up the dbt project M1's own exit gate needs: `dbt_project.yml`, `packages.yml` pinning `dbt_utils` (the source of `unique_combination_of_columns`), and `profiles/profiles.yml` carrying the two targets S9.1 requires — `lake`, whose `settings:`/`secrets:`/`attach:` keys must equal the S4.0b SQL block field for field, and `mem` (`:memory:`, no attach) so `dbt parse` and `dbt compile` run on a bare service-less runner. Every `env_var()` call carries a default, which is the direct fix for M23's static job that could not parse. Project-level `+contract: {enforced: true}` and `+on_schema_change: append_new_columns` are set here so that no future model can silently omit them (M4, M16).
 
 ## Scope
 
 ### In scope
 
-- `dbt/dbt_project.yml`: project/profile name, model/seed/macro/test paths, `vars: {std_version, survivorship_version}` as FALLBACKS only, `models: +contract: {enforced: true}` and `+on_schema_change: sync_all_columns`
+- `dbt/dbt_project.yml`: project/profile name, model/seed/macro/test paths, `vars: {std_version, survivorship_version}` as FALLBACKS only, `models: +contract: {enforced: true}` and `+on_schema_change: append_new_columns`
 - `dbt/packages.yml` with an exact `dbt_utils` version plus the committed `dbt/package-lock.yml`
 - `dbt/profiles/profiles.yml`: `er` profile with `lake` and `mem` outputs, `threads: 1` on both, every `env_var()` defaulted
 - Directory scaffolding (`models/`, `macros/`, `seeds/`, `tests/`) with `.gitkeep` so `dbt parse` resolves its paths
@@ -54,7 +54,7 @@ Implements M23 (two targets, defaulted `env_var`, static job cannot connect), M4
 - [ ] AC3: `uv run dbt compile --project-dir dbt --profiles-dir dbt/profiles --target mem` exits 0 and the `mem` output has `path: ':memory:'` with no `attach:` and no `extensions:` key.
 - [ ] AC4: `tests/unit/test_dbt_profiles.py` loads `profiles.yml` as YAML and asserts the `lake` output matches S4.0b: `settings` has exactly `extension_directory=/opt/duckdb_extensions`, `autoinstall_known_extensions=false`, `autoload_known_extensions=false`, `threads` from `ER_DUCKDB_THREADS`, `memory_limit` from `ER_DUCKDB_MEMORY_LIMIT`; `secrets[0]` is named `er_s3` of type `s3` with the six option keys; `attach[0]` is `ducklake:postgres:{{ env_var('ER_CATALOG_DSN', '') }}` with alias `lake` and options `data_path` and `metadata_schema`.
 - [ ] AC5: Both outputs declare `threads: 1`, and the test asserts it is distinct from `settings.threads` (which is env-derived).
-- [ ] AC6: `dbt_project.yml` sets `+contract: {enforced: true}` and `+on_schema_change: 'sync_all_columns'` at the `models:` root, and declares `vars` for `std_version` and `survivorship_version` — the test asserts a comment or config note marking them fallbacks, since the CLI's `--vars` always wins (S6).
+- [ ] AC6: `dbt_project.yml` sets `+contract: {enforced: true}` and `+on_schema_change: 'append_new_columns'` at the `models:` root, and declares `vars` for `std_version` and `survivorship_version` — the test asserts a comment or config note marking them fallbacks, since the CLI's `--vars` always wins (S6).
 - [ ] AC7: `uv run dbt ls --project-dir dbt --profiles-dir dbt/profiles --target mem --resource-type model` lists zero models: M1 ships none.
 - [ ] AC8: Every `env_var(` occurrence in `profiles.yml` has a second argument — asserted by a regex test, so a future edit that drops a default fails on the unit layer rather than in the static CI job.
 - [ ] AC9: `git ls-files dbt` returns at least one entry, so `docker/Dockerfile` (ER-007) can COPY `dbt/` in a fresh clone. Moved here from ER-003 AC5, which could not satisfy it: this ticket owns every path under `dbt/`.

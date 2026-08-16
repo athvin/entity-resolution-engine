@@ -44,7 +44,7 @@ B4 called `golden_records` a schema placeholder: the pipeline's terminal output 
 
 ## Design decisions applied
 
-Implements gaps B4, M4 and M16 for the marts. Constraints easy to miss: (1) the survivable column set is EXACTLY the eleven columns of `GOLDEN_SURVIVABLE_COLUMNS`; `email_valid`/`phone_valid` are inputs to the `validated` rule and are NOT columns of `golden_records`; (2) when `address` wins, all six `addr_*` values MUST come from ONE winning contributing record — never assembled field by field, which is the defect S4.6 explicitly names; (3) the lineage grid is complete: a row is emitted for every `(entity_id, attribute)` pair in the six-token vocabulary even when the winning value is NULL, so `(entity_id, attribute)` is a well-formed logical key and ER-090's expected file has a fixed shape; (4) `survivorship_version` comes from `versions.survivorship_version` in the config, passed as a dbt `--vars` override (S6) — `dbt_project.yml` holds only a fallback, and reading the fallback is a defect; (5) mart config is `incremental`, `delete+insert`, `unique_key='entity_id'`, `on_schema_change='sync_all_columns'`, no `indexes`, no `merge` strategy (S4.2, S4.6); (6) these are dbt-owned relations — `ddl.py` must never issue DDL against them (S5.0).
+Implements gaps B4, M4 and M16 for the marts. Constraints easy to miss: (1) the survivable column set is EXACTLY the eleven columns of `GOLDEN_SURVIVABLE_COLUMNS`; `email_valid`/`phone_valid` are inputs to the `validated` rule and are NOT columns of `golden_records`; (2) when `address` wins, all six `addr_*` values MUST come from ONE winning contributing record — never assembled field by field, which is the defect S4.6 explicitly names; (3) the lineage grid is complete: a row is emitted for every `(entity_id, attribute)` pair in the six-token vocabulary even when the winning value is NULL, so `(entity_id, attribute)` is a well-formed logical key and ER-090's expected file has a fixed shape; (4) `survivorship_version` comes from `versions.survivorship_version` in the config, passed as a dbt `--vars` override (S6) — `dbt_project.yml` holds only a fallback, and reading the fallback is a defect; (5) mart config is `incremental`, `delete+insert`, `unique_key='entity_id'`, `on_schema_change='append_new_columns'`, no `indexes`, no `merge` strategy (S4.2, S4.6); (6) these are dbt-owned relations — `ddl.py` must never issue DDL against them (S5.0).
 
 ## Acceptance criteria
 
@@ -83,5 +83,5 @@ uv run mypy --strict src/er/lake/columns.py
 - The address composite rule is implemented as a single winning-record join, and asserted as such
 - The lineage grid is complete (six rows per entity) and its attribute and rule vocabularies are closed by `accepted_values` tests
 - `survivorship_version` is sourced from the config `--vars` override, not from `dbt_project.yml`
-- Mart config is `delete+insert` on `entity_id` with `on_schema_change='sync_all_columns'`; no `indexes`, no `merge`
+- Mart config is `delete+insert` on `entity_id` with `on_schema_change='append_new_columns'`; no `indexes`, no `merge`
 - Both arms of the verify command pass and both failed before the change

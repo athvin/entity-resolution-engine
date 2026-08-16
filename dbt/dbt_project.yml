@@ -32,4 +32,4 @@ vars:
 models:
   +contract:
     enforced: true
-  +on_schema_change: sync_all_columns
+  +on_schema_change: append_new_columns
