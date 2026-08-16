@@ -2,7 +2,7 @@
 id: ER-045
 title: "base_10/expected/: std_hashes.csv, membership.csv, events.csv (M2-stageable half)"
 milestone: M2
-status: in_progress
+status: done
 kind: fixture
 size: M
 gates: full
@@ -17,9 +17,9 @@ extra_paths: []
 attempts: 1
 verify: "uv run pytest tests/unit/fixtures/test_base_10_expected.py -q && bash scripts/ci/itest.sh tests/integration/scenarios/test_base_10_std.py -q"
 branch: "ticket/ER-045-base-10-expected-std-hashes-csv"
-commit: ""
+commit: "9a48b8c5ddf18189cc9195ce106a940e04deb5bc"
 spec_sha: "2e62460d9f41a842"
-updated_at: "2026-08-16T08:39:05Z"
+updated_at: "2026-08-16T09:21:05Z"
 session: 5e72f997-3e0f-48de-b3d8-a0feed76efd8
 ---
 ## Description
