@@ -2,7 +2,7 @@
 id: ER-049
 title: "Splink scratch isolation: splink_api(), assert_no_splink_relations_in_lake, thread/insertion-order pinning, leak test in its own namespace"
 milestone: M2
-status: todo
+status: in_progress
 kind: code
 size: M
 gates: full
@@ -14,12 +14,13 @@ consumes: ["src/er/lake/ducklake.py::connect", "src/er/matching/model.py::build_
 owns: ["src/er/matching/api.py", "tests/integration/test_splink_isolation.py"]
 protected_paths: []
 extra_paths: ["src/er/lake/ducklake.py"]
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_splink_isolation.py -q"
-branch: ""
+branch: "ticket/ER-049-splink-scratch-isolation-splink-api-assert"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "2abcfe433c322f74"
+updated_at: "2026-08-16T00:02:34Z"
+session: 1932cd81-94a2-4ba7-93c4-5cadd5351f09
 ---
 ## Description
 
