@@ -2,7 +2,7 @@
 id: ER-052
 title: "M2 exit gate: standardization + blocking green on base_10 under the namespaced harness"
 milestone: M2
-status: in_progress
+status: done
 kind: code
 size: S
 gates: full
@@ -17,9 +17,9 @@ extra_paths: []
 attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_m2_exit.py -q"
 branch: "ticket/ER-052-m2-exit-gate-standardization-blocking-green"
-commit: ""
+commit: "59edd29df593e0a3a42445040fcd24b1c064ac4b"
 spec_sha: "2e62460d9f41a842"
-updated_at: "2026-08-16T09:54:05Z"
+updated_at: "2026-08-16T10:42:56Z"
 session: e48423c1-0473-4042-a493-201b77e3c69f
 ---
 ## Description
