@@ -2,7 +2,7 @@
 id: ER-045
 title: "base_10/expected/: std_hashes.csv, membership.csv, events.csv (M2-stageable half)"
 milestone: M2
-status: todo
+status: in_progress
 kind: fixture
 size: M
 gates: full
@@ -14,12 +14,13 @@ consumes: ["tests/helpers/compare.py::assert_partition_equal", "tests/helpers/ex
 owns: ["fixtures/static/base_10/expected/base/std_hashes.csv", "fixtures/static/base_10/expected/base/membership.csv", "fixtures/static/base_10/expected/base/events.csv", "tests/unit/fixtures/test_base_10_expected.py", "tests/integration/scenarios/test_base_10_std.py"]
 protected_paths: ["fixtures/static/base_10/base/crm.csv", "fixtures/static/base_10/base/billing.csv", "fixtures/static/base_10/base/webforms.csv", "fixtures/static/base_10/truth.csv", "dbt/models/intermediate/int_std_records.sql", "src/er/lake/hashing.py"]
 extra_paths: []
-attempts: 0
+attempts: 1
 verify: "uv run pytest tests/unit/fixtures/test_base_10_expected.py -q && bash scripts/ci/itest.sh tests/integration/scenarios/test_base_10_std.py -q"
-branch: ""
+branch: "ticket/ER-045-base-10-expected-std-hashes-csv"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "2e62460d9f41a842"
+updated_at: "2026-08-16T08:39:05Z"
+session: 5e72f997-3e0f-48de-b3d8-a0feed76efd8
 ---
 ## Description
 
