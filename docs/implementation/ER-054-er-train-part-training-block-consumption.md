@@ -2,7 +2,7 @@
 id: ER-054
 title: "er train part A: training: block consumption + ordered Splink 4 call sequence (spy-verified), seeded estimate_u, thread-pinned"
 milestone: M3
-status: in_progress
+status: done
 kind: code
 size: M
 gates: fast
@@ -17,9 +17,9 @@ extra_paths: ["src/er/config/schema.py"]
 attempts: 1
 verify: "uv run pytest tests/unit/matching/test_train_sequence.py tests/unit/config/test_training_block.py -q"
 branch: "ticket/ER-054-er-train-part-training-block-consumption"
-commit: ""
+commit: "8bea5ab"
 spec_sha: "2e62460d9f41a842"
-updated_at: "2026-08-16T12:55:49Z"
+updated_at: "2026-08-16T13:45:45Z"
 session: 178d0651-7261-407d-af50-43dc182f35a2
 ---
 ## Description
