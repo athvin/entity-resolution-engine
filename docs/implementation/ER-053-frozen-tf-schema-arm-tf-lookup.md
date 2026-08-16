@@ -2,7 +2,7 @@
 id: ER-053
 title: "Frozen-TF schema arm: tf_lookup, tf_snapshot_id/tf_tables_path, materialize_tf_lookup, register_tf, compute_tf_table confinement guard"
 milestone: M3
-status: todo
+status: in_progress
 kind: code
 size: M
 gates: full
@@ -14,12 +14,13 @@ consumes: ["src/er/lake/ddl.py::apply", "src/er/lake/model.py::TABLE_SPECS", "sr
 owns: ["src/er/matching/tf.py", "tests/unit/matching/test_tf_registration.py", "tests/integration/test_tf_schema.py"]
 protected_paths: []
 extra_paths: []
-attempts: 0
+attempts: 1
 verify: "uv run pytest tests/unit/matching/test_tf_registration.py -q && bash scripts/ci/itest.sh tests/integration/test_tf_schema.py -q"
-branch: ""
+branch: "ticket/ER-053-frozen-tf-schema-arm-tf-lookup"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "2e62460d9f41a842"
+updated_at: "2026-08-16T11:19:43Z"
+session: bdf3070a-d7b1-46ae-b25c-821e5fa30e42
 ---
 ## Description
 
