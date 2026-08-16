@@ -2,7 +2,7 @@
 id: ER-047
 title: "int_blocking_keys macro-generated from the payload + contract + accepted_values"
 milestone: M2
-status: todo
+status: in_progress
 kind: code
 size: S
 gates: full
@@ -14,12 +14,13 @@ consumes: ["src/er/matching/model.py::blocking_rules_from_config", "src/er/match
 owns: ["dbt/models/intermediate/int_blocking_keys.sql", "dbt/macros/blocking/int_blocking_keys_union.sql", "tests/integration/scenarios/test_blocking_keys.py"]
 protected_paths: ["dbt/models/intermediate/int_std_records.sql", "src/er/matching/model.py", "fixtures/static/base_10/base/crm.csv", "fixtures/static/base_10/base/billing.csv", "fixtures/static/base_10/base/webforms.csv"]
 extra_paths: ["dbt/models/intermediate/schema.yml"]
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/scenarios/test_blocking_keys.py -q"
-branch: ""
+branch: "ticket/ER-047-int-blocking-keys-macro-generated-payload"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "2e62460d9f41a842"
+updated_at: "2026-08-16T06:31:09Z"
+session: d99dc4ff-62e9-4219-bd48-a8baa9fee813
 ---
 ## Description
 
