@@ -21,11 +21,18 @@ Four rules govern this module and are stated nowhere else in Python:
   ``er.errors`` and :func:`er.errors.exit_code_for` produces the status, so the
   ``error_class`` recorded and the code exited with cannot disagree.
 
-``er init``, ``er lake reset`` (ER-020), ``er ingest`` (ER-031) and ``er lake
-maintain`` (ER-025) are the commands that do real lake work here; the work itself
-lives in :mod:`er.lake.init`, :mod:`er.ingest.landing` and :mod:`er.lake.maintain`,
-and this module owns only their S4.0 stdout and the exit status derived from what
-they returned. Every other command is still a stub.
+``er init``, ``er lake reset`` (ER-020), ``er ingest`` (ER-031), ``er lake maintain``
+(ER-025), ``er train`` (ER-055) and ``er assert`` (ER-062) are the commands that do
+real lake work here; the work itself lives in :mod:`er.lake.init`,
+:mod:`er.ingest.landing`, :mod:`er.lake.maintain`, :mod:`er.matching.train` and
+:mod:`er.review.assertions`, and this module owns only their S4.0 stdout and the exit
+status derived from what they returned. Every other command is still a stub.
+
+``er assert`` writes no ``run_stages`` row and that is S5's decision, not a shortcut:
+the ``run_stages.stage`` enum has no ``assert`` value, so
+:class:`~er.obs.runctx.RunContext` skips the row for it exactly as it does for every
+name outside :data:`~er.lake.model.RUN_STAGES`. A steward action is recorded in
+``assertions`` itself, whose lifecycle columns are what the next run reads.
 
 ``er run-all``'s ingest slot is deliberately still a :class:`NoOpStage`: the chain's
 composition is ER-014's contract, and wiring the real stage into it belongs with the
@@ -106,6 +113,7 @@ from er.matching.train import run_train_stage
 from er.obs.logging import emit_stage_record
 from er.obs.runctx import RunContext, StageRun
 from er.resume import ResumePlan, read_resume_rows, resume_plan
+from er.review.assertions import add_assertion, load_assertions_csv, retract_assertion
 from er.versions import (
     MODE_CORRECTION_PASS,
     ModeDecision,
@@ -165,6 +173,12 @@ _MODES: tuple[str, str] = ("incremental", "full")
 #: ``runs.mode`` for a standalone stage invocation outside a ``run-all`` chain (S5);
 #: the chains and the lifecycle verbs pass their own value.
 _MODE_STAGE: str = "stage"
+
+#: The three sub-verbs S4.0 gives ``er assert``, as the user types them. A positional
+#: argument rather than three commands because S4.0's table gives ``er assert`` ONE
+#: row whose flags vary by verb, and "no flag beyond that table" is only checkable
+#: while the flag set is declared once.
+_ASSERT_VERBS: tuple[str, ...] = ("add", "remove", "load")
 
 #: Every command that mutates the namespace and therefore takes the S4.0b writer
 #: lock, as the path a user types after ``er``. S4.7 names this set; ``assert`` is
@@ -535,6 +549,79 @@ class _TrainStage:
             )
         _write_stdout(result.manifest(), result.stdout_line(), options)
         return result.exit_code
+
+
+@dataclass(frozen=True)
+class _AssertStage:
+    """`er assert`: the three steward verbs over the `assertions` relation (S4.4).
+
+    Every verb prints S4.0's five fields — `assertion_id, rec_a_key, rec_b_key, kind,
+    active` — and nothing else, which is why this is a :func:`_run_command` stage
+    rather than a :func:`_run_single` one: the generic per-stage summary would be a
+    second, differently shaped line in a ``--json`` stream S4.0 says holds only the
+    command's output.
+
+    The flag combinations are validated HERE, before :func:`~er.lake.ducklake.connect`
+    is called, so a malformed invocation exits ``2`` without opening a connection
+    (S4.0). They are not validated in the command function as well: one place decides
+    which flags a verb needs, and a second would be free to disagree with it.
+
+    The stage decides no exit code of its own beyond ``load``'s ``10``. A conflicting
+    insert raises :class:`~er.review.assertions.AssertionConflict`, a bad key or kind
+    raises :class:`~er.errors.ConfigError`, and :func:`~er.errors.exit_code_for`
+    derives ``1`` and ``2`` from the S4.7 class each carries.
+    """
+
+    action: str
+    a: str | None = None
+    b: str | None = None
+    kind: str | None = None
+    by: str | None = None
+    note: str | None = None
+    assertion_id: str | None = None
+    path: Path | None = None
+    args: tuple[str, ...] = ()
+    name: str = "assert"
+
+    def _flag(self, value: str | None, flag: str) -> str:
+        """``value``, or the S4.0 exit-``2`` refusal for a verb missing a flag."""
+        if value is None:
+            raise ConfigError(f"er assert {self.action}: {flag} is required (S4.0)")
+        return value
+
+    def run(self, options: GlobalOptions) -> int:
+        if self.action == "add":
+            a = self._flag(self.a, "--a")
+            b = self._flag(self.b, "--b")
+            kind = self._flag(self.kind, "--kind")
+            by = self._flag(self.by, "--by")
+            with connect() as connection:
+                written = add_assertion(
+                    connection, a=a, b=b, kind=kind, created_by=by, note=self.note
+                )
+            _write_stdout(written.manifest(), written.stdout_line(), options)
+            return int(ExitCode.SUCCESS)
+        if self.action == "remove":
+            assertion_id = self._flag(self.assertion_id, "--assertion-id")
+            by = self._flag(self.by, "--by")
+            with connect() as connection:
+                retracted = retract_assertion(connection, assertion_id, retracted_by=by)
+            _write_stdout(retracted.manifest(), retracted.stdout_line(), options)
+            return int(ExitCode.SUCCESS)
+        if self.action == "load":
+            if self.path is None:
+                raise ConfigError("er assert load: --path is required (S4.0)")
+            with connect() as connection:
+                applied = load_assertions_csv(connection, self.path)
+            for written in applied:
+                _write_stdout(written.manifest(), written.stdout_line(), options)
+            # S4.0's `10` is "nothing to do", and a file whose every row is already
+            # present and active is exactly that: no row was written, and the lake is
+            # in the state the file asks for.
+            return int(ExitCode.SUCCESS if applied else ExitCode.NOTHING_TO_DO)
+        raise ConfigError(
+            f"er assert: unknown verb {self.action!r}; S4.0 declares {', '.join(_ASSERT_VERBS)}"
+        )
 
 
 def _tenant_of(options: GlobalOptions) -> str | None:
@@ -1481,9 +1568,39 @@ def assert_(
     run_id: RunIdOption = None,
     json_output: JsonOption = False,
 ) -> None:
-    """Add, retract or bulk-load steward assertions (S4.4)."""
+    """Add, retract or bulk-load steward assertions (S4.4).
+
+    ``--a`` and ``--b`` are unordered: the pair is canonicalised to
+    ``rec_a_key < rec_b_key`` on the way in (S5.0, D9), so passing them the wrong way
+    round writes a canonical row rather than earning an error.
+
+    Rows are never deleted. ``remove`` sets ``active=false`` and stamps
+    ``retracted_by``/``retracted_at``, because the assertion delta between two runs is
+    computed from those stamps (S4.5.1).
+
+    Exit codes (S4.0): ``0`` success; ``1`` a conflicting insert — ``never`` and
+    ``always`` cannot both be active for one pair, and S4.4 rejects the second at
+    write time rather than ordering around it; ``2`` a malformed key or an unknown
+    kind; ``10`` from ``load`` when every row of the file is already active.
+    """
     options = GlobalOptions.resolve(config_path=config, run_id=run_id, json_output=json_output)
-    _run_single("assert", options, (action,))
+    _run_command(
+        _AssertStage(
+            action=action,
+            a=a,
+            b=b,
+            kind=kind,
+            by=by,
+            note=note,
+            assertion_id=assertion_id,
+            path=assert_path,
+            args=(action,),
+        ),
+        options,
+        mode=_MODE_STAGE,
+        command="assert",
+        persist=True,
+    )
 
 
 @app.command()
