@@ -2,7 +2,7 @@
 id: ER-058
 title: "Full match: predict → canonical match_scores single INSERT, evidence payload schema, half-open gray band, prob_to_weight, counters"
 milestone: M3
-status: todo
+status: in_progress
 kind: code
 size: M
 gates: full
@@ -14,12 +14,13 @@ consumes: ["src/er/matching/tf.py::register_tf", "src/er/matching/tf.py::new_tf_
 owns: ["src/er/matching/full.py", "src/er/matching/thresholds.py", "src/er/matching/evidence.py", "tests/integration/test_full_match.py", "tests/unit/matching/test_thresholds.py"]
 protected_paths: []
 extra_paths: ["src/er/cli.py"]
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_full_match.py -q"
-branch: ""
+branch: "ticket/ER-058-full-match-predict-canonical-match-scores"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "2e62460d9f41a842"
+updated_at: "2026-08-16T21:52:06Z"
+session: 9e0ef860-5643-4d7b-b395-c829fa4931f6
 ---
 ## Description
 
