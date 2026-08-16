@@ -103,11 +103,11 @@ def test_key_set_is_s5_2_plus_exit_code() -> None:
 def test_failed_stage_line_carries_error_class() -> None:
     """AC2/AC6: a failed stage emits the same line, classified, and still one of it.
 
-    ``er review`` is the example because it is still an unimplemented stub, and a stub
-    fails without a lake. ``er train`` was until ER-055 implemented it and ``er assert``
-    until ER-062 did.
+    ``er correct`` is the example because it is still an unimplemented stub, and a stub
+    fails without a lake. ``er train`` was until ER-055 implemented it, ``er assert``
+    until ER-062 did and ``er review`` until ER-063 did.
     """
-    result = invoke("review", "list")
+    result = invoke("correct")
 
     assert result.exit_code == int(ExitCode.STAGE_FAILURE)
     emitted = lines(result.stderr)
@@ -117,7 +117,7 @@ def test_failed_stage_line_carries_error_class() -> None:
     assert tuple(record) == STAGE_RECORD_KEYS
     assert record["status"] == "failed"
     assert record["error_class"] == ErrorClass.DATA.value
-    assert record["error_detail"] == "stage not implemented: review"
+    assert record["error_detail"] == "stage not implemented: correct"
     assert record["ended_at"] is not None
 
 

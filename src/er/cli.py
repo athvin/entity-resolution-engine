@@ -22,17 +22,19 @@ Four rules govern this module and are stated nowhere else in Python:
   ``error_class`` recorded and the code exited with cannot disagree.
 
 ``er init``, ``er lake reset`` (ER-020), ``er ingest`` (ER-031), ``er lake maintain``
-(ER-025), ``er train`` (ER-055) and ``er assert`` (ER-062) are the commands that do
-real lake work here; the work itself lives in :mod:`er.lake.init`,
-:mod:`er.ingest.landing`, :mod:`er.lake.maintain`, :mod:`er.matching.train` and
-:mod:`er.review.assertions`, and this module owns only their S4.0 stdout and the exit
-status derived from what they returned. Every other command is still a stub.
+(ER-025), ``er train`` (ER-055), ``er assert`` (ER-062) and ``er review`` (ER-063) are
+the commands that do real lake work here; the work itself lives in
+:mod:`er.lake.init`, :mod:`er.ingest.landing`, :mod:`er.lake.maintain`,
+:mod:`er.matching.train`, :mod:`er.review.assertions` and :mod:`er.review.queue`, and
+this module owns only their S4.0 stdout and the exit status derived from what they
+returned. Every other command is still a stub.
 
-``er assert`` writes no ``run_stages`` row and that is S5's decision, not a shortcut:
-the ``run_stages.stage`` enum has no ``assert`` value, so
-:class:`~er.obs.runctx.RunContext` skips the row for it exactly as it does for every
-name outside :data:`~er.lake.model.RUN_STAGES`. A steward action is recorded in
-``assertions`` itself, whose lifecycle columns are what the next run reads.
+``er assert`` and ``er review`` write no ``run_stages`` row and that is S5's decision,
+not a shortcut: the ``run_stages.stage`` enum has neither an ``assert`` nor a
+``review`` value, so :class:`~er.obs.runctx.RunContext` skips the row for both exactly
+as it does for every name outside :data:`~er.lake.model.RUN_STAGES`. A steward action
+is recorded in ``assertions`` and ``review_queue`` themselves, whose lifecycle columns
+are what the next run reads.
 
 ``er run-all``'s ingest slot is deliberately still a :class:`NoOpStage`: the chain's
 composition is ER-014's contract, and wiring the real stage into it belongs with the
@@ -114,6 +116,7 @@ from er.obs.logging import emit_stage_record
 from er.obs.runctx import RunContext, StageRun
 from er.resume import ResumePlan, read_resume_rows, resume_plan
 from er.review.assertions import add_assertion, load_assertions_csv, retract_assertion
+from er.review.queue import OPEN, RESOLUTIONS, open_reviews, resolve_review
 from er.versions import (
     MODE_CORRECTION_PASS,
     ModeDecision,
@@ -179,6 +182,11 @@ _MODE_STAGE: str = "stage"
 #: row whose flags vary by verb, and "no flag beyond that table" is only checkable
 #: while the flag set is declared once.
 _ASSERT_VERBS: tuple[str, ...] = ("add", "remove", "load")
+
+#: The two sub-verbs S4.0 gives ``er review``, for the same reason ``er assert``'s
+#: three are a positional argument: one table row, one flag set, one place it is
+#: declared. ``list`` is the only read-only verb in the S4.7 lock split below.
+_REVIEW_VERBS: tuple[str, ...] = ("list", "resolve")
 
 #: Every command that mutates the namespace and therefore takes the S4.0b writer
 #: lock, as the path a user types after ``er``. S4.7 names this set; ``assert`` is
@@ -621,6 +629,61 @@ class _AssertStage:
             return int(ExitCode.SUCCESS if applied else ExitCode.NOTHING_TO_DO)
         raise ConfigError(
             f"er assert: unknown verb {self.action!r}; S4.0 declares {', '.join(_ASSERT_VERBS)}"
+        )
+
+
+@dataclass(frozen=True)
+class _ReviewStage:
+    """`er review`: the two steward verbs over the `review_queue` relation (S4.3.5).
+
+    A :func:`_run_command` stage rather than a :func:`_run_single` one for the same
+    reason `er assert` is: S4.0 gives `er review` a stdout of its own — rows of
+    ``review_id, subject_type, keys, match_probability, status`` — so the generic
+    per-stage summary would be a second, differently shaped line in a ``--json``
+    stream S4.0 says holds only the command's output.
+
+    ``list`` is the one verb that returns ``10``: S4.0 gives the command "``10``
+    empty list", and an empty queue is nothing to do rather than a failure. ``0`` and
+    ``10`` are the only codes this stage chooses; ``1`` (a conflicting assertion) and
+    ``2`` (an unknown `review_id`, an unknown verb, a missing flag, or `match` against
+    an entity subject) are derived by :func:`~er.errors.exit_code_for` from the class
+    the raised error carries.
+    """
+
+    action: str
+    status: str = OPEN
+    limit: int = 100
+    review_id: str | None = None
+    resolution: str | None = None
+    by: str | None = None
+    args: tuple[str, ...] = ()
+    name: str = "review"
+
+    def _flag(self, value: str | None, flag: str) -> str:
+        """``value``, or the S4.0 exit-``2`` refusal for a verb missing a flag."""
+        if value is None:
+            raise ConfigError(f"er review {self.action}: {flag} is required (S4.0)")
+        return value
+
+    def run(self, options: GlobalOptions) -> int:
+        if self.action == "list":
+            with connect() as connection:
+                rows = open_reviews(connection, status=self.status, limit=self.limit)
+            for row in rows:
+                _write_stdout(row.manifest(), row.stdout_line(), options)
+            return int(ExitCode.SUCCESS if rows else ExitCode.NOTHING_TO_DO)
+        if self.action == "resolve":
+            review_id = self._flag(self.review_id, "--review-id")
+            resolution = self._flag(self.resolution, "--as")
+            by = self._flag(self.by, "--by")
+            with connect() as connection:
+                resolved = resolve_review(
+                    connection, review_id, resolution=resolution, resolved_by=by
+                )
+            _write_stdout(resolved.row.manifest(), resolved.row.stdout_line(), options)
+            return int(ExitCode.SUCCESS)
+        raise ConfigError(
+            f"er review: unknown verb {self.action!r}; S4.0 declares {', '.join(_REVIEW_VERBS)}"
         )
 
 
@@ -1606,26 +1669,52 @@ def assert_(
 @app.command()
 def review(
     action: Annotated[str, typer.Argument(help="list | resolve.")],
-    status: Annotated[str, typer.Option("--status", help="Filter, for list.")] = "open",
+    status: Annotated[str, typer.Option("--status", help="Filter, for list.")] = OPEN,
     limit: Annotated[int, typer.Option("--limit", help="Row cap, for list.")] = 100,
     review_id: Annotated[
         str | None, typer.Option("--review-id", help="Row to resolve, for resolve.")
     ] = None,
     as_: Annotated[
-        str | None, typer.Option("--as", help="match | no_match | dismiss, for resolve.")
+        str | None,
+        typer.Option("--as", help=f"{' | '.join(RESOLUTIONS)}, for resolve."),
     ] = None,
     by: Annotated[str | None, typer.Option("--by", help="Steward, for resolve.")] = None,
     config: ConfigOption = None,
     run_id: RunIdOption = None,
     json_output: JsonOption = False,
 ) -> None:
-    """List or resolve the gray-band review queue (S4.3.5)."""
+    """List or resolve the steward review queue (S4.3.5, S4.4.2, S11).
+
+    ``resolve --as match`` writes the ``always`` assertion for the row's canonical
+    pair and ``--as no_match`` the ``never``, which is the mechanism that makes a
+    steward's correction survive a re-run (S4.4); ``--as dismiss`` writes none. An
+    entity subject — an S11 coherence finding — has no pair to assert over, so only
+    ``dismiss`` is legal against one.
+
+    Exit codes (S4.0): ``0`` success; ``1`` a conflicting assertion, which leaves the
+    row `open`; ``2`` an unknown `review_id`, an unknown verb or a missing flag;
+    ``10`` from ``list`` when the queue holds no matching row.
+    """
     options = GlobalOptions.resolve(config_path=config, run_id=run_id, json_output=json_output)
     # `list` is the only read-only verb S4.7 names, so anything else takes the lock —
     # including a verb that does not exist. A misspelling that skipped the lock would
     # be a writer's refusal turned into an unlocked run by a typo.
     verb = "review list" if action == "list" else "review resolve"
-    _run_single("review", options, (action,), command=verb)
+    _run_command(
+        _ReviewStage(
+            action=action,
+            status=status,
+            limit=limit,
+            review_id=review_id,
+            resolution=as_,
+            by=by,
+            args=(action,),
+        ),
+        options,
+        mode=_MODE_STAGE,
+        command=verb,
+        persist=True,
+    )
 
 
 @lake_app.command("maintain")
