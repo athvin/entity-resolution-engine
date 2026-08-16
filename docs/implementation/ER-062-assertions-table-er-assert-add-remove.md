@@ -2,7 +2,7 @@
 id: ER-062
 title: "assertions: table + er assert add|remove|load + assertions.csv format (symbolic assertion_id) + precedence + check_contradiction_1 (unit)"
 milestone: M3
-status: in_progress
+status: done
 kind: code
 size: M
 gates: full
@@ -17,9 +17,9 @@ extra_paths: ["src/er/cli.py", "src/er/review/__init__.py"]
 attempts: 1
 verify: "uv run pytest tests/unit/review/test_assertions_model.py -q && bash scripts/ci/itest.sh tests/integration/test_assertions_cli.py -q"
 branch: "ticket/ER-062-assertions-table-er-assert-add-remove"
-commit: ""
+commit: "059997826c6c7b25c1cef97d01e593cc6b8c20d6"
 spec_sha: "2e62460d9f41a842"
-updated_at: "2026-08-16T17:28:46Z"
+updated_at: "2026-08-16T18:29:12Z"
 session: 1d026dff-c729-494f-84fe-3f432a87eae6
 ---
 ## Description
