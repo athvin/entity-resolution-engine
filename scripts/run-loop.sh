@@ -290,9 +290,12 @@ while :; do
   NEXT_JSON="$(python3 "$BOARD" next --json)"
   NEXT_RC=$?
   if [[ $NEXT_RC -eq 10 ]]; then
-    BLOCKED_N="$(python3 -c "
+    # stdin, not source interpolation. On a parse error this falls back to 0, which
+    # would report a STALLED board as "board complete" -- the one misreport that
+    # would make an unfinished board look finished.
+    BLOCKED_N="$(printf '%s' "$NEXT_JSON" | python3 -c "
 import json,sys
-d=json.loads('''$NEXT_JSON''')
+d=json.load(sys.stdin)
 print(len(d.get('blocked',[]))+len(d.get('starved',[])))" 2>/dev/null || echo 0)"
     if [[ "$BLOCKED_N" -gt 0 ]]; then
       log "BOARD STALLED: no READY tickets, but $BLOCKED_N blocked/starved"
@@ -309,7 +312,10 @@ print(len(d.get('blocked',[]))+len(d.get('starved',[])))" 2>/dev/null || echo 0)
     break
   fi
 
-  TICKET_ID="$(python3 -c "import json;print(json.loads('''$NEXT_JSON''')['id'])")"
+  # JSON on STDIN, never interpolated into Python source: a title containing \"
+  # survives a heredoc but is eaten by a '''...''' literal, which silently emptied
+  # TICKET_ID for ER-056 and skipped its independent re-verify entirely.
+  TICKET_ID="$(printf '%s' "$NEXT_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("id",""))')"
   if [[ -n "$ONLY_TICKET" && "$TICKET_ID" != "$ONLY_TICKET" ]]; then
     TICKET_ID="$ONLY_TICKET"
   fi
@@ -321,10 +327,10 @@ print(len(d.get('blocked',[]))+len(d.get('starved',[])))" 2>/dev/null || echo 0)
   # burned two iterations. Clear the branch before handing the ticket over: delete it
   # when it is already merged, otherwise rename it so the work is preserved but the
   # name is free.
-  TICKET_BRANCH="$(python3 -c "
+  TICKET_BRANCH="$(printf '%s' "$NEXT_JSON" | python3 -c "
 import json
-d=json.loads('''$NEXT_JSON''')
-print(d.get('branch') or '')" 2>/dev/null || echo "")"
+import json,sys
+print(json.load(sys.stdin).get('branch') or '')" 2>/dev/null || echo "")"
   if [[ -n "$TICKET_BRANCH" ]] && git show-ref --verify --quiet "refs/heads/$TICKET_BRANCH"; then
     if git merge-base --is-ancestor "$TICKET_BRANCH" HEAD 2>/dev/null; then
       git branch -d "$TICKET_BRANCH" >/dev/null 2>&1 \
