@@ -25,9 +25,12 @@ Three constraints are easy to miss:
 * At least two EM sessions run, because m is not estimated for a blocked column
   (V9) — one session would leave the blocked column's m at its prior.
 
-This module is deliberately short of `er train`: `model_version` allocation, the S3
-artifact upload, the `model_registry` row, the active/superseded pointer and
-`run_stages` are ER-055's. What it does own beyond the sequence is the `tf_lookup`
+:func:`train_model` is the sequence and nothing else. :func:`run_train_stage` is the
+`er train` stage built on top of it: it captures the corpus snapshot the model is
+fitted against, applies the S4 `--if-changed` idempotency key, allocates the version
+the TF rows are frozen under, and hands the fitted settings to
+:mod:`er.lake.model_registry`, which owns the artifact upload, the row and the
+active/superseded pointer. What it does own beyond the sequence is the `tf_lookup`
 materialization, because D4 permits `er train` to mint a `tf_snapshot_id` and freeze
 TF under it, and confines that to two callers of which this is the first.
 """
@@ -44,22 +47,44 @@ import duckdb
 from splink import Linker
 
 from er.config.schema import Config
-from er.errors import StageFailure
+from er.errors import ExitCode, StageFailure
+from er.lake.columns import STD_RECORD_COLUMNS
+from er.lake.model import SCHEMA_QUALIFIER
+from er.lake.model_registry import (
+    ModelRow,
+    ObjectWriter,
+    allocate_model_version,
+    corpus_snapshot,
+    find_active_model,
+    register_model,
+)
 from er.matching.api import splink_api
 from er.matching.model import build_settings
-from er.matching.tf import materialize_tf_lookup, new_tf_snapshot_id, tf_columns
+from er.matching.tf import (
+    STD_RECORDS_RELATION,
+    materialize_tf_lookup,
+    new_tf_snapshot_id,
+    tf_columns,
+    tf_tables_path,
+)
+from er.obs.runctx import StageRun
 
 __all__ = [
     "EM_RULE",
+    "FITTED_METRICS_KEY",
     "NON_FITTED_SETTINGS_KEYS",
     "SETTINGS_READ_PATH",
     "TRAIN_CALL_SEQUENCE",
+    "TRAIN_CORPUS_RELATION",
     "TrainCall",
     "TrainCallSpec",
     "TrainLinker",
     "TrainResult",
+    "TrainStageResult",
     "build_training_linker",
+    "fitted_m_u",
     "render_call_sequence",
+    "run_train_stage",
     "train_model",
 ]
 
@@ -352,3 +377,254 @@ def train_model(
         tf_rows=tf_rows,
         calls=calls,
     )
+
+
+#: The bare local relation `er train` copies the corpus into. Bare and local for
+#: :func:`build_training_linker`'s reason, and named once here because the stage
+#: creates it and Splink resolves it.
+TRAIN_CORPUS_RELATION: Final = "er_train_corpus"
+
+#: Where the fitted m and u values land in `model_registry.metrics`. S4.3.2 requires
+#: the metrics payload to carry them alongside the verbatim `training:` block; the
+#: block alone would record how the model was fitted but not what was fitted.
+FITTED_METRICS_KEY: Final = "fitted_m_u"
+
+_CORPUS_SQL: Final = (
+    f"CREATE OR REPLACE TABLE {TRAIN_CORPUS_RELATION} AS "
+    f"SELECT {', '.join(STD_RECORD_COLUMNS)} "
+    f"FROM {SCHEMA_QUALIFIER}.{STD_RECORDS_RELATION}"
+)
+
+#: The columns are projected by name and never `SELECT *`: S5.1 makes explicit
+#: projection the rule for reading a relation that may have grown a column, and the
+#: list is S5's own (:data:`~er.lake.columns.STD_RECORD_COLUMNS`).
+_CORPUS_COUNT_SQL: Final = f"SELECT count(*) FROM {TRAIN_CORPUS_RELATION}"
+
+
+def _materialize_corpus(connection: duckdb.DuckDBPyConnection) -> int:
+    """Copy the corpus into a bare local relation and return how many rows it holds.
+
+    Local because Splink resolves an input table through `information_schema.columns
+    WHERE table_name = '<name>'`, which a lake-qualified name matches no row of;
+    S4.0b's "materialized into local temp tables first" is the sanctioned way to get
+    one (see :func:`build_training_linker`).
+
+    Raises:
+        er.errors.StageFailure: the corpus relation does not exist, or holds no rows.
+            Both are `er standardize` not having run, and both are worth naming here:
+            Splink's own failure over an absent or empty frame arrives much later and
+            says nothing about the pipeline step that was skipped.
+    """
+    try:
+        connection.execute(_CORPUS_SQL)
+    except duckdb.Error as exc:
+        raise StageFailure(
+            f"{SCHEMA_QUALIFIER}.{STD_RECORDS_RELATION} cannot be read: {exc}. "
+            f"`er train` fits over the standardized corpus, so `er standardize` runs "
+            f"first (S4.0, S4.3.2)"
+        ) from exc
+    counted = connection.execute(_CORPUS_COUNT_SQL).fetchone()
+    rows = 0 if counted is None else int(counted[0])
+    if rows == 0:
+        raise StageFailure(
+            f"{SCHEMA_QUALIFIER}.{STD_RECORDS_RELATION} holds no rows; there is nothing "
+            f"to fit an EM model over (S4.3.2)"
+        )
+    return rows
+
+
+def fitted_m_u(settings: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """The fitted m and u of every comparison level, in settings order.
+
+    A list rather than a mapping keyed by level label: Splink's labels are display
+    strings and two levels of one comparison may share one, so a mapping would drop a
+    fitted value and no reader would notice.
+    """
+    fitted: list[dict[str, Any]] = []
+    comparisons = settings.get("comparisons", ())
+    if not isinstance(comparisons, list):
+        return fitted
+    for comparison in comparisons:
+        name = comparison.get("output_column_name")
+        for level in comparison.get("comparison_levels", ()):
+            fitted.append(
+                {
+                    "comparison": name,
+                    "level": level.get("label_for_charts"),
+                    "m_probability": level.get("m_probability"),
+                    "u_probability": level.get("u_probability"),
+                }
+            )
+    return fitted
+
+
+@dataclass(frozen=True)
+class TrainStageResult:
+    """What one `er train` invocation produced, in the terms S4.0 prints it in.
+
+    ``trained`` distinguishes the two exits S4.0 gives the command: a run that fitted
+    and registered a model (`0`), and a `--if-changed` run that found the active row
+    already carrying this `(config_hash, corpus_snapshot)` and allocated nothing
+    (`10`). Both report the same five fields, because the second one is describing the
+    model that made the training unnecessary.
+    """
+
+    model_version: str
+    params_path: str
+    tf_snapshot_id: str
+    corpus_snapshot: int
+    metrics: Mapping[str, Any]
+    trained: bool
+    rows_in: int
+
+    @property
+    def exit_code(self) -> int:
+        """S4.0: ``0`` for a training run, ``10`` for a `--if-changed` no-op."""
+        return int(ExitCode.SUCCESS if self.trained else ExitCode.NOTHING_TO_DO)
+
+    def manifest(self) -> dict[str, object]:
+        """The `--json` stdout object: S4.0's five fields for `er train`."""
+        return {
+            "model_version": self.model_version,
+            "params_path": self.params_path,
+            "tf_snapshot_id": self.tf_snapshot_id,
+            "corpus_snapshot": self.corpus_snapshot,
+            "metrics": dict(self.metrics),
+        }
+
+    def stdout_line(self) -> str:
+        """The human stdout line, in S4.0's column order.
+
+        `metrics` is rendered as compact JSON rather than expanded: it is one of the
+        five fields S4.0 names, and a multi-line rendering would stop the line being
+        one line.
+        """
+        metrics = json.dumps(dict(self.metrics), sort_keys=True, separators=(",", ":"))
+        return (
+            f"model_version={self.model_version}, params_path={self.params_path}, "
+            f"tf_snapshot_id={self.tf_snapshot_id}, "
+            f"corpus_snapshot={self.corpus_snapshot}, metrics={metrics}"
+        )
+
+    def record(self, stage_run: StageRun) -> None:
+        """Write this run's counters onto its `run_stages` row (S5.2).
+
+        S4 declares no per-stage counter list for `train`, so every name here is
+        free-form and lands in the `counters` JSON payload — except `rows_in`, which
+        S5.2 promotes to a typed column and :meth:`StageCounters.set` routes there.
+        The three names S4.3.2 makes the stage's own identity — the version, the TF
+        snapshot and the corpus it was fitted against — are also copied onto the
+        :class:`~er.obs.runctx.StageRun` itself, because the S5.2 stderr record carries
+        `model_version` and `tf_snapshot_id` as top-level keys.
+        """
+        stage_run.model_version = self.model_version
+        stage_run.tf_snapshot_id = self.tf_snapshot_id
+        stage_run.counters.set("rows_in", self.rows_in)
+        stage_run.counters.set("model_version", self.model_version)
+        stage_run.counters.set("tf_snapshot_id", self.tf_snapshot_id)
+        stage_run.counters.set("corpus_snapshot", self.corpus_snapshot)
+        stage_run.counters.set("trained", self.trained)
+
+
+def _unchanged(active: ModelRow, config_hash: str, snapshot: int) -> bool:
+    """Whether the active row already carries this `(config_hash, corpus_snapshot)`.
+
+    S4's idempotency key for `train`, and the whole of what `--if-changed` tests. The
+    ACTIVE row and not any row: a superseded model carrying the same key was trained
+    and then replaced, and re-training is exactly what the operator wants after that.
+    """
+    return active.config_hash == config_hash and active.corpus_snapshot == snapshot
+
+
+def run_train_stage(
+    connection: duckdb.DuckDBPyConnection,
+    cfg: Config,
+    store: ObjectWriter,
+    *,
+    run_id: str,
+    config_hash: str,
+    if_changed: bool = False,
+    stage_run: StageRun | None = None,
+) -> TrainStageResult:
+    """The `er train` stage: fit a model, register it, and activate it (S4.3.2, S4.0).
+
+    The order is fixed by S4.3.2 and by S4's idempotency table, and every step of it is
+    a decision some other order would get wrong:
+
+    1. **Capture `corpus_snapshot` first.** It is the version the model is fitted
+       against, so it has to be read before anything this stage does can advance it.
+    2. **Apply `--if-changed` second**, against the ACTIVE row's
+       `(config_hash, corpus_snapshot)`. Before the allocation, because "allocates no
+       new `model_version`" is the whole content of the S4 row.
+    3. **Allocate, then freeze TF, then fit.** `tf_lookup` is keyed by
+       `(model_version, tf_snapshot_id)`, so the version has to exist before the rows
+       do; :func:`register_model` re-derives the same allocation inside its transaction
+       and refuses if it moved.
+    4. **Register last.** The artifact is uploaded before the row is written, and both
+       happen only once there is a fitted model to point at.
+
+    Args:
+        connection: an open S4.0b connection with the lake attached by alias.
+        cfg: the validated S6 document.
+        store: where the artifact goes — an
+            :class:`~er.lake.objectstore.ObjectStore` in production.
+        run_id: this invocation's run id (S5.2).
+        config_hash: this invocation's `config_hash`; half of the S4 idempotency key
+            and a column of the registry row.
+        if_changed: the S4.0 `--if-changed` flag.
+        stage_run: the `run_stages` row to record counters on, when there is one.
+
+    Returns:
+        The five fields S4.0 prints, and the exit code they imply.
+
+    Raises:
+        er.errors.ConfigError: a TF column is not a column of `int_std_records`.
+        er.errors.StageFailure: the fitted settings could not be read back, or the
+            version allocation moved under the stage.
+    """
+    snapshot = corpus_snapshot(connection, STD_RECORDS_RELATION)
+    active = find_active_model(connection)
+    if if_changed and active is not None and _unchanged(active, config_hash, snapshot):
+        skipped = TrainStageResult(
+            model_version=active.model_version,
+            params_path=active.params_path,
+            tf_snapshot_id=active.tf_snapshot_id,
+            corpus_snapshot=active.corpus_snapshot,
+            metrics=active.metrics,
+            trained=False,
+            rows_in=0,
+        )
+        if stage_run is not None:
+            skipped.record(stage_run)
+        return skipped
+
+    model_version = allocate_model_version(connection)
+    rows_in = _materialize_corpus(connection)
+    result = train_model(connection, cfg, TRAIN_CORPUS_RELATION, model_version=model_version)
+    metrics: dict[str, Any] = {**result.metrics, FITTED_METRICS_KEY: fitted_m_u(result.settings)}
+
+    row = register_model(
+        connection,
+        store,
+        model_version=model_version,
+        model_uri_prefix=cfg.storage.model_uri_prefix,
+        settings_json=result.settings_json,
+        metrics=metrics,
+        corpus_snapshot=snapshot,
+        tf_snapshot_id=result.tf_snapshot_id,
+        tf_tables_path=tf_tables_path(model_version, result.tf_snapshot_id),
+        config_hash=config_hash,
+        run_id=run_id,
+    )
+    stage_result = TrainStageResult(
+        model_version=row.model_version,
+        params_path=row.params_path,
+        tf_snapshot_id=row.tf_snapshot_id,
+        corpus_snapshot=row.corpus_snapshot,
+        metrics=row.metrics,
+        trained=True,
+        rows_in=rows_in,
+    )
+    if stage_run is not None:
+        stage_result.record(stage_run)
+    return stage_result

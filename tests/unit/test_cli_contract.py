@@ -241,11 +241,16 @@ class FailingStage:
 
 
 def test_not_implemented_stage_is_exit_1() -> None:
-    """AC6: an unwritten stage is exit 1 with its message, and never in the chain."""
-    result = invoke("train")
+    """AC6: an unwritten stage is exit 1 with its message, and never in the chain.
+
+    ``er assert`` is the example because it is still a stub. ``er train`` was, until
+    ER-055 implemented it; a test that keeps asserting a stub over an implemented
+    stage stops testing the split it is named for.
+    """
+    result = invoke("assert", "add")
 
     assert result.exit_code == int(ExitCode.STAGE_FAILURE)
-    assert "stage not implemented: train" in result.stderr
+    assert "stage not implemented: assert" in result.stderr
     record = stage_lines(result.stderr)[0]
     assert record["status"] == "failed"
     assert record["error_class"] == ErrorClass.DATA.value

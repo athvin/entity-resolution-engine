@@ -101,6 +101,8 @@ from er.lake.ducklake import connect
 from er.lake.env import MissingEnvError
 from er.lake.init import init_lake, reset_lake
 from er.lake.maintain import DEFAULT_RETAIN_DAYS, maintain
+from er.lake.objectstore import ObjectStore
+from er.matching.train import run_train_stage
 from er.obs.logging import emit_stage_record
 from er.obs.runctx import RunContext, StageRun
 from er.resume import ResumePlan, read_resume_rows, resume_plan
@@ -487,6 +489,52 @@ class _IngestStage:
             )
         _write_stdout(manifest.manifest(), manifest.stdout_line(), options)
         return manifest.exit_code
+
+
+@dataclass
+class _TrainStage:
+    """`er train`: fit a model, register it, and make it the active one (S4.3.2).
+
+    The stage owns the S4.0 surface — the ``--if-changed`` flag, the five-field stdout
+    line, and the ``0`` / ``10`` split — and none of the lifecycle:
+    :func:`~er.matching.train.run_train_stage` decides both, because the exit code
+    follows from whether a version was allocated and nothing else here can tell.
+
+    The object store is constructed here rather than inside the stage function so that
+    there is one place the environment is read, and so that a caller with a store of
+    its own — the integration suite's failing-upload arm — can supply one without the
+    stage reaching for `ER_S3_*` behind it.
+    """
+
+    if_changed: bool = False
+    args: tuple[str, ...] = ()
+    name: str = "train"
+    stage_run: StageRun | None = None
+
+    def bind(self, stage_run: StageRun) -> None:
+        self.stage_run = stage_run
+
+    def run(self, options: GlobalOptions) -> int:
+        if options.config is None or options.config_hash is None:
+            # Unreachable through the command tree: S4.0 lists `ER_CONFIG` in this
+            # command's required-env column, so `GlobalOptions.resolve` has already
+            # exited 2 without a document. Stated rather than asserted so a stage
+            # driven some other way fails loudly instead of registering a model whose
+            # `config_hash` column would have to be invented.
+            raise StageFailure("er train was invoked without a validated config")
+        store = ObjectStore.from_env()
+        with connect() as connection:
+            result = run_train_stage(
+                connection,
+                options.config,
+                store,
+                run_id=options.run_id,
+                config_hash=options.config_hash,
+                if_changed=self.if_changed,
+                stage_run=self.stage_run,
+            )
+        _write_stdout(result.manifest(), result.stdout_line(), options)
+        return result.exit_code
 
 
 def _tenant_of(options: GlobalOptions) -> str | None:
@@ -1219,11 +1267,27 @@ def train(
 ) -> None:
     """Fit a Splink model and register a new model_version (S4.3.2).
 
+    Runs full-corpus EM over `int_std_records`, freezes term frequency under a new
+    `tf_snapshot_id`, writes the settings JSON to
+    ``{storage.model_uri_prefix}model_v{N}.json`` and inserts the `model_registry` row
+    that supersedes the previous active one. A new `model_version` is allocated on
+    every invocation unless ``--if-changed`` is passed.
+
+    Exit codes (S4.0): ``0`` success; ``10`` with ``--if-changed`` when the active
+    model already carries this ``(config_hash, corpus_snapshot)``; ``1`` EM failure;
+    ``2`` an incomplete ``training:`` block.
+
     Never reached from ``er run-all`` or ``er correct``: training is always an
     explicit, separate invocation (S4.0).
     """
     options = GlobalOptions.resolve(config_path=config, run_id=run_id, json_output=json_output)
-    _run_single("train", options, ("--if-changed",) if if_changed else (), mode="train")
+    _run_command(
+        _TrainStage(if_changed=if_changed, args=("--if-changed",) if if_changed else ()),
+        options,
+        mode="train",
+        command="train",
+        persist=True,
+    )
 
 
 @app.command()

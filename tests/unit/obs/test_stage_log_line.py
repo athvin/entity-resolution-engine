@@ -101,8 +101,12 @@ def test_key_set_is_s5_2_plus_exit_code() -> None:
 
 
 def test_failed_stage_line_carries_error_class() -> None:
-    """AC2/AC6: a failed stage emits the same line, classified, and still one of it."""
-    result = invoke("train")
+    """AC2/AC6: a failed stage emits the same line, classified, and still one of it.
+
+    ``er assert`` is the example because it is still an unimplemented stub, and a stub
+    fails without a lake. ``er train`` was, until ER-055 implemented it.
+    """
+    result = invoke("assert", "add")
 
     assert result.exit_code == int(ExitCode.STAGE_FAILURE)
     emitted = lines(result.stderr)
@@ -112,7 +116,7 @@ def test_failed_stage_line_carries_error_class() -> None:
     assert tuple(record) == STAGE_RECORD_KEYS
     assert record["status"] == "failed"
     assert record["error_class"] == ErrorClass.DATA.value
-    assert record["error_detail"] == "stage not implemented: train"
+    assert record["error_detail"] == "stage not implemented: assert"
     assert record["ended_at"] is not None
 
 
