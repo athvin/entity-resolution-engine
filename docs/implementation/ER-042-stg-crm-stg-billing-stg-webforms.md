@@ -2,7 +2,7 @@
 id: ER-042
 title: "stg_crm/stg_billing/stg_webforms + incremental config + staging schema.yml"
 milestone: M2
-status: in_progress
+status: done
 kind: code
 size: M
 gates: full
@@ -17,9 +17,9 @@ extra_paths: ["dbt/dbt_project.yml"]
 attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/scenarios/test_staging.py -q && uv run pytest tests/unit/dbt/test_incremental_configs.py -q"
 branch: "ticket/ER-042-stg-crm-stg-billing-stg-webforms"
-commit: ""
+commit: "4ea6c7ca73cef93d6f5abdb99b93e876fc281073"
 spec_sha: "2e62460d9f41a842"
-updated_at: "2026-08-16T00:09:48Z"
+updated_at: "2026-08-16T01:43:15Z"
 session: 4c399469-59da-4c70-b761-42f05a94d032
 ---
 ## Description
