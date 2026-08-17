@@ -2,7 +2,7 @@
 id: ER-059
 title: "**NEW** current_edges(conn, model_version, tf_snapshot_id): one current row per canonical pair over cumulative match_scores, total-ordered"
 milestone: M3
-status: todo
+status: in_progress
 kind: code
 size: S
 gates: full
@@ -14,12 +14,13 @@ consumes: ["src/er/matching/full.py::score_full", "src/er/matching/thresholds.py
 owns: ["src/er/matching/edges.py", "tests/unit/matching/test_current_edges.py", "tests/integration/test_current_edges.py"]
 protected_paths: []
 extra_paths: []
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_current_edges.py -q && uv run pytest tests/unit/matching/test_current_edges.py -q"
-branch: ""
+branch: "ticket/ER-059-new-current-edges-conn-model-version"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "2e62460d9f41a842"
+updated_at: "2026-08-17T03:22:51Z"
+session: 03264f1a-beb6-451f-a460-a5ced2185e0d
 ---
 ## Description
 
