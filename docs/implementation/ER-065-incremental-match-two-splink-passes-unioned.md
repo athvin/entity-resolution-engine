@@ -2,7 +2,7 @@
 id: ER-065
 title: "Incremental match: two Splink passes unioned (find_matches_to_new_records + batch-only dedupe_only)"
 milestone: M3
-status: in_progress
+status: done
 kind: code
 size: L
 gates: full
@@ -17,9 +17,9 @@ extra_paths: ["src/er/cli.py"]
 attempts: 2
 verify: "bash scripts/ci/itest.sh tests/integration/test_incremental_match.py -q"
 branch: "ticket/ER-065-incremental-match-two-splink-passes-unioned"
-commit: ""
+commit: "1a1b041e32cb0152a7b236f21999234f5980b157"
 spec_sha: "7467bdacba1bd84c"
-updated_at: "2026-08-17T14:31:58Z"
+updated_at: "2026-08-17T20:31:04Z"
 session: 53120873-66f1-412d-b119-87bda49ef450
 ---
 ## Description
