@@ -2,7 +2,7 @@
 id: ER-057
 title: "T-BLK-1: dbt/Splink blocking parity on base_10 + tests/helpers/pairs.py"
 milestone: M3
-status: in_progress
+status: done
 kind: code
 size: M
 gates: full
@@ -17,9 +17,9 @@ extra_paths: []
 attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_blocking_parity.py -q"
 branch: "ticket/ER-057-t-blk-1-dbt-splink-blocking"
-commit: ""
+commit: "5dc492c92c08cd267c1f989171b01420a8c7c7bb"
 spec_sha: "2e62460d9f41a842"
-updated_at: "2026-08-17T00:38:56Z"
+updated_at: "2026-08-17T02:15:51Z"
 session: c166595e-eeb0-4710-a262-82c289ac6497
 ---
 ## Description
