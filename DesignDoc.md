@@ -1656,6 +1656,7 @@ fixtures/static/<scenario>/
 ├── tf_flip_pairs.csv         # optional: the edges T-INC-1b / T-TF-1 allow to cross auto_merge
 ├── truth.csv                 # ground truth: persona label per input row (hand-authored scenarios only)
 ├── traps.csv                 # ground truth: the designed traps and the rows that construct them
+├── attribution.csv           # ground truth: per-record role and the pass that must discover it
 └── expected/
     ├── base/                 # expected state after the base phase
     │   ├── membership.csv
@@ -1676,7 +1677,7 @@ The scenario-root files are inputs, bounds and ground truth — never expectatio
 
 **Inputs and bounds** — `assertions.csv`, `parity_pairs.csv`, `tf_flip_pairs.csv`. These are fed to the pipeline or bound what it may do.
 
-**Ground truth** — `truth.csv` and `traps.csv`. These are read only by tests and by the quality metrics of S8.5; the pipeline never sees them, and no phase consumes them. `truth.csv` carries one row per input record giving its persona label, and is what makes pairwise precision/recall computable at all (S8.5). `traps.csv` indexes each designed trap of S8.2 to the `(source_system, source_record_id)` rows that construct it, so a fixture edit that dissolves a trap fails a test instead of silently weakening the corpus. Both exist only in hand-authored scenarios; generated corpora (S8.4) carry their labels in the generator manifest instead, so a generated scenario has neither file.
+**Ground truth** — `truth.csv`, `traps.csv` and `attribution.csv`. These are read only by tests and by the quality metrics of S8.5; the pipeline never sees them, and no phase consumes them. `truth.csv` carries one row per input record giving its persona label, and is what makes pairwise precision/recall computable at all (S8.5). `traps.csv` indexes each designed trap of S8.2 to the `(source_system, source_record_id)` rows that construct it, so a fixture edit that dissolves a trap fails a test instead of silently weakening the corpus. Both exist only in hand-authored scenarios; generated corpora (S8.4) carry their labels in the generator manifest instead, so a generated scenario has neither file. `attribution.csv` belongs to incremental scenarios only: it gives each post-base `record_key` one role (`joiner`, `bridge`, `new_pair`) and the pass that MUST discover it (`pass1` for new-vs-corpus, `pass2` for new-vs-new, per S4.3.4/D2). It is a CSV and not a `scenario.yaml` block because the manifest is normatively a flat `key: value` map whose scalar alphabet excludes the `:` inside every `record_key` (S5.0/D6) — the attribution is tabular data keyed by `record_key`, so it takes the same form as the other ground truth. Its purpose is that pass-2 coverage is checkable: without it, the new-vs-new pass can be omitted entirely and every downstream assertion still passes.
 
 `assertions.csv` exists wherever a scenario asserts (`split_scenario`, `assertions_scenario`); `parity_pairs.csv` and `tf_flip_pairs.csv` exist only in the scenarios whose tests name them — `base_10` for T-TF-1, `incremental_batch` for T-INC-3 and T-INC-1b. `parity_pairs.csv` lives in `incremental_batch` and not in `base_10` because T-INC-3 exercises the incremental two-pass path, which has no input in a scenario with no `batch/` phase.
 
