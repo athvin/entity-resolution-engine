@@ -2,7 +2,7 @@
 id: ER-059
 title: "**NEW** current_edges(conn, model_version, tf_snapshot_id): one current row per canonical pair over cumulative match_scores, total-ordered"
 milestone: M3
-status: in_progress
+status: done
 kind: code
 size: S
 gates: full
@@ -17,9 +17,9 @@ extra_paths: []
 attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_current_edges.py -q && uv run pytest tests/unit/matching/test_current_edges.py -q"
 branch: "ticket/ER-059-new-current-edges-conn-model-version"
-commit: ""
+commit: "1105530ab80f74d3e9bd464f6b0068be88f8ff72"
 spec_sha: "2e62460d9f41a842"
-updated_at: "2026-08-17T03:22:51Z"
+updated_at: "2026-08-17T04:41:04Z"
 session: 03264f1a-beb6-451f-a460-a5ced2185e0d
 ---
 ## Description
