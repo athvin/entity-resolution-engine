@@ -2,7 +2,7 @@
 id: ER-064
 title: "incremental_batch fixture (3 joiners, 1 bridge, 2 new-vs-new) + base_scenario: base_10 + pass attribution"
 milestone: M3
-status: todo
+status: in_progress
 kind: fixture
 size: M
 gates: fast
@@ -14,12 +14,13 @@ consumes: ["tests/helpers/scenarios.py::load_scenario", "tests/helpers/expected.
 owns: ["fixtures/static/incremental_batch/scenario.yaml", "fixtures/static/incremental_batch/base", "fixtures/static/incremental_batch/batch", "fixtures/static/incremental_batch/expected", "tests/unit/fixtures/test_incremental_batch.py"]
 protected_paths: ["fixtures/static/base_10/base", "fixtures/static/base_10/expected"]
 extra_paths: []
-attempts: 0
+attempts: 1
 verify: "uv run pytest tests/unit/fixtures/test_incremental_batch.py -q"
-branch: ""
+branch: "ticket/ER-064-incremental-batch-fixture-3-joiners-1"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "2e62460d9f41a842"
+updated_at: "2026-08-17T05:50:38Z"
+session: 9d4ee22c-17c4-4d50-92df-2cfbc99939c2
 ---
 ## Description
 
