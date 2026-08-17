@@ -35,6 +35,16 @@ plus that rest, and four of its decisions are the ones a re-implementation gets 
   endpoint content hashes are written onto the row, which is what makes that claim
   checkable after the fact rather than merely asserted.
 
+**The write is published, because there are two scoring paths and one write.** S4.0b's
+"a single write statement" and S4.3.4's `MERGE INTO` are properties of `match_scores`,
+not of full mode: the S4.3.4 two-pass incremental scorer (:mod:`er.matching.incremental`)
+persists the same relation on the same logical key. So :func:`merge_match_scores` — the
+merge, its canonicalising source and the read-back that re-checks the ordering through
+the S5.0 helper — is a function both paths call rather than a private helper one path
+owns and the other reimplements. A second copy would be a second place for the four
+things S4.3.4 requires of the source (self-pairs dropped, canonicalised, made distinct,
+both endpoint hashes joined on) to be got subtly differently.
+
 **The one thing this stage changes about the frozen model.** The settings document is
 loaded from `model_registry` and used verbatim except for
 ``retain_intermediate_calculation_columns``, which is forced on. That flag decides
@@ -77,6 +87,9 @@ __all__ = [
     "MODE_FULL",
     "RETAIN_INTERMEDIATE_KEY",
     "FullMatchResult",
+    "ScoredPair",
+    "merge_match_scores",
+    "prediction_columns",
     "score_full",
 ]
 
@@ -381,13 +394,18 @@ def _candidate_pairs(connection: duckdb.DuckDBPyConnection) -> int | None:
         return None
 
 
-def _prediction_columns(connection: duckdb.DuckDBPyConnection, relation: str) -> tuple[str, ...]:
+def prediction_columns(connection: duckdb.DuckDBPyConnection, relation: str) -> tuple[str, ...]:
     """The column names of the prediction relation, in Splink's own order.
 
     Read off the relation rather than derived from the config: which columns
     `predict()` emits is a property of the settings document that produced it, and
     :func:`~er.matching.evidence.evidence_keys` is what turns the difference between
     the two into a refusal instead of a payload with a hole in it.
+
+    Public because the S4.3.4 two-pass scorer asks the same question of two prediction
+    relations — `find_matches_to_new_records` and `predict` need not emit the same
+    columns — and answering it from the config instead is exactly the mistake the
+    paragraph above rules out.
     """
     rows = connection.execute(f"DESCRIBE SELECT * FROM {relation}").fetchall()
     return tuple(str(row[0]) for row in rows)
@@ -409,8 +427,8 @@ def _stamp(moment: datetime | None) -> datetime:
 
 
 @dataclass(frozen=True)
-class _ScoredPair:
-    """One row this run wrote, as it is read back for classification."""
+class ScoredPair:
+    """One row a scoring run wrote, as it is read back for classification."""
 
     rec_a_key: str
     rec_b_key: str
@@ -424,7 +442,7 @@ def _scored_rows(
     model_version: str,
     tf_snapshot_id: str,
     run_id: str,
-) -> list[_ScoredPair]:
+) -> list[ScoredPair]:
     """Every pair this run scored, canonicalised through the S5.0 helper.
 
     The re-canonicalisation is not defensive duplication: it is what makes
@@ -433,7 +451,7 @@ def _scored_rows(
     two equal — raises here, before anything downstream joins one-sided on it.
     """
     rows = connection.execute(_SCORED_ROWS_SQL, [model_version, tf_snapshot_id, run_id]).fetchall()
-    scored: list[_ScoredPair] = []
+    scored: list[ScoredPair] = []
     for rec_a_key, rec_b_key, match_probability, evidence in rows:
         canonical = canonicalize_pair(str(rec_a_key), str(rec_b_key))
         if canonical != (str(rec_a_key), str(rec_b_key)):
@@ -443,7 +461,7 @@ def _scored_rows(
                 f"rec_a_key < rec_b_key (D9)"
             )
         scored.append(
-            _ScoredPair(
+            ScoredPair(
                 rec_a_key=canonical[0],
                 rec_b_key=canonical[1],
                 match_probability=float(match_probability),
@@ -453,6 +471,70 @@ def _scored_rows(
             )
         )
     return scored
+
+
+def merge_match_scores(
+    connection: duckdb.DuckDBPyConnection,
+    prediction_relation: str,
+    evidence_expression: str,
+    *,
+    model_version: str,
+    tf_snapshot_id: str,
+    run_id: str,
+    scored_at: datetime | None = None,
+) -> list[ScoredPair]:
+    """THE `match_scores` write, and the rows it left behind (S4.3.4, S4.0b, S5.0).
+
+    One statement reaches the lake — the `MERGE INTO` of :func:`_merge_sql`, over a
+    source that drops self-pairs, canonicalises to `rec_a_key < rec_b_key`, makes the
+    result distinct on the pair and joins both endpoints' `content_hash` on. Nothing is
+    deleted and nothing is truncated: `match_scores` is cumulative, so a key already
+    scored is rewritten in place and a key that is not is inserted.
+
+    The read-back is part of the same unit rather than a separate call a caller might
+    forget. It is what makes :func:`~er.entities.ids.canonicalize_pair` the authority
+    for an ordering the merge had to express in SQL, and its result is what the gray
+    band is classified from — in Python, through :mod:`er.matching.thresholds`, because
+    the band is half-open and is defined in exactly one place.
+
+    Both S4.3.4 scoring paths call this: full mode hands it one corpus-wide prediction,
+    and the two-pass incremental scorer hands it the union of its two passes. Which is
+    the point — one write statement, one canonicalisation site, one read-back.
+
+    Args:
+        connection: an open S4.0b connection with the lake attached by alias.
+        prediction_relation: the relation the merge reads, carrying `record_key_l`,
+            `record_key_r`, `match_probability` and whatever ``evidence_expression``
+            names. It lives in the in-memory database — a Splink prediction, or a local
+            relation built from several — so the merge's source is a join across the
+            two catalogs and the lake still sees a single statement.
+        evidence_expression: the SQL producing each row's `evidence JSON`, from
+            :func:`~er.matching.evidence.build_evidence` over
+            :func:`prediction_columns` of that same relation. A caller whose relation
+            already holds a materialized payload passes the column name.
+        model_version: the registry version being scored at, written onto every row.
+        tf_snapshot_id: the frozen TF snapshot, written onto every row.
+        run_id: this stage's run, written onto every row the merge touched — which is
+            what makes the read-back exactly the set this call scored.
+        scored_at: the stamp every row carries; now, in UTC, when omitted.
+
+    Returns:
+        Every pair this run scored, in canonical pair order, each carrying its
+        `match_probability` and its decoded `evidence` mapping.
+
+    Raises:
+        er.errors.StageFailure: a persisted pair is not in the S5.0 canonical ordering.
+    """
+    connection.execute(
+        _merge_sql(prediction_relation, evidence_expression),
+        [model_version, tf_snapshot_id, run_id, _stamp(scored_at)],
+    )
+    return _scored_rows(
+        connection,
+        model_version=model_version,
+        tf_snapshot_id=tf_snapshot_id,
+        run_id=run_id,
+    )
 
 
 def score_full(
@@ -530,17 +612,14 @@ def score_full(
     predictions = linker.inference.predict(threshold_match_probability=thresholds.review_low)
     relation = str(predictions.physical_name)
 
-    evidence_expression = build_evidence(cfg, _prediction_columns(connection, relation))
-    connection.execute(
-        _merge_sql(relation, evidence_expression),
-        [model_version, tf_snapshot_id, run_ctx.run_id, _stamp(scored_at)],
-    )
-
-    scored = _scored_rows(
+    scored = merge_match_scores(
         connection,
+        relation,
+        build_evidence(cfg, prediction_columns(connection, relation)),
         model_version=model_version,
         tf_snapshot_id=tf_snapshot_id,
         run_id=run_ctx.run_id,
+        scored_at=scored_at,
     )
     gray_band = [pair for pair in scored if in_gray_band(pair.match_probability, thresholds)]
     upserted = upsert_gray_band_pairs(
