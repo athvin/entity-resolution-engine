@@ -2,7 +2,7 @@
 id: ER-064
 title: "incremental_batch fixture (3 joiners, 1 bridge, 2 new-vs-new) + base_scenario: base_10 + pass attribution"
 milestone: M3
-status: in_progress
+status: blocked
 kind: fixture
 size: M
 gates: fast
@@ -19,7 +19,7 @@ verify: "uv run pytest tests/unit/fixtures/test_incremental_batch.py -q"
 branch: "ticket/ER-064-incremental-batch-fixture-3-joiners-1"
 commit: ""
 spec_sha: "2e62460d9f41a842"
-updated_at: "2026-08-17T05:50:38Z"
+updated_at: "2026-08-17T05:55:50Z"
 session: 9d4ee22c-17c4-4d50-92df-2cfbc99939c2
 ---
 ## Description
@@ -83,3 +83,12 @@ uv run python scripts/validate_fixtures.py fixtures/static/incremental_batch
 - No ULID appears anywhere under `fixtures/static/incremental_batch/`
 - `base_10` inputs and expectations are unmodified
 - `bash scripts/gates.sh` green
+
+## Blocker log
+
+### Attempt 1 — underspecified (2026-08-17T05:55:50Z)
+
+- **Failing command:** `uv run python scripts/validate_fixtures.py .loop/probe/incremental_batch   # probe manifest carrying AC3's attribution: block`
+- **Assertion / contradiction:** Two defects. (1) AC3 and the DoD require a scenario.yaml 'attribution:' block, but the manifest grammar refuses it: 'scenario.yaml:4: manifest: unknown key attribution; the manifest keys are aux_files, base_scenario, phases, scenario' (tests/helpers/scenario.py:170 _MANIFEST_KEYS, raised at :256). Widening that set is not sufficient either: :248 rejects any indented line ('the manifest is a flat key: value map') so a block has no representation, and :168 pins the value alphabet to [A-Za-z0-9_.-], which excludes the ':' that every record_key contains by S5.0/D6. FORMAT.md:56-73 pins this grammar as normative and is cross-checked by tests/unit/fixtures/test_fixture_format.py. All three files are owned by ER-028 (done); ER-064 lists them under consumes, not owns, and names no replacement spelling. Two of the ticket's own three Verification commands therefore fail for any scenario.yaml satisfying AC3. (2) AC7 requires expected/batch/std_hashes.csv to hold 29 rows = 23 base + 6 batch, but Scope/out-of-scope forbids 'Running any pipeline stage' and gates are fast. A std_hash is SHA-256 over int_std_records (T-STD-1), so the 6 batch values exist only after an ingest+standardize run; ER-045's DoD says the file is 'generated from a real pipeline run' and tests/integration/scenarios/test_base_10_std.py:9-21 documents that as the only production path. ER-064 consumes src/er/ingest/hashing.py::content_hash (the S4.1 raw-record hash), not table_content_hash, so it did not plan to compute one. AC7 is satisfiable only by inventing six 64-hex strings, which would poison ER-065 and ER-066.
+- **Smallest change that would unblock:** Two edits, both to ER-064's ticket, no DesignDoc change (S8.2.1 never mentions scenario.yaml). (1) Move the attribution out of the manifest into a scenario-root ground-truth file: add 'attribution.csv' with literal header 'record_key,role,pass' beside truth.csv and traps.csv. It is read only by tests and never fed to the pipeline, so it belongs to S8.2.1's GROUND TRUTH kind, needs no manifest key, no grammar change, and no new lint rule -- only appending it to TRUTH_FILES in tests/helpers/scenario.py and one paragraph in FORMAT.md. Record the bridged pair as two more rows or as a second file 'bridged_labels.csv' (header 'entity_label_a,entity_label_b'). Then either add 'tests/helpers/scenario.py' and 'fixtures/static/FORMAT.md' to ER-064's owns, or -- cleaner -- cut a predecessor ticket owning both, and make ER-064 depend on it. Rewrite AC3/AC4 and the DoD bullet to name attribution.csv instead of a scenario.yaml block. If the attribution must stay in scenario.yaml, the ticket has to state the exact grammar extension, because indentation and ':' are both currently refused. (2) Drop expected/batch/std_hashes.csv from ER-064 entirely: by S8.2.1 an absent expected file means the phase makes no claim about that relation, so removing it costs nothing and is the same staging ER-045 used. Delete AC7, delete the file from provides/owns, and give it to the first ticket that actually runs the batch phase (ER-065 or ER-066), following ER-045's pattern -- an integration test that emits artifacts/incremental_batch/expected/batch/std_hashes.csv and compares it. Everything else in ER-064 (AC1, AC2, AC5, AC6, AC8) is hand-authorable and unaffected.
+- **Log:** `.loop/logs/ER-064.attempt-1.log`
