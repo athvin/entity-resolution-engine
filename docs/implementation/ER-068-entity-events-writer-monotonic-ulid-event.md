@@ -2,7 +2,7 @@
 id: ER-068
 title: "entity_events writer: monotonic ULID event_id, seq, per-type details schema, details_hash within-run idempotency key (unit)"
 milestone: M3
-status: todo
+status: in_progress
 kind: code
 size: M
 gates: fast
@@ -14,12 +14,13 @@ consumes: ["src/er/entities/ids.py::UlidFactory", "src/er/entities/ids.py::Monot
 owns: ["src/er/entities/events.py", "tests/unit/entities/__init__.py", "tests/unit/entities/test_events.py"]
 protected_paths: []
 extra_paths: []
-attempts: 0
+attempts: 1
 verify: "uv run pytest tests/unit/entities/test_events.py -q"
-branch: ""
+branch: "ticket/ER-068-entity-events-writer-monotonic-ulid-event"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "2e62460d9f41a842"
+updated_at: "2026-08-17T05:56:24Z"
+session: 6a729e8f-bed3-4d4c-9540-98b3386843be
 ---
 ## Description
 
