@@ -1,0 +1,3 @@
+account_no,fname,lname,billing_email,contact_phone,addr1,addr_city,addr_state,postal_code,birth_date,updated_ts,persona_id
+B008,Marcus,Whitfield,marcus.whitfield@example.com,415-555-0210,742 Evergreen Terrace Apt 12,San Francisco,CA,94115,05/09/1972,2024-05-07 14:05:00,P4
+B009,Sofia,Marchetti,sofia.marchetti@example.com,628-555-0715,58 Chenery Street Apt 3,San Francisco,CA,94131,11/08/1991,2024-05-08 10:20:00,P12

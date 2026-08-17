@@ -1,0 +1,3 @@
+submission_id,name_first,name_last,email,phone_number,address,city,region,postcode,date_of_birth,submitted_at,persona_id
+W009,Thomas,Okonkwo,thomas.okonkwo@example.com,(415) 555-0623,920 Taraval Street Apt 8,San Francisco,CA,94129,1965-10-19,2024-05-10 16:30:00,P10
+W010,Sofia,Marchetti,sofia.marchetti@example.com,(628) 555-0715,58 Chenery Street Apt 3,San Francisco,CA,94131,1991-11-08,2024-05-11 08:45:00,P12

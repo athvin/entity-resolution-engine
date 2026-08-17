@@ -1,0 +1,7 @@
+record_key,role,pass
+billing:B008,joiner,pass1
+billing:B009,new_pair,pass2
+crm:C009,joiner,pass1
+crm:C010,bridge,pass1
+webforms:W009,joiner,pass1
+webforms:W010,new_pair,pass2

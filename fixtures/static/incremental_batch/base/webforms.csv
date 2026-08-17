@@ -1,0 +1,9 @@
+submission_id,name_first,name_last,email,phone_number,address,city,region,postcode,date_of_birth,submitted_at,persona_id
+W001,Bob,Chen,test@test.com,628-555-0101,1420 Judah Street Apt 5,San Francisco,CA,94107,1985-03-14,2024-03-02 14:45:00,P1
+W002,Bobby,Chen,bobby.chen@example.com,(628) 555-0101,1420 Judah Street Apt 5,San Francisco,CA,94107,1985-03-15,2024-04-19 09:05:00,P1
+W003,Priya,Raghavan,priya.r@example.com,+14155550132,88 Harbor Street #4B,San Francisco,CA,94110,1990-07-22,2024-03-27 08:40:00,P2
+W004,Krystal,Nowakowski,,415-555-0177,233 Cortland Avenue Unit 2,San Francisco,CA,94112,1978-12-03,2024-03-14 17:55:00,P3
+W005,Yolanda,Prescott,yolanda.prescott@example.com,(415) 555-0288,742 Evergreen Terrace Apt 12,San Francisco,CA,94115,1968-11-30,2024-01-28 10:05:00,P5
+W006,Inga,Halverson,inga.halverson@example.com,(628) 555-0402,1201 Fulton Street Apt 2,San Francisco,CA,94121,1979-04-26,2024-01-30 12:00:00,P7
+W007,Dana,Lin,dana.lin@example.com,(415) 555-0455,306 Ulloa Street Apt 7,San Francisco,CA,94124,1995-02-11,2024-02-05 08:00:00,P8
+W008,Dena,Linden,dana.lin@example.com,415-555-0455,306 Ulloa Street Apt 7,San Francisco,CA,94124,1995-02-11,2024-02-05 08:00:00,P8

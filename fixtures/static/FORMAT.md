@@ -24,6 +24,7 @@ fixtures/static/<scenario>/
 ├── tf_flip_pairs.csv         # optional: the edges T-INC-1b / T-TF-1 allow to cross auto_merge
 ├── truth.csv                 # ground truth: the persona label of each input row
 ├── traps.csv                 # ground truth: the designed traps and the rows that construct them
+├── attribution.csv           # ground truth: each post-base record's role and discovering pass
 └── expected/
     ├── base/                 # expected state after the base phase
     │   ├── membership.csv
@@ -60,11 +61,22 @@ scenario: incremental_batch        # required; must equal the directory name
 phases: [base, batch]              # required; a subset of the vocabulary, always including base
 base_scenario: base_10             # optional; whose deliveries run before this scenario's own
 aux_files: [parity_pairs.csv]      # optional; which scenario-root files this scenario carries
+bridged_labels: [E5, E6]           # optional; the base_scenario labels this scenario's bridge merges
+bridged_personas: [P6, P7]         # optional; the personas holding those two labels
 ```
 
 The manifest exists so that "the phases this scenario has" is a declaration rather than an
 inference from whichever directories happen to be on disk: a delivery lost to a bad merge would
 otherwise read as a scenario that never had that phase.
+
+`bridged_labels` and `bridged_personas` are declared together or not at all, and each names
+exactly two distinct entries. They exist for the same reason: a **bridge** record — one that
+matches records of two different existing entities and so forces a merge — is cross-persona by
+construction whenever the base corpus labels one entity per persona, which `base_10` does. There
+is then no *truthful* bridge to build, so the merge has to be declared as a designed mechanic or
+whoever finds it next reads it as a quality defect. A comment would not do: the tests assert that
+the two labels are distinct groups of the `base_scenario`'s `expected/base/membership.csv` and
+that the two personas holding them differ.
 
 The grammar is deliberately small, and `scripts/validate_fixtures.py` refuses anything outside
 it rather than guessing. One `key: value` per line, no indentation; a value is either a bare
@@ -88,14 +100,23 @@ enumerates the root by name and rejects anything unlisted.
 to the pipeline or bound what it may do. Each has a literal header below, and each must be
 declared in the manifest's `aux_files`.
 
-**Ground truth** — `truth.csv` and `traps.csv`. These are read only by tests and by the S8.5
-metrics; the pipeline never sees them and no phase consumes them. `truth.csv` carries one row per
-input record giving its persona label, and is what makes pairwise precision/recall computable at
-all. `traps.csv` indexes each designed trap of S8.2 to the `(source_system, source_record_id)`
-rows that construct it, so a fixture edit that dissolves a trap fails a test instead of silently
-weakening the corpus. Both exist only in hand-authored scenarios — a generated corpus carries its
-labels in the generator manifest instead — and neither is declared in `aux_files` nor carries a
-pinned header below, because S8.2.1 states none.
+**Ground truth** — `truth.csv`, `traps.csv` and `attribution.csv`. These are read only by tests
+and by the S8.5 metrics; the pipeline never sees them and no phase consumes them. `truth.csv`
+carries one row per input record giving its persona label, and is what makes pairwise
+precision/recall computable at all. `traps.csv` indexes each designed trap of S8.2 to the
+`(source_system, source_record_id)` rows that construct it, so a fixture edit that dissolves a
+trap fails a test instead of silently weakening the corpus. `attribution.csv` belongs to
+incremental scenarios only: its columns are `record_key,role,pass`, it gives each post-base
+`record_key` one role (`joiner`, `bridge`, `new_pair`) and the pass that MUST discover it
+(`pass1` for new-vs-corpus, `pass2` for new-vs-new, per S4.3.4/D2), and without it the
+new-vs-new pass can be omitted entirely while every downstream assertion still passes. It is a
+CSV and not a manifest block because the manifest is a flat `key: value` map whose scalar
+alphabet excludes the `:` inside every `record_key`. All three exist only in hand-authored
+scenarios — a generated corpus carries its labels in the generator manifest instead — and none is
+declared in `aux_files` nor appears in the header block below: that block is the linter's
+grading table and S8.2.1 pins a literal there for the inputs and bounds alone. Ground truth is
+graded by the scenario's own test instead, which is where `attribution.csv`'s three columns are
+asserted.
 
 ## Headers (literal)
 
@@ -161,7 +182,7 @@ prints the vocabulary.
 
 | Rule | What it catches |
 |---|---|
-| `manifest` | a missing or malformed `scenario.yaml`, a phase outside the vocabulary, `batch` without `base`, an `aux_files` entry that is not there |
+| `manifest` | a missing or malformed `scenario.yaml`, a phase outside the vocabulary, `batch` without `base`, an `aux_files` entry that is not there, a bridge declared with one of its two keys or naming other than two distinct entries |
 | `phase-dir` | a directory that is not a phase, a phase directory the manifest does not declare, a declared phase with no delivery |
 | `expected-phase` | an `expected/<phase>/` for a phase the scenario does not have |
 | `unknown-file` | a scenario-root or `expected/` file the format does not define, or an input/bound the manifest does not declare |

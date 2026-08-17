@@ -1,0 +1,9 @@
+crm_id,first_name,last_name,email_address,phone,street_address,city,state,zip,dob,last_modified,persona_id
+C001,Robert,Chen,robert.chen@example.com,(628) 555-0101,1420 Judah Street Apt 5,San Francisco,CA,94107,1985-03-14,2024-01-05 08:12:00,P1
+C002,Priya,Raghavan,priya.raghavan@example.com,(415) 555-0132,88 Harbor Street #4B,San Francisco,CA,94110,1990-07-22,2024-01-09 11:00:00,P2
+C003,Krystal,Nowakowsky,krystal.n@example.com,(415) 555-0177,233 Cortland Avenue Unit 2,San Francisco,CA,94112,1978-12-03,2024-02-02 12:15:00,P3
+C004,Marcus,Whitfield,marcus.whitfield@example.com,(415) 555-0210,742 Evergreen Terrace Apt 12,San Francisco,CA,94115,1972-05-09,2024-01-15 07:45:00,P4
+C005,Yolanda,Prescott,yolanda.prescott@example.com,(415) 555-0288,19 Pierce Street Apt 6,San Francisco,CA,94118,1968-11-30,2024-02-08 15:35:00,P5
+C006,Ingrid,Halvorsen,ingrid.halvorsen@example.com,(415) 555-0341,512 Balboa Street Apt 9,San Francisco,CA,94121,1983-09-17,2024-01-11 06:50:00,P6
+C007,Elena,Vasquez,elena.vasquez@example.com,(415) 555-0519,445 Noe Street Apt 11,San Francisco,CA,94127,1988-06-04,2024-01-19 14:30:00,P9
+C008,Thomas,Okonkwo,,(415) 555-0623,920 Taraval Street Apt 8,San Francisco,CA,94129,1965-10-19,2024-03-08 10:45:00,P10

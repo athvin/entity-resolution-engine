@@ -1,0 +1,3 @@
+crm_id,first_name,last_name,email_address,phone,street_address,city,state,zip,dob,last_modified,persona_id
+C009,Priya,Raghavan,priya.raghavan@example.com,(415) 555-0132,88 Harbor Street #4B,San Francisco,CA,94110,1990-07-22,2024-05-06 09:15:00,P2
+C010,Ingrid,Halverson,inga.halverson@example.com,(415) 555-0341,512 Balboa Street Apt 9,San Francisco,CA,94121,1983-09-17,2024-05-09 11:40:00,P11

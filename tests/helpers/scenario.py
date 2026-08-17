@@ -44,6 +44,8 @@ from .expected import LABEL_COLUMN, LABEL_PREFIX, ULID_SHAPED, Row, load_expecte
 __all__ = [
     "AUX_FILES",
     "BASE_PHASE",
+    "BRIDGE_ARITY",
+    "BRIDGE_KEYS",
     "EXPECTED_DIR",
     "EXPECTED_HEADERS",
     "EXPECTED_RELATIONS",
@@ -88,16 +90,18 @@ AUX_FILES: Final[tuple[str, ...]] = ("assertions.csv", "parity_pairs.csv", "tf_f
 
 #: The scenario root's GROUND TRUTH -- S8.2.1's second kind. `truth.csv` gives one
 #: row per input record its persona label; `traps.csv` indexes each designed trap
-#: of S8.2 to the rows that construct it. The pipeline never sees either: they are
-#: read only by tests and by the S8.5 metrics, and exist only in hand-authored
-#: scenarios, since a generated corpus carries its labels in the generator
-#: manifest instead.
+#: of S8.2 to the rows that construct it; `attribution.csv` gives each post-base
+#: `record_key` its role and the pass that MUST discover it, which is what makes
+#: pass-2 coverage checkable at all (S4.3.4/D2). The pipeline never sees any of
+#: them: they are read only by tests and by the S8.5 metrics, and exist only in
+#: hand-authored scenarios, since a generated corpus carries its labels in the
+#: generator manifest instead.
 #:
 #: They are NOT declared in the manifest's `aux_files` and carry no entry in
 #: :data:`EXPECTED_HEADERS`, and both omissions are deliberate: S8.2.1 pins a
 #: literal header for every INPUT and BOUND and for none of the ground truth, so a
 #: header pinned here would be one the spec does not state.
-TRUTH_FILES: Final[tuple[str, ...]] = ("truth.csv", "traps.csv")
+TRUTH_FILES: Final[tuple[str, ...]] = ("truth.csv", "traps.csv", "attribution.csv")
 
 #: Every file S8.2.1 admits at the scenario root, of either kind. This is the list
 #: the `unknown-file` lint rule enumerates: the spec's distinction is normative
@@ -167,8 +171,23 @@ SCENARIO_ROOTS: Final[tuple[Path, ...]] = (
 #: mistake rather than a value the strict parser should try to interpret.
 _SCALAR = re.compile(r"[A-Za-z0-9_.-]+")
 
+#: The manifest keys that declare a designed BRIDGE: the two labels of the
+#: `base_scenario` the bridge record merges, and the two personas holding them.
+#: They are a pair of bare scalars each, so the pinned grammar already admits
+#: them and nothing about it widens.
+#:
+#: They are keys rather than a comment because a bridge is cross-persona by
+#: construction -- a scenario whose base corpus labels one entity per persona has
+#: no truthful bridge -- so the intent has to be machine-readable or the merge
+#: reads as a quality defect to whoever finds it next.
+BRIDGE_KEYS: Final[tuple[str, ...]] = ("bridged_labels", "bridged_personas")
+
+#: How many names each :data:`BRIDGE_KEYS` entry carries. A bridge joins exactly
+#: two entities: one is no merge and three is a different mechanic.
+BRIDGE_ARITY: Final[int] = 2
+
 _MANIFEST_KEYS: Final[frozenset[str]] = frozenset(
-    {"scenario", "phases", "base_scenario", "aux_files"}
+    {"scenario", "phases", "base_scenario", "aux_files", *BRIDGE_KEYS}
 )
 
 
@@ -220,6 +239,10 @@ class Manifest:
     phases: tuple[str, ...]
     base_scenario: str | None
     aux_files: tuple[str, ...]
+    #: The `base_scenario`'s `entity_label`s the scenario's bridge record merges,
+    #: and the personas that hold them. Empty when the scenario designs no bridge.
+    bridged_labels: tuple[str, ...] = ()
+    bridged_personas: tuple[str, ...] = ()
 
     @property
     def directory(self) -> Path:
@@ -318,6 +341,16 @@ def _manifest_from_fields(fields: Mapping[str, str | tuple[str, ...]], path: Pat
             f"aux_files names {disallowed}; the scenario-root files are {list(AUX_FILES)}", path
         )
 
+    bridged = {key: _bridge_field(fields, key, path) for key in BRIDGE_KEYS}
+    declared_bridge = sorted(key for key, names in bridged.items() if names)
+    if declared_bridge and len(declared_bridge) != len(BRIDGE_KEYS):
+        missing = sorted(set(BRIDGE_KEYS) - set(declared_bridge))
+        raise ScenarioError(
+            f"{declared_bridge} is declared without {missing}; a bridge names both the "
+            "labels it merges and the personas holding them",
+            path,
+        )
+
     return Manifest(
         path=path,
         name=name,
@@ -326,7 +359,24 @@ def _manifest_from_fields(fields: Mapping[str, str | tuple[str, ...]], path: Pat
         phases=tuple(phase for phase in PHASES if phase in set(phases)),
         base_scenario=_optional_scalar(fields, "base_scenario", path),
         aux_files=tuple(aux_files),
+        bridged_labels=bridged["bridged_labels"],
+        bridged_personas=bridged["bridged_personas"],
     )
+
+
+def _bridge_field(
+    fields: Mapping[str, str | tuple[str, ...]], key: str, path: Path
+) -> tuple[str, ...]:
+    """One :data:`BRIDGE_KEYS` entry: two distinct names, or nothing at all."""
+    names = _sequence_field(fields, key, path)
+    if names is None:
+        return ()
+    if len(names) != BRIDGE_ARITY or len(set(names)) != BRIDGE_ARITY:
+        raise ScenarioError(
+            f"{key!r} is {list(names)}; a bridge merges exactly {BRIDGE_ARITY} distinct entities",
+            path,
+        )
+    return names
 
 
 def _required_scalar(fields: Mapping[str, str | tuple[str, ...]], key: str, path: Path) -> str:

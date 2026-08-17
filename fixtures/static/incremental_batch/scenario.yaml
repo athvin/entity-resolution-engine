@@ -1,0 +1,21 @@
+scenario: incremental_batch
+phases: [base, batch]
+
+# base/ is COMMITTED, not inherited. S3 shows this scenario with its own base/, and
+# S8.2.1 makes a missing phase directory mean the scenario has no such phase, so the
+# delivery is here and `base_scenario` is a byte-identity assertion against base_10
+# rather than an indirection -- which is what keeps the two corpora from drifting.
+base_scenario: base_10
+
+# The bridge (crm:C010) carries base_10 persona P6's phone, address and birth_date
+# and persona P7's email, so it merges the two entities those personas hold. The
+# pair is declared rather than inferred: base_10's ten personas are exactly ten
+# entities (S8.2), so NO truthful bridge exists in it, and a reader who found this
+# merge without the declaration would read a designed mechanic as a quality defect.
+# The labels are base_10's own, from base_10/expected/base/membership.csv.
+bridged_labels: [E5, E6]
+bridged_personas: [P6, P7]
+
+# No expected/batch/golden.csv: golden_records is first written in M4 (S12), and
+# S12's gating rule forbids a milestone asserting on a later milestone's relation.
+# An absent expected file is a phase making no claim, not an empty expectation.

@@ -1,0 +1,8 @@
+account_no,fname,lname,billing_email,contact_phone,addr1,addr_city,addr_state,postal_code,birth_date,updated_ts,persona_id
+B001,Rob,Chen,r.chen@example.com,628-555-0101,1420 Judah Street Apt 5,San Francisco,CA,94107,03/14/1985,2024-02-11 10:30:00,P1
+B002,Priya,Raghavan,,415-555-0132,88 Harbor Street #4B,San Francisco,CA,94110,07/22/1990,2024-02-18 16:20:00,P2
+B003,Krystal,Nowakowski,krystal.n@example.com,415-555-0177,233 Cortland Avenue Unit 2,San Francisco,CA,94112,12/03/1978,2024-01-22 09:30:00,P3
+B004,Marcus,Whitfield,,415-555-0210,742 Evergreen Terrace Apt 12,San Francisco,CA,94115,05/09/1972,2024-02-25 13:10:00,P4
+B005,Ingrid,Halvorsen,ingrid.halvorsen@example.com,415-555-0341,77 Cabrillo Way Unit 3,San Francisco,CA,94122,09/17/1983,2024-02-14 11:25:00,P6
+B006,Inga,Halverson,inga.halverson@example.com,628-555-0402,1201 Fulton Street Apt 2,San Francisco,CA,94123,04/26/1979,2024-02-21 09:55:00,P7
+B007,Elena,Vasquez,test@test.com,415-555-0519,445 Noe Street Apt 11,San Francisco,CA,94127,06/04/1988,2024-02-27 07:20:00,P9
