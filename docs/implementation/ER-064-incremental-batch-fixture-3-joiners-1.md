@@ -2,7 +2,7 @@
 id: ER-064
 title: "incremental_batch fixture (3 joiners, 1 bridge, 2 new-vs-new) + base_scenario: base_10 + pass attribution"
 milestone: M3
-status: in_progress
+status: done
 kind: fixture
 size: M
 gates: full
@@ -17,9 +17,9 @@ extra_paths: []
 attempts: 1
 verify: "uv run pytest tests/unit/fixtures/test_incremental_batch.py -q"
 branch: "ticket/ER-064-incremental-batch-fixture-3-joiners-1"
-commit: ""
+commit: "383377c"
 spec_sha: "7467bdacba1bd84c"
-updated_at: "2026-08-17T08:20:04Z"
+updated_at: "2026-08-17T09:36:28Z"
 session: 1d05948d-ce5a-4274-bbe7-05c8aff17052
 ---
 ## Description
