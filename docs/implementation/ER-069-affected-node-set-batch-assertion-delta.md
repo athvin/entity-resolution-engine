@@ -2,7 +2,7 @@
 id: ER-069
 title: "Affected NODE set: batch ∪ assertion delta ∪ content_hash delta ∪ deletions ∪ blocking-discovered partners ∪ co-members"
 milestone: M3
-status: todo
+status: in_progress
 kind: code
 size: M
 gates: full
@@ -14,12 +14,13 @@ consumes: ["src/er/matching/edges.py::current_edges", "src/er/review/assertions.
 owns: ["src/er/entities/cluster.py", "tests/unit/entities/test_affected_nodes.py", "tests/integration/test_affected_nodes.py"]
 protected_paths: []
 extra_paths: []
-attempts: 0
+attempts: 1
 verify: "uv run pytest tests/unit/entities/test_affected_nodes.py -q && bash scripts/ci/itest.sh tests/integration/test_affected_nodes.py -q"
-branch: ""
+branch: "ticket/ER-069-affected-node-set-batch-assertion-delta"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "7467bdacba1bd84c"
+updated_at: "2026-08-18T17:32:21Z"
+session: 0ddb196a-cb0c-40c1-aff3-f0043b2489a2
 ---
 ## Description
 
