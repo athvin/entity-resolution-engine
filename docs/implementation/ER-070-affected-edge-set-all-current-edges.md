@@ -2,7 +2,7 @@
 id: ER-070
 title: "Affected EDGE set: ALL current edges via current_edges, always-assertion injection (evidence.source='assertion'), cut_edges exclusion"
 milestone: M3
-status: todo
+status: in_progress
 kind: code
 size: M
 gates: full
@@ -14,12 +14,13 @@ consumes: ["src/er/entities/cluster.py::affected_nodes", "src/er/entities/cluste
 owns: ["tests/unit/entities/test_affected_edges.py", "tests/integration/test_affected_edges.py"]
 protected_paths: ["tests/unit/entities/test_affected_nodes.py", "tests/integration/test_affected_nodes.py"]
 extra_paths: ["src/er/entities/cluster.py"]
-attempts: 0
+attempts: 1
 verify: "uv run pytest tests/unit/entities/test_affected_edges.py -q && bash scripts/ci/itest.sh tests/integration/test_affected_edges.py -q"
-branch: ""
+branch: "ticket/ER-070-affected-edge-set-all-current-edges"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "7467bdacba1bd84c"
+updated_at: "2026-08-18T23:02:56Z"
+session: eb108de8-8f52-4454-99a9-e92e5a5c609b
 ---
 ## Description
 
