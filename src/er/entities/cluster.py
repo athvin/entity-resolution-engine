@@ -1,4 +1,4 @@
-"""The affected NODE set of S4.5.1 — the formula, not a paraphrase of it.
+"""The affected NODE and EDGE sets of S4.5.1 — the formulae, not a paraphrase of them.
 
 S4.5.1 states the set as four lines of set algebra, and the whole reason it is a
 formula is that every prose retelling of it has lost an arm:
@@ -51,18 +51,43 @@ each arm separately and names it, rather than computing one union nobody can aud
   transitive edge closure would drag in the whole component graph for no additional
   guarantee.
 
-**Shape.** A pure core — :func:`partners_of` and :func:`affected_nodes` take already
-loaded rows and touch no connection — plus thin loaders that read the relations. The
-core is what the unit layer exercises on a bare runner (S8.1), and it is also what makes
-the S4.5.4 determinism argument checkable: given the same rows it returns the same sets.
+**Three decisions the EDGE set makes**, and each of them is a way an implementer loses a
+partition rather than a way to write the query more tidily.
 
-**Scope, deliberately.** This module produces the node set. The affected EDGE set of
-S4.5.1 — the `cut_edges` exclusion, the `int_std_records` restriction and the full
-assertion adjustment of the clustering edge list — is ER-070's; label propagation is
-ER-071's; reconciliation and the exit-`10` on an empty affected set are ER-074's. The
-one piece of assertion adjustment done here is the minimum the *partner rule* is defined
-over: minus active `never` pairs, plus active `always` pairs at `p = 1.0` (S4.4).
-Nothing here writes, invalidates or deletes a row.
+* **ALL currently-active edges among the members, never this run's scored pairs.**
+  `match_scores` is cumulative and is never truncated per run (S4.3.4), so an entity
+  whose edges were written by a run three weeks ago has no row from this one — and a
+  loader scoped to `run_id` would return an empty edge set for it and fragment it into
+  singletons. S4.5.1 states this as the one correct reading, in the same breath as the
+  misreading. Which is why :func:`affected_edges` takes no `run_id` at all: it reads
+  through :func:`er.matching.edges.current_edges`, whose scope is the run's
+  `(model_version, tf_snapshot_id)` and nothing narrower.
+* **The `cut_edges` exclusion is unconditional and applies on every later run.** Without
+  it every cut is silently re-merged next run from the cumulative table and `never`
+  becomes a no-op with a one-run half-life (S4.4.2). A cut is released by deactivating
+  its row — retraction is ER-076's to write — so what is honoured here is `active`, and
+  the pair reappears in the edge set the moment it is not.
+* **Assertion edges exist only in memory, and only between affected nodes.** S4.4 is
+  explicit that they are "never persisted to `match_scores`", so
+  :func:`adjust_edges_with_assertions` is a function over a loaded list and issues no
+  statement whatsoever. It is passed the node set because an active `always` between two
+  records this run never touched would otherwise drag an edge — and with it two
+  unclustered endpoints — into a subgraph the node formula deliberately left out.
+
+**Shape.** A pure core — :func:`partners_of`, :func:`affected_nodes` and
+:func:`adjust_edges_with_assertions` take already loaded rows and touch no connection —
+plus thin loaders that read the relations. The core is what the unit layer exercises on a
+bare runner (S8.1), and it is also what makes the S4.5.4 determinism argument checkable:
+given the same rows it returns the same sets.
+
+**Scope, deliberately.** This module produces the node set and the edge set the
+clustering runs over. Label propagation is ER-071's; connected components and
+reconciliation, and the exit-`10` on an empty affected set, are ER-072's and ER-074's;
+the `cut_edges` rows themselves — S4.4.2's cut choice and its bounded fixpoint — are
+ER-076's, and all that happens here is the exclusion of rows already written. Edge
+invalidation on supersession or deletion (S4.5.5) is ER-082's and ER-083's; this module
+only honours the `is_active` flag it finds. Nothing here writes, invalidates or deletes a
+row.
 """
 
 from __future__ import annotations
@@ -74,18 +99,23 @@ from typing import Any, Final
 
 import duckdb
 
-from er.entities.ids import record_key
+from er.entities.ids import canonicalize_pair, record_key
 from er.lake.model import SCHEMA_QUALIFIER
+from er.matching.edges import current_edges
 from er.review.assertions import ALWAYS, NEVER, Assertion
 from er.review.queue import ENTITY, PAIR, RESOLVED_STATUSES
 
 __all__ = [
     "ASSERTION_EDGE_PROBABILITY",
+    "ASSERTION_EVIDENCE_SOURCE",
     "RECONCILE_STAGE",
     "SEED_ARMS",
     "SUCCEEDED",
     "AffectedSet",
+    "Edge",
     "SeedRecords",
+    "adjust_edges_with_assertions",
+    "affected_edges",
     "affected_nodes",
     "current_membership",
     "last_reconciled_watermark",
@@ -111,6 +141,12 @@ SUCCEEDED: Final = "succeeded"
 #: is a named constant rather than a literal.
 ASSERTION_EDGE_PROBABILITY: Final = 1.0
 
+#: `evidence.source` on an injected `always` edge. S4.4 writes the payload literally —
+#: `{"source": "assertion", "assertion_id": …}` — and this value is what a consumer
+#: discriminates on: an edge carrying it was never scored, has no `match_scores` row
+#: behind it, and must never be given one.
+ASSERTION_EVIDENCE_SOURCE: Final = "assertion"
+
 #: The five arms of S4.5.1's `seed`, in the order the spec writes them. Exported so a
 #: caller (and :class:`SeedRecords`) can enumerate them rather than restate them.
 SEED_ARMS: Final[tuple[str, ...]] = (
@@ -128,6 +164,11 @@ _REVIEW_QUEUE: Final = f"{SCHEMA_QUALIFIER}.review_queue"
 _ENTITY_MEMBERSHIP: Final = f"{SCHEMA_QUALIFIER}.entity_membership"
 _RUNS: Final = f"{SCHEMA_QUALIFIER}.runs"
 _RUN_STAGES: Final = f"{SCHEMA_QUALIFIER}.run_stages"
+_CUT_EDGES: Final = f"{SCHEMA_QUALIFIER}.cut_edges"
+#: The standardized corpus, which is where S4.2 puts a record that is NOT tombstoned.
+#: The edge set restricts to it, so an edge incident to a tombstone is excluded even
+#: while its `match_scores` row is still `is_active` (S4.5.1, S4.5.5).
+_INT_STD_RECORDS: Final = f"{SCHEMA_QUALIFIER}.int_std_records"
 
 
 @dataclass(frozen=True)
@@ -181,6 +222,58 @@ class AffectedSet:
         judged empty on `nodes` alone would skip the retirement that entity is owed.
         """
         return not self.nodes and not self.entities
+
+
+@dataclass(frozen=True)
+class Edge:
+    """One edge of the clustering edge set: a scored pair, or an assertion-sourced one.
+
+    A record rather than the `(rec_a_key, rec_b_key, match_probability)` triple
+    :func:`~er.matching.edges.current_edges` returns, for one reason: after S4.4's
+    adjustment the set holds edges of two provenances, and the injected ones carry an
+    `evidence` payload with no `match_scores` row behind it. A triple cannot say that, and
+    a consumer that has to infer "assertion" from `match_probability == 1.0` would also
+    call a genuinely certain scored pair an assertion.
+
+    The pair is validated as canonical at construction. S5.0 canonicalises at write time
+    through one helper and "readers never perform a two-sided join", so a non-canonical
+    edge here is not something to sort into shape — it means some producer bypassed
+    :func:`~er.entities.ids.canonicalize_pair`, and the pairs it made are not addressable
+    by the key everything downstream joins on.
+    """
+
+    rec_a_key: str
+    rec_b_key: str
+    match_probability: float
+    #: S4.4's payload on an injected edge, and ``None`` on a scored one. ``None`` rather
+    #: than the scored row's own `evidence`: S4.5.1's normative query projects three
+    #: columns, and the waterfall stays in `match_scores` where S4.3.5 keeps it.
+    evidence: Mapping[str, str] | None = None
+
+    def __post_init__(self) -> None:
+        if canonicalize_pair(self.rec_a_key, self.rec_b_key) != self.pair:
+            raise ValueError(
+                f"({self.rec_a_key!r}, {self.rec_b_key!r}) is not canonical: S5.0 requires "
+                f"rec_a_key < rec_b_key on every pair, written through "
+                f"er.entities.ids.canonicalize_pair"
+            )
+
+    @property
+    def pair(self) -> tuple[str, str]:
+        """The canonical pair this edge joins."""
+        return (self.rec_a_key, self.rec_b_key)
+
+    @property
+    def is_assertion(self) -> bool:
+        """Whether S4.4's adjustment injected this edge rather than a scorer writing it.
+
+        The check a writer makes before it persists anything: an assertion edge has no
+        `match_scores` row and may never be given one, and `assertions` is its durable
+        record (S4.4).
+        """
+        return self.evidence is not None and (
+            self.evidence.get("source") == ASSERTION_EVIDENCE_SOURCE
+        )
 
 
 def _keys(rows: Sequence[Sequence[Any]]) -> frozenset[str]:
@@ -427,33 +520,95 @@ def seed_records(
     )
 
 
+def adjust_edges_with_assertions(
+    edges: Iterable[Edge],
+    assertions: Iterable[Assertion],
+    *,
+    nodes: Iterable[str] | None = None,
+) -> list[Edge]:
+    """S4.4's edge adjustment: minus active `never`, plus active `always` at `p = 1.0`.
+
+    PURE, and that is normative rather than convenient. S4.4 states the adjustment "is
+    not a SQL clause and is not part of the `select`": the query loads the scored edges
+    and this runs over the loaded result. Nothing here executes a statement, so no
+    assertion edge can reach `match_scores` — `assertions` is their durable record, and
+    every `match_scores` row stays a scored one with `model_version` and `tf_snapshot_id`
+    `NOT NULL` (S5).
+
+    `always` first and `never` second, which is the order S4.4 fixes so that the two
+    precedence readings cannot disagree: a pair carrying both is removed either way.
+    S4.4 also rejects that pair at write time (exit ``1``), so the ordering here is what
+    makes the claim true of *any* assertion set — including one a future writer, or a
+    direct insert, produced.
+
+    Only ACTIVE assertions adjust anything. A retracted row is a historical record and
+    not a constraint; it reaches the seed through the assertion delta arm (S4.5.1) and
+    stops there.
+
+    Args:
+        edges: the loaded edge set; :func:`affected_edges`' result in production.
+        assertions: the assertion set, typically
+            :func:`~er.review.assertions.active_assertions`'.
+        nodes: the affected node set to confine INJECTION to. An `always` with an
+            endpoint outside it is skipped, because an edge between two records this run
+            never touched would pull an unclustered endpoint into a subgraph S4.5.1's
+            node formula deliberately left out. ``None`` injects unconditionally, which
+            is what the partner rule needs: a partner IS a record an `always` reaches
+            from the seed, so filtering by a node set that rule is still computing would
+            be circular. Removal by `never` is unconditional either way — a pair outside
+            the node set has no edge in `edges` to remove.
+
+    Returns:
+        The adjusted edges in canonical pair order, one per pair.
+    """
+    adjusted = {edge.pair: edge for edge in edges}
+    active = [assertion for assertion in assertions if assertion.active]
+    reachable = None if nodes is None else frozenset(nodes)
+    for assertion in active:
+        if assertion.kind != ALWAYS:
+            continue
+        if reachable is not None and not reachable.issuperset(assertion.pair):
+            continue
+        adjusted[assertion.pair] = Edge(
+            *assertion.pair,
+            match_probability=ASSERTION_EDGE_PROBABILITY,
+            evidence={
+                "source": ASSERTION_EVIDENCE_SOURCE,
+                "assertion_id": assertion.assertion_id,
+            },
+        )
+    for assertion in active:
+        if assertion.kind == NEVER:
+            adjusted.pop(assertion.pair, None)
+    return [adjusted[pair] for pair in sorted(adjusted)]
+
+
 def _adjusted_edges(
     edges: Iterable[tuple[str, str, float]],
     assertions: Iterable[Assertion],
 ) -> dict[tuple[str, str], float]:
-    """The scored edges with S4.4's adjustment applied: minus `never`, plus `always`.
+    """The partner rule's view of :func:`adjust_edges_with_assertions`: pair -> `p`.
 
-    In memory and over the loaded result, exactly as S4.4 requires — the adjustment "is
-    not a SQL clause and is not part of the `select`", and assertion edges are never
-    persisted to `match_scores`.
+    A projection of the one adjustment implementation and not a second one — two spellings
+    of "minus `never`, plus `always`" would be two chances to disagree about precedence,
+    and the partner rule and the clustering edge set are required to see the same adjusted
+    graph (S4.5.1).
 
-    `always` first and `never` second, which is the order S4.4 fixes so that the two
-    precedence readings cannot disagree: a pair carrying both would be removed either
-    way. (S4.4 also rejects that pair at write time; the ordering here is what makes the
-    claim true of any assertion set, including one a future writer produced.)
+    The triples are canonicalised on the way in rather than trusted. A caller holding
+    `(b, a)` would otherwise miss an assertion for `(a, b)` on a dict lookup — a `never`
+    that silently failed to remove its edge — because :class:`Edge` and
+    :class:`~er.review.assertions.Assertion` are both keyed on the canonical pair (S5.0).
 
-    Only ACTIVE assertions adjust anything. A retracted row is a historical record, not a
-    constraint — it reaches the seed through the assertion arm and stops there.
+    No node set is passed: see :func:`adjust_edges_with_assertions`.
     """
-    adjusted = {(rec_a_key, rec_b_key): p for rec_a_key, rec_b_key, p in edges}
-    active = [assertion for assertion in assertions if assertion.active]
-    for assertion in active:
-        if assertion.kind == ALWAYS:
-            adjusted[assertion.pair] = ASSERTION_EDGE_PROBABILITY
-    for assertion in active:
-        if assertion.kind == NEVER:
-            adjusted.pop(assertion.pair, None)
-    return adjusted
+    adjusted = adjust_edges_with_assertions(
+        [
+            Edge(*canonicalize_pair(rec_a_key, rec_b_key), probability)
+            for rec_a_key, rec_b_key, probability in edges
+        ],
+        assertions,
+    )
+    return {edge.pair: edge.match_probability for edge in adjusted}
 
 
 def partners_of(
@@ -635,3 +790,112 @@ def load_affected_set(
         auto_merge=auto_merge,
         assertions=assertions,
     )
+
+
+def _active_cut_pairs(connection: duckdb.DuckDBPyConnection) -> frozenset[tuple[str, str]]:
+    """Every pair S4.4.2 has cut and not released, as canonical pairs.
+
+    Unfiltered by `(model_version, tf_snapshot_id)`, exactly as S4.5.1's query writes the
+    exclusion, and the columns permit it: `cut_edges` makes both of them nullable (S5)
+    because a cut is a statement about a *pair*, not about a scoring. A reader that
+    scoped the exclusion to the run's key would re-merge every cut the moment a new model
+    was trained — which is the one-run half-life S4.4.2 exists to prevent, arriving a
+    model version later.
+    """
+    rows = connection.execute(
+        f"SELECT rec_a_key, rec_b_key FROM {_CUT_EDGES} WHERE active"
+    ).fetchall()
+    return frozenset((str(rec_a_key), str(rec_b_key)) for rec_a_key, rec_b_key in rows)
+
+
+def _standardized_records(
+    connection: duckdb.DuckDBPyConnection, records: Iterable[str]
+) -> frozenset[str]:
+    """Which of `records` `int_std_records` still holds — i.e. which are not tombstoned.
+
+    Asked as "which of these", not "all of them", because the corpus is the whole lake
+    and the question is only ever about the endpoints of a handful of candidate edges.
+
+    S4.2 excludes a tombstoned record from the standardized corpus entirely, so absence
+    here IS the tombstone: S4.5.1 restricts both endpoints to this relation, and S4.5.5
+    calls the exclusion permanent for a tombstone precisely because the record cannot
+    come back into it without being re-delivered.
+    """
+    requested = sorted(set(records))
+    if not requested:
+        return frozenset()
+    rows = connection.execute(
+        f"SELECT record_key FROM {_INT_STD_RECORDS} "
+        f" WHERE record_key IN ({', '.join('?' for _ in requested)})",
+        requested,
+    ).fetchall()
+    return frozenset(str(record_key_value) for (record_key_value,) in rows)
+
+
+def affected_edges(
+    connection: duckdb.DuckDBPyConnection,
+    nodes: Iterable[str],
+    *,
+    model_version: str,
+    tf_snapshot_id: str,
+    auto_merge: float,
+) -> list[Edge]:
+    """S4.5.1's affected EDGE set: ALL currently-active edges among the affected nodes.
+
+    NOT this run's scored pairs. `match_scores` is cumulative and is never truncated per
+    run (S4.3.4), so an entity whose edges were written by an earlier run carries no row
+    from this one; S4.5.1 says in as many words that an implementer who loads only this
+    run's pairs "will spuriously fragment every touched entity". This function therefore
+    takes no `run_id`, and the only scope it applies is the run's `(model_version,
+    tf_snapshot_id)` — rows at another key are a different scoring problem (INV-SCORE,
+    S4.3.3).
+
+    The predicate list is S4.5.1's, sourced in one place each:
+    :func:`~er.matching.edges.current_edges` applies the key, `is_active` and the
+    inclusive `p >= auto_merge` bound and returns one row per canonical pair; both
+    endpoints must be affected nodes; the pair must not be an active `cut_edges` row
+    (S4.4.2); and both endpoints must still be in `int_std_records`, which excludes a
+    tombstoned endpoint whose `match_scores` row is still `is_active` (S4.5.5).
+
+    The result is NOT assertion-adjusted. :func:`adjust_edges_with_assertions` is the
+    other half and is deliberately separate: it is pure, it is what the unit layer can
+    exercise without a lake, and keeping it out of the query is how S4.4's "not a SQL
+    clause" stays true by construction.
+
+    Args:
+        connection: a connection with the lake attached (S4.0b). Nothing is written.
+        nodes: the affected node set — :attr:`AffectedSet.nodes`.
+        model_version: the run's model version.
+        tf_snapshot_id: the run's TF snapshot.
+        auto_merge: `thresholds.auto_merge`, which IS the clustering cut (D13).
+
+    Returns:
+        The edges in canonical pair order, each pair at most once, every one satisfying
+        `rec_a_key < rec_b_key`. Empty when the affected set is empty — a run with
+        nothing to reconcile queries no relation at all.
+
+    Raises:
+        er.matching.edges.DuplicateEdgeKeyError: `match_scores` holds more than one row
+            for a pair at this key (S5.0, S4.3.4).
+    """
+    affected = frozenset(nodes)
+    if not affected:
+        return []
+    among = [
+        (rec_a_key, rec_b_key, probability)
+        for rec_a_key, rec_b_key, probability in current_edges(
+            connection, model_version, tf_snapshot_id, min_probability=auto_merge
+        )
+        if rec_a_key in affected and rec_b_key in affected
+    ]
+    if not among:
+        return []
+    cut = _active_cut_pairs(connection)
+    live = _standardized_records(
+        connection, (key for rec_a_key, rec_b_key, _ in among for key in (rec_a_key, rec_b_key))
+    )
+    return [
+        Edge(rec_a_key, rec_b_key, probability)
+        for rec_a_key, rec_b_key, probability in among
+        if (rec_a_key, rec_b_key) not in cut and rec_a_key in live and rec_b_key in live
+    ]
