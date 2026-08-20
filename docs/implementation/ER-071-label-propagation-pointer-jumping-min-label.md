@@ -2,7 +2,7 @@
 id: ER-071
 title: "Label propagation: pointer-jumping min-label, ceil(log2 n)+1 bound, clustering.max_iterations, hard non-convergence failure"
 milestone: M3
-status: todo
+status: blocked
 kind: code
 size: M
 gates: full
@@ -19,7 +19,7 @@ verify: "uv run pytest tests/unit/entities/test_label_propagation.py -q && bash 
 branch: ""
 commit: ""
 spec_sha: "7467bdacba1bd84c"
-updated_at: "2026-08-20T16:47:08Z"
+updated_at: "2026-08-20T20:35:21Z"
 session: 1f99f231-79a8-4655-a027-6abc6d48e477
 ---
 ## Description
@@ -84,3 +84,12 @@ uv run ruff check . && uv run ruff format --check .
 - `label_prop_iterations` is returned by the call so ER-074 can put it in `run_stages.counters`
 - Integration test proves zero lake relations and zero `__splink__%` relations are created by the loop
 - Both verify commands pass on a clean namespace; `scripts/gates.sh` green
+
+## Blocker log
+
+### Attempt 0 — gate_failed (2026-08-20T20:35:21Z)
+
+- **Failing command:** `bash scripts/gates.sh --scope full --no-cache (driver re-verification on main)`
+- **Assertion / contradiction:** The ticket was marked done, but an independent full-ladder run on merged main failed. See /Users/athvin/github.com/athvin/entity-resolution-engine/.loop/runs/3be15946-408e-44df-8029-220d3aca8849/reverify-ER-071.log
+- **Smallest change that would unblock:** Inspect branch loop-quarantine/ER-071, fix the failing gate, then unblock the ticket.
+- **Log:** `/Users/athvin/github.com/athvin/entity-resolution-engine/.loop/runs/3be15946-408e-44df-8029-220d3aca8849/reverify-ER-071.log`
