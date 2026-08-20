@@ -2,7 +2,7 @@
 id: ER-071
 title: "Label propagation: pointer-jumping min-label, ceil(log2 n)+1 bound, clustering.max_iterations, hard non-convergence failure"
 milestone: M3
-status: in_progress
+status: todo
 kind: code
 size: M
 gates: full
@@ -16,10 +16,10 @@ protected_paths: []
 extra_paths: ["src/er/errors.py", "src/er/entities/cluster.py"]
 attempts: 1
 verify: "uv run pytest tests/unit/entities/test_label_propagation.py -q && bash scripts/ci/itest.sh tests/integration/test_clustering.py -q"
-branch: "ticket/ER-071-label-propagation-pointer-jumping-min-label"
+branch: ""
 commit: ""
 spec_sha: "7467bdacba1bd84c"
-updated_at: "2026-08-20T15:17:21Z"
+updated_at: "2026-08-20T16:45:56Z"
 session: 1f99f231-79a8-4655-a027-6abc6d48e477
 ---
 ## Description
