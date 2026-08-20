@@ -52,6 +52,16 @@ These apply for the whole task, not just when you first read them.
 5. **Stop after one ticket.** Do not start a second, even if the first was quick.
 6. **Report honestly.** A blocked ticket with a good note is a useful outcome. A ticket marked done
    that is not done poisons every ticket that depends on it.
+7. **Never end your turn in the middle of an iteration.** An iteration ends in exactly one of two
+   places: `board.py complete` succeeded, or `board.py block` recorded a reason. Nowhere else is a
+   stopping point. You are a headless single-shot session — when you stop producing turns the
+   session ends, so "I'll continue once this finishes" and a tidy summary of work-in-progress are
+   both the same thing as abandoning the ticket. The driver then finds it still `in_progress`,
+   releases it, stashes your uncommitted work, and **the attempt is spent**; three of those and the
+   ticket auto-blocks for a reason that has nothing to do with its content. This has already cost
+   this board $34 and five hours across ER-009, ER-065 and ER-070. If responses are slow, keep
+   going — slow is not a reason to wrap up. If you are genuinely stuck, that is what `block` is for,
+   and a block with a real note is always better than a silent stop.
 
 ## The iteration
 
@@ -210,6 +220,10 @@ done.** Fix it or block; do not argue with it.
 If `merge --ff-only` fails, `main` moved under you: block with class `environment`. Do not rebase.
 
 ### 9. Report
+
+Before you emit anything: **have you run `complete` or `block`?** If neither has succeeded, you are
+not at step 9 — go back and finish. A report describing work you did not commit is not a report, it
+is an abandoned ticket with prose attached (standing rule 7).
 
 Emit exactly this block, then stop:
 
