@@ -2,7 +2,7 @@
 id: ER-061
 title: "INV-SCORE: corpus-size independence + missing-tf_lookup precondition failure (TF behavioural arm)"
 milestone: M3
-status: todo
+status: in_progress
 kind: code
 size: M
 gates: full
@@ -14,12 +14,13 @@ consumes: ["src/er/matching/tf.py::materialize_tf_lookup", "src/er/matching/tf.p
 owns: ["tests/integration/test_tf_policy.py"]
 protected_paths: ["fixtures/static/model_test_v1.json", "fixtures/static/base_10/base"]
 extra_paths: ["src/er/matching/tf.py", "src/er/matching/full.py"]
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_tf_policy.py -q"
-branch: ""
+branch: "ticket/ER-061-inv-score-corpus-size-independence-missing"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "7467bdacba1bd84c"
+updated_at: "2026-08-23T09:59:33Z"
+session: c379438e-8c95-4be8-8f5f-3832d8ceafaa
 ---
 ## Description
 
