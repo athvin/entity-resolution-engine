@@ -2,7 +2,7 @@
 id: ER-066
 title: "T-INC-3 scoring parity (50 committed pairs) + T-MATCH-SYM orientation invariance"
 milestone: M3
-status: in_progress
+status: done
 kind: code
 size: S
 gates: full
@@ -17,9 +17,9 @@ extra_paths: []
 attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_scoring_parity.py -q"
 branch: "ticket/ER-066-t-inc-3-scoring-parity-50"
-commit: ""
+commit: "b3cd98d480291c586d3193c6c7f5b5a0591f04f1"
 spec_sha: "7467bdacba1bd84c"
-updated_at: "2026-08-23T11:43:51Z"
+updated_at: "2026-08-23T13:08:53Z"
 session: c379438e-8c95-4be8-8f5f-3832d8ceafaa
 ---
 ## Description
