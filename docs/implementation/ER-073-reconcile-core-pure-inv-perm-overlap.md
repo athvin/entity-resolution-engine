@@ -2,7 +2,7 @@
 id: ER-073
 title: "Reconcile core (pure): INV-PERM, overlap matrix, member_added, merge+split-at-once, fragment order by min(record_key), singleton orphan, mint order, IdFactory"
 milestone: M3
-status: in_progress
+status: done
 kind: code
 size: L
 gates: fast
@@ -17,9 +17,9 @@ extra_paths: []
 attempts: 1
 verify: "uv run pytest tests/unit/entities/test_reconcile_plan.py -q"
 branch: "ticket/ER-073-reconcile-core-pure-inv-perm-overlap"
-commit: ""
+commit: "623e6c4485b66fd6067375519b0bd7eac2d0530d"
 spec_sha: "7467bdacba1bd84c"
-updated_at: "2026-08-20T20:35:41Z"
+updated_at: "2026-08-23T09:32:20Z"
 session: 4031c76d-0fa3-4298-bd81-776dd0213361
 ---
 ## Description
