@@ -2,7 +2,7 @@
 id: ER-087
 title: "Survivorship macros: five literal ORDER BY fragments + mandatory terminal record_key ASC + tiebreak_deterministic lineage"
 milestone: M4
-status: todo
+status: done
 kind: code
 size: M
 gates: fast
@@ -14,12 +14,13 @@ consumes: ["tests/unit/dbt/harness.py::render_macro", "src/er/lake/columns.py::G
 owns: ["dbt/macros/survivorship/", "tests/unit/dbt/test_survivorship_macros.py"]
 protected_paths: []
 extra_paths: []
-attempts: 0
+attempts: 1
 verify: "uv run pytest tests/unit/dbt/test_survivorship_macros.py -q"
-branch: ""
-commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+branch: "ticket/ER-087-survivorship-macros-five-literal-order-by"
+commit: "3253477cb89fc32f759adff41c2bc3ef79fb0d99"
+spec_sha: "7467bdacba1bd84c"
+updated_at: "2026-08-23T14:34:54Z"
+session: c379438e-8c95-4be8-8f5f-3832d8ceafaa
 ---
 ## Description
 
