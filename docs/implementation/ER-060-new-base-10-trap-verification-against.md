@@ -2,7 +2,7 @@
 id: ER-060
 title: "**NEW** base_10 trap verification against the committed model: exactly one gray-band pair, ≥1 single-rule-covered true pair, tie row, recency never decides"
 milestone: M3
-status: in_progress
+status: blocked
 kind: code
 size: S
 gates: full
@@ -19,7 +19,7 @@ verify: "bash scripts/ci/itest.sh tests/integration/test_base_10_traps.py -q"
 branch: "ticket/ER-060-new-base-10-trap-verification-against"
 commit: ""
 spec_sha: "7467bdacba1bd84c"
-updated_at: "2026-08-23T09:34:48Z"
+updated_at: "2026-08-23T09:58:55Z"
 session: c379438e-8c95-4be8-8f5f-3832d8ceafaa
 ---
 ## Description
@@ -87,3 +87,12 @@ uv run pytest tests/unit/fixtures/test_base_10.py -q
 - No assertion reads `golden_records`, `golden_lineage` or `entity_membership`
 - `provides` entries recorded in INTERFACES.md
 - Committed on a branch off main
+
+## Blocker log
+
+### Attempt 1 — verify_failed (2026-08-23T09:58:55Z)
+
+- **Failing command:** `bash scripts/ci/itest.sh tests/integration/test_base_10_traps.py -q`
+- **Assertion / contradiction:** 3 failed, 5 passed. All three failures are properties of base_10 under the committed model_test_v1, not defects in the assertions; every fix lies in a protected_path of this ticket. (1) test_exactly_one_gray_band_pair_and_it_is_cross_persona: '0 pairs fall in the half-open gray band [0.6, 0.95); S8.2 designs exactly one.' The pair traps.csv designs for the band, crm:C006 (P6) | webforms:W006 (P7), is ABSENT from match_scores, i.e. it scored below review_low=0.60. Only 14 pairs are persisted at all and every one scores >= 0.997621. ER-058's tests/integration/test_full_match.py already documents this ('the natural gray band may well be empty') and works around it by crafting auto_merge onto an observed probability -- that workaround has been masking a dissolved trap, and T-REVIEW-1 has no gray_band row to assert. (2) test_missed_true_pairs_satisfy_the_authoring_constraint: 'true pairs: 18; missed at auto_merge=0.95: 4' -- billing:B001|crm:C001, billing:B001|webforms:W001, billing:B001|webforms:W002 and webforms:W007|webforms:W008, all absent from match_scores. This violates S8.2's normative authoring constraint twice over. billing:B001 has NO surviving >= auto_merge edge, so P1 (4 records) splits: 'removing (billing:B001, crm:C001) disconnects P1: its remaining >= auto_merge edges are [(crm:C001, webforms:W001), (crm:C001, webforms:W002), (webforms:W001, webforms:W002)]'. And webforms:W007|webforms:W008 is the ONLY edge of P8, a 2-record persona, which S8.2 forbids outright: 'no true pair of a 2-record persona and no true pair whose removal disconnects its persona may fall below auto_merge'. T-MATCH-1b's 'entity count == 10' is therefore unsatisfiable on this corpus -- it would be 12 -- with precision still 1.0 and nothing pointing at the cause, which is the exact failure shape S8.2 pins the constraint to prevent. (3) test_at_least_one_true_pair_is_single_rule_covered: 'every blocked true pair is carried by two or more key_types'. phone_exact alone carries all 18 true pairs because every persona shares one phone across its records, so no blocking-rule regression is visible on base_10 and T-BLK-1 cannot fail for a real reason. ROOT CAUSE for (2)'s P1 arm, confirmed against the seed: dbt/seeds/nickname_variants.csv line 4-5 carries 'bob,robert' and 'bobby,robert' but NOT 'rob,robert'. Hence crm:C001 (Robert) scores 1.000000 against webforms:W001 (Bob) and 0.997621 against webforms:W002 (Bobby), but falls below review_low against billing:B001 (Rob) -- the three records differ in nothing else that matters (same phone, same address, same birth_date, same family_name). Splink additionally warns 'm values not fully trained' for email, birth_date and addr_postal on every predict call.
+- **Smallest change that would unblock:** Three independent fixes, none of them in this ticket's owned files. (a) Add 'rob,robert' to dbt/seeds/nickname_variants.csv (ER-039 owns the seed). That alone restores billing:B001's three P1 edges above auto_merge and fixes the P1 arm of AC3 -- it is a one-line change and should be done first, because it is the only one with a confirmed root cause. (b) For P8: either re-author webforms:W008 in fixtures/static/base_10/base/webforms.csv so 'Dena Linden' clears auto_merge against 'Dana Lin' (family_name 'Lin' vs 'Linden' scores jaro_winkler below the 0.90 level, so the pair rests on email/phone alone), or add a third record to P8 so the persona is >= 3 and the missed edge becomes transitively recoverable. S8.2 prefers zero missed edges, so the first is closer to the spec. (c) For the gray band: base_10 must contain one pair scoring in [0.60, 0.95). crm:C006 | webforms:W006 currently scores below 0.60 -- they share only 'Halv' + postal 94121 and differ in given_name, birth_date, email and phone. Bring them closer (e.g. give webforms:W006 the same birth_date as crm:C006, or a shared addr_street) until the pair lands in the band, keeping it cross-persona per S8.2. (d) For AC2: remove the shared phone from one true pair -- e.g. change billing:B003's contact_phone so P3's billing<->crm pair is carried by email_exact and dob_name but not phone_exact -- so at least one true pair is single-rule-covered. Verify each with the failing command above; the module prints the full scored distribution and the missed pairs with probabilities. If instead the intended reading is that these traps hold only after a refit, the block belongs to ER-056 (fixtures/static/model_test_v1.json) rather than ER-041.
+- **Log:** `.loop/logs/ER-060.attempt-1.log`
