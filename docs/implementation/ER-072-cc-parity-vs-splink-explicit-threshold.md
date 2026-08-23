@@ -2,7 +2,7 @@
 id: ER-072
 title: "CC parity vs Splink (explicit threshold_match_probability) + assert_membership_equals_components (T-INV-1) autouse finalizer"
 milestone: M3
-status: todo
+status: done
 kind: code
 size: M
 gates: full
@@ -14,12 +14,13 @@ consumes: ["src/er/entities/cluster.py::label_propagate", "src/er/entities/affec
 owns: ["tests/helpers/invariants.py", "tests/integration/test_invariants.py", "tests/integration/test_clustering_parity.py", "tests/unit/entities/test_cluster_threshold.py"]
 protected_paths: []
 extra_paths: ["src/er/entities/cluster.py", "tests/integration/conftest.py"]
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_clustering_parity.py -q && uv run pytest tests/unit/entities/test_cluster_threshold.py -q"
-branch: ""
-commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+branch: "ticket/ER-072-cc-parity-vs-splink-explicit-threshold"
+commit: "ce8a1dd0064303b3f3de890be906b76ea7376400"
+spec_sha: "7467bdacba1bd84c"
+updated_at: "2026-08-23T22:40:07Z"
+session: c379438e-8c95-4be8-8f5f-3832d8ceafaa
 ---
 ## Description
 

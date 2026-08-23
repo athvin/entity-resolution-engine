@@ -118,25 +118,35 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Final
+from typing import Any, Final, Protocol
 
 import duckdb
+from splink import Linker
 
 from er.entities.ids import canonicalize_pair, record_key
 from er.errors import NonConvergenceError
 from er.lake.model import SCHEMA_QUALIFIER
+from er.matching.api import splink_api
 from er.matching.edges import current_edges
+from er.matching.model import UNIQUE_ID_COLUMN
 from er.review.assertions import ALWAYS, NEVER, Assertion
 from er.review.queue import ENTITY, PAIR, RESOLVED_STATUSES
 
 __all__ = [
     "ASSERTION_EDGE_PROBABILITY",
+    "CLUSTER_EDGES_RELATION",
+    "CLUSTER_ID_COLUMN",
+    "CLUSTER_NODES_RELATION",
     "ASSERTION_EVIDENCE_SOURCE",
     "LABEL_PROP_ITERATIONS",
     "MAX_ITERATION_BOUND",
     "RECONCILE_STAGE",
     "SEED_ARMS",
     "SUCCEEDED",
+    "ClusterClustering",
+    "ClusterFrame",
+    "ClusterLinker",
+    "ClusterTableManagement",
     "AffectedSet",
     "Edge",
     "LabelPropagationResult",
@@ -144,6 +154,7 @@ __all__ = [
     "adjust_edges_with_assertions",
     "affected_edges",
     "affected_nodes",
+    "cluster_full",
     "current_membership",
     "label_propagate",
     "last_reconciled_watermark",
@@ -1283,3 +1294,145 @@ def _labelling(connection: duckdb.DuckDBPyConnection) -> dict[str, str]:
         f"SELECT record_key, label FROM {_LABELS_RELATION} ORDER BY record_key"
     ).fetchall()
     return {str(key): str(label) for key, label in rows}
+
+
+class ClusterFrame(Protocol):
+    """A Splink result table, narrowed to the one attribute this module reads."""
+
+    @property
+    def physical_name(self) -> str:
+        """The relation Splink materialised the result into."""
+
+
+class ClusterTableManagement(Protocol):
+    """The one table-management call the clustering path makes."""
+
+    def register_table_predict(self, input_data: Any, overwrite: bool = False) -> ClusterFrame:
+        """Register an edge list as the predictions frame clustering consumes."""
+
+
+class ClusterClustering(Protocol):
+    """Splink's connected-components entry point, with the threshold spelled out.
+
+    A Protocol for the reason :class:`~er.matching.tf.TfLinker` is one: `mypy --strict`
+    refuses a call into Splink's unannotated source, and stating the signature here is
+    how the call becomes typed without suppressing the check. Declaring
+    ``threshold_match_probability`` in the Protocol has a second effect worth the space —
+    the parameter this module must never omit is now part of a type this module owns.
+    """
+
+    def cluster_pairwise_predictions_at_threshold(
+        self, df_predict: Any, threshold_match_probability: float | None = None
+    ) -> ClusterFrame:
+        """Connected components over ``df_predict``, cut at the given probability."""
+
+
+class ClusterLinker(Protocol):
+    """A Splink `Linker`, narrowed to what :func:`cluster_full` touches."""
+
+    @property
+    def table_management(self) -> ClusterTableManagement:
+        """The linker's table-management surface."""
+
+    @property
+    def clustering(self) -> ClusterClustering:
+        """The linker's clustering surface."""
+
+
+#: The bare local relations `cluster_full` materialises. Bare and local for the reason
+#: `er.matching.full._materialize_corpus` gives: Splink resolves an input table through
+#: `information_schema.columns WHERE table_name = '<name>'`, which a lake-qualified name
+#: matches no row of. Distinct names from the scorer's and the parity helper's, so a
+#: suite that does both in one connection cannot have one call replace the other's.
+CLUSTER_NODES_RELATION: Final = "er_cluster_nodes"
+CLUSTER_EDGES_RELATION: Final = "er_cluster_edges"
+
+#: How Splink names the two endpoints of a predictions row, and the column it returns
+#: the component under.
+_LEFT_COLUMN: Final = f"{UNIQUE_ID_COLUMN}_l"
+_RIGHT_COLUMN: Final = f"{UNIQUE_ID_COLUMN}_r"
+CLUSTER_ID_COLUMN: Final = "cluster_id"
+
+
+def cluster_full(
+    connection: duckdb.DuckDBPyConnection,
+    nodes: Iterable[str],
+    edges: Iterable[Edge],
+    *,
+    auto_merge: float,
+    settings: Mapping[str, Any],
+) -> frozenset[frozenset[str]]:
+    """S4.5.2's full-path clustering: Splink connected components at `auto_merge`.
+
+    The counterpart of :func:`label_propagate`, and the reason both exist is B5: the two
+    paths MUST consume the identical edge set and MUST agree on the partition. A full
+    re-resolution that clustered differently from an incremental one would make G3 false
+    in a way no scoring test could see, because every individual probability would match.
+
+    **The threshold is passed explicitly, and that is the whole point.** Splink's
+    ``cluster_pairwise_predictions_at_threshold`` takes
+    ``threshold_match_probability=None`` by default, and a ``None`` threshold treats
+    **every supplied edge as a match** — so a caller that omitted it would silently
+    cluster the gray band in, and the resulting partition would be wrong by exactly the
+    edges S4.3.5 says a steward must adjudicate. D13 and MINOR-thresholds pin the
+    clustering cut to `auto_merge`; the argument below is the only place that pin is
+    expressed, which is why a unit test spies on the call rather than on the result.
+
+    Nothing reaches the lake. The API comes from :func:`~er.matching.api.splink_api`,
+    whose ``output_schema`` is the in-memory scratch schema, and both relations below are
+    unqualified — so they land beside Splink's own intermediates and
+    :func:`~er.matching.api.assert_no_splink_relations_in_lake` holds afterwards (M17).
+
+    Args:
+        connection: an open S4.0b connection. The nodes and edges are materialised on it.
+        nodes: the affected node set. A node with no incident edge above the threshold
+            comes back as its own singleton component, which is what makes the two paths
+            comparable — :func:`label_propagate` labels such a node with itself.
+        edges: the assertion-adjusted, cut-excluded edge set, as :class:`Edge` records.
+            Every probability is passed through; the threshold does the filtering, so
+            that what is compared is the *cut* rather than the caller's pre-filtering.
+        auto_merge: `thresholds.auto_merge` from the validated S6 document (S6, M26).
+        settings: the model settings document. Only `unique_id_column_name` matters to
+            clustering, but the real document is passed so the linker this builds is the
+            same object the scoring path builds.
+
+    Returns:
+        The partition, as a set of frozensets of `record_key`. A set of frozensets rather
+        than a labelling because the two paths pick their representatives differently —
+        Splink's `cluster_id` is not required to be the component minimum — and the claim
+        B5 makes is about the partition, not about the names.
+    """
+    node_set = sorted(set(nodes))
+    edge_list = list(edges)
+
+    api = splink_api(connection)
+    connection.execute(
+        f"CREATE OR REPLACE TABLE {CLUSTER_NODES_RELATION} ({UNIQUE_ID_COLUMN} VARCHAR)"
+    )
+    connection.executemany(
+        f"INSERT INTO {CLUSTER_NODES_RELATION} VALUES (?)", [[key] for key in node_set]
+    )
+    connection.execute(
+        f"CREATE OR REPLACE TABLE {CLUSTER_EDGES_RELATION} "
+        f"({_LEFT_COLUMN} VARCHAR, {_RIGHT_COLUMN} VARCHAR, match_probability DOUBLE)"
+    )
+    connection.executemany(
+        f"INSERT INTO {CLUSTER_EDGES_RELATION} VALUES (?, ?, ?)",
+        [[edge.rec_a_key, edge.rec_b_key, edge.match_probability] for edge in edge_list],
+    )
+
+    linker: ClusterLinker = Linker(CLUSTER_NODES_RELATION, settings=dict(settings), db_api=api)
+    predictions = linker.table_management.register_table_predict(
+        connection.sql(f"SELECT * FROM {CLUSTER_EDGES_RELATION}"), overwrite=True
+    )
+    clustered = linker.clustering.cluster_pairwise_predictions_at_threshold(
+        predictions, threshold_match_probability=auto_merge
+    )
+
+    components: dict[str, set[str]] = {}
+    rows = connection.execute(
+        f"SELECT {CLUSTER_ID_COLUMN}, {UNIQUE_ID_COLUMN} FROM {clustered.physical_name}"
+    ).fetchall()
+    for cluster_id, key in rows:
+        components.setdefault(str(cluster_id), set()).add(str(key))
+    return frozenset(frozenset(member) for member in components.values())
