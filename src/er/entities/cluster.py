@@ -74,15 +74,38 @@ partition rather than a way to write the query more tidily.
   records this run never touched would otherwise drag an edge — and with it two
   unclustered endpoints — into a subgraph the node formula deliberately left out.
 
+**The loop the two sets feed** is S4.5.2's, and :func:`label_propagate` is it: `label(v) =
+min(record_key)` over the closed neighbourhood of `v`, propagated to fixpoint, bounded by
+`clustering.max_iterations` and failing hard when it does not settle. Three decisions
+there, and each is a way the partition or the snapshot history goes wrong:
+
+* **Every round ends in a pointer jump.** The closed-neighbourhood min alone moves a label
+  one hop per round, so a component that is a path of `n` records would need `n` rounds and
+  a 1024-record chain would blow the default cap of 50. Composing the round's own result
+  with itself — `label(v) := L(L(v))` — doubles the reach each round instead, which is what
+  makes `ceil(log2 n) + 1` (:func:`MAX_ITERATION_BOUND`) a true bound and the configured
+  cap a safety net rather than the expected count.
+* **The iterations run in the in-memory database and NOTHING per-round reaches the lake**
+  (S4.0b, M17). The tables the loop rewrites each round are `TEMP`, so a round commits no
+  DuckLake snapshot; a loop that materialised its state in `lake.main` would leave one
+  snapshot per iteration between the endpoints `run_stages` recorded, and the S4.7
+  recovery story reads that range.
+* **Non-convergence is a hard failure, never a partial partition.** S4.5.2 and S13 both
+  say so: exit `1`, `error_class = non_convergence` (S4.7), no snapshot, no events, and the
+  unconverged component's size and minimum `record_key` logged.
+
 **Shape.** A pure core — :func:`partners_of`, :func:`affected_nodes` and
 :func:`adjust_edges_with_assertions` take already loaded rows and touch no connection —
 plus thin loaders that read the relations. The core is what the unit layer exercises on a
 bare runner (S8.1), and it is also what makes the S4.5.4 determinism argument checkable:
-given the same rows it returns the same sets.
+given the same rows it returns the same sets. :func:`label_propagate` sits between the
+two: it needs a connection because S4.5.2 pins the loop to DuckDB SQL, but the connection
+it needs is a bare `duckdb.connect()` — no lake, so the unit layer exercises it too.
 
 **Scope, deliberately.** This module produces the node set and the edge set the
-clustering runs over. Label propagation is ER-071's; connected components and
-reconciliation, and the exit-`10` on an empty affected set, are ER-072's and ER-074's;
+clustering runs over, and propagates labels over them. Splink parity for the full path is
+ER-072's; the raw cluster -> `entity_id` mapping, INV-PERM and the events are ER-073's and
+ER-074's; the exit-`10` on an empty affected set is ER-074's too; and
 the `cut_edges` rows themselves — S4.4.2's cut choice and its bounded fixpoint — are
 ER-076's, and all that happens here is the exclusion of rows already written. Edge
 invalidation on supersession or deletion (S4.5.5) is ER-082's and ER-083's; this module
@@ -100,6 +123,7 @@ from typing import Any, Final
 import duckdb
 
 from er.entities.ids import canonicalize_pair, record_key
+from er.errors import NonConvergenceError
 from er.lake.model import SCHEMA_QUALIFIER
 from er.matching.edges import current_edges
 from er.review.assertions import ALWAYS, NEVER, Assertion
@@ -108,16 +132,20 @@ from er.review.queue import ENTITY, PAIR, RESOLVED_STATUSES
 __all__ = [
     "ASSERTION_EDGE_PROBABILITY",
     "ASSERTION_EVIDENCE_SOURCE",
+    "LABEL_PROP_ITERATIONS",
+    "MAX_ITERATION_BOUND",
     "RECONCILE_STAGE",
     "SEED_ARMS",
     "SUCCEEDED",
     "AffectedSet",
     "Edge",
+    "LabelPropagationResult",
     "SeedRecords",
     "adjust_edges_with_assertions",
     "affected_edges",
     "affected_nodes",
     "current_membership",
+    "label_propagate",
     "last_reconciled_watermark",
     "load_affected_set",
     "partners_of",
@@ -156,6 +184,12 @@ SEED_ARMS: Final[tuple[str, ...]] = (
     "assertion_delta",
     "review_delta",
 )
+
+#: The name S4.5.6 gives the propagation's round count in `run_stages.counters`, and the
+#: name `er.obs.counters.DECLARED_COUNTERS['reconcile']` already carries. Exported so
+#: ER-074 spells it once — a stage that invented `label_prop_iters` here would satisfy
+#: every test in this module and still write a payload S5.2 calls incomplete.
+LABEL_PROP_ITERATIONS: Final = "label_prop_iterations"
 
 _RAW_RECORDS: Final = f"{SCHEMA_QUALIFIER}.raw_records"
 _INGEST_BATCHES: Final = f"{SCHEMA_QUALIFIER}.ingest_batches"
@@ -899,3 +933,353 @@ def affected_edges(
         for rec_a_key, rec_b_key, probability in among
         if (rec_a_key, rec_b_key) not in cut and rec_a_key in live and rec_b_key in live
     ]
+
+
+#: The three relations the loop works in, every one of them `TEMP`. S4.0b binds the S4.5
+#: propagation to the in-memory database — "iterations run in the in-memory database and
+#: only the final labelling is written to the lake, so the loop cannot commit one snapshot
+#: per iteration" — and a `TEMP` relation lives in the connection's `temp` catalog, which
+#: is not `lake` and has no snapshot history at all. The names are prefixed because they
+#: share a namespace with whatever else the run connection has materialised.
+_LABELS_RELATION: Final = "er_label_prop_labels"
+_ADJACENCY_RELATION: Final = "er_label_prop_adjacency"
+_NEXT_RELATION: Final = "er_label_prop_next"
+
+#: Dropped in this order — the derived relation first — on every exit path, including the
+#: non-convergence raise. Nothing but the returned labelling leaves the function.
+_LOOP_RELATIONS: Final[tuple[str, ...]] = (
+    _NEXT_RELATION,
+    _LABELS_RELATION,
+    _ADJACENCY_RELATION,
+)
+
+#: One round of S4.5.2, as one statement.
+#:
+#: `closed` is the spec's `label(v) = min(record_key)` over the CLOSED neighbourhood: the
+#: `LEFT JOIN` and the `coalesce` are what makes it closed, so a node with no incident edge
+#: keeps its own label instead of dropping out of the result entirely (S4.5.3's "a record
+#: leaving all clusters becomes a singleton" has no input if it does).
+#:
+#: The final `SELECT` is the pointer jump, and it is why the loop terminates in
+#: :func:`MAX_ITERATION_BOUND` rounds rather than in one round per hop: composing the
+#: round's own result with itself doubles the reach each time. `closed` is referenced
+#: twice, which is exactly the composition — `label(v) := L(L(v))` — and never a second
+#: pass over the edges.
+#:
+#: `min` over `VARCHAR` is lexicographic, which is the order S5.0's `record_key` is
+#: canonicalised and compared in everywhere else in this module (`canonicalize_pair`), so
+#: the label of a component is the same minimum a reader computing it in Python gets.
+_ROUND_SQL: Final = f"""
+CREATE OR REPLACE TEMP TABLE {_NEXT_RELATION} AS
+WITH neighbourhood AS (
+    SELECT adjacency.node AS record_key, min(labels.label) AS label
+      FROM {_ADJACENCY_RELATION} AS adjacency
+      JOIN {_LABELS_RELATION} AS labels ON labels.record_key = adjacency.neighbour
+     GROUP BY adjacency.node
+), closed AS (
+    SELECT labels.record_key,
+           least(labels.label, coalesce(neighbourhood.label, labels.label)) AS label
+      FROM {_LABELS_RELATION} AS labels
+      LEFT JOIN neighbourhood ON neighbourhood.record_key = labels.record_key
+)
+SELECT closed.record_key, coalesce(jumped.label, closed.label) AS label
+  FROM closed
+  LEFT JOIN closed AS jumped ON jumped.record_key = closed.label
+"""
+
+#: How many labels the round moved. Zero IS the fixpoint S4.5.2 propagates to: the round
+#: is monotone — every label it writes is `<=` the one it replaces and is a record in the
+#: same component — so a round that moves nothing can only be followed by rounds that move
+#: nothing.
+_CHANGED_SQL: Final = f"""
+SELECT count(*)
+  FROM {_NEXT_RELATION} AS next_labels
+  JOIN {_LABELS_RELATION} AS labels USING (record_key)
+ WHERE next_labels.label IS DISTINCT FROM labels.label
+"""
+
+_ADOPT_SQL: Final = (
+    f"CREATE OR REPLACE TEMP TABLE {_LABELS_RELATION} AS "
+    f"SELECT record_key, label FROM {_NEXT_RELATION}"
+)
+
+
+def MAX_ITERATION_BOUND(node_count: int) -> int:
+    """`ceil(log2 n) + 1` — the rounds S4.5.2's pointer jumping needs for `n` nodes.
+
+    Upper case because it is a bound of the ALGORITHM and not a knob: S4.5.2 states it as
+    a fact about pointer jumping ("halves path length per round"), it is a function of `n`
+    only, and no configuration can move it. `clustering.max_iterations` is the other
+    number — the configured cap, the safety net, and the one whose exhaustion fails the
+    stage — and the two are deliberately not the same thing (S6, default 50).
+
+    The worst case for a component of `n` records is the path: the round's reach after `k`
+    rounds is `2^(k+1) - 2` hops, so it covers a path's `n - 1` hops once
+    `2^(k+1) >= n + 1`, and the round that then finds nothing to move is the `+ 1`. Any
+    other shape of the same size has a smaller diameter and settles sooner.
+
+    Computed with :meth:`int.bit_length` rather than `math.log2`: `ceil(log2 n)` is
+    `(n - 1).bit_length()` exactly, for every `n`, with no float in the path — and this
+    number is asserted against at `n = 1024`, where `log2` is exact but its neighbours
+    are the sort of place a float bound goes off by one.
+
+    Args:
+        node_count: how many records are being propagated over. The whole node set is a
+            sound argument even though the bound is per-component, because the bound is
+            monotone in `n` and no component is larger than the set.
+
+    Returns:
+        The bound, and ``0`` for an empty node set — no round is run at all.
+    """
+    if node_count <= 0:
+        return 0
+    return (node_count - 1).bit_length() + 1
+
+
+@dataclass(frozen=True)
+class LabelPropagationResult:
+    """The labelling S4.5.2 propagated to, and what it cost.
+
+    Both, because the reconcile stage owes S4.5.6 a `label_prop_iterations` counter and
+    the round count is not recoverable from the labelling: two partitions that look
+    identical can have cost one round and eleven. :attr:`counters` is that payload, keyed
+    by the name S4.5.6 declares, so ER-074 merges it rather than re-spelling it.
+    """
+
+    #: `record_key -> label`, where the label is the minimum `record_key` of the record's
+    #: component. Complete over the node set that was passed in — including records with
+    #: no incident edge, which label themselves — and in `record_key` order, so a caller
+    #: iterating it writes rows in a total order (S4.5.4).
+    labels: Mapping[str, str]
+
+    #: Rounds executed, the last of which is the one that moved nothing and thereby
+    #: proved the fixpoint. Never more than `clustering.max_iterations`, and never more
+    #: than :func:`MAX_ITERATION_BOUND` of the node count.
+    iterations: int
+
+    @property
+    def counters(self) -> dict[str, int]:
+        """The S4.5.6 counter payload this stage contributes."""
+        return {LABEL_PROP_ITERATIONS: self.iterations}
+
+
+def _components(nodes: frozenset[str], pairs: Sequence[tuple[str, str]]) -> list[frozenset[str]]:
+    """The connected components of the subgraph, by union-find.
+
+    The FAILURE path's tool and nothing else's. It exists because S4.5.2 requires the
+    non-convergence failure to log "the unconverged component's size and its minimum
+    `record_key`", and at the moment the loop gives up the labelling is by definition not
+    yet the answer to that question — a partial label group would report three records for
+    a component of eight and send an operator looking in the wrong place.
+
+    That it is cheap is not an argument for using it as the loop: S4.5.2 pins the
+    incremental path to iterative label propagation in DuckDB SQL over data that already
+    lives in the database, and INV-EQ's guard (T-INV-1) is a *reference* comparison, not a
+    second production implementation. Here the edge list is already loaded, the run is
+    over, and the only cost that matters is the diagnosis being right.
+    """
+    parent = {key: key for key in nodes}
+
+    def root(key: str) -> str:
+        while parent[key] != key:
+            parent[key] = parent[parent[key]]
+            key = parent[key]
+        return key
+
+    for rec_a_key, rec_b_key in pairs:
+        roots = (root(rec_a_key), root(rec_b_key))
+        # Hooked onto the smaller key rather than by rank: the root of a component is then
+        # its minimum `record_key`, which is the label the loop was trying to reach.
+        parent[max(roots)] = min(roots)
+    grouped: dict[str, set[str]] = {}
+    for key in nodes:
+        grouped.setdefault(root(key), set()).add(key)
+    return [frozenset(members) for members in grouped.values()]
+
+
+def _non_convergence_message(
+    labels: Mapping[str, str],
+    nodes: frozenset[str],
+    pairs: Sequence[tuple[str, str]],
+    *,
+    iterations: int,
+    max_iterations: int,
+) -> str:
+    """S4.5.2's log line: which component did not settle, how big it is, its minimum key.
+
+    The largest unsettled component, tiebroken by minimum `record_key` ASC so that two
+    runs over the same subgraph name the same one (S4.5.4). A component is unsettled when
+    any member's label is not its minimum `record_key`, which is the fixpoint the loop was
+    driving at.
+    """
+    components = _components(nodes, pairs)
+    unsettled = [group for group in components if any(labels[key] != min(group) for key in group)]
+    # A round that moved a label cannot have left every component at its minimum, so
+    # `unsettled` is never empty here; falling back to every component keeps a diagnosis
+    # honest rather than raising a second exception while reporting the first.
+    worst = min(unsettled or components, key=lambda group: (-len(group), min(group)))
+    return (
+        f"label propagation did not converge within clustering.max_iterations="
+        f"{max_iterations} ({iterations} iteration(s) run over {len(nodes)} record(s), "
+        f"{len(pairs)} edge(s)): {len(unsettled)} component(s) unsettled; the largest "
+        f"holds {len(worst)} record(s) and its minimum record_key is {min(worst)!r} "
+        f"(S4.5.2). No membership was written and no event was emitted"
+    )
+
+
+def _open_loop_relations(
+    connection: duckdb.DuckDBPyConnection,
+    nodes: frozenset[str],
+    pairs: Sequence[tuple[str, str]],
+) -> None:
+    """Seed the `TEMP` state: every node labelled with itself, adjacency in both senses.
+
+    Both senses of every pair, which is what makes the result independent of the
+    orientation the caller happened to hold an edge in (S4.5.4, D1). The closed
+    neighbourhood of `v` is symmetric by definition; canonicalising the input instead
+    would leave `min` over a one-sided join answering a different question for `a` than
+    for `b`.
+    """
+    connection.execute(
+        f"CREATE OR REPLACE TEMP TABLE {_LABELS_RELATION} "
+        f"(record_key VARCHAR NOT NULL, label VARCHAR NOT NULL)"
+    )
+    connection.executemany(
+        f"INSERT INTO {_LABELS_RELATION} (record_key, label) VALUES (?, ?)",
+        [[key, key] for key in sorted(nodes)],
+    )
+    connection.execute(
+        f"CREATE OR REPLACE TEMP TABLE {_ADJACENCY_RELATION} "
+        f"(node VARCHAR NOT NULL, neighbour VARCHAR NOT NULL)"
+    )
+    if pairs:
+        connection.executemany(
+            f"INSERT INTO {_ADJACENCY_RELATION} (node, neighbour) VALUES (?, ?)",
+            [
+                [end, other]
+                for rec_a_key, rec_b_key in pairs
+                for end, other in ((rec_a_key, rec_b_key), (rec_b_key, rec_a_key))
+            ],
+        )
+
+
+def _close_loop_relations(connection: duckdb.DuckDBPyConnection) -> None:
+    """Drop every `TEMP` relation the loop made, on success and on failure alike."""
+    for relation in _LOOP_RELATIONS:
+        connection.execute(f"DROP TABLE IF EXISTS {relation}")
+
+
+def label_propagate(
+    connection: duckdb.DuckDBPyConnection,
+    nodes: Iterable[str],
+    edges: Iterable[tuple[str, str]],
+    *,
+    max_iterations: int,
+) -> LabelPropagationResult:
+    """S4.5.2's incremental clustering: min-label propagation to a bounded fixpoint.
+
+    `label(v) = min(record_key)` over the closed neighbourhood of `v`, propagated until
+    nothing moves, with a pointer jump ending every round so the fixpoint is reached in
+    :func:`MAX_ITERATION_BOUND` rounds rather than in one per hop.
+
+    **Nothing is written.** Every round rewrites `TEMP` relations in the connection's
+    in-memory database (S4.0b, M17), and they are dropped before this returns — the
+    labelling is the only thing that leaves. That is what lets a stage commit membership in
+    a single snapshot after clustering succeeds (S4.7), and it is why a non-convergence
+    failure can guarantee "no snapshot committed, no events emitted": there is nothing to
+    roll back.
+
+    **The result does not depend on input order or on pair orientation.** Adjacency is
+    stored in both senses and every step is a `min` over a set, so the same subgraph
+    delivered in any order gives byte-identical labels — which is what D1/D2 (S4.5.4)
+    require of the partition this feeds.
+
+    Args:
+        connection: the run connection (S4.0b). A bare `duckdb.connect()` is enough: this
+            function reads no relation of the lake, and the unit layer passes exactly that.
+        nodes: the affected node set — :attr:`AffectedSet.nodes`. A record with no incident
+            edge is labelled with itself and MUST be passed in, or the singleton it becomes
+            has no input (S4.5.3).
+        edges: the pairs of the affected edge set, in either orientation —
+            `edge.pair for edge in affected_edges(...)` in production. Probabilities are
+            not read: the edge set is already cut at `auto_merge` (S4.5.1), and an edge in
+            it is an edge.
+        max_iterations: `clustering.max_iterations` from the validated config (S6, V12,
+            default 50). Required, and never defaulted here: M26 puts the cap in the
+            config document, so a literal in this module would be a second source of it.
+
+    Returns:
+        The labelling and the round count, as a :class:`LabelPropagationResult`.
+
+    Raises:
+        NonConvergenceError: the labelling had not settled after `max_iterations` rounds.
+            S4.7 classifies it `non_convergence` (exit ``1``, not retryable) and the
+            message carries the unconverged component's size and its minimum `record_key`.
+        ValueError: `max_iterations` is below V12's floor of 1, or an edge names a record
+            that is not in `nodes` — which would silently drop that record from the
+            partition rather than fail.
+    """
+    if max_iterations < 1:
+        raise ValueError(
+            f"max_iterations={max_iterations} is below the S6.1 V12 floor of 1; the cap "
+            f"comes from clustering.max_iterations on the validated config"
+        )
+    node_set = frozenset(nodes)
+    # Self-pairs are dropped rather than rejected: a loop on `v` says nothing the closed
+    # neighbourhood does not already say, and no canonical pair can be one (S5.0 requires
+    # `rec_a_key < rec_b_key`).
+    pairs = [(rec_a_key, rec_b_key) for rec_a_key, rec_b_key in edges if rec_a_key != rec_b_key]
+    stray = sorted({key for pair in pairs for key in pair} - node_set)
+    if stray:
+        raise ValueError(
+            f"{len(stray)} edge endpoint(s) are not in the node set and would be labelled "
+            f"but never returned: {stray[:5]}. S4.5.1's edge set is the edges AMONG the "
+            f"affected nodes, so an endpoint outside it is a caller error"
+        )
+    if not node_set:
+        return LabelPropagationResult(labels={}, iterations=0)
+
+    _open_loop_relations(connection, node_set, pairs)
+    try:
+        iterations = 0
+        while True:
+            iterations += 1
+            connection.execute(_ROUND_SQL)
+            row = connection.execute(_CHANGED_SQL).fetchone()
+            assert row is not None, "count(*) returned no row"
+            moved = int(row[0])
+            if not moved:
+                break
+            connection.execute(_ADOPT_SQL)
+            if iterations >= max_iterations:
+                raise NonConvergenceError(
+                    _non_convergence_message(
+                        _labelling(connection),
+                        node_set,
+                        pairs,
+                        iterations=iterations,
+                        max_iterations=max_iterations,
+                    )
+                )
+        labels = _labelling(connection)
+    finally:
+        _close_loop_relations(connection)
+
+    # The other bound, and the other thing that has to be enforced: `max_iterations` is a
+    # configured cap that a deployment can raise, while `ceil(log2 n) + 1` is a property of
+    # the round. Converging *later* than the bound would mean the pointer jump had stopped
+    # doubling the reach — a silent regression to one hop per round that no cap would
+    # catch, since the default 50 covers a chain of 2^49 records.
+    assert iterations <= MAX_ITERATION_BOUND(len(node_set)), (
+        f"pointer jumping took {iterations} rounds over {len(node_set)} records, more than "
+        f"the S4.5.2 bound of {MAX_ITERATION_BOUND(len(node_set))}"
+    )
+    return LabelPropagationResult(labels=labels, iterations=iterations)
+
+
+def _labelling(connection: duckdb.DuckDBPyConnection) -> dict[str, str]:
+    """The current `record_key -> label` mapping, in `record_key` order (S4.5.4)."""
+    rows = connection.execute(
+        f"SELECT record_key, label FROM {_LABELS_RELATION} ORDER BY record_key"
+    ).fetchall()
+    return {str(key): str(label) for key, label in rows}
