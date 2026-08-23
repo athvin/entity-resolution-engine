@@ -82,7 +82,12 @@ from er.matching.full import (
     prediction_columns,
 )
 from er.matching.model import LINK_TYPE, UNIQUE_ID_COLUMN, blocking_rules_from_config
-from er.matching.tf import STD_RECORDS_RELATION, register_tf
+from er.matching.tf import (
+    STD_RECORDS_RELATION,
+    assert_tf_lookup_complete,
+    register_tf,
+    tf_columns,
+)
 from er.matching.thresholds import in_gray_band, is_auto_merge, prob_to_weight
 from er.obs.runctx import StageRun
 from er.review.queue import GrayBandPair, upsert_gray_band_pairs
@@ -562,8 +567,19 @@ def score_incremental(
     Raises:
         er.errors.StageFailure: a prediction carries no evidence columns, or a persisted
             pair is not canonically ordered. Both are S4.0 exit ``1``.
+        er.matching.tf.TfLookupIncomplete: the preflight found one or more `tf: true`
+            columns with no frozen rows for this key. Raised before the batch is
+            decided and before anything is built or written, and it names every
+            missing column (exit ``3``).
         er.matching.tf.MissingTfLookupError: no frozen TF rows for this key (exit ``3``).
     """
+    # D4 preflight, ahead of even the batch decision. An incomplete frozen snapshot is
+    # a precondition failure of the STAGE, not a property of the batch: reporting
+    # S4.0's `10` ("nothing to do") for a lake whose `tf_lookup` is missing columns
+    # would hide a misconfigured model until the next delivery happened to be
+    # non-empty, and that delivery is the one that would score wrongly.
+    assert_tf_lookup_complete(connection, model_version, tf_snapshot_id, tf_columns(cfg))
+
     thresholds = cfg.thresholds
     keys = (
         unscored_record_keys(connection, model_version=model_version, tf_snapshot_id=tf_snapshot_id)
