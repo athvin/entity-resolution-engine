@@ -43,6 +43,7 @@ __all__ = [
     "ErrorClass",
     "ErrorClassRow",
     "ExitCode",
+    "NonConvergenceError",
     "NothingToDo",
     "PreconditionFailure",
     "StageFailure",
@@ -178,6 +179,24 @@ class StageFailure(ErError):
     ``error_class=`` — ``transient_io`` for an S3 5xx, ``contradiction`` for
     CONTRADICTION-1, ``non_convergence`` for an exceeded fixpoint bound.
     """
+
+
+class NonConvergenceError(StageFailure):
+    """A bounded fixpoint did not settle within `clustering.max_iterations` (S4.7).
+
+    S4.7's `non_convergence` row has exactly two raisers — S4.5.2's label propagation
+    and S4.4.2's never-cut loop — and the row's operator action ("investigate the logged
+    component") is a property of the failure rather than of the call site, so it is a
+    class and not a `StageFailure(error_class=…)` spelled out at each of them.
+
+    Both raisers fail the stage **before anything is written**: no snapshot is committed
+    and no event is emitted (S4.5.2, S4.7). The unconverged component's size and its
+    minimum `record_key` belong in ``message``, which is what reaches
+    `run_stages.error_detail` and the stage's log line — a class alone tells an operator
+    which loop gave up and nothing about where to look.
+    """
+
+    default_error_class: ClassVar[ErrorClass | None] = ErrorClass.NON_CONVERGENCE
 
 
 class PreconditionFailure(ErError):
