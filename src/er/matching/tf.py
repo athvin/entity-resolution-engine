@@ -45,6 +45,7 @@ scoring run that cannot find its frozen TF must stop, not fall back to computing
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from typing import Any, Final, Protocol
 
 import duckdb
@@ -60,7 +61,9 @@ __all__ = [
     "TF_LOOKUP_RELATION",
     "MissingTfLookupError",
     "TfLinker",
+    "TfLookupIncomplete",
     "TfTableManagement",
+    "assert_tf_lookup_complete",
     "materialize_tf_lookup",
     "new_tf_snapshot_id",
     "parse_tf_tables_path",
@@ -95,6 +98,79 @@ class MissingTfLookupError(PreconditionFailure):
     it from the corpus at hand, which breaks INV-SCORE silently and for every pair.
     The operator action is to re-materialize the snapshot, not to retry the run.
     """
+
+
+class TfLookupIncomplete(MissingTfLookupError):
+    """The frozen snapshot is missing rows for one or more `tf: true` columns.
+
+    The *preflight* form of :class:`MissingTfLookupError`, and a subclass of it so a
+    caller that already handles the late failure handles this one too.
+    :func:`register_tf` raises on the first column it cannot find, which is all a
+    scoring path needs — but by then a `Linker` exists and the corpus has been copied,
+    and the operator is told about one column when three may be missing. The preflight
+    reports every one, so re-materializing the snapshot is a single action rather than
+    a bisect.
+    """
+
+
+def assert_tf_lookup_complete(
+    connection: duckdb.DuckDBPyConnection,
+    model_version: str,
+    tf_snapshot_id: str,
+    columns: Sequence[str],
+) -> tuple[str, ...]:
+    """Refuse to score unless every TF column has frozen rows at this key (D4, S4.3.3).
+
+    This is the guard that makes "Splink never computes term frequency" true of the
+    *system* rather than of the happy path. Without it a run whose `tf_lookup` was
+    partially deleted — or never materialized — reaches
+    :func:`register_tf` only after a `Linker` has been built, and a run whose columns
+    are ALL missing would, if the registration were ever made conditional, score with
+    Splink computing TF from the corpus at hand. That breaks INV-SCORE silently and
+    for every pair, which is the one failure mode D4 exists to prevent.
+
+    It is called before any Splink object is constructed and before any `match_scores`
+    row is written, so a refused run is a true no-write.
+
+    Args:
+        connection: a connection with the lake attached, per S4.0b.
+        model_version: the registry version about to be scored at.
+        tf_snapshot_id: the frozen TF snapshot about to be registered.
+        columns: the `tf: true` columns the config declares, from :func:`tf_columns`.
+            Passed in rather than re-derived: the frozen rows cannot say which column
+            is missing from them, so the requirement has to come from the config.
+
+    Returns:
+        ``columns`` as a tuple, unchanged, so a caller can bind the checked set.
+
+    Raises:
+        TfLookupIncomplete: at least one column has zero rows for the key. The message
+            names **every** missing column, not the first (S4.0 exit ``3``).
+    """
+    required = tuple(columns)
+    if not required:
+        # No `tf: true` column is a valid config: there is nothing to freeze and
+        # nothing for Splink to recompute, so the snapshot is trivially complete.
+        return required
+
+    rows = connection.execute(
+        f"SELECT DISTINCT column_name FROM {_TF_LOOKUP} "
+        f"WHERE model_version = ? AND tf_snapshot_id = ?",
+        [model_version, tf_snapshot_id],
+    ).fetchall()
+    present = {str(column_name) for (column_name,) in rows}
+    missing = tuple(column for column in required if column not in present)
+    if missing:
+        raise TfLookupIncomplete(
+            f"{TF_LOOKUP_RELATION} holds no rows for {list(missing)} at "
+            f"model_version={model_version!r}, tf_snapshot_id={tf_snapshot_id!r}. "
+            f"The config declares {list(required)} as tf: true and scoring registers "
+            f"every one of them; scoring without the frozen rows would compute term "
+            f"frequency from the corpus at hand and break INV-SCORE (S4.3.3, D4). "
+            f"Re-materialize the snapshot named by "
+            f"{tf_tables_path(model_version, tf_snapshot_id)!r}"
+        )
+    return required
 
 
 def tf_columns(cfg: Config) -> tuple[str, ...]:

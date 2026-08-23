@@ -75,7 +75,12 @@ from er.lake.model import REGISTRY, SCHEMA_QUALIFIER
 from er.matching.api import assert_no_splink_relations_in_lake, splink_api
 from er.matching.evidence import build_evidence
 from er.matching.model import UNIQUE_ID_COLUMN
-from er.matching.tf import STD_RECORDS_RELATION, register_tf
+from er.matching.tf import (
+    STD_RECORDS_RELATION,
+    assert_tf_lookup_complete,
+    register_tf,
+    tf_columns,
+)
 from er.matching.thresholds import in_gray_band, is_auto_merge
 from er.obs.runctx import StageRun
 from er.review.queue import GrayBandPair, upsert_gray_band_pairs
@@ -591,8 +596,19 @@ def score_full(
         er.errors.StageFailure: the corpus is unreadable or empty, the prediction
             carries no evidence columns, or a persisted pair is not canonically
             ordered. All are S4.0 exit ``1``.
+        er.matching.tf.TfLookupIncomplete: the preflight found one or more `tf: true`
+            columns with no frozen rows for this key. Raised before anything is built
+            or written, and it names every missing column (exit ``3``).
         er.matching.tf.MissingTfLookupError: no frozen TF rows for this key (exit ``3``).
     """
+    # D4 preflight, and deliberately the first statement in the function: it runs
+    # before `splink_api`, before the corpus copy and before any `match_scores` write,
+    # so a snapshot missing frozen rows refuses at exit 3 having written nothing.
+    # `register_tf` below still raises on a column it cannot find — that guard is not
+    # redundant, it is what keeps the two halves of D4 independent — but by then a
+    # Linker exists and the operator learns about one missing column at a time.
+    assert_tf_lookup_complete(connection, model_version, tf_snapshot_id, tf_columns(cfg))
+
     thresholds = cfg.thresholds
     candidate_pairs = _candidate_pairs(connection)
 
