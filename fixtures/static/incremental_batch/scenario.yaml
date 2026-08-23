@@ -1,6 +1,13 @@
 scenario: incremental_batch
 phases: [base, batch]
 
+# T-INC-3's parity set (S8.2.1). An INPUT rather than ground truth, so the manifest
+# must declare it or `scripts/validate_fixtures.py` rejects it as an unlisted root
+# file. Its contents are DERIVED — the pairs both the incremental two-pass path and
+# the corpus-wide pass score — and are regenerated with ER_REGEN_PARITY=1 rather than
+# hand-authored; no test asserts a pair count, only set equality with the derivation.
+aux_files: [parity_pairs.csv]
+
 # base/ is COMMITTED, not inherited. S3 shows this scenario with its own base/, and
 # S8.2.1 makes a missing phase directory mean the scenario has no such phase, so the
 # delivery is here and `base_scenario` is a byte-identity assertion against base_10

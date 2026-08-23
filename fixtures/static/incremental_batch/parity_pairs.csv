@@ -1,0 +1,10 @@
+rec_a_key,rec_b_key
+billing:B002,crm:C009
+billing:B004,billing:B008
+billing:B005,crm:C010
+billing:B008,crm:C004
+billing:B009,webforms:W010
+crm:C002,crm:C009
+crm:C006,crm:C010
+crm:C008,webforms:W009
+crm:C009,webforms:W003

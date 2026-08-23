@@ -2,7 +2,7 @@
 id: ER-066
 title: "T-INC-3 scoring parity (50 committed pairs) + T-MATCH-SYM orientation invariance"
 milestone: M3
-status: todo
+status: done
 kind: code
 size: S
 gates: full
@@ -14,12 +14,13 @@ consumes: ["src/er/matching/incremental.py::score_incremental", "src/er/matching
 owns: ["fixtures/static/incremental_batch/parity_pairs.csv", "tests/helpers/parity.py", "tests/integration/test_scoring_parity.py"]
 protected_paths: ["src/er/matching/incremental.py", "src/er/matching/full.py", "fixtures/static/model_test_v1.json", "fixtures/static/incremental_batch/base", "fixtures/static/incremental_batch/batch"]
 extra_paths: []
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_scoring_parity.py -q"
-branch: ""
-commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+branch: "ticket/ER-066-t-inc-3-scoring-parity-50"
+commit: "b3cd98d480291c586d3193c6c7f5b5a0591f04f1"
+spec_sha: "7467bdacba1bd84c"
+updated_at: "2026-08-23T13:08:53Z"
+session: c379438e-8c95-4be8-8f5f-3832d8ceafaa
 ---
 ## Description
 
