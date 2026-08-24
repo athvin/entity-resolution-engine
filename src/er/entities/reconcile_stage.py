@@ -77,6 +77,8 @@ from er.lake.model import SCHEMA_QUALIFIER
 from er.matching.edges import current_edges
 from er.obs.runctx import StageRun
 from er.review.assertions import Assertion, active_assertions, check_contradiction_1
+from er.review.never_cut import never_cut_fixpoint, persist_cuts, release_cuts
+from er.review.queue import upsert_escalation
 
 __all__ = [
     "RECONCILE_STAGE",
@@ -87,6 +89,9 @@ __all__ = [
 
 #: The stage name S5.2 records this work under.
 RECONCILE_STAGE: Final = "reconcile"
+
+#: S5's event type for an S4.4.2 partition-level cut.
+EDGE_CUT: Final = "edge_cut"
 
 _MEMBERSHIP: Final = f"{SCHEMA_QUALIFIER}.entity_membership"
 _ENTITIES: Final = f"{SCHEMA_QUALIFIER}.entities"
@@ -137,6 +142,9 @@ class ReconcileResult:
     members_added: int
     members_removed: int
     events_emitted: int
+    edges_cut: int = 0
+    cut_iterations: int = 0
+    never_unsatisfiable_escalations: int = 0
 
     def manifest(self) -> dict[str, Any]:
         """The S4.0 stdout document for this stage."""
@@ -180,6 +188,9 @@ class ReconcileResult:
         counters.set("members_added", self.members_added)
         counters.set("members_removed", self.members_removed)
         counters.set("events_emitted", self.events_emitted)
+        counters.set("edges_cut", self.edges_cut)
+        counters.set("cut_iterations", self.cut_iterations)
+        counters.set("never_unsatisfiable_escalations", self.never_unsatisfiable_escalations)
         counters.set("duration_ms", duration_ms)
 
 
@@ -266,6 +277,7 @@ def apply_reconcile_plan(
     run_id: str,
     occurred_at: datetime | None = None,
     ids: IdFactory | None = None,
+    extra_events: Sequence[tuple[str, str, Mapping[str, Any]]] = (),
 ) -> int:
     """Commit ``plan``: membership, entities, events. Returns the events written.
 
@@ -279,6 +291,11 @@ def apply_reconcile_plan(
         run_id: stamped onto every row this writes.
         occurred_at: the events' stamp; now, in UTC, when omitted.
         ids: the `event_id` source, injected for determinism in tests (D10).
+        extra_events: `(entity_id, event_type, details)` triples the plan cannot know
+            about — S4.4.2's `edge_cut` is the only one today. They join the SAME log
+            and therefore the same single append, because S4.5.3 requires an event and
+            the membership change it describes to land in one snapshot; a second flush
+            for the cuts would publish half the history.
 
     Returns:
         How many `entity_events` rows were appended.
@@ -340,6 +357,8 @@ def apply_reconcile_plan(
     log = EventLog(run_id, ids=ids)
     for planned in plan.events:
         log.emit(planned.entity_id, planned.event_type, planned.details)
+    for entity_id, event_type, details in extra_events:
+        log.emit(entity_id, event_type, details)
 
     # `EventLog` collapses duplicates WITHIN one accumulation; this filters the ones
     # already committed by an earlier apply under the same `run_id`. Both halves are
@@ -433,11 +452,85 @@ def run_reconcile_stage(
         [edge.pair for edge in adjusted],
         max_iterations=cfg.clustering.max_iterations,
     )
+
+    # S4.4.2 between clustering and the plan. A `never` is enforced at the PARTITION
+    # level, so it needs a clustering to look at — and the plan must be built over the
+    # POST-cut partition, or INV-PERM would be applied to an answer the cut is about to
+    # change. Releasing first is what lets a retracted `never` re-merge in the same run
+    # that retracted it: a stale active cut would keep the component apart for one more
+    # run and the retraction would look like it had not taken.
+    release_cuts(connection, run_id=run_ctx.run_id, released_at=occurred_at)
+    cut = never_cut_fixpoint(
+        [(edge.rec_a_key, edge.rec_b_key, edge.match_probability) for edge in adjusted],
+        assertions,
+        nodes=nodes,
+        cut_protect_probability=cfg.clustering.cut_protect_probability,
+        max_iterations=cfg.clustering.max_iterations,
+    )
+    if cut.cuts:
+        adjusted = [edge for edge in adjusted if edge.pair not in cut.cut_pairs]
+        propagation = label_propagate(
+            connection,
+            nodes,
+            [edge.pair for edge in adjusted],
+            max_iterations=cfg.clustering.max_iterations,
+        )
+
     groups = _groups(propagation.labels)
     plan = reconcile_plan(_current_partition(connection, nodes), groups, factory)
+
+    # S4.4.2 step 5: an `edge_cut` event on the affected entity. The id is minted here
+    # rather than inside `persist_cuts` because the event carries it too — one mint,
+    # two writers, so the row and the event name the same cut.
+    cut_ids = {cut_edge.pair: factory.new() for cut_edge in cut.cuts}
+    placement = {assignment.record_key: assignment.entity_id for assignment in plan.assignments}
+    for entity_id, members in _current_partition(connection, nodes).items():
+        for member in members:
+            placement.setdefault(member, entity_id)
+    cut_events = [
+        (
+            placement[cut_edge.rec_a_key],
+            EDGE_CUT,
+            {
+                "rec_a_key": cut_edge.rec_a_key,
+                "rec_b_key": cut_edge.rec_b_key,
+                "match_probability": cut_edge.match_probability,
+                "assertion_id": cut_edge.assertion_id,
+                "cut_id": cut_ids[cut_edge.pair],
+            },
+        )
+        for cut_edge in cut.cuts
+        if cut_edge.rec_a_key in placement
+    ]
+
     events_written = apply_reconcile_plan(
-        connection, plan, run_id=run_ctx.run_id, occurred_at=occurred_at, ids=factory
+        connection,
+        plan,
+        run_id=run_ctx.run_id,
+        occurred_at=occurred_at,
+        ids=factory,
+        extra_events=cut_events,
     )
+    cuts_written = persist_cuts(
+        connection,
+        cut.cuts,
+        run_id=run_ctx.run_id,
+        model_version=model_version,
+        tf_snapshot_id=tf_snapshot_id,
+        cut_at=occurred_at,
+        cut_ids=cut_ids,
+    )
+    # S4.4.2 step 4: a pair every path between which is protected is escalated rather
+    # than cut. The assertion id travels in the CutResult for the operator's benefit but
+    # is not a `review_queue` column (S5) — the row is keyed by the pair and the reason.
+    for rec_a_key, rec_b_key, _assertion_id in cut.escalations:
+        upsert_escalation(
+            connection,
+            rec_a_key=rec_a_key,
+            rec_b_key=rec_b_key,
+            run_id=run_ctx.run_id,
+            id_factory=factory,
+        )
 
     statuses = [transition.status for transition in plan.transitions]
     event_types = [planned.event_type for planned in plan.events]
@@ -454,6 +547,9 @@ def run_reconcile_stage(
         members_added=event_types.count(MEMBER_ADDED),
         members_removed=event_types.count(MEMBER_REMOVED),
         events_emitted=events_written,
+        edges_cut=cuts_written,
+        cut_iterations=cut.iterations,
+        never_unsatisfiable_escalations=len(cut.escalations),
     )
     result.record(run_ctx, duration_ms=int((time.monotonic() - started) * 1000))
     return result
