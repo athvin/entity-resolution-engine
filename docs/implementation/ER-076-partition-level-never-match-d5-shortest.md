@@ -2,7 +2,7 @@
 id: ER-076
 title: "Partition-level never_match (D5): shortest-path BFS total order, min-probability cut, cut_protect_probability, cut_edges persistence + affected.py/invariants.py updates, edge_cut event, escalation to review_queue, bounded fixpoint, collateral bound"
 milestone: M3
-status: todo
+status: in_progress
 kind: code
 size: L
 gates: full
@@ -14,12 +14,13 @@ consumes: ["src/er/entities/cluster.py::label_propagate", "src/er/entities/affec
 owns: ["src/er/review/never_cut.py", "tests/unit/review/test_never_cut.py", "tests/integration/test_never_cut_persistence.py"]
 protected_paths: []
 extra_paths: ["src/er/entities/affected.py", "src/er/entities/reconcile_stage.py", "tests/helpers/invariants.py"]
-attempts: 0
+attempts: 1
 verify: "uv run pytest tests/unit/review/test_never_cut.py -q && bash scripts/ci/itest.sh tests/integration/test_never_cut_persistence.py -q"
-branch: ""
+branch: "ticket/ER-076-partition-level-never-match-d5-shortest"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "7467bdacba1bd84c"
+updated_at: "2026-08-24T00:49:23Z"
+session: c379438e-8c95-4be8-8f5f-3832d8ceafaa
 ---
 ## Description
 
