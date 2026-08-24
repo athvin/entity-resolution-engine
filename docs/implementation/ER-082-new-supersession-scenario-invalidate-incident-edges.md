@@ -2,7 +2,7 @@
 id: ER-082
 title: "**NEW** supersession_scenario + invalidate_incident_edges on content_hash change + affected-set widening"
 milestone: M3
-status: todo
+status: in_progress
 kind: code
 size: M
 gates: full
@@ -14,12 +14,13 @@ consumes: ["relation:raw_records", "relation:int_std_records", "relation:match_s
 owns: ["fixtures/static/supersession_scenario/", "src/er/entities/retraction.py", "tests/integration/scenarios/test_supersession.py", "tests/unit/entities/test_retraction.py"]
 protected_paths: []
 extra_paths: ["src/er/cli.py", "src/er/matching/full.py", "src/er/matching/incremental.py", "src/er/entities/affected.py", "tests/unit/test_package_layout.py", "scripts/validate_fixtures.py"]
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/scenarios/test_supersession.py -q"
-branch: ""
+branch: "ticket/ER-082-new-supersession-scenario-invalidate-incident-edges"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "7467bdacba1bd84c"
+updated_at: "2026-08-24T03:54:01Z"
+session: c379438e-8c95-4be8-8f5f-3832d8ceafaa
 ---
 ## Description
 
