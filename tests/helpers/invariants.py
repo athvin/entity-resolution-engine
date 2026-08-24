@@ -38,14 +38,18 @@ board produces, and the cut arm becomes meaningful when cuts are written.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Final
 
 import duckdb
 
-from er.entities.cluster import label_propagate
+from er.config.loader import load_config
+from er.entities.cluster import Edge, adjust_edges_with_assertions, label_propagate
 from er.lake.model import SCHEMA_QUALIFIER
 from er.matching.api import leaked_splink_relations
+from er.review.assertions import active_assertions, check_contradiction_1
 
 __all__ = [
     "CANONICAL_PAIR_RELATIONS",
@@ -256,6 +260,20 @@ def assert_membership_equals_components(
         # rather than skips: see this module's header.
         return
 
+    # An unsatisfiable assertion set voids clause 1's PREMISE, and that is not a
+    # weakening. S4.4.1 makes a `never` inside an always-closure a hard pre-clustering
+    # failure: the reconcile refuses and writes nothing, deliberately leaving membership
+    # as it was. The active `always` edges are still injected by S4.4's adjustment, so
+    # the recomputation merges components the pipeline was forbidden to merge — and
+    # there is no partition that satisfies the set, so "membership equals the
+    # components" has no correct answer to be measured against. The remaining four
+    # clauses are asserted above and still hold; only the comparison is skipped, and
+    # only while the contradiction stands.
+    if _relation_exists(connection, ASSERTIONS) and check_contradiction_1(
+        active_assertions(connection)
+    ):
+        return
+
     if nodes is None:
         nodes = [
             str(row[0])
@@ -273,16 +291,46 @@ def assert_membership_equals_components(
 def _current_edge_pairs(
     connection: duckdb.DuckDBPyConnection, nodes: Sequence[str]
 ) -> list[tuple[str, str]]:
-    """The active, at-or-above-threshold pairs among ``nodes``, minus any live cut.
+    """S8.3's current edge set: assertion-adjusted, `>= auto_merge`, minus live cuts.
 
-    The threshold is not applied here as a literal: the rows a scenario leaves in
-    `match_scores` span the whole persisted band, and the clustering cut is
-    `auto_merge`. Callers that know their config pass `edges` explicitly; this fallback
-    reads the cut from `cut_edges` and the band from the rows themselves, which is the
-    most a finalizer with no config in hand can honestly do.
+    All three qualifiers are load-bearing and each fails in a different direction.
+
+    * **`>= auto_merge`.** `match_scores` holds everything from `review_low` up
+      (S4.3.4), and the clustering cut is `auto_merge` (S4.3, D13). Recomputing over
+      the whole persisted band would connect the gray band and report every queued pair
+      as membership drift.
+    * **Assertion-adjusted (S4.4).** An `always` edge exists only in `assertions` — it
+      is never persisted to `match_scores`, which is what keeps that relation's
+      `model_version` NOT NULL. A recomputation that read scores alone would split every
+      entity a steward's `always` merged, and a `never` the pipeline honoured would look
+      like an entity that failed to merge.
+    * **Minus live cuts.** A cut pair is excluded from clustering (S4.4.2), so including
+      it here would merge two components the pipeline deliberately keeps apart.
+
+    The config is read from `ER_CONFIG`, the document S7.1 supplies to every process in
+    the Compose envelope, because the finalizer that calls this has no config in hand
+    and the threshold may not be guessed — M26.
     """
     if not _relation_exists(connection, MATCH_SCORES):
         return []
+    cfg = load_config(Path(os.environ["ER_CONFIG"]))
+    member = set(nodes)
+
+    scored = [
+        Edge(
+            rec_a_key=str(left),
+            rec_b_key=str(right),
+            match_probability=float(probability),
+        )
+        for left, right, probability in connection.execute(
+            f"SELECT DISTINCT rec_a_key, rec_b_key, match_probability FROM {MATCH_SCORES} "
+            "WHERE is_active AND match_probability >= ?",
+            [cfg.thresholds.auto_merge],
+        ).fetchall()
+    ]
+    assertions = active_assertions(connection) if _relation_exists(connection, ASSERTIONS) else []
+    adjusted = adjust_edges_with_assertions(scored, assertions, nodes=sorted(member))
+
     excluded: set[tuple[str, str]] = set()
     if _relation_exists(connection, CUT_EDGES):
         excluded = {
@@ -291,14 +339,10 @@ def _current_edge_pairs(
                 f"SELECT rec_a_key, rec_b_key FROM {CUT_EDGES} WHERE active"
             ).fetchall()
         }
-    member = set(nodes)
-    pairs = connection.execute(
-        f"SELECT DISTINCT rec_a_key, rec_b_key FROM {MATCH_SCORES} WHERE is_active"
-    ).fetchall()
     return [
-        (str(left), str(right))
-        for left, right in pairs
-        if (str(left), str(right)) not in excluded and str(left) in member and str(right) in member
+        edge.pair
+        for edge in adjusted
+        if edge.pair not in excluded and edge.rec_a_key in member and edge.rec_b_key in member
     ]
 
 
