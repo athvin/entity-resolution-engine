@@ -92,6 +92,7 @@ from er.dbt_runner import render_dbt_vars
 from er.doctor import check_lines, check_record, run_checks
 from er.doctor import exit_code as doctor_exit_code
 from er.entities.ids import IdFactory, UlidFactory
+from er.entities.reconcile_stage import run_reconcile_stage
 from er.errors import (
     ConfigError,
     ErError,
@@ -561,6 +562,50 @@ class _TrainStage:
                 config_hash=options.config_hash,
                 if_changed=self.if_changed,
                 stage_run=self.stage_run,
+            )
+        _write_stdout(result.manifest(), result.stdout_line(), options)
+        return result.exit_code
+
+
+@dataclass
+class _ReconcileStage:
+    """`er reconcile`: cluster the adjusted edge set and commit the plan (S4.5).
+
+    The stage owns the S4.0 surface — the stdout manifest, the `run_stages` row and the
+    exit codes — and none of the reconciliation:
+    :func:`~er.entities.reconcile_stage.run_reconcile_stage` runs the chain, and every
+    exit code but ``0`` and ``10`` arrives here as a raised error that
+    :func:`~er.errors.exit_code_for` translates. ``1`` in particular is CONTRADICTION-1
+    (S4.4.1) or a non-convergent label propagation (S4.5.2), both of which fail before
+    anything is written — so a refused run leaves `entity_membership` untouched without
+    this stage having to undo anything.
+
+    The model is read from `model_registry` rather than taken as a flag: S4.5.1's edge
+    set is "at the run's `model_version`", and a reconcile that clustered a different
+    version than the scores were written under would silently drop every edge.
+    """
+
+    args: tuple[str, ...] = ()
+    name: str = "reconcile"
+    stage_run: StageRun | None = None
+
+    def bind(self, stage_run: StageRun) -> None:
+        self.stage_run = stage_run
+
+    def run(self, options: GlobalOptions) -> int:
+        if options.config is None or self.stage_run is None:
+            # Unreachable through the command tree: S4.0 lists `ER_CONFIG` in this
+            # command's required-env column, so `GlobalOptions.resolve` has already
+            # exited 2 without a document, and `_execute` binds before the body runs.
+            raise StageFailure("er reconcile was invoked without a config or a run_stages row")
+        with connect() as connection:
+            active = active_model(connection)
+            result = run_reconcile_stage(
+                connection,
+                options.config,
+                self.stage_run,
+                model_version=active.model_version,
+                tf_snapshot_id=active.tf_snapshot_id,
             )
         _write_stdout(result.manifest(), result.stdout_line(), options)
         return result.exit_code
@@ -1614,7 +1659,13 @@ def reconcile(
 ) -> None:
     """Cluster the assertion-adjusted edge set and reconcile entities (S4.5)."""
     options = GlobalOptions.resolve(config_path=config, run_id=run_id, json_output=json_output)
-    _run_single("reconcile", options)
+    _run_command(
+        _ReconcileStage(),
+        options,
+        mode=_MODE_STAGE,
+        command="reconcile",
+        persist=True,
+    )
 
 
 @app.command()
