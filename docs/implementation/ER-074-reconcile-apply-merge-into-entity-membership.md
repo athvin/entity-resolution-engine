@@ -2,7 +2,7 @@
 id: ER-074
 title: "Reconcile apply: MERGE INTO entity_membership, entities/redirects/events, CONTRADICTION-1 wired as pre-clustering hard failure"
 milestone: M3
-status: in_progress
+status: done
 kind: code
 size: L
 gates: full
@@ -17,9 +17,9 @@ extra_paths: ["src/er/cli.py"]
 attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_reconcile_apply.py -q && bash scripts/ci/itest.sh tests/integration/test_contradiction_1.py -q"
 branch: "ticket/ER-074-reconcile-apply-merge-into-entity-membership"
-commit: ""
+commit: "8f0fc82ab4f60fc5c1f64754934fbba7adb9a2e6"
 spec_sha: "7467bdacba1bd84c"
-updated_at: "2026-08-23T22:42:12Z"
+updated_at: "2026-08-24T00:47:47Z"
 session: c379438e-8c95-4be8-8f5f-3832d8ceafaa
 ---
 ## Description
