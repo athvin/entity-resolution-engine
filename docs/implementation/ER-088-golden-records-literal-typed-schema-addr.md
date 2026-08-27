@@ -2,7 +2,7 @@
 id: ER-088
 title: "golden_records literal typed schema (addr_* expanded) + golden_lineage (6-token vocabulary, address composite) + contract + config parity"
 milestone: M4
-status: in_progress
+status: done
 kind: code
 size: L
 gates: full
@@ -17,9 +17,9 @@ extra_paths: ["dbt/models/schema.yml", "src/er/lake/columns.py", "tests/unit/tes
 attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_golden_models.py -q && uv run pytest tests/unit/config/test_golden_schema_parity.py -q"
 branch: "ticket/ER-088-golden-records-literal-typed-schema-addr"
-commit: ""
+commit: "c4915d2686d0f3806c88c40c132df6abba6a3263"
 spec_sha: "7467bdacba1bd84c"
-updated_at: "2026-08-27T13:52:23Z"
+updated_at: "2026-08-27T18:51:09Z"
 session: c379438e-8c95-4be8-8f5f-3832d8ceafaa
 ---
 ## Description
