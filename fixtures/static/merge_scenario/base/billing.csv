@@ -1,0 +1,3 @@
+account_no,fname,lname,billing_email,contact_phone,addr1,addr_city,addr_state,postal_code,birth_date,updated_ts,persona_id
+B501,Marcus,Oyelaran,marcus.o@example.com,415-555-0501,88 Cypress Road Apt 3,San Francisco,CA,94110,06/22/1979,2024-02-03 08:15:00,P1
+B510,Marcus,Oyelaran,m.oyelaran@example.com,415-555-0577,88 Cypress Road Apt 3,San Francisco,CA,94110,06/22/1979,2024-02-05 09:40:00,P1

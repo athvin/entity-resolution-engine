@@ -2,7 +2,7 @@
 id: ER-075
 title: "merge_scenario + merge_scenario_tie fixtures + T-PERM-1 (survivor rule, redirect, exactly one merge event, zero golden rows deferred to ER-092)"
 milestone: M3
-status: todo
+status: done
 kind: fixture
 size: M
 gates: full
@@ -14,12 +14,13 @@ consumes: ["ER-028::load_scenario", "ER-028::validate_fixtures", "tests/helpers/
 owns: ["fixtures/static/merge_scenario/", "fixtures/static/merge_scenario_tie/", "tests/integration/scenarios/test_merge_scenario.py", "tests/unit/fixtures/test_merge_scenario.py"]
 protected_paths: []
 extra_paths: []
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/scenarios/test_merge_scenario.py -q && uv run pytest tests/unit/fixtures/test_merge_scenario.py -q"
-branch: ""
-commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+branch: "ticket/ER-075-merge-scenario-merge-scenario-tie-fixtures"
+commit: "391587d73bdf22cd4fb3006cf61d8e83c26c1de4"
+spec_sha: "7467bdacba1bd84c"
+updated_at: "2026-08-27T08:03:54Z"
+session: c379438e-8c95-4be8-8f5f-3832d8ceafaa
 ---
 ## Description
 
