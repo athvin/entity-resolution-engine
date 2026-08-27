@@ -21,6 +21,7 @@ from typing import Final
 __all__ = [
     "ADDRESS_COMPOSITE_COLUMNS",
     "GOLDEN_LINEAGE_ATTRIBUTES",
+    "GOLDEN_MART_RELATIONS",
     "GOLDEN_SURVIVABLE_COLUMNS",
     "STD_RECORD_COLUMNS",
     "VOLATILE_COLUMNS",
@@ -94,6 +95,22 @@ GOLDEN_LINEAGE_ATTRIBUTES: Final[tuple[str, ...]] = tuple(
         ADDRESS_ATTRIBUTE if column.startswith("addr_") else column
         for column in GOLDEN_SURVIVABLE_COLUMNS
     )
+)
+
+
+# The three golden marts, in the order S4.6 lists them. They are rebuilt together and
+# REAPED together: dbt's `delete+insert` only deletes keys present in the freshly built
+# batch, so a merge loser or an emptied fragment produces zero rows, its key is never
+# named, and its stale golden row survives forever. ER-092's explicit reap step deletes
+# every `disposition='retire'` entity from all three.
+#
+# The list lives here, once, because the failure mode of spelling it again inside
+# `assemble.py` is that the third relation gets forgotten -- and an orphan
+# `golden_display` row is the one a consumer is most likely to read.
+GOLDEN_MART_RELATIONS: Final[tuple[str, ...]] = (
+    "golden_records",
+    "golden_lineage",
+    "golden_display",
 )
 
 
