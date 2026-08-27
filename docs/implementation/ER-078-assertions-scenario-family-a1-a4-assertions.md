@@ -2,7 +2,7 @@
 id: ER-078
 title: "assertions_scenario family: A1–A4, assertions_contradiction, assertions_non_batch, assertions_cut_tie, assertions_path_tie, assertions_two_iterations"
 milestone: M3
-status: in_progress
+status: done
 kind: fixture
 size: L
 gates: fast
@@ -17,9 +17,9 @@ extra_paths: []
 attempts: 1
 verify: "uv run pytest tests/unit/fixtures/test_assertions_scenario.py -q"
 branch: "ticket/ER-078-assertions-scenario-family-a1-a4-assertions"
-commit: ""
+commit: "91c7ad9699c11e3970dced29868d29397c05551d"
 spec_sha: "7467bdacba1bd84c"
-updated_at: "2026-08-27T08:31:39Z"
+updated_at: "2026-08-27T10:16:00Z"
 session: c379438e-8c95-4be8-8f5f-3832d8ceafaa
 ---
 ## Description
