@@ -2,7 +2,7 @@
 id: ER-077
 title: "split_scenario (bridge, machine-checked) + split_scenario_tie_2_2 + T-PERM-2"
 milestone: M3
-status: todo
+status: blocked
 kind: fixture
 size: M
 gates: full
@@ -14,12 +14,13 @@ consumes: ["ER-028::load_scenario", "ER-028::validate_fixtures", "tests/helpers/
 owns: ["fixtures/static/split_scenario/", "fixtures/static/split_scenario_tie_2_2/", "tests/integration/scenarios/test_split_scenario.py", "tests/unit/fixtures/test_split_scenario.py"]
 protected_paths: []
 extra_paths: []
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/scenarios/test_split_scenario.py -q && uv run pytest tests/unit/fixtures/test_split_scenario.py -q"
-branch: ""
+branch: "ticket/ER-077-split-scenario-bridge-machine-checked-split"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "7467bdacba1bd84c"
+updated_at: "2026-08-24T03:02:10Z"
+session: c379438e-8c95-4be8-8f5f-3832d8ceafaa
 ---
 ## Description
 
@@ -81,3 +82,12 @@ uv run python fixtures/validate_fixtures.py fixtures/static/split_scenario fixtu
 - No golden expectation committed; `expected/<phase>/golden.csv` absent for both scenarios
 - T-PERM-2's function name matches S8.3
 - Both scenarios pass the fixture validator and both verify commands are green
+
+## Blocker log
+
+### Attempt 1 — verify_failed (2026-08-24T03:02:10Z)
+
+- **Failing command:** `bash scripts/ci/itest.sh tests/integration/scenarios/test_split_scenario.py -q`
+- **Assertion / contradiction:** A BRIDGE IS NOT CONSTRUCTIBLE UNDER THE COMMITTED MODEL, so AC1 (and with it AC4-AC8) cannot be satisfied by any authored corpus. Measured, not inferred: a five-record probe corpus (fixtures/static/split_scenario/base, committed on the ticket branch at 1f24c5a) was ingested, standardized and scored at fixtures/static/model_test_v1.json, and the ENTIRE match_scores relation came back with one row -- 'billing:B301 | crm:C301 p=0.999995'. Three deliberately planted link types all scored below review_low=0.60 despite being blocked: (1) webforms:W301 vs crm:C301 and billing:B301 share given_name 'Nadia', family_name 'Okafor', street address '10 Vine Street Apt 1', postcode 94101 and birth_date 1980-01-15, differing only in phone -- blocked by name_postal ('Okaf|94101') and dob_name ('1980-01-15|Nad'), so they were scored and rejected, not missed; (2) crm:C302 vs billing:B302 share given_name 'Owen', family_name 'Petrov', address, postcode and birth_date, differing only in phone -- blocked identically, likewise rejected; (3) webforms:W301 vs crm:C302 share phone_e164 +14155550702 exactly and nothing else -- blocked by phone_exact, likewise rejected. The model therefore has NO intermediate-strength link: a pair either agrees on (given_name, family_name, phone_e164) and scores ~1.0, or it falls under review_low. That makes every component a CLIQUE, and a clique has no bridge: if a1~a2 are co-fragment they agree on those three fields, and if a2~b1 is the bridge they agree on those three fields, so a1~b1 by transitivity and the 'single connection' the ticket requires cannot exist. This is the THIRD manifestation of the same root cause -- ER-060 found base_10's gray band empty and its rob/robert nickname link below review_low, ER-074 found incremental_batch's declared bridge does not bridge despite an exact email match -- and in all three cases Splink warns 'm values not fully trained' for email, birth_date and addr_postal, which is why only given_name, family_name and phone carry weight.
+- **Smallest change that would unblock:** Fix the model, not this fixture. (a) The single highest-value action is to refit or repair fixtures/static/model_test_v1.json (ER-056) so that email, birth_date and addr_postal carry trained m values -- Splink emits 'm values not fully trained' for exactly those three on every predict call. With birth_date and addr_postal contributing, a pair agreeing on given_name + family_name + address + birth_date but NOT phone would land between review_low and 1.0, which is precisely the intermediate band a bridge needs and which the probe shows is currently empty. That one change also unblocks ER-060 and removes the workaround ER-074 needed. (b) If refitting is out of scope now, the alternative is to relax this ticket: a bridge could be supplied as an  assertion over a pair the model does not link (S4.4 injects it at p=1.0 and it becomes a genuine single edge), which makes the split testable -- but AC1 says the bridge must be machine-checked from the committed base expectation, so that reading needs the ticket amended rather than the fixture bent. (c) Do NOT hand-author expected/*/membership.csv to describe a component the pipeline does not produce; that is how incremental_batch came to declare a bridge it does not have. The probe corpus and the probe test are committed at 1f24c5a on ticket/ER-077-partition... so the next attempt can re-measure in one Docker run rather than re-deriving this.
+- **Log:** `.loop/logs/ER-077.attempt-1.log`
