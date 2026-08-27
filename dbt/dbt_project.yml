@@ -31,6 +31,19 @@ clean-targets: ["target", "dbt_packages"]
 vars:
   std_version: "1"
   survivorship_version: "1"
+  # A fallback so `dbt parse` renders on a runner with no config document (S9.1).
+  # A real run NEVER reads it: `render_dbt_vars` passes the S6 `survivorship:` block
+  # whole on every invocation, and reading this copy instead would be the defect
+  # S4.6 guards against. The chains here are deliberately the shortest that parse --
+  # a fallback that mirrored `configs/test.yaml` would let a missing override pass
+  # unnoticed, which is exactly what makes the override untested.
+  survivorship:
+    given_name: [source_priority]
+    family_name: [source_priority]
+    email: [source_priority]
+    phone_e164: [source_priority]
+    address: [source_priority]
+    birth_date: [source_priority]
   standardization:
     email_strip_plus_addressing: false
     email_placeholders: []

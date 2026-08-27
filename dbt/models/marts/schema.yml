@@ -1,0 +1,173 @@
+# The S5 contracts for the two golden marts, and the tests S4.6 names for them.
+#
+# S5.0 gives every dbt-owned relation an ENFORCED contract, so each column list below is
+# S5's listing -- column for column, type for type, in its order -- and a drift from it
+# fails `dbt build` instead of landing. `golden_records` is the pipeline's terminal
+# output, so a silent column drift here is the one drift no downstream relation would
+# catch.
+#
+# `NOT NULL` is a `constraints:` entry rather than a `not_null` data test, for the reason
+# `models/intermediate/schema.yml` gives: S5.0 makes it the one constraint DuckLake
+# enforces, and a test alone would leave the physical column nullable.
+#
+# The eleven survivable columns are deliberately NULLABLE. An entity whose every member
+# lacks an email has no email, and S5 marks only `entity_id`, `survivorship_version` and
+# `assembled_at` NOT NULL. `email_valid`/`phone_valid` appear in neither relation: they
+# are inputs to the `validated` rule on `int_std_records` and are not survivable (S5.0's
+# GOLDEN_SURVIVABLE_COLUMNS names neither).
+version: 2
+
+models:
+  - name: golden_records
+    description: >
+      One row per active entity holding at least one member (S4.6). Each attribute is
+      decided by its own S6 survivorship chain; the six addr_* columns are ONE decision
+      and all come from the single winning contributing record.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: entity_id
+        description: "The entity this golden row describes; S5.0's logical key."
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+        data_tests:
+          # NO `keys` tag, deliberately. S5.0's ownership table gives this relation
+          # "contract + `unique`" and does not put it under T-KEY-1's selector, and the
+          # reason shows up the moment it does: `dbt test --select tag:keys` requires
+          # every tagged relation to EXIST, so tagging a mart makes the staging and
+          # intermediate key tests fail with "Table golden_records does not exist" in
+          # every scenario that never assembles. The key is still enforced -- this test
+          # runs with `dbt build --select marts`, and
+          # test_golden_models.py::test_every_active_entity_with_members_has_exactly_one_golden_row
+          # asserts it as data besides.
+          - unique
+          # Every golden row belongs to an ACTIVE entity (S4.6). A merge loser or a
+          # retired entity keeping a golden row is the defect ER-092's reap step exists
+          # to prevent, and this is the test that names it.
+          - relationships:
+              arguments:
+                to: source('lake', 'entities')
+                field: entity_id
+      - name: given_name
+        data_type: VARCHAR
+      - name: family_name
+        data_type: VARCHAR
+      - name: email
+        data_type: VARCHAR
+      - name: phone_e164
+        data_type: VARCHAR
+      - name: addr_number
+        data_type: VARCHAR
+      - name: addr_street
+        data_type: VARCHAR
+      - name: addr_unit
+        data_type: VARCHAR
+      - name: addr_city
+        data_type: VARCHAR
+      - name: addr_region
+        data_type: VARCHAR
+      - name: addr_postal
+        data_type: VARCHAR
+      - name: birth_date
+        data_type: DATE
+      - name: survivorship_version
+        description: "versions.survivorship_version from S6, passed as a --vars override."
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+      - name: assembled_at
+        data_type: TIMESTAMP
+        constraints:
+          - type: not_null
+
+  - name: golden_lineage
+    description: >
+      One row per (entity_id, attribute) over S4.6's closed six-token vocabulary, naming
+      the record that supplied the golden value and the rule that decided it. The grid is
+      complete: a row is emitted even where the winning value is NULL.
+    config:
+      contract:
+        enforced: true
+    data_tests:
+      # The logical key. `unique` on `entity_id` would be wrong here -- six rows per
+      # entity is the point -- so the composite is what S5.0 pins.
+      - dbt_utils.unique_combination_of_columns:
+          # Untagged, for the reason `golden_records.entity_id` above states.
+          arguments:
+            combination_of_columns: ['entity_id', 'attribute']
+    columns:
+      - name: entity_id
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+        data_tests:
+          - relationships:
+              arguments:
+                to: source('lake', 'entities')
+                field: entity_id
+      - name: attribute
+        description: "S4.6's closed vocabulary; six tokens for eleven columns."
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+        data_tests:
+          - accepted_values:
+              name: accepted_values_golden_lineage_attribute
+              arguments:
+                values: ['given_name', 'family_name', 'email', 'phone_e164', 'address', 'birth_date']
+      - name: record_key
+        description: >
+          The winning contributing record. Never NULL: an entity exists because it holds
+          members, and a member has a record_key whatever its values are.
+
+          Deliberately carries NO `relationships` test to `int_std_records`, though the
+          reference is real. dbt's indirect selection is eager: a test is included when
+          ANY of its parents is selected, so a test naming `ref('int_std_records')` is
+          pulled into `dbt build --select intermediate` -- the standardize step every
+          stage runs -- and fails there with "Table with name golden_lineage does not
+          exist", long before the marts are built. The integrity it would assert is
+          instead asserted by `test_address_columns_come_from_one_record` and
+          `test_non_address_values_come_from_their_lineage_record`, which join lineage to
+          `int_std_records` on this column and would fail on a dangling key.
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+      - name: source_system
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+      - name: source_record_id
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+      - name: rule
+        description: >
+          The chain rule that separated the winner from its nearest rival, or
+          'tiebreak_deterministic' when the mandatory terminal `record_key ASC` decided
+          -- including the single-candidate case, where there was nothing to decide
+          against. ER-087's survivorship_decision closes this vocabulary; this test is
+          what keeps it closed.
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+        data_tests:
+          - accepted_values:
+              name: accepted_values_golden_lineage_rule
+              arguments:
+                values:
+                  - source_priority
+                  - recency
+                  - frequency
+                  - completeness
+                  - validated
+                  - tiebreak_deterministic
+      - name: survivorship_version
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+      - name: assembled_at
+        data_type: TIMESTAMP
+        constraints:
+          - type: not_null

@@ -35,7 +35,7 @@ from enum import Enum
 from types import MappingProxyType
 from typing import Final
 
-from er.lake.columns import GOLDEN_SURVIVABLE_COLUMNS
+from er.lake.columns import GOLDEN_LINEAGE_ATTRIBUTES, GOLDEN_SURVIVABLE_COLUMNS
 
 __all__ = [
     "ASSERTION_KINDS",
@@ -307,9 +307,12 @@ DISPOSITIONS: Final[frozenset[str]] = frozenset({"rebuild", "retire"})
 
 #: `address` is one lineage attribute covering the six `addr_*` columns, which S4.6
 #: requires to come from a single winning record.
-GOLDEN_LINEAGE_ATTRIBUTES: Final[frozenset[str]] = frozenset(
-    {"email", "phone_e164", "given_name", "family_name", "address", "birth_date"}
-)
+#:
+#: Imported rather than listed. The vocabulary is a CONSEQUENCE of S5's survivable
+#: column set -- those eleven columns with the six `addr_*` ones collapsed -- so
+#: `columns.py` derives it there and this module re-exports it. Two listings could
+#: disagree about a column added to S5, and the enum below is what a `dbt build`
+#: would then accept.
 
 # --------------------------------------------------------------------------- #
 # the relations, in S5 declaration order
@@ -661,7 +664,7 @@ _DBT_SPECS: Final[tuple[TableSpec, ...]] = (
             _nn("assembled_at", TIMESTAMP),
         ),
         keys=(LogicalKey(("entity_id", "attribute")),),
-        enums=MappingProxyType({"attribute": GOLDEN_LINEAGE_ATTRIBUTES}),
+        enums=MappingProxyType({"attribute": frozenset(GOLDEN_LINEAGE_ATTRIBUTES)}),
     ),
     TableSpec(
         name="golden_display",

@@ -51,7 +51,17 @@ STANDARDIZATION_KEYS = {
 }
 
 #: AC1's key set. A sixth key here without a spec row is the defect this pins.
-VAR_KEYS = {"std_version", "survivorship_version", "run_id", "sources", "standardization"}
+VAR_KEYS = {
+    "std_version",
+    "survivorship_version",
+    "run_id",
+    "sources",
+    "standardization",
+    # S4.6 dispatches each attribute's rule chain from the config, so the marts are
+    # handed the `survivorship:` block whole -- the same reason `sources` is carried
+    # whole rather than projected (ER-088).
+    "survivorship",
+}
 
 # AC4's ceiling on the whole payload for configs/test.yaml. Deliberately far below
 # er.dbt_runner.MAX_VARS_BYTES, which is itself far below Linux's 128 KiB per-argv
@@ -160,6 +170,11 @@ def test_project_vars_are_all_overridden() -> None:
         "survivorship_version": cfg.versions.survivorship_version,
         "standardization": cfg.standardization.model_dump(),
         "sources": {name: spec.model_dump() for name, spec in cfg.sources.items()},
+        # S4.6's per-attribute rule chains, carried whole so `golden_records` can
+        # dispatch them (ER-088). Listed here for the same reason every other var is:
+        # this test is what proves the runtime override beats the dbt_project.yml
+        # fallback, and a var absent from this mapping is one it cannot check.
+        "survivorship": {attribute: list(chain) for attribute, chain in cfg.survivorship.items()},
     }
     for key in sorted(declared):
         assert key in from_document, (
