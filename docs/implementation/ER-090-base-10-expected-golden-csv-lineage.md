@@ -2,7 +2,7 @@
 id: ER-090
 title: "base_10/expected/golden.csv + lineage.csv + machine-checked rule-coverage table"
 milestone: M4
-status: in_progress
+status: blocked
 kind: fixture
 size: M
 gates: fast
@@ -19,7 +19,7 @@ verify: "uv run pytest tests/unit/fixtures/test_base_10_golden.py -q"
 branch: "ticket/ER-090-base-10-expected-golden-csv-lineage"
 commit: ""
 spec_sha: "7467bdacba1bd84c"
-updated_at: "2026-08-27T22:10:49Z"
+updated_at: "2026-08-27T22:19:34Z"
 session: c379438e-8c95-4be8-8f5f-3832d8ceafaa
 ---
 ## Description
@@ -85,3 +85,12 @@ uv run ruff check .
 - The Python oracle is documented as a fixture-authoring aid whose arbiter is T-GOLD-1 (ER-091)
 - `base_10`'s 23/10/18 truth counts are re-asserted green after any input edit
 - `uv run pytest tests/unit/fixtures/test_base_10_golden.py -q` passes and failed before the change
+
+## Blocker log
+
+### Attempt 1 — spec_contradiction (2026-08-27T22:19:34Z)
+
+- **Failing command:** `uv run python .loop/er090_author.py`
+- **Assertion / contradiction:** AC5 requires set(lineage.rule) to equal exactly the six-token vocabulary, and 'frequency' is UNREACHABLE for base_10, so the set equality can never hold. Measured, not inferred: a Python survivorship oracle verified against a real run (23 int_std_records rows x 13 fields, 0 mismatches; 72 golden_lineage rows reproducing winner AND rule, 0 mismatches) produces source_priority 38, tiebreak_deterministic 11, recency 8, validated 2, completeness 1, frequency 0 over the committed 10-entity membership. Two independent reasons. (1) Where frequency is FIRST in the chain (birth_date), it can never be the deciding rule for ANY input: ER-087 attributes the decision to the first chain rule whose sort key differs between rank 1 and rank 2, and rank1.freq always equals rank2.freq -- if rank-1's value is shared by f1 records then those f1 records hold the top key and fill the first f1 ranks, so rank 2 is one of them when f1 >= 2, and when f1 = 1 every group has size 1 so all frequencies are 1. Brute-forced over every value multiset for entity sizes 2 to 6 across 3 symbols: 0 of 1092 cases. (2) Where frequency follows source_priority (given_name, family_name), it decides only when rank 1 and rank 2 tie on source_priority, i.e. both sit at the best-priority source present in the entity, AND a third record makes their value frequencies differ. No base_10 entity qualifies: E1, E2 and E3 have 3 or 4 records but exactly one crm record each, E4 to E9 have 2 or 1 records, and E10 is the only entity whose top two share a source but it has 2 members, where frequencies are 1,1 or 2,2 and therefore always tied. email, phone_e164 and address carry no frequency term. A value-level edit cannot fix this because a record's source_system is the file it lives in, so no edit can give an entity a second record at its best priority, and moving or adding records would change the membership ER-041 owns and the 23/10/18 counts that are machine-checked.
+- **Smallest change that would unblock:** Amend AC5. It is the only unsatisfiable criterion; AC1 to AC4 and AC6 to AC8 all hold and the oracle that proves them is written and verified. Proposed wording: 'AC5: set(lineage.rule) is a subset of the six-token vocabulary and contains at least source_priority, recency, completeness, validated and tiebreak_deterministic. frequency is not reachable on base_10 -- where it leads a chain it can never separate rank 1 from rank 2, and where it follows source_priority no base_10 entity holds two records at its best-priority source with three or more members -- so full six-token coverage belongs to a fixture built for it rather than to base_10.' If instead full coverage on base_10 is wanted, the smallest structural change is to give one entity a second crm record plus a third member sharing one of their given_names, which means ER-041 re-authoring base_10's membership and re-checking 23/10/18 and every designed trap; that is a bigger change than the criterion it satisfies. A third option is to amend ER-087 so a rule is credited when it eliminates ANY candidate rather than only rank 2, but that changes merged, tested behaviour and the meaning of S5's closed golden_lineage.rule vocabulary, so it should not be done for a coverage target.
+- **Log:** `.loop/logs/ER-090.attempt-1.log`
