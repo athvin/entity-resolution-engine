@@ -171,3 +171,54 @@ models:
         data_type: TIMESTAMP
         constraints:
           - type: not_null
+
+  # S5's `golden_display`: five columns, and deliberately NOT a sixth.
+  #
+  # No `survivorship_version`. S4.6 makes this relation's provenance a join --
+  # `golden_records` and `golden_lineage` on `entity_id` already answer "which record
+  # supplied this, under which rule, at which version" -- so a version column here would
+  # be a second answer to a question that has one, and the second answer is the one that
+  # goes stale. The asymmetry with its two siblings is intentional and this note is where
+  # the reason lives.
+  - name: golden_display
+    description: >
+      Presentation casing over golden_records (S4.6): one row per entity_id, with a
+      proper-cased name, a formatted phone, a single-line address and the email
+      unchanged. NEVER read by the matching layer --
+      tests/unit/test_golden_display_isolation.py is what holds that true.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: entity_id
+        description: "One row per entity; the same key golden_records carries."
+        data_type: VARCHAR
+        constraints:
+          - type: not_null
+        data_tests:
+          # Untagged, for the reason golden_records.entity_id above states.
+          - unique
+          # A display row may never outlive the golden row it renders. It names
+          # golden_records rather than anything upstream because dbt's indirect
+          # selection is eager: a test reaching back to the intermediate layer would be
+          # pulled into `dbt build --select intermediate` and fail there.
+          - relationships:
+              arguments:
+                to: ref('golden_records')
+                field: entity_id
+      - name: display_name
+        description: "Title-cased given + family, NULL parts dropped, single space."
+        data_type: VARCHAR
+      - name: display_email
+        description: "golden_records.email, byte for byte. Never re-cased (S4.2)."
+        data_type: VARCHAR
+      - name: display_phone
+        description: "(NNN) NNN-NNNN for a +1 NANP number; the E.164 string otherwise."
+        data_type: VARCHAR
+      - name: display_address
+        description: "`number street unit, city region postal`, empty parts dropped."
+        data_type: VARCHAR
+      - name: assembled_at
+        data_type: TIMESTAMP
+        constraints:
+          - type: not_null
