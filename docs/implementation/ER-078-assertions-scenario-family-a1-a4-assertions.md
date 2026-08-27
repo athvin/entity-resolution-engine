@@ -2,7 +2,7 @@
 id: ER-078
 title: "assertions_scenario family: A1–A4, assertions_contradiction, assertions_non_batch, assertions_cut_tie, assertions_path_tie, assertions_two_iterations"
 milestone: M3
-status: todo
+status: in_progress
 kind: fixture
 size: L
 gates: fast
@@ -14,12 +14,13 @@ consumes: ["ER-028::load_scenario", "ER-028::validate_fixtures", "src/er/config/
 owns: ["fixtures/static/assertions_scenario/", "fixtures/static/assertions_contradiction/", "fixtures/static/assertions_non_batch/", "fixtures/static/assertions_cut_tie/", "fixtures/static/assertions_path_tie/", "fixtures/static/assertions_two_iterations/", "tests/unit/fixtures/test_assertions_scenario.py"]
 protected_paths: []
 extra_paths: []
-attempts: 0
+attempts: 1
 verify: "uv run pytest tests/unit/fixtures/test_assertions_scenario.py -q"
-branch: ""
+branch: "ticket/ER-078-assertions-scenario-family-a1-a4-assertions"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "7467bdacba1bd84c"
+updated_at: "2026-08-27T08:31:39Z"
+session: c379438e-8c95-4be8-8f5f-3832d8ceafaa
 ---
 ## Description
 
