@@ -1,0 +1,2 @@
+crm_id,first_name,last_name,email_address,phone,street_address,city,state,zip,dob,last_modified,persona_id
+C601,Ingrid,Vasquez,ingrid.v@example.com,(415) 555-0601,12 Juniper Way Apt 6,San Francisco,CA,94112,1986-03-09,2024-03-10 13:45:00,P1

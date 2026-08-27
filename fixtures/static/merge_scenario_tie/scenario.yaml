@@ -1,0 +1,17 @@
+scenario: merge_scenario_tie
+
+# The even-overlap variant of `merge_scenario`. Both old entities hold exactly two
+# members and the new group contains all four plus the bridge, so `|g_new ∩ g_old|` is
+# 2 for both and the largest-overlap half of S4.5.3's claimant rule cannot decide the
+# survivor. What decides it is the tiebreak — `min member record_key ASC` within the
+# overlap — and `billing:B601` sorts before `billing:B602`, so the entity holding
+# `billing:B601` survives.
+#
+# The bridge is built the same way as the non-tie scenario's: no phone and no email, so
+# those comparisons hit `is_null_level` and contribute a Bayes factor of 1 rather than
+# the ~1e-18 a disagreement contributes.
+phases: [base, batch]
+
+# No expected/*/golden.csv, for the reason `merge_scenario/scenario.yaml` states: the
+# loser's golden row is ER-092's assertion, and S8.2.1 spells "this phase claims
+# nothing about that relation" as an absent file.

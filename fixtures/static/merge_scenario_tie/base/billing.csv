@@ -1,0 +1,3 @@
+account_no,fname,lname,billing_email,contact_phone,addr1,addr_city,addr_state,postal_code,birth_date,updated_ts,persona_id
+B601,Ingrid,Vasquez,ingrid.v@example.com,415-555-0601,12 Juniper Way Apt 6,San Francisco,CA,94112,03/09/1986,2024-03-11 08:30:00,P1
+B602,Ingrid,Vasquez,i.vasquez@example.com,415-555-0688,12 Juniper Way Apt 6,San Francisco,CA,94112,03/09/1986,2024-03-12 09:15:00,P1

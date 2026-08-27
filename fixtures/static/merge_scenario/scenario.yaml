@@ -1,0 +1,20 @@
+scenario: merge_scenario
+
+# `base` holds two entities the model keeps apart, and `batch` delivers the one record
+# that joins them (S8.2). The two are kept apart by phone and email alone: every other
+# compared attribute agrees, so the pair is blocked, scored and REJECTED rather than
+# never compared — which is what makes the base partition an honest two rather than an
+# artefact of a blocking rule that never fired.
+#
+# The bridging record carries no phone and no email at all. Splink marks every
+# comparison in the committed model with `is_null_level`, so a null contributes a Bayes
+# factor of 1 — no evidence either way — instead of the ~1e-18 an actual disagreement
+# contributes. That is what lets one record match members of BOTH old entities while
+# those entities still do not match each other, and it is the only construction under
+# `model_test_v1` that produces a merge.
+phases: [base, batch]
+
+# No expected/*/golden.csv. `golden_records` is first written in M4 and reaping the
+# loser's golden row is T-INC-2's assertion (ER-092), so a golden expectation here
+# would be a claim this milestone cannot check. S8.2.1 makes an absent expected file
+# mean the phase claims nothing about that relation, so the omission is the encoding.
