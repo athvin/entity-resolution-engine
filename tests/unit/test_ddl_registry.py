@@ -407,7 +407,10 @@ def test_enum_domains_are_exact() -> None:
     assert parsed["model_registry", "status"] == MODEL_STATUSES
     assert parsed["runs", "status"] == RUN_STATUSES == parsed["run_stages", "status"]
     assert parsed["runs", "rebuild_reason"] == REBUILD_REASONS
-    assert parsed["golden_lineage", "attribute"] == GOLDEN_LINEAGE_ATTRIBUTES
+    # The constant carries S5's order for `golden_lineage`'s grid; the parsed DDL
+    # comment is a set, so the comparison is made on sets and the binding between
+    # the spec text and the one definition is unchanged.
+    assert parsed["golden_lineage", "attribute"] == frozenset(GOLDEN_LINEAGE_ATTRIBUTES)
 
     # Every enum column is a plain VARCHAR: DuckLake has no ENUM type (S5.0).
     for relation, column in declared:
@@ -451,12 +454,29 @@ def test_golden_survivable_columns_are_imported_not_restated() -> None:
         if column.name in GOLDEN_SURVIVABLE_COLUMNS:
             assert column.type == std[column.name], column.name
 
-    # M4: `columns.py` owns both tuples. A second assignment here is the copy that
+    # M4: `columns.py` owns these names. A second assignment here is the copy that
     # would drift, and importing is the only way the registry may reference them.
+    #
+    # `GOLDEN_LINEAGE_ATTRIBUTES` joined the list in ER-088: it had been a hard-coded
+    # frozenset here while `columns.py` derives it from the survivable set, which is two
+    # listings of one consequence of S5. The import is checked by parsing rather than by
+    # substring, so grouping the names on one `from` line -- which is what the formatter
+    # does -- cannot make this guard silently stop looking.
     source = MODEL_SOURCE.read_text(encoding="utf-8")
-    for name in ("GOLDEN_SURVIVABLE_COLUMNS", "VOLATILE_COLUMNS"):
+    owned = ("GOLDEN_SURVIVABLE_COLUMNS", "VOLATILE_COLUMNS", "GOLDEN_LINEAGE_ATTRIBUTES")
+    for name in owned:
         assert re.search(rf"^\s*{name}\s*(:[^=]+)?=[^=]", source, re.MULTILINE) is None, name
-    assert "from er.lake.columns import GOLDEN_SURVIVABLE_COLUMNS" in source
+
+    imported_from_columns = {
+        alias.name
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.ImportFrom) and node.module == "er.lake.columns"
+        for alias in node.names
+    }
+    for name in ("GOLDEN_SURVIVABLE_COLUMNS", "GOLDEN_LINEAGE_ATTRIBUTES"):
+        assert name in imported_from_columns, (
+            f"{name} is neither assigned nor imported from er.lake.columns in model.py"
+        )
 
 
 def test_registry_module_is_pure() -> None:

@@ -71,7 +71,14 @@ ARTIFACTS_DIR = Path("artifacts")
 #: shadow any of them: a stage that could override ``std_version`` would make the
 #: document stop being the single source of truth exactly where it matters most.
 CONFIG_SOURCED_VARS: frozenset[str] = frozenset(
-    {"std_version", "survivorship_version", "run_id", "sources", "standardization"}
+    {
+        "std_version",
+        "survivorship_version",
+        "run_id",
+        "sources",
+        "standardization",
+        "survivorship",
+    }
 )
 
 #: Hard ceiling on the encoded ``--vars`` payload. Linux's ``MAX_ARG_STRLEN`` is
@@ -144,6 +151,11 @@ def render_dbt_vars(
         "sources": {name: source.model_dump() for name, source in cfg.sources.items()},
         # Exactly S6's three keys, consumed by `email_norm` and `phone_e164`.
         "standardization": cfg.standardization.model_dump(),
+        # The per-attribute rule chains, whole. S4.6 dispatches each chain rule to one
+        # macro emitting one literal ORDER BY fragment, so `golden_records` cannot
+        # assemble an entity without them — and a chain spelled in the model instead
+        # would be a second copy of S6's survivorship block (M26).
+        "survivorship": {attribute: list(chain) for attribute, chain in cfg.survivorship.items()},
     }
     if extra:
         shadowed = sorted(key for key in extra if key in payload)

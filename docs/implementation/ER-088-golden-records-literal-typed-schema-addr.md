@@ -2,7 +2,7 @@
 id: ER-088
 title: "golden_records literal typed schema (addr_* expanded) + golden_lineage (6-token vocabulary, address composite) + contract + config parity"
 milestone: M4
-status: todo
+status: done
 kind: code
 size: L
 gates: full
@@ -14,12 +14,13 @@ consumes: ["src/er/lake/columns.py::GOLDEN_SURVIVABLE_COLUMNS", "dbt/macros/surv
 owns: ["dbt/models/marts/golden_records.sql", "dbt/models/marts/golden_lineage.sql", "tests/integration/test_golden_models.py", "tests/unit/config/test_golden_schema_parity.py"]
 protected_paths: []
 extra_paths: ["dbt/models/schema.yml", "src/er/lake/columns.py", "tests/unit/test_columns.py"]
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_golden_models.py -q && uv run pytest tests/unit/config/test_golden_schema_parity.py -q"
-branch: ""
-commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+branch: "ticket/ER-088-golden-records-literal-typed-schema-addr"
+commit: "c4915d2686d0f3806c88c40c132df6abba6a3263"
+spec_sha: "7467bdacba1bd84c"
+updated_at: "2026-08-27T18:51:09Z"
+session: c379438e-8c95-4be8-8f5f-3832d8ceafaa
 ---
 ## Description
 

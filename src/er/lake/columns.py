@@ -19,6 +19,8 @@ sorted, and neither may be turned into a set for convenience.
 from typing import Final
 
 __all__ = [
+    "ADDRESS_COMPOSITE_COLUMNS",
+    "GOLDEN_LINEAGE_ATTRIBUTES",
     "GOLDEN_SURVIVABLE_COLUMNS",
     "STD_RECORD_COLUMNS",
     "VOLATILE_COLUMNS",
@@ -64,6 +66,36 @@ GOLDEN_SURVIVABLE_COLUMNS: Final[tuple[str, ...]] = (
     "addr_postal",
     "birth_date",
 )
+
+# The six `addr_*` columns of `golden_records`, in S5 DDL order. S4.6 makes them ONE
+# survivorship decision: when `address` wins, all six values come from the SINGLE
+# winning contributing record and are never assembled field by field across records.
+# Derived from `GOLDEN_SURVIVABLE_COLUMNS` rather than re-listed, so a seventh `addr_*`
+# column added to S5 joins the composite automatically instead of being silently left
+# out of the one rule that governs it.
+ADDRESS_COMPOSITE_COLUMNS: Final[tuple[str, ...]] = tuple(
+    column for column in GOLDEN_SURVIVABLE_COLUMNS if column.startswith("addr_")
+)
+
+# The attribute this composite is decided under, and the token `golden_lineage` records
+# it as. It is not a `golden_records` column: six are.
+ADDRESS_ATTRIBUTE: Final[str] = "address"
+
+# `golden_lineage.attribute`'s closed vocabulary (S4.6, S5): the survivable column set
+# with the six `addr_*` columns collapsed into the single `address` decision. Six tokens
+# for eleven columns, which is exactly the composite rule stated as a vocabulary.
+#
+# Derived, in survivable-column order, with `address` taking the position of the first
+# `addr_*` column — so the grid `golden_lineage` emits is ordered the way S5 lists the
+# relation rather than alphabetically, and adding a survivable column to S5 extends this
+# vocabulary without an edit here.
+GOLDEN_LINEAGE_ATTRIBUTES: Final[tuple[str, ...]] = tuple(
+    dict.fromkeys(
+        ADDRESS_ATTRIBUTE if column.startswith("addr_") else column
+        for column in GOLDEN_SURVIVABLE_COLUMNS
+    )
+)
+
 
 # The `int_std_records` column list of S5, in DDL order. S6.1 V6 validates every
 # column named by `blocking[].expr` and every key of `comparisons` against it, and

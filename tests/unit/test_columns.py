@@ -23,6 +23,9 @@ import sys
 from pathlib import Path
 
 from er.lake.columns import (
+    ADDRESS_ATTRIBUTE,
+    ADDRESS_COMPOSITE_COLUMNS,
+    GOLDEN_LINEAGE_ATTRIBUTES,
     GOLDEN_SURVIVABLE_COLUMNS,
     STD_RECORD_COLUMNS,
     VOLATILE_COLUMNS,
@@ -226,7 +229,18 @@ def test_each_column_set_has_exactly_one_definition_site() -> None:
         for path in (REPO_ROOT / root).rglob("*.py")
         if "__pycache__" not in path.parts
     ]
-    for name in ("VOLATILE_COLUMNS", "GOLDEN_SURVIVABLE_COLUMNS", "STD_RECORD_COLUMNS"):
+    for name in (
+        "VOLATILE_COLUMNS",
+        "GOLDEN_SURVIVABLE_COLUMNS",
+        "STD_RECORD_COLUMNS",
+        # The three ER-088 added. `er.config.validators` binds ADDRESS_COLUMNS and
+        # SURVIVORSHIP_KEYS to these, which is an assignment to a DIFFERENT name and so
+        # is an alias rather than a second definition -- exactly the distinction this
+        # test exists to keep.
+        "ADDRESS_ATTRIBUTE",
+        "ADDRESS_COMPOSITE_COLUMNS",
+        "GOLDEN_LINEAGE_ATTRIBUTES",
+    ):
         assignment = re.compile(rf"^\s*{name}\s*(:[^=]+)?=[^=]", re.MULTILINE)
         sites = [
             path
@@ -234,3 +248,62 @@ def test_each_column_set_has_exactly_one_definition_site() -> None:
             if assignment.search(path.read_text(encoding="utf-8")) is not None
         ]
         assert sites == [COLUMNS_SOURCE], f"{name} is defined in {[str(p) for p in sites]}"
+
+
+def test_address_composite_is_the_addr_subset_in_order() -> None:
+    """S4.6's composite is derived from the survivable tuple, never re-listed.
+
+    The six columns win or lose together, so a seventh `addr_*` column added to S5 must
+    join the composite automatically. A literal list here would leave it out of the one
+    rule that governs it, and the symptom would be an address assembled field-by-field
+    across records — the defect S4.6 names by name.
+    """
+    assert ADDRESS_COMPOSITE_COLUMNS == tuple(
+        column for column in GOLDEN_SURVIVABLE_COLUMNS if column.startswith("addr_")
+    )
+    assert len(ADDRESS_COMPOSITE_COLUMNS) == 6, (
+        f"S5 lists six addr_* columns; the composite found {ADDRESS_COMPOSITE_COLUMNS}"
+    )
+    # In survivable order, not sorted: the six are read off one record, and that
+    # record's column order is S5's.
+    positions = [GOLDEN_SURVIVABLE_COLUMNS.index(c) for c in ADDRESS_COMPOSITE_COLUMNS]
+    assert positions == sorted(positions)
+
+
+def test_lineage_vocabulary_is_the_survivable_set_with_address_collapsed() -> None:
+    """S4.6's six-token vocabulary: eleven columns, six decisions."""
+    assert ADDRESS_ATTRIBUTE not in GOLDEN_SURVIVABLE_COLUMNS, (
+        "`address` is the composite's NAME, not a golden_records column; six are"
+    )
+    assert set(GOLDEN_LINEAGE_ATTRIBUTES) == (
+        set(GOLDEN_SURVIVABLE_COLUMNS) - set(ADDRESS_COMPOSITE_COLUMNS)
+    ) | {ADDRESS_ATTRIBUTE}
+    assert len(GOLDEN_LINEAGE_ATTRIBUTES) == 6, (
+        f"S4.6 closes the vocabulary at six tokens; got {GOLDEN_LINEAGE_ATTRIBUTES}"
+    )
+    assert len(set(GOLDEN_LINEAGE_ATTRIBUTES)) == len(GOLDEN_LINEAGE_ATTRIBUTES), (
+        "the six addr_* columns collapsed to more than one `address` token"
+    )
+    # Ordered, and `address` sits where the first addr_* column does — so the grid
+    # golden_lineage emits reads in S5's order rather than alphabetically.
+    assert GOLDEN_LINEAGE_ATTRIBUTES.index(ADDRESS_ATTRIBUTE) == next(
+        index
+        for index, column in enumerate(GOLDEN_LINEAGE_ATTRIBUTES)
+        if column == ADDRESS_ATTRIBUTE
+    )
+    assert GOLDEN_LINEAGE_ATTRIBUTES[0] == GOLDEN_SURVIVABLE_COLUMNS[0]
+
+
+def test_validators_alias_the_canonical_constants_rather_than_redefining_them() -> None:
+    """S6.1 V2 exists to keep one fact single, so it must not derive it a second time."""
+    from er.config import validators
+
+    assert validators.ADDRESS_COLUMNS is ADDRESS_COMPOSITE_COLUMNS, (
+        "er.config.validators re-derives the address composite instead of importing it; "
+        "two derivations of one fact is what V2 exists to prevent"
+    )
+    assert validators.ADDRESS_KEY == ADDRESS_ATTRIBUTE
+    assert validators.SURVIVORSHIP_KEYS == frozenset(GOLDEN_LINEAGE_ATTRIBUTES), (
+        "the survivorship keyset and golden_lineage's vocabulary have drifted; they are "
+        "the same six tokens and must come from the same tuple"
+    )

@@ -321,4 +321,10 @@ def test_dbt_vars_key_set() -> None:
         "run_id": SUPPLIED_RUN_ID,
         "sources": {name: source.model_dump() for name, source in config.sources.items()},
         "standardization": config.standardization.model_dump(),
+        # ER-088: S4.6 dispatches each attribute's rule chain, so `golden_records`
+        # cannot assemble an entity without the `survivorship:` block. Carried whole,
+        # for the same reason `sources` is.
+        "survivorship": {
+            attribute: list(chain) for attribute, chain in config.survivorship.items()
+        },
     }

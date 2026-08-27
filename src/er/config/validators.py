@@ -28,7 +28,12 @@ from types import MappingProxyType
 from typing import Final
 
 from er.config.schema import TERMINAL_SURVIVORSHIP_RULE, Config
-from er.lake.columns import GOLDEN_SURVIVABLE_COLUMNS, STD_RECORD_COLUMNS
+from er.lake.columns import (
+    ADDRESS_ATTRIBUTE,
+    ADDRESS_COMPOSITE_COLUMNS,
+    GOLDEN_LINEAGE_ATTRIBUTES,
+    STD_RECORD_COLUMNS,
+)
 
 __all__ = [
     "ADDRESS_COLUMNS",
@@ -80,19 +85,22 @@ _SEPARATING_RULES: Final[frozenset[str]] = frozenset(SURVIVORSHIP_RULES) - {_SOU
 #: The composite `survivorship:` key of S6. It is the only key that is not itself a
 #: `golden_records` column, and S4.6 requires all six of its columns to come from one
 #: winning record, so they win or lose together and expand together.
-ADDRESS_KEY = "address"
+#:
+#: Imported rather than spelled here. This module's own docstring says V2 exists to keep
+#: the `survivorship:` key set and `GOLDEN_SURVIVABLE_COLUMNS` ONE fact, and a validator
+#: that re-derived the vocabulary it validates against would be the first place that
+#: fact could split. `er.config` imports `er.lake.columns`; the reverse would be a layer
+#: inversion, so `columns.py` is where all three of these live.
+ADDRESS_KEY: Final[str] = ADDRESS_ATTRIBUTE
 
-#: Derived, never listed: the `addr_*` members of the imported survivable tuple.
-ADDRESS_COLUMNS: Final[tuple[str, ...]] = tuple(
-    column for column in GOLDEN_SURVIVABLE_COLUMNS if column.startswith("addr_")
-)
+#: The `addr_*` members of the survivable tuple (S4.6's composite).
+ADDRESS_COLUMNS: Final[tuple[str, ...]] = ADDRESS_COMPOSITE_COLUMNS
 
-#: The `survivorship:` key set S6.1 V2 requires, as a consequence of S5.0 rather than
-#: as a second listing of it: every survivable golden column, with the six address
-#: ones collapsed into `address`.
-SURVIVORSHIP_KEYS: Final[frozenset[str]] = (
-    frozenset(GOLDEN_SURVIVABLE_COLUMNS) - frozenset(ADDRESS_COLUMNS)
-) | {ADDRESS_KEY}
+#: The `survivorship:` key set S6.1 V2 requires: every survivable golden column with the
+#: six address ones collapsed into `address`. That is exactly `golden_lineage`'s closed
+#: attribute vocabulary, unordered -- one fact, and V2 and the mart now read it from the
+#: same tuple.
+SURVIVORSHIP_KEYS: Final[frozenset[str]] = frozenset(GOLDEN_LINEAGE_ATTRIBUTES)
 
 _NULL_TOKEN = "null"
 _VARIANT_MATCH = "variant_match"

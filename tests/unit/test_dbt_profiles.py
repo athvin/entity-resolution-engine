@@ -201,16 +201,22 @@ def test_project_sets_contract_and_on_schema_change() -> None:
     # both satisfy. Asserted together, because the constraint is on the PAIR.
     assert models["+on_schema_change"] == "append_new_columns"
 
-    # The two version vars, plus the two the S4.2 staging models read AT RENDER
-    # TIME: a missing var is tolerated by `dbt parse` and is a hard error in
-    # `dbt compile --target mem`, and S9.1 runs both on a runner with no services and
-    # no config document. Exact, not a subset: a fifth var here would be a value the
-    # pipeline never passes and therefore a real fallback rather than a rendering aid.
+    # The two version vars, the two the S4.2 staging models read AT RENDER TIME, and
+    # the S4.6 survivorship chains the marts dispatch: a missing var is tolerated by
+    # `dbt parse` and is a hard error in `dbt compile --target mem`, and S9.1 runs both
+    # on a runner with no services and no config document.
+    #
+    # Exact, not a subset. The rule the exactness encodes is that every var declared
+    # here must be one the pipeline actually overrides -- otherwise it is a real
+    # fallback rather than a rendering aid, and a run could silently read it.
+    # `test_dbt_runner.py::test_project_vars_are_all_overridden` is the other half of
+    # that pair, and it checks each of these resolves to an S6 field at runtime.
     assert set(project["vars"]) == {
         "std_version",
         "survivorship_version",
         "sources",
         "standardization",
+        "survivorship",
     }
 
     # S6: the CLI's `--vars` override always wins, so these two are fallbacks for a
