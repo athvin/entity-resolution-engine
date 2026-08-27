@@ -1,0 +1,13 @@
+scenario: assertions_non_batch
+
+# a `never` over two records the batch delivers neither of. The affected set can only
+# reach them through the assertion delta (S4.5.1, B5), so a run that seeded the affected
+# set from `ingest_batches` alone would leave the partition untouched.
+phases: [base, batch]
+
+# S8.2.1 admits `assertions.csv` at the scenario root only when the manifest
+# declares it: the file is an INPUT the run loads, not an expectation.
+aux_files: [assertions.csv]
+
+# No expected/*/golden.csv: `golden_records` is first written in M4 (S12), and a
+# milestone may not assert on a later milestone's relation.

@@ -1,0 +1,5 @@
+phase,rec_a_key,rec_b_key,kind,created_by,note
+batch,billing:B701,crm:C701,always,steward:er-078,A1 an always over a pair sharing neither email nor phone; nothing but this edge can join them
+batch,billing:B702,crm:C702,never,steward:er-078,A2 a never over a naturally linked pair with no third record; the direct edge is suppressed and no cut is needed
+batch,billing:B703,crm:C703,never,steward:er-078,A3 a never whose endpoints stay connected through webforms:W703; this is the case that forces a partition-level cut
+batch,billing:B704,crm:C704,always,steward:er-078,A4 an always the run retracts before reconcile; it must have no effect on the partition

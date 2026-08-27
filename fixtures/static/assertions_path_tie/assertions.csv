@@ -1,0 +1,2 @@
+phase,rec_a_key,rec_b_key,kind,created_by,note
+batch,crm:CP01,webforms:WP01,never,steward:er-078,two bridges give two paths of equal minimum hop count between the endpoints once the direct edge is suppressed

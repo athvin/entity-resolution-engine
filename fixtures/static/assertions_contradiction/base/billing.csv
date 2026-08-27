@@ -1,0 +1,2 @@
+account_no,fname,lname,billing_email,contact_phone,addr1,addr_city,addr_state,postal_code,birth_date,updated_ts,persona_id
+B801,Elena,Marsh,e.marsh@example.com,415-555-0802,10 Sutter Row Apt 1,San Francisco,CA,94114,07/19/1984,2024-04-01 09:00:00,P2

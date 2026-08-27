@@ -1,0 +1,5 @@
+crm_id,first_name,last_name,email_address,phone,street_address,city,state,zip,dob,last_modified,persona_id
+C701,Ana,Ferreira,ana.f@example.com,(415) 555-0701,10 Sutter Row Apt 1,San Francisco,CA,94114,1984-07-19,2024-04-01 09:00:00,P1
+C702,Bruno,Katz,bruno.k@example.com,(415) 555-0703,10 Sutter Row Apt 1,San Francisco,CA,94114,1984-07-19,2024-04-01 09:00:00,P2
+C703,Chiara,Lund,,,10 Sutter Row Apt 1,San Francisco,CA,94114,1984-07-19,2024-04-01 09:00:00,P4
+C704,Dmitri,Novak,dmitri.n@example.com,(415) 555-0707,10 Sutter Row Apt 1,San Francisco,CA,94114,1984-07-19,2024-04-01 09:00:00,P6

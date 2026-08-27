@@ -1,0 +1,2 @@
+crm_id,first_name,last_name,email_address,phone,street_address,city,state,zip,dob,last_modified,persona_id
+C901,Hana,Iqbal,hana.i@example.com,(415) 555-0901,10 Sutter Row Apt 1,San Francisco,CA,94114,1984-07-19,2024-04-01 09:00:00,P1
