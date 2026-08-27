@@ -1,0 +1,14 @@
+scenario: assertions_scenario
+
+# the four cases S4.4 gives the assertion lifecycle: A1 an `always` that joins a pair
+# nothing else can join, A2 a `never` on a naturally linked pair with no alternative
+# path, A3 a `never` whose endpoints stay connected through a third record, and A4 an
+# `always` the run retracts before reconcile.
+phases: [base, batch]
+
+# S8.2.1 admits `assertions.csv` at the scenario root only when the manifest
+# declares it: the file is an INPUT the run loads, not an expectation.
+aux_files: [assertions.csv]
+
+# No expected/*/golden.csv: `golden_records` is first written in M4 (S12), and a
+# milestone may not assert on a later milestone's relation.

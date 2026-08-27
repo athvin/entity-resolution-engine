@@ -1,0 +1,12 @@
+scenario: assertions_two_iterations
+
+# the case D5's bounded fixpoint needs two rounds for. Cutting one edge leaves the
+# endpoints joined by the second path, so the run must re-propagate and cut again.
+phases: [base, batch]
+
+# S8.2.1 admits `assertions.csv` at the scenario root only when the manifest
+# declares it: the file is an INPUT the run loads, not an expectation.
+aux_files: [assertions.csv]
+
+# No expected/*/golden.csv: `golden_records` is first written in M4 (S12), and a
+# milestone may not assert on a later milestone's relation.

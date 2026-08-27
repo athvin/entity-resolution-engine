@@ -1,0 +1,2 @@
+phase,rec_a_key,rec_b_key,kind,created_by,note
+batch,crm:CI01,webforms:WI01,never,steward:er-078,cutting one edge leaves the endpoints joined by the second path so the bounded fixpoint needs a second round; a single-pass implementation stops one cut short

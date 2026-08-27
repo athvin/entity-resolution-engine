@@ -1,0 +1,14 @@
+scenario: assertions_cut_tie
+
+# D5's cut tie. Every compared field of all three records is identical, so both edges on
+# the shortest path carry the same `match_probability` by INV-SCORE (S4.3.3) and the
+# `(rec_a_key ASC, rec_b_key ASC)` tiebreak is the only thing that can choose between
+# them.
+phases: [base, batch]
+
+# S8.2.1 admits `assertions.csv` at the scenario root only when the manifest
+# declares it: the file is an INPUT the run loads, not an expectation.
+aux_files: [assertions.csv]
+
+# No expected/*/golden.csv: `golden_records` is first written in M4 (S12), and a
+# milestone may not assert on a later milestone's relation.

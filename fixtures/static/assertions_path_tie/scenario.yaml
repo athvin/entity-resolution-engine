@@ -1,0 +1,12 @@
+scenario: assertions_path_tie
+
+# D5's path tie: two bridges, so once the direct edge is suppressed there are exactly
+# two paths of equal minimum hop count between the never pair.
+phases: [base, batch]
+
+# S8.2.1 admits `assertions.csv` at the scenario root only when the manifest
+# declares it: the file is an INPUT the run loads, not an expectation.
+aux_files: [assertions.csv]
+
+# No expected/*/golden.csv: `golden_records` is first written in M4 (S12), and a
+# milestone may not assert on a later milestone's relation.

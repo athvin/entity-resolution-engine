@@ -1,0 +1,10 @@
+scenario: assertions_contradiction
+
+# the minimal cycle S4.4.1 refuses: always(a,b), always(b,c), never(a,c). The batch run
+# fails CONTRADICTION-1, so this scenario ships NO `expected/batch/` directory -- there
+# is no post-state to describe, and S8.2.1 spells an absent claim as an absent file.
+phases: [base, batch]
+
+# S8.2.1 admits `assertions.csv` at the scenario root only when the manifest
+# declares it: the file is an INPUT the run loads, not an expectation.
+aux_files: [assertions.csv]

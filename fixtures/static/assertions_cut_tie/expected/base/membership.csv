@@ -1,0 +1,4 @@
+persona_id,source_system,source_record_id,entity_label
+P1,billing,BT01,E1
+P1,webforms,WT01,E1
+P2,crm,CT01,E1

@@ -1,0 +1,2 @@
+phase,rec_a_key,rec_b_key,kind,created_by,note
+batch,billing:B901,crm:C901,never,steward:er-078,neither record is delivered in the batch; only the assertion delta can bring them into the affected set (S4.5.1)

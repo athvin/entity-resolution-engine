@@ -1,0 +1,2 @@
+phase,rec_a_key,rec_b_key,kind,created_by,note
+batch,crm:CT01,webforms:WT01,never,steward:er-078,every compared field of all three records is identical so both path edges carry the same probability; only the rec_a_key then rec_b_key tiebreak can choose which is cut

@@ -1,0 +1,10 @@
+entity_label,event_type,count
+E2,member_removed,1
+E3,member_removed,1
+E5,merged,1
+E7,created,1
+E7,edge_cut,1
+E7,split,1
+E8,created,1
+E8,split,1
+E9,created,1

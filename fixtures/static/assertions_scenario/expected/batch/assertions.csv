@@ -1,0 +1,5 @@
+rec_a_key,rec_b_key,kind,active
+billing:B701,crm:C701,always,true
+billing:B702,crm:C702,never,true
+billing:B703,crm:C703,never,true
+billing:B704,crm:C704,always,false

@@ -1,0 +1,4 @@
+phase,rec_a_key,rec_b_key,kind,created_by,note
+batch,billing:B801,crm:C801,always,steward:er-078,the first leg of the cycle S4.4.1 refuses
+batch,billing:B801,webforms:W801,always,steward:er-078,the second leg; transitively it forces crm:C801 and webforms:W801 together
+batch,crm:C801,webforms:W801,never,steward:er-078,the leg that closes the contradiction; CONTRADICTION-1 fails the run
