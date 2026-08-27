@@ -2,7 +2,7 @@
 id: ER-080
 title: "Event replay: replay_membership reproduces entity_membership; zero events on unchanged re-run"
 milestone: M3
-status: in_progress
+status: done
 kind: code
 size: S
 gates: full
@@ -17,9 +17,9 @@ extra_paths: ["src/er/entities/events.py", "tests/helpers/invariants.py"]
 attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_event_replay.py -q"
 branch: "ticket/ER-080-event-replay-replay-membership-reproduces-entity"
-commit: ""
+commit: "b2ebc38ab1e3c1dd9795a8199f62550b5edc6d13"
 spec_sha: "7467bdacba1bd84c"
-updated_at: "2026-08-27T10:43:47Z"
+updated_at: "2026-08-27T13:24:32Z"
 session: c379438e-8c95-4be8-8f5f-3832d8ceafaa
 ---
 ## Description
