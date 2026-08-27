@@ -1,0 +1,2 @@
+crm_id,first_name,last_name,email_address,phone,street_address,city,state,zip,dob,last_modified,persona_id
+C401,Priya,Anand,priya.anand@example.com,(415) 555-0801,30 Alder Street Apt 2,San Francisco,CA,94105,1988-04-12,2024-01-05 09:20:00,P1

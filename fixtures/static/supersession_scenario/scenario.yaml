@@ -1,0 +1,12 @@
+scenario: supersession_scenario
+
+# `batch` re-delivers one record of the base entity with corrected values (S8.2). The
+# key is unchanged, so S4.1's append-only `raw_records` gains a second version rather
+# than overwriting the first, and `int_std_records` carries the newer one — which is
+# what makes the S4.3.3 endpoint-hash clause of INV-SCORE observable at all.
+phases: [base, batch]
+
+# No expected/*/golden.csv: `golden_records` is first written in M4 (S12), and S12's
+# gating rule forbids a milestone asserting on a later milestone's relation. S8.2.1
+# makes an absent expected file mean the phase claims nothing about that relation, so
+# the omission is the encoding rather than a gap.

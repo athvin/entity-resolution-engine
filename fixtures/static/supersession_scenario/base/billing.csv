@@ -1,0 +1,2 @@
+account_no,fname,lname,billing_email,contact_phone,addr1,addr_city,addr_state,postal_code,birth_date,updated_ts,persona_id
+B401,Priya,Anand,priya.a@example.com,415-555-0801,30 Alder Street Apt 2,San Francisco,CA,94105,04/12/1988,2024-01-07 10:05:00,P1

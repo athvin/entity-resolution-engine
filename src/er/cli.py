@@ -93,6 +93,7 @@ from er.doctor import check_lines, check_record, run_checks
 from er.doctor import exit_code as doctor_exit_code
 from er.entities.ids import IdFactory, UlidFactory
 from er.entities.reconcile_stage import run_reconcile_stage
+from er.entities.retraction import invalidate_incident_edges
 from er.errors import (
     ConfigError,
     ErError,
@@ -119,6 +120,7 @@ from er.matching.incremental import (
     IncrementalScoreResult,
     score_incremental,
 )
+from er.matching.tf import assert_tf_lookup_complete, tf_columns
 from er.matching.train import run_train_stage
 from er.obs.logging import emit_stage_record
 from er.obs.runctx import RunContext, StageRun
@@ -687,6 +689,28 @@ class _MatchStage:
                     f"answer a different question (S4.3.2)"
                 )
             settings = load_model_settings(connection, store, active.model_version)
+
+            # S4.5.5, and deliberately here rather than inside the two scorers. S4.0b
+            # permits the scoring path exactly one write to `match_scores` — "only final
+            # scored pairs are written ... in a single write statement" — and this
+            # retirement is not a scored pair, so it belongs to the STAGE, one level out.
+            # It runs before scoring so a pair whose endpoints moved is retired and then
+            # re-scored back to `is_active = true` by the S4.3.4 MERGE carrying the NEW
+            # hashes, which is INV-SCORE (S4.3.3) working rather than breaking.
+            #
+            # The D4 preflight is re-asserted first, and it is not redundant with the one
+            # each scorer opens with: an incomplete frozen snapshot must refuse at exit 3
+            # having written NOTHING, and invalidating ahead of that check would retire
+            # edges on a run that then declined to replace them — leaving the next
+            # reconcile to cluster a corpus whose edges this run had just deleted.
+            assert_tf_lookup_complete(
+                connection,
+                active.model_version,
+                active.tf_snapshot_id,
+                tf_columns(options.config),
+            )
+            invalidate_incident_edges(connection, run_id=self.stage_run.run_id)
+
             result: FullMatchResult | IncrementalScoreResult
             if self.mode == MODE_FULL:
                 result = score_full(
