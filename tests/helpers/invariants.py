@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Sequence
+from datetime import datetime
 from pathlib import Path
 from typing import Final
 
@@ -47,6 +48,7 @@ import duckdb
 
 from er.config.loader import load_config
 from er.entities.cluster import Edge, adjust_edges_with_assertions, label_propagate
+from er.entities.events import EVENT_COLUMNS, REPLAY_ORDER_COLUMNS, replay_membership
 from er.lake.model import SCHEMA_QUALIFIER
 from er.matching.api import leaked_splink_relations
 from er.review.assertions import active_assertions, check_contradiction_1
@@ -55,6 +57,7 @@ __all__ = [
     "CANONICAL_PAIR_RELATIONS",
     "Partition",
     "assert_membership_equals_components",
+    "assert_replay_reproduces_membership",
     "current_partition",
     "membership_partition",
 ]
@@ -361,4 +364,79 @@ def _partition_report(membership: Partition, components: Partition) -> str:
             f"  in the components but not in entity_membership ({len(only_components)}):",
             *(f"    {group}" for group in only_components[:20]),
         ]
+    )
+
+
+ENTITY_EVENTS: Final = f"{SCHEMA_QUALIFIER}.entity_events"
+
+
+def assert_replay_reproduces_membership(
+    connection: duckdb.DuckDBPyConnection,
+    *,
+    up_to: tuple[datetime, int] | None = None,
+    expected: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Folding `entity_events` reproduces `entity_membership` exactly (D3, M3).
+
+    This is the only executable statement of what current state MEANS relative to its
+    log: `entity_membership` holds no history (S4.5.3), so if the fold and the table
+    disagree, one of them is lying and nothing else in the system would notice.
+
+    The comparison runs in BOTH directions on purpose. A one-directional check —
+    "everything replay produced is in the table" — passes on a fold that silently
+    dropped an event type, which is exactly the bug worth catching here.
+
+    Args:
+        connection: an attached lake connection.
+        up_to: fold only events at or before this `(occurred_at, seq)`, for the
+            point-in-time arm. Every event, when omitted.
+        expected: compare against this mapping rather than against the live table.
+            The point-in-time arm passes a time-travelled read here, since the live
+            table is the state AFTER the run being replayed to.
+
+    Returns:
+        The folded `record_key -> entity_id`, so a caller can make further claims about
+        it without folding twice.
+    """
+    # Column names come from the S5 TableSpec, never from literals here: two of the five
+    # this fold reads (`occurred_at`, `seq`) are VOLATILE_COLUMNS members, and
+    # `tests/unit/test_compare_helpers.py` requires every helper to import that
+    # vocabulary rather than re-spell it.
+    stamp, sequence = REPLAY_ORDER_COLUMNS
+    rows = connection.execute(f"SELECT {', '.join(EVENT_COLUMNS)} FROM {ENTITY_EVENTS}").fetchall()
+    events = [dict(zip(EVENT_COLUMNS, row, strict=True)) for row in rows]
+    if up_to is not None:
+        events = [event for event in events if (event[stamp], int(event[sequence])) <= up_to]
+    replayed = replay_membership(events)
+
+    if expected is None:
+        expected = {
+            str(record_key): str(entity_id)
+            for record_key, entity_id in connection.execute(
+                f"SELECT record_key, entity_id FROM {ENTITY_MEMBERSHIP}"
+            ).fetchall()
+        }
+
+    if replayed == expected:
+        return replayed
+
+    only_replay = sorted(k for k in replayed if replayed[k] != expected.get(k))
+    only_table = sorted(k for k in expected if expected[k] != replayed.get(k))
+    raise AssertionError(
+        "\n".join(
+            [
+                f"replaying {len(events)} event(s) does not reproduce entity_membership "
+                "(S4.5.3, D3)",
+                f"  records replay places differently ({len(only_replay)}):",
+                *(
+                    f"    {k}: replay={replayed.get(k)!r} table={expected.get(k)!r}"
+                    for k in only_replay[:20]
+                ),
+                f"  records the table holds that replay does not ({len(only_table)}):",
+                *(
+                    f"    {k}: table={expected.get(k)!r} replay={replayed.get(k)!r}"
+                    for k in only_table[:20]
+                ),
+            ]
+        )
     )

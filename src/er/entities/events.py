@@ -52,12 +52,15 @@ __all__ = [
     "OPTIONAL_DETAIL_KEYS",
     "DetailsSchema",
     "Event",
+    "EVENT_FOLD_VOCABULARY",
+    "REPLAY_ORDER_COLUMNS",
     "EventLog",
     "InvalidEventDetailsError",
     "UnknownEventTypeError",
     "append_events",
     "canonical_details",
     "details_hash",
+    "replay_membership",
 ]
 
 _SPEC: Final = REGISTRY["entity_events"]
@@ -451,3 +454,102 @@ def append_events(
     statement = _INSERT_PREFIX + ", ".join(_ROW_PLACEHOLDER for _ in rows)
     connection.execute(statement, [value for row in rows for value in row])
     return len(rows)
+
+
+#: The replay order (S4.5.3), declared once. `entity_membership` is current state and
+#: this pair is what turns the log back into it, so a reader that ordered by anything
+#: else — `event_id`, physical row order — would fold a different history. Exported
+#: because `tests/helpers/invariants.py` must not re-spell a VOLATILE_COLUMNS member as
+#: a literal, and both of these are members of that set.
+REPLAY_ORDER_COLUMNS: Final[tuple[str, str]] = ("occurred_at", "seq")
+
+
+#: How each event type moves membership when the log is folded (S4.5.3, D3).
+#:
+#: `add` puts `details.member_keys` on the event's own entity; `remove` takes them
+#: off it; `move` does both, taking them off the event's entity and putting them on
+#: the entity named by the detail key beside the verb. `none` is membership-neutral
+#: and is listed rather than omitted, because "this type does nothing" and "this type
+#: is not handled" must not look the same to a reader or to :func:`replay_membership`.
+#:
+#: `merged` MOVES rather than merely removing: S4.5.3 emits it on the entity that lost
+#: all of its members, and the members went somewhere. The destination is read from the
+#: event's own `merged_into` detail and never from the `entities.merged_into` COLUMN —
+#: D3's rule is that the fold depends on the log alone, and S5 describes that column as
+#: the durable form of the same fact rather than as a second source of it.
+EVENT_FOLD_VOCABULARY: Final[Mapping[str, tuple[str, str | None]]] = MappingProxyType(
+    {
+        "created": ("add", None),
+        "member_added": ("add", None),
+        "member_removed": ("remove", None),
+        "merged": ("move", "merged_into"),
+        "split": ("add", None),
+        "retired": ("remove", None),
+        "edge_cut": ("none", None),
+    }
+)
+
+
+def replay_membership(
+    events: Iterable[Mapping[str, Any]],
+) -> dict[str, str]:
+    """Fold `entity_events` into `record_key -> entity_id` (S4.5.3, D3, M3).
+
+    This is the executable statement of what `entity_membership` MEANS relative to its
+    log: current state is the fold of the history, so replaying every event must
+    reproduce the table exactly. Nothing else in the system says that.
+
+    Three properties are load-bearing:
+
+    * **The sort is inside this function.** `(occurred_at, seq)` is the replay order
+      (S4.5.3) and it is applied here, so a caller cannot make the answer depend on how
+      it happened to query. A fold that trusted physical row order would agree with
+      `entity_membership` on a small lake and diverge on a compacted one.
+    * **An unknown `event_type` raises.** A type this fold skipped would make replay
+      agree with membership *by doing less*, which is the one failure mode a
+      replay-equals-table assertion cannot otherwise catch.
+    * **Membership is a set per entity, not a scalar.** A split emits `created` and
+      `split` on the same fragment carrying the same keys, and a merge can emit `merged`
+      on the loser beside `member_added` on the claimant; applying either twice has to
+      be harmless.
+
+    Args:
+        events: rows carrying at least `entity_id`, `event_type`, `occurred_at`, `seq`
+            and `details` — a mapping, or the JSON text `entity_events.details` stores.
+
+    Returns:
+        `record_key -> entity_id` for every record the log leaves in an entity. A record
+        whose last event removed it from everything is absent, which is what
+        `entity_membership` holds for it too: no row.
+
+    Raises:
+        UnknownEventTypeError: an `event_type` outside :data:`EVENT_FOLD_VOCABULARY`.
+    """
+    holdings: dict[str, set[str]] = {}
+
+    def members(entity_id: str) -> set[str]:
+        return holdings.setdefault(entity_id, set())
+
+    stamp, sequence = REPLAY_ORDER_COLUMNS
+    for event in sorted(events, key=lambda row: (row[stamp], int(row[sequence]))):
+        event_type = str(event["event_type"])
+        if event_type not in EVENT_FOLD_VOCABULARY:
+            raise UnknownEventTypeError(event_type)
+        verb, destination_key = EVENT_FOLD_VOCABULARY[event_type]
+        if verb == "none":
+            continue
+
+        raw = event["details"]
+        details = raw if isinstance(raw, Mapping) else json.loads(str(raw))
+        keys = {str(key) for key in details.get("member_keys", ())}
+        entity_id = str(event["entity_id"])
+
+        if verb == "add":
+            members(entity_id).update(keys)
+        elif verb == "remove":
+            members(entity_id).difference_update(keys)
+        else:
+            members(entity_id).difference_update(keys)
+            members(str(details[destination_key])).update(keys)
+
+    return {record_key: entity_id for entity_id, keys in holdings.items() for record_key in keys}
