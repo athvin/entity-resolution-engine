@@ -2,7 +2,7 @@
 id: ER-089
 title: "**NEW (split)** golden_display + presentation-only guard (no matching module reads it)"
 milestone: M4
-status: todo
+status: in_progress
 kind: code
 size: S
 gates: full
@@ -14,12 +14,13 @@ consumes: ["relation:golden_records", "relation:golden_lineage", "src/er/lake/co
 owns: ["dbt/models/marts/golden_display.sql", "tests/integration/test_golden_display.py", "tests/unit/test_golden_display_isolation.py"]
 protected_paths: []
 extra_paths: ["dbt/models/schema.yml", "src/er/lake/columns.py"]
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_golden_display.py -q && uv run pytest tests/unit/test_golden_display_isolation.py -q"
-branch: ""
+branch: "ticket/ER-089-new-split-golden-display-presentation-only"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "7467bdacba1bd84c"
+updated_at: "2026-08-27T19:19:03Z"
+session: c379438e-8c95-4be8-8f5f-3832d8ceafaa
 ---
 ## Description
 
