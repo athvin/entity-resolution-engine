@@ -104,6 +104,7 @@ from er.errors import (
     classify,
     exit_code_for,
 )
+from er.golden.assemble import assemble as run_assemble
 from er.ingest.landing import ingest_delivery
 from er.ingest.sources import adapter_for
 from er.lake.catalog import tenant_lock
@@ -1736,6 +1737,43 @@ def reconcile(
     )
 
 
+@dataclass
+class _AssembleStage:
+    """`er assemble`: build the golden marts, reap retired entities (S4.6, M10).
+
+    The stage owns the S4.0 surface — the stdout manifest and the ``0`` / ``10``
+    split — and none of the assembly: :func:`~er.golden.assemble.assemble` computes
+    the touched set, sequences the marts between the touched-set write and the reap,
+    and returns the counters. `--touched-only` is a typed field rather than an argv
+    token because it changes what the stage READS (`er_touched_entities`), not just
+    what it prints.
+    """
+
+    touched_only: bool = False
+    args: tuple[str, ...] = ()
+    name: str = "assemble"
+    stage_run: StageRun | None = None
+
+    def bind(self, stage_run: StageRun) -> None:
+        self.stage_run = stage_run
+
+    def run(self, options: GlobalOptions) -> int:
+        if options.config is None or self.stage_run is None:
+            # Unreachable through the command tree: S4.0 lists ER_CONFIG required and
+            # `_execute` binds before the body runs.
+            raise StageFailure("er assemble was invoked without a config or a run_stages row")
+        with connect() as connection:
+            result = run_assemble(
+                connection,
+                options.config,
+                run_id=self.stage_run.run_id,
+                counters=self.stage_run.counters,
+                touched_only=self.touched_only,
+            )
+        _write_stdout(result.manifest(), result.stdout_line(), options)
+        return result.exit_code
+
+
 @app.command()
 def assemble(
     touched_only: Annotated[
@@ -1747,7 +1785,16 @@ def assemble(
 ) -> None:
     """Build golden records, lineage and display rows (S4.6)."""
     options = GlobalOptions.resolve(config_path=config, run_id=run_id, json_output=json_output)
-    _run_single("assemble", options, ("--touched-only",) if touched_only else ())
+    _run_command(
+        _AssembleStage(
+            touched_only=touched_only,
+            args=("--touched-only",) if touched_only else (),
+        ),
+        options,
+        mode=_MODE_STAGE,
+        command="assemble",
+        persist=True,
+    )
 
 
 @app.command("run-all")

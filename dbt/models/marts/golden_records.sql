@@ -61,6 +61,10 @@ with members as (
     join {{ source('lake', 'entities') }} as e
       on e.entity_id = m.entity_id
      and e.status = 'active'
+    -- S4.6 touched-only assembly: `true` in full mode, the rebuild set in touched
+    -- mode (assembly/touched_entities.sql). Applied at the source CTE so every
+    -- downstream decision inherits the restriction and no per-entity id reaches argv.
+    where {{ assemble_entity_filter('m.entity_id') }}
 
 ),
 
@@ -155,7 +159,7 @@ select
     cast(a.{{ column }} as VARCHAR) as {{ column }},
     {%- endfor %}
     cast('{{ var('survivorship_version') }}' as VARCHAR) as survivorship_version,
-    cast('{{ run_started_at.strftime('%Y-%m-%d %H:%M:%S') }}' as TIMESTAMP) as assembled_at
+    cast('{{ var('run_started_at', run_started_at.strftime('%Y-%m-%d %H:%M:%S')) }}' as TIMESTAMP) as assembled_at
 from (select distinct entity_id from member_rows) as e
 {%- for attribute in scalar_attributes %}
 left join decision_{{ attribute }} as d_{{ attribute }}
