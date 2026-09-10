@@ -2,7 +2,7 @@
 id: ER-083
 title: "deletion_scenario + retraction path (member_removed/split/retired) + T-DEL-1"
 milestone: M3
-status: in_progress
+status: done
 kind: code
 size: L
 gates: full
@@ -17,9 +17,9 @@ extra_paths: ["fixtures/static/deletion_scenario/base/", "fixtures/static/deleti
 attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/scenarios/test_deletion.py -q && uv run pytest tests/unit/fixtures/test_deletion_scenario.py -q"
 branch: "ticket/ER-083-deletion-scenario-retraction-path-member-removed"
-commit: ""
+commit: "3c217f5dcc3f2f2a3c3c5235919020f635bc77ab"
 spec_sha: "7467bdacba1bd84c"
-updated_at: "2026-09-10T10:52:10Z"
+updated_at: "2026-09-10T16:50:02Z"
 session: d0707c1d-1d2f-4e95-8ff1-341c508a8022
 ---
 ## Description
