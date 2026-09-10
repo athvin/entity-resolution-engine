@@ -2,7 +2,7 @@
 id: ER-092
 title: "Touched-only assembly: er_touched_entities, single run_id var, explicit reap step, assembled_at rule + T-INC-2 (rewritten ∪ reaped == touched)"
 milestone: M4
-status: todo
+status: in_progress
 kind: code
 size: L
 gates: full
@@ -14,12 +14,13 @@ consumes: ["src/er/obs/run_context.py::RunContext", "src/er/dbt_runner.py::rende
 owns: ["src/er/golden/assemble.py", "dbt/macros/assembly/touched_entities.sql", "tests/integration/test_touched_assembly.py"]
 protected_paths: ["fixtures/static/base_10/expected/", "fixtures/static/merge_scenario/expected/", "fixtures/static/deletion_scenario/expected/"]
 extra_paths: ["src/er/cli.py", "dbt/models/marts/golden_records.sql", "dbt/models/marts/golden_lineage.sql", "dbt/models/marts/golden_display.sql", "dbt/models/schema.yml"]
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_touched_assembly.py -q"
-branch: ""
+branch: "ticket/ER-092-touched-only-assembly-er-touched-entities"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "7467bdacba1bd84c"
+updated_at: "2026-09-10T23:24:52Z"
+session: d0707c1d-1d2f-4e95-8ff1-341c508a8022
 ---
 ## Description
 
