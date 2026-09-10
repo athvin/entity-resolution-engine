@@ -2,7 +2,7 @@
 id: ER-067
 title: "er.eval.pairwise_metrics + hand-computed unit + blocking-recall & edge-level T-MATCH-1a on base_10"
 milestone: M3
-status: in_progress
+status: done
 kind: code
 size: M
 gates: full
@@ -17,9 +17,9 @@ extra_paths: ["scripts/lint_metrics.py", "src/er/eval/__init__.py"]
 attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_match_quality.py -q && uv run pytest tests/unit/eval/test_pairwise_metrics.py -q"
 branch: "ticket/ER-067-er-eval-pairwise-metrics-hand-computed"
-commit: ""
+commit: "f97ee0c85509f45dfccf8b2c92ebb8714b4e2864"
 spec_sha: "7467bdacba1bd84c"
-updated_at: "2026-09-10T19:40:53Z"
+updated_at: "2026-09-10T22:15:41Z"
 session: d0707c1d-1d2f-4e95-8ff1-341c508a8022
 ---
 ## Description
