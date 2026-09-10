@@ -112,6 +112,7 @@ from er.lake.ducklake import connect
 from er.lake.env import MissingEnvError
 from er.lake.init import init_lake, reset_lake
 from er.lake.maintain import DEFAULT_RETAIN_DAYS, maintain
+from er.lake.model import REBUILD_REASONS
 from er.lake.model_registry import active_model, load_model_settings
 from er.lake.objectstore import ObjectStore
 from er.matching.full import MODE_FULL, FullMatchResult, score_full
@@ -569,6 +570,21 @@ class _TrainStage:
         return result.exit_code
 
 
+def _reason_option(value: str | None) -> str | None:
+    """Validate ``--reason`` during parsing, before any lake connection (S4.0).
+
+    Typer callbacks run while the command line is still being read, so an unknown
+    value exits ``2`` as a malformed invocation — the AC7 contract — instead of
+    surfacing later as a rejected row.
+    """
+    if value is not None and value not in REBUILD_REASONS:
+        raise typer.BadParameter(
+            f"{value!r} is not a rebuild reason; expected one of "
+            f"{', '.join(sorted(REBUILD_REASONS))}"
+        )
+    return value
+
+
 @dataclass
 class _ReconcileStage:
     """`er reconcile`: cluster the adjusted edge set and commit the plan (S4.5).
@@ -590,6 +606,9 @@ class _ReconcileStage:
     args: tuple[str, ...] = ()
     name: str = "reconcile"
     stage_run: StageRun | None = None
+    #: The S5.1 rebuild reason, stamped into every emitted event's details. `None`
+    #: for ordinary runs — a reason puts the run outside T-INC-2's accounting.
+    reason: str | None = None
 
     def bind(self, stage_run: StageRun) -> None:
         self.stage_run = stage_run
@@ -608,6 +627,7 @@ class _ReconcileStage:
                 self.stage_run,
                 model_version=active.model_version,
                 tf_snapshot_id=active.tf_snapshot_id,
+                reason=self.reason,
             )
         _write_stdout(result.manifest(), result.stdout_line(), options)
         return result.exit_code
@@ -989,6 +1009,7 @@ def run_all_chain(
     *,
     source: str | None = None,
     path: str | None = None,
+    reason: str | None = None,
 ) -> list[Stage]:
     """The ordered stages ``er run-all --mode <mode>`` executes (S4.0).
 
@@ -1018,7 +1039,11 @@ def run_all_chain(
         stages.append(_stage_for("ingest", ingest_args))
     stages.append(_stage_for("standardize", ("--changed-only",) if incremental else ()))
     stages.append(_stage_for("match", ("--mode", mode)))
-    stages.append(_stage_for("reconcile"))
+    # The chain's reconcile slot is still the M1 stub (`_stage_for`), so the reason
+    # reaches only `runs.rebuild_reason` here; the ticket that wires real stages
+    # into this chain threads it into `_ReconcileStage(reason=...)`, whose event
+    # stamping the standalone `er reconcile --reason` already exercises.
+    stages.append(_stage_for("reconcile", ("--reason", reason) if reason is not None else ()))
     stages.append(_stage_for("assemble", ("--touched-only",) if incremental else ()))
     return stages
 
@@ -1206,7 +1231,13 @@ def _run_single(
 
 
 def _run_command(
-    stage: Stage, options: GlobalOptions, *, mode: str, command: str, persist: bool = False
+    stage: Stage,
+    options: GlobalOptions,
+    *,
+    mode: str,
+    command: str,
+    persist: bool = False,
+    rebuild_reason: str | None = None,
 ) -> None:
     """Execute a stage that writes its OWN stdout, and exit with its code.
 
@@ -1228,7 +1259,9 @@ def _run_command(
     """
     with _writer_lock(command, options):
         _preflight_schema(command)
-        with _run_context(options, mode=mode, persist=persist) as run:
+        with _run_context(
+            options, mode=mode, persist=persist, rebuild_reason=rebuild_reason
+        ) as run:
             outcome = _execute(stage, options, run)
     if outcome.error_detail is not None:
         sys.stderr.write(outcome.error_detail + "\n")
@@ -1677,6 +1710,16 @@ def match(
 
 @app.command()
 def reconcile(
+    reason: Annotated[
+        str | None,
+        typer.Option(
+            "--reason",
+            callback=_reason_option,
+            help="Rebuild reason: std_version_bump | survivorship_version_bump | "
+            "correction_pass | operator. Stamped on runs.rebuild_reason and every "
+            "emitted event (S4.0, S5.1).",
+        ),
+    ] = None,
     config: ConfigOption = None,
     run_id: RunIdOption = None,
     json_output: JsonOption = False,
@@ -1684,11 +1727,12 @@ def reconcile(
     """Cluster the assertion-adjusted edge set and reconcile entities (S4.5)."""
     options = GlobalOptions.resolve(config_path=config, run_id=run_id, json_output=json_output)
     _run_command(
-        _ReconcileStage(),
+        _ReconcileStage(reason=reason),
         options,
         mode=_MODE_STAGE,
         command="reconcile",
         persist=True,
+        rebuild_reason=reason,
     )
 
 
@@ -1721,6 +1765,15 @@ def run_all(
     ] = False,
     resume: Annotated[
         str | None, typer.Option("--resume", help="Restart RUN_ID at its first unfinished stage.")
+    ] = None,
+    reason: Annotated[
+        str | None,
+        typer.Option(
+            "--reason",
+            callback=_reason_option,
+            help="Rebuild reason recorded on runs.rebuild_reason and stamped into "
+            "every emitted event; overrides the fingerprint-derived one (S5.1).",
+        ),
     ] = None,
     config: ConfigOption = None,
     run_id: RunIdOption = None,
@@ -1769,12 +1822,17 @@ def run_all(
             # a full run. Recording one and executing the other would leave
             # `run_stages` describing a chain that never ran (S4.0, S5.2).
             effective = _guarded_mode(mode, options, prior=prior, allow_escalate=allow_escalate)
-            chain = run_all_chain(effective, skip_ingest, source=source, path=delivery)
+            chain = run_all_chain(
+                effective, skip_ingest, source=source, path=delivery, reason=reason
+            )
+            # An explicit --reason wins over the fingerprint-derived verdict: the
+            # operator is stating what this run IS, and both the run row and its
+            # events must tell the same story (S5.1).
             _run_chain(
                 chain,
                 options,
                 mode=effective,
-                rebuild_reason=_rebuild_reason(options, prior),
+                rebuild_reason=reason if reason is not None else _rebuild_reason(options, prior),
             )
             return
         plan = _resume(resume, options)

@@ -84,6 +84,7 @@ from __future__ import annotations
 
 from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
+from enum import StrEnum
 from types import MappingProxyType
 from typing import Any, Final
 
@@ -99,6 +100,7 @@ __all__ = [
     "PLANNED_EVENT_ORDER",
     "PLANNED_STATUSES",
     "RECLUSTER",
+    "RebuildReason",
     "RETIRED",
     "SPLIT",
     "EntityTransition",
@@ -136,6 +138,21 @@ PLANNED_STATUSES: Final[frozenset[str]] = frozenset({ACTIVE, MERGED, RETIRED})
 #: (S4.5.5). The only cause a *pure* plan can justify: `tombstone` and
 #: `supersession` are facts about `raw_records`, which this function never sees.
 RECLUSTER: Final = "recluster"
+
+
+class RebuildReason(StrEnum):
+    """The S5.1 `runs.rebuild_reason` vocabulary, as a type a CLI can enumerate.
+
+    The values ARE `er.lake.model.REBUILD_REASONS` — a unit test asserts the set
+    equality — and a non-NULL reason puts the run outside T-INC-2's accounting,
+    which is why `er reconcile` and `er run-all` default to none at all (S5.1).
+    """
+
+    STD_VERSION_BUMP = "std_version_bump"
+    SURVIVORSHIP_VERSION_BUMP = "survivorship_version_bump"
+    CORRECTION_PASS = "correction_pass"
+    OPERATOR = "operator"
+
 
 #: The order planned events are returned in, and therefore the order ER-074 hands
 #: them to :class:`~er.entities.events.EventLog`, which is `seq` order and so the

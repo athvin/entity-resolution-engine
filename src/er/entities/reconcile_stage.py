@@ -285,6 +285,7 @@ def apply_reconcile_plan(
     occurred_at: datetime | None = None,
     ids: IdFactory | None = None,
     extra_events: Sequence[tuple[str, str, Mapping[str, Any]]] = (),
+    reason: str | None = None,
 ) -> int:
     """Commit ``plan``: membership, entities, events. Returns the events written.
 
@@ -361,7 +362,10 @@ def apply_reconcile_plan(
             member_rows,
         )
 
-    log = EventLog(run_id, ids=ids)
+    # A rebuild's reason rides every event of the run (S4.0, S5.1). It joins the
+    # canonicalised details and therefore `details_hash`, so a stamped run's events
+    # are new idempotency keys rather than duplicates of an ordinary run's.
+    log = EventLog(run_id, ids=ids, reason=reason)
     for planned in plan.events:
         log.emit(planned.entity_id, planned.event_type, planned.details)
     for entity_id, event_type, details in extra_events:
@@ -397,6 +401,7 @@ def run_reconcile_stage(
     tf_snapshot_id: str,
     id_factory: IdFactory | None = None,
     occurred_at: datetime | None = None,
+    reason: str | None = None,
 ) -> ReconcileResult:
     """Run the S4.5 chain and commit its plan.
 
@@ -543,6 +548,7 @@ def run_reconcile_stage(
         occurred_at=occurred_at,
         ids=factory,
         extra_events=(*removal_events, *cut_events),
+        reason=reason,
     )
     cuts_written = persist_cuts(
         connection,

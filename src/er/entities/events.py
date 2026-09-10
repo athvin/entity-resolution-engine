@@ -42,7 +42,7 @@ from typing import Any, Final
 import duckdb
 
 from er.entities.ids import IdFactory, MonotonicUlidFactory, canonicalize_pair
-from er.lake.model import EVENT_TYPES, REGISTRY, SCHEMA_QUALIFIER
+from er.lake.model import EVENT_TYPES, REBUILD_REASONS, REGISTRY, SCHEMA_QUALIFIER
 
 __all__ = [
     "EVENT_DETAILS_SCHEMA",
@@ -60,6 +60,7 @@ __all__ = [
     "append_events",
     "canonical_details",
     "details_hash",
+    "stamp_reason",
     "replay_membership",
 ]
 
@@ -77,10 +78,12 @@ _ENTITY_EVENTS: Final = f"{SCHEMA_QUALIFIER}.{_SPEC.name}"
 #: emits, which is how a reader tells an INV-EQ repair from an ordinary change.
 OPTIONAL_DETAIL_KEYS: Final[tuple[str, ...]] = ("reason",)
 
-#: The only `reason` S4.0 names. A closed vocabulary because `reason` is hashed
-#: into `details_hash`: a free-text field would make the idempotency key sensitive
-#: to a caller's phrasing.
-EVENT_REASONS: Final[frozenset[str]] = frozenset({"correction_pass"})
+#: The reasons a rebuild run may stamp onto its events — S5.1's
+#: `runs.rebuild_reason` vocabulary, imported rather than restated so the run row
+#: and its events cannot disagree about what a rebuild may be called. A closed
+#: vocabulary because `reason` is hashed into `details_hash`: a free-text field
+#: would make the idempotency key sensitive to a caller's phrasing.
+EVENT_REASONS: Final[frozenset[str]] = REBUILD_REASONS
 
 #: Why a record left its entity (S4.1.1, S4.5.5): `tombstone` for a deleted record,
 #: `supersession` for one whose `content_hash` changed, `recluster` for a member the
@@ -217,6 +220,32 @@ def canonical_details(details: Mapping[str, Any]) -> str:
     return json.dumps(dict(details), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
+def stamp_reason(details: Mapping[str, Any], reason: str) -> dict[str, Any]:
+    """Return ``details`` with the rebuild ``reason`` stamped in (S4.0, S5.1).
+
+    The stamp participates in :func:`details_hash`, so stamping changes the
+    idempotency key — stated here because that is the behaviour a caller must
+    want: a rebuild's account of an entity is a different claim than an ordinary
+    run's. A details document already carrying a DIFFERENT reason raises rather
+    than being silently overwritten; carrying the same one is a no-op.
+
+    Raises:
+        ValueError: ``reason`` is outside :data:`EVENT_REASONS`, or ``details``
+            already names a different reason.
+    """
+    if reason not in EVENT_REASONS:
+        raise ValueError(
+            f"{reason!r} is not a rebuild reason; S5.1 allows {', '.join(sorted(EVENT_REASONS))}"
+        )
+    existing = details.get("reason")
+    if existing is not None and existing != reason:
+        raise ValueError(
+            f"details already carry reason={existing!r}; refusing to restamp as "
+            f"{reason!r} — one run has one reason (S5.1)"
+        )
+    return {**details, "reason": reason}
+
+
 def details_hash(details: Mapping[str, Any]) -> str:
     """SHA-256 hex digest of :func:`canonical_details`.
 
@@ -348,11 +377,22 @@ class EventLog:
             process.
     """
 
-    __slots__ = ("_by_key", "_events", "_ids", "_run_id")
+    __slots__ = ("_by_key", "_events", "_ids", "_reason", "_run_id")
 
-    def __init__(self, run_id: str, ids: IdFactory | None = None) -> None:
+    def __init__(
+        self,
+        run_id: str,
+        ids: IdFactory | None = None,
+        reason: str | None = None,
+    ) -> None:
+        if reason is not None and reason not in EVENT_REASONS:
+            raise ValueError(
+                f"{reason!r} is not a rebuild reason; S5.1 allows "
+                f"{', '.join(sorted(EVENT_REASONS))}"
+            )
         self._run_id = run_id
         self._ids: IdFactory = MonotonicUlidFactory() if ids is None else ids
+        self._reason = reason
         self._events: list[Event] = []
         self._by_key: dict[tuple[str, str, str, str], Event] = {}
 
@@ -389,7 +429,14 @@ class EventLog:
             InvalidEventDetailsError: ``details`` is missing a required key, carries
                 an unknown one, or holds a value outside a closed vocabulary.
         """
-        normalised = _validated_details(event_type, {} if details is None else details)
+        supplied = {} if details is None else details
+        if self._reason is not None:
+            supplied = stamp_reason(supplied, self._reason)
+        normalised = _validated_details(event_type, supplied)
+        # `reason` participates in `details_hash` (S4.5.4): a stamped and an
+        # unstamped emission of otherwise-identical details are two DIFFERENT
+        # idempotency keys, which is what lets a rebuild's events coexist with an
+        # ordinary run's without either suppressing the other.
         digest = details_hash(normalised)
         key = (self._run_id, entity_id, event_type, digest)
         recorded = self._by_key.get(key)
