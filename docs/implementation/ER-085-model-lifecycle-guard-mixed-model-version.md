@@ -2,7 +2,7 @@
 id: ER-085
 title: "Model lifecycle guard (mixed model_version/tf_snapshot_id above review_low → exit 3) + T-MODEL-1"
 milestone: M3
-status: todo
+status: in_progress
 kind: code
 size: S
 gates: full
@@ -14,12 +14,13 @@ consumes: ["src/er/matching/current_edges.py::current_edges", "src/er/lake/model
 owns: ["src/er/entities/guards.py", "tests/integration/test_model_lifecycle.py", "tests/unit/entities/test_model_guard.py"]
 protected_paths: []
 extra_paths: ["src/er/cli.py", "src/er/entities/reconcile.py", "tests/unit/test_no_training_in_scenarios.py"]
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_model_lifecycle.py -q"
-branch: ""
+branch: "ticket/ER-085-model-lifecycle-guard-mixed-model-version"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "7467bdacba1bd84c"
+updated_at: "2026-09-10T22:38:34Z"
+session: d0707c1d-1d2f-4e95-8ff1-341c508a8022
 ---
 ## Description
 
