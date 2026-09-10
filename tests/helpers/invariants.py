@@ -55,8 +55,10 @@ from er.review.assertions import active_assertions, check_contradiction_1
 
 __all__ = [
     "CANONICAL_PAIR_RELATIONS",
+    "NeverOutcome",
     "Partition",
     "assert_membership_equals_components",
+    "assert_never_pairs_resolved",
     "assert_replay_reproduces_membership",
     "current_partition",
     "membership_partition",
@@ -440,3 +442,96 @@ def assert_replay_reproduces_membership(
             ]
         )
     )
+
+
+#: Which of D5's three recorded outcomes an active `never` pair ended a run in.
+NeverOutcome = str
+
+#: The closed vocabulary of D5's "no silent outcome" rule (S4.4.2).
+NEVER_OUTCOMES: Final[tuple[str, ...]] = ("not_co_clustered", "cut", "escalated")
+
+
+def assert_never_pairs_resolved(
+    connection: duckdb.DuckDBPyConnection,
+) -> dict[tuple[str, str], str]:
+    """Every active `never` pair ends in exactly one recorded outcome (D5, S4.4.2).
+
+    D5 forbids a silent outcome: an active `never` pair may not simply be co-clustered
+    with nothing recorded about it. Each one must be in exactly one of three states,
+    and this classifies them from the persisted relations — not from the cut search's
+    own return — so the assertion is over what the lake holds after the run:
+
+    * **not_co_clustered** — the endpoints are in two entities (or one is absent), and
+      no `cut_edges` row and no `review_queue` escalation was needed;
+    * **cut** — an active `cut_edges` row for the pair's assertion keeps them apart;
+    * **escalated** — an open `review_queue` row with `reason='never_unsatisfiable'`
+      records that every path between them was protected.
+
+    The three classes are asserted disjoint AND total: a pair in none is a silent
+    outcome and fails with the pair named; a pair in two would mean the run both cut
+    and escalated one assertion, which the fixpoint's per-pair branch forbids.
+
+    Returns:
+        `canonical pair -> outcome`, for a caller that wants to assert the mix.
+    """
+    membership = _membership_map(connection)
+    assertions = [a for a in active_assertions(connection) if a.kind == "never"]
+
+    # A cut is attributed by ASSERTION_ID, not by the cut edge's own pair: S4.4.2 cuts
+    # the minimum-probability edge ON THE PATH between the never's endpoints, which is
+    # in general a different pair than the never itself (A3 cuts a bridge edge). The
+    # `cut_edges` row carries the assertion it satisfies, so that is the join.
+    cut_assertions = {
+        str(assertion_id)
+        for (assertion_id,) in connection.execute(
+            f"SELECT assertion_id FROM {CUT_EDGES} WHERE active"
+        ).fetchall()
+    }
+    escalated_pairs = {
+        (str(rec_a), str(rec_b))
+        for rec_a, rec_b in connection.execute(
+            f"SELECT rec_a_key, rec_b_key FROM {REVIEW_QUEUE} "
+            "WHERE reason = 'never_unsatisfiable' AND status = 'open'"
+        ).fetchall()
+    }
+
+    outcomes: dict[tuple[str, str], str] = {}
+    for assertion in assertions:
+        pair = tuple(sorted((assertion.rec_a_key, assertion.rec_b_key)))
+        canonical = (pair[0], pair[1])
+        left = membership.get(assertion.rec_a_key)
+        right = membership.get(assertion.rec_b_key)
+        co_clustered = left is not None and left == right
+
+        # First, the invariant every outcome shares: an active `never` may never leave
+        # its endpoints co-clustered (M6). Whatever recorded the outcome, if the pair is
+        # still together the run did not honour the assertion.
+        assert not co_clustered, (
+            f"active never pair {canonical} shares an entity ({left}); no recorded "
+            "outcome excuses that (M6)"
+        )
+
+        # Then the outcome, as a PRIORITY: a cut or an escalation is why the pair is
+        # apart; "not_co_clustered" is the residual — apart with neither needed. The
+        # three are mutually exclusive by this ordering, and every pair reaches one, so
+        # a silent outcome (D5) is unreachable rather than merely asserted against.
+        cut = assertion.assertion_id in cut_assertions
+        escalated = canonical in escalated_pairs
+        assert not (cut and escalated), (
+            f"never {canonical} is both cut and escalated; the fixpoint's per-pair "
+            "branch chooses one (S4.4.2)"
+        )
+        outcomes[canonical] = "cut" if cut else "escalated" if escalated else "not_co_clustered"
+    return outcomes
+
+
+def _membership_map(connection: duckdb.DuckDBPyConnection) -> dict[str, str]:
+    """`record_key -> entity_id`, current `entity_membership`."""
+    if not _relation_exists(connection, ENTITY_MEMBERSHIP):
+        return {}
+    return {
+        str(record): str(entity)
+        for entity, record in connection.execute(
+            f"SELECT entity_id, record_key FROM {ENTITY_MEMBERSHIP}"
+        ).fetchall()
+    }

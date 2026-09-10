@@ -65,6 +65,7 @@ __all__ = [
     "choose_cut_edge",
     "never_cut_fixpoint",
     "persist_cuts",
+    "recheck_violations",
     "release_cuts",
     "shortest_path",
 ]
@@ -237,6 +238,48 @@ def _components(edges: Iterable[PathEdge], nodes: Iterable[str]) -> dict[str, in
                     stack.append(neighbour)
         index += 1
     return seen
+
+
+def recheck_violations(
+    assertions: Iterable[Assertion],
+    membership: Mapping[str, str],
+) -> list[tuple[str, str]]:
+    """The active `never` pairs currently co-clustered, by CURRENT membership (S4.4.2).
+
+    PURE. `membership` is `record_key -> entity_id` as `entity_membership` holds it
+    the moment a run begins — its CURRENT state, not any earlier run's. Re-evaluating
+    against it is what D5's stale-violation rule requires in both directions:
+
+    * a `never` recorded against a component an earlier run built, whose endpoints a
+      later delivery or retraction has since separated, is **not** a violation now and
+      must not trigger a fresh cut — it is absent from this list because the two keys
+      map to different entities (or to none);
+    * a `never` whose endpoints have only just become co-clustered **is** a violation
+      now, and appears here even though no prior run ever cut it.
+
+    The reconcile stage calls this before searching for a cut, so a run whose current
+    membership honours every `never` does no cut work at all — the correct no-op, and
+    the guard the release path needs so it does not re-cut a violation that resolved
+    itself. Endpoints absent from `membership` (a tombstoned record, S4.5.5) are not
+    co-clustered with anything and so are never a live violation.
+
+    Args:
+        assertions: the assertion set; only active `never` rows are read.
+        membership: `record_key -> entity_id`, current `entity_membership`.
+
+    Returns:
+        The canonical pairs still co-clustered, sorted — the D5 "recorded outcome"
+        set the classifier partitions.
+    """
+    violations: list[tuple[str, str]] = []
+    for assertion in assertions:
+        if assertion.kind != NEVER or not assertion.active:
+            continue
+        left = membership.get(assertion.rec_a_key)
+        right = membership.get(assertion.rec_b_key)
+        if left is not None and left == right:
+            violations.append(canonicalize_pair(assertion.rec_a_key, assertion.rec_b_key))
+    return sorted(set(violations))
 
 
 def never_cut_fixpoint(

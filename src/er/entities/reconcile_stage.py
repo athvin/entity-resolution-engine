@@ -79,7 +79,13 @@ from er.lake.model import SCHEMA_QUALIFIER
 from er.matching.edges import current_edges
 from er.obs.runctx import StageRun
 from er.review.assertions import Assertion, active_assertions, check_contradiction_1
-from er.review.never_cut import never_cut_fixpoint, persist_cuts, release_cuts
+from er.review.never_cut import (
+    CutResult,
+    never_cut_fixpoint,
+    persist_cuts,
+    recheck_violations,
+    release_cuts,
+)
 from er.review.queue import upsert_escalation
 
 __all__ = [
@@ -498,12 +504,23 @@ def run_reconcile_stage(
     # that retracted it: a stale active cut would keep the component apart for one more
     # run and the retraction would look like it had not taken.
     release_cuts(connection, run_id=run_ctx.run_id, released_at=occurred_at)
-    cut = never_cut_fixpoint(
-        [(edge.rec_a_key, edge.rec_b_key, edge.match_probability) for edge in adjusted],
-        assertions,
-        nodes=nodes,
-        cut_protect_probability=cfg.clustering.cut_protect_probability,
-        max_iterations=cfg.clustering.max_iterations,
+    # D5's stale-violation recheck, against the POST-clustering membership this run
+    # just computed: a `never` is a live violation only if its endpoints are
+    # co-clustered NOW. `recheck_violations` reads exactly that, so a run whose
+    # clustering already honours every `never` runs no cut search — the correct no-op
+    # — and a violation that resolved itself for an unrelated reason is not re-cut.
+    post_cluster_membership = {key: label for key, label in propagation.labels.items()}
+    live_violations = recheck_violations(assertions, post_cluster_membership)
+    cut = (
+        never_cut_fixpoint(
+            [(edge.rec_a_key, edge.rec_b_key, edge.match_probability) for edge in adjusted],
+            assertions,
+            nodes=nodes,
+            cut_protect_probability=cfg.clustering.cut_protect_probability,
+            max_iterations=cfg.clustering.max_iterations,
+        )
+        if live_violations
+        else CutResult()
     )
     if cut.cuts:
         adjusted = [edge for edge in adjusted if edge.pair not in cut.cut_pairs]
