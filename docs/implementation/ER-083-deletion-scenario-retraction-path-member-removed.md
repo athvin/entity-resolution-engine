@@ -2,7 +2,7 @@
 id: ER-083
 title: "deletion_scenario + retraction path (member_removed/split/retired) + T-DEL-1"
 milestone: M3
-status: todo
+status: in_progress
 kind: code
 size: L
 gates: full
@@ -14,12 +14,13 @@ consumes: ["src/er/entities/retraction.py::invalidate_incident_edges", "relation
 owns: ["fixtures/static/deletion_scenario/resurrect/", "fixtures/static/deletion_scenario/expected/", "tests/integration/scenarios/test_deletion.py", "tests/unit/fixtures/test_deletion_scenario.py"]
 protected_paths: []
 extra_paths: ["fixtures/static/deletion_scenario/base/", "fixtures/static/deletion_scenario/refresh/", "src/er/entities/retraction.py", "src/er/entities/reconcile.py", "src/er/entities/affected.py", "src/er/entities/events.py", "scripts/validate_fixtures.py"]
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/scenarios/test_deletion.py -q && uv run pytest tests/unit/fixtures/test_deletion_scenario.py -q"
-branch: ""
+branch: "ticket/ER-083-deletion-scenario-retraction-path-member-removed"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "7467bdacba1bd84c"
+updated_at: "2026-09-10T10:52:10Z"
+session: d0707c1d-1d2f-4e95-8ff1-341c508a8022
 ---
 ## Description
 
