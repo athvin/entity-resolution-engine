@@ -2,7 +2,7 @@
 id: ER-090
 title: "base_10/expected/golden.csv + lineage.csv + machine-checked rule-coverage table"
 milestone: M4
-status: blocked
+status: todo
 kind: fixture
 size: M
 gates: fast
@@ -14,12 +14,12 @@ consumes: ["fixtures/static/base_10/base/", "fixtures/static/base_10/truth.csv",
 owns: ["fixtures/static/base_10/expected/base/golden.csv", "fixtures/static/base_10/expected/base/lineage.csv", "tests/unit/fixtures/test_base_10_golden.py"]
 protected_paths: []
 extra_paths: ["fixtures/static/base_10/base/", "fixtures/static/FORMAT.md", "tests/helpers/expected.py", "scripts/validate_fixtures.py", "tests/unit/fixtures/test_fixture_format.py"]
-attempts: 1
+attempts: 0
 verify: "uv run pytest tests/unit/fixtures/test_base_10_golden.py -q"
-branch: "ticket/ER-090-base-10-expected-golden-csv-lineage"
+branch: ""
 commit: ""
 spec_sha: "7467bdacba1bd84c"
-updated_at: "2026-08-27T22:19:34Z"
+updated_at: "2026-09-10T06:13:23Z"
 session: c379438e-8c95-4be8-8f5f-3832d8ceafaa
 ---
 ## Description
