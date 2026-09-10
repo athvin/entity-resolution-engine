@@ -1,0 +1,6 @@
+entity_label,event_type,count
+E1,member_removed,2
+E2,member_removed,1
+E2,retired,1
+E3,created,1
+E3,split,1

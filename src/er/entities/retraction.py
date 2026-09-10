@@ -34,12 +34,14 @@ properties of it are load-bearing:
   itself here. The comparison is therefore a `LEFT JOIN` with a NULL test rather than an
   equality that would silently keep the edge alive (S4.5.5).
 
-The deletion arm proper — tombstone derivation and the `--full-refresh-keys` path — is
-ER-032's and ER-083's. This module only honours what it finds in `int_std_records`.
+:func:`retract_tombstoned_records` is the membership half of the same story
+(S4.5.5, D8). Tombstone derivation and the `--full-refresh-keys` path are ER-032's;
+this module only honours what it finds — or does not find — in `int_std_records`.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import Final
 
@@ -50,13 +52,16 @@ from er.lake.model import SCHEMA_QUALIFIER
 __all__ = [
     "MATCH_SCORES_RELATION",
     "StaleEdge",
+    "corpus_absent_keys",
     "invalidate_incident_edges",
+    "retract_tombstoned_records",
     "stale_edge_rows",
 ]
 
 MATCH_SCORES_RELATION: Final = "match_scores"
 _MATCH_SCORES: Final = f"{SCHEMA_QUALIFIER}.{MATCH_SCORES_RELATION}"
 _STD_RECORDS: Final = f"{SCHEMA_QUALIFIER}.int_std_records"
+_MEMBERSHIP: Final = f"{SCHEMA_QUALIFIER}.entity_membership"
 
 #: One stale edge: the pair, and which endpoint went stale. Returned rather than merely
 #: counted because "three edges were invalidated" is a number, and the operator's next
@@ -169,3 +174,99 @@ def _active_count(connection: duckdb.DuckDBPyConnection) -> int:
     """How many `match_scores` rows are currently active."""
     row = connection.execute(f"SELECT count(*) FROM {_MATCH_SCORES} WHERE is_active").fetchone()
     return 0 if row is None else int(row[0])
+
+
+def corpus_absent_keys(
+    connection: duckdb.DuckDBPyConnection,
+    nodes: Iterable[str],
+) -> frozenset[str]:
+    """The affected keys `int_std_records` does not hold — the tombstoned ones.
+
+    Distinct from :func:`retract_tombstoned_records`'s return on purpose: that is
+    the subset that still held a membership row when the run began. A tombstone an
+    *earlier* run already retracted has no row left to remove, but it can re-enter
+    the affected seed — S4.5.1's tombstone arm reads `raw_records` since the
+    watermark, and a watermark taken at the prior run's start predates that run's
+    own ingest — and a corpus-absent key handed to the propagation comes back as a
+    one-node group that would re-mint a membership row for a deleted record. The
+    stage therefore excludes THIS set from the node set, and subtracts only the
+    retracted memberships from the prior partition.
+    """
+    keys = sorted(set(nodes))
+    if not keys:
+        return frozenset()
+    placeholders = ", ".join("?" for _ in keys)
+    held = {
+        str(row[0])
+        for row in connection.execute(
+            f"SELECT record_key FROM {_STD_RECORDS} WHERE record_key IN ({placeholders})",
+            keys,
+        ).fetchall()
+    }
+    return frozenset(keys) - held
+
+
+def retract_tombstoned_records(
+    connection: duckdb.DuckDBPyConnection,
+    nodes: Iterable[str],
+) -> dict[str, tuple[str, ...]]:
+    """Remove membership rows for affected records the corpus no longer holds (S4.5.5).
+
+    A tombstoned record is excluded from `int_std_records` entirely (S4.2), so within
+    the affected set "has a membership row but no standardized row" identifies exactly
+    the records S4.1.1 deleted. Their rows are removed HERE, before clustering, and
+    for one reason: a departed record must appear in neither partition the reconciler
+    compares. Left in ``p_old`` it reads as a member the new clustering dropped and
+    the plan would mint it a fresh singleton entity (S4.5.3's orphan rule — which is
+    for records that *left their cluster*, not the corpus); handed to the propagation
+    it would come back as a one-node group and re-enter membership. The stage instead
+    subtracts what this returns from the prior partition, so the entity that lost the
+    record shrinks — and splits, or empties and retires — through the ordinary
+    overlap mapping with no deletion-specific branch in it (D8).
+
+    A `DELETE`, though S4.5.3 makes `MERGE INTO` the membership writer: that rule
+    governs *assignment* — a record has exactly one entity at a time — and a departed
+    record has zero. The history is not lost; the stage emits `member_removed` with
+    ``cause='tombstone'`` from what this returns, and `entity_events` is where
+    membership history lives.
+
+    Restricted to ``nodes`` — the S4.5.1 affected set — rather than sweeping the whole
+    relation: the stage acts on the records its watermark says changed, and a
+    long-tombstoned record outside the set is a fact about an earlier run's work, not
+    this one's.
+
+    Args:
+        connection: an attached lake connection (S4.0b).
+        nodes: the affected node set, as `record_key`s.
+
+    Returns:
+        ``entity_id -> the removed record_keys, sorted``, empty when nothing was
+        tombstoned — the ordinary case for a run with no deletions.
+    """
+    keys = sorted(set(nodes))
+    if not keys:
+        return {}
+    placeholders = ", ".join("?" for _ in keys)
+    doomed = connection.execute(
+        f"""
+        SELECT m.entity_id, m.record_key
+          FROM {_MEMBERSHIP} AS m
+          LEFT JOIN {_STD_RECORDS} AS s ON s.record_key = m.record_key
+         WHERE m.record_key IN ({placeholders})
+           AND s.record_key IS NULL
+         ORDER BY m.entity_id, m.record_key
+        """,
+        keys,
+    ).fetchall()
+    if not doomed:
+        return {}
+
+    removed: dict[str, list[str]] = {}
+    for entity_id, record_key in doomed:
+        removed.setdefault(str(entity_id), []).append(str(record_key))
+    doomed_keys = sorted(key for keys_of in removed.values() for key in keys_of)
+    connection.execute(
+        f"DELETE FROM {_MEMBERSHIP} WHERE record_key IN ({', '.join('?' for _ in doomed_keys)})",
+        doomed_keys,
+    )
+    return {entity_id: tuple(keys_of) for entity_id, keys_of in sorted(removed.items())}

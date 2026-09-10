@@ -72,6 +72,7 @@ from er.entities.reconcile import (
     ReconcilePlan,
     reconcile_plan,
 )
+from er.entities.retraction import corpus_absent_keys, retract_tombstoned_records
 from er.errors import ErrorClass, ExitCode, StageFailure
 from er.lake.model import SCHEMA_QUALIFIER
 from er.matching.edges import current_edges
@@ -92,6 +93,12 @@ RECONCILE_STAGE: Final = "reconcile"
 
 #: S5's event type for an S4.4.2 partition-level cut.
 EDGE_CUT: Final = "edge_cut"
+
+#: `member_removed.cause` for a record S4.1.1 deleted — one of S5's closed
+#: `MEMBER_REMOVED_CAUSES`. The plan's own removals carry `recluster`; this one is
+#: stamped by the stage because only the stage knows the record left the corpus
+#: rather than merely leaving its cluster (S4.5.5).
+TOMBSTONE_CAUSE: Final = "tombstone"
 
 _MEMBERSHIP: Final = f"{SCHEMA_QUALIFIER}.entity_membership"
 _ENTITIES: Final = f"{SCHEMA_QUALIFIER}.entities"
@@ -436,7 +443,22 @@ def run_reconcile_stage(
     if not affected.nodes:
         return _nothing_to_do()
 
-    nodes = tuple(sorted(affected.nodes))
+    # S4.5.5's membership half, before clustering: the prior partition is read while
+    # the tombstoned records still hold their rows, the rows are then removed, and
+    # the departed keys are subtracted from BOTH sides — from `p_old`, so the entity
+    # that lost them shrinks (and splits, or empties and retires) through the
+    # ordinary overlap mapping, and from the node set, so the propagation cannot
+    # hand a deleted record back as a one-node group. The subtraction keeps an
+    # emptied entity as a zero-member `p_old` entry, which is exactly the input
+    # S4.5.3 retires.
+    nodes_all = tuple(sorted(affected.nodes))
+    prior = _current_partition(connection, nodes_all)
+    absent = corpus_absent_keys(connection, nodes_all)
+    retracted = retract_tombstoned_records(connection, nodes_all)
+    removed_keys = frozenset(key for keys in retracted.values() for key in keys)
+    nodes = tuple(key for key in nodes_all if key not in absent)
+    p_old = {entity_id: members - removed_keys for entity_id, members in prior.items()}
+
     edges = affected_edges(
         connection,
         nodes,
@@ -477,7 +499,7 @@ def run_reconcile_stage(
         )
 
     groups = _groups(propagation.labels)
-    plan = reconcile_plan(_current_partition(connection, nodes), groups, factory)
+    plan = reconcile_plan(p_old, groups, factory)
 
     # S4.4.2 step 5: an `edge_cut` event on the affected entity. The id is minted here
     # rather than inside `persist_cuts` because the event carries it too — one mint,
@@ -503,13 +525,24 @@ def run_reconcile_stage(
         if cut_edge.rec_a_key in placement
     ]
 
+    # `member_removed` for the tombstoned records, on the entity each departed from
+    # (S4.5.5). Emitted as extra events for the plan's reason for `edge_cut`: the plan
+    # never saw the departed keys — subtracting them beforehand is what routed the
+    # split/retire through the ordinary mapping — so only the stage can say who left.
+    # The details take the plan's own `member_removed` shape, so event replay folds
+    # both kinds through one rule.
+    removal_events = [
+        (entity_id, MEMBER_REMOVED, {"member_keys": list(keys), "cause": TOMBSTONE_CAUSE})
+        for entity_id, keys in retracted.items()
+    ]
+
     events_written = apply_reconcile_plan(
         connection,
         plan,
         run_id=run_ctx.run_id,
         occurred_at=occurred_at,
         ids=factory,
-        extra_events=cut_events,
+        extra_events=(*removal_events, *cut_events),
     )
     cuts_written = persist_cuts(
         connection,
@@ -545,7 +578,7 @@ def run_reconcile_stage(
         entities_split=event_types.count(SPLIT),
         entities_retired=statuses.count(RETIRED),
         members_added=event_types.count(MEMBER_ADDED),
-        members_removed=event_types.count(MEMBER_REMOVED),
+        members_removed=event_types.count(MEMBER_REMOVED) + len(removal_events),
         events_emitted=events_written,
         edges_cut=cuts_written,
         cut_iterations=cut.iterations,

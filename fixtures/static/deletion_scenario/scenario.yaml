@@ -1,0 +1,33 @@
+scenario: deletion_scenario
+
+# S8.2's three-phase deletion scenario: `base` delivers six records; `refresh` is
+# the one `--full-refresh-keys` delivery, omitting exactly two live keys; and
+# `resurrect` is an ordinary delivery re-appearing one of them (S8.2.1 -- reusing
+# `refresh` for it would tombstone every key the resurrection omits).
+#
+# The two omitted keys are chosen for the two S4.5.5 outcomes T-DEL-1 must reach:
+#
+#   webforms:W321  the BRIDGE record of Ines Fontaine's five-record entity. Her
+#                  crm/billing pair share one email and phone; her crm/webforms
+#                  pair share another; W321 alone carries the first pair's phone
+#                  and the second pair's email, so it is a cut vertex of the
+#                  above-auto_merge edge graph and its removal forces a `split`.
+#                  The two sides also differ on birth_date and postal, so no
+#                  direct cross edge exists -- machine-checked by
+#                  tests/unit/fixtures/test_deletion_scenario.py.
+#   crm:C323      Otto Vance, a singleton: tombstoning his only record empties
+#                  the entity, which is the `retired` path.
+#
+# The resurrection re-delivers W321 with every COMPARED value identical, a
+# fresh submission timestamp, and a corrected unit designator. The unit matters:
+# `raw_records`' logical key is `(source_system, source_record_id,
+# content_hash)` (S5.0) and the hash is over the canonical VALUES -- the
+# timestamp is not among them -- so a re-delivery whose canonical values all
+# equal the pre-tombstone version's could not append and the tombstone would
+# stay current (src/er/ingest/landing.py). With a changed canonical value it is
+# an ordinary content version (S4.1.1): it re-scores against both fragments, and
+# claiming follows S4.5.3 -- equal overlaps of two, so `min member record_key`
+# picks the fragment holding billing:B321 and the other is merged back in.
+phases: [base, refresh, resurrect]
+
+# No expected/*/golden.csv: `golden_records` is first written in M4 (S12).

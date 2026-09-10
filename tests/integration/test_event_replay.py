@@ -162,12 +162,20 @@ class Replayed:
     run_id: str = ""
 
     def phase(self, name: str) -> subprocess.CompletedProcess[str]:
-        """Deliver, ingest, standardize, score and reconcile one phase under one run."""
+        """Deliver, ingest, standardize, score and reconcile one phase under one run.
+
+        A `refresh` phase is S8.2.1's one `--full-refresh-keys` delivery, so its
+        ingest carries the flag — replaying it as an ordinary delivery would derive
+        no tombstones and the log being folded would describe a different history.
+        A per-source `10` is a legitimate mid-scenario outcome (a source whose
+        full-refresh delivery re-states its key set unchanged has nothing to do).
+        """
         self.run_id = str(ULID())
         for source, path in self.scenario.inputs_for(name).items():
             directory = self.root / name / source
             directory.mkdir(parents=True, exist_ok=True)
             (directory / path.name).write_bytes(path.read_bytes())
+        refresh = ("--full-refresh-keys",) if name == "refresh" else ()
         for source in self.scenario.inputs_for(name):
             result = run_er(
                 "ingest",
@@ -175,11 +183,15 @@ class Replayed:
                 source,
                 "--path",
                 str(self.root / name),
+                *refresh,
                 "--run-id",
                 self.run_id,
                 "--json",
             )
-            assert result.returncode == int(ExitCode.SUCCESS), result.stdout + result.stderr
+            assert result.returncode in (
+                int(ExitCode.SUCCESS),
+                int(ExitCode.NOTHING_TO_DO),
+            ), result.stdout + result.stderr
         self.dbt.standardize()
         scored = run_er("match", "--mode", MODE_FULL, "--run-id", self.run_id, "--json")
         assert scored.returncode == int(ExitCode.SUCCESS), scored.stdout + scored.stderr

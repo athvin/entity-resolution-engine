@@ -1,0 +1,2 @@
+account_no,fname,lname,billing_email,contact_phone,addr1,addr_city,addr_state,postal_code,birth_date,updated_ts,persona_id
+B321,Ines,Fontaine,ines.fontaine@example.com,415-555-0901,31 Laurel Street Apt 2,San Francisco,CA,94103,05/11/1982,2024-02-12 10:15:00,P1
