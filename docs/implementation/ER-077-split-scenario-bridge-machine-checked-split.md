@@ -2,7 +2,7 @@
 id: ER-077
 title: "split_scenario (bridge, machine-checked) + split_scenario_tie_2_2 + T-PERM-2"
 milestone: M3
-status: todo
+status: in_progress
 kind: fixture
 size: M
 gates: full
@@ -14,13 +14,13 @@ consumes: ["ER-028::load_scenario", "ER-028::validate_fixtures", "tests/helpers/
 owns: ["fixtures/static/split_scenario/", "fixtures/static/split_scenario_tie_2_2/", "tests/integration/scenarios/test_split_scenario.py", "tests/unit/fixtures/test_split_scenario.py"]
 protected_paths: []
 extra_paths: []
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/scenarios/test_split_scenario.py -q && uv run pytest tests/unit/fixtures/test_split_scenario.py -q"
-branch: ""
+branch: "ticket/ER-077-split-scenario-bridge-machine-checked-split"
 commit: ""
 spec_sha: "7467bdacba1bd84c"
-updated_at: "2026-09-10T06:13:23Z"
-session: c379438e-8c95-4be8-8f5f-3832d8ceafaa
+updated_at: "2026-09-10T06:13:56Z"
+session: d0707c1d-1d2f-4e95-8ff1-341c508a8022
 ---
 ## Description
 
