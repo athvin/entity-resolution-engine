@@ -133,6 +133,19 @@ if [[ "$SCOPE" == "auto" ]]; then
   fi
 fi
 
+# E2E relaxation (user directive, 2026-09-10): with ER_RELAX_E2E=1 the Compose
+# integration gate and any itest-based ticket verify are skipped, so the ladder
+# is spec/board/lint/format/types/unit/dbt only while the remaining tickets land.
+# The receipt records `relaxed: true`, and `board.py complete` honours a relaxed
+# receipt only while the SAME variable is set -- unset it and every full-scope
+# ticket needs a real integration run again. Strict is the default.
+RELAXED=0
+if [[ "${ER_RELAX_E2E:-0}" == "1" && "$SCOPE" == "full" ]]; then
+  SCOPE="fast"
+  RELAXED=1
+  echo "gates: ER_RELAX_E2E=1 -- integration gate and itest verifies are skipped"
+fi
+
 case "$SCOPE" in
   fast) GATES=("${FAST_GATES[@]}") ;;
   full) GATES=("${FULL_GATES[@]}") ;;
@@ -390,7 +403,12 @@ VERIFY_EXIT=-1
 VERIFY_CMD=""
 if [[ -n "$TICKET" ]]; then
   VERIFY_CMD="$(python3 "$BOARD" verify-cmd "$TICKET" 2>/dev/null || true)"
-  if [[ -n "$VERIFY_CMD" && $FAILED -eq 0 ]]; then
+  if [[ $RELAXED -eq 1 && "$VERIFY_CMD" == *itest.sh* ]]; then
+    # -3 is "relaxed-skip", never PASS: the receipt says so, and complete only
+    # accepts it while ER_RELAX_E2E is still set.
+    echo "--- verify: $TICKET -- SKIPPED (ER_RELAX_E2E=1; itest-based verify)"
+    VERIFY_EXIT=-3
+  elif [[ -n "$VERIFY_CMD" && $FAILED -eq 0 ]]; then
     echo "--- verify: $TICKET"
     echo "    $VERIFY_CMD"
     log="$LOGS_DIR/${TICKET}-verify.log"
@@ -412,9 +430,9 @@ if [[ -n "$TICKET" && $NO_RECEIPT -eq 0 ]]; then
   ATTEMPT="$(ticket_field attempts || echo 0)"
   RECEIPT="$RECEIPTS_DIR/${TICKET}-${ATTEMPT}.json"
   python3 - "$RECEIPT" "$TREE" "$HEAD_SHA" "$DIRTY_HASH" "$SCOPE" "$VERIFY_CMD" "$VERIFY_EXIT" \
-      "$GATE_RESULTS" <<'PY'
+      "$GATE_RESULTS" "$RELAXED" <<'PY'
 import json, sys, time
-path, tree, head, dirty, scope, vcmd, vexit, codes = sys.argv[1:9]
+path, tree, head, dirty, scope, vcmd, vexit, codes, relaxed = sys.argv[1:10]
 exit_codes = {}
 for pair in codes.strip(";").split(";"):
     if not pair:
@@ -430,6 +448,7 @@ json.dump({
     "exit_codes": exit_codes,
     "verify_cmd": vcmd,
     "verify_exit": int(vexit),
+    "relaxed": relaxed == "1",
     "written_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
 }, open(path, "w"), indent=2)
 print(f"receipt: {path}")

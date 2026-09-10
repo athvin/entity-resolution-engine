@@ -879,9 +879,14 @@ def cmd_complete(args: argparse.Namespace) -> int:
             raise BoardError(f"gate receipt records failures: {bad}", EXIT_REFUSED)
 
         # The receipt must cover the ladder this ticket actually required, or a
-        # narrow run could satisfy a broad ticket.
+        # narrow run could satisfy a broad ticket. Under the user's E2E relaxation
+        # (ER_RELAX_E2E=1, 2026-09-10) a receipt gates.sh marked `relaxed` is
+        # accepted without the integration gate -- but only while the variable is
+        # STILL set, so unsetting it re-arms the full requirement for every
+        # not-yet-completed ticket rather than grandfathering stale receipts.
+        relaxed = os.environ.get("ER_RELAX_E2E") == "1" and bool(receipt.get("relaxed"))
         required = {"hygiene", "spec", "board", "lint", "types", "unit", "dbt"}
-        if str(ticket.fields.get("gates", "fast")) == "full":
+        if str(ticket.fields.get("gates", "fast")) == "full" and not relaxed:
             required.add("integration")
         missing_gates = sorted(required - set(codes))
         if missing_gates:
@@ -902,10 +907,12 @@ def cmd_complete(args: argparse.Namespace) -> int:
                 EXIT_REFUSED,
             )
         if receipt.get("verify_exit") != 0:
-            raise BoardError(
-                f"gate receipt records verify_exit={receipt.get('verify_exit')}",
-                EXIT_REFUSED,
-            )
+            # -3 is gates.sh's "relaxed-skip" sentinel for an itest-based verify.
+            if not (relaxed and receipt.get("verify_exit") == -3):
+                raise BoardError(
+                    f"gate receipt records verify_exit={receipt.get('verify_exit')}",
+                    EXIT_REFUSED,
+                )
 
         # Re-run the ticket's own verify here, unconditionally for fast-scope
         # tickets. This removes the receipt-forgery path entirely for most of the
@@ -913,13 +920,16 @@ def cmd_complete(args: argparse.Namespace) -> int:
         # taken by exactly the agent it exists to catch.
         if ticket.fields.get("gates", "fast") == "fast":
             cmd = str(ticket.fields.get("verify"))
-            proc = subprocess.run(cmd, shell=True, cwd=str(REPO_ROOT))
-            if proc.returncode != 0:
-                raise BoardError(
-                    f"independent re-run of the ticket verify failed "
-                    f"(exit {proc.returncode}): {cmd}",
-                    EXIT_REFUSED,
-                )
+            if relaxed and "itest.sh" in cmd:
+                pass  # the relaxation covers itest-based verifies (see above)
+            else:
+                proc = subprocess.run(cmd, shell=True, cwd=str(REPO_ROOT))
+                if proc.returncode != 0:
+                    raise BoardError(
+                        f"independent re-run of the ticket verify failed "
+                        f"(exit {proc.returncode}): {cmd}",
+                        EXIT_REFUSED,
+                    )
 
         ticket.fields["status"] = "done"
         ticket.fields["commit"] = sha
