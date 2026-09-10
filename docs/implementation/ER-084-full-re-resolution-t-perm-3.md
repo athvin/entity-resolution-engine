@@ -2,7 +2,7 @@
 id: ER-084
 title: "Full re-resolution + T-PERM-3 restated as INV-PERM + --reason correction_pass stamping"
 milestone: M3
-status: in_progress
+status: done
 kind: code
 size: M
 gates: full
@@ -17,9 +17,9 @@ extra_paths: ["src/er/cli.py", "src/er/entities/reconcile.py", "src/er/entities/
 attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_perm_full_reresolution.py -q"
 branch: "ticket/ER-084-full-re-resolution-t-perm-3"
-commit: ""
+commit: "7971a6f7e193108f05065b296129a6bd2765577a"
 spec_sha: "7467bdacba1bd84c"
-updated_at: "2026-09-10T22:15:54Z"
+updated_at: "2026-09-10T22:30:14Z"
 session: d0707c1d-1d2f-4e95-8ff1-341c508a8022
 ---
 ## Description
