@@ -1,0 +1,26 @@
+scenario: split_scenario
+
+# A `never` assertion on a BRIDGE edge severs a previously merged entity (S8.2).
+# The base phase co-clusters two real people: Nadia Okafor's three records link
+# through her shared email, and Tessa Brandt's two link through hers; the one
+# cross edge is webforms:W301 | crm:C302, which agree on phone_e164 (the second
+# line both households answer), birth_date and addr_postal and on nothing else.
+# Every other cross pair shares no blocking key at all, so the asserted pair is
+# the component's only connection -- a bridge, machine-checked by
+# tests/unit/fixtures/test_split_scenario.py rather than asserted in prose.
+phases: [base, batch]
+
+# S8.2.1 admits `assertions.csv` at the scenario root only when the manifest
+# declares it: the file is an INPUT the run loads, not an expectation.
+aux_files: [assertions.csv]
+
+# The batch delivery contains NONE of the asserted records (AC3): the affected
+# node set reaches them exclusively through the assertion delta of S4.5.1, which
+# is what "applied identically in incremental and full modes" (S4.4) rests on.
+# Because the asserted pair IS the only connection, the S4.4 pre-clustering edge
+# adjustment removes it outright and no partition-level cut is needed: the run
+# writes zero `cut_edges` rows and emits zero `edge_cut` events, which is what
+# distinguishes this scenario from assertions_scenario's A3 case (S4.4.2).
+
+# No expected/*/golden.csv: `golden_records` is first written in M4 (S12), and a
+# milestone may not assert on a later milestone's relation.

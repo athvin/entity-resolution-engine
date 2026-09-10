@@ -1,0 +1,19 @@
+scenario: split_scenario_tie_2_2
+
+# The even-fragment variant of `split_scenario` (S4.5.3): severing the bridge
+# leaves two fragments of two, so `member_count DESC` cannot rank them and the
+# fragment holding the smaller minimum member record_key -- billing:B311 --
+# retains the entity_id. The bridge is billing:B311 | crm:C312: the two agree on
+# phone_e164, birth_date and addr_postal and on nothing else; each person's own
+# pair links through their shared email, and no other cross pair shares any
+# blocking key.
+phases: [base, batch]
+
+# S8.2.1 admits `assertions.csv` at the scenario root only when the manifest
+# declares it: the file is an INPUT the run loads, not an expectation.
+aux_files: [assertions.csv]
+
+# The batch delivery contains none of the asserted records, and the severed
+# bridge needs no partition-level cut, for split_scenario's reasons.
+
+# No expected/*/golden.csv: `golden_records` is first written in M4 (S12).
