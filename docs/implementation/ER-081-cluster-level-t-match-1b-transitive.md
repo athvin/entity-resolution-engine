@@ -2,7 +2,7 @@
 id: ER-081
 title: "Cluster-level T-MATCH-1b: transitive-closure precision/recall, robert/bob merged, household not merged, placeholder email forms no component"
 milestone: M3
-status: in_progress
+status: done
 kind: code
 size: S
 gates: full
@@ -17,9 +17,9 @@ extra_paths: ["src/er/eval/metrics.py", "tests/unit/eval/test_pairwise_metrics.p
 attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_match_quality_cluster.py -q"
 branch: "ticket/ER-081-cluster-level-t-match-1b-transitive"
-commit: ""
+commit: "d23a084d48ba287f1de41e06a620a95e0bb54980"
 spec_sha: "7467bdacba1bd84c"
-updated_at: "2026-09-10T22:30:20Z"
+updated_at: "2026-09-10T22:38:29Z"
 session: d0707c1d-1d2f-4e95-8ff1-341c508a8022
 ---
 ## Description
