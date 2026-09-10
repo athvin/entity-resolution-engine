@@ -343,15 +343,16 @@ def by_ref(records: tuple[Record, ...]) -> dict[tuple[str, str], Record]:
 def _rule_key(rule: str, record: Record, attribute: str, rows: Sequence[Record]) -> Any:
     """The S4.6 `ORDER BY` fragment for ``rule``, as an ascending sort key.
 
-    Every fragment is inverted here so that "lower is better" holds uniformly; the
-    tests only ever ask whether a rule takes more than one value over a persona's
-    rows, and that question is invariant under the inversion.
+    Every fragment is inverted so that "lower is better" holds uniformly —
+    `frequency` negates its count, `recency` subtracts from a far-future instant —
+    because :func:`first_separating_rule` ranks a persona's rows on the chain's
+    full key and the direction of each term is part of what it ranks by.
     """
     value = record.value(attribute)
     if rule == "source_priority":
         return record.priority_rank
     if rule == "recency":
-        return record.updated_at
+        return datetime(9999, 12, 31) - datetime.strptime(record.updated_at, "%Y-%m-%d %H:%M:%S")
     if rule == "frequency":
         return -sum(1 for other in rows if other.value(attribute) == value)
     if rule == "completeness":
@@ -365,15 +366,28 @@ def _rule_key(rule: str, record: Record, attribute: str, rows: Sequence[Record])
 def first_separating_rule(
     chain: Sequence[str], rows: Sequence[Record], attribute: str
 ) -> str | None:
-    """The first element of ``chain`` that takes more than one value over ``rows``.
+    """The rule ER-087's macro attributes: the first chain element whose sort key
+    differs between the rank-1 and rank-2 rows of the chain's total order.
 
-    ``None`` means no rule in the chain separates them, so the mandatory terminal
-    `record_key ASC` decides and `golden_lineage.rule` is `tiebreak_deterministic`.
+    Rank-1 against rank-2, not "any value spread over the whole persona": a rule
+    whose key varies only among rows an earlier rule already ranked below the top
+    two never decides anything, and crediting it would make this fixture promise a
+    `golden_lineage.rule` the S4.6 dispatch cannot produce (the ER-090 blocker was
+    exactly that disagreement). ``None`` means every rule's key ties between the
+    top two rows, so the mandatory terminal `record_key ASC` decides and
+    `golden_lineage.rule` is `tiebreak_deterministic`.
     """
-    for rule in chain:
-        if rule == TERMINAL_SURVIVORSHIP_RULE:
-            break
-        if len({_rule_key(rule, record, attribute, rows) for record in rows}) > 1:
+    active = [rule for rule in chain if rule != TERMINAL_SURVIVORSHIP_RULE]
+
+    def chain_key(record: Record) -> tuple[Any, ...]:
+        return (
+            *(_rule_key(rule, record, attribute, rows) for rule in active),
+            record.ref,
+        )
+
+    rank_1, rank_2 = sorted(rows, key=chain_key)[:2]
+    for rule in active:
+        if _rule_key(rule, rank_1, attribute, rows) != _rule_key(rule, rank_2, attribute, rows):
             return rule
     return None
 

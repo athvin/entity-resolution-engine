@@ -65,6 +65,7 @@ from typing import Any, Final
 from unittest import mock
 
 import duckdb
+import pandas as pd
 import pytest
 from helpers.model import fixture_settings, load_fixture_model
 from helpers.pairs import canonical_pairs_from_blocking_keys
@@ -533,9 +534,23 @@ def symmetry(
         initialised_lake.execute(f'USE "{database}".{schema}')
 
 
+def _as_typed_frame(record: Mapping[str, Any]) -> pd.DataFrame:
+    """One record as a single-row frame whose `birth_date` column is date-typed.
+
+    A bare dict with `birth_date=None` reaches DuckDB as a column of type NULL, and
+    the S4.3.1 `dob_same_year_month` fragment's `date_trunc` has no NULL-type
+    overload to bind against — every other level's functions are single-overload and
+    absorb an untyped NULL. Coercing the one ambiguous column keeps a null-DOB
+    record (base_10 commits one) comparable in both orientations.
+    """
+    frame = pd.DataFrame([dict(record)])
+    frame["birth_date"] = pd.to_datetime(frame["birth_date"])
+    return frame
+
+
 def _probability(linker: Linker, left: Mapping[str, Any], right: Mapping[str, Any]) -> float:
     """`compare_two_records` for one ordered pair, as a probability."""
-    frame = linker.inference.compare_two_records(dict(left), dict(right))
+    frame = linker.inference.compare_two_records(_as_typed_frame(left), _as_typed_frame(right))
     rows = frame.as_record_dict()
     assert len(rows) == 1, f"compare_two_records returned {len(rows)} rows, expected 1"
     return float(rows[0]["match_probability"])

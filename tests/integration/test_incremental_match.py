@@ -515,10 +515,14 @@ def test_gray_band_is_queued_not_clustered(substrate: Substrate) -> None:
     below = [row for row in rows if row["match_probability"] < substrate.cfg.thresholds.review_low]
     assert not below, f"{len(below)} rows fall below review_low; nothing under it is persisted"
 
+    # Scoped to the pairs THIS run wrote, for the crafted arm's reason below:
+    # `match_scores` is cumulative, and the base full run's own gray pair (base_10
+    # commits exactly one, S8.2) is not this incremental stage's to have counted.
     natural = {
         (row["rec_a_key"], row["rec_b_key"])
         for row in rows
-        if in_gray_band(row["match_probability"], substrate.cfg.thresholds)
+        if row["run_id"] == scored.stage_run.run_id
+        and in_gray_band(row["match_probability"], substrate.cfg.thresholds)
     }
     assert scored.result.pairs_in_gray_band == len(natural)
 

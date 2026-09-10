@@ -1,8 +1,8 @@
 persona_id,source_system,source_record_id,entity_label
 P1,billing,B001,E1
 P1,crm,C001,E1
+P1,crm,C009,E1
 P1,webforms,W001,E1
-P1,webforms,W002,E1
 P10,crm,C008,E9
 P2,billing,B002,E2
 P2,crm,C002,E2

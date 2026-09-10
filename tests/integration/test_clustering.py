@@ -101,8 +101,8 @@ SCORED_AT: Final = datetime(2026, 3, 1, 0, 0, 0)
 P1_CHAIN: Final[tuple[str, ...]] = (
     record_key("billing", "B001"),
     record_key("crm", "C001"),
+    record_key("crm", "C009"),
     record_key("webforms", "W001"),
-    record_key("webforms", "W002"),
 )
 P2_CHAIN: Final[tuple[str, ...]] = (
     record_key("billing", "B002"),
@@ -407,7 +407,7 @@ def test_components_match_reference_on_base_10(subgraph: Subgraph) -> None:
     the connected components it is supposed to equal drifting apart.
 
     The two chains are what make it a test of propagation rather than of a single hop:
-    `webforms:W002` is three edges from its component's minimum, so a label has to travel.
+    `webforms:W001` is three edges from its component's minimum, so a label has to travel.
     """
     result = label_propagate(
         subgraph.connection,

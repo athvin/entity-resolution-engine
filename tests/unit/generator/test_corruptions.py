@@ -29,7 +29,6 @@ from __future__ import annotations
 import ast
 import re
 import sys
-from collections import defaultdict
 from collections.abc import Iterator
 from pathlib import Path
 from types import ModuleType
@@ -134,28 +133,52 @@ def _national_digits(phone: str) -> str:
     return digits[1:] if len(digits) == 11 and digits.startswith("1") else digits
 
 
-def test_nicknames_come_only_from_the_seed(personas: list[Any]) -> None:
-    """AC5: every substituted given name is a pair in `nickname_variants.csv`."""
+def test_given_names_are_seed_variants_or_vocabulary_names(personas: list[Any]) -> None:
+    """AC5: every emitted given name is justifiable against a committed authority.
+
+    Two axes may replace a given name: the nickname axis, whose output must be a
+    pair in `nickname_variants.csv`, and the alternate-name axis, whose output must
+    be a member of the committed weighted list. Anything else -- a typo-mangled
+    name, an invented diminutive -- is a true pair the pipeline is structurally
+    unable to find, and would read in the S10.5 numbers as a recall regression
+    with nothing in the pipeline to fix.
+    """
     pairs = corruptions.nickname_pairs()
-    substitutions = 0
+    vocabulary = set(personas_module.given_names().names)
+    nicknames = 0
+    alternates = 0
     for persona, source, record in _records(personas):
         emitted = record.given_name.lower()
         if emitted == persona.given_name:
             continue
-        substitutions += 1
-        assert frozenset({persona.given_name, emitted}) in pairs, (
+        if frozenset({persona.given_name, emitted}) in pairs:
+            nicknames += 1
+            continue
+        alternates += 1
+        assert emitted in vocabulary, (
             f"{source} emitted {emitted!r} for persona given name {persona.given_name!r}, "
-            f"which is not a pair in {corruptions.NICKNAME_SEED_PATH}"
+            f"which is neither a pair in {corruptions.NICKNAME_SEED_PATH} nor a name in "
+            f"{personas_module.GIVEN_NAMES_PATH}"
         )
-    # Without this the assertion above passes vacuously against a generator that
-    # substitutes nothing -- which is exactly the regression it exists to catch.
-    assert substitutions > 0, "no nickname substitution fired; the axis is dead"
+    # Without these the assertions above pass vacuously against a generator that
+    # substitutes nothing -- which is exactly the regression they exist to catch.
+    assert nicknames > 0, "no nickname substitution fired; the axis is dead"
+    assert alternates > 0, "no alternate given name fired; the else-level axis is dead"
 
 
-def test_phone_drift_forms_reduce_to_one_number(personas: list[Any]) -> None:
-    """AC6: only the three S8.2 surfaces, and one number per persona."""
-    by_persona: dict[str, set[str]] = defaultdict(set)
+def test_phone_drift_forms_are_valid_and_mostly_the_personas_number(personas: list[Any]) -> None:
+    """AC6: only the three S8.2 surfaces; format drift dominates, number drift exists.
+
+    The format axis re-spells the persona's own number, so the S8.2 drifted-phone
+    trap normalizes together; the `alt_phone_rate` axis emits a genuinely different
+    number, which is the only support the `phone_e164` disagreement level has
+    during EM. The persona's own number must remain the overwhelmingly common case
+    or the trap's premise -- one number, three spellings -- stops describing the
+    corpus.
+    """
     forms_seen: set[str] = set()
+    own = 0
+    alternate = 0
     for persona, source, record in _records(personas):
         if not record.phone:
             continue  # per-field missingness; an empty field is not a surface
@@ -165,14 +188,19 @@ def test_phone_drift_forms_reduce_to_one_number(personas: list[Any]) -> None:
             f"S8.2 surfaces {sorted(PHONE_PATTERNS)}"
         )
         forms_seen.add(matched[0])
-        by_persona[persona.persona_id].add(_national_digits(record.phone))
-        assert _national_digits(record.phone) == _national_digits(persona.phone)
+        if _national_digits(record.phone) == _national_digits(persona.phone):
+            own += 1
+        else:
+            alternate += 1
 
-    for persona_id, numbers in by_persona.items():
-        assert len(numbers) == 1, f"{persona_id} drifted to {len(numbers)} distinct numbers"
     assert forms_seen == set(PHONE_PATTERNS), (
         f"only {sorted(forms_seen)} were emitted; every configured surface must appear "
         f"or the drift axis is not exercised"
+    )
+    assert alternate > 0, "no alternate phone number fired; the else-level axis is dead"
+    assert own > 4 * alternate, (
+        f"{alternate} of {own + alternate} phones are not the persona's own number; "
+        f"number drift must stay the minority case or the S8.2 trap premise is gone"
     )
 
 
@@ -197,12 +225,75 @@ def test_every_address_parses_under_regex_v1(personas: list[Any]) -> None:
     assert stale > 0, "no stale address fired; the axis is dead"
 
 
+def test_within_persona_drift_axes_all_fire_with_the_right_shapes(personas: list[Any]) -> None:
+    """Every S6 comparison level the corpus is EM support for has live support.
+
+    The committed fixture model is fitted over this corpus, and a level with zero
+    support trains to an undefined m -- Splink then drops the whole comparison at
+    predict time (the `m values are not fully trained` warning). Each axis is
+    therefore asserted alive AND shape-correct against the persona's ground truth:
+    a domain swap keeps the username, a day typo keeps the year and month, a move
+    changes the postal code, an alternate email keeps the corpus's dotted idiom.
+    """
+    domain_swaps = 0
+    alt_emails = 0
+    day_typos = 0
+    wrong_dobs = 0
+    moved = 0
+    for persona, source, record in _records(personas):
+        if record.email and record.email != persona.email:
+            local, _, domain = record.email.rpartition("@")
+            own_local, _, own_domain = persona.email.rpartition("@")
+            if local == own_local:
+                domain_swaps += 1
+                assert domain != own_domain, (
+                    f"{source} re-emitted {persona.email!r} unchanged through the swap axis"
+                )
+            else:
+                alt_emails += 1
+                assert local.startswith(f"{persona.given_name}.{persona.family_name}."), (
+                    f"{source} emitted alternate email {record.email!r}, which does not carry "
+                    f"the persona's own name in the corpus's dotted idiom"
+                )
+        if record.birth_date is not None and record.birth_date != persona.birth_date:
+            if (record.birth_date.year, record.birth_date.month) == (
+                persona.birth_date.year,
+                persona.birth_date.month,
+            ):
+                day_typos += 1
+                assert record.birth_date.day != persona.birth_date.day
+            else:
+                wrong_dobs += 1
+        if record.addr_postal != persona.addr_postal:
+            moved += 1
+            assert record.address_line.lower() != persona.address_line, (
+                f"{source} moved {persona.persona_id} to postal {record.addr_postal} "
+                f"without changing its address line"
+            )
+
+    for name, count in (
+        ("email_domain_swap_rate", domain_swaps),
+        ("alt_email_rate", alt_emails),
+        ("dob_day_typo_rate", day_typos),
+        ("dob_wrong_rate", wrong_dobs),
+        ("moved_postal_rate", moved),
+    ):
+        assert count > 0, f"the {name} axis never fired; its comparison level has no EM support"
+
+
 def test_profile_validation_rejects_unknown_source_and_bad_rate(tmp_path: Path) -> None:
     """AC8: a source absent from `sources:` and an out-of-range rate both fail to load."""
     block = """
   typo_rate: 0.03
   nickname_rate: 0.1
+  alt_given_rate: 0.02
   stale_address_rate: 0.04
+  moved_postal_rate: 0.05
+  alt_email_rate: 0.08
+  email_domain_swap_rate: 0.02
+  alt_phone_rate: 0.06
+  dob_day_typo_rate: 0.02
+  dob_wrong_rate: 0.01
   missing_rates:
     email: 0.02
   phone_form_weights:

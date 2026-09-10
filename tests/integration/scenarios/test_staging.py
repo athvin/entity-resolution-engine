@@ -375,14 +375,20 @@ def test_name_variants_symmetry_and_date_formats(
 
     # AC4: every staged `birth_date` is the delivered value read through that
     # source's own `date_format` (S6) -- which is the claim, since `%m/%d/%Y` and
-    # `%Y-%m-%d` describe the same day differently.
+    # `%Y-%m-%d` describe the same day differently. An empty delivered field is the
+    # S8.2 missing-value convention, so it must stage to NULL rather than parse.
     by_persona: dict[str, dict[str, date | None]] = {}
     for source in SOURCES:
         spec = sources[source]
         for row in delivered_rows(base_10, source):
             delivered = row[spec.columns["birth_date"]]
-            expected = datetime.strptime(delivered, spec.date_format).date()
             record_id = row[spec.record_id_column]
+            if not delivered:
+                assert births[source][record_id] is None, (
+                    f"{source}/{record_id}: an empty birth_date field must stage to NULL"
+                )
+                continue
+            expected = datetime.strptime(delivered, spec.date_format).date()
             assert births[source][record_id] == expected, f"{source}/{record_id}: {delivered}"
             by_persona.setdefault(row[PERSONA_COLUMN], {})[source] = births[source][record_id]
 

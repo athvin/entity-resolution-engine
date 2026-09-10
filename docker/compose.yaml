@@ -38,6 +38,13 @@ x-er-image: &er-image
 services:
   catalog:                                 # DuckLake catalog database
     image: postgres:16@sha256:11a9d238fbb48bab14599c57e41123254452b1a2d93c6c8595bce96f346bd082
+    # DuckLake's maintenance sweep drops every expired inlined-data table in one
+    # transaction, and a long test session accumulates hundreds of them; postgres's
+    # default 64 locks per transaction then fails the sweep with "out of shared
+    # memory" and poisons the catalog connection for everything after it. The limit
+    # is per-transaction bookkeeping, not memory reserved up front, so raising it
+    # costs nothing when unused.
+    command: ["postgres", "-c", "max_locks_per_transaction=1024"]
     environment:
       POSTGRES_DB: ducklake
       POSTGRES_USER: er

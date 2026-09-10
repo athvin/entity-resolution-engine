@@ -20,12 +20,17 @@ would quietly destroy something a test downstream is graded on:
   `dbt/seeds/nickname_variants.csv` (ER-039). A diminutive invented here would be a
   true pair the pipeline is *unable* to find, so it would read as a recall
   regression in the S10.5 quality numbers with nothing in the pipeline to fix.
-* **`given_name` is the nickname axis and carries no typo.** The two corruptions do
-  not compose: a typo on top of a substitution leaves a value that is neither the
-  persona's name nor a seed variant, and "did the generator emit a nickname it could
-  not justify?" stops being answerable from the corpus. Typos therefore land on
+* **`given_name` carries no typo, and its two substitution axes never compose.** A
+  typo on top of a substitution leaves a value that is neither the persona's name
+  nor a justifiable alternate, and "did the generator emit a name it could not
+  justify?" stops being answerable from the corpus. Typos therefore land on
   `family_name`, which is also where `base_10`'s typo trap lives (S8.2) and where
-  the `jaro_winkler:0.90` level of S6 is the intended catcher.
+  the `jaro_winkler:0.90` level of S6 is the intended catcher. The nickname axis
+  substitutes a seed variant; the *alternate-name* axis (`alt_given_rate`) draws a
+  different legal name from the committed weighted list -- the middle-name /
+  goes-by shape real sources hold -- and it fires only when the nickname axis did
+  not, so every emitted given name is the persona's, a seed variant of it, or a
+  member of the committed vocabulary.
 * **Only `email`, `phone` and `birth_date` may go missing.** S8.2's missing-email
   trap is exactly this axis. `address_line`, the six `addr_*` values and the two
   name columns are excluded by :data:`MISSABLE_FIELDS` and rejected by
@@ -33,13 +38,27 @@ would quietly destroy something a test downstream is graded on:
   `family_name` and `addr_postal`: nulling either does not corrupt a record, it
   removes it from candidate generation altogether, and a record no rule pairs is a
   missing edge no threshold change can recover.
-* **A stale address stays inside its postal area.** S10.1's stale-address axis is a
-  person who moved, and the drift is a different house number and street with the
-  same city, region and postal code. Moving the postal code too would break
-  `name_postal` for that record, which is the same "removed from candidate
-  generation" failure as nulling it; keeping it exercises what the axis is for --
-  the `address: [recency, source_priority]` survivorship chain of S6 deciding which
-  of two addresses reaches `golden_records`.
+* **A stale address stays inside its postal area; a move leaves it.** S10.1's
+  stale-address axis is drift within a life: a different house number and street
+  with the same city, region and postal code, so `name_postal` still pairs the
+  record. The *moved* axis (`moved_postal_rate`) is a person who left the area --
+  a full new address with a different postal code -- and it exists because the
+  `addr_postal` comparison of S6 has a disagreement level that EM can only fit if
+  two records of one persona ever disagree on postal; without it that level has no
+  support, the fitted m is undefined, and Splink drops the whole comparison at
+  predict time. A moved record still pairs through `email_exact`, `phone_exact`
+  or `dob_name`, so the corpus loses no persona from candidate generation.
+* **Within-persona field drift is a real shape, and every S6 comparison level must
+  have support.** Sources genuinely disagree about a person: a billing address on
+  an old email, a webform typed with a new phone number, a birthday keyed a day
+  off. The `alt_email_rate`, `email_domain_swap_rate` (same username, different
+  domain -- the `username_exact` level's shape), `alt_phone_rate`,
+  `dob_day_typo_rate` (same year and month -- `dob_same_year_month`'s shape) and
+  `dob_wrong_rate` axes emit exactly those disagreements. They are what gives EM
+  support for every disagreement level of S6's comparisons; a corpus in which
+  matches never disagree on a field trains that field's disagreement m to nothing,
+  and the committed fixture model then scores every real-world disagreement as
+  impossible.
 
 The module reads two committed files -- the nickname seed and `profiles.yaml` -- and
 performs no other I/O.
@@ -52,7 +71,7 @@ import hashlib
 import random
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from functools import cache
 from pathlib import Path
 from types import MappingProxyType
@@ -62,7 +81,20 @@ import yaml
 
 from er.config.schema import Config
 
-from .personas import MAX_HOUSE_NUMBER, STREET_NAMES, STREET_TYPES, Persona
+from .personas import (
+    AREA_CODES,
+    CITIES,
+    EARLIEST_BIRTH_DATE,
+    EMAIL_DOMAINS,
+    FICTIONAL_EXCHANGE,
+    LATEST_BIRTH_DATE,
+    MAX_HOUSE_NUMBER,
+    POSTAL_SPREAD,
+    STREET_NAMES,
+    STREET_TYPES,
+    Persona,
+    given_names,
+)
 
 __all__ = [
     "MISSABLE_FIELDS",
@@ -105,7 +137,18 @@ MISSABLE_FIELDS: Final = ("email", "phone", "birth_date")
 
 #: Every rate name on a profile, so an unknown key in the YAML is a load error and
 #: not a silently ignored line.
-_RATE_FIELDS: Final = ("typo_rate", "nickname_rate", "stale_address_rate")
+_RATE_FIELDS: Final = (
+    "typo_rate",
+    "nickname_rate",
+    "alt_given_rate",
+    "stale_address_rate",
+    "moved_postal_rate",
+    "alt_email_rate",
+    "email_domain_swap_rate",
+    "alt_phone_rate",
+    "dob_day_typo_rate",
+    "dob_wrong_rate",
+)
 
 #: The keyboard-adjacency substitutions a typo may make, plus the two structural
 #: typos (transposition and deletion) `_apply_typo` chooses between. Adjacency
@@ -161,7 +204,24 @@ class CorruptionProfile:
     source: str
     typo_rate: float
     nickname_rate: float
+    #: A different legal given name from the committed weighted list -- the
+    #: middle-name / goes-by shape. Fires only when the nickname axis did not.
+    alt_given_rate: float
     stale_address_rate: float
+    #: A full new address with a different postal code -- the person left the
+    #: area. Takes precedence over the stale axis when both fire.
+    moved_postal_rate: float
+    #: A different email entirely -- a second mailbox the source holds.
+    alt_email_rate: float
+    #: The persona's username on a different domain -- `username_exact`'s shape.
+    #: Fires only when the alternate-email axis did not.
+    email_domain_swap_rate: float
+    #: A different phone number entirely -- an old or secondary line.
+    alt_phone_rate: float
+    #: The persona's birthday keyed a day off, inside the same year and month.
+    dob_day_typo_rate: float
+    #: A wholly wrong birth date. Fires only when the day-typo axis did not.
+    dob_wrong_rate: float
     #: field -> the fraction of records emitting it empty. Keys are a subset of
     #: :data:`MISSABLE_FIELDS`; an absent key means the field never goes missing.
     missing_rates: Mapping[str, float]
@@ -354,6 +414,72 @@ def _stale_address_line(rng: random.Random) -> str:
     return f"{number} {street} {street_type}"
 
 
+def _moved_address(rng: random.Random) -> tuple[str, str, str, str]:
+    """`(line, city, region, postal)` for a person who left their postal area.
+
+    Drawn from the same committed vocabulary as `personas.py`'s addresses so the
+    line parses under the v1 grammar, and postal-distinct from the persona's own
+    only probabilistically -- one draw in a thousand lands back in the same city
+    block, which is corpus noise, not a defect. No unit phrase, for the stale
+    axis's reason.
+    """
+    number = str(rng.randrange(1, MAX_HOUSE_NUMBER + 1))
+    street = STREET_NAMES[rng.randrange(len(STREET_NAMES))]
+    street_type = STREET_TYPES[rng.randrange(len(STREET_TYPES))]
+    city, region, postal_base = CITIES[rng.randrange(len(CITIES))]
+    postal = f"{postal_base + rng.randrange(POSTAL_SPREAD):05d}"
+    return f"{number} {street} {street_type}", city, region, postal
+
+
+def _alternate_given(rng: random.Random) -> str:
+    """A different legal name from the committed weighted list.
+
+    The draw may land on the persona's own name; the caller treats that as the
+    trial having produced no visible drift, which keeps the axis one draw wide.
+    """
+    return given_names().pick(rng)
+
+
+def _alternate_email(persona: Persona, rng: random.Random) -> str:
+    """A second mailbox for the persona: their name plus a numeric disambiguator.
+
+    The `.N` suffix keeps the value inside the corpus's `<given>.<family>@<domain>`
+    idiom while making a collision with any persona's primary address (whose rare
+    dedup suffix is digit-only, never dot-digit) impossible by construction.
+    """
+    domain = EMAIL_DOMAINS[rng.randrange(len(EMAIL_DOMAINS))]
+    return f"{persona.given_name}.{persona.family_name}.{rng.randrange(2, 1000)}@{domain}"
+
+
+def _swap_email_domain(email: str, rng: random.Random) -> str:
+    """The same username on a different reserved domain -- `username_exact`'s shape."""
+    local, _, current = email.rpartition("@")
+    others = tuple(domain for domain in EMAIL_DOMAINS if domain != current)
+    return f"{local}@{others[rng.randrange(len(others))]}"
+
+
+def _alternate_phone(rng: random.Random) -> str:
+    """A different fictional-exchange number -- an old or secondary line."""
+    area = AREA_CODES[rng.randrange(len(AREA_CODES))]
+    return f"+1{area}{FICTIONAL_EXCHANGE}{rng.randrange(10_000):04d}"
+
+
+def _dob_day_typo(birth_date: date, rng: random.Random) -> date:
+    """The same year and month, a different day -- `dob_same_year_month`'s shape."""
+    month_start = birth_date.replace(day=1)
+    next_month = (month_start + timedelta(days=31)).replace(day=1)
+    days_in_month = (next_month - month_start).days
+    offset = rng.randrange(1, days_in_month)
+    return birth_date.replace(day=1 + (birth_date.day - 1 + offset) % days_in_month)
+
+
+def _wrong_birth_date(rng: random.Random) -> date:
+    """A uniform redraw over the persona window -- almost surely a different month."""
+    return date.fromordinal(
+        rng.randrange(EARLIEST_BIRTH_DATE.toordinal(), LATEST_BIRTH_DATE.toordinal() + 1)
+    )
+
+
 def _titlecase(text: str) -> str:
     """Capitalise word-initially, leaving digit- and `#`-initial tokens alone.
 
@@ -386,27 +512,52 @@ def corrupt_record(
     Note:
         The axes are applied in a fixed order and each spends exactly one trial,
         fired or not, so adding a rate to a profile moves only the axes after it.
+        Where two axes drift the same field, the trial of each is still spent and
+        the first-listed one wins, so the pair stays two independent Bernoulli
+        draws rather than one axis reshaping the other's realised rate.
     """
-    given_name = persona.given_name
-    if profile.fires(profile.nickname_rate, rng):
-        given_name = _substitute_nickname(given_name, rng)
+    nicknamed = profile.fires(profile.nickname_rate, rng)
+    given_name = _substitute_nickname(persona.given_name, rng) if nicknamed else persona.given_name
+    if profile.fires(profile.alt_given_rate, rng) and not nicknamed:
+        given_name = _alternate_given(rng)
 
     family_name = persona.family_name
     if profile.fires(profile.typo_rate, rng):
         family_name = _apply_typo(family_name, rng)
 
     address_line = persona.address_line
-    if profile.fires(profile.stale_address_rate, rng):
+    addr_city = persona.addr_city
+    addr_region = persona.addr_region
+    addr_postal = persona.addr_postal
+    moved = profile.fires(profile.moved_postal_rate, rng)
+    if moved:
+        address_line, addr_city, addr_region, addr_postal = _moved_address(rng)
+    if profile.fires(profile.stale_address_rate, rng) and not moved:
         address_line = _stale_address_line(rng)
 
-    phone = render_phone(persona.phone, profile.pick_phone_form(rng))
+    number = _alternate_phone(rng) if profile.fires(profile.alt_phone_rate, rng) else persona.phone
+    phone = render_phone(number, profile.pick_phone_form(rng))
 
-    email = "" if profile.fires(profile.missing_rate("email"), rng) else persona.email
+    email = persona.email
+    alt_email = profile.fires(profile.alt_email_rate, rng)
+    if alt_email:
+        email = _alternate_email(persona, rng)
+    if profile.fires(profile.email_domain_swap_rate, rng) and not alt_email:
+        email = _swap_email_domain(email, rng)
+
+    birth_date: date | None = persona.birth_date
+    day_typo = profile.fires(profile.dob_day_typo_rate, rng)
+    if day_typo:
+        birth_date = _dob_day_typo(persona.birth_date, rng)
+    if profile.fires(profile.dob_wrong_rate, rng) and not day_typo:
+        birth_date = _wrong_birth_date(rng)
+
+    if profile.fires(profile.missing_rate("email"), rng):
+        email = ""
     if profile.fires(profile.missing_rate("phone"), rng):
         phone = ""
-    birth_date = (
-        None if profile.fires(profile.missing_rate("birth_date"), rng) else persona.birth_date
-    )
+    if profile.fires(profile.missing_rate("birth_date"), rng):
+        birth_date = None
 
     return CorruptedRecord(
         persona_id=persona.persona_id,
@@ -415,9 +566,9 @@ def corrupt_record(
         email=email,
         phone=phone,
         address_line=_titlecase(address_line),
-        addr_city=_titlecase(persona.addr_city),
-        addr_region=persona.addr_region.upper(),
-        addr_postal=persona.addr_postal,
+        addr_city=_titlecase(addr_city),
+        addr_region=addr_region.upper(),
+        addr_postal=addr_postal,
         birth_date=birth_date,
     )
 
@@ -521,11 +672,10 @@ def load_profiles(
         missing_keys = sorted(known - set(block))
         if missing_keys:
             raise ValueError(f"profiles.{source}: missing key(s) {missing_keys}")
+        rates = {field: _rate(source, field, block[field]) for field in _RATE_FIELDS}
         profiles[source] = CorruptionProfile(
             source=source,
-            typo_rate=_rate(source, "typo_rate", block["typo_rate"]),
-            nickname_rate=_rate(source, "nickname_rate", block["nickname_rate"]),
-            stale_address_rate=_rate(source, "stale_address_rate", block["stale_address_rate"]),
+            **rates,
             missing_rates=_missing_rates(source, block["missing_rates"]),
             phone_form_weights=_phone_form_weights(source, block["phone_form_weights"]),
         )

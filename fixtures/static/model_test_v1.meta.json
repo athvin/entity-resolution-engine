@@ -1,7 +1,7 @@
 {
   "artifact": "model_test_v1.json",
   "config_hash": "530a272840204f6f9944df4a9e8b84852eb85134225280b00b161811a097c438",
-  "corpus_digest": "9fa17301c53b6357cd47ac17a563e1b139a160b369d6c993c9e5dfc85938b730",
+  "corpus_digest": "e888eb7aa347b533f09aab22f95d92be60b164ca153770d38cbd954c07405894",
   "duckdb_version": "1.5.5",
   "generator_seed": 42,
   "model_version": "v0001",
@@ -10,9 +10,9 @@
     "personas": 4000,
     "records": 10000
   },
-  "sha256": "9d5b22288fc90f089792ea38af30a5c66ce59db7969ef44a32ab473538625c83",
+  "sha256": "8b810a3fa3e17c82148f3ea87dd2dc49accb3ca5554206bf4f49b6cb08c5b982",
   "splink_version": "4.0.16",
-  "tf_rows": 4554,
+  "tf_rows": 5608,
   "tf_snapshot_id": "01JWMDTFSNAP00000000000001",
   "training": {
     "deterministic_rules": [

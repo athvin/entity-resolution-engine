@@ -220,10 +220,18 @@ def reconciled(
 
         # A pair `base_10` genuinely co-clusters, read from the membership rather than
         # hard-coded: which records share an entity is a property of the model, and
-        # ER-060 has shown those can move.
+        # ER-060 has shown those can move. Restricted to a THREE-member entity: its
+        # component is a triangle, so suppressing the direct edge leaves exactly one
+        # two-hop path and the never-cut removes exactly one edge — the "one active
+        # cut row" the assertions below are stated over. A four-member clique (base_10
+        # holds one) needs two cuts and would make the count a property of the
+        # topology rather than of persistence.
         row = initialised_lake.execute(
+            f"WITH sized AS (SELECT entity_id, count(*) AS members FROM {MEMBERSHIP} "
+            f"GROUP BY entity_id) "
             f"SELECT a.record_key, b.record_key, a.entity_id FROM {MEMBERSHIP} AS a "
             f"JOIN {MEMBERSHIP} AS b ON a.entity_id = b.entity_id AND a.record_key < b.record_key "
+            f"JOIN sized ON sized.entity_id = a.entity_id AND sized.members = 3 "
             "ORDER BY a.record_key, b.record_key LIMIT 1"
         ).fetchone()
         assert row is not None, "no entity holds two records; there is nothing to cut apart"
