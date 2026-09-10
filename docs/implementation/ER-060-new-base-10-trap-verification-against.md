@@ -2,7 +2,7 @@
 id: ER-060
 title: "**NEW** base_10 trap verification against the committed model: exactly one gray-band pair, ≥1 single-rule-covered true pair, tie row, recency never decides"
 milestone: M3
-status: todo
+status: in_progress
 kind: code
 size: S
 gates: full
@@ -14,13 +14,13 @@ consumes: ["fixtures/static/base_10/truth.csv", "fixtures/static/base_10/base/cr
 owns: ["tests/integration/test_base_10_traps.py", "tests/helpers/traps.py"]
 protected_paths: ["fixtures/static/base_10/", "src/er/matching/", "configs/test.yaml"]
 extra_paths: []
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_base_10_traps.py -q"
-branch: ""
+branch: "ticket/ER-060-new-base-10-trap-verification-against"
 commit: ""
 spec_sha: "7467bdacba1bd84c"
-updated_at: "2026-09-10T06:13:23Z"
-session: c379438e-8c95-4be8-8f5f-3832d8ceafaa
+updated_at: "2026-09-10T16:50:13Z"
+session: d0707c1d-1d2f-4e95-8ff1-341c508a8022
 ---
 ## Description
 
