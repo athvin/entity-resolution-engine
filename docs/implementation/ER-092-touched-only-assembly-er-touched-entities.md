@@ -2,7 +2,7 @@
 id: ER-092
 title: "Touched-only assembly: er_touched_entities, single run_id var, explicit reap step, assembled_at rule + T-INC-2 (rewritten ∪ reaped == touched)"
 milestone: M4
-status: in_progress
+status: done
 kind: code
 size: L
 gates: full
@@ -17,9 +17,9 @@ extra_paths: ["src/er/cli.py", "dbt/models/marts/golden_records.sql", "dbt/model
 attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_touched_assembly.py -q"
 branch: "ticket/ER-092-touched-only-assembly-er-touched-entities"
-commit: ""
+commit: "8ee1d8916c139ad81676c75df373126fdd810bd8"
 spec_sha: "7467bdacba1bd84c"
-updated_at: "2026-09-10T23:24:52Z"
+updated_at: "2026-09-10T23:57:47Z"
 session: d0707c1d-1d2f-4e95-8ff1-341c508a8022
 ---
 ## Description
