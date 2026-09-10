@@ -80,11 +80,13 @@ min(record_key)` over the closed neighbourhood of `v`, propagated to fixpoint, b
 there, and each is a way the partition or the snapshot history goes wrong:
 
 * **Every round ends in a pointer jump.** The closed-neighbourhood min alone moves a label
-  one hop per round, so a component that is a path of `n` records would need `n` rounds and
-  a 1024-record chain would blow the default cap of 50. Composing the round's own result
-  with itself — `label(v) := L(L(v))` — doubles the reach each round instead, which is what
-  makes `ceil(log2 n) + 1` (:func:`MAX_ITERATION_BOUND`) a true bound and the configured
-  cap a safety net rather than the expected count.
+  one hop per round; composing the round's own result with itself — `label(v) := L(L(v))`
+  — doubles the reach wherever the interior labels already point toward the component
+  minimum, which is what lets a monotone-key 1024-record chain settle in 11 rounds
+  instead of blowing the default cap of 50. The doubling is an acceleration, not a
+  guarantee: an adversarial key placement degrades the round to one true hop per round,
+  which is why :func:`MAX_ITERATION_BOUND` is `n` and the configured cap remains a
+  safety net for the component shapes a real corpus holds.
 * **The iterations run in the in-memory database and NOTHING per-round reaches the lake**
   (S4.0b, M17). The tables the loop rewrites each round are `TEMP`, so a round commits no
   DuckLake snapshot; a loop that materialised its state in `lake.main` would leave one
@@ -971,11 +973,11 @@ _LOOP_RELATIONS: Final[tuple[str, ...]] = (
 #: keeps its own label instead of dropping out of the result entirely (S4.5.3's "a record
 #: leaving all clusters becomes a singleton" has no input if it does).
 #:
-#: The final `SELECT` is the pointer jump, and it is why the loop terminates in
-#: :func:`MAX_ITERATION_BOUND` rounds rather than in one round per hop: composing the
-#: round's own result with itself doubles the reach each time. `closed` is referenced
-#: twice, which is exactly the composition — `label(v) := L(L(v))` — and never a second
-#: pass over the edges.
+#: The final `SELECT` is the pointer jump: composing the round's own result with
+#: itself — `closed` referenced twice, `label(v) := L(L(v))`, never a second pass
+#: over the edges. It doubles the reach wherever interior labels already point
+#: toward the component minimum; see :func:`MAX_ITERATION_BOUND` for why that is
+#: an acceleration rather than a guarantee.
 #:
 #: `min` over `VARCHAR` is lexicographic, which is the order S5.0's `record_key` is
 #: canonicalised and compared in everywhere else in this module (`canonicalize_pair`), so
@@ -1016,23 +1018,28 @@ _ADOPT_SQL: Final = (
 
 
 def MAX_ITERATION_BOUND(node_count: int) -> int:
-    """`ceil(log2 n) + 1` — the rounds S4.5.2's pointer jumping needs for `n` nodes.
+    """``n`` — the rounds the S4.5.2 round provably needs for `n` nodes.
 
-    Upper case because it is a bound of the ALGORITHM and not a knob: S4.5.2 states it as
-    a fact about pointer jumping ("halves path length per round"), it is a function of `n`
-    only, and no configuration can move it. `clustering.max_iterations` is the other
-    number — the configured cap, the safety net, and the one whose exhaustion fails the
-    stage — and the two are deliberately not the same thing (S6, default 50).
+    Upper case because it is a bound of the ALGORITHM and not a knob: it is a
+    function of `n` only, and no configuration can move it.
+    `clustering.max_iterations` is the other number — the configured cap, the
+    safety net, and the one whose exhaustion fails the stage — and the two are
+    deliberately not the same thing (S6, default 50).
 
-    The worst case for a component of `n` records is the path: the round's reach after `k`
-    rounds is `2^(k+1) - 2` hops, so it covers a path's `n - 1` hops once
-    `2^(k+1) >= n + 1`, and the round that then finds nothing to move is the `+ 1`. Any
-    other shape of the same size has a smaller diameter and settles sooner.
-
-    Computed with :meth:`int.bit_length` rather than `math.log2`: `ceil(log2 n)` is
-    `(n - 1).bit_length()` exactly, for every `n`, with no float in the path — and this
-    number is asserted against at `n = 1024`, where `log2` is exact but its neighbours
-    are the sort of place a float bound goes off by one.
+    The bound is LINEAR, not logarithmic, and the difference was measured rather
+    than theorised: the round's trailing jump composes the closed-neighbourhood
+    min with itself, which doubles the reach only while every intermediate label
+    points TOWARD the component minimum. Keys are `record_key`s, not positions,
+    and a component whose second-smallest key sits at the far end of a path from
+    its smallest — `base_10`'s two billing records bridged through their crm and
+    webforms rows, after a review resolution, is a real one — hands the interior
+    nodes a mislabelled direction and degrades the round to one true hop per
+    round. Every round is still monotone (each label written is `<=` the one it
+    replaces and stays inside the component), so the frontier of the true
+    minimum advances at least one hop per round and `n - 1` hops plus the round
+    that finds nothing to move gives `n`. The monotone-key chain settles in
+    `ceil(log2 n) + 1` — the unit suite demonstrates 11 rounds over 1024 records
+    — but that is the round at its best, not its bound.
 
     Args:
         node_count: how many records are being propagated over. The whole node set is a
@@ -1042,9 +1049,7 @@ def MAX_ITERATION_BOUND(node_count: int) -> int:
     Returns:
         The bound, and ``0`` for an empty node set — no round is run at all.
     """
-    if node_count <= 0:
-        return 0
-    return (node_count - 1).bit_length() + 1
+    return max(node_count, 0)
 
 
 @dataclass(frozen=True)
@@ -1190,8 +1195,8 @@ def label_propagate(
     """S4.5.2's incremental clustering: min-label propagation to a bounded fixpoint.
 
     `label(v) = min(record_key)` over the closed neighbourhood of `v`, propagated until
-    nothing moves, with a pointer jump ending every round so the fixpoint is reached in
-    :func:`MAX_ITERATION_BOUND` rounds rather than in one per hop.
+    nothing moves, with a pointer jump ending every round; the fixpoint arrives within
+    :func:`MAX_ITERATION_BOUND` rounds, and far sooner on monotone-key components.
 
     **Nothing is written.** Every round rewrites `TEMP` relations in the connection's
     in-memory database (S4.0b, M17), and they are dropped before this returns — the

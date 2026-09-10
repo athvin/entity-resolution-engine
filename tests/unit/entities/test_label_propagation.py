@@ -168,7 +168,14 @@ def test_pointer_jumping_converges_within_log2_bound(
     nodes, edges = path_graph(PATH_NODES)
     result = label_propagate(connection, nodes, edges, max_iterations=MAX_ITERATIONS)
 
-    assert MAX_ITERATION_BOUND(PATH_NODES) == 11
+    # The chain's keys ascend along the path, so every interior label points
+    # toward the minimum and the jump genuinely doubles: eleven rounds, exactly
+    # `ceil(log2 1024) + 1`. That is the round at its best; the BOUND is linear
+    # (`n`), because an adversarial key placement — the second-smallest key at
+    # the far end of a path — degrades the jump to one true hop per round, and a
+    # bound that assumed the best case refused a legitimate corpus (ER-086
+    # measured exactly that on a review-resolution merge).
+    assert result.iterations == 11
     assert result.iterations <= MAX_ITERATION_BOUND(PATH_NODES)
     assert set(result.labels) == set(nodes), "every node passed in is labelled"
     assert set(result.labels.values()) == {nodes[0]}, (
