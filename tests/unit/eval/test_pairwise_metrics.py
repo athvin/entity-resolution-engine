@@ -78,3 +78,30 @@ def test_out_of_universe_and_non_canonical_raise() -> None:
         pairwise_metrics(set(), {(B, A)}, set(UNIVERSE))
     with pytest.raises(ValueError, match="non-canonical"):
         pairwise_metrics(set(), set(), {(A, A)})
+
+
+def test_cluster_closure_pairs_is_canonical_and_transitive() -> None:
+    """The closure is every within-entity pair, canonical, and never crosses.
+
+    Membership rows arrive deliberately unsorted so canonicality is the
+    function's doing, not the input's; the duplicate-record guard is S4.5.3's
+    one-row-per-record reading of `entity_membership`.
+    """
+    from er.eval.metrics import cluster_closure_pairs, membership_partition
+
+    rows = [("s:c", "E1"), ("s:a", "E1"), ("s:b", "E1"), ("s:z", "E2"), ("s:y", "E2")]
+    closure = cluster_closure_pairs(rows)
+    # C(3,2) within E1 plus the E2 pair — worked by hand — and nothing across.
+    assert closure == {("s:a", "s:b"), ("s:a", "s:c"), ("s:b", "s:c"), ("s:y", "s:z")}
+    assert all(rec_a < rec_b for rec_a, rec_b in closure)
+
+    partition = membership_partition(rows)
+    assert partition == {
+        "E1": frozenset({"s:a", "s:b", "s:c"}),
+        "E2": frozenset({"s:y", "s:z"}),
+    }
+
+    with pytest.raises(ValueError, match="two entities"):
+        membership_partition([("s:a", "E1"), ("s:a", "E2")])
+    # The same assignment twice is a re-statement, not a conflict.
+    assert cluster_closure_pairs([("s:a", "E1"), ("s:a", "E1")]) == set()

@@ -25,10 +25,16 @@ are pinned here rather than left to each call site:
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 
-__all__ = ["PairwiseMetrics", "pairwise_metrics"]
+__all__ = [
+    "PairwiseMetrics",
+    "cluster_closure_pairs",
+    "membership_partition",
+    "pairwise_metrics",
+]
 
 #: A canonical pair: `rec_a_key < rec_b_key` (S5.0).
 Pair = tuple[str, str]
@@ -49,6 +55,45 @@ class PairwiseMetrics:
     precision: float
     recall: float
     f1: float
+
+
+def membership_partition(rows: Iterable[tuple[str, str]]) -> dict[str, frozenset[str]]:
+    """`entity_id -> members` from `(record_key, entity_id)` membership rows.
+
+    The partition S8.5's cluster-level row is stated over. A record appearing
+    under two entities raises: `entity_membership` is CURRENT STATE with exactly
+    one row per record (S4.5.3), and a duplicate here means the caller read
+    something else.
+    """
+    seen: dict[str, str] = {}
+    grouped: dict[str, set[str]] = {}
+    for record_key, entity_id in rows:
+        previous = seen.get(record_key)
+        if previous is not None and previous != entity_id:
+            raise ValueError(
+                f"{record_key!r} appears under two entities ({previous!r}, "
+                f"{entity_id!r}); entity_membership holds one row per record (S4.5.3)"
+            )
+        seen[record_key] = entity_id
+        grouped.setdefault(entity_id, set()).add(record_key)
+    return {entity_id: frozenset(members) for entity_id, members in grouped.items()}
+
+
+def cluster_closure_pairs(rows: Iterable[tuple[str, str]]) -> set[Pair]:
+    """The transitive closure of a membership as canonical pairs (S8.5, S5.0).
+
+    S8.5's cluster-level `predicted` set: every within-entity pair, each exactly
+    once, in the `rec_a_key < rec_b_key` orientation. Computed here — beside
+    :func:`pairwise_metrics` — so T-MATCH-1b and the benchmark's quality block
+    read one closure rather than growing a second that disagrees about ordering.
+    """
+    pairs: set[Pair] = set()
+    for members in membership_partition(rows).values():
+        ordered = sorted(members)
+        for index, rec_a_key in enumerate(ordered):
+            for rec_b_key in ordered[index + 1 :]:
+                pairs.add((rec_a_key, rec_b_key))
+    return pairs
 
 
 def _require_canonical(name: str, pairs: AbstractSet[Pair]) -> None:
