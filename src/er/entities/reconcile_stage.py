@@ -62,6 +62,7 @@ from er.entities.cluster import (
     load_affected_set,
 )
 from er.entities.events import EventLog, append_events
+from er.entities.guards import assert_single_scoring_generation, scoring_generation_rows
 from er.entities.ids import IdFactory, MonotonicUlidFactory
 from er.entities.reconcile import (
     MEMBER_ADDED,
@@ -434,6 +435,16 @@ def run_reconcile_stage(
     # batch happened to be non-empty.
     if check_contradiction_1(assertions):
         raise _contradiction_failure(assertions)
+
+    # The S4.3.2 activation guard, likewise before anything is written: a current
+    # edge set speaking two scoring generations above `review_low` is two
+    # probability scales against one threshold, and the refusal (exit 3,
+    # `precondition`) is what forces the full rescore first. Assertion edges can
+    # never appear here — S4.4 keeps them out of `match_scores` entirely.
+    assert_single_scoring_generation(
+        scoring_generation_rows(connection),
+        review_low=cfg.thresholds.review_low,
+    )
 
     watermark = last_reconciled_watermark(connection)
     scored = current_edges(connection, model_version, tf_snapshot_id)
