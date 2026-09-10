@@ -2,7 +2,7 @@
 id: ER-079
 title: "T-ASSERT-1: no active never pair shares an entity in either mode; stale-violation recheck against current membership; no silent outcome"
 milestone: M3
-status: in_progress
+status: done
 kind: code
 size: M
 gates: full
@@ -17,9 +17,9 @@ extra_paths: ["src/er/review/never_cut.py", "tests/helpers/invariants.py"]
 attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/scenarios/test_assertions_scenario.py -q"
 branch: "ticket/ER-079-t-assert-1-no-active-never"
-commit: ""
+commit: "952608be1501ee8a8383794b4f97a95dbfed60d2"
 spec_sha: "7467bdacba1bd84c"
-updated_at: "2026-09-10T23:00:05Z"
+updated_at: "2026-09-10T23:24:33Z"
 session: d0707c1d-1d2f-4e95-8ff1-341c508a8022
 ---
 ## Description
