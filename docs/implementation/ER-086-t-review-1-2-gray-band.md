@@ -2,7 +2,7 @@
 id: ER-086
 title: "T-REVIEW-1/2: gray-band capture, resolution-driven merge (proves assertion-delta affected-set expansion), no reopen"
 milestone: M3
-status: in_progress
+status: done
 kind: code
 size: S
 gates: full
@@ -17,9 +17,9 @@ extra_paths: ["src/er/review/queue.py", "src/er/entities/affected.py"]
 attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_review_loop.py -q"
 branch: "ticket/ER-086-t-review-1-2-gray-band"
-commit: ""
+commit: "a03e052f267d27d62f0d316d50a34a06eaadcc53"
 spec_sha: "7467bdacba1bd84c"
-updated_at: "2026-09-10T22:47:28Z"
+updated_at: "2026-09-10T22:59:58Z"
 session: d0707c1d-1d2f-4e95-8ff1-341c508a8022
 ---
 ## Description
