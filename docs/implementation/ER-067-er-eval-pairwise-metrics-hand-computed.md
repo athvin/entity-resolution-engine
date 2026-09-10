@@ -2,7 +2,7 @@
 id: ER-067
 title: "er.eval.pairwise_metrics + hand-computed unit + blocking-recall & edge-level T-MATCH-1a on base_10"
 milestone: M3
-status: todo
+status: in_progress
 kind: code
 size: M
 gates: full
@@ -14,12 +14,13 @@ consumes: ["src/er/entities/ids.py::record_key", "src/er/entities/ids.py::canoni
 owns: ["src/er/eval/metrics.py", "tests/helpers/quality.py", "tests/unit/eval/__init__.py", "tests/unit/eval/test_pairwise_metrics.py", "tests/integration/test_match_quality.py"]
 protected_paths: ["fixtures/static/base_10", "fixtures/static/model_test_v1.json"]
 extra_paths: ["scripts/lint_metrics.py", "src/er/eval/__init__.py"]
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_match_quality.py -q && uv run pytest tests/unit/eval/test_pairwise_metrics.py -q"
-branch: ""
+branch: "ticket/ER-067-er-eval-pairwise-metrics-hand-computed"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "7467bdacba1bd84c"
+updated_at: "2026-09-10T19:40:53Z"
+session: d0707c1d-1d2f-4e95-8ff1-341c508a8022
 ---
 ## Description
 
