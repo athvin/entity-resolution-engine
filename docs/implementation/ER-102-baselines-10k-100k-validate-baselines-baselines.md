@@ -2,7 +2,7 @@
 id: ER-102
 title: "Baselines 10k/100k + --validate-baselines + baselines/README.md + flip the scheduled scale to 10k"
 milestone: M5
-status: in_progress
+status: todo
 kind: code
 size: M
 gates: fast
@@ -14,12 +14,12 @@ consumes: ["benchmarks/report.py", "benchmarks/workflow.py::parse_benchmark_work
 owns: ["benchmarks/baselines/10k.json", "benchmarks/baselines/100k.json", "benchmarks/baselines/README.md", "tests/unit/bench/test_baselines.py"]
 protected_paths: ["tests/unit/bench/test_workflow.py", "tests/unit/bench/test_preflight.py"]
 extra_paths: [".github/workflows/ci.yaml", ".github/workflows/benchmark.yaml"]
-attempts: 1
+attempts: 0
 verify: "uv run pytest tests/unit/bench/test_baselines.py -q"
-branch: "ticket/ER-102-baselines-10k-100k-validate-baselines-baselines"
+branch: ""
 commit: ""
 spec_sha: "7467bdacba1bd84c"
-updated_at: "2026-09-11T03:39:42Z"
+updated_at: "2026-09-11T03:39:54Z"
 session: d0707c1d-1d2f-4e95-8ff1-341c508a8022
 ---
 ## Description
@@ -90,3 +90,12 @@ bash scripts/gates.sh --ticket ER-102
 - `benchmarks/baselines/README.md` documents the bootstrap, the envelopes and the reviewed-PR rule, and notes the S9.2 Cadence divergence.
 - ER-101's workflow/preflight tests pass unmodified.
 - `scripts/gates.sh --ticket ER-102` green with a receipt.
+
+## Blocker log
+
+### Attempt 1 — environment (2026-09-11T03:39:54Z)
+
+- **Failing command:** `uv run python benchmarks/report.py --write-baseline --scale 100k (dispatched on ubuntu-latest-8-cores)`
+- **Assertion / contradiction:** 100k requires a dispatched run measured inside its S10.2 envelope (runner=ubuntu-latest-8-cores, cpu_limit=6, mem_limit=24g, duckdb_memory_limit=16GB). That runner label is not available in this environment; the only substrate is the 2-vCPU/6g smoke/10k envelope, under which a 100k run is NON_COMPARABLE (cgroup cpu quota 2 != 6, memory.max 6g != 24g) and report.py --write-baseline correctly refuses it (S10.4).
+- **Smallest change that would unblock:** Provision the ubuntu-latest-8-cores GitHub larger-runner label (a paid per-repo/org setting) OR attach self-hosted hardware carrying that label and the 100k envelope (DesignDoc MINOR-milestones escape (a)); then dispatch benchmark.yaml at scale=100k, capture latest.json via report.py --write-baseline, commit 100k.json (and 10k.json). ER-102 Design-decision (1) forbids committing a 100k baseline from a 2-vCPU runner or demoting the scale (demotion is DesignDoc S10.2 spec work). Not an underspecified/verify_failed class: the ticket is fully specified and the block is the spec-mandated outcome for an unavailable runner.
+- **Log:** `.loop/logs/ER-102.attempt-1.log`
