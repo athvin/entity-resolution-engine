@@ -48,9 +48,12 @@ from er.dbt_runner import (
     render_dbt_vars,
     run_dbt,
 )
+from er.embeddings.coherence import get_scorer
+from er.entities.ids import IdFactory
 from er.errors import ExitCode, StageFailure
 from er.lake.ducklake import attach_statements, detach
 from er.lake.model import SCHEMA_QUALIFIER
+from er.review.queue import upsert_entity_finding
 
 __all__ = [
     "MARTS_SELECTOR",
@@ -61,6 +64,7 @@ __all__ = [
     "assemble_dbt_vars",
     "compute_touched_set",
     "reap_retired_entities",
+    "score_touched_entities",
     "write_touched_entities",
 ]
 
@@ -300,6 +304,49 @@ def _closer(connection: duckdb.DuckDBPyConnection) -> Callable[[], None]:
     return close
 
 
+def score_touched_entities(
+    connection: duckdb.DuckDBPyConnection,
+    cfg: Config,
+    *,
+    run_id: str,
+    id_factory: IdFactory | None = None,
+) -> int:
+    """The S11 coherence hook: score this run's rebuilt entities, queue findings (M20).
+
+    Constructs the `coherence.scorer` once, scores the run's `disposition='rebuild'`
+    entities — read from `er_touched_entities` in ascending `entity_id` order so the minted
+    review ids are reproducible and the scorer sees them in input order — and writes each
+    finding above the scorer's threshold as an `entity` `review_queue` row through the
+    S4.3.5 upsert (refresh-open, skip-resolved). `NoopScorer` reports zero dispersion, so
+    under the v1 default this runs and writes nothing. Returns how many findings were
+    queued.
+    """
+    scorer = get_scorer(cfg)
+    entity_ids = [
+        str(row[0])
+        for row in connection.execute(
+            f"SELECT entity_id FROM {_TOUCHED} "
+            "WHERE run_id = ? AND disposition = 'rebuild' ORDER BY entity_id",
+            [run_id],
+        ).fetchall()
+    ]
+    written = 0
+    for coherence in scorer.score_clusters(entity_ids):
+        if coherence.dispersion > scorer.threshold:
+            upsert_entity_finding(
+                connection,
+                entity_id=coherence.entity_id,
+                run_id=run_id,
+                waterfall={
+                    "dispersion": coherence.dispersion,
+                    "outlier_record_keys": list(coherence.outlier_record_keys),
+                },
+                id_factory=id_factory,
+            )
+            written += 1
+    return written
+
+
 def assemble(
     connection: duckdb.DuckDBPyConnection,
     cfg: Config,
@@ -309,6 +356,7 @@ def assemble(
     touched_only: bool,
     artifacts_dir: Path = ARTIFACTS_DIR,
     dbt: Callable[..., DbtResult] | None = None,
+    id_factory: IdFactory | None = None,
 ) -> AssembleResult:
     """Compute the touched set, run the marts, reap, and count (S4.6, M10).
 
@@ -353,6 +401,11 @@ def assemble(
         return empty
 
     write_touched_entities(connection, run_id, touched)
+
+    # S11 coherence seam: score the rebuilt entities and queue findings after the touched
+    # set is written and before the marts run (M20). Under the v1 `noop` scorer this writes
+    # nothing and changes no golden, membership or event row.
+    score_touched_entities(connection, cfg, run_id=run_id, id_factory=id_factory)
 
     runner = run_dbt if dbt is None else dbt
     vars_payload = assemble_dbt_vars(cfg, run_id, run_started, touched_only=touched_only)
