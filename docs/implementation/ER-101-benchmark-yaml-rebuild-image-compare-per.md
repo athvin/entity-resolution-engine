@@ -2,7 +2,7 @@
 id: ER-101
 title: "benchmark.yaml rebuild: in-image compare, per-scale runs-on/timeouts, weekly smoke cron, preflight, always-upload/teardown, SHA pins, options↔baselines coupling"
 milestone: M5
-status: todo
+status: in_progress
 kind: code
 size: M
 gates: fast
@@ -14,12 +14,13 @@ consumes: ["benchmarks/scales.yaml", "benchmarks/scales.py", "benchmarks/report.
 owns: [".github/workflows/benchmark.yaml", "benchmarks/workflow.py", "tests/unit/bench/test_workflow.py", "tests/unit/bench/test_preflight.py"]
 protected_paths: [".github/workflows/ci.yaml", "tests/unit/test_ci_workflow.py"]
 extra_paths: [".github/workflows/benchmark.yaml"]
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/actionlint.sh && uv run pytest tests/unit/bench/test_workflow.py tests/unit/bench/test_preflight.py -q"
-branch: ""
+branch: "ticket/ER-101-benchmark-yaml-rebuild-image-compare-per"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "7467bdacba1bd84c"
+updated_at: "2026-09-11T03:29:02Z"
+session: d0707c1d-1d2f-4e95-8ff1-341c508a8022
 ---
 ## Description
 
