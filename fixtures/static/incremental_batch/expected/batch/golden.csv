@@ -1,0 +1,11 @@
+entity_label,given_name,family_name,email,phone_e164,addr_number,addr_street,addr_unit,addr_city,addr_region,addr_postal,birth_date,survivorship_version
+E1,robert,chen,bobby.chen@example.com,+16285550101,1420,judah street,apt 5,san francisco,ca,94107,1985-03-14,1
+E10,dana,linden,dana.lin@example.com,+14155550455,306,ulloa street,apt 7,san francisco,ca,94124,1995-02-11,1
+E2,priya,raghavan,priya.raghavan@example.com,+14155550132,88,harbor street,#4b,san francisco,ca,94110,1990-07-22,1
+E3,krystal,nowakowsky,krystal.n@example.com,+14155550177,233,cortland avenue,unit 2,san francisco,ca,94112,1978-12-03,1
+E4,marcus,whitfield,marcus.whitfield@example.com,+14155550210,742,evergreen terrace,apt 12,san francisco,ca,94115,1972-05-09,1
+E5,catherine,halverson,cathy.halverson@example.com,+14155550341,512,balboa street,apt 9,san francisco,ca,94121,1983-09-17,1
+E6,elena,vasquez,elena.vasquez@example.com,+14155550519,445,noe street,apt 11,san francisco,ca,94127,1988-06-04,1
+E7,sofia,marchetti,sofia.marchetti@example.com,+16285550715,58,chenery street,apt 3,san francisco,ca,94131,1991-11-08,1
+E8,yolanda,prescott,yolanda.prescott@example.com,+14155550288,19,pierce street,apt 6,san francisco,ca,94118,1968-11-30,1
+E9,thomas,okonkwo,thomas.okonkwo@example.com,+14155550623,920,taraval street,apt 8,san francisco,ca,94129,1965-10-19,1
