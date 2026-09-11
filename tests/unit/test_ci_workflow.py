@@ -6,7 +6,9 @@ default write token to every PR and nothing goes red. Serialised jobs cost wall-
 that the <10 min budget has no room for, but produce identical results. A `uses:` that
 slips back to a tag keeps working right up until the tag moves. And a `run:` step naming
 a script no milestone has produced yet turns every PR red for three milestones -- the
-failure mode S12 calls out by name, and the reason the M5-only steps are absent here.
+failure mode S12 calls out by name, and the reason the `lint_metrics.py` step is still
+absent here (its subject does not exist). The M5 `Baseline/dispatch parity` step has
+landed (ER-102) now that report.py, the baselines and benchmark.yaml all exist.
 
 Two sources, deliberately. The parsed document is what proves the semantics: what
 `cache-to` actually resolves to, which job carries `needs:`, what the timeouts are. The
@@ -50,6 +52,8 @@ EXPECTED_STATIC_RUN_STEPS = [
     "bash scripts/ci/actionlint.sh",
     "uv run python scripts/lint_spec.py DesignDoc.md",
     "uv run python scripts/lint_board.py",
+    "uv run python benchmarks/report.py --validate-baselines "
+    "--baselines-dir benchmarks/baselines --workflow .github/workflows/benchmark.yaml",
     "uv run dbt deps --project-dir dbt",
     "uv run dbt parse --project-dir dbt --profiles-dir dbt/profiles --target mem",
 ]
@@ -225,8 +229,8 @@ def test_run_steps_reference_existing_files() -> None:
         "these steps name repository paths that do not exist:\n"
         + "\n".join(missing)
         + "\nA step referencing an artefact a later milestone produces leaves every PR "
-        "red until that milestone lands, which is why the M5-only `lint_metrics.py` "
-        "and `report.py --validate-baselines` steps are absent from this workflow (S12)."
+        "red until that milestone lands, which is why the `lint_metrics.py` step is still "
+        "absent from this workflow (S12); `report.py --validate-baselines` landed in M5."
     )
 
 

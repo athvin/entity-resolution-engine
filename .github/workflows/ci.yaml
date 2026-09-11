@@ -11,11 +11,10 @@
 #   - `static` and `unit` have no `needs:`, so they run concurrently and the <10 min
 #     budget of S9.1 is enforced by the timeouts rather than hoped for.
 #
-# Deliberately absent until M5 (S12), because each references an artefact no earlier
-# milestone produces and a step that names a missing file turns every PR red for three
-# milestones:
-#   - `Baseline/dispatch parity` (`benchmarks/report.py --validate-baselines`), which
-#     needs report.py, the committed baselines and benchmark.yaml;
+# `Baseline/dispatch parity` (`benchmarks/report.py --validate-baselines`) lands in M5
+# (ER-102): it needs report.py, the committed baselines and benchmark.yaml, all of which
+# now exist. Still deliberately absent (S12), because its subject is an artefact no
+# milestone has produced and a step naming a missing file turns every PR red:
 #   - `Single metrics implementation` (`scripts/lint_metrics.py`), whose S8.5 subject
 #     `src/er/eval/metrics.py` does not exist yet.
 # `test_run_steps_reference_existing_files` enforces that absence mechanically.
@@ -53,6 +52,8 @@ jobs:
         run: uv run python scripts/lint_spec.py DesignDoc.md
       - name: Board lint
         run: uv run python scripts/lint_board.py
+      - name: Baseline/dispatch parity
+        run: uv run python benchmarks/report.py --validate-baselines --baselines-dir benchmarks/baselines --workflow .github/workflows/benchmark.yaml
       - run: uv run dbt deps --project-dir dbt
       - run: uv run dbt parse --project-dir dbt --profiles-dir dbt/profiles --target mem
 

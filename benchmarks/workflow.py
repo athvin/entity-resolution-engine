@@ -35,6 +35,9 @@ _TERNARY = re.compile(
 # rejected by `is_sha_pinned`, rather than silently not matching.
 _USES = re.compile(r"uses:\s*(?P<action>[A-Za-z0-9._/-]+)@(?P<sha>[^\s#]+)\s*#\s*(?P<comment>\S+)")
 _ENV_ASSIGN = re.compile(r'echo\s+"(?P<name>[A-Z_]+)=')
+# The scale a scheduled (cron) run measures: the `|| 'X'` fallback of an `inputs.scale`
+# expression, which is what resolves when `github.event.inputs.scale` is empty.
+_SCALE_FALLBACK = re.compile(r"inputs\.scale\s*\|\|\s*'(?P<scale>[^']+)'")
 
 
 @dataclass(frozen=True)
@@ -64,6 +67,7 @@ class WorkflowEnvelope:
     """The parsed benchmark workflow, read once for every consumer (S9.2)."""
 
     dispatch_options: frozenset[str]
+    scheduled_scale: str | None
     scheduled_crons: tuple[str, ...]
     permissions_contents: str | None
     concurrency_cancel_in_progress: bool
@@ -113,6 +117,13 @@ def parse_benchmark_workflow(
     options = (((dispatch.get("inputs") or {}).get("scale") or {}).get("options")) or []
     crons = tuple(str(entry["cron"]) for entry in (on_block.get("schedule") or []))
 
+    # The scheduled scale is the `inputs.scale || 'X'` fallback of `env.SCALE` — what a cron
+    # run resolves to when no dispatch input is supplied (S9.2). Read from env.SCALE rather
+    # than the concurrency group so the one expression that actually selects the measured
+    # corpus is the authority.
+    env_scale = str((document.get("env") or {}).get("SCALE", ""))
+    scheduled = _SCALE_FALLBACK.search(env_scale)
+
     permissions = document.get("permissions") or {}
     concurrency = document.get("concurrency") or {}
     job = (document.get("jobs") or {}).get("bench")
@@ -139,6 +150,7 @@ def parse_benchmark_workflow(
 
     return WorkflowEnvelope(
         dispatch_options=frozenset(str(option) for option in options),
+        scheduled_scale=scheduled.group("scale") if scheduled else None,
         scheduled_crons=crons,
         permissions_contents=permissions.get("contents"),
         concurrency_cancel_in_progress=bool(concurrency.get("cancel-in-progress", True)),

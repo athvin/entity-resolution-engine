@@ -15,6 +15,8 @@ on:
         type: choice
         options:
           - smoke
+          - 10k
+          - 100k
         default: smoke
       repeat:
         description: measured passes to fold into the median
@@ -30,11 +32,11 @@ permissions:
 concurrency:
   # Keyed on the scale, and cancel-in-progress is false so a scheduled or in-flight
   # measurement is never killed mid-run (S9.2).
-  group: benchmark-${{ github.event.inputs.scale || 'smoke' }}
+  group: benchmark-${{ github.event.inputs.scale || '10k' }}
   cancel-in-progress: false
 
 env:
-  SCALE: ${{ github.event.inputs.scale || 'smoke' }}
+  SCALE: ${{ github.event.inputs.scale || '10k' }}
   REPEAT: ${{ github.event.inputs.repeat || '3' }}
 
 jobs:

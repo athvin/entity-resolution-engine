@@ -26,7 +26,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import statistics
+import sys
 from collections.abc import Mapping, Sequence
 from enum import StrEnum
 from pathlib import Path
@@ -34,19 +36,36 @@ from typing import Any
 
 from scales import Scale, _memory_bytes, get_scale
 from schema import BenchResultError, validate_bench_result, write_result
+from workflow import WorkflowEnvelope, parse_benchmark_workflow
 
 __all__ = [
     "CV_CEILING",
     "DEFAULT_FAIL_THRESHOLD",
     "DEFAULT_REPEAT",
+    "ENVELOPE_EXPORTS",
     "Verdict",
     "aggregate_passes",
     "compare_to_baseline",
     "comparability_violations",
     "main",
     "render_report_md",
+    "validate_baselines",
     "write_baseline",
 ]
+
+#: Each resource-envelope variable the S9.2 preflight exports into `$GITHUB_ENV`, and the
+#: `scales.yaml` field it MUST read it from. The coupling `--validate-baselines` enforces is
+#: that the preflight sources each from `scales.py --field <field>` rather than a literal: a
+#: hardcoded value silently drifts from S10.2 the moment scales.yaml changes, and then a run
+#: measures one envelope while the baseline was taken under another.
+ENVELOPE_EXPORTS: Mapping[str, str] = {
+    "ER_CPU_LIMIT": "cpu_limit",
+    "ER_MEM_LIMIT": "mem_limit",
+    "ER_DUCKDB_MEMORY_LIMIT": "duckdb_memory_limit",
+}
+
+_DEFAULT_BASELINES_DIR = Path("benchmarks/baselines")
+_DEFAULT_WORKFLOW = Path(".github/workflows/benchmark.yaml")
 
 DEFAULT_REPEAT = 3
 DEFAULT_FAIL_THRESHOLD = 1.25
@@ -249,6 +268,89 @@ def write_baseline(run: Mapping[str, Any], baselines_dir: Path, scale: Scale) ->
     return destination
 
 
+def _preflight_field_map(preflight_script: str) -> dict[str, str | None]:
+    """For each envelope var the preflight assigns, the `scales.py --field` it reads.
+
+    A var assigned from a literal (or from the wrong field) maps to ``None`` / that other
+    field, which is what lets :func:`validate_baselines` tell a sourced envelope from a
+    hardcoded one. Parsed line-by-line because each `echo "ER_X=$(… --field f)"` is its own
+    line and its command substitution carries inner quotes a single whole-string regex would
+    trip over.
+    """
+    field_of: dict[str, str | None] = {}
+    for line in preflight_script.splitlines():
+        assign = re.search(r"(?P<var>ER_[A-Z_]+)=", line)
+        if assign is None or assign.group("var") not in ENVELOPE_EXPORTS:
+            continue
+        field = re.search(r"--field\s+(?P<field>[a-z_]+)", line)
+        field_of[assign.group("var")] = field.group("field") if field else None
+    return field_of
+
+
+def validate_baselines(
+    baselines_dir: Path = _DEFAULT_BASELINES_DIR,
+    workflow_path: Path = _DEFAULT_WORKFLOW,
+    *,
+    envelope: WorkflowEnvelope | None = None,
+) -> list[str]:
+    """Every S9.1 coupling violation between the baselines, the workflow and `scales.yaml`.
+
+    Three couplings, each a separately-named line so the static job's failure says which
+    broke (an empty list means the tree is internally consistent):
+
+    * the committed baseline file set (`<baselines_dir>/*.json`) equals the workflow's
+      dispatch `scale` options — a scale is dispatchable only once its baseline exists, so a
+      dispatch option without a baseline (or a baseline no longer offered) is drift (S9.2);
+    * each dispatch option's workflow `runs-on` equals that scale's `scales.yaml` runner —
+      so `100k` cannot be dispatched onto the 2-vCPU runner its baseline was not measured on
+      (S10.2, S10.4);
+    * the preflight sources each `ER_*` envelope variable from `scales.py --field <field>`
+      rather than a literal, so the measured envelope cannot drift from the S10.2 row.
+
+    The workflow is read once through :func:`~workflow.parse_benchmark_workflow` (the single
+    parser, ER-101), never a second YAML grep.
+    """
+    envelope = envelope or parse_benchmark_workflow(workflow_path)
+    options = set(envelope.dispatch_options)
+    violations: list[str] = []
+
+    committed = {path.stem for path in baselines_dir.glob("*.json")}
+    for scale_name in sorted(options - committed):
+        violations.append(
+            f"dispatch option {scale_name!r} has no committed baseline "
+            f"{baselines_dir}/{scale_name}.json"
+        )
+    for scale_name in sorted(committed - options):
+        violations.append(
+            f"committed baseline {scale_name}.json is not a workflow dispatch option "
+            f"{sorted(options)}"
+        )
+
+    for scale_name in sorted(options):
+        try:
+            scale = get_scale(scale_name)
+        except BenchResultError as error:
+            violations.append(str(error))
+            continue
+        runner = envelope.runner_for(scale_name)
+        if runner != scale.runner:
+            violations.append(
+                f"scale {scale_name!r}: workflow runner {runner!r} != scales.yaml runner "
+                f"{scale.runner!r}"
+            )
+
+    field_of = _preflight_field_map(envelope.preflight_script)
+    for variable, expected_field in ENVELOPE_EXPORTS.items():
+        actual_field = field_of.get(variable)
+        if actual_field != expected_field:
+            violations.append(
+                f"preflight exports {variable} from scales.yaml field {actual_field!r}, "
+                f"expected {expected_field!r} (a hardcoded envelope drifts from S10.2)"
+            )
+
+    return violations
+
+
 def render_report_md(result: Mapping[str, Any]) -> str:
     """A one-row-per-phase Markdown table plus the run's verdict and ratio (S10.3)."""
     lines = [
@@ -313,10 +415,18 @@ def _build_parser() -> argparse.ArgumentParser:
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--run", action="store_true", help="measure --repeat passes of a scale")
     mode.add_argument("--compare", metavar="RUN_JSON", help="compare an existing run JSON")
+    mode.add_argument(
+        "--validate-baselines",
+        action="store_true",
+        help="lint the baseline set, the workflow dispatch options and the S10.2 envelopes",
+    )
     parser.add_argument("--scale", help="scale name (smoke, 10k, ...)")
     parser.add_argument("--repeat", type=int, default=DEFAULT_REPEAT, help="measured passes")
     parser.add_argument("--out", type=Path, help="where to write the run JSON (+ report.md)")
     parser.add_argument("--baselines-dir", type=Path, help="directory of <scale>.json baselines")
+    parser.add_argument(
+        "--workflow", type=Path, help="benchmark workflow to read for --validate-baselines"
+    )
     parser.add_argument("--fail-threshold", type=float, default=DEFAULT_FAIL_THRESHOLD)
     parser.add_argument("--write-baseline", action="store_true", help="freeze this run as baseline")
     return parser
@@ -601,6 +711,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     except SystemExit as exit_error:
         # argparse exits 2 on a usage error already; normalise any other code to 2.
         return _EXIT_BAD_USAGE if exit_error.code not in (0, None) else int(exit_error.code or 0)
+
+    if args.validate_baselines:
+        # The S9.1 static-job lint: no `--scale`, no run — it reads the baseline set, the
+        # workflow and scales.yaml. Each violation goes to stderr (named so the job says
+        # which coupling broke); exit 1 on any, 0 when the tree is consistent.
+        try:
+            violations = validate_baselines(
+                args.baselines_dir or _DEFAULT_BASELINES_DIR,
+                args.workflow or _DEFAULT_WORKFLOW,
+            )
+        except (OSError, ValueError, BenchResultError) as error:
+            print(f"error: {error}", file=sys.stderr, flush=True)
+            return _EXIT_BAD_USAGE
+        for violation in violations:
+            print(violation, file=sys.stderr, flush=True)
+        print("OK" if not violations else "INVALID", flush=True)
+        return 0 if not violations else 1
 
     if not args.scale:
         print("error: --scale is required", flush=True)
