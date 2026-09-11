@@ -2,7 +2,7 @@
 id: ER-104
 title: "Phase-2 seam: CoherenceScorer Protocol, NoopScorer, name registry, reconcile hook (once per run), subject_type='entity' review rows"
 milestone: M6
-status: todo
+status: in_progress
 kind: code
 size: S
 gates: full
@@ -14,12 +14,13 @@ consumes: ["src/er/golden/assemble.py", "src/er/review/queue.py", "src/er/config
 owns: ["src/er/embeddings/coherence.py", "tests/helpers/scorers.py", "tests/unit/test_coherence_seam.py", "tests/integration/test_coherence_hook.py"]
 protected_paths: ["tests/integration/test_touched_assembly.py", "tests/unit/review/test_queue_upsert.py"]
 extra_paths: ["src/er/golden/assemble.py", "src/er/embeddings/__init__.py"]
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_coherence_hook.py -q && uv run pytest tests/unit/test_coherence_seam.py -q && uv run mypy --strict src/er/embeddings"
-branch: ""
+branch: "ticket/ER-104-phase-2-seam-coherencescorer-protocol-noopscorer"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "7467bdacba1bd84c"
+updated_at: "2026-09-11T03:41:20Z"
+session: d0707c1d-1d2f-4e95-8ff1-341c508a8022
 ---
 ## Description
 
