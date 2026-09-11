@@ -259,11 +259,15 @@ def test_report_md_and_verdict_line(tmp_path: Path, capsys: Any) -> None:
     )
     assert code == 0
     report_md = (out.parent / "report.md").read_text(encoding="utf-8")
-    rows = [
-        line for line in report_md.splitlines() if line.startswith("| ") and "phase |" not in line
+    # Exactly one timing row per phase. The quality section (ER-100) adds its own table
+    # rows below, which this count must not sweep in — so it matches the phase name in the
+    # first cell rather than counting every table row.
+    phase_rows = [
+        line
+        for line in report_md.splitlines()
+        if line.startswith("| ") and line.split("|")[1].strip() in PHASES
     ]
-    # one header-separator row plus one row per phase
-    assert sum(1 for r in rows if not set(r) <= set("|- ")) == len(PHASES)
+    assert len(phase_rows) == len(PHASES)
     assert capsys.readouterr().out.strip().splitlines()[-1] == "NO_BASELINE"
 
 

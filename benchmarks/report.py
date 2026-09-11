@@ -269,6 +269,19 @@ def render_report_md(result: Mapping[str, Any]) -> str:
             f"| {phase['pairs_above_auto_merge']} | {phase['memory_peak_bytes']} "
             f"| {phase['snapshot_count']} |"
         )
+    quality = result["quality"]
+    lines += [
+        "",
+        "## Quality (reported, never gated)",
+        "",
+        "| family | precision | recall | f1 |",
+        "|---|---|---|---|",
+        f"| edge | {float(quality['edge_precision']):.3f} | {float(quality['edge_recall']):.3f} "
+        f"| {float(quality['edge_f1']):.3f} |",
+        f"| cluster | {float(quality['cluster_precision']):.3f} "
+        f"| {float(quality['cluster_recall']):.3f} | {float(quality['cluster_f1']):.3f} |",
+        f"| blocking | — | {float(result['blocking_recall']):.3f} | — |",
+    ]
     return "\n".join(lines) + "\n"
 
 
@@ -352,10 +365,25 @@ class _SubprocessRunner:
             )
 
     def er(self, args: Sequence[str]) -> None:
+        from er.dbt_runner import DBT_PROFILES_DIR, DBT_PROJECT_DIR
+
         argv = list(args)
         if argv[0] == "standardize":
-            select = "staging intermediate"
-            self._sh(["dbt", "build", "--select", *select.split(), "--target", "lake"])
+            self._sh(
+                [
+                    "dbt",
+                    "build",
+                    "--select",
+                    "staging",
+                    "intermediate",
+                    "--target",
+                    "lake",
+                    "--project-dir",
+                    DBT_PROJECT_DIR,
+                    "--profiles-dir",
+                    DBT_PROFILES_DIR,
+                ]
+            )
         elif argv[0] == "ingest":
             run_id = argv[argv.index("--run-id") + 1]
             argv += ["--path", str(self._drop_for_run[run_id])]
@@ -451,6 +479,7 @@ def _measure_and_aggregate(scale_name: str, *, repeat: int) -> dict[str, Any]:
 
     from er.config.hashing import config_hash
     from er.config.loader import load_config
+    from er.dbt_runner import DBT_PROFILES_DIR, DBT_PROJECT_DIR
     from er.lake.ducklake import connect
 
     scale = get_scale(scale_name)
@@ -490,6 +519,21 @@ def _measure_and_aggregate(scale_name: str, *, repeat: int) -> dict[str, Any]:
         drops[label] = root
 
     subprocess.run(["er", "init"], check=False)
+    # Seed the reference tables (e.g. nickname_variants) the staging models read, once,
+    # before any measured pass. Excluded from the timing like generation and init (S10.3).
+    subprocess.run(
+        [
+            "dbt",
+            "seed",
+            "--target",
+            "lake",
+            "--project-dir",
+            DBT_PROJECT_DIR,
+            "--profiles-dir",
+            DBT_PROFILES_DIR,
+        ],
+        check=True,
+    )
     passes: list[dict[str, Any]] = []
     with connect() as connection:
         for _ in range(repeat):
@@ -504,8 +548,12 @@ def _measure_and_aggregate(scale_name: str, *, repeat: int) -> dict[str, Any]:
             )
             sampler = MemorySampler(duckdb_source=lambda: current_duckdb_memory_bytes(connection))
             sampler.start()
-            records = run_pass(runner, run_ids)
-            peaks = sampler.stop()
+            try:
+                records = run_pass(runner, run_ids)
+            finally:
+                # Always join the sampler, so a failed pass cannot leave a thread sampling
+                # a connection that the enclosing `with` is about to close.
+                peaks = sampler.stop()
             active = connection.execute(
                 "SELECT model_version, tf_snapshot_id FROM lake.main.model_registry "
                 "WHERE status='active'"
@@ -519,7 +567,31 @@ def _measure_and_aggregate(scale_name: str, *, repeat: int) -> dict[str, Any]:
                 tf_snapshot_id=str(active[1]) if active else "",
             )
             passes.append(_single_pass_result(records, fingerprint, peaks))
-    return aggregate_passes(passes)
+        # Quality is a property of the corpus, not of a sample, so it is computed once over
+        # the final lake state against the generator's truth — reported, never gated (S10.5).
+        contribution = _quality_contribution(connection, staging, cfg.thresholds.auto_merge)
+    result = aggregate_passes(passes)
+    result["blocking_recall"] = contribution["blocking_recall"]
+    result["quality"] = contribution["quality"]
+    return result
+
+
+def _quality_contribution(connection: Any, staging: Path, auto_merge: float) -> dict[str, Any]:
+    """`blocking_recall` and the quality block over the generated corpus's truth (S10.5)."""
+    import csv
+
+    from quality import quality_block, truth_pairs_from_rows
+
+    rows: list[tuple[str, str]] = []
+    for truth_csv in (staging / "truth.csv", staging / "batch" / "truth.csv"):
+        if not truth_csv.exists():
+            continue
+        with truth_csv.open(newline="", encoding="utf-8") as handle:
+            for row in csv.DictReader(handle):
+                record_key = f"{row['source_system']}:{row['source_record_id']}"
+                rows.append((row["persona_id"], record_key))
+    truth = truth_pairs_from_rows(rows)
+    return quality_block(connection, truth, auto_merge=auto_merge)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
