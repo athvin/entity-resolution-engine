@@ -2,7 +2,7 @@
 id: ER-095
 title: "T-SNAP-1: runtime snapshot capture from run_stages, golden time travel"
 milestone: M4
-status: todo
+status: in_progress
 kind: code
 size: S
 gates: full
@@ -14,12 +14,13 @@ consumes: ["relation:run_stages", "relation:runs", "src/er/golden/assemble.py::a
 owns: ["tests/integration/test_snapshot_time_travel.py", "tests/helpers/snapshots.py"]
 protected_paths: ["fixtures/static/base_10/expected/base/golden.csv"]
 extra_paths: []
-attempts: 0
+attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_snapshot_time_travel.py -q"
-branch: ""
+branch: "ticket/ER-095-t-snap-1-runtime-snapshot-capture"
 commit: ""
-spec_sha: ""
-updated_at: "2026-08-14T20:02:00Z"
+spec_sha: "7467bdacba1bd84c"
+updated_at: "2026-09-11T01:48:52Z"
+session: d0707c1d-1d2f-4e95-8ff1-341c508a8022
 ---
 ## Description
 
