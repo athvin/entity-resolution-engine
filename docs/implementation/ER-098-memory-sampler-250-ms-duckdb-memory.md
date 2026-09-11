@@ -2,7 +2,7 @@
 id: ER-098
 title: "Memory sampler (250 ms; duckdb_memory + RSS + cgroup peak) + ER_DUCKDB_THREADS/ER_DUCKDB_MEMORY_LIMIT on every connection + compose limits 2/6g"
 milestone: M5
-status: in_progress
+status: done
 kind: code
 size: M
 gates: full
@@ -17,9 +17,9 @@ extra_paths: ["docker/compose.yaml", "src/er/lake/ducklake.py", "dbt/profiles/pr
 attempts: 1
 verify: "bash scripts/ci/bench.sh pytest tests/unit/bench/test_memory_sampler.py tests/integration/test_benchmark_memory.py -q"
 branch: "ticket/ER-098-memory-sampler-250-ms-duckdb-memory"
-commit: ""
+commit: "41b054ddbe3fd03ee0fd8085198952ee144dfb1f"
 spec_sha: "7467bdacba1bd84c"
-updated_at: "2026-09-11T02:45:04Z"
+updated_at: "2026-09-11T03:01:24Z"
 session: d0707c1d-1d2f-4e95-8ff1-341c508a8022
 ---
 ## Description
