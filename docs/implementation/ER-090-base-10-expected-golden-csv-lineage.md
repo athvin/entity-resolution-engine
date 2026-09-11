@@ -2,7 +2,7 @@
 id: ER-090
 title: "base_10/expected/golden.csv + lineage.csv + machine-checked rule-coverage table"
 milestone: M4
-status: in_progress
+status: done
 kind: fixture
 size: M
 gates: fast
@@ -17,9 +17,9 @@ extra_paths: ["fixtures/static/base_10/base/", "fixtures/static/FORMAT.md", "tes
 attempts: 1
 verify: "uv run pytest tests/unit/fixtures/test_base_10_golden.py -q"
 branch: "ticket/ER-090-base-10-expected-golden-csv-lineage"
-commit: ""
+commit: "79bf19e3b057b6a39833f07e77a3c87968dbc8ff"
 spec_sha: "7467bdacba1bd84c"
-updated_at: "2026-09-11T00:13:26Z"
+updated_at: "2026-09-11T00:21:02Z"
 session: d0707c1d-1d2f-4e95-8ff1-341c508a8022
 ---
 ## Description
