@@ -2,7 +2,7 @@
 id: ER-097
 title: "Benchmark B: run_benchmark.py six phases, run_stages-sourced timings, incremental_ratio, no __splink__ in lake"
 milestone: M5
-status: in_progress
+status: done
 kind: code
 size: M
 gates: full
@@ -17,9 +17,9 @@ extra_paths: []
 attempts: 1
 verify: "bash scripts/ci/bench.sh pytest tests/unit/bench/test_run_benchmark.py tests/integration/test_benchmark_smoke.py -q"
 branch: "ticket/ER-097-benchmark-b-run-benchmark-py-six"
-commit: ""
+commit: "935c1b62a6a5189ec828fbad1ba03044d23a5bdd"
 spec_sha: "7467bdacba1bd84c"
-updated_at: "2026-09-11T02:00:40Z"
+updated_at: "2026-09-11T02:44:52Z"
 session: d0707c1d-1d2f-4e95-8ff1-341c508a8022
 ---
 ## Description
