@@ -2,7 +2,7 @@
 id: ER-093
 title: "T-INC-1 with INV-EQ preconditions, two isolated sub-namespaces, partition + golden equality"
 milestone: M4
-status: in_progress
+status: done
 kind: code
 size: L
 gates: full
@@ -17,9 +17,9 @@ extra_paths: []
 attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_inc_equivalence.py -q"
 branch: "ticket/ER-093-t-inc-1-inv-eq-preconditions"
-commit: ""
+commit: "e533394cdfb799468bc70fa6e9dab17a110aa1aa"
 spec_sha: "7467bdacba1bd84c"
-updated_at: "2026-09-11T00:05:01Z"
+updated_at: "2026-09-11T00:13:19Z"
 session: d0707c1d-1d2f-4e95-8ff1-341c508a8022
 ---
 ## Description
