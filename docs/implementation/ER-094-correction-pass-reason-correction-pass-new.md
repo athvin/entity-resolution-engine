@@ -2,7 +2,7 @@
 id: ER-094
 title: "Correction pass (--reason correction_pass, new tf_snapshot_id, never retrains, cadence) + T-INC-1b + T-CORR-1 (supersession-driven)"
 milestone: M4
-status: todo
+status: in_progress
 kind: code
 size: L
 gates: full
@@ -14,9 +14,9 @@ consumes: ["src/er/matching/full.py", "src/er/matching/tf.py::register_tf", "src
 owns: ["fixtures/static/correction_scenario/", "fixtures/static/incremental_batch/tf_flip_pairs.csv", "tests/integration/test_correction_pass.py"]
 protected_paths: ["fixtures/static/incremental_batch/expected/", "fixtures/static/supersession_scenario/", "src/er/matching/train.py"]
 extra_paths: ["src/er/cli.py", "src/er/matching/full.py", "src/er/matching/tf.py"]
-attempts: 1
+attempts: 2
 verify: "bash scripts/ci/itest.sh tests/integration/test_correction_pass.py -q"
-branch: ""
+branch: "ticket/ER-094-correction-pass-reason-correction-pass-new"
 commit: ""
 spec_sha: "7467bdacba1bd84c"
 updated_at: "2026-09-11T10:46:07Z"
