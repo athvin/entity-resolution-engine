@@ -2,7 +2,7 @@
 id: ER-099
 title: "report.py: --run/--compare/--write-baseline/--repeat N, median+CV, verdicts OK/REGRESSION/NO_BASELINE/NON_COMPARABLE, --baselines-dir"
 milestone: M5
-status: in_progress
+status: done
 kind: code
 size: M
 gates: fast
@@ -17,9 +17,9 @@ extra_paths: []
 attempts: 1
 verify: "uv run pytest tests/unit/bench/test_report.py -q"
 branch: "ticket/ER-099-report-py-run-compare-write-baseline"
-commit: ""
+commit: "27a12c9db962d5114dfe0749bc8e272bfadc2abb"
 spec_sha: "7467bdacba1bd84c"
-updated_at: "2026-09-11T03:02:19Z"
+updated_at: "2026-09-11T03:11:18Z"
 session: d0707c1d-1d2f-4e95-8ff1-341c508a8022
 ---
 ## Description
