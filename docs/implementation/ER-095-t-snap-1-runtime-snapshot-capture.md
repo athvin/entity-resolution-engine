@@ -2,7 +2,7 @@
 id: ER-095
 title: "T-SNAP-1: runtime snapshot capture from run_stages, golden time travel"
 milestone: M4
-status: in_progress
+status: done
 kind: code
 size: S
 gates: full
@@ -17,9 +17,9 @@ extra_paths: []
 attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_snapshot_time_travel.py -q"
 branch: "ticket/ER-095-t-snap-1-runtime-snapshot-capture"
-commit: ""
+commit: "3a9bf9a93d94a746e26e527167f3844dd552d11e"
 spec_sha: "7467bdacba1bd84c"
-updated_at: "2026-09-11T01:48:52Z"
+updated_at: "2026-09-11T01:59:41Z"
 session: d0707c1d-1d2f-4e95-8ff1-341c508a8022
 ---
 ## Description
