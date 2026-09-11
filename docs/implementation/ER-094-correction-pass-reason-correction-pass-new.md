@@ -2,7 +2,7 @@
 id: ER-094
 title: "Correction pass (--reason correction_pass, new tf_snapshot_id, never retrains, cadence) + T-INC-1b + T-CORR-1 (supersession-driven)"
 milestone: M4
-status: in_progress
+status: blocked
 kind: code
 size: L
 gates: full
@@ -19,7 +19,7 @@ verify: "bash scripts/ci/itest.sh tests/integration/test_correction_pass.py -q"
 branch: "ticket/ER-094-correction-pass-reason-correction-pass-new"
 commit: ""
 spec_sha: "7467bdacba1bd84c"
-updated_at: "2026-09-11T10:46:07Z"
+updated_at: "2026-09-11T11:34:22Z"
 session: d0707c1d-1d2f-4e95-8ff1-341c508a8022
 ---
 ## Description
@@ -91,3 +91,10 @@ uv run pytest tests/unit/fixtures -q
 - **Assertion / contradiction:** After 'er correct' on correction_scenario, crm:A001 and billing:B001 still hold distinct entity_ids and the run emits zero entity_events (AC3 requires they share one entity_id with one merged event). The correction mints a new tf_snapshot and rescores A,B to 0.970 (>=auto_merge), but run_reconcile_stage's affected set (load_affected_set -> seed_records, S4.5.1) is seeded ONLY from deltas (ingest batch / content_hash / deletion / assertion / review); a pure rescore triggers none, so reconcile exits 10 (NOTHING_TO_DO) and never reclusters. S4.0 requires the correction to 're-cluster the full assertion-adjusted edge set', but no reconcile path seeds all nodes on a scoring-generation change. ER-084 ('full re-resolution', the mechanism ER-094 wires a verb onto) only ever exercised the no-op INV-PERM case (full_pass(expect_reconcile=NOTHING_TO_DO)) and got reconcile work solely from a 'never' assertion delta, so the seed-all full recluster was never built.
 - **Smallest change that would unblock:** Add a full-recluster seed path to the reconcile: when a run's reason is correction_pass (a rebuild), seed the affected set from ALL current int_std_records record_keys instead of the S4.5.1 delta arms, then cluster/diff as usual (INV-PERM keeps ids for set-equal groups, so unchanged entities emit no event). This lives in src/er/entities/cluster.py::seed_records and src/er/entities/reconcile_stage.py::run_reconcile_stage, neither in ER-094's extra_paths — add them to extra_paths (or land a prerequisite ticket implementing the generation-change full recluster with its own unit test), then wire the correction chain to it. The TF-crossing fixture (fixtures/static/correction_scenario), the prior-generation invalidation (full.py::invalidate_superseded_generations, already committed WIP), and the T-INC-1b divergence mechanism (perturb W007|W008's shared email tf high -> edge drops below auto_merge -> E10 splits -> tf_flip_pairs row (webforms:W007,webforms:W008,down); er correct at honest corpus TF restores expected/batch) are all validated and ready once the reconcile actually reclusters.
 - **Log:** `.loop/logs/ER-094.attempt-1.log`
+
+### Attempt 2 — spec_contradiction (2026-09-11T11:34:22Z)
+
+- **Failing command:** `bash scripts/ci/itest.sh tests/integration/test_correction_pass.py -q`
+- **Assertion / contradiction:** AC6/T-INC-1b requires assert_partition_equal(after er correct, fixtures/static/incremental_batch/expected/batch/membership.csv) to hold. expected/batch has webforms:W007+W008 (persona P8, a true pair) MERGED under the frozen 10k-corpus TF. er correct re-materializes tf_lookup from the current corpus (S4.5.6), and on base_10 (23 records) their shared email dana.lin@example.com has corpus TF 0.087 -> pair scores below review_low -> SPLIT. Probe: premise=10 clusters==expected/batch; er correct=11 clusters!=expected/batch; flip edge W007|W008 0.9943->unscored. So er correct can never restore expected/batch; AC6's repair arm is unsatisfiable. This also means er correct violates INV-EQ on base_10 (corpus TF != frozen trained TF).
+- **Smallest change that would unblock:** Run T-INC-1b on a corpus where corpus-materialized TF reproduces the trained-TF partition so er correct is faithful (e.g. the 10k corpus or a dedicated 200+-record fixture matching model_test_v1's frozen TF; correction_scenario is already proven faithful). base_10 (23 records) is too small. Alternatives: weaken S8.3 T-INC-1b repair to 'within the tf_flip_pairs.csv bound', or retrain model_test_v1 on base_10 (contradicts tests/helpers/model.py). The correction-pass CODE works: T-CORR-1 + AC2-AC5,AC7 pass via er correct on correction_scenario (both fixes committed as WIP 6ca2fb8).
+- **Log:** `.loop/logs/ER-094.attempt-2.log`
