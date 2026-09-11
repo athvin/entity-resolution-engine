@@ -2,7 +2,7 @@
 id: ER-104
 title: "Phase-2 seam: CoherenceScorer Protocol, NoopScorer, name registry, reconcile hook (once per run), subject_type='entity' review rows"
 milestone: M6
-status: in_progress
+status: done
 kind: code
 size: S
 gates: full
@@ -17,9 +17,9 @@ extra_paths: ["src/er/golden/assemble.py", "src/er/embeddings/__init__.py"]
 attempts: 1
 verify: "bash scripts/ci/itest.sh tests/integration/test_coherence_hook.py -q && uv run pytest tests/unit/test_coherence_seam.py -q && uv run mypy --strict src/er/embeddings"
 branch: "ticket/ER-104-phase-2-seam-coherencescorer-protocol-noopscorer"
-commit: ""
+commit: "b2b07730e9a9b7a51bc9b1897fea7d1b690f9899"
 spec_sha: "7467bdacba1bd84c"
-updated_at: "2026-09-11T03:41:20Z"
+updated_at: "2026-09-11T10:39:44Z"
 session: d0707c1d-1d2f-4e95-8ff1-341c508a8022
 ---
 ## Description
