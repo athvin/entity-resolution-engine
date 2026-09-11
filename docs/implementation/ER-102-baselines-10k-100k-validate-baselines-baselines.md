@@ -2,7 +2,7 @@
 id: ER-102
 title: "Baselines 10k/100k + --validate-baselines + baselines/README.md + flip the scheduled scale to 10k"
 milestone: M5
-status: todo
+status: in_progress
 kind: code
 size: M
 gates: fast
@@ -14,12 +14,12 @@ consumes: ["benchmarks/report.py", "benchmarks/workflow.py::parse_benchmark_work
 owns: ["benchmarks/baselines/10k.json", "benchmarks/baselines/100k.json", "benchmarks/baselines/README.md", "tests/unit/bench/test_baselines.py"]
 protected_paths: ["tests/unit/bench/test_workflow.py", "tests/unit/bench/test_preflight.py"]
 extra_paths: [".github/workflows/ci.yaml", ".github/workflows/benchmark.yaml"]
-attempts: 0
+attempts: 1
 verify: "uv run pytest tests/unit/bench/test_baselines.py -q"
-branch: ""
+branch: "ticket/ER-102-baselines-10k-100k-validate-baselines-baselines"
 commit: ""
 spec_sha: "7467bdacba1bd84c"
-updated_at: "2026-09-11T03:39:54Z"
+updated_at: "2026-09-11T12:37:29Z"
 session: d0707c1d-1d2f-4e95-8ff1-341c508a8022
 ---
 ## Description
