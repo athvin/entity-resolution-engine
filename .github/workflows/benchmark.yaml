@@ -1,0 +1,88 @@
+# The S9.2 benchmark workflow: dispatched or weekly, never on the PR path (G4).
+#
+# Everything Python runs IN-IMAGE (`er-pipeline:ci`), so the S10.4 fingerprint is the
+# measuring environment's and not the runner's bare toolchain. The dispatch `scale`
+# options equal the committed baseline set (`benchmarks/baselines/*.json`) — a scale is
+# dispatchable only once its baseline exists (S9.2) — and `benchmarks/workflow.py` is the
+# one parser of this file. Every `uses:` is pinned to a release SHA with its tag (S9).
+name: benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      scale:
+        description: the S10.2 scale to measure
+        type: choice
+        options:
+          - smoke
+        default: smoke
+      repeat:
+        description: measured passes to fold into the median
+        type: string
+        default: "3"
+  schedule:
+    # Weekly, Monday 06:00 UTC. One cron only (S9.2).
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  # Keyed on the scale, and cancel-in-progress is false so a scheduled or in-flight
+  # measurement is never killed mid-run (S9.2).
+  group: benchmark-${{ github.event.inputs.scale || 'smoke' }}
+  cancel-in-progress: false
+
+env:
+  SCALE: ${{ github.event.inputs.scale || 'smoke' }}
+  REPEAT: ${{ github.event.inputs.repeat || '3' }}
+
+jobs:
+  bench:
+    # Runner and timeout come from the scale's S10.2 row; 100k needs the larger runner.
+    runs-on: ${{ (github.event.inputs.scale == '100k') && 'ubuntu-latest-8-cores' || 'ubuntu-latest' }}
+    timeout-minutes: ${{ (github.event.inputs.scale == '100k') && 120 || 40 }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Build the benchmark image
+        run: docker compose -f docker/compose.yaml --profile bench build benchmark
+
+      - name: Preflight — disk and envelope
+        run: |
+          docker compose -f docker/compose.yaml --profile bench down -v --remove-orphans || true
+          min_free_gb="$(docker run --rm er-pipeline:ci python benchmarks/scales.py --scale "$SCALE" --field min_free_gb)"
+          free_gb="$(python3 -c 'import shutil; print(shutil.disk_usage(".").free // (1024 ** 3))')"
+          if [ "$free_gb" -lt "$min_free_gb" ]; then
+            echo "insufficient disk: ${free_gb}GB free < ${min_free_gb}GB required for scale $SCALE" >&2
+            exit 1
+          fi
+          {
+            echo "ER_CPU_LIMIT=$(docker run --rm er-pipeline:ci python benchmarks/scales.py --scale "$SCALE" --field cpu_limit)"
+            echo "ER_MEM_LIMIT=$(docker run --rm er-pipeline:ci python benchmarks/scales.py --scale "$SCALE" --field mem_limit)"
+            echo "ER_DUCKDB_MEMORY_LIMIT=$(docker run --rm er-pipeline:ci python benchmarks/scales.py --scale "$SCALE" --field duckdb_memory_limit)"
+          } >> "$GITHUB_ENV"
+
+      - name: Measure
+        run: |
+          docker compose -f docker/compose.yaml --profile bench run --rm benchmark \
+            python benchmarks/report.py --run --scale "$SCALE" --repeat "$REPEAT" \
+            --out /app/artifacts/bench/latest.json
+
+      - name: Compare to baseline
+        run: |
+          docker compose -f docker/compose.yaml --profile bench run --rm benchmark \
+            python benchmarks/report.py --compare /app/artifacts/bench/latest.json \
+            --baselines-dir /app/benchmarks/baselines --scale "$SCALE" --fail-threshold 1.25
+
+      - name: Upload the result
+        if: always()
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        with:
+          name: bench-${{ env.SCALE }}
+          path: artifacts/bench/
+          if-no-files-found: error
+
+      - name: Teardown
+        if: always()
+        run: docker compose -f docker/compose.yaml --profile bench down -v --remove-orphans
