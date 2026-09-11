@@ -31,6 +31,7 @@ fixtures/static/<scenario>/
     │   ├── golden.csv
     │   ├── events.csv
     │   ├── std_hashes.csv
+    │   ├── lineage.csv       # additive (ER-090): golden_lineage's winner + deciding rule
     │   └── assertions.csv    # only where the scenario asserts on assertion state
     ├── batch/                # same five files, expected state after the batch phase
     ├── refresh/
@@ -156,6 +157,20 @@ passes on the run it was captured from and fails on every other one, so the lint
 `golden.csv` carries every `golden_records` column except `entity_id` (replaced by
 `entity_label`) and `assembled_at` (a `VOLATILE_COLUMNS` member). `std_hash` is the SHA-256
 defined by T-STD-1 over the stable column list of `int_std_records`.
+
+`lineage.csv` is an **additive** expected file (ER-090), not one of the five relations above:
+S8.2.1 makes a missing expected file a phase making no claim, so an extra one a scenario
+chooses to author is legal too. It records `golden_lineage`'s winner and deciding rule, one
+row per `(entity_label, attribute)`, and is not part of the `## Headers (literal)` block
+because the ID-insensitive comparators do not read it — its header is:
+
+```text
+entity_label,attribute,record_key,source_system,source_record_id,rule,survivorship_version
+```
+
+`entity_id` is replaced by `entity_label` and `assembled_at` is excluded, exactly as `golden.csv`
+does; `rule` is one of the closed six-token vocabulary `{source_priority, recency, frequency,
+completeness, validated, tiebreak_deterministic}`.
 
 ## Encoding rules
 

@@ -214,7 +214,13 @@ def _check_expected_tree(directory: Path, loaded: scenario.Scenario) -> list[Vio
     if not root.is_dir():
         return []
     declared = set(loaded.phases)
-    relations = {f"{relation}.csv" for relation in scenario.EXPECTED_RELATIONS}
+    # `lineage.csv` is an ADDITIVE expected file (ER-090), not one of the five S8.2.1
+    # relations: S8.2.1's rule is that a missing expected file simply makes no claim,
+    # so an EXTRA one that a scenario chooses to author is legal too. It is admitted
+    # here and its header documented in fixtures/static/FORMAT.md; it is deliberately
+    # kept out of `scenario.EXPECTED_RELATIONS`, which is the set the ID-insensitive
+    # comparators iterate, because nothing compares lineage by that path.
+    relations = {f"{relation}.csv" for relation in scenario.EXPECTED_RELATIONS} | {"lineage.csv"}
     violations: list[Violation] = []
 
     for entry in sorted(root.iterdir()):
@@ -254,7 +260,7 @@ def _check_expected_tree(directory: Path, loaded: scenario.Scenario) -> list[Vio
                 child,
                 0,
                 "unknown-file",
-                f"{child.name!r} is not one of the five relations a phase claims: "
+                f"{child.name!r} is not one of the relations a phase may claim: "
                 f"{sorted(relations)}",
             )
             for child in sorted(entry.iterdir())
