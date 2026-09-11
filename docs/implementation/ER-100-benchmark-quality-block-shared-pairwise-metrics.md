@@ -2,7 +2,7 @@
 id: ER-100
 title: "Benchmark quality block: shared pairwise_metrics, blocking recall, edge + cluster P/R/F1, reported never gated"
 milestone: M5
-status: in_progress
+status: done
 kind: code
 size: S
 gates: full
@@ -17,9 +17,9 @@ extra_paths: ["benchmarks/run_benchmark.py", "benchmarks/report.py"]
 attempts: 1
 verify: "bash scripts/ci/bench.sh pytest tests/unit/bench/test_quality_metrics.py tests/integration/test_benchmark_quality.py -q"
 branch: "ticket/ER-100-benchmark-quality-block-shared-pairwise-metrics"
-commit: ""
+commit: "818912a9bb884914de4d48fdf6fa6e013acc3de2"
 spec_sha: "7467bdacba1bd84c"
-updated_at: "2026-09-11T03:11:30Z"
+updated_at: "2026-09-11T03:28:50Z"
 session: d0707c1d-1d2f-4e95-8ff1-341c508a8022
 ---
 ## Description
