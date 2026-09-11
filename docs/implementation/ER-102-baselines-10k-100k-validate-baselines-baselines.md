@@ -2,7 +2,7 @@
 id: ER-102
 title: "Baselines 10k/100k + --validate-baselines + baselines/README.md + flip the scheduled scale to 10k"
 milestone: M5
-status: in_progress
+status: todo
 kind: code
 size: M
 gates: fast
@@ -14,12 +14,12 @@ consumes: ["benchmarks/report.py", "benchmarks/workflow.py::parse_benchmark_work
 owns: ["benchmarks/baselines/10k.json", "benchmarks/baselines/100k.json", "benchmarks/baselines/README.md", "tests/unit/bench/test_baselines.py"]
 protected_paths: ["tests/unit/bench/test_workflow.py", "tests/unit/bench/test_preflight.py"]
 extra_paths: [".github/workflows/ci.yaml", ".github/workflows/benchmark.yaml"]
-attempts: 1
+attempts: 0
 verify: "uv run pytest tests/unit/bench/test_baselines.py -q"
-branch: "ticket/ER-102-baselines-10k-100k-validate-baselines-baselines"
+branch: ""
 commit: ""
 spec_sha: "7467bdacba1bd84c"
-updated_at: "2026-09-11T12:37:29Z"
+updated_at: "2026-09-11T13:14:13Z"
 session: d0707c1d-1d2f-4e95-8ff1-341c508a8022
 ---
 ## Description
@@ -99,3 +99,10 @@ bash scripts/gates.sh --ticket ER-102
 - **Assertion / contradiction:** 100k requires a dispatched run measured inside its S10.2 envelope (runner=ubuntu-latest-8-cores, cpu_limit=6, mem_limit=24g, duckdb_memory_limit=16GB). That runner label is not available in this environment; the only substrate is the 2-vCPU/6g smoke/10k envelope, under which a 100k run is NON_COMPARABLE (cgroup cpu quota 2 != 6, memory.max 6g != 24g) and report.py --write-baseline correctly refuses it (S10.4).
 - **Smallest change that would unblock:** Provision the ubuntu-latest-8-cores GitHub larger-runner label (a paid per-repo/org setting) OR attach self-hosted hardware carrying that label and the 100k envelope (DesignDoc MINOR-milestones escape (a)); then dispatch benchmark.yaml at scale=100k, capture latest.json via report.py --write-baseline, commit 100k.json (and 10k.json). ER-102 Design-decision (1) forbids committing a 100k baseline from a 2-vCPU runner or demoting the scale (demotion is DesignDoc S10.2 spec work). Not an underspecified/verify_failed class: the ticket is fully specified and the block is the spec-mandated outcome for an unavailable runner.
 - **Log:** `.loop/logs/ER-102.attempt-1.log`
+
+### Attempt 1 — environment (2026-09-11T13:14:13Z)
+
+- **Failing command:** `uv run pytest tests/unit/bench/test_baselines.py -q`
+- **Assertion / contradiction:** AC1/AC3 + protected test_workflow.py::test_dispatch_options_equal_committed_baselines require 10k.json AND 100k.json committed and comparable. 100k needs runner ubuntu-latest-8-cores (cpu 6/mem 24g/duckdb 16GB) which is unavailable: personal free-account User-owned repo, zero self-hosted runners, hosted larger-runners API 404s; host has 7.65 GiB. 10k fits the 2-vCPU/6g envelope and was measured locally with the correct fingerprint, but is NON_COMPARABLE: full_match_reconcile wall_ms CV was 0.37 (repeat 3) and 0.30 (repeat 7), above the 0.15 ceiling (S10.4) — the Splink phase is too timing-noisy on this contended macOS/Docker-Desktop host; report.py --write-baseline correctly refused it.
+- **Smallest change that would unblock:** 10k: dispatch on the FREE ubuntu-latest runner (gh workflow run benchmark.yaml --ref <branch> -f scale=10k), download latest.json, report.py --compare latest.json --write-baseline --scale 10k. 100k: provision ubuntu-latest-8-cores (paid org setting) or a self-hosted 8-core/24g runner, then dispatch scale=100k and --write-baseline. All ER-102 code is committed WIP (0224f98) and verified (40/43 bench tests pass; the 3 failures are exactly the two missing baselines); the ticket completes with no code changes once both are committed. Design decision (1) forbids a 2-vCPU 100k baseline or demotion, so this is the spec-mandated environment block.
+- **Log:** `.loop/logs/ER-102.attempt-2.log`
