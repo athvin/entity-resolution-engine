@@ -85,7 +85,9 @@ from er.entities.ids import IdFactory, UlidFactory
 from er.errors import ConfigError, ExitCode
 from er.ingest.hashing import TOMBSTONE_CONTENT_HASH, content_hash
 from er.ingest.sources import SourceAdapter, SourceRow, adapter_for
+from er.lake.bulk import insert_batches
 from er.lake.model import REGISTRY, SCHEMA_QUALIFIER
+from er.obs.profiling import profiled
 from er.obs.runctx import StageRun
 
 __all__ = [
@@ -135,7 +137,7 @@ EMPTY_FULL_REFRESH_MESSAGE: Final[str] = (
 #: state of a delivery time-travellable, and a failed append would leave it there.
 STAGING_TABLE: Final[str] = "er_ingest_delivery"
 
-#: Rows handed to DuckDB per `executemany`. The adapter streams (S4.1), and this is
+#: Rows handed to DuckDB per bulk statement. The adapter streams (S4.1), and this is
 #: what keeps that property true through the staging load: a delivery at S10.2 scale
 #: is never resident, in this module any more than in ``sources.py``.
 STAGE_BATCH_ROWS: Final[int] = 1024
@@ -153,7 +155,10 @@ CREATE OR REPLACE TEMP TABLE {STAGING_TABLE} (
 )
 """
 
-_INSERT_STAGING: Final[str] = f"INSERT INTO {STAGING_TABLE} VALUES (?, ?, ?, ?, ?)"
+_INSERT_STAGING: Final[str] = (
+    f"INSERT INTO {STAGING_TABLE} SELECT unnest(?::BIGINT[]), "
+    "unnest(?::VARCHAR[]), unnest(?::VARCHAR[]), unnest(?::VARCHAR[]), unnest(?::VARCHAR[])"
+)
 
 # The S4.1 classification, evaluated against the lake as it stands BEFORE the append.
 #
@@ -503,6 +508,7 @@ def _hashed_rows(
         )
 
 
+@profiled("ingest.read_hash_stage", "records")
 def _stage_delivery(
     connection: duckdb.DuckDBPyConnection,
     rows: Iterable[SourceRow],
@@ -510,20 +516,16 @@ def _stage_delivery(
 ) -> int:
     """Load the delivery into :data:`STAGING_TABLE`; return the rows read."""
     connection.execute(_CREATE_STAGING)
-    rows_in = 0
-    batch: list[tuple[int, str, str, str, str]] = []
-    for staged in _hashed_rows(rows, columns):
-        batch.append(staged)
-        if len(batch) >= STAGE_BATCH_ROWS:
-            connection.executemany(_INSERT_STAGING, batch)
-            rows_in += len(batch)
-            batch.clear()
-    if batch:
-        connection.executemany(_INSERT_STAGING, batch)
-        rows_in += len(batch)
-    return rows_in
+    return insert_batches(
+        connection,
+        _INSERT_STAGING,
+        _hashed_rows(rows, columns),
+        columns=5,
+        batch_rows=STAGE_BATCH_ROWS,
+    )
 
 
+@profiled("ingest.classify", "records")
 def _classify(connection: duckdb.DuckDBPyConnection, source: str) -> tuple[int, int, int]:
     """The three S4.1 counts, against the lake as it stands before the append."""
     row = connection.execute(_CLASSIFY, [source, source]).fetchone()
@@ -603,6 +605,7 @@ def _refuse_empty_full_refresh(connection: duckdb.DuckDBPyConnection, source: st
     raise ConfigError(EMPTY_FULL_REFRESH_MESSAGE.format(live=live, source=source))
 
 
+@profiled("ingest.append", "records")
 def anti_join_append(
     connection: duckdb.DuckDBPyConnection,
     source: str,
@@ -675,6 +678,7 @@ def anti_join_append(
     )
 
 
+@profiled("ingest.batch_metadata", "batches")
 def write_ingest_batch(connection: duckdb.DuckDBPyConnection, manifest: IngestManifest) -> None:
     """Persist ``manifest`` as one `ingest_batches` row (S4.1, S5, S5.2).
 
@@ -703,6 +707,7 @@ def write_ingest_batch(connection: duckdb.DuckDBPyConnection, manifest: IngestMa
     )
 
 
+@profiled("ingest.delivery", "records")
 def ingest_delivery(
     cfg: Config,
     source: str,

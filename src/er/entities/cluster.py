@@ -127,10 +127,12 @@ from splink import Linker
 
 from er.entities.ids import canonicalize_pair, record_key
 from er.errors import NonConvergenceError
+from er.lake.bulk import insert_batches
 from er.lake.model import SCHEMA_QUALIFIER
 from er.matching.api import splink_api
 from er.matching.edges import current_edges
 from er.matching.model import UNIQUE_ID_COLUMN
+from er.obs.profiling import profiled
 from er.review.assertions import ALWAYS, NEVER, Assertion
 from er.review.queue import ENTITY, PAIR, RESOLVED_STATUSES
 
@@ -791,6 +793,7 @@ def current_membership(
     return {str(key): str(entity_id) for key, entity_id in rows}
 
 
+@profiled("reconcile.affected_set", "records")
 def load_affected_set(
     connection: duckdb.DuckDBPyConnection,
     *,
@@ -879,6 +882,7 @@ def _standardized_records(
     return frozenset(str(record_key_value) for (record_key_value,) in rows)
 
 
+@profiled("reconcile.affected_edges", "pairs")
 def affected_edges(
     connection: duckdb.DuckDBPyConnection,
     nodes: Iterable[str],
@@ -1143,6 +1147,7 @@ def _non_convergence_message(
     )
 
 
+@profiled("reconcile.label_setup", "records")
 def _open_loop_relations(
     connection: duckdb.DuckDBPyConnection,
     nodes: frozenset[str],
@@ -1160,31 +1165,37 @@ def _open_loop_relations(
         f"CREATE OR REPLACE TEMP TABLE {_LABELS_RELATION} "
         f"(record_key VARCHAR NOT NULL, label VARCHAR NOT NULL)"
     )
-    connection.executemany(
-        f"INSERT INTO {_LABELS_RELATION} (record_key, label) VALUES (?, ?)",
-        [[key, key] for key in sorted(nodes)],
+    insert_batches(
+        connection,
+        f"INSERT INTO {_LABELS_RELATION} SELECT unnest(?::VARCHAR[]), unnest(?::VARCHAR[])",
+        ((key, key) for key in sorted(nodes)),
+        columns=2,
     )
     connection.execute(
         f"CREATE OR REPLACE TEMP TABLE {_ADJACENCY_RELATION} "
         f"(node VARCHAR NOT NULL, neighbour VARCHAR NOT NULL)"
     )
     if pairs:
-        connection.executemany(
-            f"INSERT INTO {_ADJACENCY_RELATION} (node, neighbour) VALUES (?, ?)",
-            [
+        insert_batches(
+            connection,
+            f"INSERT INTO {_ADJACENCY_RELATION} SELECT unnest(?::VARCHAR[]), unnest(?::VARCHAR[])",
+            (
                 [end, other]
                 for rec_a_key, rec_b_key in pairs
                 for end, other in ((rec_a_key, rec_b_key), (rec_b_key, rec_a_key))
-            ],
+            ),
+            columns=2,
         )
 
 
+@profiled("reconcile.label_cleanup", "relations")
 def _close_loop_relations(connection: duckdb.DuckDBPyConnection) -> None:
     """Drop every `TEMP` relation the loop made, on success and on failure alike."""
     for relation in _LOOP_RELATIONS:
         connection.execute(f"DROP TABLE IF EXISTS {relation}")
 
 
+@profiled("reconcile.label_propagation", "records")
 def label_propagate(
     connection: duckdb.DuckDBPyConnection,
     nodes: Iterable[str],
@@ -1260,10 +1271,14 @@ def label_propagate(
         iterations = 0
         while True:
             iterations += 1
-            connection.execute(_ROUND_SQL)
-            row = connection.execute(_CHANGED_SQL).fetchone()
-            assert row is not None, "count(*) returned no row"
-            moved = int(row[0])
+            from er.obs.profiling import span
+
+            with span("reconcile.label_iteration", unit="records", iteration=iterations) as counts:
+                connection.execute(_ROUND_SQL)
+                row = connection.execute(_CHANGED_SQL).fetchone()
+                assert row is not None, "count(*) returned no row"
+                moved = int(row[0])
+                counts.update(rows_in=len(node_set), rows_out=len(node_set), labels_changed=moved)
             if not moved:
                 break
             connection.execute(_ADOPT_SQL)
@@ -1293,6 +1308,7 @@ def label_propagate(
     return LabelPropagationResult(labels=labels, iterations=iterations)
 
 
+@profiled("reconcile.label_readback", "records")
 def _labelling(connection: duckdb.DuckDBPyConnection) -> dict[str, str]:
     """The current `record_key -> label` mapping, in `record_key` order (S4.5.4)."""
     rows = connection.execute(
@@ -1414,16 +1430,22 @@ def cluster_full(
     connection.execute(
         f"CREATE OR REPLACE TABLE {CLUSTER_NODES_RELATION} ({UNIQUE_ID_COLUMN} VARCHAR)"
     )
-    connection.executemany(
-        f"INSERT INTO {CLUSTER_NODES_RELATION} VALUES (?)", [[key] for key in node_set]
+    insert_batches(
+        connection,
+        f"INSERT INTO {CLUSTER_NODES_RELATION} SELECT unnest(?::VARCHAR[])",
+        ((key,) for key in node_set),
+        columns=1,
     )
     connection.execute(
         f"CREATE OR REPLACE TABLE {CLUSTER_EDGES_RELATION} "
         f"({_LEFT_COLUMN} VARCHAR, {_RIGHT_COLUMN} VARCHAR, match_probability DOUBLE)"
     )
-    connection.executemany(
-        f"INSERT INTO {CLUSTER_EDGES_RELATION} VALUES (?, ?, ?)",
-        [[edge.rec_a_key, edge.rec_b_key, edge.match_probability] for edge in edge_list],
+    insert_batches(
+        connection,
+        f"INSERT INTO {CLUSTER_EDGES_RELATION} SELECT "
+        "unnest(?::VARCHAR[]), unnest(?::VARCHAR[]), unnest(?::DOUBLE[])",
+        ((edge.rec_a_key, edge.rec_b_key, edge.match_probability) for edge in edge_list),
+        columns=3,
     )
 
     linker: ClusterLinker = Linker(CLUSTER_NODES_RELATION, settings=dict(settings), db_api=api)

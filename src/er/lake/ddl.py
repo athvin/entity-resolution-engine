@@ -443,8 +443,15 @@ def preflight_schema(connection: duckdb.DuckDBPyConnection) -> None:
     Raises:
         SchemaBreakingError: on the first breaking difference, in registry order.
     """
+    columns_by_relation: dict[str, dict[str, str]] = {}
+    for relation, name, data_type in connection.execute(
+        "SELECT table_name, column_name, data_type FROM duckdb_columns() "
+        "WHERE database_name = ? AND schema_name = ? ORDER BY table_name, column_index",
+        [_DATABASE, _SCHEMA],
+    ).fetchall():
+        columns_by_relation.setdefault(str(relation), {})[str(name)] = str(data_type)
     for relation in DDL_OWNED:
-        live = live_columns(connection, relation)
+        live = columns_by_relation.get(relation, {})
         if not live:
             continue
         breaking = plan_evolution(live, REGISTRY[relation]).breaking

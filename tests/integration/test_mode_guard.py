@@ -30,6 +30,7 @@ from typing import Any
 
 import duckdb
 import yaml
+from helpers.cli_fixture import prepare_cli_fixture
 from ulid import ULID
 
 from er.cli import run_all_chain
@@ -167,6 +168,7 @@ def test_config_hash_drift_refuses_with_exit_3(
     initialised_lake: duckdb.DuckDBPyConnection, tmp_path: Path
 ) -> None:
     """AC1: exit 3, both values named, and a ledger and a snapshot left untouched."""
+    prepare_cli_fixture(initialised_lake, tmp_path / "delivery")
     baseline = er_run_all()
     assert baseline.returncode == 0, baseline.stdout + baseline.stderr
     on_disk_hash = config_hash(load_config(config_path()))
@@ -202,6 +204,7 @@ def test_allow_escalate_promotes_to_full_mode(
     initialised_lake: duckdb.DuckDBPyConnection, tmp_path: Path
 ) -> None:
     """AC2: the same drift exits 0, is recorded `mode='full'`, and runs the full chain."""
+    prepare_cli_fixture(initialised_lake, tmp_path / "delivery")
     baseline = er_run_all()
     assert baseline.returncode == 0, baseline.stdout + baseline.stderr
     first_run_id = run_id_of(baseline)
@@ -250,6 +253,9 @@ def test_first_run_and_failed_prior_runs_do_not_trip_the_guard(
     initialised_lake: duckdb.DuckDBPyConnection, tmp_path: Path
 ) -> None:
     """AC4: an empty `runs` table is no baseline, and neither is a failed run."""
+    prepare_cli_fixture(initialised_lake, tmp_path / "delivery")
+    initialised_lake.execute(f"DELETE FROM {SCHEMA_QUALIFIER}.run_stages")
+    initialised_lake.execute(f"DELETE FROM {SCHEMA_QUALIFIER}.runs")
     edited = drifted_config(tmp_path, auto_merge=0.96)
     assert last_successful_run(initialised_lake, TENANT) is None
 
@@ -276,9 +282,10 @@ def test_first_run_and_failed_prior_runs_do_not_trip_the_guard(
 
 
 def test_full_mode_never_consults_the_guard(
-    initialised_lake: duckdb.DuckDBPyConnection,
+    initialised_lake: duckdb.DuckDBPyConnection, tmp_path: Path
 ) -> None:
     """AC5: all four fields drifted, and `--mode full` still exits 0."""
+    prepare_cli_fixture(initialised_lake, tmp_path / "delivery")
     seed_prior_run(initialised_lake, status_succeeded=True)
     prior = last_successful_run(initialised_lake, TENANT)
     assert prior is not None

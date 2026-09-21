@@ -90,6 +90,7 @@ from typing import Any, Final
 
 from er.entities.events import EVENT_DETAILS_SCHEMA, details_hash
 from er.entities.ids import IdFactory
+from er.obs.profiling import profiled
 
 __all__ = [
     "ACTIVE",
@@ -494,6 +495,7 @@ def _acceptances(
     }
 
 
+@profiled("reconcile.plan", "entities")
 def reconcile_plan(
     p_old: Mapping[str, Collection[str]],
     p_new: Iterable[Collection[str]],

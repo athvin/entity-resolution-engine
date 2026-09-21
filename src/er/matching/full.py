@@ -82,6 +82,7 @@ from er.matching.tf import (
     tf_columns,
 )
 from er.matching.thresholds import in_gray_band, is_auto_merge
+from er.obs.profiling import profiled
 from er.obs.runctx import StageRun
 from er.review.queue import GrayBandPair, upsert_gray_band_pairs
 
@@ -353,6 +354,7 @@ def _scalar(connection: duckdb.DuckDBPyConnection, statement: str) -> Any:
     return row[0]
 
 
+@profiled("match.prepare_corpus", "records")
 def _materialize_corpus(connection: duckdb.DuckDBPyConnection) -> int:
     """Copy the corpus into a bare local relation and return how many rows it holds.
 
@@ -385,6 +387,7 @@ def _materialize_corpus(connection: duckdb.DuckDBPyConnection) -> int:
     return rows
 
 
+@profiled("match.count_candidates", "pairs")
 def _candidate_pairs(connection: duckdb.DuckDBPyConnection) -> int | None:
     """The `candidate_pair_count` metric, or ``None`` when it cannot be read.
 
@@ -478,6 +481,7 @@ def _scored_rows(
     return scored
 
 
+@profiled("match.persist_scores", "pairs")
 def merge_match_scores(
     connection: duckdb.DuckDBPyConnection,
     prediction_relation: str,
@@ -542,6 +546,7 @@ def merge_match_scores(
     )
 
 
+@profiled("match.full", "pairs")
 def score_full(
     connection: duckdb.DuckDBPyConnection,
     cfg: Config,

@@ -243,6 +243,10 @@ def test_mutating_command_runs_unlocked_when_no_catalog_is_configured(
     every mutating command exiting 2 without services — would be silent until CI ran.
     """
     monkeypatch.delenv("ER_CATALOG_DSN", raising=False)
+    from er import cli
+
+    # Isolate lock behavior from the real standardization stage's lake requirement.
+    monkeypatch.setattr(cli, "_stage_for", lambda name, args=(): cli.NoOpStage(name, tuple(args)))
 
     result = CliRunner().invoke(app, ["standardize", "--config", str(TEST_CONFIG)])
 

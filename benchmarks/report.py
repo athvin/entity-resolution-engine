@@ -331,249 +331,33 @@ def _resolve_run(args: argparse.Namespace) -> dict[str, Any]:
     return _measure_and_aggregate(args.scale, repeat=args.repeat)
 
 
-#: The three source systems a delivery is laid out under for `er ingest` (S4.1).
-_SOURCES = ("crm", "billing", "webforms")
-
-
-class _SubprocessRunner:
-    """The production `Runner`: shells out to `er`/`dbt`, reads the lake off one cursor.
-
-    Used only by `--run` (the in-image path ER-101 exercises); the unit-tested comparison
-    functions never touch it. `standardize` is the NoOp timing verb plus the dbt staging +
-    intermediate build that actually materialises `int_std_records`.
-    """
-
-    def __init__(
-        self, connection: Any, *, drop_for_run: Mapping[str, Path], auto_merge: float
-    ) -> None:
-        import os
-
-        self._connection = connection
-        self._drop_for_run = drop_for_run
-        self._auto_merge = auto_merge
-        self._env = dict(os.environ)
-
-    def _sh(self, argv: Sequence[str]) -> None:
-        import subprocess
-
-        result = subprocess.run(
-            list(argv), capture_output=True, text=True, env=self._env, check=False
-        )
-        if result.returncode not in (0, 10):
-            raise RuntimeError(
-                f"{' '.join(argv)} -> {result.returncode}\n{result.stdout}\n{result.stderr}"
-            )
-
-    def er(self, args: Sequence[str]) -> None:
-        from er.dbt_runner import DBT_PROFILES_DIR, DBT_PROJECT_DIR
-
-        argv = list(args)
-        if argv[0] == "standardize":
-            self._sh(
-                [
-                    "dbt",
-                    "build",
-                    "--select",
-                    "staging",
-                    "intermediate",
-                    "--target",
-                    "lake",
-                    "--project-dir",
-                    DBT_PROJECT_DIR,
-                    "--profiles-dir",
-                    DBT_PROFILES_DIR,
-                ]
-            )
-        elif argv[0] == "ingest":
-            run_id = argv[argv.index("--run-id") + 1]
-            argv += ["--path", str(self._drop_for_run[run_id])]
-        self._sh(["er", *argv])
-
-    def stage_rows(self, run_id: str) -> list[Any]:
-        from run_benchmark import StageRow
-
-        return [
-            StageRow(str(s), int(d or 0), int(ri or 0), int(ro or 0), int(a or 0), int(b or 0))
-            for s, d, ri, ro, a, b in self._connection.execute(
-                "SELECT stage, duration_ms, rows_in, rows_out, snapshot_start, snapshot_end "
-                "FROM lake.main.run_stages WHERE run_id = ? AND status = 'succeeded'",
-                [run_id],
-            ).fetchall()
-        ]
-
-    def candidate_pair_count(self) -> int:
-        row = self._connection.execute(
-            "SELECT count(*) FROM (SELECT DISTINCT a.record_key, b.record_key "
-            "FROM lake.main.int_blocking_keys a JOIN lake.main.int_blocking_keys b "
-            "ON a.key_type = b.key_type AND a.key_value = b.key_value "
-            "AND a.record_key < b.record_key)"
-        ).fetchone()
-        return int(row[0]) if row else 0
-
-    def pairs_above_auto_merge(self, run_id: str) -> int:
-        row = self._connection.execute(
-            "SELECT count(*) FROM lake.main.match_scores "
-            "WHERE run_id = ? AND match_probability >= ?",
-            [run_id, self._auto_merge],
-        ).fetchone()
-        return int(row[0]) if row else 0
-
-
-def _single_pass_result(
-    records: Sequence[Any], fingerprint: Mapping[str, Any], peaks: Any
-) -> dict[str, Any]:
-    """One measured pass as a schema-valid result (quality is ER-100's; zeros here)."""
-    from run_benchmark import incremental_ratio
-
-    return {
-        "scale": fingerprint["scale"],
-        "verdict": Verdict.NO_BASELINE.value,
-        "repeat": 1,
-        "incremental_ratio": incremental_ratio(records),
-        "blocking_recall": 0.0,
-        "fingerprint": dict(fingerprint),
-        "phases": [
-            {
-                "name": r.name,
-                "wall_ms": r.wall_ms,
-                "wall_ms_cv": 0.0,
-                "records_per_sec": r.records_per_sec,
-                "candidate_pair_count": r.candidate_pair_count,
-                "pairs_above_auto_merge": r.pairs_above_auto_merge,
-                "memory_peak_bytes": peaks.memory_peak_bytes,
-                "snapshot_count": r.snapshot_count,
-            }
-            for r in records
-        ],
-        "memory": {
-            "duckdb_buffer_peak_bytes": peaks.duckdb_memory_bytes,
-            "rss_peak_bytes": peaks.rss_bytes,
-            "cgroup_peak_bytes": peaks.cgroup_peak_bytes or 0,
-        },
-        "quality": {
-            "edge_precision": 0.0,
-            "edge_recall": 0.0,
-            "edge_f1": 0.0,
-            "cluster_precision": 0.0,
-            "cluster_recall": 0.0,
-            "cluster_f1": 0.0,
-        },
-    }
-
-
 def _measure_and_aggregate(scale_name: str, *, repeat: int) -> dict[str, Any]:
-    """Generate the corpus once, then measure `repeat` passes and aggregate them (S10.3).
-
-    The in-image path. Generation and `er init` run before measurement and are excluded
-    from it (S10.3); the corpus is reused across passes.
-    """
+    """Use the instrumented CLI harness with a fresh lake per repeated pass."""
     import os
-    import shutil
-    import subprocess
-    import tempfile
+    import uuid
 
-    from fingerprint import environment_fingerprint
-    from memory import MemorySampler, current_duckdb_memory_bytes
-    from run_benchmark import run_pass
-    from ulid import ULID
+    from profile_pipeline import run_case
+    from profile_report import benchmark_result, write_report
 
-    from er.config.hashing import config_hash
-    from er.config.loader import load_config
-    from er.dbt_runner import DBT_PROFILES_DIR, DBT_PROJECT_DIR
-    from er.lake.ducklake import connect
+    from er.obs.profiling import stream_command
 
-    scale = get_scale(scale_name)
-    cfg = load_config(Path(os.environ["ER_CONFIG"]))
-    staging = Path(tempfile.mkdtemp(prefix="er-bench-corpus-"))
-    subprocess.run(
-        [
-            "python",
-            "-m",
-            "fixtures.generator.cli",
-            "--personas",
-            str(scale.personas),
-            "--records",
-            str(scale.records),
-            "--batch",
-            str(scale.incremental_batch),
-            "--seed",
-            str(cfg.generator.seed),
-            "--out",
-            str(staging),
-            "--config",
-            os.environ["ER_CONFIG"],
-        ],
-        check=True,
-    )
-    drops: dict[str, Path] = {}
-    for label in ("base", "batch"):
-        root = staging / f"_drop_{label}"
-        for source in _SOURCES:
-            (root / source).mkdir(parents=True, exist_ok=True)
-            src = (
-                staging / f"{source}.csv"
-                if label == "base"
-                else staging / "batch" / f"{source}.csv"
-            )
-            shutil.copy(src, root / source / f"{source}.csv")
-        drops[label] = root
-
-    subprocess.run(["er", "init"], check=False)
-    # Seed the reference tables (e.g. nickname_variants) the staging models read, once,
-    # before any measured pass. Excluded from the timing like generation and init (S10.3).
-    subprocess.run(
-        [
-            "dbt",
-            "seed",
-            "--target",
-            "lake",
-            "--project-dir",
-            DBT_PROJECT_DIR,
-            "--profiles-dir",
-            DBT_PROFILES_DIR,
-        ],
-        check=True,
-    )
-    passes: list[dict[str, Any]] = []
-    with connect() as connection:
-        for _ in range(repeat):
-            run_ids = {"base": str(ULID()), "train": str(ULID()), "incremental": str(ULID())}
-            runner = _SubprocessRunner(
-                connection,
-                drop_for_run={
-                    run_ids["base"]: drops["base"],
-                    run_ids["incremental"]: drops["batch"],
-                },
-                auto_merge=cfg.thresholds.auto_merge,
-            )
-            sampler = MemorySampler(duckdb_source=lambda: current_duckdb_memory_bytes(connection))
-            sampler.start()
-            try:
-                records = run_pass(runner, run_ids)
-            finally:
-                # Always join the sampler, so a failed pass cannot leave a thread sampling
-                # a connection that the enclosing `with` is about to close.
-                peaks = sampler.stop()
-            active = connection.execute(
-                "SELECT model_version, tf_snapshot_id FROM lake.main.model_registry "
-                "WHERE status='active'"
-            ).fetchone()
-            fingerprint = environment_fingerprint(
-                scale=scale.name,
-                connection=connection,
-                config_hash=config_hash(cfg),
-                generator_seed=cfg.generator.seed,
-                model_version=str(active[0]) if active else "",
-                tf_snapshot_id=str(active[1]) if active else "",
-            )
-            passes.append(_single_pass_result(records, fingerprint, peaks))
-        # Quality is a property of the corpus, not of a sample, so it is computed once over
-        # the final lake state against the generator's truth — reported, never gated (S10.5).
-        contribution = _quality_contribution(connection, staging, cfg.thresholds.auto_merge)
-    result = aggregate_passes(passes)
-    result["blocking_recall"] = contribution["blocking_recall"]
-    result["quality"] = contribution["quality"]
-    return result
+    if repeat < 1:
+        raise ValueError("--repeat must be positive")
+    get_scale(scale_name)
+    config = Path(os.environ["ER_CONFIG"])
+    out = Path("artifacts/bench") / f"profile-{uuid.uuid4().hex}"
+    out.mkdir(parents=True)
+    completed = stream_command(["dbt", "deps", "--project-dir", "dbt"], directory=out / "dbt-deps")
+    if completed.returncode:
+        raise RuntimeError("dbt deps failed")
+    passes = []
+    try:
+        for iteration in range(1, repeat + 1):
+            run = run_case(out.resolve(), scale_name, iteration, config_template=config)
+            passes.append(benchmark_result(out / f"{scale_name}-{iteration}", run))
+    finally:
+        write_report(out)
+    return aggregate_passes(passes)
 
 
 def _quality_contribution(connection: Any, staging: Path, auto_merge: float) -> dict[str, Any]:

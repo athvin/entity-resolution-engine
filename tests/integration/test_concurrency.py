@@ -16,9 +16,11 @@ from __future__ import annotations
 
 import os
 import subprocess
+from pathlib import Path
 
 import duckdb
 import pytest
+from helpers.cli_fixture import prepare_cli_fixture
 from ulid import ULID
 
 from er.cli import MUTATING_COMMANDS, READ_ONLY_COMMANDS
@@ -109,7 +111,7 @@ def test_read_only_commands_do_not_take_the_lock(
 
 
 def test_lock_is_reacquirable_after_failure(
-    initialised_lake: duckdb.DuckDBPyConnection,
+    initialised_lake: duckdb.DuckDBPyConnection, tmp_path: Path
 ) -> None:
     """AC3: a run that exits non-zero releases the lock, with no manual unlock step."""
     assert try_advisory_lock(TENANT) is True, "the tenant was already locked"
@@ -117,9 +119,7 @@ def test_lock_is_reacquirable_after_failure(
     failed_run = str(ULID())
     failed = run_er("train", "--run-id", failed_run)
 
-    # `er train` is a mutating command whose M1 stage is unimplemented, so it takes the
-    # lock, fails inside it, and is the shortest real path to "a run that exited
-    # non-zero mid-stage" while every pipeline stage is still a no-op stub.
+    # Training without standardized records fails inside the writer lock.
     assert failed.returncode != 0, failed.stdout + failed.stderr
     with connect() as connection:
         assert connection.execute(
@@ -128,5 +128,6 @@ def test_lock_is_reacquirable_after_failure(
 
     assert try_advisory_lock(TENANT) is True, "the failed run left the tenant locked"
 
+    prepare_cli_fixture(initialised_lake, tmp_path / "delivery")
     after = run_er("run-all", "--mode", "incremental", "--skip-ingest")
     assert after.returncode == 0, after.stdout + after.stderr

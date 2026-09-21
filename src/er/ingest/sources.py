@@ -194,8 +194,14 @@ class _DropFolderAdapter:
         return discover_files(self.drop_dir, self.source, type(self).extensions)
 
     def rows(self) -> Iterator[SourceRow]:
+        from er.obs.profiling import span
+
         for path in self.discover():
-            yield from self._file_rows(path)
+            with span("ingest.file", unit="records", source=self.source, file=path.name) as counts:
+                counts["rows_out"] = 0
+                for row in self._file_rows(path):
+                    counts["rows_out"] += 1
+                    yield row
 
     def _file_rows(self, path: Path) -> Iterator[SourceRow]:
         raise NotImplementedError

@@ -73,3 +73,18 @@ def test_json_mode_moves_stdout_only() -> None:
         assert tuple(record) == STAGE_RECORD_KEYS
     assert [record["seq"] for record in machine_records] == [1, 2, 3, 4]
     assert len({record["run_id"] for record in machine_records}) == 1
+
+
+@pytest.fixture(autouse=True)
+def isolated_stage_bodies(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These protocol tests inject no-op bodies; integration tests run real stages."""
+    from er import cli as cli_module
+
+    original = cli_module._stage_for
+
+    def factory(name, args=()):
+        if name in {"ingest", "standardize", "match", "reconcile", "assemble"}:
+            return cli_module.NoOpStage(name=name, args=tuple(args))
+        return original(name, args)
+
+    monkeypatch.setattr(cli_module, "_stage_for", factory)

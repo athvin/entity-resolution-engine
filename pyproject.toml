@@ -29,7 +29,7 @@ dependencies = [
 [project.scripts]
 # The single entry point of S4.0's orchestration contract. `main` exists so the
 # script name is stable while the Typer app underneath it can be restructured.
-er = "er.cli:main"
+er = "er.entrypoint:main"
 
 [dependency-groups]
 dev = [

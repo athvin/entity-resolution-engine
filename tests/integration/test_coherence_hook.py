@@ -30,7 +30,7 @@ from er.dbt_runner import DBT_PROFILES_DIR, DBT_PROJECT_DIR, render_dbt_vars, ru
 from er.entities.ids import MonotonicUlidFactory
 from er.errors import ExitCode
 from er.golden.assemble import assemble, compute_touched_set
-from er.lake.ducklake import attach_statements, detach
+from er.lake.ducklake import attach_statements, connect, detach
 from er.lake.model import SCHEMA_QUALIFIER
 from er.lake.model_registry import model_params_uri
 from er.matching.full import MODE_FULL
@@ -197,14 +197,19 @@ def merged(
 
 def _assemble_in_process(connection: duckdb.DuckDBPyConnection, cfg: Config, run_id: str) -> Any:
     counters = StageCounters(DECLARED_COUNTERS["assemble"])
-    return assemble(
-        connection,
-        cfg,
-        run_id=run_id,
-        counters=counters,
-        touched_only=True,
-        id_factory=MonotonicUlidFactory(),
-    ), counters
+    detach(connection)
+    try:
+        return assemble(
+            connect,
+            cfg,
+            run_id=run_id,
+            counters=counters,
+            touched_only=True,
+            id_factory=MonotonicUlidFactory(),
+        ), counters
+    finally:
+        for statement in attach_statements():
+            connection.execute(statement)
 
 
 def test_scorer_called_once_with_rebuild_touched_ids(merged: _Merged, tmp_path: Path) -> None:
@@ -305,10 +310,14 @@ def test_rerun_refreshes_and_skips_resolved_subject(merged: _Merged, tmp_path: P
 
 def test_noop_writes_no_rows_and_no_extra_counters(merged: _Merged) -> None:
     """AC6: under the noop default the hook writes no coherence row, and the assemble
-    stage's counter set is exactly the six S4.6 names."""
+    stage adds only its S4.6 counters and the shared profiling counts/units."""
     _, counters = _assemble_in_process(merged.connection, merged.cfg, merged.batch_run_id)
     count = merged.connection.execute(
         f"SELECT count(*) FROM {REVIEW_QUEUE} WHERE reason = ?", [COHERENCE]
     ).fetchone()
     assert count is not None and count[0] == 0
-    assert set(counters.payload()) == ASSEMBLE_COUNTERS
+    payload = counters.payload()
+    assert set(payload) == ASSEMBLE_COUNTERS | {"rows_in", "rows_out", "input_unit", "output_unit"}
+    assert payload["rows_in"] == payload["entities_touched"]
+    assert payload["rows_out"] == payload["entities_rebuilt"]
+    assert payload["input_unit"] == payload["output_unit"] == "entities"

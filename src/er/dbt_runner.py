@@ -35,14 +35,19 @@ deliberately never a command-line flag here.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
+import sys
+import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from er.config.schema import Config
 from er.errors import ConfigError, StageFailure
+from er.lake.ducklake import suspend_session
+from er.obs.profiling import emit, enabled, profiled, stream_command
 
 __all__ = [
     "ARTIFACTS_DIR",
@@ -169,6 +174,7 @@ def render_dbt_vars(
     return payload
 
 
+@profiled("dbt.invocation")
 def run_dbt(
     command: str,
     select: str | None = None,
@@ -232,11 +238,20 @@ def run_dbt(
     if full_refresh:
         argv.append("--full-refresh")
 
+    artifact_project = Path(project_dir)
+    if enabled():
+        # A failed invocation must never inherit another invocation's successful
+        # run_results.json. The target directory also keeps every manifest intact.
+        artifact_project = Path(os.environ["ER_PROFILE_DIR"]).resolve() / "dbt" / uuid.uuid4().hex
+        artifact_project.mkdir(parents=True)
+        argv += ["--target-path", str(artifact_project / "target")]
+
     run = spawn if spawn is not None else _spawn
     snapshot_start = None if snapshot_probe is None else snapshot_probe()
     if close_conn is not None:
         close_conn()
     try:
+        suspend_session()
         completed = run(argv)
     finally:
         # In `finally` so a dbt failure — or a spawn that never returns a status —
@@ -253,6 +268,16 @@ def run_dbt(
         argv=argv,
         completed=completed,
     )
+    if enabled():
+        for model in _read_run_results(artifact_project):
+            emit(
+                "dbt_model",
+                name=model.unique_id,
+                status=model.status,
+                duration_ms=None if model.execution_time is None else model.execution_time * 1000,
+                rows_affected=model.rows_affected,
+                artifacts_dir=str(artifact_project / "target"),
+            )
     if completed.returncode != 0:
         # S4.7 classifies a dbt failure as `data` — an unparsable source row, a
         # uniqueness test failure — which exits 1. A caller with a better diagnosis
@@ -263,7 +288,7 @@ def run_dbt(
         )
     return DbtResult(
         exit_code=completed.returncode,
-        models=_read_run_results(Path(project_dir)),
+        models=_read_run_results(artifact_project),
         snapshot_start=snapshot_start,
         snapshot_end=snapshot_end,
         log_path=log_path,
@@ -316,6 +341,7 @@ def _holds_id_list(value: object) -> bool:
     return False
 
 
+@profiled("dbt.launch")
 def _spawn(argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
     """Run ``argv`` to completion, capturing both streams.
 
@@ -323,6 +349,12 @@ def _spawn(argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
     ``check=False`` because the exit status is mapped by the caller rather than
     raised as a ``CalledProcessError`` the S4.7 taxonomy would have to unwrap.
     """
+    if enabled():
+        command = [sys.executable, "-m", "er.obs.dbt_worker", *argv[1:]]
+        return stream_command(
+            command,
+            directory=Path(os.environ["ER_PROFILE_DIR"]) / "commands" / f"dbt-{uuid.uuid4().hex}",
+        )
     return subprocess.run(list(argv), capture_output=True, text=True, check=False)
 
 

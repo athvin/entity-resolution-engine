@@ -77,6 +77,7 @@ from er.entities.retraction import corpus_absent_keys, retract_tombstoned_record
 from er.errors import ErrorClass, ExitCode, StageFailure
 from er.lake.model import SCHEMA_QUALIFIER
 from er.matching.edges import current_edges
+from er.obs.profiling import profiled
 from er.obs.runctx import StageRun
 from er.review.assertions import Assertion, active_assertions, check_contradiction_1
 from er.review.never_cut import (
@@ -284,6 +285,7 @@ def _current_partition(
     return {entity_id: frozenset(members) for entity_id, members in grouped.items()}
 
 
+@profiled("reconcile.persist", "entities")
 def apply_reconcile_plan(
     connection: duckdb.DuckDBPyConnection,
     plan: ReconcilePlan,
@@ -399,6 +401,7 @@ def apply_reconcile_plan(
     return append_events(connection, fresh, occurred_at=stamp)
 
 
+@profiled("reconcile.lifecycle", "entities")
 def run_reconcile_stage(
     connection: duckdb.DuckDBPyConnection,
     cfg: Config,
@@ -463,7 +466,14 @@ def run_reconcile_stage(
         watermark=watermark,
     )
     if not affected.nodes:
-        return _nothing_to_do()
+        run_ctx.counters.set("rows_in", 0)
+        run_ctx.counters.set("rows_out", 0)
+        empty = _nothing_to_do()
+        empty.record(run_ctx, duration_ms=int((time.monotonic() - started) * 1000))
+        return empty
+    run_ctx.counters.set("rows_in", len(affected.nodes))
+    run_ctx.counters.set("input_unit", "records")
+    run_ctx.counters.set("output_unit", "entities")
 
     # S4.5.5's membership half, before clustering: the prior partition is read while
     # the tombstoned records still hold their rows, the rows are then removed, and
@@ -532,6 +542,7 @@ def run_reconcile_stage(
         )
 
     groups = _groups(propagation.labels)
+    run_ctx.counters.set("rows_out", len(groups))
     plan = reconcile_plan(p_old, groups, factory)
 
     # S4.4.2 step 5: an `edge_cut` event on the affected entity. The id is minted here

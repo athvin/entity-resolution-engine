@@ -38,6 +38,7 @@ error carries and never leaves it NULL on a failure.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass, field
@@ -52,6 +53,7 @@ from er.lake.env import MissingEnvError
 from er.lake.model import REGISTRY, RUN_MODES, RUN_STAGES, SCHEMA_QUALIFIER
 from er.obs.counters import DECLARED_COUNTERS, PROMOTED_COUNTERS, StageCounters
 from er.obs.logging import emit_stage_record
+from er.obs.profiling import profiled
 from er.versions import code_version
 
 __all__ = [
@@ -196,6 +198,8 @@ class StageRun:
     snapshot_end: int | None = None
     error_class: ErrorClass | None = None
     error_detail: str | None = None
+    monotonic_start_ns: int | None = None
+    monotonic_end_ns: int | None = None
 
     def finish(
         self,
@@ -228,6 +232,8 @@ class StageRun:
         """Wall time of the stage, the one promoted counter the stage never supplies."""
         if self.ended_at is None:
             return None
+        if self.monotonic_start_ns is not None and self.monotonic_end_ns is not None:
+            return (self.monotonic_end_ns - self.monotonic_start_ns) // 1_000_000
         return int((self.ended_at - self.started_at).total_seconds() * 1000)
 
     def record(self) -> dict[str, object]:
@@ -333,6 +339,7 @@ class RunContext:
         self._persist = self._begin()
         return self
 
+    @profiled("ledger.run_finish")
     def __exit__(self, exc_type: object, exc: BaseException | None, traceback: object) -> None:
         self.ended_at = _now()
         self.status = STATUS_FAILED if self._failed or exc is not None else STATUS_SUCCEEDED
@@ -350,6 +357,8 @@ class RunContext:
                     "ended_at": _sql_timestamp(self.ended_at),
                     "snapshot_start": self.snapshot_start,
                     "snapshot_end": self.snapshot_end,
+                    "model_version": self.model_version,
+                    "tf_snapshot_id": self.tf_snapshot_id,
                 },
                 {"run_id": self.run_id},
             )
@@ -378,6 +387,7 @@ class RunContext:
             seq=self._seq.get(name, len(self._seq) + 1),
             started_at=_now(),
             counters=StageCounters(vocabulary),
+            monotonic_start_ns=time.monotonic_ns(),
             config_hash=self.config_hash,
             model_version=self.model_version,
             tf_snapshot_id=self.tf_snapshot_id,
@@ -406,6 +416,7 @@ class RunContext:
                 stage_run.finish(int(ExitCode.SUCCESS))
             self._close_stage(stage_run, persist)
 
+    @profiled("ledger.run_begin")
     def _begin(self) -> bool:
         """Write the `runs` row; report whether this run persists anything."""
         provenance = (self.tenant, self.config_hash, self.std_version, self.survivorship_version)
@@ -416,6 +427,12 @@ class RunContext:
                 if not _relations_present(connection):
                     return False
                 if self._run_row_exists(connection):
+                    previous = connection.execute(
+                        f"SELECT snapshot_start FROM {SCHEMA_QUALIFIER}.{_RUNS} WHERE run_id = ?",
+                        [self.run_id],
+                    ).fetchone()
+                    if previous is not None:
+                        self.snapshot_start = previous[0]
                     # `runs` is keyed on `run_id` alone (S5.0), and a `run_id` can be
                     # SUPPLIED (`--run-id`, and `--resume` in ER-024). Re-opening it
                     # returns the row to `running` rather than appending a second one;
@@ -424,7 +441,16 @@ class RunContext:
                     _update_row(
                         connection,
                         _RUNS,
-                        {"status": STATUS_RUNNING, "ended_at": None},
+                        {
+                            "status": STATUS_RUNNING,
+                            "ended_at": None,
+                            **({"mode": self.mode} if self.mode != "stage" else {}),
+                            **(
+                                {"rebuild_reason": self.rebuild_reason}
+                                if self.rebuild_reason is not None
+                                else {}
+                            ),
+                        },
                         {"run_id": self.run_id},
                     )
                     return True
@@ -470,6 +496,7 @@ class RunContext:
         with self.source() as connection:
             yield connection
 
+    @profiled("ledger.stage_begin")
     def _open_stage_row(self, connection: duckdb.DuckDBPyConnection, stage_run: StageRun) -> None:
         """Write (or reset) the `running` row, and capture the range's lower bound."""
         existing = self._existing_seq(connection, stage_run.stage)
@@ -511,9 +538,11 @@ class RunContext:
         ).fetchone()
         return (0 if row is None else int(row[0])) + 1
 
+    @profiled("ledger.stage_finish")
     def _close_stage(self, stage_run: StageRun, persist: bool) -> None:
         """Stamp the terminal state, persist it, then emit the S5.2 record."""
         stage_run.ended_at = _now()
+        stage_run.monotonic_end_ns = time.monotonic_ns()
         # Derived by the run, not supplied by the stage: it is the one promoted
         # counter no stage is in a position to measure for itself.
         stage_run.counters.promote("duration_ms", stage_run.duration_ms)
