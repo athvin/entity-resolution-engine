@@ -34,11 +34,15 @@ def _dispatchable_scales() -> list[str]:
     return [name for name, scale in loaded.items() if scale.dispatchable]
 
 
-def test_dispatch_options_equal_committed_baselines(tmp_path: Path) -> None:
-    """AC2: the dispatch options are exactly the committed baseline stems, and not 1m."""
+def test_dispatch_options_match_available_baselines(tmp_path: Path) -> None:
+    """Smoke bootstraps measurements; every larger option needs a real baseline."""
     options = workflow.parse_benchmark_workflow(WORKFLOW).dispatch_options
     committed = {p.stem for p in BASELINES.glob("*.json")}
-    assert options == committed, f"options {set(options)} != committed baselines {committed}"
+    allowed = committed | {"smoke"}
+    loaded = scales.load_scales()
+    assert {name for name, scale in loaded.items() if scale.baseline_committed} == committed
+    assert {name for name, scale in loaded.items() if scale.dispatchable} == options
+    assert options == allowed, f"options {set(options)} != available scales {allowed}"
     assert "1m" not in options
 
     # A stray option that no baseline backs must make the equality fail.
@@ -51,7 +55,7 @@ def test_dispatch_options_equal_committed_baselines(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     strayed_options = workflow.parse_benchmark_workflow(strayed).dispatch_options
-    assert strayed_options != committed, "a stray dispatch option was not detected"
+    assert strayed_options != allowed, "a stray dispatch option was not detected"
     assert "1m" in strayed_options
 
 

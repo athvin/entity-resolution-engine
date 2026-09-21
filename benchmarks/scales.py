@@ -279,9 +279,10 @@ def _validate(scale: Scale) -> None:
             "Python heap and the dbt subprocess must fit in what is left"
         )
 
-    if scale.dispatchable and not scale.baseline_committed:
+    if scale.dispatchable and not scale.baseline_committed and scale.name != "smoke":
         raise BenchResultError(
-            f"scale '{scale.name}': dispatchable requires baseline_committed; a scale becomes "
+            f"scale '{scale.name}': only smoke may bootstrap without a baseline; "
+            "a larger scale becomes "
             "dispatchable only once benchmarks/baselines/<scale>.json is committed (S9.2)"
         )
 

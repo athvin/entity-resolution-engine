@@ -51,6 +51,9 @@ COPY --from=builder /opt/duckdb_extensions /opt/duckdb_extensions
 WORKDIR /app
 COPY src/ src/
 COPY dbt/ dbt/
+# Standalone CLI commands need dbt_utils in each fresh container. Resolve the
+# pinned packages during the build, independently of the developer's dbt cache.
+RUN dbt deps --project-dir dbt && rm -rf dbt/logs dbt/profiles/.user.yml
 COPY configs/ configs/
 COPY benchmarks/ benchmarks/
 COPY fixtures/ fixtures/

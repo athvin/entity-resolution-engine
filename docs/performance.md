@@ -1,16 +1,56 @@
-# Comparing pipeline performance
+# Performance
 
-The [2026-09-20 results](performance-results-2026-09-20.md) record a 27.6% reduction
-in median processing time across five matched 10k-record runs per version.
-The [100k reconciliation comparison](reconciliation-lookup-performance-2026-09-21.md)
-measures lookups using typed arrays on the complete initial-load pipeline.
+## Measured results
 
-The comparison runner measures the complete CLI lifetimes for ingestion,
-standardization, training, matching, reconciliation and assembly, followed by an
-incremental cycle. It excludes environment initialization, corpus generation and
-output verification. Normal stage logging and 250 ms container resource sampling
-remain enabled. Native SQL profiling runs separately because it adds substantial
-overhead to repeated statements.
+These are historical controlled comparisons, not CI baselines or service-level
+commitments. Both campaigns used five alternating baseline/candidate pairs,
+identical synthetic inputs and pinned dependencies, fresh lakes, two CPUs, 6 GiB
+container memory, two DuckDB threads and a 4 GB DuckDB memory limit. Detailed SQL
+profiling was disabled for the headline measurements.
+
+| Workload | Before | After | Reduction |
+|---|---:|---:|---:|
+| 10k initial load + 100 incremental records, 2026-09-20 | 90.46 s | 65.46 s | 27.6% |
+| 100k initial load, 2026-09-21 | 273.06 s | 84.80 s | 68.9% |
+| Reconciliation within that 100k load | 205.37 s | 17.79 s | 91.3% |
+
+The 100k comparison used 100,000 records representing 40,000 generated people
+(seed 42). The baseline was commit `679dbf9`; the optimized code merged as
+`e13535a`. Median CPU time fell from 281.50 to 92.80 CPU-seconds. Median sampled
+memory peak changed from 3,612.9 to 3,671.1 MiB; the largest sample was 3.68 GiB.
+Runtime variation was 0.82% before and 1.77% after.
+
+| 100k CLI stage | Baseline median | Optimized median |
+|---|---:|---:|
+| Ingestion, all sources | 7.76 s | 7.76 s |
+| Standardization | 19.01 s | 18.94 s |
+| Training | 4.47 s | 4.42 s |
+| Matching | 26.38 s | 26.43 s |
+| Reconciliation | 205.37 s | 17.79 s |
+| Golden assembly | 8.29 s | 8.22 s |
+
+Component medians need not sum to the total median. Matching became the largest
+stage. A separate diagnostic attributed 12.07 seconds to reconciliation persistence,
+including 3.91 seconds of event writes; the five targeted lookup helpers totaled
+0.714 seconds. Nested spans overlap, and the diagnostic is excluded from the medians.
+
+All 16 normalized output comparisons in the 100k campaign passed. Each large run
+produced 100,000 memberships, 39,995 golden records and 239,970 lineage rows.
+The maximum probability difference was `1.89e-14`, below the `1e-10` tolerance.
+The 100k workload included only the initial load; small fixture/smoke runs separately
+checked incremental behavior. It used a smaller CPU/memory envelope than the
+standard `100k` scale in `benchmarks/scales.yaml`.
+
+Processing times include complete CLI lifetimes, normal stage logging and 250 ms
+resource sampling. They exclude stack setup, corpus generation, validation, export
+and teardown. Memory includes page cache. These results do not establish capacity
+for arbitrary source distributions or concurrent workloads.
+
+The raw local campaigns, exports and temporary 100k measurement harness were
+removed during repository cleanup. This summary retains the measured results and
+methodology; the deleted raw runs cannot be regenerated into reports. The supported
+comparison runner below measures 10k plus incremental processing, so it does not
+recreate the historical 100k initial-only experiment exactly.
 
 ## Implementation
 
@@ -46,13 +86,13 @@ dirty working tree.
 Build both versions using the same existing dependency image:
 
 ```sh
-.venv/bin/python benchmarks/build_performance_image.py \
+uv run python benchmarks/build_performance_image.py \
   --context /path/to/baseline --base-image er-pipeline:ci \
   --tag er-perf:baseline --out artifacts/performance/build-baseline
-.venv/bin/python benchmarks/build_performance_image.py \
+uv run python benchmarks/build_performance_image.py \
   --context . --base-image er-pipeline:ci \
   --tag er-perf:candidate --out artifacts/performance/build-candidate
-.venv/bin/python benchmarks/performance.py \
+uv run python benchmarks/performance.py \
   --out artifacts/performance/comparison \
   --baseline-image er-perf:baseline --candidate-image er-perf:candidate --repeat 5
 ```
@@ -104,8 +144,37 @@ another stage's peak. Parent and child timings overlap and must not be summed.
 Regenerate the comparison offline without a database:
 
 ```sh
-.venv/bin/python benchmarks/performance.py \
+uv run python benchmarks/performance.py \
   --out artifacts/performance/comparison --report
 ```
 
 See [profiling.md](profiling.md) for trace semantics and standalone profiling.
+
+## Benchmark baselines
+
+The weekly/manual smoke workflow currently has no measured baseline and reports
+`NO_BASELINE`. The former JSON baseline was a copy of a synthetic test fixture and
+has been removed. `10k`, `100k` and `1m` remain defined workloads; their dispatch
+options stay disabled until reviewed measurements exist.
+
+Run a smoke benchmark on a dedicated, disposable Compose project:
+
+```sh
+COMPOSE_PROJECT_NAME=er-benchmark bash scripts/ci/bench.sh
+```
+
+The report is written to `artifacts/bench/latest.json` and `report.md`. Review its
+quality, variation and environment fingerprint before promoting it:
+
+```sh
+uv run python benchmarks/report.py \
+  --compare artifacts/bench/latest.json --scale smoke \
+  --baselines-dir benchmarks/baselines --write-baseline
+```
+
+The command refuses a `NON_COMPARABLE` run. Commit the generated baseline with its
+`baseline_committed` flag in `benchmarks/scales.yaml`; for larger scales, also enable
+`dispatchable` and the matching workflow choice. `OK` means within the threshold,
+`REGRESSION` means a comparable phase exceeded it, `NON_COMPARABLE` means the
+measurement cannot be judged, and `NO_BASELINE` means no comparison was possible.
+Historical optimization results above are separate from these CI baselines.

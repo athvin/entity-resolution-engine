@@ -1,13 +1,4 @@
-"""The one parser of `.github/workflows/benchmark.yaml` (S9.2, M24/M23/M25).
-
-ER-102's `--validate-baselines` and this ticket's tests both read the benchmark workflow —
-its dispatch options, per-scale runner and timeout, the envelope the preflight exports, and
-its `uses:` pins — so they read it through `parse_benchmark_workflow` rather than two
-independent greps. The workflow's `runs-on`/`timeout-minutes` are GitHub Actions ternary
-expressions over `inputs.scale`; :class:`WorkflowEnvelope` evaluates the specific
-`(scale == 'X') && A || B` shape so a caller asks `runner_for('100k')` instead of parsing
-the expression itself.
-"""
+"""Parse benchmark workflow choices, runner limits and pinned actions for validation."""
 
 from __future__ import annotations
 

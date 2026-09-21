@@ -23,9 +23,8 @@ convention a fixture author is asked to remember:
   scenario states.
 
 The manifest is read by the strict parser below rather than by PyYAML because
-``scripts/validate_fixtures.py`` is invoked as bare ``python3`` (S8.2.1's lint is
-a repo script, and ``scripts/board.py`` and ``scripts/lint_spec.py`` set the
-standing rule that those import the standard library only). The grammar it
+``scripts/validate_fixtures.py`` supports a bare ``python3`` interpreter and
+uses only standard-library imports. The grammar it
 accepts is pinned in ``fixtures/static/FORMAT.md`` and anything outside it is an
 error naming the line, so the parser never guesses and cannot silently misread a
 manifest a YAML library would read differently.

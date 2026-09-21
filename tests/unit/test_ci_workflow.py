@@ -49,7 +49,6 @@ EXPECTED_STATIC_RUN_STEPS = [
     "uv run mypy --strict src/er",
     "bash scripts/ci/actionlint.sh",
     "uv run python scripts/lint_spec.py DesignDoc.md",
-    "uv run python scripts/lint_board.py",
     "uv run dbt deps --project-dir dbt",
     "uv run dbt parse --project-dir dbt --profiles-dir dbt/profiles --target mem",
 ]
@@ -224,9 +223,7 @@ def test_run_steps_reference_existing_files() -> None:
     assert not missing, (
         "these steps name repository paths that do not exist:\n"
         + "\n".join(missing)
-        + "\nA step referencing an artefact a later milestone produces leaves every PR "
-        "red until that milestone lands, which is why the M5-only `lint_metrics.py` "
-        "and `report.py --validate-baselines` steps are absent from this workflow (S12)."
+        + "\nWorkflow commands must reference files present in a fresh checkout."
     )
 
 

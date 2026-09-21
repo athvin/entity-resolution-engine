@@ -30,7 +30,6 @@ EXPECTED_STAGES = ("builder", "runtime")
 REQUIRED_DOCKERIGNORE_ENTRIES = (
     ".git",
     ".venv",
-    ".loop",
     "artifacts",
     "dbt/target",
     "dbt/dbt_packages",

@@ -1,24 +1,4 @@
-# The PR path (DesignDoc.md S9.1). `benchmark.yaml` never runs here (G4).
-#
-# Three properties are load-bearing and are asserted by tests/unit/test_ci_workflow.py
-# rather than left to review:
-#   - every `uses:` is pinned to a release commit SHA with its tag in a trailing
-#     comment, which is what Dependabot bumps and what scripts/ci/actionlint.sh fails
-#     on; a tag is a moving target and a moving target is not a pin (S9);
-#   - `cache-to` is a QUOTED scalar -- unquoted, the comma would end the flow-mapping
-#     entry if this value were ever moved into flow style, and the buildx cache would
-#     silently degrade to inline-only;
-#   - `static` and `unit` have no `needs:`, so they run concurrently and the <10 min
-#     budget of S9.1 is enforced by the timeouts rather than hoped for.
-#
-# Deliberately absent until M5 (S12), because each references an artefact no earlier
-# milestone produces and a step that names a missing file turns every PR red for three
-# milestones:
-#   - `Baseline/dispatch parity` (`benchmarks/report.py --validate-baselines`), which
-#     needs report.py, the committed baselines and benchmark.yaml;
-#   - `Single metrics implementation` (`scripts/lint_metrics.py`), whose S8.5 subject
-#     `src/er/eval/metrics.py` does not exist yet.
-# `test_run_steps_reference_existing_files` enforces that absence mechanically.
+# PR and main checks. Static and unit jobs precede 32 isolated integration shards.
 name: ci
 
 on:
@@ -51,8 +31,6 @@ jobs:
         run: bash scripts/ci/actionlint.sh # downloads nothing; wraps the pinned binary
       - name: Spec lint
         run: uv run python scripts/lint_spec.py DesignDoc.md
-      - name: Board lint
-        run: uv run python scripts/lint_board.py
       - run: uv run dbt deps --project-dir dbt
       - run: uv run dbt parse --project-dir dbt --profiles-dir dbt/profiles --target mem
 

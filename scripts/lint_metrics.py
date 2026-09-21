@@ -44,7 +44,9 @@ _TRUE_POSITIVE_NAMES: Final = frozenset({"tp", "true_positives"})
 _ERROR_COUNT_NAMES: Final = frozenset({"fp", "fn", "false_positives", "false_negatives"})
 
 #: Directories that are never source: environments, caches, checkouts of vendored code.
-SKIPPED_DIRS: Final = frozenset({".git", ".venv", "__pycache__", ".loop", "dbt_packages", "target"})
+SKIPPED_DIRS: Final = frozenset(
+    {".git", ".venv", "__pycache__", "artifacts", "dbt_packages", "target"}
+)
 
 
 def _names_in(node: ast.AST) -> set[str]:
