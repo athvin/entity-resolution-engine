@@ -87,7 +87,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3.7.1
@@ -110,10 +110,19 @@ jobs:
         # `-m "not slow"`: T-TRAIN-1 refits the committed fixture model over the S10.2
         # `10k` corpus (S8.3), which does not fit inside M4's ten-minute PR path. It is
         # run deliberately, not on every pull request.
-        run: docker compose -f docker/compose.yaml --profile test run --rm pipeline
-             pytest tests/integration -q --maxfail=3 -m "not slow"
-             --integration-shard-index ${{ matrix.shard }} --integration-shard-count 8
+        # doctor has already initialized and checked this stack. Reuse it without
+        # restarting the one-shot initializers. Emit each test and diagnose stalls.
+        run: docker compose -f docker/compose.yaml --profile test run --rm --no-deps
+             -e PYTHONUNBUFFERED=1 pipeline
+             pytest tests/integration -v --maxfail=3 -m "not slow"
+             -o faulthandler_timeout=180
+             --integration-shard-index ${{ matrix.shard }} --integration-shard-count 16
              --junitxml=/app/artifacts/junit.xml --durations=20
+      - name: Capture substrate diagnostics
+        if: always()
+        run: |
+          docker compose -f docker/compose.yaml --profile test ps -a > artifacts/services-status.txt
+          docker compose -f docker/compose.yaml --profile test logs --no-color > artifacts/services.log
       - name: Tear down
         if: always()
         run: docker compose -f docker/compose.yaml --profile test down -v --remove-orphans
