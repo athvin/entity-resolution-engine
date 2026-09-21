@@ -262,6 +262,7 @@ def _groups(labels: Mapping[str, str]) -> list[frozenset[str]]:
     return [frozenset(members) for members in grouped.values()]
 
 
+@profiled("reconcile.current_partition", "entities")
 def _current_partition(
     connection: duckdb.DuckDBPyConnection, nodes: Iterable[str]
 ) -> dict[str, frozenset[str]]:
@@ -272,12 +273,14 @@ def _current_partition(
     of its members would look like it had lost the rest — the plan would then emit
     `member_removed` events for records nothing touched.
     """
+    requested = sorted(set(nodes))
+    if not requested:
+        return {}
     rows = connection.execute(
         f"SELECT entity_id, record_key FROM {_MEMBERSHIP} WHERE entity_id IN ("
-        f"SELECT DISTINCT entity_id FROM {_MEMBERSHIP} WHERE record_key IN ("
-        + ", ".join("?" for _ in list(nodes))
-        + "))",
-        list(nodes),
+        f"SELECT DISTINCT entity_id FROM {_MEMBERSHIP} "
+        "WHERE record_key IN (SELECT unnest(?::VARCHAR[])))",
+        [requested],
     ).fetchall()
     grouped: dict[str, set[str]] = {}
     for entity_id, key in rows:

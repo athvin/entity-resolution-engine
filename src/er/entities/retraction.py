@@ -48,6 +48,7 @@ from typing import Final
 import duckdb
 
 from er.lake.model import SCHEMA_QUALIFIER
+from er.obs.profiling import profiled
 
 __all__ = [
     "MATCH_SCORES_RELATION",
@@ -176,6 +177,7 @@ def _active_count(connection: duckdb.DuckDBPyConnection) -> int:
     return 0 if row is None else int(row[0])
 
 
+@profiled("reconcile.absent_records", "records")
 def corpus_absent_keys(
     connection: duckdb.DuckDBPyConnection,
     nodes: Iterable[str],
@@ -195,17 +197,18 @@ def corpus_absent_keys(
     keys = sorted(set(nodes))
     if not keys:
         return frozenset()
-    placeholders = ", ".join("?" for _ in keys)
     held = {
         str(row[0])
         for row in connection.execute(
-            f"SELECT record_key FROM {_STD_RECORDS} WHERE record_key IN ({placeholders})",
-            keys,
+            f"SELECT record_key FROM {_STD_RECORDS} "
+            "WHERE record_key IN (SELECT unnest(?::VARCHAR[]))",
+            [keys],
         ).fetchall()
     }
     return frozenset(keys) - held
 
 
+@profiled("reconcile.retract_tombstones", "entities")
 def retract_tombstoned_records(
     connection: duckdb.DuckDBPyConnection,
     nodes: Iterable[str],
@@ -246,17 +249,16 @@ def retract_tombstoned_records(
     keys = sorted(set(nodes))
     if not keys:
         return {}
-    placeholders = ", ".join("?" for _ in keys)
     doomed = connection.execute(
         f"""
         SELECT m.entity_id, m.record_key
           FROM {_MEMBERSHIP} AS m
           LEFT JOIN {_STD_RECORDS} AS s ON s.record_key = m.record_key
-         WHERE m.record_key IN ({placeholders})
+         WHERE m.record_key IN (SELECT unnest(?::VARCHAR[]))
            AND s.record_key IS NULL
          ORDER BY m.entity_id, m.record_key
         """,
-        keys,
+        [keys],
     ).fetchall()
     if not doomed:
         return {}
@@ -266,7 +268,7 @@ def retract_tombstoned_records(
         removed.setdefault(str(entity_id), []).append(str(record_key))
     doomed_keys = sorted(key for keys_of in removed.values() for key in keys_of)
     connection.execute(
-        f"DELETE FROM {_MEMBERSHIP} WHERE record_key IN ({', '.join('?' for _ in doomed_keys)})",
-        doomed_keys,
+        f"DELETE FROM {_MEMBERSHIP} WHERE record_key IN (SELECT unnest(?::VARCHAR[]))",
+        [doomed_keys],
     )
     return {entity_id: tuple(keys_of) for entity_id, keys_of in sorted(removed.items())}

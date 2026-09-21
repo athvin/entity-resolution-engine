@@ -68,6 +68,11 @@ Source file reads, landing/classification/appends, TF materialization and regist
 candidate generation/scoring, review operations, clustering, entity/event writes and
 golden assembly all emit nested spans.
 
+Reconciliation separately times current membership expansion, standardized-record
+lookups, current partition loading, absent-record detection and tombstone retraction.
+These helper spans expose lookup costs that would otherwise sit between the graph
+and persistence spans.
+
 ## Measurement semantics
 
 - Wall durations use monotonic clocks. Total time includes setup and correctness

@@ -2,6 +2,8 @@
 
 The [2026-09-20 results](performance-results-2026-09-20.md) record a 27.6% reduction
 in median processing time across five matched 10k-record runs per version.
+The [100k reconciliation comparison](reconciliation-lookup-performance-2026-09-21.md)
+measures lookups using typed arrays on the complete initial-load pipeline.
 
 The comparison runner measures the complete CLI lifetimes for ingestion,
 standardization, training, matching, reconciliation and assembly, followed by an
@@ -15,6 +17,10 @@ overhead to repeated statements.
 - Ingestion, graph nodes/edges and incremental keys use bound, explicitly typed
   arrays with `INSERT ... SELECT UNNEST(...)`. Loads are bounded at 1,024 rows;
   ingestion order, transaction boundaries and all business rules are preserved.
+- Reconciliation membership, corpus and tombstone lookups bind each requested key
+  set as one `VARCHAR[]` parameter using `IN (SELECT unnest(?::VARCHAR[]))`.
+  Membership lookups still expand to every member of each touched entity, and
+  tombstone deletion remains limited to the requested records absent from the corpus.
 - A `LakeSession` reuses the native connection only within one locked CLI invocation.
   Failed leases discard the connection, and each stage clears its in-memory Splink
   schema. The connection closes before a dbt subprocess starts and reopens on demand.
@@ -26,8 +32,9 @@ overhead to repeated statements.
   dbt invocation. Later standardizations retain their existing model selection.
 
 Detailed traces additionally identify CLI import/execution, preflight, connection
-setup/teardown, ledger operations and dbt launch/invocation. These diagnostic spans
-must be identical in the baseline and candidate before making a comparison.
+setup/teardown, ledger operations and dbt launch/invocation. Use the same tracing
+settings on both versions for timed runs. Compare detailed span timings only when
+both versions carry the same instrumentation.
 
 ## Reproduce a comparison
 

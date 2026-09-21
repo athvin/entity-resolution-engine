@@ -755,6 +755,7 @@ def affected_nodes(
     )
 
 
+@profiled("reconcile.current_membership", "records")
 def current_membership(
     connection: duckdb.DuckDBPyConnection, records: Iterable[str]
 ) -> dict[str, str]:
@@ -772,6 +773,9 @@ def current_membership(
     resolves external ids only and is "**never** used to resolve current membership"
     (S4.5.3).
 
+    Bind the requested keys as one typed array: expanding a large affected set into
+    a scalar `IN` list makes DuckLake spend most of the stage planning its filters.
+
     Returns:
         The mapping, empty when nothing requested is assigned.
     """
@@ -780,16 +784,16 @@ def current_membership(
         return {}
     entities = connection.execute(
         f"SELECT DISTINCT entity_id FROM {_ENTITY_MEMBERSHIP} "
-        f" WHERE record_key IN ({', '.join('?' for _ in requested)})",
-        requested,
+        " WHERE record_key IN (SELECT unnest(?::VARCHAR[]))",
+        [requested],
     ).fetchall()
     affected = sorted({str(entity_id) for (entity_id,) in entities})
     if not affected:
         return {}
     rows = connection.execute(
         f"SELECT record_key, entity_id FROM {_ENTITY_MEMBERSHIP} "
-        f" WHERE entity_id IN ({', '.join('?' for _ in affected)})",
-        affected,
+        " WHERE entity_id IN (SELECT unnest(?::VARCHAR[]))",
+        [affected],
     ).fetchall()
     return {str(key): str(entity_id) for key, entity_id in rows}
 
@@ -859,6 +863,7 @@ def _active_cut_pairs(connection: duckdb.DuckDBPyConnection) -> frozenset[tuple[
     return frozenset((str(rec_a_key), str(rec_b_key)) for rec_a_key, rec_b_key in rows)
 
 
+@profiled("reconcile.standardized_records", "records")
 def _standardized_records(
     connection: duckdb.DuckDBPyConnection, records: Iterable[str]
 ) -> frozenset[str]:
@@ -877,8 +882,8 @@ def _standardized_records(
         return frozenset()
     rows = connection.execute(
         f"SELECT record_key FROM {_INT_STD_RECORDS} "
-        f" WHERE record_key IN ({', '.join('?' for _ in requested)})",
-        requested,
+        " WHERE record_key IN (SELECT unnest(?::VARCHAR[]))",
+        [requested],
     ).fetchall()
     return frozenset(str(record_key_value) for (record_key_value,) in rows)
 
