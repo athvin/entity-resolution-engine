@@ -205,9 +205,9 @@ def test_pipeline_and_benchmark_carry_the_full_env() -> None:
 def test_image_digests_match_versions_module() -> None:
     for service, pin in IMAGE_PINS.items():
         image = rendered_service(service)["image"]
-        assert image == pin.reference, (
-            f"{service} runs {image}, not the S2.1 pin {pin.reference}; a comment "
-            "asserting a digest ought to be there is not a pin"
+        assert image == pin.pull_reference, (
+            f"{service} runs {image}, not the pinned pull reference {pin.pull_reference}; "
+            "a comment asserting a digest ought to be there is not a pin"
         )
         assert "@sha256:" in image
 

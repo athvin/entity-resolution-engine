@@ -265,6 +265,9 @@ def test_image_digests_match_s2_1() -> None:
         assert matched is not None, f"S2.1 pins {service} by a mutable tag: {reference}"
         assert (image.repository, image.tag, image.digest) == matched.groups()
         assert len(image.digest.removeprefix("sha256:")) == 64
+        pulled = IMAGE_REFERENCE.fullmatch(image.pull_reference)
+        assert pulled is not None
+        assert pulled.groups()[1:] == matched.groups()[1:], "a mirror changed the pinned bytes"
 
 
 def test_check_installed_versions_reports_mismatch() -> None:

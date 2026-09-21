@@ -139,19 +139,26 @@ class ImagePin:
     """A Compose service image pinned by digest, never by a mutable tag (S2.1).
 
     The tag is retained beside the digest because it is what a human reads in
-    `docker/compose.yaml`, but :attr:`reference` — tag *and* digest — is what the
-    file MUST contain: the digest alone is what makes the pin immutable.
+    `docker/compose.yaml`. :attr:`reference` preserves the specification's source;
+    :attr:`pull_reference` may use a mirror with the identical tag and digest.
+    The digest is what makes both references immutable.
     """
 
     service: str
     repository: str
     tag: str
     digest: str
+    mirror_repository: str | None = None
 
     @property
     def reference(self) -> str:
-        """The full ``repo:tag@sha256:…`` reference, as S2.1 and Compose write it."""
+        """The full ``repo:tag@sha256:…`` reference recorded in S2.1."""
         return f"{self.repository}:{self.tag}@{self.digest}"
+
+    @property
+    def pull_reference(self) -> str:
+        """Fetch the pinned bytes from the source or its identical-content mirror."""
+        return f"{self.mirror_repository or self.repository}:{self.tag}@{self.digest}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -217,12 +224,14 @@ IMAGE_PINS: Final[Mapping[str, ImagePin]] = {
         "minio/minio",
         "RELEASE.2025-09-07T16-13-09Z",
         "sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e",
+        mirror_repository="quay.io/minio/minio",
     ),
     "objectstore-init": ImagePin(
         "objectstore-init",
         "minio/mc",
         "RELEASE.2025-08-13T08-35-41Z",
         "sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727",
+        mirror_repository="quay.io/minio/mc",
     ),
 }
 
