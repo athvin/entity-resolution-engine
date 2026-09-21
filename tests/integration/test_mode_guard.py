@@ -55,7 +55,7 @@ CHAIN_STAGES = ("standardize", "match", "reconcile", "assemble")
 #: drifted in every field. `model_version` is included because it is the one field of
 #: the four that no config edit can move (S5).
 SEEDED_CONFIG_HASH = "f" * 64
-SEEDED_MODEL_VERSION = "v0001"
+SEEDED_MODEL_VERSION = "v9999"
 SEEDED_STD_VERSION = "99"
 SEEDED_SURVIVORSHIP_VERSION = "99"
 
