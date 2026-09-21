@@ -132,3 +132,14 @@ Validation commands:
 # Inside the Compose pipeline container:
 pytest tests/integration/test_pipeline_profiling.py -q
 ```
+
+CI distributes the complete non-slow integration collection across eight isolated
+Compose jobs, each with the existing 25-minute limit and resource envelope. The
+groups are deterministic, disjoint and collectively cover the complete collection.
+Each job retains its own JUnit artifact. Reproduce one group's pytest invocation
+inside the pipeline container with:
+
+```sh
+pytest tests/integration -q -m 'not slow' \
+  --integration-shard-index 0 --integration-shard-count 8
+```

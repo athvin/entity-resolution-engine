@@ -65,6 +65,8 @@ from er.lake.init import init_lake
 from er.lake.model import DBT_OWNED, DDL_OWNED, SCHEMA_QUALIFIER
 from er.lake.objectstore import ObjectStore
 
+pytest_plugins = ["helpers.sharding"]
+
 __all__ = [
     "DATA_PATH_TEMPLATE",
     "DELETE_RELATIONS",

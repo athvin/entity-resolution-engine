@@ -82,6 +82,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     needs: [static, unit]
+    # The real pipeline outgrew a single job. Each shard keeps its own complete
+    # Compose stack and the same CPU/memory limits; no test is excluded.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3.7.1
@@ -106,6 +112,7 @@ jobs:
         # run deliberately, not on every pull request.
         run: docker compose -f docker/compose.yaml --profile test run --rm pipeline
              pytest tests/integration -q --maxfail=3 -m "not slow"
+             --integration-shard-index ${{ matrix.shard }} --integration-shard-count 8
              --junitxml=/app/artifacts/junit.xml --durations=20
       - name: Tear down
         if: always()
@@ -114,6 +121,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
         with:
-          name: integration-artifacts
+          name: integration-artifacts-${{ matrix.shard }}
           path: artifacts/
           if-no-files-found: error
