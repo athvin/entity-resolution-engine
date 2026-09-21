@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Lint DesignDoc.md.
 
-This is the guard that keeps the specification honest once the implementation
-loop is running. The loop may not edit the spec, and this linter makes any
-regression toward the v1.0 draft a hard CI failure.
+Checks the specification for broken anchors, unresolved requirements and
+regressions toward the v1.0 draft.
 
 It must pass against the amended v1.1 document AND fail against the committed
 v1.0 copy at ``tests/fixtures/designdoc_v1.0.md`` -- a linter that passes on both

@@ -114,7 +114,7 @@ as successful zeroes.
 
 ```sh
 ER_PROFILE_DIR="$PWD/artifacts/profile/manual" ER_PROFILE_SQL=1 \
-  er run-all --mode full --source crm --path /path/to/drop --json
+  uv run er run-all --mode full --source crm --path /path/to/drop --json
 ```
 
 Use the normal lake configuration for this command. `ER_PROFILE_DIR` enables spans
@@ -123,31 +123,7 @@ Without these variables, the original CLI stdout and one-line stage stderr contr
 remain intact. Use the campaign driver for continuous resource sampling. SQL profiles
 and subprocess logs should be handled with the same access controls as source data.
 
-The existing `benchmarks/report.py --run` entry point now uses this same runner with
-fresh state and per-phase memory while preserving its six-phase JSON shape. Its old
-baselines may reflect stub standardization, overwritten ingest records or cumulative
-memory peaks; regenerate baselines explicitly before using them to judge regressions.
-
-Validation commands:
-
-```sh
-.venv/bin/ruff check .
-.venv/bin/mypy --strict src/er
-.venv/bin/python -m pytest tests/unit -q
-# Inside the Compose pipeline container:
-pytest tests/integration/test_pipeline_profiling.py -q
-```
-
-CI distributes the complete non-slow integration collection across 32 isolated
-Compose jobs, each with the existing 25-minute limit and resource envelope. The
-groups are deterministic, disjoint and collectively cover the complete collection.
-Modules marked `shard_together` stay in one job, and each job preserves pytest's
-source order so the isolation harness's producer/consumer checks remain valid.
-Each job retains its own JUnit artifact and service logs, prints each test's progress,
-and dumps Python stacks if a test takes more than three minutes. Reproduce one group's pytest invocation
-inside the pipeline container with:
-
-```sh
-pytest tests/integration -q -m 'not slow' \
-  --integration-shard-index 0 --integration-shard-count 32
-```
+The `benchmarks/report.py --run` entry point uses the same runner with fresh state
+and per-phase memory while preserving its six-phase JSON shape. See
+[benchmark baselines](performance.md#benchmark-baselines) for reviewing a measured
+run, and [CONTRIBUTING.md](../CONTRIBUTING.md) for local checks and CI shards.

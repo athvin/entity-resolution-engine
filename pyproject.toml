@@ -1,7 +1,7 @@
 [project]
 name = "er"
 version = "0.1.0"
-description = "Entity resolution and golden record pipeline (DesignDoc.md v1.1)"
+description = "Entity resolution, deduplication and golden record management"
 requires-python = ">=3.12,<3.13"
 license = { file = "LICENSE" }
 
@@ -54,20 +54,8 @@ target-version = "py312"
 # 100 rather than the 88 default: the Python already in this repo is authored at
 # 95-103 columns and the pipeline's SQL-bearing strings read badly narrower.
 line-length = 100
-# Two exclusions, both about files this project must not rewrite:
-#   *.md            - ruff formats fenced python blocks inside Markdown. The only
-#                     Markdown here is DesignDoc.md (the authority every gate is
-#                     graded against), the board, and the committed v1.0 spec
-#                     fixture. Their snippets are illustrative and elided, and
-#                     MUST read as authored.
-#   the loop scripts - scripts/board.py and scripts/lint_spec.py are the
-#                     implementation loop's own machinery. They predate this gate,
-#                     are not ruff-clean at any line length (F401, UP035, UP037,
-#                     B904 and lines the formatter both splits and collapses), and
-#                     every ticket lists them as protected_paths. Linting a file no
-#                     ticket may edit turns the gate into a permanent red light
-#                     rather than a check. Reformatting them needs its own ticket.
-extend-exclude = ["*.md", "scripts/board.py", "scripts/lint_spec.py"]
+# Keep reference Markdown and the legacy specification linter out of formatting.
+extend-exclude = ["*.md", "scripts/lint_spec.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "W"]
@@ -77,54 +65,21 @@ python_version = "3.12"
 strict = true
 files = ["src/er"]
 
-# boto3 and botocore ship no `py.typed` and S2.1 pins no stub distribution for them,
-# so `src/er/lake/objectstore.py` cannot even `import boto3` under the gate. The
-# override is deliberately narrow: it names those two distributions and nothing else,
-# so every module under `src/er` is still checked at full `--strict`. `psycopg` needs
-# no entry here -- it ships `py.typed`, which is why `lake/catalog.py` is fully typed.
-#
-# `follow_untyped_imports` was tried first and is worse: mypy then reads boto3's
-# unannotated source, and `--strict`'s disallow_untyped_calls rejects every call into
-# it, which could only be silenced by weakening the gate on our own code.
-#
-# The durable fix is S2.1's own precedent -- its PyYAML row pins `types-PyYAML`
-# precisely because an `ignore_missing_imports` override loosens this gate. boto3 has
-# the same problem and no such row; adding one is a spec amendment, not a code ticket.
+# These dependencies do not ship type information; application code stays strict.
 [[tool.mypy.overrides]]
 module = ["boto3", "boto3.*", "botocore", "botocore.*"]
 ignore_missing_imports = true
 
-# pandas has the same shape as boto3 above and reaches the gate for the same reason:
-# S8.2.1 pins `assert_golden_equal(actual: pd.DataFrame, ...)` verbatim, so
-# `tests/helpers/compare.py` must name that type, and `mypy --strict tests/helpers` is
-# ER-027's verify command. pandas 3.0.5 ships no `py.typed`, and S2.1 pins no
-# `pandas-stubs` row -- pandas is present only transitively through Splink. Adding that
-# row is a spec amendment, which a code ticket may not make, so the narrow override is
-# the same trade S2.1's PyYAML/boto3 split already records.
-#
-# Deliberately narrow, and narrower in effect than it looks: it names pandas alone, and
-# the only module under this override's influence is `tests/helpers/compare.py`, which
-# `[tool.mypy] files` does not even check -- every module under `src/er` is still
-# checked at full `--strict` with no pandas import anywhere in it.
+# pandas is used by test comparison helpers.
 [[tool.mypy.overrides]]
 module = ["pandas", "pandas.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# `tests/` on sys.path so `helpers.compare` is the module name under pytest as well as
-# under `mypy --strict tests/helpers`, which derives it by walking up while
-# `__init__.py` exists and stops at `tests/` (which has none). One spelling in both
-# tools, and no `tests/__init__.py` -- pytest's rootdir-based collection does not want
-# one, and `tests/conftest.py` belongs to ER-018.
+# Test helpers are imported as helpers.*.
 pythonpath = ["tests"]
-# The one marker this suite defines. T-TRAIN-1 (S8.3) refits the committed fixture
-# model over the S10.2 `10k` corpus, which is minutes of EM on its own, and M4's exit
-# criterion is a full PR path under ten minutes -- so the PR path runs
-# `-m "not slow"` and the artifact's cheap assertions live in
-# tests/unit/fixtures/test_fixture_model.py instead. Registered here because an
-# unregistered marker is a warning rather than a selector, and a typo in it would
-# deselect nothing while appearing to.
+# Model regeneration is exercised separately from the PR suite.
 markers = [
   "slow: refits or regenerates a committed artifact; excluded from the PR path",
 ]

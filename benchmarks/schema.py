@@ -42,9 +42,7 @@ __all__ = [
     "write_result",
 ]
 
-#: The committed contract. Read rather than restated: a schema duplicated in Python
-#: is a schema that drifts from the one `--validate-baselines` and any future consumer
-#: would read.
+#: Read the same committed contract used by every benchmark result consumer.
 SCHEMA_PATH: Final[Path] = Path(__file__).resolve().parent / "bench_result.schema.json"
 
 #: The keywords :func:`validate_bench_result` understands. Anything else in the schema

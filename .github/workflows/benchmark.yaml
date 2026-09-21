@@ -1,10 +1,5 @@
-# The S9.2 benchmark workflow: dispatched or weekly, never on the PR path (G4).
-#
-# Everything Python runs IN-IMAGE (`er-pipeline:ci`), so the S10.4 fingerprint is the
-# measuring environment's and not the runner's bare toolchain. The dispatch `scale`
-# options equal the committed baseline set (`benchmarks/baselines/*.json`) — a scale is
-# dispatchable only once its baseline exists (S9.2) — and `benchmarks/workflow.py` is the
-# one parser of this file. Every `uses:` is pinned to a release SHA with its tag (S9).
+# Smoke runs weekly or on demand; without a measured baseline it reports NO_BASELINE.
+# Add larger dispatch options only with a reviewed baseline and matching scales.yaml.
 name: benchmark
 
 on:

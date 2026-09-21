@@ -1,21 +1,12 @@
-# Developer entry points for the gate ladder.
-#
-# scripts/gates.sh is the single source of truth for what each gate runs; it is a
-# protected path and this file restates its strings rather than inventing its own.
-# tests/unit/test_package_layout.py asserts every recipe below is byte-equal to
-# the line `bash scripts/gates.sh --list` prints for the gate of the same name, so
-# the two cannot drift.
-
-.PHONY: spec board lint types unit dbt gates
+.DEFAULT_GOAL := check
+.PHONY: spec lint types unit dbt fixtures workflows integration check check-all clean
 
 spec:
-	python3 scripts/lint_spec.py DesignDoc.md
-
-board:
-	python3 scripts/board.py validate
+	uv run python scripts/lint_spec.py DesignDoc.md
 
 lint:
-	uv run ruff check . && uv run ruff format --check .
+	uv run ruff check .
+	uv run ruff format --check .
 
 types:
 	uv run mypy --strict src/er
@@ -24,9 +15,26 @@ unit:
 	uv run pytest tests/unit -q --maxfail=5
 
 dbt:
+	uv run dbt deps --project-dir dbt
 	uv run dbt parse --project-dir dbt --profiles-dir dbt/profiles --target mem
 
-# `gates` names no gate: it runs the whole ladder, including the Compose
-# integration suite, through the script that owns the ordering.
-gates:
-	bash scripts/gates.sh --scope full
+fixtures:
+	uv run python scripts/validate_fixtures.py
+
+workflows:
+	bash scripts/ci/actionlint.sh
+
+integration:
+	COMPOSE_PROJECT_NAME=er-integration bash scripts/ci/itest.sh tests/integration -q -m 'not slow'
+
+check:
+	$(MAKE) spec lint types workflows fixtures dbt unit
+
+check-all: check
+	$(MAKE) integration
+
+# Rebuildable local caches only. Run outputs under artifacts/ are removed separately.
+clean:
+	rm -rf .pytest_cache .mypy_cache .ruff_cache .hypothesis dbt/target dbt/logs dbt/dbt_packages
+	rm -f dbt/profiles/.user.yml
+	python3 -c 'from pathlib import Path; import shutil; [shutil.rmtree(p) for root in ("src", "tests", "scripts", "benchmarks", "fixtures") for p in Path(root).rglob("__pycache__")]'

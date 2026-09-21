@@ -22,8 +22,7 @@ parametrises over `--list-rules`, so a rule added here without a fixture that
 fails for exactly that reason fails the suite. A linter with no failing arm
 proves nothing.
 
-Like `scripts/board.py` and `scripts/lint_spec.py`, this is a repo script run by
-a bare interpreter and imports the standard library only -- plus
+This repository script runs with a bare interpreter and imports the standard library only -- plus
 `tests/helpers/scenario.py`, which is the single definition site for the phase
 vocabulary and the header literals, and `src/er/lake/columns.py`, which is the
 single definition site for the volatile-column set (S5.0).

@@ -1,6 +1,11 @@
 # Entity Resolution Platform — Technical Specification
 
 **Version:** 1.1
+
+Start with the [README](README.md) for the product overview and the
+[runbook](docs/runbook.md) for operating instructions. This reference preserves the
+numbered contracts and invariants used by the test suite. The implementation
+milestones in S12 record the original build sequence, not current project status.
 **Stack:** Python · Splink 4 (DuckDB backend) · dbt-duckdb · DuckLake (Postgres catalog + S3-compatible object store) · Docker Compose · GitHub Actions
 
 This document is the sole specification. It is self-contained: every algorithm, schema, threshold and invariant an implementer needs is stated here, not delegated. **MUST** marks a normative requirement; a conforming implementation satisfies all of them. Named invariants (INV-PERM, INV-EQ, INV-SCORE, CONTRADICTION-1) are defined once, at the section indicated, and cited by name everywhere else.
@@ -87,188 +92,44 @@ Rules governing this table:
 <a id="s3"></a>
 ## 3. Repository Layout
 
-```
+```text
 entity-resolution-engine/
-├── DesignDoc.md                      # this specification (the only design document)
-├── pyproject.toml                    # uv-managed; every dependency pinned per S2.1
-├── uv.lock                           # committed; `uv sync --frozen` everywhere
-├── docker/
-│   ├── Dockerfile                    # multi-stage: builder runs `uv sync --frozen`; runtime copies the venv
-│   │                                 #   and bakes ducklake/postgres/httpfs into /opt/duckdb_extensions
-│   └── compose.yaml                  # catalog (postgres), objectstore, objectstore-init, catalog-init,
-│                                     #   pipeline, benchmark; profiles: test, bench
-├── configs/
-│   ├── default.yaml                  # reference config: all fourteen S6 config blocks
-│   └── test.yaml                     # config used by fixtures and CI; `tenant: test`
+├── README.md                         # product overview and quickstart
+├── CONTRIBUTING.md                   # setup, checks and contribution workflow
+├── DesignDoc.md                      # numbered contracts used by tests
+├── pyproject.toml                    # package metadata and pinned dependencies
+├── uv.lock                           # resolved Python dependencies
+├── Makefile                          # local checks and cache cleanup
 ├── src/er/
-│   ├── __init__.py
-│   ├── cli.py                        # `er` CLI (S4.0): init, doctor, ingest, standardize, train, match,
-│   │                                 #   reconcile, assemble, run-all, correct, assert, review,
-│   │                                 #   lake maintain, lake reset
-│   ├── errors.py                     # error taxonomy → exit codes 0/1/2/3/10; retryable vs terminal
-│   ├── versions.py                   # std_version / survivorship_version / address_parser_version /
-│   │                                 #   code_version resolution; version-compat guards for run-all
-│   ├── dbt_runner.py                 # subprocess wrapper for dbt (select, vars, target, log capture,
-│   │                                 #   snapshot-range capture); no Python DuckDB connection spans it
-│   ├── config/
-│   │   ├── schema.py                 # Pydantic models for the S6 config document
-│   │   ├── loader.py                 # load/validate from --config or $ER_CONFIG; fail fast, exit 2
-│   │   └── hashing.py                # config_hash, defined normatively in S5.2
-│   ├── lake/
-│   │   ├── ducklake.py               # INSTALL/LOAD, CREATE SECRET, ATTACH lake, DETACH, snapshot helpers
-│   │   ├── catalog.py                # Postgres catalog access: metadata schema, advisory lock on tenant
-│   │   ├── objectstore.py            # S3 client: DATA_PATH round-trip, model artifact put/get, prefix reap
-│   │   ├── ddl.py                    # CREATE TABLE IF NOT EXISTS for ddl.py-owned relations only;
-│   │   │                             #   the owner split is normative in S5.0
-│   │   ├── columns.py                # VOLATILE_COLUMNS — the single definition, excluded from every
-│   │   │                             #   determinism comparison (S5.0)
-│   │   ├── model.py                  # model artifact + model_registry: version allocation, upload to
-│   │   │                             #   storage.model_uri_prefix, active/superseded pointer, tf_snapshot_id
-│   │   └── maintain.py               # merge_adjacent_files → expire_snapshots → cleanup_old_files
-│   ├── ingest/
-│   │   ├── sources.py                # source adapters (v1: CSV/Parquet drop folder)
-│   │   ├── hashing.py                # content_hash: NFC, 0x1f-joined, declared column order (S4.1)
-│   │   └── landing.py                # anti-join append into raw_records; tombstone derivation for
-│   │                                 #   --full-refresh-keys; ingest_batches manifest row
-│   ├── matching/
-│   │   ├── model.py                  # Splink 4 settings builder + blocking_rules_from_config()
-│   │   ├── train.py                  # full-corpus training; writes model JSON + tf_lookup + registry row
-│   │   ├── incremental.py            # two-pass incremental scoring (new-vs-corpus, new-vs-new)
-│   │   ├── full.py                   # corpus-wide predict + cluster; also the correction pass
-│   │   └── tf.py                     # tf_lookup materialization and register_term_frequency_lookup
-│   ├── entities/
-│   │   ├── cluster.py                # affected node+edge set, label propagation to fixpoint, cut_edges
-│   │   ├── reconcile.py              # overlap-matrix cluster→entity mapping (INV-PERM), merge/split
-│   │   ├── ids.py                    # record_key, pair canonicalisation, IdFactory, ULIDs, resolve()
-│   │   └── events.py                 # entity_events append + replay fold
-│   ├── golden/
-│   │   └── assemble.py               # touched/retired sets → er_touched_entities → dbt marts → reap
-│   ├── review/
-│   │   ├── assertions.py             # always/never application, precedence, CONTRADICTION-1
-│   │   └── queue.py                  # review_queue upsert, resolution → assertions in one transaction
-│   ├── eval/
-│   │   ├── __init__.py
-│   │   └── metrics.py                # pairwise_metrics(): blocking recall, edge-level, cluster-level —
-│   │                                 #   the one implementation used by both tests and benchmarks
-│   └── embeddings/                   # phase 2: interface only in v1
-│       └── coherence.py              # CoherenceScorer protocol + NoopScorer
-├── dbt/
-│   ├── dbt_project.yml
-│   ├── profiles/profiles.yml         # targets: `lake` (DuckLake-attached) and `mem` (:memory:, no attach)
-│   ├── models/
-│   │   ├── staging/
-│   │   │   ├── stg_crm.sql
-│   │   │   ├── stg_billing.sql
-│   │   │   └── stg_webforms.sql
-│   │   ├── intermediate/
-│   │   │   ├── int_std_records.sql   # carries record_key, content_hash, std_version
-│   │   │   └── int_blocking_keys.sql # macro-generated from the config blocking payload
-│   │   ├── marts/
-│   │   │   ├── golden_records.sql
-│   │   │   ├── golden_lineage.sql
-│   │   │   └── golden_display.sql    # presentation casing only; never read by the matching layer
-│   │   └── schema.yml                # contract: {enforced: true} on every dbt-owned model + data tests
-│   ├── tests/                        # singular tests: record_key has no ':', pair canonical ordering,
-│   │                                 #   one current std row per record, membership references active entity
-│   ├── macros/
-│   │   ├── std/                      # lowercase_trim, email_norm, phone_e164, name_norm, null_semantics
-│   │   ├── blocking/                 # int_blocking_keys UNION ALL generator
-│   │   └── survivorship/             # source_priority, recency, frequency, completeness, validated
-│   └── seeds/
-│       └── nickname_variants.csv
-├── models/                           # local staging dir for model JSON written by `er train` before upload
-│                                     #   to storage.model_uri_prefix; git-ignored except .gitkeep
-├── fixtures/
-│   ├── generator/                    # seeded synthetic generator, shared by fixtures and benchmarks
-│   │   ├── personas.py               # ground-truth persons with realistic name/email frequency skew
-│   │   ├── corruptions.py            # typos, nicknames, format drift, missingness, stale addresses
-│   │   └── emit.py                   # per-source record emission
-│   └── static/                       # small, hand-authored, committed fixture sets (S8.2)
-│       ├── model_test_v1.json        # committed frozen Splink model; scenario tests load it, never train
-│       ├── base_10/                  # every scenario has the S8.2.1 shape:
-│       │   ├── base/                 #   per-source input CSVs (crm.csv, billing.csv, webforms.csv)
-│       │   ├── tf_flip_pairs.csv     #   scenario-root auxiliary file: the T-TF-1 flip bound
-│       │   └── expected/
-│       │       └── base/             #   membership.csv, golden.csv, events.csv, std_hashes.csv,
-│       │                             #     assertions.csv — symbolic entity labels (S8.2.1)
-│       ├── incremental_batch/
-│       │   ├── base/
-│       │   ├── batch/                # incremental delivery
-│       │   ├── parity_pairs.csv      # the derived pair set T-INC-3 scores through both paths
-│       │   ├── tf_flip_pairs.csv     # the T-INC-1b divergence bound
-│       │   └── expected/{base,batch}/
-│       ├── merge_scenario/
-│       │   ├── base/
-│       │   ├── batch/
-│       │   └── expected/{base,batch}/
-│       ├── split_scenario/
-│       │   ├── base/
-│       │   ├── batch/
-│       │   ├── assertions.csv        # input assertions with their phase column (S8.2.1)
-│       │   └── expected/{base,batch}/
-│       ├── assertions_scenario/
-│       │   ├── base/
-│       │   ├── batch/
-│       │   ├── assertions.csv
-│       │   └── expected/{base,batch}/
-│       ├── deletion_scenario/
-│       │   ├── base/
-│       │   ├── refresh/              # --full-refresh-keys delivery from which tombstones are derived
-│       │   ├── resurrect/            # ordinary delivery re-appearing one tombstoned key (S8.2.1)
-│       │   └── expected/{base,refresh,resurrect}/
-│       └── supersession_scenario/
-│           ├── base/
-│           ├── batch/                # same keys, changed content_hash
-│           └── expected/{base,batch}/
-├── tests/
-│   ├── conftest.py                   # namespaced ephemeral DuckLake per session (S8.1)
-│   ├── helpers/
-│   │   ├── compare.py                # assert_partition_equal / assert_ids_stable / assert_golden_equal
-│   │   └── expected.py               # expected-file loaders, symbolic-label binding, null token
-│   ├── unit/                         # normalizers, reconciler, ids, blocking generator, and:
-│   │   ├── test_config.py            #   the fifteen S6.1 validators, one test each
-│   │   └── test_fixture_lint.py      #   expected-file sort order, null token, header literals (S8.2.1)
-│   ├── integration/                  # full `er run-all` against Compose services; the S8.3 scenarios,
-│   │   ├── test_fixture_integrity.py #   base_10 truth counts recomputed from the committed CSVs
-│   │   └── test_invariants.py        #   the node id T-INV-1's autouse finalizer reports under
-│   └── fixtures/                     # test-owned reference material (e.g. prior spec revisions)
-├── benchmarks/
-│   ├── run_benchmark.py
-│   ├── scales.yaml                   # smoke / 10k / 100k / 1m definitions
-│   ├── scales.py                     # reads scales.yaml; --scale S --field F for the S9.2 preflight
-│   ├── report.py                     # --run / --compare / --write-baseline / --repeat
-│   └── baselines/                    # committed baseline JSON per scale, updated deliberately via PR
-│       ├── smoke.json
-│       ├── 10k.json
-│       └── 100k.json
-├── artifacts/                        # bind-mounted to /app/artifacts: junit.xml, dbt logs, run manifests,
-│                                     #   bench/latest.json; git-ignored except .gitkeep
-├── scripts/
-│   ├── board.py                      # ticket board read/write over docs/implementation/BOARD.md
-│   ├── gates.sh                      # the local gate chain: ruff → mypy --strict → unit → dbt parse
-│   ├── run-loop.sh                   # autonomous implementation loop driver
-│   ├── lint_spec.py                  # spec lint; S9.1 is the authority for what it enforces
-│   ├── lint_board.py                 # board lint: ticket ids, states, dependency closure
-│   ├── lint_metrics.py               # fails on a second precision/recall definition (S8.5, S9.1)
-│   ├── actionlint.py                 # runs the actionlint binary shipped by the pinned
-│   │                                 #   actionlint-py wheel (S2.1); downloads nothing (S9.1)
-│   └── ci/                           # helper scripts invoked by the workflows
-├── .claude/
-│   └── skills/                       # repo-scoped agent skills used by the implementation loop
-├── docs/
-│   ├── gap-report-v1.0.md            # the v1.0 review this revision closes
-│   └── implementation/
-│       └── BOARD.md                  # ticket board (ER-NNN): state, dependencies, exit criteria
-└── .github/
-    ├── dependabot.yml                # ecosystem: github-actions; proposes SHA bumps (S9)
-    └── workflows/
-        ├── ci.yaml                   # PR path: static → unit → integration
-        └── benchmark.yaml            # workflow_dispatch + weekly schedule
+│   ├── cli.py                        # pipeline commands
+│   ├── entrypoint.py                 # lightweight console entry point
+│   ├── config/                       # validated configuration and fingerprints
+│   ├── ingest/                       # source adapters and append-only history
+│   ├── std/                          # standardization and blocking
+│   ├── matching/                     # Splink training, TF and pair scoring
+│   ├── entities/                     # clustering, reconciliation and events
+│   ├── golden/                       # golden record assembly
+│   ├── review/                       # assertions and steward review
+│   ├── lake/                         # storage, schema and lifecycle
+│   ├── obs/                          # run metadata, counters and profiling
+│   ├── eval/                         # shared quality metrics
+│   └── embeddings/                   # coherence interface and NoopScorer
+├── dbt/                              # staging, cleaning, blocking and golden models
+├── configs/                          # default and fixture configurations
+├── docker/                           # image and local Compose services
+├── fixtures/                         # synthetic generator and checked-in scenarios
+├── tests/                            # unit, integration and test-owned fixtures
+├── benchmarks/                       # measurements, comparisons and profiling
+│   └── baselines/                    # reviewed measurements only
+├── scripts/                          # validation and CI entry points
+├── docs/                             # architecture, configuration, runbook and performance
+└── .github/                          # CI, benchmark workflow and dependency updates
 ```
+
 
 Layout rules that are normative:
 
-- `models/` and `artifacts/` are working directories, not sources of truth: `models/` stages a model JSON before it is uploaded to `storage.model_uri_prefix`, and `er match` MUST load the model from the registry URI, never from the local path. `artifacts/` MUST be a Compose bind mount so CI can upload it.
+- `er match` MUST load model artifacts from the registry URI under `storage.model_uri_prefix`. Generated `artifacts/` output is ignored by Git, created by the runner, and bind-mounted into Compose so CI can upload it. Empty directory markers are unnecessary.
 - `expected/` lives **inside each scenario directory**. There is no top-level `fixtures/expected/`.
 - Every relation named in S5 is owned by exactly one of `src/er/lake/ddl.py` or a file under `dbt/models/` (S5.0). A relation appearing in both is a defect that `scripts/lint_spec.py` fails on.
 
@@ -1521,6 +1382,7 @@ COPY --from=builder /opt/duckdb_extensions /opt/duckdb_extensions
 WORKDIR /app
 COPY src/ src/
 COPY dbt/ dbt/
+RUN dbt deps --project-dir dbt
 COPY configs/ configs/
 COPY benchmarks/ benchmarks/
 COPY fixtures/ fixtures/
@@ -1564,7 +1426,7 @@ docker compose -f docker/compose.yaml --profile test down -v --remove-orphans   
 
 | Layer | Runs | Substrate | Scope |
 |---|---|---|---|
-| Static | every PR | GH runner, no services | `ruff check .`, `ruff format --check .`, `mypy --strict src/er`, `scripts/actionlint.py`, `scripts/lint_spec.py`, `scripts/lint_board.py`, `scripts/lint_metrics.py`, `report.py --validate-baselines` (from M5 only), `dbt deps`, `dbt parse` (no warehouse connection). **S9.1 is the authority for the exact step list**; this row summarises it |
+| Static | every PR | GH runner, no services | `ruff check .`, `ruff format --check .`, `mypy --strict src/er`, `scripts/actionlint.py`, `scripts/lint_spec.py`, `dbt deps`, `dbt parse` (no warehouse connection). **S9.1 is the authority for the exact step list**; this row summarises it |
 | Unit | every PR | GH runner, no services | normalizer macros against a bare in-process DuckDB, `dbt compile --target mem`, reconciler as a pure function, `record_key`/pair-canonicalisation/`IdFactory`/`resolve()` logic, config validators, never-cut algorithm, `er.eval.pairwise_metrics` |
 | Integration | every PR | Docker Compose (`run --rm pipeline`) | `er doctor`, then `er init` / `er run-all` against `fixtures/static/*`; every S8.3 scenario test |
 | dbt data tests | every PR, inside the integration job | Compose | `dbt build` — `unique`, `not_null`, `accepted_values`, `dbt_utils.unique_combination_of_columns`, `relationships`, and the singular tests (`':'` in `source_record_id`, pair canonicality, one membership row per record) |
@@ -1850,212 +1712,44 @@ Two workflows. `ci.yaml` is the PR path; `benchmark.yaml` never runs on the PR p
 <a id="s9-1"></a>
 ### 9.1 `ci.yaml` — PR path
 
-```yaml
-name: ci
-on:
-  pull_request:
-  push: { branches: [main] }
+[The committed workflow](.github/workflows/ci.yaml) is the executable definition.
+It runs on pull requests and pushes to `main` with read-only repository permissions.
 
-permissions:
-  contents: read
+- Static and unit jobs run in parallel with 10-minute timeouts. Static validation
+  includes Ruff, strict mypy, actionlint, specification lint and dbt parsing.
+- Integration waits for both jobs, then distributes the non-slow suite across 32
+  isolated Compose stacks, each with a 25-minute timeout. Every test belongs to
+  exactly one shard; slow fixture-model regeneration is a separate check.
+- Actions are pinned by commit SHA. Both test layers upload JUnit and diagnostics;
+  integration teardown runs even when a test fails.
+- dbt has exactly two targets: `lake` attaches DuckLake and `mem` parses/compiles
+  without a warehouse connection. Every profile `env_var()` supplies a default so
+  checks can run without lake credentials.
+- `scripts/lint_spec.py` checks reference anchors, required contracts and version
+  pins against the lockfile and Compose images. Unit tests verify package layout,
+  workflow structure, fixture integrity and shared quality metrics.
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
-jobs:
-  static:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
-      - uses: astral-sh/setup-uv@f0ec1fc3b38f5e7cd3d55c029b73096c30f19b40 # v10.0.1
-        with:
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-      - run: uv sync --frozen
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
-      - run: uv run mypy --strict src/er
-      - name: actionlint
-        run: uv run python scripts/actionlint.py            # downloads nothing; wraps the pinned binary
-      - name: Spec lint
-        run: uv run python scripts/lint_spec.py DesignDoc.md
-      - name: Board lint
-        run: uv run python scripts/lint_board.py
-      - name: Single metrics implementation
-        run: uv run python scripts/lint_metrics.py       # the S8.5 second-definition grep
-      # Added in M5, together with report.py, benchmark.yaml and the committed
-      # baselines. It is NOT present in the ci.yaml that M1 delivers: the step
-      # references three artefacts no earlier milestone produces, so adding it
-      # before M5 would leave the static job — and therefore every PR — red for
-      # three milestones with no way to satisfy it. See S12 M5.
-      - name: Baseline/dispatch parity
-        run: uv run python benchmarks/report.py --validate-baselines
-             --baselines-dir benchmarks/baselines
-             --workflow .github/workflows/benchmark.yaml
-      - run: uv run dbt deps --project-dir dbt
-      - run: uv run dbt parse --project-dir dbt --profiles-dir dbt/profiles --target mem
-
-  unit:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
-      - uses: astral-sh/setup-uv@f0ec1fc3b38f5e7cd3d55c029b73096c30f19b40 # v10.0.1
-        with:
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-      - run: uv sync --frozen
-      - run: mkdir -p artifacts
-      - run: uv run dbt deps --project-dir dbt
-      - run: uv run dbt compile --project-dir dbt --profiles-dir dbt/profiles --target mem
-      - run: uv run pytest tests/unit -n auto -q --junitxml=artifacts/junit-unit.xml
-      - if: always()
-        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
-        with:
-          name: unit-artifacts
-          path: artifacts/
-          if-no-files-found: error
-
-  integration:
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    needs: [static, unit]
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
-      - uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3.7.1
-      - name: Build pipeline image (cached)
-        uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75   # v6.9.0
-        with:
-          context: .
-          file: docker/Dockerfile
-          load: true
-          tags: er-pipeline:ci
-          cache-from: type=gha
-          cache-to: "type=gha,mode=max"        # quoted: unquoted, the comma ends the flow-mapping entry
-      - name: Reset substrate
-        run: |
-          mkdir -p artifacts
-          docker compose -f docker/compose.yaml --profile test down -v --remove-orphans
-      - name: Environment check (T-DOCTOR-1)
-        run: docker compose -f docker/compose.yaml --profile test run --rm pipeline er doctor
-      - name: Run integration suite
-        run: docker compose -f docker/compose.yaml --profile test run --rm pipeline
-             pytest tests/integration -q --maxfail=3
-             --junitxml=/app/artifacts/junit.xml --durations=20
-      - name: Tear down
-        if: always()
-        run: docker compose -f docker/compose.yaml --profile test down -v --remove-orphans
-      - name: Collect artifacts (junit, dbt logs, run manifests)
-        if: always()
-        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
-        with:
-          name: integration-artifacts
-          path: artifacts/
-          if-no-files-found: error
-```
-
-- **Job graph.** `static` and `unit` run in parallel; only `integration` has `needs: [static, unit]`. The serial `static → unit → integration` chain paid for two `uv sync` runs ahead of the expensive job for no signal.
-- **dbt targets.** `dbt/profiles/profiles.yml` defines exactly two targets: `lake` (in-container; performs the S7.2 attach; the default for every `er` invocation) and `mem` (`path: ':memory:'`, no attach, no extensions, no services). Every `env_var()` call in the profile MUST supply a default (`env_var('ER_CATALOG_DSN', '')`, `env_var('ER_LAKE_DATA_PATH', '')`, …) so a bare runner with no services set can parse and compile the project. `dbt parse` (static) and `dbt compile --target mem` (unit) never open a warehouse connection to DuckLake; `dbt build` runs only inside the integration suite against `--target lake`.
-- **Lints owned by the static job.** This bullet is the authority for what each lint enforces; no other section adds duties to them.
-  - `scripts/lint_spec.py` fails if `DesignDoc.md` cites a companion design document, carries an unresolved placeholder marker, leaves an S2.1 pin unfilled, has an `<a id="…">` anchor that is duplicated, missing before a heading, or inconsistent with its heading number, **or if any S2.1 row disagrees with `uv.lock` or with the image digests in `docker/compose.yaml`** — the pin table is a restatement, so a restatement that has drifted is worse than none. The forbidden patterns are declared in the linter, never in this document.
-  - `scripts/lint_board.py` fails if any relation in S5 or any test id in S8.3 is unassigned to a milestone in S12, or if a milestone cites an id that does not exist.
-  - `scripts/lint_metrics.py` fails if any file outside `src/er/eval/metrics.py` defines a second precision/recall implementation — the enforcement S8.5 requires, so that "exactly one implementation" is a gate rather than a wish.
-  - `report.py --validate-baselines` fails if the set of `benchmarks/baselines/*.json` is not exactly the set of `workflow_dispatch` choice options in `benchmark.yaml`, **or if, for any dispatchable scale, `benchmark.yaml`'s `runs-on` expression and the envelope it exports disagree with that scale's row in `benchmarks/scales.yaml`** (S10.2) — the coupling that makes a `100k` baseline comparable to a `100k` run.
-- **Machine-readable results.** Every pytest invocation writes junit XML into `artifacts/`; both uploads use `if-no-files-found: error`, so an empty artifacts directory is a CI failure rather than a silent success.
-- **Budget.** The <10 min PR target is enforced by the timeouts: `static` and `unit` are capped at 10 minutes each and run concurrently, `integration` at 25. Branch protection on `main` requires all three jobs.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local commands and shard reproduction.
 
 <a id="s9-2"></a>
 ### 9.2 `benchmark.yaml` — dispatch + weekly
 
-```yaml
-name: benchmark
-on:
-  workflow_dispatch:
-    inputs:
-      scale:
-        type: choice
-        options: [smoke, 10k, 100k]     # MUST equal the set of committed baselines (S10.2)
-        default: smoke
-      repeat:
-        type: string
-        default: "3"
-  schedule:
-    - cron: "0 6 * * 1"                 # weekly, Monday 06:00 UTC, smoke scale
+[The committed benchmark workflow](.github/workflows/benchmark.yaml) runs weekly
+on Monday at 06:00 UTC and on demand. It never runs on the PR path.
 
-permissions:
-  contents: read
+- `smoke` is always available to bootstrap measurements. Without a reviewed
+  baseline, the comparison reports `NO_BASELINE`; it makes no regression claim.
+- Larger dispatch options require a committed measured baseline under
+  `benchmarks/baselines/` and matching `baseline_committed` / `dispatchable` flags
+  in `benchmarks/scales.yaml`. Tests check these sets agree with the workflow.
+- The preflight reads disk requirements and CPU/memory limits from the selected
+  scale. Measurement and comparison run inside the same built image.
+- A comparable run fails with `REGRESSION` when any phase median exceeds its
+  baseline by more than 25%. Incomparable environments produce `NON_COMPARABLE`.
+- Results upload after comparison even on failure, and teardown always runs.
+  Baselines are replaced only through a reviewed measurement change.
 
-concurrency:
-  group: benchmark-${{ inputs.scale || 'smoke' }}
-  cancel-in-progress: false             # never cancel a scheduled or in-flight measurement
-
-env:
-  SCALE: ${{ inputs.scale || 'smoke' }}
-  REPEAT: ${{ inputs.repeat || '3' }}
-
-jobs:
-  bench:
-    # MUST agree with the runner column of S10.2; --validate-baselines checks it (S9.1)
-    runs-on: ${{ (inputs.scale == '100k') && 'ubuntu-latest-8-cores' || 'ubuntu-latest' }}
-    timeout-minutes: ${{ (inputs.scale == '100k') && 120 || 40 }}
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
-      - uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3.7.1
-      - name: Build pipeline image
-        uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75   # v6.9.0
-        with:
-          context: .
-          file: docker/Dockerfile
-          load: true
-          tags: er-pipeline:ci
-          cache-from: type=gha
-          cache-to: "type=gha,mode=max"
-      - name: Preflight (disk) and resource envelope for this scale
-        run: |
-          mkdir -p artifacts/bench
-          docker compose -f docker/compose.yaml --profile bench down -v --remove-orphans
-          free_gb=$(python3 -c "import os;s=os.statvfs('/var/lib/docker');print(s.f_bavail*s.f_frsize//2**30)")
-          need=$(docker run --rm er-pipeline:ci python benchmarks/scales.py --scale "$SCALE" --field min_free_gb)
-          echo "free=${free_gb}GiB need=${need}GiB host_nproc=$(nproc)"
-          test "$free_gb" -ge "$need"
-          # The envelope is a property of the scale (S10.2). Export it so Compose applies it and
-          # so the measured cgroup values can be checked against it by the S10.4 rule.
-          echo "ER_CPU_LIMIT=$(docker run --rm er-pipeline:ci python benchmarks/scales.py --scale "$SCALE" --field cpu_limit)" >> "$GITHUB_ENV"
-          echo "ER_MEM_LIMIT=$(docker run --rm er-pipeline:ci python benchmarks/scales.py --scale "$SCALE" --field mem_limit)" >> "$GITHUB_ENV"
-          echo "ER_DUCKDB_MEMORY_LIMIT=$(docker run --rm er-pipeline:ci python benchmarks/scales.py --scale "$SCALE" --field duckdb_memory_limit)" >> "$GITHUB_ENV"
-      - name: Run benchmark
-        run: docker compose -f docker/compose.yaml --profile bench run --rm benchmark
-             python benchmarks/report.py --run --scale "$SCALE" --repeat "$REPEAT"
-             --out /app/artifacts/bench/latest.json
-        env:
-          BENCH_SCALE: ${{ env.SCALE }}
-      - name: Compare vs baseline (in-image)
-        run: docker compose -f docker/compose.yaml --profile bench run --rm benchmark
-             python benchmarks/report.py --compare /app/artifacts/bench/latest.json
-             --baselines-dir /app/benchmarks/baselines --scale "$SCALE"
-             --fail-threshold 1.25
-        env:
-          BENCH_SCALE: ${{ env.SCALE }}
-      - name: Upload benchmark artifacts
-        if: always()
-        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
-        with:
-          name: bench-${{ env.SCALE }}-${{ github.sha }}
-          path: artifacts/bench/
-          if-no-files-found: error
-      - name: Tear down
-        if: always()
-        run: docker compose -f docker/compose.yaml --profile bench down -v --remove-orphans
-```
-
-- **Runner, envelope and scale move together.** A larger scale is dispatched onto a larger runner *and* given a larger Compose envelope, from one table: S10.2 owns `runner`, `cpu_limit`, `mem_limit` and `duckdb_memory_limit` per scale; `runs-on` above encodes the runner and the preflight exports the other three into the environment `docker compose` reads. Without that coupling a `100k` run would land on an 8-core runner and then be squeezed into the 2-CPU default envelope — measurable, but not the machine anyone provisioned — and the S10.4 comparability check would have nothing coherent to compare against.
-- **Everything Python runs in-image.** The disk figure comes from the runner's own `statvfs` (it is a property of the runner), but the threshold it is compared against comes from `benchmarks/scales.py` executed inside `er-pipeline:ci` with a bare `docker run` — no Compose services are started for a preflight. `report.py` likewise executes inside the image through `docker compose run`, so the job needs no `setup-uv`, no `uv sync`, and no runner-side Python environment beyond the preinstalled `python3`, and the S10.4 environment fingerprint provably comes from the measuring environment rather than the runner.
-- **Upload after compare, `if: always()`.** A regression, a `NON_COMPARABLE` verdict, or a crash still publishes `latest.json` and `report.md`.
-- **Dispatch options.** The `scale` choice list MUST equal the set of scales with a committed baseline under `benchmarks/baselines/`. Adding a scale to the dispatch list requires committing its baseline first; the static job's `--validate-baselines` step enforces the equality mechanically. `1m` is defined in `scales.yaml` but is not dispatchable until a `1m` baseline is committed.
-- **Cadence.** Weekly on Monday at the `smoke` scale, plus on-demand dispatch. There is no nightly run and there is never a PR-path run.
-- **Gate.** `--fail-threshold 1.25` fails the job when any phase median is more than 25% slower than the committed baseline (`REGRESSION`). Baselines change only through a reviewed PR that rewrites the JSON with `--write-baseline`.
+See [performance.md](docs/performance.md) for measurement and baseline operations.
 
 ---
 
@@ -2078,12 +1772,12 @@ Deterministic, seeded synthetic corpus generator, shared by fixtures and benchma
 
 | Scale | Personas | Records | Incremental batch | `min_free_gb` | Baseline committed | Dispatchable |
 |---|---|---|---|---|---|---|
-| `smoke` | 400 | 1,000 | 50 | 4 | yes | yes |
-| `10k` | 4,000 | 10,000 | 100 | 8 | yes | yes |
-| `100k` | 40,000 | 100,000 | 1,000 | 24 | yes | yes |
+| `smoke` | 400 | 1,000 | 50 | 4 | no | yes |
+| `10k` | 4,000 | 10,000 | 100 | 8 | no | no |
+| `100k` | 40,000 | 100,000 | 1,000 | 24 | no | no |
 | `1m` | 400,000 | 1,000,000 | 10,000 | 120 | no | no |
 
-`smoke` exists so the weekly cron and any first-run bootstrap complete inside a 40-minute job on a 2-vCPU runner. `min_free_gb` is the preflight threshold asserted in S9.2. A scale becomes dispatchable only when `benchmarks/baselines/<scale>.json` is committed.
+`smoke` exists so the weekly cron and any first-run bootstrap complete inside a 40-minute job on a 2-vCPU runner. `min_free_gb` is the preflight threshold asserted in S9.2. A larger scale becomes dispatchable only when `benchmarks/baselines/<scale>.json` is committed; `smoke` may bootstrap without a baseline.
 
 **Resource envelope per scale (normative).** `scales.yaml` carries these four fields alongside the ones above, and they are the single source of truth for the runner a scale is dispatched onto and the container limits it is measured under:
 
@@ -2145,7 +1839,6 @@ All three are reported separately in `latest.json`; the cgroup peak is the numbe
 | `--compare RUN [--baselines-dir DIR] [--scale s]` | compare a run JSON against `DIR/<scale>.json`; prints a per-phase table with ratios |
 | `--fail-threshold F` | default `1.25`; a phase whose median `wall_ms` exceeds `F ×` the baseline median yields `REGRESSION` |
 | `--write-baseline` | the documented bootstrap: copy a run JSON to `DIR/<scale>.json`; refuses a `NON_COMPARABLE` run |
-| `--validate-baselines --baselines-dir DIR --workflow PATH` | asserts the baseline file set equals the workflow's `scale` choice options, and that each dispatchable scale's runner and exported envelope in the workflow match its `scales.yaml` row (S10.2); used by the static CI job |
 
 Verdicts and exit codes:
 
@@ -2228,10 +1921,10 @@ class NoopScorer:
 | **M2 — Ingest & standardize** | source adapters, `content_hash`, append-only landing, tombstone derivation, `stg_*`, `int_std_records`, `int_blocking_keys`, the blocking generator, the `base_10` fixture with `expected/base/std_hashes.csv` (its `expected/base/membership.csv` and `expected/base/golden.csv` are authored and committed here, but are first *asserted* in M3 and M4 respectively, since the relations they describe do not exist yet), the `deletion_scenario` fixture's three phases, **the synthetic generator** | `raw_records`, `ingest_batches`, `stg_crm`, `stg_billing`, `stg_webforms`, `int_std_records`, `int_blocking_keys` | T-KEY-1b, T-STD-1, T-BLK-1, **T-IDEM-1a**, **T-DEL-1a** green; `base_10` truth counts machine-checked at 23/10/18. The full-chain arms T-IDEM-1 and T-DEL-1 belong to M4 and M3: they assert on `entity_events`, `entity_membership`, `match_scores` and `golden_*`, none of which this milestone creates |
 | **M3 — Match, assert, reconcile** | Splink settings builder, `er train`, TF freeze, the two-pass incremental path, assertions and CONTRADICTION-1, the partition-level never-cut, clustering, the overlap-matrix reconciler, `er assert`/`er review`, **the committed fixture model `fixtures/static/model_test_v1.json`**, the `incremental_batch` fixture's `base/`, `batch/` and `parity_pairs.csv` (T-INC-3 scores through the two-pass path, so it needs a scenario with a `batch/` phase), and the `supersession_scenario` fixture's `base/`, `batch/` and `expected/{base,batch}/` (its expectations name `match_scores`, `entity_membership` and `entity_events`, which are created here and nowhere earlier) | `model_registry`, `tf_lookup`, `match_scores`, `assertions`, `cut_edges`, `entities`, `entity_membership`, `entity_events`, `review_queue` | T-MATCH-SYM, T-MATCH-1a, T-MATCH-1b, T-INC-3, T-TRAIN-1, T-MODEL-1, T-TF-1, T-PERM-1, T-PERM-2, T-PERM-3, T-ASSERT-1, T-ASSERT-2, T-REVIEW-1, T-REVIEW-2, **T-DEL-1**, **T-SUPER-1** green; T-INV-1 armed as an autouse finalizer and green on every scenario. Every one of those reads only relations M1–M3 create; the golden reap that T-PERM-1 used to assert moved to T-INC-2 in M4 for the same reason |
 | **M4 — Golden & incremental proof** | survivorship macros with the terminal tiebreak, lineage, `golden_display`, touched-only assembly, the retire/reap path, `er correct` (the correction pass), `--resume` | `er_touched_entities`, `golden_records`, `golden_lineage`, `golden_display` | T-GOLD-1, T-SNAP-1, T-INC-1, T-INC-1b, T-INC-2, T-CORR-1, T-CFG-1, **T-IDEM-1** (the full-chain arm, which asserts on `golden_records` and `golden_lineage` and so could not be gated earlier) green; full PR CI path green in under 10 minutes, enforced by the sum of the job timeouts |
-| **M5 — Benchmark** | `benchmarks/run_benchmark.py`, `report.py` (`--run`, `--compare`, `--write-baseline`, `--repeat`, `--validate-baselines`), `benchmarks/scales.py`, the memory sampler, `benchmark.yaml`, the committed baselines, **and the `Baseline/dispatch parity` step added to `ci.yaml`'s static job** — all in this milestone, because the step references artefacts no earlier milestone produces | none (benchmark writes into a disposable namespace) | **Precondition (environmental, MUST be confirmed before the milestone starts).** The `100k` row of S10.2 dispatches onto `ubuntu-latest-8-cores`, and that larger-runner label is a repository/organisation setting an autonomous implementer cannot provision: with the label unavailable the `100k` job either queues indefinitely or lands on a 2-vCPU runner where the exported envelope (`cpu_limit=6`, `mem_limit=24g`) cannot be honoured, every run is `NON_COMPARABLE` under S10.4, and `--write-baseline` refuses it — so the third baseline is unobtainable by any amount of code. Confirm the label is enabled for this repository before starting M5; if it is not, take the S13 fallback rather than committing a `100k` baseline measured outside its S10.2 row. Then: **smoke, 10k and 100k** baselines committed via `--write-baseline` — all three, because S9.2's dispatch options are `[smoke, 10k, 100k]` and the static job's `--validate-baselines` step asserts that set equals the committed baseline set, so a missing `smoke.json` fails every PR. All three are *producible*: a `100k` dispatch lands on the runner and inside the envelope its S10.2 row declares, so it satisfies the S10.4 comparability rule and `--write-baseline` accepts it. Per-phase CV under 15%; incremental ratio and `blocking_recall` present in `artifacts/bench/latest.json`; the `--fail-threshold 1.25` comparison demonstrably executes in-image |
+| **M5 — Benchmark** | Benchmark measurement, comparison, profiling and CI workflow | none (benchmark writes into a disposable namespace) | Validate workload envelopes, output quality and repeatability; commit only measured baselines from comparable environments. Smoke can bootstrap without a baseline. Enable larger dispatch options when their runner and reviewed baseline are available (S9.2, S10.2). |
 | **M6 — Phase 2** | embedding coherence implementation replacing `NoopScorer` | none | cluster-level recall on the 100k scale improves without cluster-level precision regressing; coherence findings land as `review_queue` rows with `subject_type='entity'` |
 
-**Gating rule (normative).** A milestone's exit criteria may name only tests that read relations existing by the end of *that* milestone. S12 is a gate — "M1 cannot exit until…", "no code merged before this" — so a criterion that depends on a later milestone's relation does not merely mislead, it stalls an agent working ticket by ticket on a test it cannot make pass. Where a guarantee spans milestones, the test is **split into arms** (T-KEY-1a / T-KEY-1b, T-IDEM-1a / T-IDEM-1, T-DEL-1a / T-DEL-1) rather than deferred whole or asserted early; each arm is a real test with its own node id, and the arms together assert exactly what the single test asserted before. `scripts/lint_board.py` fails if any S8.3 id is unassigned to a milestone, so an arm cannot be created and then forgotten.
+**Gating rule (normative).** A milestone's exit criteria may name only tests that read relations existing by the end of *that* milestone. S12 is a gate — "M1 cannot exit until…", "no code merged before this" — so a criterion that depends on a later milestone's relation does not merely mislead, it stalls an agent working ticket by ticket on a test it cannot make pass. Where a guarantee spans milestones, the test is **split into arms** (T-KEY-1a / T-KEY-1b, T-IDEM-1a / T-IDEM-1, T-DEL-1a / T-DEL-1) rather than deferred whole or asserted early; each arm is a real test with its own node id, and the arms together assert exactly what the single test asserted before. The milestone table is retained as historical test coverage context; it no longer drives a ticket board.
 
 **Why the generator is in M2 and the fixture model is in M3.** The generator moves forward from M5 because `base_10`'s traps are hand-authored but the deletion, supersession and correction scenarios need seeded corpora larger than a human should hand-write, and its seed lives in the M1 config schema — there is no dependency left to wait for. The committed fixture model moves back into M3 and is *not* an M2 artifact because scenario tests **never train**: EM over `base_10`'s 23 records is degenerate (the `u` estimate is drawn from at most 253 pairs and the `m` estimate from at most 18), so the model it would produce is noise. `fixtures/static/model_test_v1.json` is trained once against the M2 generator's 10k corpus, committed, and loaded by every scenario test; `er train` itself is exercised only by T-TRAIN-1 and T-MODEL-1.
 
@@ -2275,5 +1968,5 @@ Each row below is encoded into a table schema or into the identity of stored row
 | Label propagation or the never-cut loop fails to converge | Both are bounded by `clustering.max_iterations`; on non-convergence the stage fails with the unconverged component size logged, no snapshot committed and no events emitted — never a silent partial partition |
 | Splink intermediates polluting the lake | The primary DuckDB database is `:memory:` with DuckLake attached as `lake` and `output_schema='splink_scratch'`; T-INV-1 and `er doctor` both assert zero `__splink__%` relations in `lake` after every run |
 | CI integration flakiness from service startup | Healthcheck-gated `depends_on` for the catalog and completion-gated one-shot initialisers for the object store and the lake (S7.1 — no probe is declared that the image cannot satisfy), `run --rm` rather than `up --abort-on-container-exit`, `down -v --remove-orphans` before and after every run, retries only at startup and never inside a test |
-| **The `100k` scale needs a larger GitHub runner that no code change can provision.** `ubuntu-latest-8-cores` (S10.2, S9.2) is a paid, per-repository/organisation runner setting; without it the `100k` dispatch cannot execute inside its declared envelope, so M5's third baseline cannot be produced | It is a stated **M5 precondition** (S12), confirmed before the milestone starts rather than discovered inside it. If the label is unavailable: (a) attach self-hosted hardware carrying that label and the S10.2 `100k` envelope — the S10.4 fingerprint records what was actually measured and the comparability rule polices it, so a correctly sized self-hosted run is a valid baseline; or (b) demote the scale: flip the `100k` row's *Baseline committed* and *Dispatchable* cells in S10.2 to `no` exactly as `1m` already is, drop `100k` from `benchmark.yaml`'s dispatch `options`, and do not commit `benchmarks/baselines/100k.json`. The `--validate-baselines` equality (S9.1) keeps the option list and the baseline set in step, so the PR path stays green at `[smoke, 10k]` and `100k` returns as a one-line change the day the runner appears. Never commit a `100k` baseline measured outside its S10.2 row: S10.4 marks it `NON_COMPARABLE` and `--write-baseline` refuses it, and a baseline taken on the wrong machine silently redefines every later comparison |
+| **The standard `100k` benchmark needs a larger runner.** Its S10.2 envelope exceeds the default runner. | Keep this scale undispatchable until the configured runner is available and a comparable baseline has been reviewed. Local optimization experiments with another envelope remain separate measurements. |
 | Benchmark numbers not comparable across machines | A per-scale resource envelope (runner, `cpu_limit`, `mem_limit`, `duckdb_memory_limit`) owned by S10.2 and applied by Compose, `ER_DUCKDB_THREADS` / `ER_DUCKDB_MEMORY_LIMIT` applied via `SET` on every connection, `--repeat 3` reporting medians with the coefficient of variation, and an environment fingerprint (runner class, image digest, cgroup `cpu.max` and `memory.max`, `nproc`, DuckDB/Splink versions, seed, scale) embedded in every report. The NON-COMPARABLE rule — the exact conditions, and the bar a run must clear before it may be committed as a baseline — is normative in S10.4 |
