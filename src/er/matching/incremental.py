@@ -58,7 +58,7 @@ number about the full path reported on a row that scored a batch.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Final
@@ -81,6 +81,7 @@ from er.matching.full import (
     ScoredPair,
     merge_match_scores,
     prediction_columns,
+    review_scored_pairs,
 )
 from er.matching.model import LINK_TYPE, UNIQUE_ID_COLUMN, blocking_rules_from_config
 from er.matching.tf import (
@@ -89,10 +90,9 @@ from er.matching.tf import (
     register_tf,
     tf_columns,
 )
-from er.matching.thresholds import in_gray_band, is_auto_merge, prob_to_weight
+from er.matching.thresholds import prob_to_weight
 from er.obs.profiling import profiled
 from er.obs.runctx import StageRun
-from er.review.queue import GrayBandPair, upsert_gray_band_pairs
 
 # `MODE_INCREMENTAL` is re-exported below rather than spelled again: `runs.mode`, S4.0's
 # `--mode` value and this stage's `mode` counter are one string under three names, and
@@ -641,7 +641,7 @@ def score_incremental(
         if select is not None
     ]
 
-    scored: list[ScoredPair] = []
+    scored: Iterable[ScoredPair] = ()
     if selects:
         # `UNION ALL`, not `UNION`: the deduplication a pair found by both passes needs
         # is the merge source's `DISTINCT ON (rec_a_key, rec_b_key)`, which also
@@ -661,18 +661,10 @@ def score_incremental(
             scored_at=scored_at,
         )
 
-    gray_band = [pair for pair in scored if in_gray_band(pair.match_probability, thresholds)]
-    upserted = upsert_gray_band_pairs(
+    summary = review_scored_pairs(
         connection,
-        (
-            GrayBandPair(
-                rec_a_key=pair.rec_a_key,
-                rec_b_key=pair.rec_b_key,
-                match_probability=pair.match_probability,
-                waterfall=pair.evidence,
-            )
-            for pair in gray_band
-        ),
+        scored,
+        thresholds,
         run_id=run_ctx.run_id,
         id_factory=id_factory,
     )
@@ -685,13 +677,11 @@ def score_incremental(
         tf_snapshot_id=tf_snapshot_id,
         candidate_pairs=None,
         unscored_records=len(keys),
-        pairs_scored=len(scored),
-        pairs_above_auto_merge=sum(
-            1 for pair in scored if is_auto_merge(pair.match_probability, thresholds)
-        ),
-        pairs_in_gray_band=len(gray_band),
-        review_queue_added=upserted.added,
-        review_queue_refreshed=upserted.refreshed_count,
+        pairs_scored=summary.pairs_scored,
+        pairs_above_auto_merge=summary.pairs_above_auto_merge,
+        pairs_in_gray_band=summary.pairs_in_gray_band,
+        review_queue_added=summary.review_queue_added,
+        review_queue_refreshed=summary.review_queue_refreshed,
     )
     result.record(run_ctx)
     return result

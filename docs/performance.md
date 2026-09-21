@@ -1,6 +1,199 @@
 # Performance
 
-## Measured results
+## Million-record full pipeline benchmark
+
+Run one initial load of **1,000,000 synthetic source records representing 400,000
+people**, spread across CRM, billing and webforms (seed 42):
+
+```sh
+make benchmark-1m
+```
+
+The command builds the current checkout, starts a fresh disposable lake, and times
+ingestion → cleaning/standardization → model training → matching → reconciliation
+→ golden record assembly. Training is included in the first-load total. Generation,
+image/stack setup, validation and teardown are outside that processing time. There
+is no incremental delivery, and detailed SQL profiling is disabled. The existing
+CI benchmark still measures its separate six-phase workload including incrementals.
+
+`make benchmark-1m` uses **local mode**, which fits the resource limits to the current
+Docker host without reducing the million-record input. It leaves two CPUs and at
+least 1 GiB of Docker memory outside the pipeline limit, assigns at most two thirds
+of container memory (capped at 4 GB) to DuckDB, and limits workers to one per 2 GiB
+of DuckDB memory. Additional memory remains available for reconciliation's Python
+heap. A 12-GiB Docker allocation selects **2 CPUs, 10 GiB container memory,
+2 DuckDB threads and a 4 GB DuckDB limit**. Local mode checks for 2 GiB free disk at
+startup; that is a startup guard, not a prediction of the run's disk consumption.
+
+Without `--local`, the runner uses the standard `benchmarks/scales.yaml` envelope:
+12 CPUs, 56 GiB container memory, a 40 GB DuckDB limit and 120 GiB free disk. These
+are comparison settings, not minimum requirements for processing a million records.
+The chosen resource profile is recorded in the manifest, verified against actual
+container limits, and printed in the report. Compare timings only at the same limits.
+
+Check the host, validate the runner with 1,000 records, or measure three fresh
+million-record passes for a median and variation:
+
+```sh
+uv run python benchmarks/full_pipeline.py --scale 1m --local --check-only
+uv run python benchmarks/full_pipeline.py --scale smoke --local
+uv run python benchmarks/full_pipeline.py --scale 1m --local --repeat 3
+```
+
+Run from a checkout on the Docker host (Docker Desktop bind mounts also work).
+Keep the host otherwise idle. Each pass owns a unique Compose project; its
+containers, volumes and temporary image tag are removed afterward, including on
+failure. Repeats reuse the same generated inputs, with a fresh stack for each pass.
+Existing development stacks are not touched.
+
+Use `--keep-failed` during resource tuning to preserve a failed lake for diagnosis
+or recovery. Its Compose project and image are recorded as `retained_project` and
+`retained_image` in `manifest.json`. After finishing that investigation, remove the
+retained stack and image using those exact recorded names:
+
+```sh
+docker compose -p "<retained_project>" -f docker/compose.yaml \
+  -f "<output-directory>/compose.json" --profile bench down -v --remove-orphans
+docker image rm "<retained_image>"
+```
+
+Results go into a new `artifacts/bench/full-<scale>-<timestamp>/` directory. Use
+`--out <new-directory>` to choose a different location; existing directories are
+never overwritten. Keep this directory until the measurement has been reviewed:
+
+- `report.md`: full-pipeline duration, input throughput, time per stage, bottleneck,
+  CPU time, sampled pipeline memory, golden record count and lineage count.
+- `results.json`: measured passes, output validation, match quality, input hashes,
+  runtime fingerprints and aggregate statistics. One pass reports variation as
+  unmeasured; multiple passes also compare counts and membership partitions.
+- `run-*/`: command logs, raw timings, resource samples and generated run configuration.
+  `manifest.json`, `working-tree.patch`, build and service logs identify the source,
+  dependencies and execution environment. Large generated inputs remain under `inputs/`.
+
+Validation requires exactly one membership for every standardized input, one
+golden row per entity, and one lineage decision per golden attribute whose winning
+record belongs to that entity. Synthetic truth also produces blocking, edge and
+cluster quality metrics, outside the processing timer. CPU and memory cover the
+pipeline container and its descendants; the database and object store are separate
+services. Memory includes page cache and is sampled every 250 ms.
+
+This is a capacity measurement, separate from CI regression baselines. Running it
+does not enable scheduled million-record jobs or promote a baseline.
+
+### Optimized local million-record result, 2026-09-21
+
+The optimized full pipeline processed **1,000,000 records in 207.79 seconds
+(3 minutes 28 seconds)**, versus 1,532.33 seconds before: **7.37 times faster**
+overall, with **86.4% less processing time**. Both passes used the same generated
+inputs, dependency versions, 2 CPUs, 10 GiB container limit, 2 DuckDB threads and
+4 GB DuckDB limit on the local Mac described below.
+
+| CLI stage | Before, seconds | After, seconds |
+|---|---:|---:|
+| Ingestion, all sources | 21.47 | 20.47 |
+| Cleaning/standardization | 81.98 | 84.15 |
+| Model training | 11.06 | 12.05 |
+| Matching | 1,192.38 | 19.25 |
+| Reconciliation | 208.14 | 55.59 |
+| Golden record assembly | 17.30 | 16.28 |
+| **Total processing** | **1,532.33** | **207.79** |
+
+Matching was **61.95 times faster**. The same 36,928 review records now use
+37 insert batches, and the observed matching snapshot delta fell from 36,930 to
+39. Reconciliation took **73.3% less time**. Cleaning/standardization is now the
+largest stage, at 40.5% of processing time. Throughput rose from 653 to 4,813
+input records/second.
+
+Sampled pipeline memory fell **46.9%, from 8.51 to 4.52 GiB**. Within reconciliation,
+the sampled peak fell from 8.51 to 2.37 GiB. Processing CPU time fell from
+1,507.42 to 308.77 CPU-seconds. These memory figures include the pipeline's page
+cache and child processes, exclude the catalog and object store, and use 250 ms
+samples; they are not a hard cap on all Python and native allocations.
+
+All 1,000,000 inputs retained memberships. Counts, the membership-partition hash,
+input hashes and synthetic quality metrics matched the baseline exactly, including
+**395,867 golden records** and **2,375,202 lineage rows**. Integrity validation
+passed. A separate 10k initial-plus-incremental comparison also matched normalized
+outputs, with a maximum score difference of `6.66e-16`. The million-record baseline
+did not export every golden value and score, so those were not compared row by row
+at that scale. All 742 unit/contract tests and 26 selected database integration
+tests passed; a separate profiling-enabled smoke run also passed.
+
+These are single exploratory passes; variation is unmeasured. Checks overlapped
+baseline generation and early ingestion, and temporary image/cache cleanup
+overlapped optimized generation and early processing. No tests ran during optimized
+processing. This comparison demonstrates the observed improvement on this corpus,
+not a controlled multi-run regression baseline.
+
+The optimized evidence is retained under
+`artifacts/bench/full-1m-optimized-20260921/`; the source manifest identifies the
+uncommitted changes on `4ce5a5c`. Its full campaign took 5 minutes 27 seconds,
+including setup, generation, validation and teardown. Stage memory, environment
+checks and the before/after comparison are saved in
+`artifacts/performance/matching-20260921/million-comparison.json`.
+
+A separate capacity check also completed all 1,000,000 records with a **6 GiB
+pipeline container limit**, keeping 2 CPUs and the 4 GB DuckDB limit. Processing
+took **198.50 seconds**, with a sampled peak of **4.81 GiB**; counts, membership
+partitions and quality metrics matched the 10 GiB pass. This confirms the workload
+can now finish under the container limit that previously failed in reconciliation.
+Docker Desktop remained allocated 12 GiB during this check. It reused the generated
+inputs and an audited image on a fresh lake; it is a capacity check, not a repeated
+measurement of the 10 GiB configuration. Evidence is in
+`artifacts/bench/full-1m-optimized-6g-retry-20260921/` and
+`artifacts/performance/matching-20260921/capacity-comparison.json`.
+An earlier 6 GiB attempt failed during ingestion with an object-store HTTP 400
+`IncompleteBody` error. Its logs are retained separately under
+`artifacts/bench/full-1m-optimized-6g-20260921/`; that attempt does not establish a
+memory limit. All measurement stacks were removed after their logs were saved.
+
+### Local million-record baseline, 2026-09-21
+
+One complete pass on the local Apple Silicon Mac (8 logical CPUs, 24 GiB RAM)
+processed all **1,000,000 records in 1,532.33 seconds (25 minutes 32 seconds)**,
+about **653 input records/second**. Docker Desktop was allocated 12 GiB; the
+pipeline used 2 CPUs, a 10 GiB container limit, 2 DuckDB threads and a 4 GB DuckDB
+limit. The engine source was `4ce5a5c`, with the uncommitted benchmark runner
+identified by the source hashes in the run manifest.
+
+| CLI stage | Seconds | Share of processing |
+|---|---:|---:|
+| Ingestion, all sources | 21.47 | 1.4% |
+| Cleaning/standardization | 81.98 | 5.3% |
+| Model training | 11.06 | 0.7% |
+| Matching | 1,192.38 | 77.8% |
+| Reconciliation | 208.14 | 13.6% |
+| Golden record assembly | 17.30 | 1.1% |
+
+The run produced **395,867 golden records** and **2,375,202 lineage rows**. All
+1,000,000 inputs were present in standardization and entity membership, and the
+golden-record and lineage integrity checks passed. Synthetic pairwise cluster
+precision was 90.34% and recall was 98.70%; successful integrity checks do not
+imply perfect entity resolution.
+
+Sampled pipeline memory peaked at **8.51 GiB**, including page cache, and processing
+used **1,507.42 CPU-seconds**. An earlier attempt with a 6 GiB pipeline limit was
+killed during reconciliation after matching completed. The larger container limit
+allowed the same workload to finish without changing production engine code.
+
+Matching was the largest stage. It added **36,928 review records**, and
+live database observations showed repeated individual review lookups and writes.
+The baseline review queue implementation handled these one subject at a time.
+Together with the logged blocking and prediction times (1.33 s and 2.93 s), this
+pointed to review-queue persistence as the dominant matching cost. Detailed SQL
+profiling was disabled, so its exact share was not separately timed. The current
+implementation batches these operations as described below.
+
+This was one exploratory local run; runtime variation is unmeasured. Local checks
+also ran during generation and early ingestion, so it is not an idle-host
+regression baseline. The headline time excludes setup, generation, validation and
+teardown. The complete campaign, including those activities, took 26 minutes
+57 seconds. Raw evidence is retained locally under
+`artifacts/bench/full-1m-local-10g-20260921/`, including `report.md`, `results.json`,
+the source manifest and command/resource logs. The disposable stack and image tag
+were removed after success.
+
+## Historical controlled comparisons
 
 These are historical controlled comparisons, not CI baselines or service-level
 commitments. Both campaigns used five alternating baseline/candidate pairs,
@@ -57,6 +250,19 @@ recreate the historical 100k initial-only experiment exactly.
 - Ingestion, graph nodes/edges and incremental keys use bound, explicitly typed
   arrays with `INSERT ... SELECT UNNEST(...)`. Loads are bounded at 1,024 rows;
   ingestion order, transaction boundaries and all business rules are preserved.
+- Full and incremental matching consume the persisted scores in batches of 1,024
+  Python rows, with running counters and evidence JSON decoded only for review
+  candidates. The native result is completed before interleaving review writes,
+  preventing a later statement from discarding unread result chunks. It stays on
+  the caller's connection so uncommitted scores remain visible.
+- Review candidates accumulate into batches of up to 1,024. Each batch uses one
+  joined lookup plus bulk inserts and refreshes, with null-safe subject keys.
+  Repeated subjects preserve the first payload, and settled reviews remain unchanged.
+- Entity transitions, memberships and events load temporary DuckDB tables in
+  bounded column batches. Each destination still receives one final merge or insert;
+  the temporary tables are removed afterward. This avoids constructing SQL and
+  Python parameter lists with millions of scalar values, and preserves the caller's
+  transaction boundaries.
 - Reconciliation membership, corpus and tombstone lookups bind each requested key
   set as one `VARCHAR[]` parameter using `IN (SELECT unnest(?::VARCHAR[]))`.
   Membership lookups still expand to every member of each touched entity, and

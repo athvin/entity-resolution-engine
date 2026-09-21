@@ -36,12 +36,14 @@ import json
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from itertools import chain
 from types import MappingProxyType
 from typing import Any, Final
 
 import duckdb
 
 from er.entities.ids import IdFactory, MonotonicUlidFactory, canonicalize_pair
+from er.lake.bulk import staged_rows
 from er.lake.model import EVENT_TYPES, REBUILD_REASONS, REGISTRY, SCHEMA_QUALIFIER
 from er.obs.profiling import profiled
 
@@ -462,8 +464,6 @@ class EventLog:
 
 
 _COLUMN_LIST: Final = ", ".join(EVENT_COLUMNS)
-_ROW_PLACEHOLDER: Final = f"({', '.join('?' for _ in EVENT_COLUMNS)})"
-_INSERT_PREFIX: Final = f"INSERT INTO {_ENTITY_EVENTS} ({_COLUMN_LIST}) VALUES "
 
 
 @profiled("reconcile.events", "events")
@@ -497,12 +497,20 @@ def append_events(
     # the replay order, and a clock read per row would let two events of one run
     # differ in a column that carries no information (S4.5.3, S5.0).
     stamp = datetime.now(UTC).replace(tzinfo=None) if occurred_at is None else occurred_at
-    rows = [event.row(stamp) for event in events]
-    if not rows:
+    remaining = iter(events)
+    first = next(remaining, None)
+    if first is None:
         return 0
-    statement = _INSERT_PREFIX + ", ".join(_ROW_PLACEHOLDER for _ in rows)
-    connection.execute(statement, [value for row in rows for value in row])
-    return len(rows)
+    with staged_rows(
+        connection,
+        tuple((column.name, column.type) for column in _SPEC.columns),
+        (event.row(stamp) for event in chain((first,), remaining)),
+    ) as staged:
+        written = connection.execute(
+            f"INSERT INTO {_ENTITY_EVENTS} ({_COLUMN_LIST}) SELECT {_COLUMN_LIST} FROM {staged}"
+        ).fetchone()
+        assert written is not None
+        return int(written[0])
 
 
 #: The replay order (S4.5.3), declared once. `entity_membership` is current state and

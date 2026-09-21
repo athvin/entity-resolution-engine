@@ -103,7 +103,9 @@ def check_fixture(connection: Any, phase: str = "base") -> None:
     }
 
 
-def validate_coverage(directory: Path, *, trained: bool) -> dict[str, Any]:
+def validate_coverage(
+    directory: Path, *, trained: bool, initial_only: bool = False
+) -> dict[str, Any]:
     events = read_events(directory)
     starts = {event["span_id"] for event in events if event["event"] == "span_start"}
     ends = {event["span_id"] for event in events if event["event"] == "span_end"}
@@ -117,9 +119,10 @@ def validate_coverage(directory: Path, *, trained: bool) -> dict[str, Any]:
         "reconcile",
         "assemble",
         "match.full",
-        "match.incremental",
         "reconcile.label_propagation",
     }
+    if not initial_only:
+        required.add("match.incremental")
     if trained:
         required |= {"train", "train.fit", "train.estimation_call", "train.publish_model"}
     assert required <= names, f"missing transformations: {required - names}"
@@ -209,7 +212,10 @@ def run_case(
     label: str | None = None,
     corpus_root: Path | None = None,
     compare_outputs: bool = False,
+    initial_only: bool = False,
 ) -> dict[str, Any]:
+    if initial_only and case == "tiny":
+        raise ValueError("initial-only measurements require a generated benchmark scale")
     label = label or (f"{case}-{iteration}" if detailed else f"{case}-control")
     directory = out / label
     directory.mkdir(parents=True)
@@ -235,6 +241,7 @@ def run_case(
         "label": label,
         "iteration": iteration,
         "detailed": detailed,
+        "initial_only": initial_only,
         "namespace": namespace,
         "status": "running",
         "commands": [],
@@ -258,6 +265,8 @@ def run_case(
             if run_id is not None:
                 argv += ["--run-id", run_id]
         command_dir = directory / "commands" / invocation
+        if initial_only:
+            print(f"[benchmark] {phase}: {' '.join(args[:4])}", flush=True)
         cpu_before = cgroup_readings()
         tick = time.monotonic_ns()
         with span(f"command.{argv[1]}", run_id=run_id, phase=phase) as metrics:
@@ -305,8 +314,10 @@ def run_case(
             from scales import get_scale
 
             scale = get_scale(case)
-            corpus = (corpus_root or out) / f"corpus-{case}"
-            base_records, batch_records = scale.records, scale.incremental_batch
+            suffix = "-initial" if initial_only else ""
+            corpus = (corpus_root or out) / f"corpus-{case}{suffix}"
+            base_records = scale.records
+            batch_records = 0 if initial_only else scale.incremental_batch
             if not corpus.exists():
                 command(
                     [
@@ -318,7 +329,7 @@ def run_case(
                         "--records",
                         str(scale.records),
                         "--batch",
-                        str(scale.incremental_batch),
+                        str(batch_records),
                         "--seed",
                         str(config.generator.seed),
                         "--out",
@@ -329,7 +340,10 @@ def run_case(
                 )
             base_inputs, batch_inputs = corpus, corpus / "batch"
         drops = {}
-        for phase, inputs in (("base", base_inputs), ("batch", batch_inputs)):
+        deliveries = [("base", base_inputs)]
+        if not initial_only:
+            deliveries.append(("batch", batch_inputs))
+        for phase, inputs in deliveries:
             drop = directory / f"drop-{phase}"
             for source in SOURCES:
                 (drop / source).mkdir(parents=True)
@@ -343,7 +357,8 @@ def run_case(
             for phase, drop in drops.items()
             for source in SOURCES
         }
-        for phase, mode in (("base", "full"), ("batch", "incremental")):
+        for phase in drops:
+            mode = "full" if phase == "base" else "incremental"
             run_id = str(ULID())
             for source in SOURCES:
                 command(
@@ -381,6 +396,10 @@ def run_case(
                 assert tables["golden_records"] > 0, tables
                 if phase == "base":
                     assert tables["raw_records"] == base_records, tables
+                    if initial_only:
+                        result["output_validation"] = validate_initial_outputs(
+                            connection, base_records
+                        )
                 else:
                     assert tables["raw_records"] >= base_records, tables
                 if case == "tiny":
@@ -434,7 +453,9 @@ def run_case(
         ]
         assert sum(stage["rows_in"] for stage in ingests) == base_records + batch_records
         if detailed:
-            result["coverage"] = validate_coverage(directory, trained=case != "tiny")
+            result["coverage"] = validate_coverage(
+                directory, trained=case != "tiny", initial_only=initial_only
+            )
         result["status"] = "succeeded"
     except BaseException as error:
         result.update(status="failed", error=f"{type(error).__name__}: {error}")
@@ -473,6 +494,60 @@ def run_case(
     if result["status"] != "succeeded":
         raise RuntimeError(result["error"])
     return result
+
+
+def validate_initial_outputs(connection: Any, records: int) -> dict[str, int]:
+    """Check complete membership and golden lineage without fetching the full lake."""
+    from er.lake.columns import GOLDEN_LINEAGE_ATTRIBUTES
+
+    def count(query: str, parameters: list[Any] | None = None) -> int:
+        return int(connection.execute(query, parameters or []).fetchone()[0])
+
+    counts = {
+        table: count(f"SELECT count(*) FROM lake.main.{table}")
+        for table in ("raw_records", "int_std_records", "entity_membership", "golden_records")
+    }
+    for table in ("raw_records", "int_std_records", "entity_membership"):
+        assert counts[table] == records, f"{table}: {counts[table]} != {records}"
+    for table in ("int_std_records", "entity_membership"):
+        assert count(f"SELECT count(DISTINCT record_key) FROM lake.main.{table}") == records
+    assert (
+        count(
+            "SELECT count(*) FROM lake.main.int_std_records s "
+            "ANTI JOIN lake.main.entity_membership m USING (record_key)"
+        )
+        == 0
+    ), "standardized records missing membership"
+    entities = count("SELECT count(DISTINCT entity_id) FROM lake.main.entity_membership")
+    assert 0 < entities == counts["golden_records"], "golden count differs from entity count"
+    assert count("SELECT count(DISTINCT entity_id) FROM lake.main.golden_records") == entities
+    assert (
+        count(
+            "SELECT count(*) FROM lake.main.entity_membership m "
+            "ANTI JOIN lake.main.golden_records g USING (entity_id)"
+        )
+        == 0
+    ), "entities missing golden records"
+    assert (
+        count(
+            "SELECT count(*) FROM (SELECT g.entity_id, a.attribute "
+            "FROM lake.main.golden_records g CROSS JOIN unnest(?::VARCHAR[]) a(attribute) "
+            "LEFT JOIN lake.main.golden_lineage l USING (entity_id, attribute) "
+            "GROUP BY g.entity_id, a.attribute HAVING count(l.record_key) != 1)",
+            [list(GOLDEN_LINEAGE_ATTRIBUTES)],
+        )
+        == 0
+    ), "golden lineage has missing or duplicate attribute decisions"
+    lineage = count("SELECT count(*) FROM lake.main.golden_lineage")
+    assert lineage == entities * len(GOLDEN_LINEAGE_ATTRIBUTES), "unexpected lineage rows"
+    assert (
+        count(
+            "SELECT count(*) FROM lake.main.golden_lineage l "
+            "ANTI JOIN lake.main.entity_membership m USING (entity_id, record_key)"
+        )
+        == 0
+    ), "lineage winners are not members of their entities"
+    return {**counts, "entities": entities, "golden_lineage": lineage}
 
 
 def save_semantic_outputs(
