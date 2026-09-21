@@ -8,8 +8,7 @@ Two shapes are used deliberately. The chain assertions spawn `er` as a subproces
 exactly as Compose runs it (S7.1), because "every stage of `er run-all` writes its
 row" is a claim about the command and not about :class:`~er.obs.runctx.RunContext`.
 The failure and touched-set assertions drive the context in-process against the
-S8.1 fixture's connection, because a raising stage body and a re-execution of one
-are not reachable through a CLI whose M1 stages are no-op stubs.
+S8.1 fixture's connection to inject a specific failure and retry it deterministically.
 
 Snapshot **counts** are asserted nowhere and may not be: a stage commits a range
 (S4 preamble), and a no-op run may legitimately commit an empty one.
@@ -21,10 +20,12 @@ import io
 import json
 import os
 import subprocess
+from pathlib import Path
 from typing import Any
 
 import duckdb
 import pytest
+from helpers.cli_fixture import prepare_cli_fixture
 from ulid import ULID
 
 from er.errors import ErrorClass, StageFailure
@@ -89,10 +90,12 @@ def run_context(run_id: str, *, connection: duckdb.DuckDBPyConnection, mode: str
 
 
 def test_run_all_writes_one_run_and_four_stage_rows(
-    initialised_lake: duckdb.DuckDBPyConnection,
+    initialised_lake: duckdb.DuckDBPyConnection, tmp_path: Path
 ) -> None:
     """AC1/AC2/AC5: one `runs` row, four `run_stages` rows, one stderr line each."""
-    result = run_er("run-all", "--mode", "incremental", "--skip-ingest")
+    prepare_cli_fixture(initialised_lake, tmp_path / "delivery")
+    tested_run_id = str(ULID())
+    result = run_er("run-all", "--mode", "incremental", "--skip-ingest", "--run-id", tested_run_id)
 
     assert result.returncode == 0, result.stdout + result.stderr
 
@@ -103,13 +106,15 @@ def test_run_all_writes_one_run_and_four_stage_rows(
             connection,
             f"SELECT run_id, tenant, mode, status, config_hash, code_version, "
             f"std_version, survivorship_version, started_at, ended_at "
-            f"FROM {SCHEMA_QUALIFIER}.runs",
+            f"FROM {SCHEMA_QUALIFIER}.runs WHERE run_id = ?",
+            tested_run_id,
         )
         stages = query(
             connection,
             f"SELECT stage, seq, status, snapshot_start, snapshot_end, started_at, "
             f"ended_at, counters, duration_ms, error_class "
-            f"FROM {SCHEMA_QUALIFIER}.run_stages ORDER BY seq",
+            f"FROM {SCHEMA_QUALIFIER}.run_stages WHERE run_id = ? ORDER BY seq",
+            tested_run_id,
         )
 
     assert len(runs) == 1, "S5.2: one `runs` row per CLI invocation"
@@ -145,21 +150,27 @@ def test_run_all_writes_one_run_and_four_stage_rows(
         assert tuple(record) == STAGE_RECORD_KEYS
 
 
-def test_stage_records_snapshot_range(initialised_lake: duckdb.DuckDBPyConnection) -> None:
+def test_stage_records_snapshot_range(
+    initialised_lake: duckdb.DuckDBPyConnection, tmp_path: Path
+) -> None:
     """AC1: every row carries a range, and the run's span contains every stage's."""
-    result = run_er("run-all", "--mode", "full", "--skip-ingest")
+    prepare_cli_fixture(initialised_lake, tmp_path / "delivery")
+    tested_run_id = str(ULID())
+    result = run_er("run-all", "--mode", "full", "--skip-ingest", "--run-id", tested_run_id)
 
     assert result.returncode == 0, result.stdout + result.stderr
 
     with connect() as connection:
         run = query(
             connection,
-            f"SELECT snapshot_start, snapshot_end FROM {SCHEMA_QUALIFIER}.runs",
+            f"SELECT snapshot_start, snapshot_end FROM {SCHEMA_QUALIFIER}.runs WHERE run_id = ?",
+            tested_run_id,
         )
         stages = query(
             connection,
             f"SELECT stage, snapshot_start, snapshot_end FROM {SCHEMA_QUALIFIER}.run_stages "
-            f"ORDER BY seq",
+            f"WHERE run_id = ? ORDER BY seq",
+            tested_run_id,
         )
 
     assert len(run) == 1

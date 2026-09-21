@@ -70,6 +70,7 @@ from splink.internals.blocking_rule_creator import BlockingRuleCreator
 from er.config.schema import Config
 from er.entities.ids import IdFactory
 from er.errors import ExitCode
+from er.lake.bulk import insert_batches
 from er.lake.columns import STD_RECORD_COLUMNS
 from er.lake.model import SCHEMA_QUALIFIER
 from er.matching.api import assert_no_splink_relations_in_lake, splink_api
@@ -89,6 +90,7 @@ from er.matching.tf import (
     tf_columns,
 )
 from er.matching.thresholds import in_gray_band, is_auto_merge, prob_to_weight
+from er.obs.profiling import profiled
 from er.obs.runctx import StageRun
 from er.review.queue import GrayBandPair, upsert_gray_band_pairs
 
@@ -171,7 +173,7 @@ SELECT rec.{UNIQUE_ID_COLUMN}
 _BATCH_KEYS_DDL: Final = (
     f"CREATE OR REPLACE TABLE {BATCH_KEYS_RELATION} ({UNIQUE_ID_COLUMN} VARCHAR NOT NULL)"
 )
-_BATCH_KEYS_INSERT: Final = f"INSERT INTO {BATCH_KEYS_RELATION} VALUES (?)"
+_BATCH_KEYS_INSERT: Final = f"INSERT INTO {BATCH_KEYS_RELATION} SELECT unnest(?::VARCHAR[])"
 
 #: The batch and the prior corpus: one projection of `int_std_records`, split by the
 #: key relation. `NOT IN` over a relation of non-NULL keys, which is what the `NOT NULL`
@@ -246,6 +248,7 @@ def unscored_record_keys(
     return tuple(str(record_key) for (record_key,) in rows)
 
 
+@profiled("match.prepare_batch", "records")
 def _materialize_batch(connection: duckdb.DuckDBPyConnection, keys: Sequence[str]) -> int:
     """Split `int_std_records` into the batch and the prior corpus; return the latter's size.
 
@@ -258,7 +261,12 @@ def _materialize_batch(connection: duckdb.DuckDBPyConnection, keys: Sequence[str
     match twice.
     """
     connection.execute(_BATCH_KEYS_DDL)
-    connection.executemany(_BATCH_KEYS_INSERT, [[key] for key in keys])
+    insert_batches(
+        connection,
+        _BATCH_KEYS_INSERT,
+        ((key,) for key in keys),
+        columns=1,
+    )
     connection.execute(_BATCH_SQL)
     connection.execute(_PRIOR_CORPUS_SQL)
     return _count(connection, PRIOR_CORPUS_RELATION)
@@ -294,6 +302,7 @@ def _pair_select(connection: duckdb.DuckDBPyConnection, cfg: Config, relation: s
     )
 
 
+@profiled("match.new_vs_corpus", "pairs")
 def pass1_new_vs_corpus(
     connection: duckdb.DuckDBPyConnection,
     cfg: Config,
@@ -352,6 +361,7 @@ def pass1_new_vs_corpus(
     return _pair_select(connection, cfg, str(predictions.physical_name))
 
 
+@profiled("match.new_vs_new", "pairs")
 def pass2_new_vs_new(
     connection: duckdb.DuckDBPyConnection,
     cfg: Config,
@@ -503,6 +513,7 @@ def _nothing_to_do(model_version: str, tf_snapshot_id: str) -> IncrementalScoreR
     )
 
 
+@profiled("match.incremental", "pairs")
 def score_incremental(
     connection: duckdb.DuckDBPyConnection,
     cfg: Config,

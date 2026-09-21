@@ -37,13 +37,16 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Final
 
 import duckdb
 
 from er.lake.env import require_bool_env, require_env, require_int_env
+from er.obs.profiling import profiled, span
+from er.obs.sql_profile import instrument_connection
 
 __all__ = [
     "EXTENSION_DIRECTORY_DEFAULT",
@@ -178,6 +181,7 @@ def attach_statements() -> tuple[str, ...]:
     )
 
 
+@profiled("lake.detach")
 def detach(connection: duckdb.DuckDBPyConnection) -> bool:
     """DETACH the lake if this connection holds it; report whether it did.
 
@@ -194,7 +198,7 @@ def detach(connection: duckdb.DuckDBPyConnection) -> bool:
 
 
 @contextmanager
-def connect() -> Iterator[duckdb.DuckDBPyConnection]:
+def _fresh_connection() -> Iterator[duckdb.DuckDBPyConnection]:
     """Open the S4.0b connection: ``:memory:`` primary, lake attached as ``lake``.
 
     The block is rendered first and executed second, so a missing or malformed
@@ -204,18 +208,117 @@ def connect() -> Iterator[duckdb.DuckDBPyConnection]:
     is a correctness problem and not just a resource one.
     """
     statements = attach_statements()
-    connection = duckdb.connect(":memory:")
+    with span("lake.open"):
+        connection = duckdb.connect(":memory:")
     try:
         # Created before the ATTACH so that "the scratch schema is in the primary
         # database" is a property of this statement rather than of DuckDB's
         # default-catalog rules, which is what M17 actually requires.
-        connection.execute(f"CREATE SCHEMA IF NOT EXISTS {SPLINK_OUTPUT_SCHEMA}")
-        for statement in statements:
-            connection.execute(statement)
+        with span("lake.configure_attach"):
+            connection.execute(f"CREATE SCHEMA IF NOT EXISTS {SPLINK_OUTPUT_SCHEMA}")
+            for statement in statements:
+                connection.execute(statement)
+        connection = instrument_connection(connection)
         yield connection
     finally:
-        detach(connection)
-        connection.close()
+        with span("lake.close"):
+            try:
+                detach(connection)
+            finally:
+                connection.close()
+
+
+class LakeSession:
+    """Own one connection within a locked invocation; never across a dbt process.
+
+    Borrowers receive a native connection (or the SQL profiler's existing proxy).
+    A lease cannot survive suspension. Connections are reopened lazily after dbt,
+    and any failed lease discards its connection before failure bookkeeping.
+    """
+
+    def __init__(self) -> None:
+        self.connection: duckdb.DuckDBPyConnection | None = None
+        self.manager: AbstractContextManager[duckdb.DuckDBPyConnection] | None = None
+        self.leases = 0
+        self.broken = False
+
+    @contextmanager
+    def borrow(self) -> Iterator[duckdb.DuckDBPyConnection]:
+        if self.connection is None:
+            manager = _fresh_connection()
+            self.connection = manager.__enter__()
+            self.manager = manager
+        self.leases += 1
+        try:
+            yield self.connection
+        except BaseException:
+            self.broken = True
+            raise
+        finally:
+            self.leases -= 1
+            if self.broken and self.leases == 0:
+                # An aborted transaction must not prevent failure ledger writes.
+                if self.connection is not None:
+                    try:
+                        self.connection.execute("ROLLBACK")
+                    except duckdb.Error:
+                        pass
+                self.close()
+
+    def close(self) -> None:
+        if self.leases:
+            raise RuntimeError("cannot close a lake session while a connection is borrowed")
+        manager, self.manager = self.manager, None
+        self.connection = None
+        self.broken = False
+        if manager is not None:
+            manager.__exit__(None, None, None)
+
+    def clear_scratch(self) -> None:
+        if self.connection is not None:
+            self.connection.execute("SET schema='main'")
+            self.connection.execute(f"DROP SCHEMA IF EXISTS memory.{SPLINK_OUTPUT_SCHEMA} CASCADE")
+            self.connection.execute(f"CREATE SCHEMA memory.{SPLINK_OUTPUT_SCHEMA}")
+
+
+_session: ContextVar[LakeSession | None] = ContextVar("er_lake_session", default=None)
+
+
+@contextmanager
+def invocation_session() -> Iterator[LakeSession]:
+    """Scope reuse to one invocation, after its writer lock has been acquired."""
+    if _session.get() is not None:
+        raise RuntimeError("nested invocation sessions are not supported")
+    session = LakeSession()
+    token = _session.set(session)
+    try:
+        yield session
+    finally:
+        try:
+            session.close()
+        finally:
+            _session.reset(token)
+
+
+def suspend_session() -> None:
+    """Close the native connection before spawning dbt; the next borrow reopens it."""
+    session = _session.get()
+    if session is not None:
+        session.close()
+
+
+def clear_session_scratch() -> None:
+    session = _session.get()
+    if session is not None:
+        session.clear_scratch()
+
+
+@contextmanager
+def connect() -> Iterator[duckdb.DuckDBPyConnection]:
+    """Borrow the invocation's connection, or own a fresh one outside the CLI."""
+    session = _session.get()
+    with session.borrow() if session is not None else _fresh_connection() as connection:
+        yield connection
 
 
 def current_snapshot(connection: duckdb.DuckDBPyConnection) -> int:

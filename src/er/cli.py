@@ -21,13 +21,9 @@ Four rules govern this module and are stated nowhere else in Python:
   ``er.errors`` and :func:`er.errors.exit_code_for` produces the status, so the
   ``error_class`` recorded and the code exited with cannot disagree.
 
-``er init``, ``er lake reset`` (ER-020), ``er ingest`` (ER-031), ``er lake maintain``
-(ER-025), ``er train`` (ER-055), ``er assert`` (ER-062) and ``er review`` (ER-063) are
-the commands that do real lake work here; the work itself lives in
-:mod:`er.lake.init`, :mod:`er.ingest.landing`, :mod:`er.lake.maintain`,
-:mod:`er.matching.train`, :mod:`er.review.assertions` and :mod:`er.review.queue`, and
-this module owns only their S4.0 stdout and the exit status derived from what they
-returned. Every other command is still a stub.
+The standalone commands and ``run-all`` share the real ingest, standardize,
+match, reconcile and assemble implementations. This module owns orchestration,
+stdout manifests and exit status; each subsystem owns its transformations.
 
 ``er assert`` and ``er review`` write no ``run_stages`` row and that is S5's decision,
 not a shortcut: the ``run_stages.stage`` enum has neither an ``assert`` nor a
@@ -36,9 +32,8 @@ as it does for every name outside :data:`~er.lake.model.RUN_STAGES`. A steward a
 is recorded in ``assertions`` and ``review_queue`` themselves, whose lifecycle columns
 are what the next run reads.
 
-``er run-all``'s ingest slot is deliberately still a :class:`NoOpStage`: the chain's
-composition is ER-014's contract, and wiring the real stage into it belongs with the
-ticket that gives ``run-all`` a ``--source``/``--path`` it has to thread.
+``er run-all`` threads ``--source``/``--path`` into ingestion. A caller that already
+ingested several sources under the same run ID uses ``--skip-ingest``.
 
 Every invocation now runs inside an :class:`~er.obs.runctx.RunContext` (ER-023), so
 the ``runs`` row, each stage's ``run_stages`` row and its snapshot range are written
@@ -81,7 +76,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Annotated, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Annotated, Protocol, runtime_checkable
 
 import typer
 
@@ -89,10 +84,7 @@ from er.config.hashing import config_hash
 from er.config.loader import ConfigValidationError, load_config
 from er.config.schema import Config
 from er.dbt_runner import render_dbt_vars
-from er.doctor import check_lines, check_record, run_checks
-from er.doctor import exit_code as doctor_exit_code
 from er.entities.ids import IdFactory, UlidFactory
-from er.entities.reconcile_stage import run_reconcile_stage
 from er.entities.retraction import invalidate_incident_edges
 from er.errors import (
     ConfigError,
@@ -104,39 +96,39 @@ from er.errors import (
     classify,
     exit_code_for,
 )
-from er.golden.assemble import assemble as run_assemble
 from er.ingest.landing import ingest_delivery
 from er.ingest.sources import adapter_for
 from er.lake.catalog import tenant_lock
 from er.lake.ddl import SchemaBreakingError, preflight_schema
-from er.lake.ducklake import connect
+from er.lake.ducklake import clear_session_scratch, connect, invocation_session
 from er.lake.env import MissingEnvError
 from er.lake.init import init_lake, reset_lake
 from er.lake.maintain import DEFAULT_RETAIN_DAYS, maintain
 from er.lake.model import REBUILD_REASONS
-from er.lake.model_registry import active_model, load_model_settings
+from er.lake.model_registry import active_model, find_active_model, load_model_settings
 from er.lake.objectstore import ObjectStore
-from er.matching.full import MODE_FULL, FullMatchResult, score_full
-from er.matching.incremental import (
-    MODE_INCREMENTAL,
-    IncrementalScoreResult,
-    score_incremental,
-)
 from er.matching.tf import assert_tf_lookup_complete, tf_columns
-from er.matching.train import run_train_stage
 from er.obs.logging import emit_stage_record
+from er.obs.profiling import profiled, span
 from er.obs.runctx import RunContext, StageRun
 from er.resume import ResumePlan, read_resume_rows, resume_plan
 from er.review.assertions import add_assertion, load_assertions_csv, retract_assertion
 from er.review.queue import OPEN, RESOLUTIONS, open_reviews, resolve_review
 from er.versions import (
     MODE_CORRECTION_PASS,
+    MODE_FULL,
+    MODE_INCREMENTAL,
     ModeDecision,
     RunFingerprint,
     check_mode_preconditions,
     last_successful_run,
     rebuild_reason_for,
 )
+
+if TYPE_CHECKING:
+    from er.matching.full import FullMatchResult
+    from er.matching.incremental import IncrementalScoreResult
+
 
 __all__ = [
     "COMMANDS",
@@ -175,9 +167,7 @@ COMMANDS: tuple[str, ...] = (
     "lake reset",
 )
 
-#: The stages ``er run-all`` chains. M1 ships them as nothing-to-do stubs so the
-#: milestone's exit criterion is runnable before any of them has an implementation
-#: (S12 M1); they are exactly the set that may never be a :class:`NotImplementedStage`.
+#: The implemented stages chained by ``er run-all``.
 _CHAINED_STAGES: frozenset[str] = frozenset(
     {"ingest", "standardize", "match", "reconcile", "assemble"}
 )
@@ -549,6 +539,8 @@ class _TrainStage:
         self.stage_run = stage_run
 
     def run(self, options: GlobalOptions) -> int:
+        from er.matching.train import run_train_stage
+
         if options.config is None or options.config_hash is None:
             # Unreachable through the command tree: S4.0 lists `ER_CONFIG` in this
             # command's required-env column, so `GlobalOptions.resolve` has already
@@ -615,6 +607,8 @@ class _ReconcileStage:
         self.stage_run = stage_run
 
     def run(self, options: GlobalOptions) -> int:
+        from er.entities.reconcile_stage import run_reconcile_stage
+
         if options.config is None or self.stage_run is None:
             # Unreachable through the command tree: S4.0 lists `ER_CONFIG` in this
             # command's required-env column, so `GlobalOptions.resolve` has already
@@ -681,6 +675,9 @@ class _MatchStage:
         self.stage_run = stage_run
 
     def run(self, options: GlobalOptions) -> int:
+        from er.matching.full import score_full
+        from er.matching.incremental import score_incremental
+
         if options.config is None or self.stage_run is None:
             # Unreachable through the command tree: S4.0 lists `ER_CONFIG` in this
             # command's required-env column, so `GlobalOptions.resolve` has already
@@ -958,9 +955,12 @@ def _writer_lock(command: str, options: GlobalOptions) -> Iterator[None]:
             # it must not have to parse a refusal out of the manifest it asked for.
             sys.stderr.write(f"{exc}\n")
             raise typer.Exit(exit_code_for(exc)) from exc
+        if command not in _PREFLIGHT_EXEMPT:
+            held.enter_context(invocation_session())
         yield
 
 
+@profiled("command.preflight")
 def _preflight_schema(command: str) -> None:
     """Refuse a command whose lake has drifted breakingly from S5 (S5.1, S4.7).
 
@@ -997,11 +997,51 @@ def _preflight_schema(command: str) -> None:
 
 
 def _stage_for(name: str, args: Sequence[str] = ()) -> Stage:
-    """The stage M1 ships for ``name``: a no-op stub if ``run-all`` chains it."""
+    """Build the same real stage for standalone commands and chained runs."""
     flags = tuple(args)
-    if name in _CHAINED_STAGES:
-        return NoOpStage(name=name, args=flags)
+
+    def value(flag: str, default: str | None = None) -> str | None:
+        return flags[flags.index(flag) + 1] if flag in flags else default
+
+    if name == "ingest":
+        source, path = value("--source"), value("--path")
+        if source is None or path is None:
+            raise ConfigError("ingest requires --source and --path")
+        return _IngestStage(source=source, path=Path(path), args=flags)
+    if name == "standardize":
+        return _StandardizeStage(changed_only="--changed-only" in flags, args=flags)
+    if name == "match":
+        return _MatchStage(mode=value("--mode", "full") or "full", args=flags)
+    if name == "reconcile":
+        return _ReconcileStage(reason=value("--reason"), args=flags)
+    if name == "assemble":
+        return _AssembleStage(touched_only="--touched-only" in flags, args=flags)
     return NotImplementedStage(name=name, args=flags)
+
+
+@dataclass
+class _StandardizeStage:
+    changed_only: bool = False
+    full_refresh: bool = False
+    args: tuple[str, ...] = ()
+    name: str = "standardize"
+    stage_run: StageRun | None = None
+
+    def bind(self, stage_run: StageRun) -> None:
+        self.stage_run = stage_run
+
+    def run(self, options: GlobalOptions) -> int:
+        from er.std.stage import standardize as run_standardize
+
+        if options.config is None or self.stage_run is None:
+            raise StageFailure("standardize needs a config and stage record")
+        code, _ = run_standardize(
+            options.config,
+            self.stage_run,
+            changed_only=self.changed_only,
+            full_refresh=self.full_refresh,
+        )
+        return code
 
 
 def run_all_chain(
@@ -1040,10 +1080,6 @@ def run_all_chain(
         stages.append(_stage_for("ingest", ingest_args))
     stages.append(_stage_for("standardize", ("--changed-only",) if incremental else ()))
     stages.append(_stage_for("match", ("--mode", mode)))
-    # The chain's reconcile slot is still the M1 stub (`_stage_for`), so the reason
-    # reaches only `runs.rebuild_reason` here; the ticket that wires real stages
-    # into this chain threads it into `_ReconcileStage(reason=...)`, whose event
-    # stamping the standalone `er reconcile --reason` already exercises.
     stages.append(_stage_for("reconcile", ("--reason", reason) if reason is not None else ()))
     stages.append(_stage_for("assemble", ("--touched-only",) if incremental else ()))
     return stages
@@ -1114,12 +1150,23 @@ def _run_context(
     rather than by each stage.
     """
     document = options.config
+    tf_snapshot_id = None
+    if persist and document is not None:
+        try:
+            with connect() as connection:
+                active = find_active_model(connection)
+            if active is not None:
+                model_version = model_version or active.model_version
+                tf_snapshot_id = active.tf_snapshot_id
+        except MissingEnvError:
+            pass
     return RunContext(
         run_id=options.run_id,
         mode=mode,
         tenant=None if document is None else document.tenant,
         config_hash=options.config_hash,
         model_version=model_version,
+        tf_snapshot_id=tf_snapshot_id,
         std_version=None if document is None else document.versions.std_version,
         survivorship_version=(None if document is None else document.versions.survivorship_version),
         rebuild_reason=rebuild_reason,
@@ -1140,7 +1187,18 @@ def _execute(stage: Stage, options: GlobalOptions, run: RunContext) -> _Outcome:
     it writes are on the row the context persists rather than on one it built for
     itself (S5.2).
     """
-    with run.stage(stage.name) as stage_run:
+    with (
+        span(stage.name, run_id=options.run_id, stage=stage.name) as metrics,
+        run.stage(stage.name) as stage_run,
+    ):
+        input_unit, output_unit = {
+            "train": ("records", "models"),
+            "match": ("records", "pairs"),
+            "reconcile": ("records", "entities"),
+            "assemble": ("entities", "entities"),
+        }.get(stage.name, ("records", "records"))
+        stage_run.counters.set("input_unit", input_unit)
+        stage_run.counters.set("output_unit", output_unit)
         if isinstance(stage, RecordingStage):
             stage.bind(stage_run)
         try:
@@ -1152,6 +1210,13 @@ def _execute(stage: Stage, options: GlobalOptions, run: RunContext) -> _Outcome:
             stage_run.finish(code, error_class=classify(exc), error_detail=exc.detail)
         else:
             stage_run.finish(code)
+        finally:
+            clear_session_scratch()
+        metrics.update(stage_run.counters.payload())
+        metrics["exit_code"] = code
+        if stage_run.model_version is not None:
+            run.model_version = stage_run.model_version
+            run.tf_snapshot_id = stage_run.tf_snapshot_id
     return _Outcome(
         stage=stage.name,
         exit_code=code,
@@ -1294,9 +1359,15 @@ def _run_chain(
         options, mode=mode, model_version=model_version, rebuild_reason=rebuild_reason
     ) as run:
         for stage in stages:
+            if isinstance(stage, _StandardizeStage):
+                stage.full_refresh = rebuild_reason in (
+                    "std_version_bump",
+                    "survivorship_version_bump",
+                )
             outcome = _execute(stage, options, run)
             executed += 1
-            _report(outcome, options)
+            if isinstance(stage, (_StandardizeStage, NoOpStage, NotImplementedStage)):
+                _report(outcome, options)
             if outcome.exit_code not in (ExitCode.SUCCESS, ExitCode.NOTHING_TO_DO):
                 final = outcome.exit_code
                 break
@@ -1328,7 +1399,17 @@ def _resume(run_id: str, options: GlobalOptions) -> ResumePlan:
     try:
         with connect() as connection:
             rows = read_resume_rows(connection, run_id)
-        return resume_plan(rows, options.config_hash)
+            plan = resume_plan(rows, options.config_hash)
+            active = find_active_model(connection)
+            if plan.model_version is not None and (
+                active is None or active.model_version != plan.model_version
+            ):
+                raise PreconditionFailure(
+                    "ERR_MODEL_VERSION_CHANGED: "
+                    f"cannot resume {run_id}: recorded model "
+                    f"{plan.model_version!r} is no longer active",
+                )
+        return plan
     except ErError as exc:
         raise typer.Exit(_refuse(run_id, exc)) from exc
 
@@ -1345,14 +1426,18 @@ def _current_fingerprint(options: GlobalOptions) -> RunFingerprint | None:
     document = options.config
     if document is None or options.config_hash is None:
         return None
+    model_version = None
+    try:
+        with connect() as connection:
+            active = find_active_model(connection)
+        if active is not None:
+            model_version = active.model_version
+    except MissingEnvError:
+        pass
     return RunFingerprint(
         config_hash=options.config_hash,
-        # The value this run's `runs.model_version` will hold, which is NULL until a
-        # stage resolves the `status='active'` row — the same value `_run_chain` hands
-        # `_run_context` on this path. The two MUST move together: a prior run recorded
-        # under a resolved `model_version` would otherwise drift against a current one
-        # that has merely not been resolved yet.
-        model_version=None,
+        # Resolve the same active model the real matching stage will use.
+        model_version=model_version,
         std_version=document.versions.std_version,
         survivorship_version=document.versions.survivorship_version,
     )
@@ -1560,6 +1645,9 @@ def doctor(
     options = GlobalOptions.resolve(
         config_path=config, run_id=run_id, json_output=json_output, require_config=False
     )
+    from er.doctor import check_lines, check_record, run_checks
+    from er.doctor import exit_code as doctor_exit_code
+
     results = run_checks()
     for result, line in zip(results, check_lines(results), strict=True):
         _write_stdout(check_record(result), line, options)
@@ -1758,18 +1846,19 @@ class _AssembleStage:
         self.stage_run = stage_run
 
     def run(self, options: GlobalOptions) -> int:
+        from er.golden.assemble import assemble as run_assemble
+
         if options.config is None or self.stage_run is None:
             # Unreachable through the command tree: S4.0 lists ER_CONFIG required and
             # `_execute` binds before the body runs.
             raise StageFailure("er assemble was invoked without a config or a run_stages row")
-        with connect() as connection:
-            result = run_assemble(
-                connection,
-                options.config,
-                run_id=self.stage_run.run_id,
-                counters=self.stage_run.counters,
-                touched_only=self.touched_only,
-            )
+        result = run_assemble(
+            connect,
+            options.config,
+            run_id=self.stage_run.run_id,
+            counters=self.stage_run.counters,
+            touched_only=self.touched_only,
+        )
         _write_stdout(result.manifest(), result.stdout_line(), options)
         return result.exit_code
 

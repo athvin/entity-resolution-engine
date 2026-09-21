@@ -29,6 +29,7 @@ from typing import Any, cast
 
 import duckdb
 import pytest
+from helpers.cli_fixture import prepare_cli_fixture
 from ulid import ULID
 
 from er.lake.catalog import LOCK_HELD_MESSAGE, tenant_lock
@@ -262,6 +263,7 @@ def test_writes_maintain_run_and_stage_rows(
 def test_referenced_snapshots_remain_time_travelable(
     initialised_lake: duckdb.DuckDBPyConnection,
     delivery: Path,
+    tmp_path: Path,
 ) -> None:
     """AC5: the retention guard keeps S4.7's one recovery tool usable.
 
@@ -269,6 +271,7 @@ def test_referenced_snapshots_remain_time_travelable(
     the teardown spelling, ``older_than => now()`` — which reaps every snapshot a
     live run points at and leaves an operator holding a range they cannot read.
     """
+    prepare_cli_fixture(initialised_lake, tmp_path / "pipeline-fixture")
     ingest(delivery)
     assert run_er("run-all", "--mode", "incremental", "--skip-ingest").returncode == 0
 

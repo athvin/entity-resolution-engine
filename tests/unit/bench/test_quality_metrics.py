@@ -27,6 +27,27 @@ def _import(module: str) -> ModuleType:
 
 quality = _import("quality")
 
+
+def test_quality_at_10k_does_not_construct_all_possible_pairs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = _lake()
+    connection.execute(
+        "INSERT INTO lake.main.int_std_records "
+        "SELECT 'crm:' || i::VARCHAR FROM range(5, 10001) t(i)"
+    )
+
+    def forbidden(_records: object) -> None:
+        raise AssertionError("quadratic record-pair universe was allocated")
+
+    monkeypatch.setattr(quality, "_all_pairs", forbidden)
+    try:
+        assert quality.blocking_recall(connection, TRUTH).recall == 1
+        assert quality.cluster_level_metrics(connection, TRUTH).f1 == 1
+    finally:
+        connection.close()
+
+
 R1, R2, R3, R4 = "crm:1", "crm:2", "crm:3", "crm:4"
 #: r1/r2 are one persona and r3/r4 another.
 TRUTH = {(R1, R2), (R3, R4)}

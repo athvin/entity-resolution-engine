@@ -64,6 +64,8 @@ from er.lake.objectstore import ObjectStore
 if TYPE_CHECKING:  # annotations only -- never executed, so the name clash cannot bite
     from conftest import LakeNamespace, SubNamespace
 
+pytestmark = pytest.mark.shard_together
+
 #: S8.1 step 4's opt-out. Spelled rather than imported, with the namespace shape.
 KEEP_LAKE_OPTION = "--keep-lake"
 

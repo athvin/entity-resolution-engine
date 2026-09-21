@@ -138,3 +138,18 @@ def test_emitter_refuses_a_record_that_is_not_the_s5_2_key_set() -> None:
 def test_cli_exports_the_one_emitter() -> None:
     """AC2: `emit_stage_line` is THE emitter under its ER-014 name, not a second one."""
     assert emit_stage_line is emit_stage_record
+
+
+@pytest.fixture(autouse=True)
+def isolated_stage_bodies(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These protocol tests inject no-op bodies; integration tests run real stages."""
+    from er import cli as cli_module
+
+    original = cli_module._stage_for
+
+    def factory(name, args=()):
+        if name in {"ingest", "standardize", "match", "reconcile", "assemble"}:
+            return cli_module.NoOpStage(name=name, args=tuple(args))
+        return original(name, args)
+
+    monkeypatch.setattr(cli_module, "_stage_for", factory)

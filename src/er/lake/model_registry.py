@@ -49,6 +49,7 @@ import duckdb
 from er.errors import ConfigError, PreconditionFailure, StageFailure
 from er.lake.ducklake import LAKE_ALIAS
 from er.lake.model import REGISTRY, SCHEMA_QUALIFIER
+from er.obs.profiling import profiled
 
 __all__ = [
     "ACTIVE",
@@ -281,6 +282,7 @@ def active_model(connection: duckdb.DuckDBPyConnection) -> ModelRow:
     return row
 
 
+@profiled("match.load_model", "models")
 def load_model_settings(
     connection: duckdb.DuckDBPyConnection, store: ObjectWriter, model_version: str
 ) -> dict[str, Any]:
@@ -376,6 +378,7 @@ _INSERT_SQL: Final = (
 _SUPERSEDE_SQL: Final = f"UPDATE {_REGISTRY} SET status = ? WHERE status = ?"
 
 
+@profiled("train.publish_model", "models")
 def register_model(
     connection: duckdb.DuckDBPyConnection,
     store: ObjectWriter,

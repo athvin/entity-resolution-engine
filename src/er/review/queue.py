@@ -60,6 +60,7 @@ from er.lake.model import (
     REVIEW_SUBJECT_TYPES,
     SCHEMA_QUALIFIER,
 )
+from er.obs.profiling import profiled
 from er.review.assertions import ALWAYS, NEVER, Assertion, add_assertion
 
 __all__ = [
@@ -493,6 +494,7 @@ def _upsert(
     )
 
 
+@profiled("match.review_queue", "pairs")
 def upsert_gray_band_pairs(
     connection: duckdb.DuckDBPyConnection,
     pairs: Iterable[GrayBandPair],

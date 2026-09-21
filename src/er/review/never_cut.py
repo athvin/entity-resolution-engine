@@ -55,6 +55,7 @@ import duckdb
 from er.entities.ids import IdFactory, MonotonicUlidFactory, canonicalize_pair
 from er.errors import NonConvergenceError
 from er.lake.model import SCHEMA_QUALIFIER
+from er.obs.profiling import profiled
 from er.review.assertions import NEVER, Assertion
 
 __all__ = [
@@ -282,6 +283,7 @@ def recheck_violations(
     return sorted(set(violations))
 
 
+@profiled("reconcile.constraints", "pairs")
 def never_cut_fixpoint(
     edges: Iterable[PathEdge],
     assertions: Iterable[Assertion],

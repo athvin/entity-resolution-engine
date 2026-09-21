@@ -51,8 +51,9 @@ from er.dbt_runner import (
 from er.embeddings.coherence import get_scorer
 from er.entities.ids import IdFactory
 from er.errors import ExitCode, StageFailure
-from er.lake.ducklake import attach_statements, detach
 from er.lake.model import SCHEMA_QUALIFIER
+from er.obs.profiling import profiled, span
+from er.obs.runctx import ConnectionSource
 from er.review.queue import upsert_entity_finding
 
 __all__ = [
@@ -100,6 +101,7 @@ _TOUCHED: Final = f"{SCHEMA_QUALIFIER}.er_touched_entities"
 _TIMESTAMP_FORMAT: Final = "%Y-%m-%d %H:%M:%S.%f"
 
 
+@profiled("assemble.touched_set", "entities")
 def compute_touched_set(connection: duckdb.DuckDBPyConnection, run_id: str) -> dict[str, str]:
     """`entity_id -> disposition` for every entity this run's events touched (S4.6).
 
@@ -170,6 +172,7 @@ def write_touched_entities(
     return len(touched)
 
 
+@profiled("assemble.reap", "entities")
 def reap_retired_entities(connection: duckdb.DuckDBPyConnection, run_id: str) -> int:
     """Delete every `retire`-disposition entity from the three golden relations (S4.6).
 
@@ -258,6 +261,10 @@ class AssembleResult:
     def record(self, counters: Any) -> None:
         """Write the S4.6 counters onto the stage's `run_stages` row (S5.2)."""
         counters.set("entities_touched", self.entities_touched)
+        counters.set("rows_in", self.entities_touched)
+        counters.set("rows_out", self.entities_rebuilt)
+        counters.set("input_unit", "entities")
+        counters.set("output_unit", "entities")
         counters.set("entities_rebuilt", self.entities_rebuilt)
         counters.set("entities_reaped", self.entities_reaped)
         counters.set("lineage_rows", self.lineage_rows)
@@ -279,6 +286,7 @@ def _run_started_at(connection: duckdb.DuckDBPyConnection, run_id: str) -> datet
     return stamp if isinstance(stamp, datetime) else datetime.fromisoformat(str(stamp))
 
 
+@profiled("assemble.output_counts", "lineage_rows")
 def _golden_counts(connection: duckdb.DuckDBPyConnection) -> tuple[int, int]:
     """`(lineage_rows, tiebreak_deterministic_count)` after the marts (S4.6 counters)."""
     lineage = connection.execute(
@@ -292,16 +300,6 @@ def _golden_counts(connection: duckdb.DuckDBPyConnection) -> tuple[int, int]:
         0 if lineage is None else int(lineage[0]),
         0 if tiebreak is None else int(tiebreak[0]),
     )
-
-
-def _closer(connection: duckdb.DuckDBPyConnection) -> Callable[[], None]:
-    """A `close_conn` that returns None — `detach` returns a truthy value run_dbt's
-    signature does not want."""
-
-    def close() -> None:
-        detach(connection)
-
-    return close
 
 
 def score_touched_entities(
@@ -347,8 +345,9 @@ def score_touched_entities(
     return written
 
 
+@profiled("assemble.lifecycle", "entities")
 def assemble(
-    connection: duckdb.DuckDBPyConnection,
+    source: ConnectionSource,
     cfg: Config,
     *,
     run_id: str,
@@ -366,7 +365,7 @@ def assemble(
     is captured once from the `runs` row so every relation stamps the same instant.
 
     Args:
-        connection: an attached lake connection (S4.0b).
+        source: a connection provider; no borrowed connection spans dbt (S4.0b).
         cfg: the validated S6 document.
         run_id: this run.
         counters: the stage's `StageCounters` (S5.2).
@@ -380,47 +379,42 @@ def assemble(
         set (S4.0), ``0`` otherwise.
     """
     started = time.monotonic()
-    run_started = _run_started_at(connection, run_id)
-    touched = compute_touched_set(connection, run_id) if touched_only else {}
-    rebuild = {entity_id for entity_id, d in touched.items() if d == "rebuild"}
+    with span("assemble.prepare"), source() as connection:
+        run_started = _run_started_at(connection, run_id)
+        touched = compute_touched_set(connection, run_id) if touched_only else {}
+        rebuild = {entity_id for entity_id, d in touched.items() if d == "rebuild"}
 
-    # `--touched-only` with nothing to do is S4.0's `10`: no mart runs, no reap, no
-    # golden row moves, and every `assembled_at` stays as it was.
-    if touched_only and not touched:
-        write_touched_entities(connection, run_id, {})
-        empty = AssembleResult(
-            exit_code=int(ExitCode.NOTHING_TO_DO),
-            entities_touched=0,
-            entities_rebuilt=0,
-            entities_reaped=0,
-            lineage_rows=0,
-            tiebreak_deterministic_count=0,
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
-        empty.record(counters)
-        return empty
+        # `--touched-only` with nothing to do is S4.0's `10`: no mart runs, no reap, no
+        # golden row moves, and every `assembled_at` stays as it was.
+        if touched_only and not touched:
+            write_touched_entities(connection, run_id, {})
+            empty = AssembleResult(
+                exit_code=int(ExitCode.NOTHING_TO_DO),
+                entities_touched=0,
+                entities_rebuilt=0,
+                entities_reaped=0,
+                lineage_rows=0,
+                tiebreak_deterministic_count=0,
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
+            empty.record(counters)
+            return empty
 
-    write_touched_entities(connection, run_id, touched)
+        write_touched_entities(connection, run_id, touched)
 
-    # S11 coherence seam: score the rebuilt entities and queue findings after the touched
-    # set is written and before the marts run (M20). Under the v1 `noop` scorer this writes
-    # nothing and changes no golden, membership or event row.
-    score_touched_entities(connection, cfg, run_id=run_id, id_factory=id_factory)
+        # S11 coherence seam: score the rebuilt entities and queue findings after the touched
+        # set is written and before the marts run (M20). Under the v1 `noop` scorer this writes
+        # nothing and changes no golden, membership or event row.
+        score_touched_entities(connection, cfg, run_id=run_id, id_factory=id_factory)
 
     runner = run_dbt if dbt is None else dbt
     vars_payload = assemble_dbt_vars(cfg, run_id, run_started, touched_only=touched_only)
-
-    def reattach() -> None:
-        for statement in attach_statements():
-            connection.execute(statement)
 
     result = runner(
         "build",
         select=MARTS_SELECTOR,
         vars=vars_payload,
         target="lake",
-        close_conn=_closer(connection),
-        reopen_conn=reattach,
         project_dir=DBT_PROJECT_DIR,
         profiles_dir=DBT_PROFILES_DIR,
         artifacts_dir=artifacts_dir,
@@ -431,18 +425,19 @@ def assemble(
         # braces path for an injected runner that returns rather than raises.
         raise StageFailure(f"the golden marts exited {result.exit_code}; nothing was reaped")
 
-    entities_reaped = reap_retired_entities(connection, run_id)
-    lineage_rows, tiebreak = _golden_counts(connection)
+    with span("assemble.finalize"), source() as connection:
+        entities_reaped = reap_retired_entities(connection, run_id)
+        lineage_rows, tiebreak = _golden_counts(connection)
 
-    if touched_only:
-        entities_rebuilt = len(rebuild)
-        entities_touched = len(touched)
-    else:
-        # Full mode rebuilds every active entity and reaps nothing, so the S4.6
-        # accounting `rebuilt + reaped == touched` holds with `reaped = 0` and
-        # `touched = rebuilt` — the whole active corpus is what this run touched.
-        entities_rebuilt = _active_entity_count(connection)
-        entities_touched = entities_rebuilt
+        if touched_only:
+            entities_rebuilt = len(rebuild)
+            entities_touched = len(touched)
+        else:
+            # Full mode rebuilds every active entity and reaps nothing, so the S4.6
+            # accounting `rebuilt + reaped == touched` holds with `reaped = 0` and
+            # `touched = rebuilt` — the whole active corpus is what this run touched.
+            entities_rebuilt = _active_entity_count(connection)
+            entities_touched = entities_rebuilt
 
     outcome = AssembleResult(
         exit_code=int(ExitCode.SUCCESS),

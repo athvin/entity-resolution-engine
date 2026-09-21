@@ -107,8 +107,8 @@ def _cluster_pairs(connection: Any) -> set[Pair]:
 
 def blocking_recall(connection: Any, truth: set[Pair]) -> PairwiseMetrics:
     """S8.5 blocking family: blocked pairs vs truth over the full C(n,2) universe."""
-    universe = _all_pairs(_current_records(connection))
-    return pairwise_metrics(_blocked_pairs(connection), truth, universe)
+    predicted = _blocked_pairs(connection)
+    return pairwise_metrics(predicted, truth, _relevant_universe(connection, predicted, truth))
 
 
 def edge_level_metrics(connection: Any, truth: set[Pair], *, auto_merge: float) -> PairwiseMetrics:
@@ -120,8 +120,23 @@ def edge_level_metrics(connection: Any, truth: set[Pair], *, auto_merge: float) 
 
 def cluster_level_metrics(connection: Any, truth: set[Pair]) -> PairwiseMetrics:
     """S8.5 cluster family (headline): membership closure vs truth over the full C(n,2)."""
-    universe = _all_pairs(_current_records(connection))
-    return pairwise_metrics(_cluster_pairs(connection), truth, universe)
+    predicted = _cluster_pairs(connection)
+    return pairwise_metrics(predicted, truth, _relevant_universe(connection, predicted, truth))
+
+
+def _relevant_universe(connection: Any, predicted: set[Pair], truth: set[Pair]) -> set[Pair]:
+    """Validate against the full record universe without allocating C(n, 2) tuples.
+
+    Precision/recall/F1 do not use true negatives. Including only pairs present in
+    either set gives the identical result through the existing metrics function,
+    while avoiding ~50 million otherwise-unused pairs at the 10k scale.
+    """
+    records = set(_current_records(connection))
+    relevant = predicted | truth
+    stray = next(((a, b) for a, b in relevant if a not in records or b not in records), None)
+    if stray is not None:
+        raise ValueError(f"quality pair {stray!r} contains a record outside the current corpus")
+    return relevant
 
 
 def _family(metrics: PairwiseMetrics) -> dict[str, Any]:

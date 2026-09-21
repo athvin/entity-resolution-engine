@@ -34,6 +34,7 @@ from typing import Any
 
 import duckdb
 import yaml
+from helpers.cli_fixture import prepare_cli_fixture
 from ulid import ULID
 
 from er.config.hashing import config_hash
@@ -101,6 +102,7 @@ def test_second_concurrent_run_exits_3(initialised_lake: duckdb.DuckDBPyConnecti
 
 def test_the_refusal_leaves_the_tenant_unlocked(
     initialised_lake: duckdb.DuckDBPyConnection,
+    tmp_path: Path,
 ) -> None:
     """AC3: refusing does not wedge the namespace, and the writer that held it can go.
 
@@ -108,6 +110,7 @@ def test_the_refusal_leaves_the_tenant_unlocked(
     is contended, and unlocks — releasing the *holder's* lock, because `pg_advisory_unlock`
     is keyed on the value rather than on the acquisition.
     """
+    prepare_cli_fixture(initialised_lake, tmp_path / "drop")
     with tenant_lock(TENANT, run_id=str(ULID())):
         refused = run_er("run-all", "--mode", "incremental", "--skip-ingest")
         assert refused.returncode == 3, refused.stdout + refused.stderr
@@ -127,6 +130,7 @@ def test_incremental_refuses_on_config_drift(
     for this tenant" (S4.0) has to be a run the CLI itself recorded, or the guard could
     be reading a baseline no invocation would ever produce.
     """
+    prepare_cli_fixture(initialised_lake, tmp_path / "drop")
     baseline = run_er("run-all", "--mode", "incremental", "--skip-ingest")
     assert baseline.returncode == 0, baseline.stdout + baseline.stderr
     on_disk_hash = config_hash(load_config(Path(os.environ["ER_CONFIG"])))

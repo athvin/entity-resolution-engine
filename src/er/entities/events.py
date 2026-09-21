@@ -43,6 +43,7 @@ import duckdb
 
 from er.entities.ids import IdFactory, MonotonicUlidFactory, canonicalize_pair
 from er.lake.model import EVENT_TYPES, REBUILD_REASONS, REGISTRY, SCHEMA_QUALIFIER
+from er.obs.profiling import profiled
 
 __all__ = [
     "EVENT_DETAILS_SCHEMA",
@@ -465,6 +466,7 @@ _ROW_PLACEHOLDER: Final = f"({', '.join('?' for _ in EVENT_COLUMNS)})"
 _INSERT_PREFIX: Final = f"INSERT INTO {_ENTITY_EVENTS} ({_COLUMN_LIST}) VALUES "
 
 
+@profiled("reconcile.events", "events")
 def append_events(
     connection: duckdb.DuckDBPyConnection,
     events: Iterable[Event],

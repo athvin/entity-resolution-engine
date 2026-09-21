@@ -50,7 +50,7 @@ from __future__ import annotations
 import os
 import re
 from collections.abc import Callable, Iterator, Mapping
-from contextlib import ExitStack
+from contextlib import ExitStack, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -64,6 +64,8 @@ from er.lake.ducklake import LAKE_ALIAS, connect, detach
 from er.lake.init import init_lake
 from er.lake.model import DBT_OWNED, DDL_OWNED, SCHEMA_QUALIFIER
 from er.lake.objectstore import ObjectStore
+
+pytest_plugins = ["helpers.sharding"]
 
 __all__ = [
     "DATA_PATH_TEMPLATE",
@@ -267,10 +269,12 @@ def _announce(config: pytest.Config, message: str) -> None:
     run happens to have been given ``-s``.
     """
     reporter = config.pluginmanager.get_plugin("terminalreporter")
-    if reporter is None:
-        print(message)
-        return
-    reporter.write_line(message)
+    capture = config.pluginmanager.get_plugin("capturemanager")
+    with capture.global_and_fixture_disabled() if capture is not None else nullcontext():
+        if reporter is None:
+            print(message)
+        else:
+            reporter.write_line(message)
 
 
 def _reclaim_or_announce(

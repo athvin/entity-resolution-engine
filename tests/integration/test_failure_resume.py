@@ -29,6 +29,7 @@ from typing import Any
 import duckdb
 import pytest
 import yaml
+from helpers.cli_fixture import prepare_cli_fixture
 from ulid import ULID
 
 from er.config.hashing import config_hash
@@ -149,8 +150,10 @@ def test_failed_stage_leaves_prefix_committed(
 
 def test_resume_restarts_from_failed_stage_without_duplicating_rows(
     initialised_lake: duckdb.DuckDBPyConnection,
+    tmp_path: Path,
 ) -> None:
     """AC5/AC6: the resume re-executes stage k onwards, and both refusals hold."""
+    prepare_cli_fixture(initialised_lake, tmp_path / "drop")
     run_id = str(ULID())
     on_disk_hash = config_hash(load_config(config_path()))
     seed_failed_run(initialised_lake, run_id=run_id, on_disk_hash=on_disk_hash)

@@ -55,6 +55,7 @@ from er.entities.ids import IdFactory, MonotonicUlidFactory
 from er.errors import ConfigError, PreconditionFailure
 from er.lake.columns import STD_RECORD_COLUMNS
 from er.lake.model import SCHEMA_QUALIFIER
+from er.obs.profiling import profiled
 
 __all__ = [
     "TF_COLUMN_PREFIX",
@@ -258,6 +259,7 @@ SELECT value, tf_value FROM {_TF_LOOKUP}
 """
 
 
+@profiled("train.freeze_tf", "terms")
 def materialize_tf_lookup(
     connection: duckdb.DuckDBPyConnection,
     cfg: Config,
@@ -334,6 +336,7 @@ class TfLinker(Protocol):
         """The linker's table-management surface."""
 
 
+@profiled("match.register_tf", "terms")
 def register_tf(
     linker: TfLinker,
     connection: duckdb.DuckDBPyConnection,

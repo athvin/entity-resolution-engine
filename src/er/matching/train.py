@@ -67,6 +67,7 @@ from er.matching.tf import (
     tf_columns,
     tf_tables_path,
 )
+from er.obs.profiling import profiled, span
 from er.obs.runctx import StageRun
 
 __all__ = [
@@ -284,7 +285,19 @@ def _invoke(linker: TrainLinker, call: TrainCall) -> Any:
     target: Any = linker
     for attribute in call.method_path.split("."):
         target = getattr(target, attribute)
-    return target(**call.kwargs)
+    with span(
+        "train.estimation_call",
+        unit="pairs",
+        method=call.method_path,
+        blocking_rule=call.kwargs.get("blocking_rule"),
+        max_pairs=call.kwargs.get("max_pairs"),
+    ) as metrics:
+        result = target(**call.kwargs)
+        # Splink's EM session retains one parameter snapshot per completed iteration.
+        history = getattr(result, "_core_model_settings_history", None)
+        if isinstance(history, list):
+            metrics["iterations"] = max(0, len(history) - 1)
+        return result
 
 
 def _fitted_settings(linker: TrainLinker) -> dict[str, Any]:
@@ -305,6 +318,7 @@ def _fitted_settings(linker: TrainLinker) -> dict[str, Any]:
     return {key: value for key, value in document.items() if key not in NON_FITTED_SETTINGS_KEYS}
 
 
+@profiled("train.fit", "records")
 def train_model(
     connection: duckdb.DuckDBPyConnection,
     cfg: Config,
@@ -401,6 +415,7 @@ _CORPUS_SQL: Final = (
 _CORPUS_COUNT_SQL: Final = f"SELECT count(*) FROM {TRAIN_CORPUS_RELATION}"
 
 
+@profiled("train.prepare_corpus", "records")
 def _materialize_corpus(connection: duckdb.DuckDBPyConnection) -> int:
     """Copy the corpus into a bare local relation and return how many rows it holds.
 
@@ -520,6 +535,7 @@ class TrainStageResult:
         stage_run.model_version = self.model_version
         stage_run.tf_snapshot_id = self.tf_snapshot_id
         stage_run.counters.set("rows_in", self.rows_in)
+        stage_run.counters.set("rows_out", int(self.trained))
         stage_run.counters.set("model_version", self.model_version)
         stage_run.counters.set("tf_snapshot_id", self.tf_snapshot_id)
         stage_run.counters.set("corpus_snapshot", self.corpus_snapshot)
@@ -536,6 +552,7 @@ def _unchanged(active: ModelRow, config_hash: str, snapshot: int) -> bool:
     return active.config_hash == config_hash and active.corpus_snapshot == snapshot
 
 
+@profiled("train.lifecycle", "records")
 def run_train_stage(
     connection: duckdb.DuckDBPyConnection,
     cfg: Config,

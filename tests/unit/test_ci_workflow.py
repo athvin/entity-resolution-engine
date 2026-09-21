@@ -286,6 +286,35 @@ def test_integration_job_teardown_and_uploads() -> None:
         assert step["with"]["path"] == "artifacts/"
 
 
+def test_integration_matrix_covers_all_shards_and_retains_each_result() -> None:
+    definition = job("integration")
+    shards = definition["strategy"]["matrix"]["shard"]
+    assert shards == list(range(32)), "every shard must run exactly once"
+    assert definition["strategy"]["fail-fast"] is False
+    command = next(
+        step["run"] for step in definition["steps"] if step.get("name") == "Run integration suite"
+    )
+    assert "--integration-shard-index ${{ matrix.shard }}" in command
+    assert f"--integration-shard-count {len(shards)}" in command
+    assert "--no-deps" in command
+    assert "PYTHONUNBUFFERED=1" in command
+    assert "faulthandler_timeout=" in command
+    upload = next(
+        step for step in definition["steps"] if "upload-artifact@" in step.get("uses", "")
+    )
+    assert "${{ matrix.shard }}" in upload["with"]["name"]
+    diagnostics = next(
+        i
+        for i, step in enumerate(definition["steps"])
+        if step.get("name") == "Capture substrate diagnostics"
+    )
+    teardown = next(
+        i for i, step in enumerate(definition["steps"]) if step.get("name") == "Tear down"
+    )
+    assert diagnostics < teardown
+    assert definition["steps"][diagnostics]["if"] == "always()"
+
+
 def test_doctor_is_first_integration_step() -> None:
     """AC7: the integration job's order is checkout/build/reset, `er doctor`, pytest.
 

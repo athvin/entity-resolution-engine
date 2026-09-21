@@ -155,7 +155,12 @@ STABLE_POSITIONS: tuple[int, ...] = tuple(
 #: AC6's key set: the S4.1.1 per-stage names plus the promoted counters this stage
 #: writes (S5.2's completeness rule). Built from the declared tuple rather than
 #: retyped, so a name added to S4.1.1 fails here instead of silently widening.
-EXPECTED_COUNTER_KEYS = frozenset(DECLARED_COUNTERS["ingest"]) | {"rows_in", "rows_out"}
+EXPECTED_COUNTER_KEYS = frozenset(DECLARED_COUNTERS["ingest"]) | {
+    "rows_in",
+    "rows_out",
+    "input_unit",
+    "output_unit",
+}
 
 
 def run_er(*args: str) -> subprocess.CompletedProcess[str]:
@@ -411,8 +416,7 @@ def test_run_stages_counters_and_stdout_manifest(
     assert rows_out == N, "S4.1.1: rows_out is the raw_records rows appended"
     assert duration is not None
 
-    # AC6: the payload's key set is exactly the S5.2 union -- no missing name, and no
-    # sixth counter beside the five S4.1 counts.
+    # AC6: all S5.2 counters plus explicit units for the shared row measurements.
     payload = json.loads(counters)
     assert set(payload) == EXPECTED_COUNTER_KEYS
     assert payload["files"] == 1
@@ -424,6 +428,7 @@ def test_run_stages_counters_and_stdout_manifest(
     )
     assert (payload["tombstone_count"], payload["resurrected_count"]) == (0, 0)
     assert (payload["rows_in"], payload["rows_out"]) == (rows_in, rows_out)
+    assert payload["input_unit"] == payload["output_unit"] == "records"
 
     # AC7: stdout is the S4.0 manifest line and nothing else.
     lines = result.stdout.strip().splitlines()

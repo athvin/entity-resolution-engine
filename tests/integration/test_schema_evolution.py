@@ -43,6 +43,7 @@ from typing import Any
 
 import duckdb
 import yaml
+from helpers.cli_fixture import prepare_cli_fixture
 from ulid import ULID
 
 from er.cli import run_all_chain
@@ -363,6 +364,7 @@ def test_version_bump_sets_rebuild_reason_and_runs_non_incrementally(
     initialised_lake: duckdb.DuckDBPyConnection, tmp_path: Path
 ) -> None:
     """AC5/AC6: each bump names itself in `runs.rebuild_reason` and leaves T-INC-2."""
+    prepare_cli_fixture(initialised_lake, tmp_path / "drop")
     baseline = er_run_all(mode=MODE_INCREMENTAL)
     assert baseline.returncode == 0, baseline.stdout + baseline.stderr
     baseline_run_id = run_id_of(baseline)

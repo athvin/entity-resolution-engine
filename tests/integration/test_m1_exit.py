@@ -51,6 +51,7 @@ from typing import Any, Final
 
 import duckdb
 import pytest
+from helpers.cli_fixture import prepare_cli_fixture
 from ulid import ULID
 
 from er.doctor import RUNTIME_CHECK_NAMES
@@ -328,32 +329,38 @@ def test_doctor_exits_zero(empty_namespace: Namespace) -> None:
 
 
 def test_run_all_skip_ingest_exits_zero_with_four_stage_rows(
-    initialised_lake: duckdb.DuckDBPyConnection,
+    initialised_lake: duckdb.DuckDBPyConnection, tmp_path: Path
 ) -> None:
     """M1-EXIT-4 / M1-EXIT-5 / M1-EXIT-6, AC3 and AC4: the chain exits 0 on a chain of
     `10`s and leaves one `runs` row and four `run_stages` rows behind it."""
+    prepare_cli_fixture(initialised_lake, tmp_path / "delivery")
+    baseline = run_er("run-all", "--mode", "full", "--skip-ingest")
+    assert baseline.returncode == 0, baseline.stdout + baseline.stderr
     result = run_er("run-all", "--mode", "incremental", "--skip-ingest", "--json")
 
     assert result.returncode == 0, result.stdout + result.stderr
     payloads = stdout_records(result.stdout)
-    stages = [payload for payload in payloads if "stage" in payload]
+    stages = [json.loads(line) for line in result.stderr.splitlines() if line.startswith("{")]
     summary = [payload for payload in payloads if "run_id" in payload]
     assert [payload["stage"] for payload in stages] == list(CHAIN_STAGES)
     assert [payload["exit_code"] for payload in stages] == [NOTHING_TO_DO] * len(CHAIN_STAGES)
     assert len(summary) == 1, "S4.0 gives the chain one final run summary"
     assert summary[0]["exit_code"] == 0
+    tested_run_id = summary[0]["run_id"]
 
     # Read back on a connection of its own: S12 says stage commands that only print to
     # stdout do not satisfy this, so what is asserted is what reached the lake.
     with connect() as connection:
         runs = query(
             connection,
-            f"SELECT run_id, status, config_hash FROM {SCHEMA_QUALIFIER}.runs",
+            f"SELECT run_id, status, config_hash FROM {SCHEMA_QUALIFIER}.runs WHERE run_id = ?",
+            tested_run_id,
         )
         rows = query(
             connection,
             f"SELECT stage, seq, status, snapshot_start, snapshot_end "
-            f"FROM {SCHEMA_QUALIFIER}.run_stages ORDER BY seq",
+            f"FROM {SCHEMA_QUALIFIER}.run_stages WHERE run_id = ? ORDER BY seq",
+            tested_run_id,
         )
 
     assert len(runs) == 1, "S12: exactly one `runs` row"
@@ -390,19 +397,27 @@ def test_missing_source_and_path_exits_2(initialised_lake: duckdb.DuckDBPyConnec
 
 
 def test_no_ingest_batches_row_and_no_splink_relations(
-    initialised_lake: duckdb.DuckDBPyConnection,
+    initialised_lake: duckdb.DuckDBPyConnection, tmp_path: Path
 ) -> None:
     """M1-EXIT-8 / M1-EXIT-9, AC6: ingest is skipped, so nothing lands in
     `ingest_batches`; and nothing Splink writes ever lands in the lake."""
-    result = run_er("run-all", "--mode", "incremental", "--skip-ingest")
+    prepare_cli_fixture(initialised_lake, tmp_path / "delivery")
+    tested_run_id = str(ULID())
+    result = run_er("run-all", "--mode", "incremental", "--skip-ingest", "--run-id", tested_run_id)
 
     assert result.returncode == 0, result.stdout + result.stderr
     with connect() as connection:
         # The run really happened -- otherwise both zeros below are free.
-        assert count(connection, "runs") == 1
-        assert count(connection, "ingest_batches") == 0, (
-            "ingest was skipped, so no batch manifest may have been written (S12)"
-        )
+        assert query(
+            connection,
+            f"SELECT count(*) FROM {SCHEMA_QUALIFIER}.runs WHERE run_id = ?",
+            tested_run_id,
+        ) == [(1,)]
+        assert query(
+            connection,
+            f"SELECT count(*) FROM {SCHEMA_QUALIFIER}.ingest_batches WHERE run_id = ?",
+            tested_run_id,
+        ) == [(0,)], "ingest was skipped, so no batch manifest may have been written (S12)"
         assert relations(connection, SPLINK_PATTERN) == set(), (
             "S4.0b hands Splink the connection with output_schema='splink_scratch', so "
             "an intermediate in the lake means one committed a snapshot of its own"

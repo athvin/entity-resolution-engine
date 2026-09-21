@@ -135,7 +135,13 @@ def splink_api(connection: duckdb.DuckDBPyConnection) -> DuckDBAPI:
     # the guard above holds, and this ticket's guarantee should not depend on that
     # ordering.
     connection.execute(f'CREATE SCHEMA IF NOT EXISTS "{database}".{SPLINK_SCRATCH_SCHEMA}')
-    return DuckDBAPI(connection=connection, output_schema=SPLINK_SCRATCH_SCHEMA)
+    from er.obs.sql_profile import raw_connection
+
+    api = DuckDBAPI(connection=raw_connection(connection), output_schema=SPLINK_SCRATCH_SCHEMA)
+    # Splink validates the native connection in its constructor. Its SQL backend
+    # subsequently uses our transparent proxy to correlate deferred query profiles.
+    api._con = connection
+    return api
 
 
 def leaked_splink_relations(connection: duckdb.DuckDBPyConnection) -> tuple[str, ...]:
