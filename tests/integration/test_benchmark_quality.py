@@ -11,6 +11,7 @@ imports it.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -58,7 +59,9 @@ def smoke_run(
 ) -> tuple[int, dict[str, Any]]:
     """One real `report.py --run` smoke pass; returns (exit_code, run document)."""
     out = tmp_path_factory.mktemp("quality") / "latest.json"
+    environment = {key: value for key, value in os.environ.items() if key.startswith("ER_")}
     code = report.main(["--run", "--scale", "smoke", "--repeat", "1", "--out", str(out)])
+    assert {key: value for key, value in os.environ.items() if key.startswith("ER_")} == environment
     document = json.loads(out.read_text(encoding="utf-8"))
     return code, document
 

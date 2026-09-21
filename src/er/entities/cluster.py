@@ -359,7 +359,7 @@ def _since(column: str, watermark: datetime | None) -> tuple[str, list[Any]]:
 
 
 def last_reconciled_watermark(connection: duckdb.DuckDBPyConnection) -> datetime | None:
-    """The `started_at` of the most recent run whose `reconcile` stage succeeded (S5.2).
+    """The latest successful reconcile stage's `started_at` (S5.2).
 
     THE cutoff. S4.5.1 phrases four of its five arms as "since the last successful run",
     and every one of them takes this value: an arm computing its own cutoff — from
@@ -369,8 +369,9 @@ def last_reconciled_watermark(connection: duckdb.DuckDBPyConnection) -> datetime
 
     `started_at` rather than `ended_at`, and deliberately: anything written *while* the
     last reconcile was running was not seen by it, because the affected set it clustered
-    was computed at its own start. A watermark at `ended_at` would swallow exactly those
-    rows.
+    was computed at its own start. The run may have begun much earlier during ingestion;
+    its start would seed already reconciled changes again. A watermark at `ended_at`
+    would swallow changes arriving during reconciliation.
 
     Returns:
         The instant, or ``None`` when no run has ever reconciled successfully. ``None``
@@ -379,7 +380,7 @@ def last_reconciled_watermark(connection: duckdb.DuckDBPyConnection) -> datetime
         outstanding.
     """
     row = connection.execute(
-        f"SELECT max(runs.started_at) "
+        f"SELECT max(stages.started_at) "
         f"  FROM {_RUNS} AS runs "
         f"  JOIN {_RUN_STAGES} AS stages ON stages.run_id = runs.run_id "
         f" WHERE stages.stage = ? AND stages.status = ?",

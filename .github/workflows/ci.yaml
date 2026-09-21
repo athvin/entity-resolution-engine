@@ -87,7 +87,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+                16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3.7.1
@@ -116,7 +117,7 @@ jobs:
              -e PYTHONUNBUFFERED=1 pipeline
              pytest tests/integration -v --maxfail=3 -m "not slow"
              -o faulthandler_timeout=180
-             --integration-shard-index ${{ matrix.shard }} --integration-shard-count 16
+             --integration-shard-index ${{ matrix.shard }} --integration-shard-count 32
              --junitxml=/app/artifacts/junit.xml --durations=20
       - name: Capture substrate diagnostics
         if: always()

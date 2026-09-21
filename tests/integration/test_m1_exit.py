@@ -397,19 +397,27 @@ def test_missing_source_and_path_exits_2(initialised_lake: duckdb.DuckDBPyConnec
 
 
 def test_no_ingest_batches_row_and_no_splink_relations(
-    initialised_lake: duckdb.DuckDBPyConnection,
+    initialised_lake: duckdb.DuckDBPyConnection, tmp_path: Path
 ) -> None:
     """M1-EXIT-8 / M1-EXIT-9, AC6: ingest is skipped, so nothing lands in
     `ingest_batches`; and nothing Splink writes ever lands in the lake."""
-    result = run_er("run-all", "--mode", "incremental", "--skip-ingest")
+    prepare_cli_fixture(initialised_lake, tmp_path / "delivery")
+    tested_run_id = str(ULID())
+    result = run_er("run-all", "--mode", "incremental", "--skip-ingest", "--run-id", tested_run_id)
 
     assert result.returncode == 0, result.stdout + result.stderr
     with connect() as connection:
         # The run really happened -- otherwise both zeros below are free.
-        assert count(connection, "runs") == 1
-        assert count(connection, "ingest_batches") == 0, (
-            "ingest was skipped, so no batch manifest may have been written (S12)"
-        )
+        assert query(
+            connection,
+            f"SELECT count(*) FROM {SCHEMA_QUALIFIER}.runs WHERE run_id = ?",
+            tested_run_id,
+        ) == [(1,)]
+        assert query(
+            connection,
+            f"SELECT count(*) FROM {SCHEMA_QUALIFIER}.ingest_batches WHERE run_id = ?",
+            tested_run_id,
+        ) == [(0,)], "ingest was skipped, so no batch manifest may have been written (S12)"
         assert relations(connection, SPLINK_PATTERN) == set(), (
             "S4.0b hands Splink the connection with output_schema='splink_scratch', so "
             "an intermediate in the lake means one committed a snapshot of its own"

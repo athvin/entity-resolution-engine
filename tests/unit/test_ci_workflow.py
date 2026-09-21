@@ -289,7 +289,7 @@ def test_integration_job_teardown_and_uploads() -> None:
 def test_integration_matrix_covers_all_shards_and_retains_each_result() -> None:
     definition = job("integration")
     shards = definition["strategy"]["matrix"]["shard"]
-    assert shards == list(range(16)), "every shard must run exactly once"
+    assert shards == list(range(32)), "every shard must run exactly once"
     assert definition["strategy"]["fail-fast"] is False
     command = next(
         step["run"] for step in definition["steps"] if step.get("name") == "Run integration suite"

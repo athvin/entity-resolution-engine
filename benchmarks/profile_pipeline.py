@@ -12,6 +12,8 @@ import shutil
 import sys
 import time
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -183,6 +185,20 @@ def validate_coverage(directory: Path, *, trained: bool) -> dict[str, Any]:
     }
 
 
+@contextmanager
+def _case_environment() -> Iterator[None]:
+    """Restore the caller's lake and profiling settings, including on failure."""
+    previous = {key: value for key, value in os.environ.items() if key.startswith("ER_")}
+    try:
+        yield
+    finally:
+        for key in tuple(os.environ):
+            if key.startswith("ER_"):
+                del os.environ[key]
+        os.environ.update(previous)
+
+
+@_case_environment()
 def run_case(
     out: Path,
     case: str,

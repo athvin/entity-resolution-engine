@@ -94,8 +94,14 @@ harness and case-level validation results are retained there and ignored by Git.
 | Candidate source overlay | `85099c648bee69131cf7a4c5e4175af015f695bd1908db587b9eb3d79395dc3a` |
 
 A post-campaign reporting correction excludes post-command validation events from
-diagnostic counts. Pipeline sources, measured timings/resources and output checks
-are unchanged; the original and corrected reports are retained in the campaign.
+diagnostic counts. That reporting correction left pipeline sources, measured
+timings/resources and output checks unchanged; both reports remain in the campaign.
+
+Subsequent PR validation corrected the reconciliation cutoff to use the successful
+stage's start time, so unchanged follow-up runs do not process already reconciled
+changes again. It also made the benchmark restore its caller's environment settings.
+The paired measurements above belong to the frozen images listed here; they are
+not a fresh five-pair measurement of those follow-up fixes.
 
 See [performance.md](performance.md) to reproduce the comparison and
 [profiling.md](profiling.md) for instrumentation and measurement semantics.

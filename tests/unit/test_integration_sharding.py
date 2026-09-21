@@ -41,12 +41,19 @@ def test_shards_cover_every_eligible_test_once(tmp_path: Path) -> None:
         "@pytest.mark.slow\n"
         "def test_slow(): pass\n"
     )
+    (tmp_path / "test_ordered.py").write_text(
+        "import pytest\n"
+        "pytestmark = pytest.mark.shard_together\n"
+        "def test_z_producer(): pass\n"
+        "def test_a_consumer(): pass\n"
+    )
     baseline = collect(tmp_path, "-m", "not slow")
     assert baseline.returncode == 0, baseline.stdout + baseline.stderr
-    expected = {line for line in baseline.stdout.splitlines() if line.startswith("test_cases.py::")}
-    assert len(expected) == 17
+    expected = {line for line in baseline.stdout.splitlines() if line.startswith("test_")}
+    assert len(expected) == 19
     seen: set[str] = set()
     sizes = []
+    ordered_groups = []
     for index in range(3):
         result = collect(
             tmp_path,
@@ -58,14 +65,20 @@ def test_shards_cover_every_eligible_test_once(tmp_path: Path) -> None:
             "3",
         )
         assert result.returncode == 0, result.stdout + result.stderr
-        selected = {
-            line for line in result.stdout.splitlines() if line.startswith("test_cases.py::")
-        }
+        selected = {line for line in result.stdout.splitlines() if line.startswith("test_")}
+        ordered = [
+            line for line in result.stdout.splitlines() if line.startswith("test_ordered.py::")
+        ]
+        if ordered:
+            ordered_groups.append(ordered)
         assert not seen & selected, "two CI jobs would run the same test"
         seen.update(selected)
         sizes.append(len(selected))
     assert seen == expected, "CI would omit an eligible test"
     assert max(sizes) - min(sizes) <= 1
+    assert ordered_groups == [
+        ["test_ordered.py::test_z_producer", "test_ordered.py::test_a_consumer"]
+    ]
 
 
 @pytest.mark.parametrize(
