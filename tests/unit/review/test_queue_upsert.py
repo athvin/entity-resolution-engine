@@ -29,6 +29,7 @@ same string in every process (S4.5.4, D10).
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Iterator
 from typing import Any, Final
 
@@ -37,6 +38,7 @@ import pytest
 
 from er.entities.ids import CountingIdFactory
 from er.errors import ExitCode, StageFailure, exit_code_for
+from er.lake.bulk import BATCH_ROWS
 from er.lake.model import REGISTRY, SCHEMA_QUALIFIER, create_table_sql
 from er.review.queue import (
     COHERENCE,
@@ -298,3 +300,101 @@ def test_entity_finding_has_no_pair(
     )
     assert (again.added, again.refreshed_count) == (0, 1)
     assert len(raw_rows(lake)) == 1
+
+
+def numbered_pair(index: int, probability: float = 0.9) -> GrayBandPair:
+    return GrayBandPair(
+        rec_a_key=f"crm:{index:06}",
+        rec_b_key=f"webforms:{index:06}",
+        match_probability=probability,
+        waterfall={**WATERFALL, "label": f"O'Neil 雪 {index}"},
+    )
+
+
+def test_mixed_batches_preserve_first_payload_decisions_and_duplicate_counts(
+    lake: duckdb.DuckDBPyConnection, ids: CountingIdFactory
+) -> None:
+    original = upsert_gray_band_pairs(
+        lake, map(numbered_pair, range(3)), run_id=RUN_1, id_factory=ids
+    )
+    resolve_in_place(lake, original.inserted[1].review_id, DISMISSED)
+    resolve_in_place(lake, original.inserted[2].review_id, RESOLVED_MATCH)
+    settled_before = raw_rows(lake)[1:]
+    count = 2 * BATCH_ROWS + 5
+    incoming = [numbered_pair(i, 0.85) for i in range(count)]
+    incoming += [numbered_pair(3, 0.8), numbered_pair(0, 0.8)]
+    result = upsert_gray_band_pairs(lake, incoming, run_id=RUN_2, id_factory=ids)
+
+    assert (result.added, result.refreshed_count, len(result.skipped)) == (count - 3, 3, 2)
+    stored = raw_rows(lake)
+    assert len(stored) == count
+    assert stored[1:3] == settled_before
+    assert [row.rec_a_key for row in result.refreshed] == ["crm:000000", "crm:000003", "crm:000000"]
+    assert result.refreshed[0].match_probability == 0.9
+    assert result.refreshed[1].match_probability == 0.85
+    assert result.refreshed[1].review_id == result.inserted[0].review_id
+    assert result.refreshed[0].first_seen_run_id == RUN_1
+    assert all(row.last_seen_run_id == RUN_2 for row in result.refreshed)
+
+
+def test_duplicate_subject_inside_batch_mints_once_and_keeps_first_payload(
+    lake: duckdb.DuckDBPyConnection, ids: CountingIdFactory
+) -> None:
+    result = upsert_gray_band_pairs(
+        lake,
+        [numbered_pair(0), numbered_pair(0, 0.85), numbered_pair(1)],
+        run_id=RUN_1,
+        id_factory=ids,
+    )
+    assert (result.added, result.refreshed_count) == (2, 1)
+    assert result.refreshed == (result.inserted[0],)
+    assert result.refreshed[0].match_probability == 0.9
+    assert len(raw_rows(lake)) == 2
+
+
+def test_bulk_review_writes_respect_caller_rollback(
+    lake: duckdb.DuckDBPyConnection, ids: CountingIdFactory
+) -> None:
+    upsert_gray_band_pairs(lake, [numbered_pair(0)], run_id=RUN_1, id_factory=ids)
+    before = raw_rows(lake)
+    lake.execute("BEGIN")
+    result = upsert_gray_band_pairs(
+        lake, map(numbered_pair, range(BATCH_ROWS + 2)), run_id=RUN_2, id_factory=ids
+    )
+    assert (result.added, result.refreshed_count) == (BATCH_ROWS + 1, 1)
+    lake.execute("ROLLBACK")
+    assert raw_rows(lake) == before
+
+
+def test_multiple_open_rows_are_rejected_by_batch_lookup(
+    lake: duckdb.DuckDBPyConnection, ids: CountingIdFactory
+) -> None:
+    upsert_gray_band_pairs(lake, [numbered_pair(0)], run_id=RUN_1, id_factory=ids)
+    lake.execute(
+        f"INSERT INTO {REVIEW_QUEUE} SELECT * REPLACE ('duplicate' AS review_id) "
+        f"FROM {REVIEW_QUEUE}"
+    )
+    before = raw_rows(lake)
+    with pytest.raises(StageFailure, match="2 open rows"):
+        upsert_gray_band_pairs(lake, [numbered_pair(0)], run_id=RUN_2, id_factory=ids)
+    assert raw_rows(lake) == before
+
+
+def test_review_database_calls_scale_with_batches(
+    lake: duckdb.DuckDBPyConnection, ids: CountingIdFactory
+) -> None:
+    class CountedConnection:
+        calls = 0
+
+        def execute(self, query: str, parameters: Any = None) -> duckdb.DuckDBPyConnection:
+            self.calls += 1
+            return lake.execute(query, parameters)
+
+    counted: Any = CountedConnection()
+    count = 3 * BATCH_ROWS + 1
+    result = upsert_gray_band_pairs(
+        counted, map(numbered_pair, range(count)), run_id=RUN_1, id_factory=ids
+    )
+    assert result.added == count
+    assert counted.calls <= 3 * math.ceil(count / BATCH_ROWS)
+    assert len(raw_rows(lake)) == count

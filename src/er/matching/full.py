@@ -58,18 +58,20 @@ that cannot produce the evidence the spec requires of every scored pair.
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from itertools import batched
 from types import MappingProxyType
 from typing import Any, Final
 
 import duckdb
 from splink import Linker
 
-from er.config.schema import Config
+from er.config.schema import Config, Thresholds
 from er.entities.ids import IdFactory, canonicalize_pair
 from er.errors import ExitCode, StageFailure
+from er.lake.bulk import BATCH_ROWS
 from er.lake.columns import STD_RECORD_COLUMNS
 from er.lake.model import REGISTRY, SCHEMA_QUALIFIER
 from er.matching.api import assert_no_splink_relations_in_lake, splink_api
@@ -94,8 +96,10 @@ __all__ = [
     "RETAIN_INTERMEDIATE_KEY",
     "FullMatchResult",
     "ScoredPair",
+    "ScoreSummary",
     "merge_match_scores",
     "prediction_columns",
+    "review_scored_pairs",
     "score_full",
 ]
 
@@ -436,12 +440,28 @@ def _stamp(moment: datetime | None) -> datetime:
 
 @dataclass(frozen=True)
 class ScoredPair:
-    """One row a scoring run wrote, as it is read back for classification."""
+    """One persisted score; decode evidence only when a reviewer needs it."""
 
     rec_a_key: str
     rec_b_key: str
     match_probability: float
-    evidence: Mapping[str, Any]
+    evidence_json: str
+
+    @property
+    def evidence(self) -> Mapping[str, Any]:
+        payload: Mapping[str, Any] = json.loads(self.evidence_json)
+        return payload
+
+
+@dataclass
+class ScoreSummary:
+    """Running counters shared by full and incremental score consumption."""
+
+    pairs_scored: int = 0
+    pairs_above_auto_merge: int = 0
+    pairs_in_gray_band: int = 0
+    review_queue_added: int = 0
+    review_queue_refreshed: int = 0
 
 
 def _scored_rows(
@@ -450,7 +470,7 @@ def _scored_rows(
     model_version: str,
     tf_snapshot_id: str,
     run_id: str,
-) -> list[ScoredPair]:
+) -> Iterator[ScoredPair]:
     """Every pair this run scored, canonicalised through the S5.0 helper.
 
     The re-canonicalisation is not defensive duplication: it is what makes
@@ -458,27 +478,65 @@ def _scored_rows(
     had to express in SQL. A row whose keys came back in the other order — or with the
     two equal — raises here, before anything downstream joins one-sided on it.
     """
-    rows = connection.execute(_SCORED_ROWS_SQL, [model_version, tf_snapshot_id, run_id]).fetchall()
-    scored: list[ScoredPair] = []
-    for rec_a_key, rec_b_key, match_probability, evidence in rows:
-        canonical = canonicalize_pair(str(rec_a_key), str(rec_b_key))
-        if canonical != (str(rec_a_key), str(rec_b_key)):
-            raise StageFailure(
-                f"{MATCH_SCORES_RELATION} holds ({rec_a_key!r}, {rec_b_key!r}), which is not "
-                f"the S5.0 canonical ordering {canonical}; every pair relation carries "
-                f"rec_a_key < rec_b_key (D9)"
-            )
-        scored.append(
-            ScoredPair(
-                rec_a_key=canonical[0],
-                rec_b_key=canonical[1],
-                match_probability=float(match_probability),
-                # A `JSON` column comes back as text; the payload is a mapping
-                # everywhere else, including `review_queue.waterfall`.
-                evidence=json.loads(str(evidence)),
-            )
+    # Finish the query into a native result before interleaving review writes:
+    # lazy fetchmany() would otherwise lose unread chunks on the next execute().
+    # Python receives only bounded batches. Using this connection also preserves
+    # visibility of the caller's uncommitted scores, unlike a duplicate connection.
+    result = connection.sql(_SCORED_ROWS_SQL, params=[model_version, tf_snapshot_id, run_id])
+    assert result is not None
+    try:
+        result.execute()
+        while rows := result.fetchmany(BATCH_ROWS):
+            for rec_a_key, rec_b_key, match_probability, evidence in rows:
+                canonical = canonicalize_pair(str(rec_a_key), str(rec_b_key))
+                if canonical != (str(rec_a_key), str(rec_b_key)):
+                    raise StageFailure(
+                        f"{MATCH_SCORES_RELATION} holds ({rec_a_key!r}, {rec_b_key!r}), which "
+                        "is not the S5.0 canonical ordering; every pair relation carries "
+                        "rec_a_key < rec_b_key (D9)"
+                    )
+                yield ScoredPair(
+                    rec_a_key=canonical[0],
+                    rec_b_key=canonical[1],
+                    match_probability=float(match_probability),
+                    evidence_json=str(evidence),
+                )
+    finally:
+        result.close()
+
+
+@profiled("match.classify_scores", "pairs")
+def review_scored_pairs(
+    connection: duckdb.DuckDBPyConnection,
+    scored: Iterable[ScoredPair],
+    thresholds: Thresholds,
+    *,
+    run_id: str,
+    id_factory: IdFactory | None = None,
+) -> ScoreSummary:
+    """Classify all scores, retaining only one batch of review payloads/results."""
+    summary = ScoreSummary()
+
+    def gray_pairs() -> Iterator[GrayBandPair]:
+        for pair in scored:
+            summary.pairs_scored += 1
+            summary.pairs_above_auto_merge += is_auto_merge(pair.match_probability, thresholds)
+            if in_gray_band(pair.match_probability, thresholds):
+                yield GrayBandPair(
+                    rec_a_key=pair.rec_a_key,
+                    rec_b_key=pair.rec_b_key,
+                    match_probability=pair.match_probability,
+                    waterfall=pair.evidence,
+                )
+
+    for gray_band in batched(gray_pairs(), BATCH_ROWS):
+        summary.pairs_in_gray_band += len(gray_band)
+        upserted = upsert_gray_band_pairs(
+            connection, gray_band, run_id=run_id, id_factory=id_factory
         )
-    return scored
+        summary.review_queue_added += upserted.added
+        summary.review_queue_refreshed += upserted.refreshed_count
+    return summary
 
 
 @profiled("match.persist_scores", "pairs")
@@ -491,7 +549,7 @@ def merge_match_scores(
     tf_snapshot_id: str,
     run_id: str,
     scored_at: datetime | None = None,
-) -> list[ScoredPair]:
+) -> Iterator[ScoredPair]:
     """THE `match_scores` write, and the rows it left behind (S4.3.4, S4.0b, S5.0).
 
     One statement reaches the lake — the `MERGE INTO` of :func:`_merge_sql`, over a
@@ -528,8 +586,8 @@ def merge_match_scores(
         scored_at: the stamp every row carries; now, in UTC, when omitted.
 
     Returns:
-        Every pair this run scored, in canonical pair order, each carrying its
-        `match_probability` and its decoded `evidence` mapping.
+        A bounded iterator over every pair this run scored, in canonical pair
+        order. Evidence is decoded on access. Consume it before ending the stage.
 
     Raises:
         er.errors.StageFailure: a persisted pair is not in the S5.0 canonical ordering.
@@ -642,18 +700,10 @@ def score_full(
         run_id=run_ctx.run_id,
         scored_at=scored_at,
     )
-    gray_band = [pair for pair in scored if in_gray_band(pair.match_probability, thresholds)]
-    upserted = upsert_gray_band_pairs(
+    summary = review_scored_pairs(
         connection,
-        (
-            GrayBandPair(
-                rec_a_key=pair.rec_a_key,
-                rec_b_key=pair.rec_b_key,
-                match_probability=pair.match_probability,
-                waterfall=pair.evidence,
-            )
-            for pair in gray_band
-        ),
+        scored,
+        thresholds,
         run_id=run_ctx.run_id,
         id_factory=id_factory,
     )
@@ -665,13 +715,11 @@ def score_full(
         model_version=model_version,
         tf_snapshot_id=tf_snapshot_id,
         candidate_pairs=candidate_pairs,
-        pairs_scored=len(scored),
-        pairs_above_auto_merge=sum(
-            1 for pair in scored if is_auto_merge(pair.match_probability, thresholds)
-        ),
-        pairs_in_gray_band=len(gray_band),
-        review_queue_added=upserted.added,
-        review_queue_refreshed=upserted.refreshed_count,
+        pairs_scored=summary.pairs_scored,
+        pairs_above_auto_merge=summary.pairs_above_auto_merge,
+        pairs_in_gray_band=summary.pairs_in_gray_band,
+        review_queue_added=summary.review_queue_added,
+        review_queue_refreshed=summary.review_queue_refreshed,
         rows_in=rows_in,
     )
     result.record(run_ctx)

@@ -40,6 +40,7 @@ import json
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from itertools import batched
 from typing import Any, Final
 
 import duckdb
@@ -53,6 +54,7 @@ from er.entities.ids import (
     split_record_key,
 )
 from er.errors import ConfigError, StageFailure
+from er.lake.bulk import BATCH_ROWS, insert_batches
 from er.lake.model import (
     REGISTRY,
     REVIEW_REASONS,
@@ -340,12 +342,14 @@ def _require_waterfall(pair: GrayBandPair) -> Mapping[str, Any]:
 
 _SELECT_SQL: Final = f"SELECT {', '.join(_COLUMNS)} FROM {_REVIEW_QUEUE}"
 
-_INSERT_SQL: Final = (
-    f"INSERT INTO {_REVIEW_QUEUE} ({', '.join(_COLUMNS)}) "
-    f"VALUES ({', '.join('?' for _ in _COLUMNS)})"
+_INSERT_SQL: Final = f"INSERT INTO {_REVIEW_QUEUE} ({', '.join(_COLUMNS)}) SELECT " + ", ".join(
+    f"unnest(?::{column.type}[])" for column in REGISTRY[REVIEW_QUEUE_RELATION].columns
 )
 
-_REFRESH_SQL: Final = f"UPDATE {_REVIEW_QUEUE} SET last_seen_run_id = ? WHERE review_id = ?"
+_REFRESH_SQL: Final = (
+    f"UPDATE {_REVIEW_QUEUE} SET last_seen_run_id = ? "
+    "WHERE review_id IN (SELECT unnest(?::VARCHAR[]))"
+)
 
 _RESOLVE_SQL: Final = (
     f"UPDATE {_REVIEW_QUEUE} SET status = ?, resolved_by = ?, resolved_at = ? "
@@ -356,12 +360,12 @@ _RESOLVE_SQL: Final = (
 # every row that does not use them — `entity_id` on a pair subject, both record
 # keys on an entity subject — and `NULL = NULL` is NULL, so an `=` predicate would
 # match no existing row and insert a duplicate on every run.
-_SUBJECT_WHERE: Final = (
-    "subject_type = ? AND reason = ? "
-    "AND rec_a_key IS NOT DISTINCT FROM ? "
-    "AND rec_b_key IS NOT DISTINCT FROM ? "
-    "AND entity_id IS NOT DISTINCT FROM ?"
-)
+_SUBJECT_COLUMNS: Final = ("subject_type", "reason", "rec_a_key", "rec_b_key", "entity_id")
+type _SubjectKey = tuple[str, str, str | None, str | None, str | None]
+
+
+def _subject_key(row: _Subject | ReviewRow) -> _SubjectKey:
+    return row.subject_type, row.reason, row.rec_a_key, row.rec_b_key, row.entity_id
 
 
 def _row_from(values: Sequence[Any]) -> ReviewRow:
@@ -387,8 +391,8 @@ def _row_from(values: Sequence[Any]) -> ReviewRow:
     )
 
 
-def _insert(connection: duckdb.DuckDBPyConnection, row: ReviewRow) -> None:
-    """Append one row, in S5's column order."""
+def _insert_values(row: ReviewRow) -> list[Any]:
+    """One row in S5's column order, for a bounded column batch."""
     values: dict[str, Any] = {
         "review_id": row.review_id,
         "subject_type": row.subject_type,
@@ -405,22 +409,33 @@ def _insert(connection: duckdb.DuckDBPyConnection, row: ReviewRow) -> None:
         "resolved_by": row.resolved_by,
         "resolved_at": row.resolved_at,
     }
-    connection.execute(_INSERT_SQL, [values[column] for column in _COLUMNS])
+    return [values[column] for column in _COLUMNS]
 
 
-def _rows_for(connection: duckdb.DuckDBPyConnection, subject: _Subject) -> list[ReviewRow]:
-    """Every row carrying this subject's open-row key, resolved ones included."""
+def _rows_for_subjects(
+    connection: duckdb.DuckDBPyConnection, subjects: Sequence[_Subject]
+) -> dict[_SubjectKey, list[ReviewRow]]:
+    """Read existing state once per batch, including settled subjects.
+
+    A semi join avoids duplicating existing rows when input subjects repeat.
+    Nullable keys compare null-safely for both pair and entity subjects.
+    """
+    projection = ", ".join(f"unnest(?::VARCHAR[]) AS {column}" for column in _SUBJECT_COLUMNS)
+    predicate = " AND ".join(
+        f"queued.{column} IS NOT DISTINCT FROM requested.{column}" for column in _SUBJECT_COLUMNS
+    )
+    keys = [_subject_key(subject) for subject in subjects]
     rows = connection.execute(
-        f"{_SELECT_SQL} WHERE {_SUBJECT_WHERE} ORDER BY review_id",
-        [
-            subject.subject_type,
-            subject.reason,
-            subject.rec_a_key,
-            subject.rec_b_key,
-            subject.entity_id,
-        ],
+        f"SELECT {', '.join(f'queued.{column}' for column in _COLUMNS)} "
+        f"FROM {_REVIEW_QUEUE} AS queued SEMI JOIN (SELECT {projection}) AS requested "
+        f"ON {predicate} ORDER BY queued.review_id",
+        [list(values) for values in zip(*keys, strict=True)],
     ).fetchall()
-    return [_row_from(row) for row in rows]
+    grouped: dict[_SubjectKey, list[ReviewRow]] = {}
+    for values in rows:
+        row = _row_from(values)
+        grouped.setdefault(_subject_key(row), []).append(row)
+    return grouped
 
 
 def _by_id(connection: duckdb.DuckDBPyConnection, review_id: str) -> ReviewRow | None:
@@ -436,7 +451,11 @@ def _upsert(
     run_id: str,
     id_factory: IdFactory,
 ) -> UpsertResult:
-    """Apply S4.3.5's insert / refresh / skip rule to each subject, in order.
+    """Apply S4.3.5 in input order, using a lookup and bulk writes per batch.
+
+    Pending inserts join the batch's existing-state map immediately. Repeated
+    subjects therefore refresh the first payload, including across batch boundaries,
+    just as they did when each row was written separately.
 
     Raises:
         er.errors.StageFailure: a subject's open-row key carries more than one open
@@ -447,48 +466,55 @@ def _upsert(
     inserted: list[ReviewRow] = []
     refreshed: list[ReviewRow] = []
     skipped: list[ReviewRow] = []
-    for subject in subjects:
-        existing = _rows_for(connection, subject)
-        settled = [row for row in existing if row.status in RESOLVED_STATUSES]
-        if settled:
-            # NOT refreshed: S4.3.5 skips a resolved subject outright, and bumping
-            # `last_seen_run_id` here would let a dismissal decay into a row that
-            # looks freshly seen.
-            skipped.extend(settled)
-            continue
-        open_rows = [row for row in existing if row.status == OPEN]
-        if len(open_rows) > 1:
-            ids = ", ".join(row.review_id for row in open_rows)
-            raise StageFailure(
-                f"{REVIEW_QUEUE_RELATION} holds {len(open_rows)} open rows for "
-                f"(subject_type={subject.subject_type!r}, rec_a_key={subject.rec_a_key!r}, "
-                f"rec_b_key={subject.rec_b_key!r}, entity_id={subject.entity_id!r}, "
-                f"reason={subject.reason!r}): {ids}. S5.0 permits one, and DuckLake "
-                f"enforces no filtered uniqueness, so this is a writer that bypassed S4.3.5"
-            )
-        if open_rows:
-            row = open_rows[0]
-            connection.execute(_REFRESH_SQL, [run_id, row.review_id])
-            refreshed.append(replace(row, last_seen_run_id=run_id))
-            continue
-        row = ReviewRow(
-            review_id=id_factory.new(),
-            subject_type=subject.subject_type,
-            reason=subject.reason,
-            status=OPEN,
-            # Written once and never updated: `first_seen_run_id` is how long a
-            # steward task has been waiting, and a refresh that moved it would
-            # erase exactly that (S4.3.5).
-            first_seen_run_id=run_id,
-            last_seen_run_id=run_id,
-            rec_a_key=subject.rec_a_key,
-            rec_b_key=subject.rec_b_key,
-            entity_id=subject.entity_id,
-            match_probability=subject.match_probability,
-            waterfall=subject.waterfall,
-        )
-        _insert(connection, row)
-        inserted.append(row)
+    for batch in batched(subjects, BATCH_ROWS):
+        existing_by_key = _rows_for_subjects(connection, batch)
+        pending: list[ReviewRow] = []
+        pending_ids: set[str] = set()
+        refresh_ids: set[str] = set()
+        for subject in batch:
+            key = _subject_key(subject)
+            existing = existing_by_key.get(key, [])
+            settled = [row for row in existing if row.status in RESOLVED_STATUSES]
+            if settled:
+                # A steward's decision stays byte-unchanged, including last_seen.
+                skipped.extend(settled)
+                continue
+            open_rows = [row for row in existing if row.status == OPEN]
+            if len(open_rows) > 1:
+                ids = ", ".join(row.review_id for row in open_rows)
+                raise StageFailure(
+                    f"{REVIEW_QUEUE_RELATION} holds {len(open_rows)} open rows for "
+                    f"(subject_type={subject.subject_type!r}, rec_a_key={subject.rec_a_key!r}, "
+                    f"rec_b_key={subject.rec_b_key!r}, entity_id={subject.entity_id!r}, "
+                    f"reason={subject.reason!r}): {ids}. S5.0 permits one, and DuckLake "
+                    f"enforces no filtered uniqueness, so this is a writer that bypassed S4.3.5"
+                )
+            if open_rows:
+                row = replace(open_rows[0], last_seen_run_id=run_id)
+                if row.review_id not in pending_ids:
+                    refresh_ids.add(row.review_id)
+                refreshed.append(row)
+            else:
+                row = ReviewRow(
+                    review_id=id_factory.new(),
+                    subject_type=subject.subject_type,
+                    reason=subject.reason,
+                    status=OPEN,
+                    first_seen_run_id=run_id,
+                    last_seen_run_id=run_id,
+                    rec_a_key=subject.rec_a_key,
+                    rec_b_key=subject.rec_b_key,
+                    entity_id=subject.entity_id,
+                    match_probability=subject.match_probability,
+                    waterfall=subject.waterfall,
+                )
+                pending.append(row)
+                pending_ids.add(row.review_id)
+                inserted.append(row)
+            existing_by_key[key] = [row]
+        insert_batches(connection, _INSERT_SQL, map(_insert_values, pending), columns=len(_COLUMNS))
+        if refresh_ids:
+            connection.execute(_REFRESH_SQL, [run_id, sorted(refresh_ids)])
     return UpsertResult(
         inserted=tuple(inserted), refreshed=tuple(refreshed), skipped=tuple(skipped)
     )

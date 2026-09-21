@@ -75,6 +75,7 @@ from er.entities.reconcile import (
 )
 from er.entities.retraction import corpus_absent_keys, retract_tombstoned_records
 from er.errors import ErrorClass, ExitCode, StageFailure
+from er.lake.bulk import staged_rows
 from er.lake.model import SCHEMA_QUALIFIER
 from er.matching.edges import current_edges
 from er.obs.profiling import profiled
@@ -133,12 +134,6 @@ _ENTITY_COLUMNS: Final[tuple[str, ...]] = (
     "created_run_id",
     "updated_run_id",
 )
-
-
-def _values_clause(rows: int, columns: int) -> str:
-    """``(?, ?, …), (?, ?, …)`` for ``rows`` rows of ``columns`` placeholders each."""
-    one = "(" + ", ".join("?" for _ in range(columns)) + ")"
-    return ", ".join(one for _ in range(rows))
 
 
 @dataclass(frozen=True)
@@ -323,56 +318,49 @@ def apply_reconcile_plan(
     stamp = datetime.now(UTC).replace(tzinfo=None) if occurred_at is None else occurred_at
 
     if plan.transitions:
-        rows: list[Any] = []
-        for transition in plan.transitions:
-            rows += [
-                transition.entity_id,
-                transition.status,
-                transition.merged_into,
-                stamp,
-                run_id,
-            ]
-        connection.execute(
-            f"MERGE INTO {_ENTITIES} AS target USING (VALUES "
-            f"{_values_clause(len(plan.transitions), 5)}"
-            ") AS source(entity_id, status, merged_into, stamp, run_id) "
-            "   ON target.entity_id = source.entity_id "
-            " WHEN MATCHED THEN UPDATE SET status = source.status, "
-            "        merged_into = source.merged_into, updated_at = source.stamp, "
-            "        updated_run_id = source.run_id "
-            f" WHEN NOT MATCHED THEN INSERT ({', '.join(_ENTITY_COLUMNS)}) "
-            "      VALUES (source.entity_id, source.status, source.merged_into, "
-            "              source.stamp, source.stamp, source.run_id, source.run_id)",
-            rows,
-        )
+        with staged_rows(
+            connection,
+            (("entity_id", "VARCHAR"), ("status", "VARCHAR"), ("merged_into", "VARCHAR")),
+            (
+                (transition.entity_id, transition.status, transition.merged_into)
+                for transition in plan.transitions
+            ),
+        ) as staged:
+            connection.execute(
+                f"MERGE INTO {_ENTITIES} AS target USING "
+                f"(SELECT *, CAST(? AS TIMESTAMP) AS stamp, ? AS run_id FROM {staged}) "
+                "AS source ON target.entity_id = source.entity_id "
+                " WHEN MATCHED THEN UPDATE SET status = source.status, "
+                "        merged_into = source.merged_into, updated_at = source.stamp, "
+                "        updated_run_id = source.run_id "
+                f" WHEN NOT MATCHED THEN INSERT ({', '.join(_ENTITY_COLUMNS)}) "
+                "      VALUES (source.entity_id, source.status, source.merged_into, "
+                "              source.stamp, source.stamp, source.run_id, source.run_id)",
+                [stamp, run_id],
+            )
 
     if plan.assignments:
-        member_rows: list[Any] = []
-        for assignment in plan.assignments:
-            source_system, source_record_id = assignment.record_key.split(":", 1)
-            member_rows += [
-                source_system,
-                source_record_id,
-                assignment.record_key,
-                assignment.entity_id,
-                stamp,
-                run_id,
-            ]
-        connection.execute(
-            f"MERGE INTO {_MEMBERSHIP} AS target USING (VALUES "
-            f"{_values_clause(len(plan.assignments), 6)}"
-            ") AS source(source_system, source_record_id, record_key, entity_id, "
-            "            assigned_at, run_id) "
-            "   ON target.source_system = source.source_system "
-            "  AND target.source_record_id = source.source_record_id "
-            " WHEN MATCHED THEN UPDATE SET entity_id = source.entity_id, "
-            "        assigned_at = source.assigned_at, run_id = source.run_id "
-            f" WHEN NOT MATCHED THEN INSERT ({', '.join(_MEMBERSHIP_COLUMNS)}) "
-            "      VALUES (source.source_system, source.source_record_id, "
-            "              source.record_key, source.entity_id, source.assigned_at, "
-            "              source.run_id)",
-            member_rows,
-        )
+        with staged_rows(
+            connection,
+            tuple((column, "VARCHAR") for column in _MEMBERSHIP_COLUMNS[:4]),
+            (
+                (*assignment.record_key.split(":", 1), assignment.record_key, assignment.entity_id)
+                for assignment in plan.assignments
+            ),
+        ) as staged:
+            connection.execute(
+                f"MERGE INTO {_MEMBERSHIP} AS target USING "
+                f"(SELECT *, CAST(? AS TIMESTAMP) AS assigned_at, ? AS run_id FROM {staged}) "
+                "AS source ON target.source_system = source.source_system "
+                "  AND target.source_record_id = source.source_record_id "
+                " WHEN MATCHED THEN UPDATE SET entity_id = source.entity_id, "
+                "        assigned_at = source.assigned_at, run_id = source.run_id "
+                f" WHEN NOT MATCHED THEN INSERT ({', '.join(_MEMBERSHIP_COLUMNS)}) "
+                "      VALUES (source.source_system, source.source_record_id, "
+                "              source.record_key, source.entity_id, source.assigned_at, "
+                "              source.run_id)",
+                [stamp, run_id],
+            )
 
     # A rebuild's reason rides every event of the run (S4.0, S5.1). It joins the
     # canonicalised details and therefore `details_hash`, so a stamped run's events

@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := check
-.PHONY: spec lint types unit dbt fixtures workflows integration check check-all clean
+.PHONY: spec lint types unit dbt fixtures workflows integration check check-all clean benchmark-1m
 
 spec:
 	uv run python scripts/lint_spec.py DesignDoc.md
@@ -32,6 +32,9 @@ check:
 
 check-all: check
 	$(MAKE) integration
+
+benchmark-1m:
+	uv run python benchmarks/full_pipeline.py --scale 1m --local
 
 # Rebuildable local caches only. Run outputs under artifacts/ are removed separately.
 clean:
