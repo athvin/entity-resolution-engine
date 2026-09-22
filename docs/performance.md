@@ -476,3 +476,49 @@ The command refuses a `NON_COMPARABLE` run. Commit the generated baseline with i
 `REGRESSION` means a comparable phase exceeded it, `NON_COMPARABLE` means the
 measurement cannot be judged, and `NO_BASELINE` means no comparison was possible.
 Historical optimization results above are separate from these CI baselines.
+
+## SQL data-flow comparisons
+
+`benchmarks/data_flows.py` compares native execution with the retained collection
+interfaces on deterministic inputs. Each case runs in a fresh process with two
+DuckDB threads, a 512 MB DuckDB buffer limit and a private spill directory. Input
+generation and output fingerprinting are outside the timer. Peak RSS includes the
+whole process and input preparation; it is not a Python-heap measurement.
+
+```sh
+uv run python benchmarks/data_flows.py --case ingest --mode reference --records 1000000
+uv run python benchmarks/data_flows.py --case ingest --mode sql --records 1000000
+```
+
+Other cases are `tf`, `review`, and `reconcile`. Review selects 40% of scores for
+the gray band. Reconciliation changes four-record groups to five-record groups and
+includes lifecycle planning, persistence and event serialization, excluding graph
+clustering. TF uses real Splink registration. No training runs in these cases.
+
+An initial single-pass measurement on macOS ARM64, Python 3.12 and DuckDB 1.5.5:
+
+| Case | Input rows | Reference seconds | SQL seconds | Reference peak RSS MiB | SQL peak RSS MiB |
+|---|---:|---:|---:|---:|---:|
+| ingest | 100,000 | 0.860 | 0.125 | 124.9 | 183.3 |
+| tf | 100,000 | 0.080 | 0.016 | 142.6 | 124.0 |
+| review | 100,000 | 0.996 | 0.220 | 179.6 | 194.6 |
+| reconcile | 100,000 | 47.997 | 0.923 | 235.4 | 208.8 |
+| ingest | 1,000,000 | 8.566 | 0.726 | 322.3 | 650.5 |
+| tf | 1,000,000 | 0.664 | 0.068 | 392.0 | 194.5 |
+| review | 1,000,000 | 11.569 | 1.762 | 554.5 | 661.0 |
+| reconcile | 1,000,000 | >174 (stopped) | 10.309 | not recorded | 616.9 |
+
+Completed reference/SQL pairs produced the same count and aggregate fingerprint.
+The million-record reference reconciliation was still running after 174 seconds
+and was stopped; no completed reference fingerprint exists for that case. The SQL
+case emitted 300,000 events. Small randomized partition tests independently check
+assignments, transitions and ordered event details against the pure planner.
+
+These are initial stage measurements, not repeated regression baselines or complete
+pipeline benchmarks. Native ingestion and review were faster while using **more**
+total RSS at this buffer limit; TF registration used less. Removing Python data
+round trips is not a guarantee of lower whole-process memory. SQL intermediate
+relations, parallel readers and buffer allocations remain part of capacity planning.
+Exact-format serialization and graph exceptions are documented in
+[Python processing exceptions](python-processing-exceptions.md). Re-run both modes
+on an idle host before making deployment capacity or regression-threshold decisions.

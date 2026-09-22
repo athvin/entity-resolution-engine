@@ -61,7 +61,6 @@ because a half-copied set is three files that were never one artifact.
 from __future__ import annotations
 
 import argparse
-import csv
 import hashlib
 import json
 import os
@@ -193,17 +192,6 @@ _TRAINING_THREADS: Final = "1"
 
 _TF_LOOKUP: Final = f"{SCHEMA_QUALIFIER}.{TF_LOOKUP_RELATION}"
 _STD_RECORDS: Final = f"{SCHEMA_QUALIFIER}.{STD_RECORDS_RELATION}"
-
-#: The frozen rows, read back in the order they are committed in. Ordering by
-#: `(column_name, value)` rather than trusting the insert order: the rows are written
-#: by one `INSERT … UNION ALL` whose branch order is config order, and a committed
-#: file whose sort key was an implementation detail of that statement would diff the
-#: first time the statement was rewritten.
-_SELECT_TF_SQL: Final = f"""
-SELECT column_name, value, tf_value FROM {_TF_LOOKUP}
- WHERE model_version = ? AND tf_snapshot_id = ?
- ORDER BY column_name, value
-"""
 
 #: The training corpus, materialized local and bare for `build_training_linker`, and
 #: **ordered**: the u estimate samples this relation under a seed, so its row order is
@@ -488,34 +476,24 @@ def _standardize(connection: duckdb.DuckDBPyConnection, cfg: Config, artifacts: 
         )
 
 
-def _tf_rows(connection: duckdb.DuckDBPyConnection) -> list[tuple[str, str, str, str, float]]:
-    """The frozen rows of this regeneration's TF key, in committed order."""
-    return [
-        (
-            FIXTURE_MODEL_VERSION,
-            FIXTURE_TF_SNAPSHOT_ID,
-            str(column_name),
-            str(value),
-            float(tf_value),
-        )
-        for column_name, value, tf_value in connection.execute(
-            _SELECT_TF_SQL, [FIXTURE_MODEL_VERSION, FIXTURE_TF_SNAPSHOT_ID]
-        ).fetchall()
-    ]
+def _export_tf_csv(connection: duckdb.DuckDBPyConnection, path: Path) -> int:
+    """Export frozen TF in stable column/value order, independent of insert order.
 
-
-def _write_tf_csv(path: Path, rows: Sequence[tuple[str, str, str, str, float]]) -> None:
-    """Write the frozen rows as `model_test_v1.tf.csv`.
-
-    `lineterminator='\\n'` because the file is committed and compared byte for byte,
-    and `repr` for `tf_value` because Python's shortest round-tripping float repr is
-    the one rendering that reads the same value back.
+    The pinned fixture is byte-identical to the previous csv.writer export.
     """
-    with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.writer(handle, lineterminator="\n")
-        writer.writerow(TF_CSV_HEADER)
-        for model_version, tf_snapshot_id, column_name, value, tf_value in rows:
-            writer.writerow([model_version, tf_snapshot_id, column_name, value, repr(tf_value)])
+    row = connection.execute(
+        f"COPY (SELECT model_version, tf_snapshot_id, column_name, value, tf_value "
+        f"FROM {_TF_LOOKUP} WHERE model_version = $model AND tf_snapshot_id = $snapshot "
+        "ORDER BY column_name, value) TO $destination "
+        "(FORMAT CSV, HEADER true, NEW_LINE '\n')",
+        {
+            "model": FIXTURE_MODEL_VERSION,
+            "snapshot": FIXTURE_TF_SNAPSHOT_ID,
+            "destination": str(path),
+        },
+    ).fetchone()
+    assert row is not None
+    return int(row[0])
 
 
 @dataclass(frozen=True)
@@ -573,11 +551,10 @@ def regenerate(out_dir: Path, *, cfg: Config | None = None) -> RegenResult:
                     model_version=FIXTURE_MODEL_VERSION,
                     tf_snapshot_id=FIXTURE_TF_SNAPSHOT_ID,
                 )
-                rows = _tf_rows(connection)
+                tf_count = _export_tf_csv(connection, out_dir / TF_FILENAME)
 
     model_bytes = (result.settings_json + "\n").encode("utf-8")
     (out_dir / MODEL_FILENAME).write_bytes(model_bytes)
-    _write_tf_csv(out_dir / TF_FILENAME, rows)
 
     meta: dict[str, Any] = {
         **pinned_inputs(resolved, digest),
@@ -585,7 +562,7 @@ def regenerate(out_dir: Path, *, cfg: Config | None = None) -> RegenResult:
         "config_hash": config_hash(resolved),
         "duckdb_version": duckdb.__version__,
         "sha256": hashlib.sha256(model_bytes).hexdigest(),
-        "tf_rows": len(rows),
+        "tf_rows": tf_count,
         "tf_snapshot_id": FIXTURE_TF_SNAPSHOT_ID,
     }
     (out_dir / META_FILENAME).write_text(

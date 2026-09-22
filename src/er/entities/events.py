@@ -479,9 +479,8 @@ def append_events(
     S4.5.3 requires an event and the membership rewrite it describes to land in the
     same snapshot — a per-row flush would publish a half-written history.
 
-    Deduplication is the accumulator's job, not this function's: :class:`EventLog`
-    has already collapsed the run's idempotency-key duplicates, and a log is
-    flushed once.
+    :class:`EventLog` collapses duplicates within the stream. The append anti-joins
+    already persisted idempotency keys so a retry cannot add the same event twice.
 
     Args:
         connection: an attached lake connection.
@@ -507,7 +506,11 @@ def append_events(
         (event.row(stamp) for event in chain((first,), remaining)),
     ) as staged:
         written = connection.execute(
-            f"INSERT INTO {_ENTITY_EVENTS} ({_COLUMN_LIST}) SELECT {_COLUMN_LIST} FROM {staged}"
+            f"INSERT INTO {_ENTITY_EVENTS} ({_COLUMN_LIST}) "
+            f"SELECT {', '.join('s.' + column for column in EVENT_COLUMNS)} FROM {staged} s "
+            f"WHERE NOT EXISTS (SELECT 1 FROM {_ENTITY_EVENTS} e WHERE e.run_id = s.run_id "
+            "AND e.entity_id = s.entity_id AND e.event_type = s.event_type "
+            "AND e.details_hash = s.details_hash)"
         ).fetchone()
         assert written is not None
         return int(written[0])

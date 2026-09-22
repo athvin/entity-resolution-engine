@@ -48,9 +48,10 @@ from er.dbt_runner import (
     render_dbt_vars,
     run_dbt,
 )
-from er.embeddings.coherence import get_scorer
+from er.embeddings.coherence import NoopScorer, get_scorer
 from er.entities.ids import IdFactory
 from er.errors import ExitCode, StageFailure
+from er.lake.bulk import staged_rows
 from er.lake.model import SCHEMA_QUALIFIER
 from er.obs.profiling import profiled, span
 from er.obs.runctx import ConnectionSource
@@ -140,6 +141,32 @@ def compute_touched_set(connection: duckdb.DuckDBPyConnection, run_id: str) -> d
     return {str(entity_id): str(disposition) for entity_id, disposition in rows}
 
 
+def materialize_touched_entities(
+    connection: duckdb.DuckDBPyConnection, run_id: str, *, touched_only: bool
+) -> tuple[int, int]:
+    """Populate the dbt input directly; return touched and rebuild counts."""
+    connection.execute(f"DELETE FROM {_TOUCHED} WHERE run_id = ?", [run_id])
+    if not touched_only:
+        return 0, 0
+    placeholders = ", ".join("?" for _ in TOUCHED_EVENT_TYPES)
+    connection.execute(
+        f"INSERT INTO {_TOUCHED} (run_id, entity_id, disposition, created_at) "
+        "SELECT ?, touched.entity_id, "
+        "CASE WHEN e.status IN ('merged', 'retired') THEN 'retire' ELSE 'rebuild' END, ? "
+        f"FROM (SELECT DISTINCT entity_id FROM {_EVENTS} "
+        f"WHERE run_id = ? AND event_type IN ({placeholders})) touched "
+        f"LEFT JOIN {_ENTITIES} e ON e.entity_id = touched.entity_id",
+        [run_id, datetime.now(UTC).replace(tzinfo=None), run_id, *TOUCHED_EVENT_TYPES],
+    )
+    row = connection.execute(
+        f"SELECT count(*), count(*) FILTER (WHERE disposition = 'rebuild') "
+        f"FROM {_TOUCHED} WHERE run_id = ?",
+        [run_id],
+    ).fetchone()
+    assert row is not None
+    return int(row[0]), int(row[1])
+
+
 def write_touched_entities(
     connection: duckdb.DuckDBPyConnection,
     run_id: str,
@@ -161,14 +188,15 @@ def write_touched_entities(
     connection.execute(f"DELETE FROM {_TOUCHED} WHERE run_id = ?", [run_id])
     if not touched:
         return 0
-    values = ", ".join("(?, ?, ?, ?)" for _ in touched)
-    parameters: list[Any] = []
-    for entity_id, disposition in sorted(touched.items()):
-        parameters += [run_id, entity_id, disposition, stamp]
-    connection.execute(
-        f"INSERT INTO {_TOUCHED} (run_id, entity_id, disposition, created_at) VALUES {values}",
-        parameters,
-    )
+    with staged_rows(
+        connection,
+        (("entity_id", "VARCHAR"), ("disposition", "VARCHAR")),
+        sorted(touched.items()),
+    ) as relation:
+        connection.execute(
+            f"INSERT INTO {_TOUCHED} SELECT ?, entity_id, disposition, ? FROM {relation}",
+            [run_id, stamp],
+        )
     return len(touched)
 
 
@@ -187,25 +215,16 @@ def reap_retired_entities(connection: duckdb.DuckDBPyConnection, run_id: str) ->
         How many golden_records rows were reaped, which is the entity count S4.6's
         `entities_reaped` counter reports.
     """
-    retire = [
-        str(row[0])
-        for row in connection.execute(
-            f"SELECT entity_id FROM {_TOUCHED} WHERE run_id = ? AND disposition = 'retire'",
-            [run_id],
-        ).fetchall()
-    ]
-    if not retire:
-        return 0
-    placeholders = ", ".join("?" for _ in retire)
-    for relation in REAP_RELATIONS:
-        connection.execute(
-            f"DELETE FROM {SCHEMA_QUALIFIER}.{relation} WHERE entity_id IN ({placeholders})",
-            retire,
-        )
-    # The golden_records count is the entity count S4.6 reports as `entities_reaped`;
-    # the other two relations are bounded by it (one display row per record, at most
-    # six lineage rows), so the retire-set size IS the reaped entity count.
-    return len(retire)
+    retired = f"SELECT entity_id FROM {_TOUCHED} WHERE run_id = ? AND disposition = 'retire'"
+    row = connection.execute(f"SELECT count(*) FROM ({retired})", [run_id]).fetchone()
+    count = int(row[0]) if row else 0
+    if count:
+        for relation in REAP_RELATIONS:
+            connection.execute(
+                f"DELETE FROM {SCHEMA_QUALIFIER}.{relation} WHERE entity_id IN ({retired})",
+                [run_id],
+            )
+    return count
 
 
 def assemble_dbt_vars(
@@ -320,6 +339,8 @@ def score_touched_entities(
     queued.
     """
     scorer = get_scorer(cfg)
+    if type(scorer) is NoopScorer and scorer.threshold >= 0:
+        return 0
     entity_ids = [
         str(row[0])
         for row in connection.execute(
@@ -381,13 +402,13 @@ def assemble(
     started = time.monotonic()
     with span("assemble.prepare"), source() as connection:
         run_started = _run_started_at(connection, run_id)
-        touched = compute_touched_set(connection, run_id) if touched_only else {}
-        rebuild = {entity_id for entity_id, d in touched.items() if d == "rebuild"}
+        touched_count, rebuild_count = materialize_touched_entities(
+            connection, run_id, touched_only=touched_only
+        )
 
         # `--touched-only` with nothing to do is S4.0's `10`: no mart runs, no reap, no
         # golden row moves, and every `assembled_at` stays as it was.
-        if touched_only and not touched:
-            write_touched_entities(connection, run_id, {})
+        if touched_only and not touched_count:
             empty = AssembleResult(
                 exit_code=int(ExitCode.NOTHING_TO_DO),
                 entities_touched=0,
@@ -399,8 +420,6 @@ def assemble(
             )
             empty.record(counters)
             return empty
-
-        write_touched_entities(connection, run_id, touched)
 
         # S11 coherence seam: score the rebuilt entities and queue findings after the touched
         # set is written and before the marts run (M20). Under the v1 `noop` scorer this writes
@@ -430,8 +449,8 @@ def assemble(
         lineage_rows, tiebreak = _golden_counts(connection)
 
         if touched_only:
-            entities_rebuilt = len(rebuild)
-            entities_touched = len(touched)
+            entities_rebuilt = rebuild_count
+            entities_touched = touched_count
         else:
             # Full mode rebuilds every active entity and reaps nothing, so the S4.6
             # accounting `rebuilt + reaped == touched` holds with `reaped = 0` and

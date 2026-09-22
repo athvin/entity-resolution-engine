@@ -1,7 +1,9 @@
 """The bounded first-load path is the ordinary lifecycle plan, with local staging."""
 
+import json
 from collections.abc import Iterator
 from datetime import datetime
+from pathlib import Path
 
 import duckdb
 import pytest
@@ -169,7 +171,9 @@ def test_nonconvergence_leaves_no_lake_writes_or_scratch(
     assert_clean(connection)
 
 
-def test_relation_clustering_matches_existing_loop() -> None:
+def test_relation_clustering_matches_existing_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     nodes = [f"crm:{i:04}" for i in range(130)]
     pairs = list(zip(nodes[:126], nodes[1:127], strict=True))
     with duckdb.connect() as c:
@@ -180,6 +184,7 @@ def test_relation_clustering_matches_existing_loop() -> None:
             "unnest(?::VARCHAR[]) AS rec_b_key",
             [[a for a, _ in pairs], [b for _, b in pairs]],
         )
+        monkeypatch.setenv("ER_PROFILE_DIR", str(tmp_path))
         with label_propagate_relations(c, "nodes", "edges", max_iterations=50) as (
             relation,
             rounds,
@@ -189,4 +194,18 @@ def test_relation_clustering_matches_existing_loop() -> None:
                 == expected.labels
             )
             assert rounds == expected.iterations
+            # The clustering span ends before callers consume the yielded relation.
+            spans = [
+                json.loads(line)
+                for path in tmp_path.glob("events-*.jsonl")
+                for line in path.read_text().splitlines()
+            ]
+            completed = [
+                event
+                for event in spans
+                if event["name"] == "reconcile.label_propagation" and event["event"] == "span_end"
+            ]
+            assert len(completed) == 1
+            assert completed[0]["status"] == "succeeded"
+            assert completed[0]["metrics"]["rows_out"] == len(nodes)
         assert_clean(c)

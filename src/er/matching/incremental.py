@@ -58,7 +58,7 @@ number about the full path reported on a row that scored a batch.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Final
@@ -78,10 +78,10 @@ from er.matching.evidence import build_evidence
 from er.matching.full import (
     MATCH_SCORES_RELATION,
     RETAIN_INTERMEDIATE_KEY,
-    ScoredPair,
+    ScoreSummary,
     merge_match_scores,
     prediction_columns,
-    review_scored_pairs,
+    review_score_relation,
 )
 from er.matching.model import LINK_TYPE, UNIQUE_ID_COLUMN, blocking_rules_from_config
 from er.matching.tf import (
@@ -592,12 +592,21 @@ def score_incremental(
     assert_tf_lookup_complete(connection, model_version, tf_snapshot_id, tf_columns(cfg))
 
     thresholds = cfg.thresholds
-    keys = (
-        unscored_record_keys(connection, model_version=model_version, tf_snapshot_id=tf_snapshot_id)
-        if record_keys is None
-        else tuple(record_keys)
-    )
-    if not keys:
+    corpus_api = splink_api(connection)
+    if record_keys is None:
+        connection.execute(
+            f"CREATE OR REPLACE TABLE {BATCH_KEYS_RELATION} AS {_UNSCORED_KEYS_SQL}",
+            [model_version, tf_snapshot_id],
+        )
+        unscored_count = _count(connection, BATCH_KEYS_RELATION)
+        if unscored_count:
+            connection.execute(_BATCH_SQL)
+            connection.execute(_PRIOR_CORPUS_SQL)
+    else:
+        unscored_count = len(record_keys)
+        if unscored_count:
+            _materialize_batch(connection, record_keys)
+    if not unscored_count:
         result = _nothing_to_do(model_version, tf_snapshot_id)
         result.record(run_ctx)
         return result
@@ -612,8 +621,6 @@ def score_incremental(
     # pairs pass 2 exists to find. Two handles over the one connection cost two
     # idempotent `SET`s; the first is also what puts the scratch schema on the search
     # path before the relations below are created (:func:`_materialize_batch`).
-    corpus_api = splink_api(connection)
-    _materialize_batch(connection, keys)
     batch_api = splink_api(connection)
 
     # Module-global lookups, so that AC2's falsification — replace pass 2 and the
@@ -641,7 +648,6 @@ def score_incremental(
         if select is not None
     ]
 
-    scored: Iterable[ScoredPair] = ()
     if selects:
         # `UNION ALL`, not `UNION`: the deduplication a pair found by both passes needs
         # is the merge source's `DISTINCT ON (rec_a_key, rec_b_key)`, which also
@@ -651,7 +657,7 @@ def score_incremental(
         connection.execute(
             f"CREATE OR REPLACE TABLE {UNION_RELATION} AS {' UNION ALL '.join(selects)}"
         )
-        scored = merge_match_scores(
+        merge_match_scores(
             connection,
             UNION_RELATION,
             EVIDENCE_COLUMN,
@@ -661,12 +667,17 @@ def score_incremental(
             scored_at=scored_at,
         )
 
-    summary = review_scored_pairs(
-        connection,
-        scored,
-        thresholds,
-        run_id=run_ctx.run_id,
-        id_factory=id_factory,
+    summary = (
+        review_score_relation(
+            connection,
+            thresholds,
+            model_version=model_version,
+            tf_snapshot_id=tf_snapshot_id,
+            run_id=run_ctx.run_id,
+            id_factory=id_factory,
+        )
+        if selects
+        else ScoreSummary()
     )
 
     assert_no_splink_relations_in_lake(connection)
@@ -676,7 +687,7 @@ def score_incremental(
         model_version=model_version,
         tf_snapshot_id=tf_snapshot_id,
         candidate_pairs=None,
-        unscored_records=len(keys),
+        unscored_records=unscored_count,
         pairs_scored=summary.pairs_scored,
         pairs_above_auto_merge=summary.pairs_above_auto_merge,
         pairs_in_gray_band=summary.pairs_in_gray_band,

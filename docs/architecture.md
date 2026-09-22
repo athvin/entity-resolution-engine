@@ -30,7 +30,11 @@ flowchart LR
 
 DuckLake stores data in S3-compatible storage and metadata in PostgreSQL. DuckDB
 executes SQL; dbt owns staging, standardization, blocking and golden models. Python
-owns ingestion, model lifecycle, graph reconciliation and operational tables.
+orchestrates ingestion, model lifecycle, reconciliation and operational writes.
+File scans, hashing, score classification, affected-set discovery, overlap planning
+and membership updates execute as SQL in DuckDB. Only documented compatibility,
+ID-generation, serialization and graph operations process rows in Python; see
+[Python processing exceptions](python-processing-exceptions.md).
 Logical keys are enforced by writers and tests because DuckLake does not enforce
 primary-key or unique constraints.
 

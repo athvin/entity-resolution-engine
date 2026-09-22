@@ -231,11 +231,31 @@ def allocate_model_version(connection: duckdb.DuckDBPyConnection) -> str:
     `v10000`, where `'v9999' > 'v10000'` lexically and the allocator would hand out
     `v10000` twice.
     """
-    numbers = [
-        parse_model_version(str(version))
-        for (version,) in connection.execute(f"SELECT model_version FROM {_REGISTRY}").fetchall()
-    ]
-    return format_model_version(max(numbers, default=0) + 1)
+    invalid = connection.execute(
+        f"SELECT model_version FROM {_REGISTRY} "
+        "WHERE NOT regexp_full_match(model_version, 'v[0-9]{4,}') LIMIT 1"
+    ).fetchone()
+    if invalid is not None:
+        # The reference accepts Unicode decimal digits as well. Keep that rare
+        # metadata compatibility case without collecting the registry in memory.
+        cursor = connection.execute(f"SELECT model_version FROM {_REGISTRY}")
+        maximum = max(
+            (
+                parse_model_version(str(version))
+                for page in iter(lambda: cursor.fetchmany(1024), [])
+                for (version,) in page
+            ),
+            default=0,
+        )
+        return format_model_version(maximum + 1)
+    # Numeric strings can exceed BIGINT (and the fixed four-digit display width).
+    # Order by significant length and digits, then parse just the maximum in Python.
+    row = connection.execute(
+        f"SELECT model_version FROM {_REGISTRY} ORDER BY "
+        "length(ltrim(substr(model_version, 2), '0')) DESC, "
+        "ltrim(substr(model_version, 2), '0') DESC LIMIT 1"
+    ).fetchone()
+    return format_model_version((0 if row is None else parse_model_version(str(row[0]))) + 1)
 
 
 def find_active_model(connection: duckdb.DuckDBPyConnection) -> ModelRow | None:

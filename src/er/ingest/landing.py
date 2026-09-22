@@ -12,12 +12,10 @@ Four rules are structural here, and each is a decision the spec makes:
   record ADDS a row and never overwrites one. Nothing in this module issues an
   `UPDATE`, a `DELETE` or a `MERGE` against `raw_records`, and the whole write is a
   single statement (:func:`anti_join_append`) so a delivery cannot be half-applied.
-* **One `content_hash`, one implementation.** S4.1 spells the function
-  ``er.ingest.landing.content_hash`` while S3 puts the module at
-  ``ingest/hashing.py``. :data:`content_hash` here is ER-029's function *bound*, not
-  wrapped and not reimplemented — ``er.ingest.landing.content_hash is
-  er.ingest.hashing.content_hash`` — because two implementations that disagree make
-  T-IDEM-1a and T-IDEM-1 non-reproducible.
+* **One hash contract.** Native file ingestion uses the SQL expression owned by
+  ``ingest/hashing.py``. The reference function remains bound here as
+  :data:`content_hash`, and compatibility adapters use it directly. Native and
+  reference digests are parity-tested over the same source rendering.
 * **Classify before you append.** The five counts are read off the lake as it stood
   *before* the append; computing them afterwards would classify every delivered key
   as `unchanged`, which is exactly the reading that would make a broken anti-join
@@ -71,6 +69,7 @@ Out of scope by construction: edge invalidation and the ``member_removed`` / ``s
 
 from __future__ import annotations
 
+import csv
 import json
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
@@ -84,7 +83,7 @@ from er.config.schema import Config
 from er.entities.ids import IdFactory, UlidFactory
 from er.errors import ConfigError, ExitCode
 from er.ingest.hashing import TOMBSTONE_CONTENT_HASH, content_hash
-from er.ingest.sources import SourceAdapter, SourceRow, adapter_for
+from er.ingest.sources import CsvAdapter, ParquetAdapter, SourceAdapter, SourceRow, adapter_for
 from er.lake.bulk import insert_batches
 from er.lake.model import REGISTRY, SCHEMA_QUALIFIER
 from er.obs.profiling import profiled
@@ -525,6 +524,41 @@ def _stage_delivery(
     )
 
 
+@profiled("ingest.read_hash_stage", "records")
+def _stage_files(
+    connection: duckdb.DuckDBPyConnection, adapter: CsvAdapter | ParquetAdapter
+) -> int:
+    from er.ingest.native import stage_file
+    from er.obs.profiling import span
+
+    connection.execute(_CREATE_STAGING)
+    total = 0
+    for path in adapter.discover():
+        try:
+            count = stage_file(connection, adapter, path, STAGING_TABLE, total)
+        except (duckdb.Error, OSError, UnicodeError, csv.Error):
+            count = None
+        if count is None:
+            with span(
+                "ingest.compatibility_file", unit="records", source=adapter.source, file=path.name
+            ) as metrics:
+                # Stage no lake rows until the entire delivery has been validated.
+                count = insert_batches(
+                    connection,
+                    _INSERT_STAGING,
+                    (
+                        (seq + total, source, key, payload, digest)
+                        for seq, source, key, payload, digest in _hashed_rows(
+                            adapter._file_rows(path), adapter.columns
+                        )
+                    ),
+                    columns=5,
+                )
+                metrics.update(rows_in=count, rows_out=count)
+        total += count
+    return total
+
+
 @profiled("ingest.classify", "records")
 def _classify(connection: duckdb.DuckDBPyConnection, source: str) -> tuple[int, int, int]:
     """The three S4.1 counts, against the lake as it stands before the append."""
@@ -615,6 +649,7 @@ def anti_join_append(
     ingest_batch_id: str,
     ingested_at: datetime,
     full_refresh_keys: bool = False,
+    adapter: SourceAdapter | None = None,
 ) -> AppendResult:
     """Append ``rows`` to `raw_records` as an anti-join on the S4.1 key.
 
@@ -646,7 +681,11 @@ def anti_join_append(
             exactly as the invocation found it.
     """
     try:
-        rows_in = _stage_delivery(connection, rows, columns)
+        rows_in = (
+            _stage_files(connection, adapter)
+            if isinstance(adapter, (CsvAdapter, ParquetAdapter))
+            else _stage_delivery(connection, rows, columns)
+        )
         if full_refresh_keys and rows_in == 0:
             _refuse_empty_full_refresh(connection, source)
         new_count, changed_count, unchanged_count = _classify(connection, source)
@@ -761,6 +800,7 @@ def ingest_delivery(
         ingest_batch_id=ingest_batch_id,
         ingested_at=ingested_at,
         full_refresh_keys=full_refresh_keys,
+        adapter=adapter,
     )
     manifest = IngestManifest(
         ingest_batch_id=ingest_batch_id,

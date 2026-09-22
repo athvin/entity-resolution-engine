@@ -47,6 +47,7 @@ from helpers.model import (
     FIXTURE_META_PATH,
     FIXTURE_MODEL_PATH,
     FIXTURE_MODEL_VERSION,
+    FIXTURE_TF_PATH,
     FIXTURE_TF_SNAPSHOT_ID,
     fixture_meta,
     fixture_settings,
@@ -405,3 +406,13 @@ def test_ci_integration_job_excludes_slow() -> None:
 
     assert len(suite) == 1, [step.get("name") for step in steps]
     assert '-m "not slow"' in suite[0]["run"], suite[0]["run"]
+
+
+def test_copy_export_preserves_committed_tf_bytes(
+    lake: duckdb.DuckDBPyConnection,
+    tmp_path: Path,
+) -> None:
+    load_fixture_model(lake)
+    target = tmp_path / "frozen.tf.csv"
+    assert regen_module()._export_tf_csv(lake, target) == len(fixture_tf_rows())
+    assert target.read_bytes() == FIXTURE_TF_PATH.read_bytes()

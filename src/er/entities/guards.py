@@ -108,6 +108,20 @@ def scoring_generation_rows(connection: duckdb.DuckDBPyConnection) -> list[Gener
     ]
 
 
+def assert_scoring_generation(connection: duckdb.DuckDBPyConnection, *, review_low: float) -> None:
+    """Check current generations in SQL, returning only one count per generation."""
+    rows = connection.execute(
+        f"SELECT model_version, tf_snapshot_id, count(*) FROM ({_CURRENT_PER_PAIR_SQL}) "
+        "WHERE match_probability >= ? AND NOT isnan(match_probability) "
+        "GROUP BY model_version, tf_snapshot_id",
+        [review_low],
+    ).fetchall()
+    if len(rows) > 1:
+        raise MixedScoringGenerationError(
+            {(str(model), str(snapshot)): int(count) for model, snapshot, count in rows}
+        )
+
+
 def assert_single_scoring_generation(
     rows: Iterable[GenerationRow],
     *,

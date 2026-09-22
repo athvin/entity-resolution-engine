@@ -54,7 +54,7 @@ from er.entities.ids import (
     split_record_key,
 )
 from er.errors import ConfigError, StageFailure
-from er.lake.bulk import BATCH_ROWS, insert_batches
+from er.lake.bulk import BATCH_ROWS, insert_batches, staged_ids, staged_query
 from er.lake.model import (
     REGISTRY,
     REVIEW_REASONS,
@@ -650,6 +650,87 @@ def upsert_entity_finding(
         run_id=run_id,
         id_factory=id_factory if id_factory is not None else UlidFactory(),
     )
+
+
+def upsert_subject_relation(
+    connection: duckdb.DuckDBPyConnection,
+    subjects: str,
+    *,
+    run_id: str,
+    id_factory: IdFactory | None = None,
+) -> tuple[int, int]:
+    """Upsert unique, validated subjects in SQL; return added and refreshed counts.
+
+    Subjects carry the seven subject/payload columns and a stable ``position``.
+    Resolved rows suppress a subject; an open row retains its original payload.
+    Only generated IDs cross into DuckDB from Python.
+    """
+    predicate = " AND ".join(
+        f"q.{column} IS NOT DISTINCT FROM s.{column}" for column in _SUBJECT_COLUMNS
+    )
+    settled = ", ".join("?" for _ in RESOLVED_STATUSES)
+    query = (
+        f"SELECT s.*, coalesce(q.settled, 0) AS settled, "
+        "coalesce(q.open_count, 0) AS open_count, q.review_id FROM "
+        f"{subjects} s LEFT JOIN (SELECT s.position, "
+        f"count(*) FILTER (WHERE q.status IN ({settled})) AS settled, "
+        "count(*) FILTER (WHERE q.status = 'open') AS open_count, "
+        "min(q.review_id) FILTER (WHERE q.status = 'open') AS review_id "
+        f"FROM {_REVIEW_QUEUE} q JOIN {subjects} s ON {predicate} "
+        "GROUP BY s.position) q ON q.position = s.position"
+    )
+    with staged_query(connection, query, sorted(RESOLVED_STATUSES)) as state:
+        duplicate = connection.execute(
+            f"SELECT position, open_count FROM {state} WHERE settled = 0 AND open_count > 1 "
+            "ORDER BY position LIMIT 1"
+        ).fetchone()
+        if duplicate is not None:
+            # The established diagnostic names the offending subject and review IDs.
+            row = connection.execute(
+                f"SELECT {', '.join(_SUBJECT_COLUMNS)} FROM {subjects} WHERE position = ?",
+                [duplicate[0]],
+            ).fetchone()
+            assert row is not None
+            subject = _Subject(*row)
+            _upsert(
+                connection,
+                [subject],
+                run_id=run_id,
+                id_factory=id_factory if id_factory is not None else UlidFactory(),
+            )
+            raise AssertionError("duplicate open reviews were not rejected")
+        row = connection.execute(
+            f"SELECT count(*) FILTER (WHERE open_count = 0), "
+            f"count(*) FILTER (WHERE open_count = 1) FROM {state} WHERE settled = 0"
+        ).fetchone()
+        assert row is not None
+        added, refreshed = map(int, row)
+        with staged_query(
+            connection,
+            f"SELECT *, row_number() OVER (ORDER BY position) AS id_position FROM {state} "
+            "WHERE settled = 0 AND open_count = 0",
+        ) as pending:
+            with staged_ids(
+                connection, added, id_factory if id_factory is not None else UlidFactory()
+            ) as ids:
+                if added:
+                    connection.execute(
+                        f"INSERT INTO {_REVIEW_QUEUE} "
+                        "(review_id, subject_type, reason, rec_a_key, rec_b_key, entity_id, "
+                        "match_probability, waterfall, status, first_seen_run_id, "
+                        "last_seen_run_id, resolved_by, resolved_at) "
+                        "SELECT i.id, s.subject_type, s.reason, s.rec_a_key, s.rec_b_key, "
+                        "s.entity_id, s.match_probability, s.waterfall, 'open', ?, ?, NULL, NULL "
+                        f"FROM {pending} s JOIN {ids} i ON i.position = s.id_position",
+                        [run_id, run_id],
+                    )
+        if refreshed:
+            connection.execute(
+                f"UPDATE {_REVIEW_QUEUE} SET last_seen_run_id = ? WHERE review_id IN "
+                f"(SELECT review_id FROM {state} WHERE settled = 0 AND open_count = 1)",
+                [run_id],
+            )
+    return added, refreshed
 
 
 def open_reviews(

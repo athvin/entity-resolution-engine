@@ -330,3 +330,58 @@ def test_check_contradiction_1_clean_set_returns_empty() -> None:
     # And the same set WITH the never active is not, so the three cases above are
     # clean for their own reasons rather than because the checker never fires.
     assert len(check_contradiction_1([always_ab, always_bc, never_ac])) == 1
+
+
+@pytest.mark.parametrize(
+    "suffix,exception,prefix_count",
+    [
+        ("base,crm:1,web:1,never,steward,conflict", AssertionConflict, 1),
+        ("base,crm:2,crm:2,always,steward,self", ConfigError, 1),
+        ("badphase,crm:2,web:2,always,steward,parse", ConfigError, 0),
+        ("base,crm:bad:key,web:2,always,steward,parse", ConfigError, 0),
+    ],
+)
+def test_bulk_load_preserves_parse_atomicity_and_conflict_prefix(
+    lake: duckdb.DuckDBPyConnection,
+    tmp_path: Path,
+    suffix: str,
+    exception: type[Exception],
+    prefix_count: int,
+) -> None:
+    path = write_csv(
+        tmp_path / "assertions.csv",
+        ASSERTIONS_CSV_HEADER,
+        "base,web:1,crm:1,always,steward,first",
+        "base,crm:1,web:1,always,steward,duplicate",
+        suffix,
+        "base,crm:3,web:3,always,steward,after",
+    )
+    with pytest.raises(exception):
+        load_assertions_csv(lake, path, id_factory=CountingIdFactory(), created_at=STAMP)
+    assert lake.execute("SELECT count(*) FROM lake.main.assertions").fetchone() == (prefix_count,)
+    if prefix_count:
+        assert lake.execute("SELECT note FROM lake.main.assertions").fetchone() == ("first",)
+
+
+def test_bulk_load_keeps_order_and_nulls_without_python_file_parse(
+    lake: duckdb.DuckDBPyConnection,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from er.review import assertion_import
+
+    def unexpected(_path: Path) -> None:
+        raise AssertionError("ordinary assertion CSV went through the compatibility parser")
+
+    monkeypatch.setattr(assertion_import, "parse_assertions_csv", unexpected)
+    path = write_csv(
+        tmp_path / "assertions.csv",
+        ASSERTIONS_CSV_HEADER,
+        "base,web:2,crm:2,never,steward,\\N",
+        "base,web:1,crm:1,always,steward,",
+        'base,web:3,crm:3,always,steward,"quoted, 雪"',
+    )
+    actual = load_assertions_csv(lake, path, id_factory=CountingIdFactory(), created_at=STAMP)
+    assert [a.rec_a_key for a in actual] == ["crm:2", "crm:1", "crm:3"]
+    assert [a.note for a in actual] == [None, "", "quoted, 雪"]
+    assert [a.assertion_id for a in actual] == sorted(a.assertion_id for a in actual)

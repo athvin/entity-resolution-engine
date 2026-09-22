@@ -10,9 +10,59 @@ from uuid import uuid4
 
 import duckdb
 
+from er.entities.ids import IdFactory
 from er.obs.profiling import span
 
 BATCH_ROWS = 1024
+
+
+@contextmanager
+def staged_ids(
+    connection: duckdb.DuckDBPyConnection, count: int, factory: IdFactory
+) -> Iterator[str]:
+    """Mint ordered IDs without reading the records they will be joined to."""
+    with staged_rows(
+        connection,
+        (("position", "BIGINT"), ("id", "VARCHAR")),
+        ((position, factory.new()) for position in range(1, count + 1)),
+    ) as relation:
+        yield relation
+
+
+@contextmanager
+def staged_query(
+    connection: duckdb.DuckDBPyConnection,
+    query: str,
+    parameters: Sequence[Any] = (),
+) -> Iterator[str]:
+    """Materialize SQL in spillable local storage without transferring its rows."""
+    relation = f"temp.main.er_bulk_{uuid4().hex}"
+    connection.execute(f"CREATE TEMP TABLE {relation} AS {query}", list(parameters))
+    try:
+        yield relation
+    except BaseException:
+        with suppress(duckdb.Error):
+            connection.execute(f"DROP TABLE {relation}")
+        raise
+    else:
+        connection.execute(f"DROP TABLE {relation}")
+
+
+def relation_pages(
+    connection: duckdb.DuckDBPyConnection, relation: str, columns: str
+) -> Iterator[list[tuple[Any, ...]]]:
+    """Read an explicitly ordered, materialized relation in bounded ordinal ranges.
+
+    The caller supplies a dense one-based ``position`` column. Unlike an open
+    result cursor, the relation survives interleaved writes on this connection.
+    """
+    offset = 0
+    while rows := connection.execute(
+        f"SELECT {columns} FROM {relation} WHERE position > ? AND position <= ? ORDER BY position",
+        [offset, offset + BATCH_ROWS],
+    ).fetchall():
+        yield rows
+        offset += BATCH_ROWS
 
 
 @contextmanager

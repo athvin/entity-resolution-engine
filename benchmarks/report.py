@@ -362,20 +362,11 @@ def _measure_and_aggregate(scale_name: str, *, repeat: int) -> dict[str, Any]:
 
 def _quality_contribution(connection: Any, staging: Path, auto_merge: float) -> dict[str, Any]:
     """`blocking_recall` and the quality block over the generated corpus's truth (S10.5)."""
-    import csv
+    from large_validation import candidate_pair_count, quality_from_csv
 
-    from quality import quality_block, truth_pairs_from_rows
-
-    rows: list[tuple[str, str]] = []
-    for truth_csv in (staging / "truth.csv", staging / "batch" / "truth.csv"):
-        if not truth_csv.exists():
-            continue
-        with truth_csv.open(newline="", encoding="utf-8") as handle:
-            for row in csv.DictReader(handle):
-                record_key = f"{row['source_system']}:{row['source_record_id']}"
-                rows.append((row["persona_id"], record_key))
-    truth = truth_pairs_from_rows(rows)
-    return quality_block(connection, truth, auto_merge=auto_merge)
+    return quality_from_csv(
+        connection, staging, auto_merge, blocked_count=candidate_pair_count(connection)
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:

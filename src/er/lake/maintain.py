@@ -201,19 +201,32 @@ def maintain(
         The three counts S4.0 prints. All zero for an idempotent second run.
     """
     moment = datetime.now(UTC) if now is None else now
-    cutoff = retention_cutoff(moment, retain_days, referenced_snapshots(connection))
+    window = _utc(moment) - timedelta(days=retain_days)
+    referenced = connection.execute(
+        f"SELECT min(snapshot_time) FROM ({_REFERENCED_SQL}) WHERE run_started_at >= ?",
+        [window.replace(tzinfo=None)],
+    ).fetchone()
+    oldest = None if referenced is None else referenced[0]
+    cutoff = window if oldest is None else min(window, _utc(oldest))
 
-    merged = connection.execute(MERGE_ADJACENT_FILES).fetchall()
-    expired = connection.execute(EXPIRE_SNAPSHOTS, [cutoff]).fetchall()
-    deleted = connection.execute(CLEANUP_OLD_FILES).fetchall()
+    merged_cursor = connection.execute(MERGE_ADJACENT_FILES)
+    merged = sum(
+        int(row[_FILES_PROCESSED])
+        for page in iter(lambda: merged_cursor.fetchmany(1024), [])
+        for row in page
+    )
+    expired_cursor = connection.execute(EXPIRE_SNAPSHOTS, [cutoff])
+    expired = sum(len(page) for page in iter(lambda: expired_cursor.fetchmany(1024), []))
+    deleted_cursor = connection.execute(CLEANUP_OLD_FILES)
+    deleted = sum(len(page) for page in iter(lambda: deleted_cursor.fetchmany(1024), []))
 
     return MaintainResult(
-        files_merged=sum(int(row[_FILES_PROCESSED]) for row in merged),
+        files_merged=merged,
         # Row counts, not a reported total: each function returns one row per
         # snapshot expired and per file deleted, and counting them here is the only
         # reading that cannot disagree with what the engine actually did.
-        snapshots_expired=len(expired),
-        files_deleted=len(deleted),
+        snapshots_expired=expired,
+        files_deleted=deleted,
     )
 
 

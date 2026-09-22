@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import gzip
 import hashlib
 import json
 import os
@@ -26,6 +25,7 @@ from large_validation import (
 )
 from profile_report import write_report
 from scales import Scale
+from semantic_outputs import save_semantic_outputs
 from ulid import ULID
 
 from er.config.hashing import config_hash
@@ -545,60 +545,6 @@ def validate_initial_outputs(connection: Any, records: int) -> dict[str, int]:
         == 0
     ), "lineage winners are not members of their entities"
     return {**counts, "entities": entities, "golden_lineage": lineage}
-
-
-def save_semantic_outputs(
-    connection: Any, config: Any, directory: Path, phase: str
-) -> dict[str, str]:
-    """Compare business values independently of generated IDs and execution times."""
-    labels = dict(
-        connection.execute(
-            "SELECT entity_id, min(record_key) FROM lake.main.entity_membership GROUP BY entity_id"
-        ).fetchall()
-    )
-    ignored = {
-        "int_std_records": {"ingest_batch_id", "ingested_at"},
-        "int_blocking_keys": set(),
-        "golden_records": {"assembled_at"},
-        "golden_lineage": {"assembled_at"},
-    }
-    hashes = {}
-    for table, excluded in ignored.items():
-        cursor = connection.execute(f"SELECT * FROM lake.main.{table}")
-        names = [column[0] for column in cursor.description]
-        rows = []
-        for values in cursor.fetchall():
-            row = {
-                name: labels[value] if name == "entity_id" else value
-                for name, value in zip(names, values, strict=True)
-                if name not in excluded
-            }
-            rows.append(json.dumps(row, sort_keys=True, default=str, ensure_ascii=False))
-        hashes[table] = hashlib.sha256("\n".join(sorted(rows)).encode()).hexdigest()
-    pairs = connection.execute(
-        "SELECT DISTINCT a.record_key, b.record_key FROM lake.main.int_blocking_keys a "
-        "JOIN lake.main.int_blocking_keys b ON a.key_type=b.key_type AND a.key_value=b.key_value "
-        "AND a.record_key < b.record_key ORDER BY 1,2"
-    ).fetchall()
-    hashes["candidate_pairs"] = hashlib.sha256(json.dumps(pairs).encode()).hexdigest()
-    scores = connection.execute(
-        "SELECT rec_a_key, rec_b_key, match_probability, rec_a_content_hash, "
-        "rec_b_content_hash, is_active FROM lake.main.match_scores ORDER BY 1,2"
-    ).fetchall()
-    with gzip.open(directory / f"{phase}-scores.json.gz", "wt") as handle:
-        json.dump(scores, handle)
-    classes = [
-        (
-            row[0],
-            row[1],
-            row[2] >= config.thresholds.auto_merge,
-            row[2] >= config.thresholds.review_low,
-            *row[3:],
-        )
-        for row in scores
-    ]
-    hashes["score_classifications"] = hashlib.sha256(json.dumps(classes).encode()).hexdigest()
-    return hashes
 
 
 def validate_repeat_outputs(out: Path) -> None:
