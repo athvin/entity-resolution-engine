@@ -675,6 +675,7 @@ class _MatchStage:
         self.stage_run = stage_run
 
     def run(self, options: GlobalOptions) -> int:
+        from er.matching.compatibility import assert_matching_model
         from er.matching.full import score_full
         from er.matching.incremental import score_incremental
 
@@ -706,6 +707,7 @@ class _MatchStage:
                     f"implemented, and scoring at the active one instead would silently "
                     f"answer a different question (S4.3.2)"
                 )
+            assert_matching_model(connection, active, incremental=self.mode == MODE_INCREMENTAL)
             settings = load_model_settings(connection, store, active.model_version)
 
             # S4.5.5, and deliberately here rather than inside the two scorers. S4.0b
@@ -1756,7 +1758,7 @@ def match(
     ``--mode full`` is one corpus-wide `predict` at `review_low` over the active
     model's frozen settings and frozen term frequency. ``--mode incremental`` is
     S4.3.4's two passes over that same frozen model and the same registered TF tables —
-    `find_matches_to_new_records` for the batch against the corpus, and a batch-only
+    `predict_between` for the batch against the corpus, and a batch-only
     `dedupe_only` linker for the batch against itself, because the first never pairs two
     new records with each other. Either way the result is persisted to
     `lake.main.match_scores` in a single `MERGE INTO` on `(rec_a_key, rec_b_key,

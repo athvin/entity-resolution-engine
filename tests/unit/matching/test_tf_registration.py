@@ -35,6 +35,7 @@ from ulid import ULID
 from er.config.loader import load_config
 from er.config.schema import Config
 from er.lake.model import REGISTRY, create_table_sql
+from er.matching.api import splink_api
 from er.matching.tf import (
     TF_COLUMN_PREFIX,
     TF_LOOKUP_RELATION,
@@ -200,7 +201,7 @@ def cfg() -> Config:
 
 
 @pytest.fixture
-def lake() -> Iterator[duckdb.DuckDBPyConnection]:
+def lake(monkeypatch: pytest.MonkeyPatch) -> Iterator[duckdb.DuckDBPyConnection]:
     """An in-memory stand-in for the lake, holding S5's own `tf_lookup`.
 
     ATTACHed under the alias rather than created as `main.tf_lookup`: every statement
@@ -208,6 +209,7 @@ def lake() -> Iterator[duckdb.DuckDBPyConnection]:
     being the default catalog, and a fixture that made the table reachable unqualified
     would let a missing qualifier pass here and fail against a real lake.
     """
+    monkeypatch.setenv("ER_DUCKDB_THREADS", "1")
     connection = duckdb.connect()
     connection.execute("ATTACH ':memory:' AS lake")
     connection.execute(create_table_sql(REGISTRY[TF_LOOKUP_RELATION]))
@@ -266,7 +268,9 @@ def test_register_tf_calls_register_term_frequency_lookup_per_column(
     )
     linker = SpyLinker()
 
-    registered = register_tf(linker, lake, cfg, model_version, tf_snapshot_id)
+    registered = register_tf(
+        linker, lake, cfg, model_version, tf_snapshot_id, db_api=splink_api(lake)
+    )
 
     assert registered == EXPECTED_TF_COLUMNS
     calls = linker.table_management.calls
@@ -278,8 +282,8 @@ def test_register_tf_calls_register_term_frequency_lookup_per_column(
     # The frame Splink joins on is read by column name, so the shape is the interface.
     for call, column in zip(calls, EXPECTED_TF_COLUMNS, strict=True):
         frame = call.kwargs["input_data"]
-        assert isinstance(frame, str)
-        result = lake.execute(f"SELECT * FROM {frame}")
+        assert hasattr(frame, "physical_name")
+        result = lake.execute(f"SELECT * FROM {frame.physical_name}")
         assert [field[0] for field in result.description] == [column, f"{TF_COLUMN_PREFIX}{column}"]
         assert result.fetchall() == [(f"{column}-value", 0.25)]
 
@@ -299,7 +303,7 @@ def test_register_tf_refuses_a_key_missing_a_column(
     linker = SpyLinker()
 
     with pytest.raises(MissingTfLookupError) as refusal:
-        register_tf(linker, lake, cfg, model_version, tf_snapshot_id)
+        register_tf(linker, lake, cfg, model_version, tf_snapshot_id, db_api=splink_api(lake))
 
     assert "family_name" in str(refusal.value), "the refusal must name the missing column"
     assert refusal.value.code == 3

@@ -24,11 +24,11 @@ would silently re-point the session.
 the batch run's own `run_id` is what separates the pass's output from the base rows it
 sits beside — without that filter every base-only pair would look like something the
 two-pass path produced, and the S8.2.1 endpoint theorem (no pair of two base records is
-reachable from `find_matches_to_new_records` or a batch-only `dedupe_only` linker) would
+reachable from `predict_between` or a batch-only `dedupe_only` linker) would
 appear to be violated by the fixture.
 
-**T-MATCH-SYM and why it is provable at all.** `compare_two_records(a, b)` and
-`compare_two_records(b, a)` must agree, and the only comparison level that could
+**T-MATCH-SYM and why it is provable at all.** `score_pair(a, b)` and
+`score_pair(b, a)` must agree, and the only comparison level that could
 plausibly break that is `variant_match` — it reads one record's `name_variants` array
 against the other's `given_name`. S4.2 guarantees the normalized `given_name` is element
 0 of its own array, which makes the relation symmetric. That precondition is asserted
@@ -36,7 +36,7 @@ here as its own test rather than assumed, because if it ever stopped holding, th
 orientation test would fail with no indication of why.
 
 `1e-12` rather than `==` for the orientation arm is deliberate and is the ticket's:
-`compare_two_records` runs each orientation through its own SQL pipeline, so the two
+`score_pair` runs each orientation through its own SQL pipeline, so the two
 are not guaranteed to be the same floating-point *operations* in the same order, and an
 exact comparison would be asserting something about DuckDB's expression evaluation
 rather than about the model.
@@ -124,7 +124,7 @@ MODEL_REGISTRY: Final = f"{SCHEMA_QUALIFIER}.model_registry"
 
 MATCH_STAGE: Final = "match"
 
-#: AC6's bound. Not `==`: each orientation runs through its own `compare_two_records`
+#: AC6's bound. Not `==`: each orientation runs through its own `score_pair`
 #: pipeline, so exactness would be a claim about DuckDB's evaluation order.
 ORIENTATION_TOLERANCE: Final = 1e-12
 
@@ -515,7 +515,7 @@ def symmetry(
             f"CREATE OR REPLACE TABLE {SYMMETRY_CORPUS_RELATION} AS "
             f"SELECT {', '.join(STD_RECORD_COLUMNS)} FROM {STD_RECORDS}"
         )
-        linker = Linker(SYMMETRY_CORPUS_RELATION, settings=settings, db_api=api)
+        linker = Linker(api.register(SYMMETRY_CORPUS_RELATION), settings=settings)
         # The frozen TF, as any scoring path registers it (D4): an unregistered linker
         # would compare the two orientations under term frequencies computed twice.
         register_tf(linker, initialised_lake, cfg, model_version, tf_snapshot_id)
@@ -549,10 +549,13 @@ def _as_typed_frame(record: Mapping[str, Any]) -> pd.DataFrame:
 
 
 def _probability(linker: Linker, left: Mapping[str, Any], right: Mapping[str, Any]) -> float:
-    """`compare_two_records` for one ordered pair, as a probability."""
-    frame = linker.inference.compare_two_records(_as_typed_frame(left), _as_typed_frame(right))
-    rows = frame.as_record_dict()
-    assert len(rows) == 1, f"compare_two_records returned {len(rows)} rows, expected 1"
+    """`score_pair` for one ordered pair, as a probability."""
+    frame = linker.inference.score_pair(
+        linker._db_api.register(_as_typed_frame(left)),
+        linker._db_api.register(_as_typed_frame(right)),
+    )
+    rows = frame.as_record_list()
+    assert len(rows) == 1, f"score_pair returned {len(rows)} rows, expected 1"
     return float(rows[0]["match_probability"])
 
 

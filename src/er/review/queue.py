@@ -21,7 +21,7 @@ coherence scorer — and the whole point of the table is that a steward's answer
   `never_unsatisfiable`, which is a different task and not a resurfacing of the
   dismissed one.
 * **`waterfall` is retained, never projected.** S4.3.5 requires the `gamma_*`
-  comparison vector *and* the per-comparison Bayes factors from `predict()`, so
+  comparison vector *and* the per-comparison weights from `predict()`, so
   :func:`upsert_gray_band_pairs` refuses a payload carrying neither rather than
   storing a row a reviewer cannot act on.
 * **Resolving to `match` / `no_match` writes the assertion (S4.3.5).** The
@@ -141,11 +141,11 @@ _RESOLUTION_STATUS: Final[Mapping[str, str]] = {
 _RESOLUTION_KIND: Final[Mapping[str, str]] = {MATCH: ALWAYS, NO_MATCH: NEVER}
 
 #: The two key families a `gray_band` `waterfall` MUST carry (S4.3.5): Splink's
-#: `predict()` emits one `gamma_<column>` per comparison and one `bf_<column>`
-#: Bayes factor beside it, and S4.3.5 requires both to be retained rather than
-#: projected away.
+#: `predict()` emits `gamma_*` comparison levels and `mw_*` log2 weights.
+#: Historical `bf_*` Bayes factors remain valid for stored review evidence.
 GAMMA_PREFIX: Final = "gamma_"
 BAYES_FACTOR_PREFIX: Final = "bf_"
+MATCH_WEIGHT_PREFIX: Final = "mw_"
 
 
 @dataclass(frozen=True)
@@ -321,21 +321,23 @@ def _require_waterfall(pair: GrayBandPair) -> Mapping[str, Any]:
 
     Raises:
         er.errors.StageFailure: the payload carries no `gamma_*` key or no
-            per-comparison Bayes factor. S4.3.5 says both "MUST be retained rather
+            per-comparison weight. S4.3.5 says both "MUST be retained rather
             than projected away", so a stripped payload is refused at the write
             rather than discovered by a steward looking at an empty waterfall.
     """
     payload = pair.waterfall
     missing = [
         prefix
-        for prefix in (GAMMA_PREFIX, BAYES_FACTOR_PREFIX)
+        for prefix in (GAMMA_PREFIX,)
         if not any(str(key).startswith(prefix) for key in payload)
     ]
+    if not any(str(key).startswith((MATCH_WEIGHT_PREFIX, BAYES_FACTOR_PREFIX)) for key in payload):
+        missing.append("mw_* or bf_")
     if missing:
         raise StageFailure(
             f"gray-band waterfall for ({pair.rec_a_key!r}, {pair.rec_b_key!r}) carries no "
             f"{' and no '.join(f'{prefix}* key' for prefix in missing)}; S4.3.5 requires the "
-            f"gamma_* comparison vector and the per-comparison Bayes factors to be retained"
+            f"gamma_* comparison vector and the per-comparison weights to be retained"
         )
     return payload
 
@@ -547,7 +549,7 @@ def upsert_gray_band_pairs(
     Raises:
         er.errors.ConfigError: a malformed record key (S4.0 exit ``2``).
         er.errors.StageFailure: a waterfall stripped of its `gamma_*` vector or its
-            Bayes factors (S4.3.5).
+            weights (S4.3.5).
     """
     subjects: list[_Subject] = []
     for pair in pairs:

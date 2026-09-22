@@ -1,22 +1,8 @@
 {
   "additional_columns_to_retain": [],
+  "bayes_factor_column_prefix": "bf_",
   "blocking_rules_to_generate_predictions": [
-    {
-      "blocking_rule": "l.\"email\" = r.\"email\"",
-      "sql_dialect": "duckdb"
-    },
-    {
-      "blocking_rule": "l.\"phone_e164\" = r.\"phone_e164\"",
-      "sql_dialect": "duckdb"
-    },
-    {
-      "blocking_rule": "SUBSTRING(l.family_name, 1, 4) || '|' || l.addr_postal = SUBSTRING(r.family_name, 1, 4) || '|' || r.addr_postal",
-      "sql_dialect": "duckdb"
-    },
-    {
-      "blocking_rule": "l.birth_date || '|' || SUBSTRING(l.given_name, 1, 3) = r.birth_date || '|' || SUBSTRING(r.given_name, 1, 3)",
-      "sql_dialect": "duckdb"
-    }
+    "1=1"
   ],
   "comparison_vector_value_column_prefix": "gamma_",
   "comparisons": [
@@ -52,7 +38,7 @@
           "fix_m_probability": false,
           "fix_u_probability": false,
           "label_for_charts": "Array intersection size >= 1",
-          "m_probability": 0.0656970960386706,
+          "m_probability": 0.06569709603867062,
           "sql_condition": "array_length(list_intersect(\"name_variants_l\", \"name_variants_r\")) >= 1",
           "u_probability": 0.0020038876996136905
         },
@@ -60,7 +46,7 @@
           "fix_m_probability": false,
           "fix_u_probability": false,
           "label_for_charts": "All other comparisons",
-          "m_probability": 0.03360088046676867,
+          "m_probability": 0.033600880466768665,
           "sql_condition": "ELSE",
           "u_probability": 0.984365542186462
         }
@@ -91,7 +77,7 @@
           "fix_m_probability": false,
           "fix_u_probability": false,
           "label_for_charts": "Jaro-Winkler distance of family_name >= 0.9",
-          "m_probability": 0.06625861732696785,
+          "m_probability": 0.06625861732696783,
           "sql_condition": "jaro_winkler_similarity(\"family_name_l\", \"family_name_r\") >= 0.9",
           "u_probability": 0.0013985876331783175
         },
@@ -243,10 +229,9 @@
   ],
   "em_convergence": 0.0001,
   "link_type": "dedupe_only",
-  "match_weight_column_prefix": "mw_",
   "max_iterations": 25,
   "probability_two_random_records_match": 0.0001851008630274792,
-  "retain_intermediate_calculation_columns": false,
+  "retain_intermediate_calculation_columns": true,
   "retain_matching_columns": true,
   "source_dataset_column_name": "source_dataset",
   "sql_dialect": "duckdb",

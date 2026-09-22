@@ -12,7 +12,8 @@ license = { file = "LICENSE" }
 # their contract-enforcement machinery, so S2.1 pins them and they are declared
 # directly rather than left to the resolver.
 dependencies = [
-  "splink==4.0.16",
+  "splink==5.0.0.dev5",
+  "pyarrow==25.0.1",
   "duckdb==1.5.5",
   "dbt-core==1.12.2",
   "dbt-duckdb==1.11.0",
@@ -33,6 +34,7 @@ er = "er.entrypoint:main"
 
 [dependency-groups]
 dev = [
+  "pandas==3.0.5",
   "pytest==9.1.1",
   "pytest-xdist==3.8.0",
   "hypothesis==6.165.7",

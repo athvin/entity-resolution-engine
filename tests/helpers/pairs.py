@@ -246,7 +246,7 @@ def splink_blocked_pairs(
     api = splink_api(connection)
     connection.execute(_CORPUS_SQL)
     blocking_settings: dict[str, Any] = {**settings, BLOCKING_RULES_KEY: list(rules)}
-    linker = Linker(PARITY_CORPUS_RELATION, settings=blocking_settings, db_api=api)
+    linker = Linker(api.register(PARITY_CORPUS_RELATION), settings=blocking_settings)
 
     blocked = linker.inference.deterministic_link()
     relation = str(blocked.physical_name)

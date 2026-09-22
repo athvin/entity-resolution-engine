@@ -133,6 +133,42 @@ standardized corpus. It does not ingest or standardize new data. Invoke it from
 your scheduler at the configured `correction_pass.cadence`; the CLI itself does
 not run a scheduler.
 
+## Migrating an existing lake to Splink 5
+
+This release pins `splink==5.0.0.dev5`, a prerelease. Keep the previous image and
+model artifacts available. Validate a copy of your lake and its labeled examples
+before applying the migration to production.
+
+```sh
+erdev init
+erdev standardize
+erdev train
+erdev run-all --mode full --skip-ingest --reason operator
+```
+
+`init` adds the standardization work journal idempotently. Existing model rows
+without the exact Splink version are treated as legacy and cannot be scored by
+the new engine. Training creates a new version and frozen TF snapshot. The full
+chain must successfully finish matching, reconciliation and golden assembly before
+incremental matching is allowed. An interrupted full chain can be resumed using
+its run ID. `train --if-changed` never reuses a legacy model.
+
+New match evidence contains `gamma_*`, log2 weights `mw_*`, optional
+`mw_tf_adj_*`, and total `match_weight`. Existing review rows with `bf_*` evidence
+remain readable. Consumers displaying score explanations must understand the
+new weight fields; they are logarithms, not Bayes factors.
+
+Rollback requires the old image, its model and TF snapshot, followed by a complete
+full resolution under that image. Do not mix old and new scoring engines in
+incremental processing. Review quality and downstream results before resuming
+deliveries in either direction.
+
+Standardization journals pending ingestion batches before dbt begins. A failure
+after staging or current-record updates leaves the journal for the next attempt,
+including an attempt with a new run ID. Do not manually clear this table during
+recovery. Successful processing removes it after current records and blocking
+keys are rebuilt. A retry of an interrupted full refresh remains a full refresh.
+
 ## Review and assertions
 
 ```sh

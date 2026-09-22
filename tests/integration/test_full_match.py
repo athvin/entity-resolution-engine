@@ -65,9 +65,9 @@ from er.lake.model_registry import model_params_uri
 from er.lake.objectstore import ObjectStore
 from er.matching.api import assert_no_splink_relations_in_lake, leaked_splink_relations
 from er.matching.evidence import (
-    BAYES_FACTOR_PREFIX,
     GAMMA_PREFIX,
     MATCH_WEIGHT_KEY,
+    MATCH_WEIGHT_PREFIX,
     TF_ADJUSTMENT_PREFIX,
 )
 from er.matching.full import MATCH_SCORES_RELATION, MODE_FULL, FullMatchResult, score_full
@@ -520,7 +520,7 @@ def test_evidence_payload_covers_every_comparison(
             f"{sorted(configured)}"
         )
         for column in configured:
-            assert f"{BAYES_FACTOR_PREFIX}{column}" in evidence
+            assert f"{MATCH_WEIGHT_PREFIX}{column}" in evidence
         for column in tf_columns:
             # `tf: true` means the score carries a frozen term-frequency adjustment
             # (D4); retaining it is what makes the number re-derivable.
@@ -590,7 +590,7 @@ def test_gray_band_is_half_open_and_lands_in_review_queue(
     for row in queued_pairs(standardized):
         waterfall = json.loads(str(row["waterfall"]))
         assert any(key.startswith(GAMMA_PREFIX) for key in waterfall)
-        assert any(key.startswith(BAYES_FACTOR_PREFIX) for key in waterfall)
+        assert any(key.startswith(MATCH_WEIGHT_PREFIX) for key in waterfall)
 
 
 def test_counters_and_no_active_model_exit_3(
@@ -662,15 +662,19 @@ def test_no_splink_relations_in_lake(
     standardized: duckdb.DuckDBPyConnection, cfg: Config, model: tuple[str, str]
 ) -> None:
     """AC8: the stage scored a real corpus and left nothing of Splink's in the lake."""
-    scored = score(standardized, cfg, model)
+    with StatementLog(standardized) as log:
+        scored = score(standardized, cfg, model)
     assert scored.result.pairs_scored > 0, "a stage that scored nothing leaks nothing either"
+    assert any(
+        _verb(statement) == "CREATE" and "__splink__" in statement for statement in log.statements()
+    ), "Splink must have materialized real intermediates before cleanup"
 
     materialized = scalar(
         standardized,
         "SELECT count(*) FROM duckdb_tables() WHERE database_name = current_database() "
         "AND table_name LIKE '__splink__%'",
     )
-    assert materialized > 0, "Splink materialized nothing; the leak check would be vacuous"
+    assert materialized == 0, "scoring must release its local scratch relations"
 
     assert leaked_splink_relations(standardized) == ()
     assert_no_splink_relations_in_lake(standardized)

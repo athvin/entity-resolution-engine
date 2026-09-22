@@ -17,7 +17,7 @@ both the order and the argument sources rather than this module being its own.
 
 Three constraints are easy to miss:
 
-* Splink 4's estimators are namespaced (`linker.training.*`). A call on the bare
+* Splink 5's estimators are namespaced (`linker.training.*`). A call on the bare
   linker is the Splink 3 API, which is why the declared method path carries the
   namespace and is walked attribute by attribute.
 * `seed` is not optional here even though it is in Splink (its default is ``None``).
@@ -44,6 +44,7 @@ from functools import reduce
 from typing import Any, Final, Protocol
 
 import duckdb
+import splink
 from splink import Linker
 
 from er.config.schema import Config
@@ -58,7 +59,7 @@ from er.lake.model_registry import (
     find_active_model,
     register_model,
 )
-from er.matching.api import splink_api
+from er.matching.api import cleanup_splink, splink_api
 from er.matching.model import build_settings
 from er.matching.tf import (
     STD_RECORDS_RELATION,
@@ -126,11 +127,20 @@ TRAIN_CALL_SEQUENCE: Final[tuple[TrainCallSpec, ...]] = (
     ),
     TrainCallSpec(
         "training.estimate_u_using_random_sampling",
-        {"max_pairs": "training.u_max_pairs", "seed": "training.u_seed"},
+        {
+            "max_pairs": "training.u_max_pairs",
+            "seed": "training.u_seed",
+            "min_count_per_level": "training.u_min_count_per_level",
+            "num_chunks": "training.u_num_chunks",
+        },
     ),
     TrainCallSpec(
         "training.estimate_parameters_using_expectation_maximisation",
-        {"blocking_rule": EM_RULE, "fix_u_probabilities": "training.em.fix_u_probabilities"},
+        {
+            "blocking_rule": EM_RULE,
+            "fix_u_probabilities": "training.em.fix_u_probabilities",
+            "max_pairs": "training.em.max_pairs",
+        },
         repeat_over="training.em_blocking_rules",
     ),
 )
@@ -272,7 +282,7 @@ def build_training_linker(
         er.errors.StageFailure: the connection's default catalog is the lake.
         er.errors.ConfigError: the settings cannot be built from `cfg`.
     """
-    return Linker(corpus_relation, settings=build_settings(cfg), db_api=splink_api(connection))
+    return Linker(splink_api(connection).register(corpus_relation), settings=build_settings(cfg))
 
 
 def _invoke(linker: TrainLinker, call: TrainCall) -> Any:
@@ -316,6 +326,63 @@ def _fitted_settings(linker: TrainLinker) -> dict[str, Any]:
             f"storage.model_uri_prefix, and there is nothing to write without it"
         )
     return {key: value for key, value in document.items() if key not in NON_FITTED_SETTINGS_KEYS}
+
+
+def _estimate_u_on_bernoulli_sample(
+    connection: duckdb.DuckDBPyConnection,
+    cfg: Config,
+    corpus_relation: str,
+    target: Linker,
+    call: TrainCall,
+) -> Linker:
+    """Keep the Splink 4 seeded sample while using Splink 5's narrow u estimators.
+
+    Splink 5 samples by a hash of IDs; the same seed no longer names the same data.
+    The default therefore selects the ordered Bernoulli sample in native SQL and
+    fits u on all of that sample. Public model serialization transfers the prior
+    and learned u values to a new full-corpus Linker for EM. No input rows cross
+    into Python and no Splink implementation is patched.
+    """
+    api = splink_api(connection)
+    sample = "er_train_u_sample"
+    corpus = '"' + corpus_relation.replace('"', '""') + '"'
+    try:
+        total_row = connection.execute(f"SELECT count(*) FROM {corpus}").fetchone()
+        assert total_row is not None
+        total = int(total_row[0])
+        desired = 0.5 * ((8 * cfg.training.u_max_pairs + 1) ** 0.5 + 1)
+        percent = min(1.0, desired / max(1, total)) * 100
+        sampling = (
+            f"USING SAMPLE bernoulli({percent}%) REPEATABLE({cfg.training.u_seed})"
+            if percent < 100
+            else ""
+        )
+        connection.execute(
+            f"CREATE OR REPLACE TABLE {sample} AS "
+            f"SELECT * FROM (SELECT * FROM {corpus} ORDER BY record_key) {sampling}"
+        )
+        sample_row = connection.execute(f"SELECT count(*) FROM {sample}").fetchone()
+        assert sample_row is not None
+        sample_rows = int(sample_row[0])
+        if sample_rows < 2:
+            raise StageFailure("the seeded u sample contains fewer than two records")
+        sampled_linker = Linker(api.register(sample), settings=_fitted_settings(target))
+        # Bernoulli is an approximate record sample, as it was in Splink 4. Raise
+        # the internal cap to its actual pair count so v5 does not sample it again.
+        actual = TrainCall(
+            call.method_path,
+            {
+                **call.kwargs,
+                "max_pairs": max(cfg.training.u_max_pairs, sample_rows * (sample_rows - 1) // 2),
+            },
+        )
+        _invoke(sampled_linker, actual)
+        fitted = _fitted_settings(sampled_linker)
+    finally:
+        cleanup_splink(api)
+        connection.execute(f"DROP TABLE IF EXISTS {sample}")
+    cleanup_splink(target._db_api)
+    return Linker(splink_api(connection).register(corpus_relation), settings=fitted)
 
 
 @profiled("train.fit", "records")
@@ -363,15 +430,29 @@ def train_model(
 
     target = build_training_linker(connection, cfg, corpus_relation) if linker is None else linker
     calls = render_call_sequence(cfg)
-    for call in calls:
-        _invoke(target, call)
-
-    settings = _fitted_settings(target)
+    try:
+        for call in calls:
+            if (
+                linker is None
+                and isinstance(target, Linker)
+                and cfg.training.u_sampling_method == "bernoulli"
+                and call.method_path == "training.estimate_u_using_random_sampling"
+            ):
+                target = _estimate_u_on_bernoulli_sample(
+                    connection, cfg, corpus_relation, target, call
+                )
+            else:
+                _invoke(target, call)
+        settings = _fitted_settings(target)
+    finally:
+        if linker is None and isinstance(target, Linker):
+            cleanup_splink(target._db_api)
     # `model_dump()` and not a re-derivation from the fields this module happens to
     # read: S4.3.2 persists the whole block verbatim, so a key the sequence never
     # touches must still survive into `model_registry.metrics`.
     training_block = cfg.training.model_dump()
     metrics: dict[str, Any] = {
+        "splink_version": splink.__version__,
         "training": training_block,
         "em_sessions": len(cfg.training.em_blocking_rules),
         # The one fitted scalar that is not per-comparison, and the one an operator
@@ -549,7 +630,11 @@ def _unchanged(active: ModelRow, config_hash: str, snapshot: int) -> bool:
     ACTIVE row and not any row: a superseded model carrying the same key was trained
     and then replaced, and re-training is exactly what the operator wants after that.
     """
-    return active.config_hash == config_hash and active.corpus_snapshot == snapshot
+    return (
+        active.config_hash == config_hash
+        and active.corpus_snapshot == snapshot
+        and active.metrics.get("splink_version") == splink.__version__
+    )
 
 
 @profiled("train.lifecycle", "records")
@@ -618,7 +703,15 @@ def run_train_stage(
     model_version = allocate_model_version(connection)
     rows_in = _materialize_corpus(connection)
     result = train_model(connection, cfg, TRAIN_CORPUS_RELATION, model_version=model_version)
-    metrics: dict[str, Any] = {**result.metrics, FITTED_METRICS_KEY: fitted_m_u(result.settings)}
+    metrics: dict[str, Any] = {
+        **result.metrics,
+        FITTED_METRICS_KEY: fitted_m_u(result.settings),
+        "migration_requires_full_resolution": active is not None
+        and (
+            active.metrics.get("splink_version") != splink.__version__
+            or bool(active.metrics.get("migration_requires_full_resolution", False))
+        ),
+    }
 
     row = register_model(
         connection,

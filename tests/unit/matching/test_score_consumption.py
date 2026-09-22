@@ -26,9 +26,15 @@ EVIDENCE = {"gamma_email": 2, "bf_email": 41.7, "label": "O'Neil 雪"}
 
 
 @pytest.mark.parametrize("native", [False, True])
+@pytest.mark.parametrize(
+    "evidence",
+    [EVIDENCE, {"gamma_email": 2, "mw_email": 5.382, "mw_tf_adj_email": -0.7}],
+    ids=["legacy-bayes-factors", "log2-weights"],
+)
 def test_score_batches_survive_review_writes_in_same_transaction(
     monkeypatch: pytest.MonkeyPatch,
     native: bool,
+    evidence: dict[str, Any],
 ) -> None:
     with duckdb.connect() as connection:
         connection.execute("ATTACH ':memory:' AS lake")
@@ -45,7 +51,7 @@ def test_score_batches_survive_review_writes_in_same_transaction(
             "INSERT INTO lake.main.match_scores SELECT 'crm:' || printf('%06d', i), "
             "'webforms:' || printf('%06d', i), list_extract(?::DOUBLE[], (i % 5) + 1), "
             "?::JSON, 'v1', 'tf1', 'run1' FROM range(?) AS t(i)",
-            [probabilities, json.dumps(EVIDENCE), count],
+            [probabilities, json.dumps(evidence), count],
         )
         decode = json.loads
         decoded = 0
@@ -90,7 +96,7 @@ def test_score_batches_survive_review_writes_in_same_transaction(
         assert [(key, probability) for key, probability, _ in queued] == [
             (f"crm:{i:06}", probabilities[i % 5]) for i in range(count) if i % 5 in (1, 2)
         ]
-        assert all(decode(payload) == EVIDENCE for _, _, payload in queued)
+        assert all(decode(payload) == evidence for _, _, payload in queued)
         assert (
             review_scored_pairs(
                 connection,

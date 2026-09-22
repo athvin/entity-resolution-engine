@@ -1,6 +1,6 @@
 {
   "artifact": "model_test_v1.json",
-  "config_hash": "530a272840204f6f9944df4a9e8b84852eb85134225280b00b161811a097c438",
+  "config_hash": "f2ee4a07e5eecd9aa19c1bbb0518ad74343c2e1768438be36db6abe0087b720c",
   "corpus_digest": "e888eb7aa347b533f09aab22f95d92be60b164ca153770d38cbd954c07405894",
   "duckdb_version": "1.5.5",
   "generator_seed": 42,
@@ -10,8 +10,8 @@
     "personas": 4000,
     "records": 10000
   },
-  "sha256": "8b810a3fa3e17c82148f3ea87dd2dc49accb3ca5554206bf4f49b6cb08c5b982",
-  "splink_version": "4.0.16",
+  "sha256": "f9051b00384be3eff7790b690c842b9c19b40081f91203b2c11c9b364ab12c8d",
+  "splink_version": "5.0.0.dev5",
   "tf_rows": 5608,
   "tf_snapshot_id": "01JWMDTFSNAP00000000000001",
   "training": {
@@ -21,7 +21,8 @@
       "l.family_name = r.family_name and l.birth_date = r.birth_date"
     ],
     "em": {
-      "fix_u_probabilities": true
+      "fix_u_probabilities": true,
+      "max_pairs": null
     },
     "em_blocking_rules": [
       "l.email = r.email",
@@ -29,6 +30,9 @@
     ],
     "recall": 0.85,
     "u_max_pairs": 1000000,
+    "u_min_count_per_level": null,
+    "u_num_chunks": 10,
+    "u_sampling_method": "bernoulli",
     "u_seed": 20260101
   }
 }
