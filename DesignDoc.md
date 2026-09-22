@@ -668,6 +668,11 @@ Golden winner selection executes once in `golden_lineage`; `golden_records` read
 
 **Counters** — `run_stages`: `rows_in` = touched entities, `rows_out` = golden rows written; `counters = {entities_touched, entities_rebuilt, entities_reaped, lineage_rows, tiebreak_deterministic_count, duration_ms}`.
 
+Full assembly also schedules every currently merged or retired entity for the reap,
+including retirements from earlier runs. This repairs stale marts after an interrupted
+assembly or a full correction. Its touched count is rebuilt plus scheduled-for-reap
+entities; repeating the reap is idempotent even when their rows are already absent.
+
 <a id="s4-7"></a>
 ### 4.7 Failure semantics & recovery
 

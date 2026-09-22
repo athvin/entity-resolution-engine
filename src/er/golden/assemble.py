@@ -147,6 +147,15 @@ def materialize_touched_entities(
     """Populate the dbt input directly; return touched and rebuild counts."""
     connection.execute(f"DELETE FROM {_TOUCHED} WHERE run_id = ?", [run_id])
     if not touched_only:
+        # A full correction can merge or retire entities, too. Include older
+        # retirements so a new run also repairs an interrupted assembly. The
+        # marts rebuild all active entities without consulting this retire set.
+        connection.execute(
+            f"INSERT INTO {_TOUCHED} (run_id, entity_id, disposition, created_at) "
+            f"SELECT ?, entity_id, 'retire', ? FROM {_ENTITIES} "
+            "WHERE status IN ('merged', 'retired')",
+            [run_id, datetime.now(UTC).replace(tzinfo=None)],
+        )
         return 0, 0
     placeholders = ", ".join("?" for _ in TOUCHED_EVENT_TYPES)
     connection.execute(
@@ -212,8 +221,8 @@ def reap_retired_entities(connection: duckdb.DuckDBPyConnection, run_id: str) ->
     T-SNAP-1 both read it.
 
     Returns:
-        How many golden_records rows were reaped, which is the entity count S4.6's
-        `entities_reaped` counter reports.
+        How many entities were scheduled for cleanup, which is S4.6's
+        `entities_reaped` counter. Retrying also counts already-absent entities.
     """
     retired = f"SELECT entity_id FROM {_TOUCHED} WHERE run_id = ? AND disposition = 'retire'"
     row = connection.execute(f"SELECT count(*) FROM ({retired})", [run_id]).fetchone()
@@ -452,11 +461,10 @@ def assemble(
             entities_rebuilt = rebuild_count
             entities_touched = touched_count
         else:
-            # Full mode rebuilds every active entity and reaps nothing, so the S4.6
-            # accounting `rebuilt + reaped == touched` holds with `reaped = 0` and
-            # `touched = rebuilt` — the whole active corpus is what this run touched.
+            # Full mode rebuilds the active corpus and removes every inactive
+            # entity's old marts, including leftovers from earlier failed runs.
             entities_rebuilt = _active_entity_count(connection)
-            entities_touched = entities_rebuilt
+            entities_touched = entities_rebuilt + entities_reaped
 
     outcome = AssembleResult(
         exit_code=int(ExitCode.SUCCESS),
