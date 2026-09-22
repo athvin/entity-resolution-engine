@@ -591,6 +591,17 @@ _DDL_SPECS: Final[tuple[TableSpec, ...]] = (
         keys=(LogicalKey(("ingest_batch_id",)),),
     ),
     TableSpec(
+        name="er_standardize_work",
+        owner=Owner.DDL,
+        columns=(
+            _nn("run_id", VARCHAR),
+            _nn("source_system", VARCHAR),
+            _nn("ingest_batch_id", VARCHAR),
+            _nn("full_refresh", BOOLEAN),
+        ),
+        keys=(LogicalKey(("run_id", "source_system", "ingest_batch_id")),),
+    ),
+    TableSpec(
         name="er_touched_entities",
         owner=Owner.DDL,
         columns=(

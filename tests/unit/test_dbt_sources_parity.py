@@ -44,7 +44,7 @@ SINGULAR_TESTS = REPO_ROOT / "dbt" / "tests"
 # S5.0's ownership table lists exactly this many `ddl.py`-owned relations. A literal,
 # not `len(DDL_OWNED)`: a count derived from the registry would agree with it no
 # matter what the registry said, which is the drift AC2 is about.
-DDL_OWNED_COUNT = 14
+DDL_OWNED_COUNT = 15
 
 # The two S5.0 keys no generic test can express, and the files that carry them.
 # `model_registry`'s at-most-one-active row is uniqueness over the empty tuple, and

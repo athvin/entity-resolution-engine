@@ -47,7 +47,7 @@ from er.lake.objectstore import ObjectStore
 # S5.0's ownership table lists exactly this many `ddl.py`-owned relations, and S4.0
 # makes `er init` print one line per relation. A literal, because a count derived
 # from `DDL_OWNED` would agree with the registry no matter what the registry said.
-DDL_OWNED_COUNT = 14
+DDL_OWNED_COUNT = 15
 
 # `configs/test.yaml`'s `tenant:`, which Compose supplies to every service as
 # `ER_CONFIG` (S7.1). `--confirm-tenant` is compared against this value, not against

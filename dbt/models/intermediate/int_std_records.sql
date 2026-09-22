@@ -91,13 +91,16 @@ where record_key in (
     from {{ this }} as current_row
     join (
         select source_system, source_record_id, ingested_at, ingest_batch_id
-        from {{ ref('stg_crm') }}
+        from {{ ref('stg_crm') }} as staged
+        where {{ standardize_key_filter('staged.source_system', 'staged.source_record_id') }}
         union all
         select source_system, source_record_id, ingested_at, ingest_batch_id
-        from {{ ref('stg_billing') }}
+        from {{ ref('stg_billing') }} as staged
+        where {{ standardize_key_filter('staged.source_system', 'staged.source_record_id') }}
         union all
         select source_system, source_record_id, ingested_at, ingest_batch_id
-        from {{ ref('stg_webforms') }}
+        from {{ ref('stg_webforms') }} as staged
+        where {{ standardize_key_filter('staged.source_system', 'staged.source_record_id') }}
     ) as version
       on version.source_system = current_row.source_system
      and version.source_record_id = current_row.source_record_id
@@ -116,17 +119,20 @@ where record_key in (
 with versions as (
 
     select{{ payload_projection }}
-    from {{ ref('stg_crm') }}
+    from {{ ref('stg_crm') }} as staged
+        where {{ standardize_key_filter('staged.source_system', 'staged.source_record_id') }}
 
     union all
 
     select{{ payload_projection }}
-    from {{ ref('stg_billing') }}
+    from {{ ref('stg_billing') }} as staged
+        where {{ standardize_key_filter('staged.source_system', 'staged.source_record_id') }}
 
     union all
 
     select{{ payload_projection }}
-    from {{ ref('stg_webforms') }}
+    from {{ ref('stg_webforms') }} as staged
+        where {{ standardize_key_filter('staged.source_system', 'staged.source_record_id') }}
 
 ),
 

@@ -281,6 +281,11 @@ def test_rewritten_plus_reaped_equals_touched(merge_pipeline: Pipeline) -> None:
     """T-INC-2 / AC2, AC3, AC7: the touched-set accounting is an equality."""
     merge_pipeline.phase("base", touched_only=False)
     before = merge_pipeline.assembled_at()
+    # A sentinel proves untouched display rows are not rewritten, even when a
+    # rewrite would otherwise reproduce the same assembled_at timestamp.
+    merge_pipeline.connection.execute(
+        f"UPDATE {GOLDEN_DISPLAY} SET display_name='untouched display sentinel'"
+    )
 
     merge_pipeline.phase("batch", touched_only=True)
     run_id = merge_pipeline.run_id
@@ -301,6 +306,14 @@ def test_rewritten_plus_reaped_equals_touched(merge_pipeline: Pipeline) -> None:
     for entity, stamp in after.items():
         if entity not in touched:
             assert before.get(entity) == stamp, f"{entity} was re-stamped but not touched"
+            assert (
+                scalar(
+                    merge_pipeline.connection,
+                    f"SELECT display_name FROM {GOLDEN_DISPLAY} WHERE entity_id=?",
+                    entity,
+                )
+                == "untouched display sentinel"
+            )
 
     # AC7: the reconcile-touched counters add up on the assemble stage's row.
     counters = json.loads(

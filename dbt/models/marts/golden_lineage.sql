@@ -21,13 +21,9 @@
   having been a single candidate with nothing to decide against. `schema.yml`'s
   `accepted_values` test is what holds that closed; this model only passes it through.
 
-  **Why this re-runs the decisions rather than reading `golden_records`.** The winner's
-  `record_key` is not a column of `golden_records` -- it is the thing this relation
-  exists to record. Both models render the same `survivorship_decision` over the same
-  `attr_*` projections from the same `int_std_records` rows, so they agree by
-  construction; the alternative, joining `golden_records` back to `int_std_records` on
-  matching VALUES, would pick the wrong record whenever two members share a value, which
-  is most of the time.
+  This is the only model that runs survivorship decisions. `golden_records` reads
+  values by these winning record keys, preserving null winners and the composite
+  address decision without repeating the ranking work.
 #}
 
 {{ config(materialized='incremental', incremental_strategy='delete+insert',
