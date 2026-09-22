@@ -152,16 +152,23 @@ the new engine. Training creates a new version and frozen TF snapshot. The full
 chain must successfully finish matching, reconciliation and golden assembly before
 incremental matching is allowed. An interrupted full chain can be resumed using
 its run ID. `train --if-changed` never reuses a legacy model.
+Full assembly also removes stale golden, lineage and display rows for merged or
+retired entities left by earlier runs.
 
 New match evidence contains `gamma_*`, log2 weights `mw_*`, optional
 `mw_tf_adj_*`, and total `match_weight`. Existing review rows with `bf_*` evidence
 remain readable. Consumers displaying score explanations must understand the
 new weight fields; they are logarithms, not Bayes factors.
 
-Rollback requires the old image, its model and TF snapshot, followed by a complete
-full resolution under that image. Do not mix old and new scoring engines in
-incremental processing. Review quality and downstream results before resuming
-deliveries in either direction.
+For rollback, restore the previous image **and its configuration**. Under that
+image, run `er train` without `--if-changed`, then
+`er run-all --mode full --skip-ingest --reason operator`. This activates a compatible
+model and frozen TF snapshot and finishes the full resolution. Switching the image
+alone leaves the Splink 5 model active. The previous image's full-assembly path
+does not reap merge losers; finish with `er assemble --touched-only --run-id RUN_ID`,
+using that full chain's run ID. To reuse the exact pre-migration model and
+state instead, restore the corresponding catalog and object-store backup together.
+Review quality and downstream results before resuming deliveries in either direction.
 
 Standardization journals pending ingestion batches before dbt begins. A failure
 after staging or current-record updates leaves the journal for the next attempt,

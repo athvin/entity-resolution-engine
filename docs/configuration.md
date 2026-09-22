@@ -94,10 +94,11 @@ cannot run cleanup; remove that job's abandoned directory before retrying.
 
 ## Training large corpora
 
-The normal config uses exact deterministic-prior estimation, at most 1,000,000
+The normal config uses exact deterministic-prior estimation, a target of 1,000,000
 random pairs for u, no u early stopping, and uncapped EM sessions.
 `training.u_sampling_method: bernoulli` preserves the previous ordered, seeded
 DuckDB record sample; Splink 5 estimates u over that sample without resampling it.
+The record sample is approximate, so its actual pair count can exceed the target.
 The opt-in `hash` method uses native Splink 5 sampling, which can change quality
 even with the same seed and pair budget. All training
 options and the exact Splink version are stored with the model.
