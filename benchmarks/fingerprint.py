@@ -118,7 +118,17 @@ def environment_fingerprint(
     exactly the schema's required set and nothing more.
     """
     env = os.environ if environ is None else environ
+    try:
+        from er.matching.runtime import MatchingRuntime
+    except ModuleNotFoundError as error:
+        if error.name != "er.matching.runtime":
+            raise
+        matching_runtime = {"supported": False}
+    else:
+        matching_runtime = MatchingRuntime.from_env(env).fingerprint()
+
     return {
+        "matching_runtime": matching_runtime,
         "scale": scale,
         "image_digest": env.get("ER_IMAGE_DIGEST", "unknown"),
         "git_sha": env.get("ER_GIT_SHA", "unknown"),

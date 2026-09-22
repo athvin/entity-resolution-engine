@@ -128,7 +128,12 @@ def _blocked_subset_counts(
 
 
 def quality_from_csv(
-    connection: Any, corpus: Path, auto_merge: float, *, blocked_count: int
+    connection: Any,
+    corpus: Path,
+    auto_merge: float,
+    *,
+    blocked_count: int,
+    include_batch: bool = True,
 ) -> dict[str, Any]:
     """Count the three quality families over a fully labelled generated corpus.
 
@@ -136,10 +141,11 @@ def quality_from_csv(
     benchmark. Truth and selected edges are joined to blocking keys in SQL;
     cluster closure sizes come from group counts rather than enumerated pairs.
     The common metric implementation owns all precision/recall conventions.
+    ``include_batch=False`` measures the initial load before its delivery is ingested.
     """
     truth = f"temp.main.benchmark_truth_{uuid.uuid4().hex}"
     paths = [str(corpus / "truth.csv")]
-    if (corpus / "batch/truth.csv").exists():
+    if include_batch and (corpus / "batch/truth.csv").exists():
         paths.append(str(corpus / "batch/truth.csv"))
     connection.execute(
         f"CREATE TEMP TABLE {truth} AS SELECT persona_id, "

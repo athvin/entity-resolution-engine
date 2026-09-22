@@ -264,10 +264,13 @@ def processing_resources(path: Path, run: dict[str, Any]) -> dict[str, Any]:
     commands = [entry for entry in run["commands"] if entry["phase"] != "setup"]
     cpu = throttle = 0.0
     peaks: list[int] = []
+    storage: dict[str, list[int]] = {"spill_bytes": [], "parquet_scratch_bytes": []}
     for command in commands:
         start, end = command["started_ns"], command["ended_ns"]
         selected = [s for s in samples if start <= s["monotonic_ns"] <= end]
         peaks.extend(s["memory.current"] for s in selected if s.get("memory.current") is not None)
+        for key, values in storage.items():
+            values.extend(s[key] for s in selected if key in s)
         if "cpu" in command:
             if any(command["cpu"].get(key) is None for key in ("usage_usec", "throttled_usec")):
                 raise AssertionError(f"command CPU counters unavailable: {path}")
@@ -284,6 +287,7 @@ def processing_resources(path: Path, run: dict[str, Any]) -> dict[str, Any]:
         "cpu_s": cpu,
         "throttled_s": throttle,
         "sampled_memory_peak_bytes": max(peaks) if peaks else None,
+        **{f"sampled_{key}_peak": max(values) for key, values in storage.items() if values},
     }
 
 

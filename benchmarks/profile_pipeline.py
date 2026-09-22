@@ -26,6 +26,7 @@ from large_validation import (
 from profile_report import write_report
 from scales import Scale
 from semantic_outputs import save_semantic_outputs
+from storage_sampler import StorageSampler
 from ulid import ULID
 
 from er.config.hashing import config_hash
@@ -34,7 +35,7 @@ from er.lake.ducklake import connect
 from er.lake.model_registry import register_model
 from er.lake.objectstore import ObjectStore
 from er.matching.tf import tf_tables_path
-from er.obs.profiling import ResourceSampler, cgroup_readings, span, stream_command
+from er.obs.profiling import cgroup_readings, span, stream_command
 
 SOURCES = ("crm", "billing", "webforms")
 ROOT = Path(__file__).resolve().parents[1]
@@ -221,6 +222,7 @@ def run_case(
     compare_outputs: bool = False,
     initial_only: bool = False,
     workload: Scale | None = None,
+    prediction_matrix: bool = False,
 ) -> dict[str, Any]:
     if initial_only and case == "tiny":
         raise ValueError("initial-only measurements require a generated benchmark scale")
@@ -262,11 +264,11 @@ def run_case(
             json.dumps(comparable_config, sort_keys=True).encode()
         ).hexdigest(),
     }
-    sampler = ResourceSampler(directory / "resources.jsonl")
+    sampler = StorageSampler(directory / "resources.jsonl")
     sampler.start()
     started = time.monotonic()
 
-    def command(args: list[str], run_id: str | None = None, phase: str = "setup") -> None:
+    def command(args: list[str], run_id: str | None = None, phase: str = "setup") -> dict[str, Any]:
         invocation = uuid.uuid4().hex
         os.environ["ER_PROFILE_INVOCATION_ID"] = invocation
         argv = list(args)
@@ -312,6 +314,7 @@ def run_case(
         (directory / "result.json").write_text(json.dumps(result, indent=2))
         if completed.returncode not in (0, 10):
             raise RuntimeError(f"{args[:3]} failed ({completed.returncode}); see {command_dir}")
+        return entry
 
     try:
         command(["er", "init"])
@@ -399,10 +402,18 @@ def run_case(
                 assert tables["golden_records"] > 0, tables
                 if phase == "base":
                     assert tables["raw_records"] == base_records, tables
-                    if initial_only:
+                    if case != "tiny":
                         result["output_validation"] = validate_initial_outputs(
                             connection, base_records
                         )
+                        if not initial_only:
+                            result["base_quality"] = quality_from_csv(
+                                connection,
+                                corpus,
+                                config.thresholds.auto_merge,
+                                blocked_count=result["base_candidate_pairs"],
+                                include_batch=False,
+                            )
                 else:
                     assert tables["raw_records"] >= base_records, tables
                 if case == "tiny":
@@ -412,6 +423,10 @@ def run_case(
                     result[f"{phase}_semantic_hashes"] = save_semantic_outputs(
                         connection, config, directory, phase
                     )
+        if prediction_matrix:
+            from prediction_matrix import run_matrix
+
+            result["prediction_matrix"] = run_matrix(directory, command)
         with span("validation.quality", unit="pairs"), connect() as connection:
             if case != "tiny":
                 result["quality"] = quality_from_csv(
@@ -420,6 +435,7 @@ def run_case(
                     config.thresholds.auto_merge,
                     blocked_count=result[f"{phase}_candidate_pairs"],
                 )
+                result[f"{phase}_quality"] = result["quality"]
             from fingerprint import environment_fingerprint
 
             active = connection.execute(
