@@ -374,11 +374,9 @@ def table_management_spy(monkeypatch: pytest.MonkeyPatch) -> TableManagementSpy:
     register = LinkerTableManagement.register_term_frequency_lookup
     compute = LinkerTableManagement.compute_tf_table
 
-    def recording_register(
-        self: LinkerTableManagement, input_data: Any, col_name: str, overwrite: bool = False
-    ) -> Any:
+    def recording_register(self: LinkerTableManagement, input_data: Any, col_name: str) -> Any:
         spy.registered.append(col_name)
-        return register(self, input_data, col_name, overwrite)
+        return register(self, input_data, col_name)
 
     def recording_compute(self: LinkerTableManagement, column_name: str, *args: Any) -> Any:
         spy.computed.append(column_name)

@@ -353,7 +353,14 @@ def test_missing_tf_lookup_is_a_precondition_failure(
     assert scalar(initialised_lake, f"SELECT count(*) FROM {TF_LOOKUP}") == 0
 
     with pytest.raises(MissingTfLookupError) as refusal:
-        register_tf(object(), initialised_lake, cfg, MODEL_VERSION, new_tf_snapshot_id())
+        register_tf(
+            object(),
+            initialised_lake,
+            cfg,
+            MODEL_VERSION,
+            new_tf_snapshot_id(),
+            db_api=splink_api(initialised_lake),
+        )
 
     assert tf_columns(cfg)[0] in str(refusal.value), "the refusal must name the missing column"
     # The CLI translates the class, not the exception type (S4.7), so the exit status
@@ -384,8 +391,9 @@ def test_registered_tf_scores_without_leaking_into_the_lake(
     # schema, so a later module cannot fail for a reason this one caused.
     search_path = scalar(standardized, "SELECT current_schema()")
     try:
-        linker = Linker(FRAME, settings=build_settings(cfg), db_api=splink_api(standardized))
-        registered = register_tf(linker, standardized, cfg, MODEL_VERSION, frozen)
+        api = splink_api(standardized)
+        linker = Linker(api.register(FRAME), settings=build_settings(cfg))
+        registered = register_tf(linker, standardized, cfg, MODEL_VERSION, frozen, db_api=api)
         predictions = linker.inference.predict(
             threshold_match_probability=cfg.thresholds.review_low
         )

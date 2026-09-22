@@ -425,7 +425,7 @@ def prediction_columns(connection: duckdb.DuckDBPyConnection, relation: str) -> 
     the two into a refusal instead of a payload with a hole in it.
 
     Public because the S4.3.4 two-pass scorer asks the same question of two prediction
-    relations — `find_matches_to_new_records` and `predict` need not emit the same
+    relations — `predict_between` and `predict` need not emit the same
     columns — and answering it from the config instead is exactly the mistake the
     paragraph above rules out.
     """
@@ -725,11 +725,10 @@ def score_full(
     api = splink_api(connection)
     rows_in = _materialize_corpus(connection)
     linker = Linker(
-        MATCH_CORPUS_RELATION,
+        api.register(MATCH_CORPUS_RELATION),
         settings=_scoring_settings(settings),
-        db_api=api,
     )
-    register_tf(linker, connection, cfg, model_version, tf_snapshot_id)
+    register_tf(linker, connection, cfg, model_version, tf_snapshot_id, db_api=api)
     # Explicit, and in probabilities: Splink's own default is a match WEIGHT of -4,
     # which is a probability of about 0.06 and would persist pairs S4.3.4 says are
     # never written (S4.3, MINOR-thresholds).

@@ -1403,7 +1403,7 @@ class ClusterFrame(Protocol):
 class ClusterTableManagement(Protocol):
     """The one table-management call the clustering path makes."""
 
-    def register_table_predict(self, input_data: Any, overwrite: bool = False) -> ClusterFrame:
+    def register_table_predict(self, input_data: Any) -> ClusterFrame:
         """Register an edge list as the predictions frame clustering consumes."""
 
 
@@ -1523,9 +1523,9 @@ def cluster_full(
         columns=3,
     )
 
-    linker: ClusterLinker = Linker(CLUSTER_NODES_RELATION, settings=dict(settings), db_api=api)
+    linker: ClusterLinker = Linker(api.register(CLUSTER_NODES_RELATION), settings=dict(settings))
     predictions = linker.table_management.register_table_predict(
-        connection.sql(f"SELECT * FROM {CLUSTER_EDGES_RELATION}"), overwrite=True
+        api.register(CLUSTER_EDGES_RELATION)
     )
     clustered = linker.clustering.cluster_pairwise_predictions_at_threshold(
         predictions, threshold_match_probability=auto_merge

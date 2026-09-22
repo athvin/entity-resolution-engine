@@ -1,59 +1,19 @@
-"""`er match --mode incremental`: two Splink passes, unioned, one write (S4.3.4, D2).
+"""Incremental matching: two blocked Splink passes and one lake write (S4.3.4).
 
-S4.3.4 opens with the constraint the whole module exists to obey: "Splink 4's inference
-surface accepts no precomputed pair table; every entry point regenerates pairs from
-blocking rules". So incremental scoring cannot be "score the pairs `int_blocking_keys`
-says are new" — it is **two passes over the same frozen model JSON and the same
-registered TF tables**, unioned:
+Both passes use the same frozen model and registered term-frequency tables.
+`predict_between` scores the prior corpus against the batch; `predict_within`
+deduplicates the batch itself. The prior corpus excludes every batch key, so each
+pass has a distinct responsibility and a new pair cannot disappear silently when
+one pass is missing. Both receive `review_low` explicitly as a probability.
 
-* :func:`pass1_new_vs_corpus` — `find_matches_to_new_records` from a linker built over
-  the corpus, against the batch. It takes a match **WEIGHT**, so `review_low` goes
-  through :func:`~er.matching.thresholds.prob_to_weight`.
-* :func:`pass2_new_vs_new` — a second linker over the batch **alone** at
-  `link_type='dedupe_only'`, predicting at a match **PROBABILITY**. It exists because
-  `find_matches_to_new_records` never pairs two new records with each other, which is
-  exactly the `incremental_batch` case where two new records form a new entity
-  (`billing:B009` and `webforms:W010`). Without it that entity is unreachable, and
-  nothing else in the pipeline would report it missing.
+Each pass keeps its own database API and linker state on the shared connection.
+All inputs and intermediates stay in local scratch storage. The results are
+unioned and sent to `full.merge_match_scores`, which canonicalizes, deduplicates
+and persists them with one atomic MERGE. Existing scores remain cumulative.
 
-Five decisions here are the ones a re-implementation gets wrong.
-
-**Each pass gets its own `DuckDBAPI` handle.** Splink caches
-`__splink__df_concat_with_tf` under its templated name, not under a hash of the input it
-was built from, so two `Linker`s sharing one handle share that relation — and the two
-passes have *different* inputs. Sharing makes pass 2 predict over pass 1's corpus, which
-raises nothing, returns pairs, and loses exactly the new-vs-new pairs pass 2 exists to
-find. :func:`score_incremental` builds one handle per pass.
-
-**The corpus is `int_std_records` MINUS the batch.** `find_matches_to_new_records`
-regenerates pairs between the records its linker was built over and the records it is
-handed. A corpus relation that still held the batch keys would therefore emit
-new-vs-new pairs *from pass 1*, which does not corrupt the result — the union is made
-distinct — but does make pass 2 look redundant, and "delete pass 2 and the new pair
-disappears" is the only check that keeps it. So the split is a property of the
-implementation and not merely of the test: pass 1 sees the prior corpus, pass 2 sees the
-batch, and neither sees both.
-
-**The two units are different, and neither is defaulted.** S4.3 says it once: "Where a
-Splink call takes a match **weight**, pass `log2(p/(1-p))`; never rely on Splink's `-4`
-default". Pass 1's `match_weight_threshold` is a weight and pass 2's
-`threshold_match_probability` is a probability, so the same `review_low` reaches them
-through two different spellings — and :mod:`er.matching.thresholds` is where the
-conversion lives, once.
-
-**One write, and it is `full.py`'s.** S4.0b permits exactly one write to the lake per
-scoring stage and S4.3.4 makes it a `MERGE INTO` on the four-column logical key. The
-union is assembled in the in-memory database and handed to
-:func:`~er.matching.full.merge_match_scores`, so both scoring paths share one merge, one
-canonicalisation of the pair and one read-back — and `match_scores` is cumulative, so
-the rows a previous run wrote are still there and still `is_active` afterwards.
-
-**`int_blocking_keys` is not read here at all.** S4.3.4 states it as a negative — the
-relation is the blocking-rule generation source, the S4.5 touched-subgraph driver and
-the `candidate_pair_count` benchmark metric, and explicitly *not* an input to scoring.
-That is why :attr:`IncrementalScoreResult.candidate_pairs` is ``None``: S5.2 spells "the
-stage does not report this" as NULL, and the alternative — the corpus-wide count — is a
-number about the full path reported on a row that scored a batch.
+Blocking rules come from the config's shared generator. `int_blocking_keys` is
+never an input to scoring, and the incremental candidate-pair counter remains NULL
+because the full-corpus count would not describe this batch.
 """
 
 from __future__ import annotations
@@ -65,6 +25,7 @@ from typing import Any, Final
 
 import duckdb
 from splink import DuckDBAPI, Linker
+from splink.internals.blocking import BlockingRule
 from splink.internals.blocking_rule_creator import BlockingRuleCreator
 
 from er.config.schema import Config
@@ -90,7 +51,6 @@ from er.matching.tf import (
     register_tf,
     tf_columns,
 )
-from er.matching.thresholds import prob_to_weight
 from er.obs.profiling import profiled
 from er.obs.runctx import StageRun
 
@@ -291,7 +251,7 @@ def _pair_select(connection: duckdb.DuckDBPyConnection, cfg: Config, relation: s
     The evidence expression is built from *this* relation's columns
     (:func:`~er.matching.full.prediction_columns`), not from the config alone: which
     columns a prediction emits is a property of the call that produced it, and
-    `find_matches_to_new_records` and `predict` are two different calls. Rendering the
+    `predict_between` and `predict_within` are two different calls. Rendering the
     payload here rather than after the union is what lets the two passes disagree about
     their column sets without the union having to reconcile them.
     """
@@ -312,37 +272,12 @@ def pass1_new_vs_corpus(
     model_version: str,
     tf_snapshot_id: str,
 ) -> str | None:
-    """Pass 1 — new vs corpus: `find_matches_to_new_records` at a match WEIGHT (S4.3.4).
+    """Pass 1: score blocked pairs between the prior corpus and new records.
 
-    The linker is built over :data:`PRIOR_CORPUS_RELATION` — `int_std_records` minus the
-    batch — and handed :data:`BATCH_RELATION` as the new records. The blocking rules are
-    the second element of :func:`~er.matching.model.blocking_rules_from_config`, the same
-    call whose first element built `int_blocking_keys` through dbt: one `expr` string
-    per rule, so the pass Splink blocks on and the relation S4.2 mirrors cannot drift.
-
-    The threshold is a **weight**. S4.3: "never rely on Splink's `-4` default" — which is
-    a probability near ``0.06`` and would persist pairs S4.3.4 says are never written —
-    so `review_low` goes through :func:`~er.matching.thresholds.prob_to_weight`.
-
-    Args:
-        connection: the S4.0b connection, with both local relations materialized.
-        cfg: the validated S6 document; `blocking:`, `comparisons:` and `thresholds:`.
-        api: this pass's OWN handle from :func:`~er.matching.api.splink_api` — not one
-            shared with pass 2; see :func:`score_incremental` for what sharing costs.
-        settings: the settings document `model_version` was registered with.
-        model_version: the registry version whose frozen TF is registered.
-        tf_snapshot_id: the frozen TF snapshot to register.
-
-    Returns:
-        A `SELECT` over the prediction, projecting `record_key_l`, `record_key_r`,
-        `match_probability` and the rendered `evidence`; ``None`` when there is no prior
-        corpus to match against, which is a lake whose whole standardized corpus is
-        unscored. Splink over an empty input is an error, not an empty frame, so the
-        emptiness is decided here.
-
-    Raises:
-        er.matching.tf.MissingTfLookupError: no frozen TF rows for this key (exit ``3``).
-    """
+    Both inputs are registered with this pass's API before constructing the linker.
+    Frozen TF is registered for every configured column. The same blocking-rule
+    generator feeds dbt and Splink, and review_low is passed as a probability.
+    Return a SELECT carrying canonical-writer inputs, or None for an empty corpus."""
     if _count(connection, PRIOR_CORPUS_RELATION) == 0:
         return None
     _, generated = blocking_rules_from_config(cfg)
@@ -350,13 +285,16 @@ def pass1_new_vs_corpus(
     # generator's `list[BlockingRuleCreator]` is not assignable to a list of the union
     # Splink accepts; `er.matching.model.build_settings` widens the same list the same
     # way for the same reason.
-    rules: list[BlockingRuleCreator | dict[str, Any] | str] = list(generated)
-    linker = Linker(PRIOR_CORPUS_RELATION, settings=_pass_settings(settings), db_api=api)
-    register_tf(linker, connection, cfg, model_version, tf_snapshot_id)
-    predictions = linker.inference.find_matches_to_new_records(
-        records_or_tablename=BATCH_RELATION,
-        blocking_rules=rules,
-        match_weight_threshold=prob_to_weight(cfg.thresholds.review_low),
+    rules: list[BlockingRuleCreator | BlockingRule | dict[str, Any] | str] = list(generated)
+    prior = api.register(PRIOR_CORPUS_RELATION)
+    batch = api.register(BATCH_RELATION)
+    linker = Linker(prior, settings=_pass_settings(settings))
+    register_tf(linker, connection, cfg, model_version, tf_snapshot_id, db_api=api)
+    predictions = linker.inference.predict_between(
+        left=prior,
+        right=batch,
+        blocking_rules_to_generate_predictions=rules,
+        threshold_match_probability=cfg.thresholds.review_low,
     )
     return _pair_select(connection, cfg, str(predictions.physical_name))
 
@@ -371,48 +309,23 @@ def pass2_new_vs_new(
     model_version: str,
     tf_snapshot_id: str,
 ) -> str | None:
-    """Pass 2 — new vs new: a batch-only `dedupe_only` linker at a PROBABILITY (S4.3.4).
+    """Pass 2: deduplicate the new batch with the same frozen model and TF.
 
-    This pass is the whole reason incremental scoring is two passes.
-    `find_matches_to_new_records` compares new records against the corpus and **never**
-    against each other, so two records arriving in one batch that are the same person
-    would form no edge, no cluster and no entity — and no counter would be short. The
-    `incremental_batch` fixture's `billing:B009`/`webforms:W010` pair is that case, and
-    `fixtures/static/incremental_batch/attribution.csv` records which pass each of its
-    records is reachable by.
-
-    Same frozen model JSON, same registered TF tables, and the same connection: only
-    the input relation and the threshold's units differ from pass 1. `predict()` takes a
-    **probability**, so `review_low` is passed as it is written in the config.
-
-    Args:
-        connection: the S4.0b connection, with :data:`BATCH_RELATION` materialized.
-        cfg: the validated S6 document; `comparisons:` and `thresholds:`.
-        api: this pass's OWN handle from :func:`~er.matching.api.splink_api`. Sharing
-            pass 1's would make this pass predict over pass 1's corpus and return
-            everything except the pairs it is here for; see :func:`score_incremental`.
-        settings: the settings document `model_version` was registered with, used
-            verbatim but for :data:`LINK_TYPE_KEY` and the retain flag.
-        model_version: the registry version whose frozen TF is registered.
-        tf_snapshot_id: the frozen TF snapshot to register.
-
-    Returns:
-        A `SELECT` shaped like :func:`pass1_new_vs_corpus`'s, or ``None`` when the batch
-        holds fewer than two records — one record has nobody to be deduplicated against,
-        and Splink's answer to that input is an error rather than an empty frame.
-
-    Raises:
-        er.matching.tf.MissingTfLookupError: no frozen TF rows for this key (exit ``3``).
-    """
+    predict_between never compares two records on the same side, so this pass is
+    required for two records arriving together to form a new entity. The batch-only
+    linker uses dedupe_only and predict_within with an explicit review_low
+    probability. Return None when the batch contains fewer than two records."""
     if _count(connection, BATCH_RELATION) < 2:
         return None
+    batch = api.register(BATCH_RELATION)
     linker = Linker(
-        BATCH_RELATION,
+        batch,
         settings=_pass_settings(settings, **{LINK_TYPE_KEY: LINK_TYPE}),
-        db_api=api,
     )
-    register_tf(linker, connection, cfg, model_version, tf_snapshot_id)
-    predictions = linker.inference.predict(threshold_match_probability=cfg.thresholds.review_low)
+    register_tf(linker, connection, cfg, model_version, tf_snapshot_id, db_api=api)
+    predictions = linker.inference.predict_within(
+        batch, threshold_match_probability=cfg.thresholds.review_low
+    )
     return _pair_select(connection, cfg, str(predictions.physical_name))
 
 
@@ -539,8 +452,8 @@ def score_incremental(
        and the split comes after it, so both relations land in the in-memory scratch
        schema (:func:`_materialize_batch`).
     3. **Run both passes**, each registering the frozen TF of the same key (D4, S4.3.3):
-       pass 1 at a match weight against the prior corpus, pass 2 at a match probability
-       within the batch. Either may contribute nothing.
+       pass 1 against the prior corpus and pass 2 within the batch, both at the review
+       probability threshold. Either may contribute nothing.
     4. **Union, then merge once.** The union is `UNION ALL` into a local relation; the
        self-pair drop, the canonicalisation to `rec_a_key < rec_b_key`, the `DISTINCT`
        and the endpoint-hash join all happen inside
@@ -602,16 +515,9 @@ def score_incremental(
         result.record(run_ctx)
         return result
 
-    # ONE API HANDLE PER PASS, and that is not defensive duplication. `DuckDBAPI` owns
-    # Splink's intermediate-table cache, and `__splink__df_concat_with_tf` is cached
-    # under its *templated* name rather than under a hash of the input it was built from
-    # (`splink/internals/database_api.py::_get_table_from_cache_or_db`). The two passes
-    # have different inputs — the prior corpus and the batch — so a shared handle lets
-    # pass 2 find the concat pass 1 built over the corpus and predict over *that*: it
-    # returns pairs, it raises nothing, and the only thing missing is the new-vs-new
-    # pairs pass 2 exists to find. Two handles over the one connection cost two
-    # idempotent `SET`s; the first is also what puts the scratch schema on the search
-    # path before the relations below are created (:func:`_materialize_batch`).
+    # Keep input registration and linker state scoped to each pass, while using
+    # the same connection and frozen model. The first API also selects the local
+    # scratch schema before the corpus is split into its two physical tables.
     corpus_api = splink_api(connection)
     _materialize_batch(connection, keys)
     batch_api = splink_api(connection)

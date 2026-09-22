@@ -17,7 +17,7 @@ both the order and the argument sources rather than this module being its own.
 
 Three constraints are easy to miss:
 
-* Splink 4's estimators are namespaced (`linker.training.*`). A call on the bare
+* Splink's estimators are namespaced (`linker.training.*`). A call on the bare
   linker is the Splink 3 API, which is why the declared method path carries the
   namespace and is walked attribute by attribute.
 * `seed` is not optional here even though it is in Splink (its default is ``None``).
@@ -272,7 +272,8 @@ def build_training_linker(
         er.errors.StageFailure: the connection's default catalog is the lake.
         er.errors.ConfigError: the settings cannot be built from `cfg`.
     """
-    return Linker(corpus_relation, settings=build_settings(cfg), db_api=splink_api(connection))
+    api = splink_api(connection)
+    return Linker(api.register(corpus_relation), settings=build_settings(cfg))
 
 
 def _invoke(linker: TrainLinker, call: TrainCall) -> Any:

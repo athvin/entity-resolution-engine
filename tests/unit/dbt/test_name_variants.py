@@ -5,7 +5,7 @@ where it could otherwise only be observed rather than proved:
 
 * **Element 0 is the record's own normalized `given_name`** (S4.2). `variant_match`
   is `ArrayIntersectLevel('name_variants', min_intersection=1)` (S4.3.1), and
-  T-MATCH-SYM (S8.3) asserts `compare_two_records(a, b) == compare_two_records(b, a)`.
+  T-MATCH-SYM (S8.3) asserts `score_pair(a, b) == score_pair(b, a)`.
   Orientation-independence follows from the symmetry of the intersection only
   because every record contributes its own name to its own array; without it the
   integration assertion would pass or fail on which names happened to sort where.

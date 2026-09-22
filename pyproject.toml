@@ -12,7 +12,8 @@ license = { file = "LICENSE" }
 # their contract-enforcement machinery, so S2.1 pins them and they are declared
 # directly rather than left to the resolver.
 dependencies = [
-  "splink==4.0.16",
+  "splink[pyarrow]==5.0.0.dev5",
+  "pyarrow==25.0.1",
   "duckdb==1.5.5",
   "dbt-core==1.12.2",
   "dbt-duckdb==1.11.0",
@@ -40,6 +41,7 @@ dev = [
   "mypy==2.3.0",
   "actionlint-py==1.7.7.23",
   "types-PyYAML==6.0.12.20260724",
+  "pandas==3.0.5",
 ]
 
 [build-system]

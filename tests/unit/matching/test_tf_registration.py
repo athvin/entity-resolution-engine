@@ -30,11 +30,13 @@ from typing import Any
 import duckdb
 import pytest
 import yaml
+from splink import DuckDBAPI
 from ulid import ULID
 
 from er.config.loader import load_config
 from er.config.schema import Config
 from er.lake.model import REGISTRY, create_table_sql
+from er.matching.api import splink_api
 from er.matching.tf import (
     TF_COLUMN_PREFIX,
     TF_LOOKUP_RELATION,
@@ -169,13 +171,11 @@ class SpyTableManagement:
 
     calls: list[SpyCall] = field(default_factory=list)
 
-    def register_term_frequency_lookup(
-        self, input_data: Any, col_name: str, overwrite: bool = False
-    ) -> None:
+    def register_term_frequency_lookup(self, input_data: Any, col_name: str) -> None:
         self.calls.append(
             SpyCall(
                 "register_term_frequency_lookup",
-                {"input_data": input_data, "col_name": col_name, "overwrite": overwrite},
+                {"input_data": input_data, "col_name": col_name},
             )
         )
 
@@ -235,6 +235,12 @@ def freeze(
     )
 
 
+@pytest.fixture
+def api(lake: duckdb.DuckDBPyConnection, monkeypatch: pytest.MonkeyPatch) -> DuckDBAPI:
+    monkeypatch.setenv("ER_DUCKDB_THREADS", "2")
+    return splink_api(lake)
+
+
 def test_tf_columns_reads_only_tf_true(cfg: Config) -> None:
     """AC1: `tf_columns` is the `tf: true` keys in config order, and nothing else."""
     assert tf_columns(cfg) == EXPECTED_TF_COLUMNS
@@ -253,7 +259,7 @@ def test_tf_columns_reads_only_tf_true(cfg: Config) -> None:
 
 
 def test_register_tf_calls_register_term_frequency_lookup_per_column(
-    cfg: Config, lake: duckdb.DuckDBPyConnection
+    cfg: Config, lake: duckdb.DuckDBPyConnection, api: DuckDBAPI
 ) -> None:
     """AC4: one registration per TF column, in order, and no other call at all."""
     model_version = "v0001"
@@ -266,7 +272,7 @@ def test_register_tf_calls_register_term_frequency_lookup_per_column(
     )
     linker = SpyLinker()
 
-    registered = register_tf(linker, lake, cfg, model_version, tf_snapshot_id)
+    registered = register_tf(linker, lake, cfg, model_version, tf_snapshot_id, db_api=api)
 
     assert registered == EXPECTED_TF_COLUMNS
     calls = linker.table_management.calls
@@ -278,11 +284,13 @@ def test_register_tf_calls_register_term_frequency_lookup_per_column(
     # The frame Splink joins on is read by column name, so the shape is the interface.
     for call, column in zip(calls, EXPECTED_TF_COLUMNS, strict=True):
         frame = call.kwargs["input_data"]
-        assert frame == [{column: f"{column}-value", f"{TF_COLUMN_PREFIX}{column}": 0.25}]
+        rows = lake.execute(f"SELECT * FROM {frame.physical_name}")
+        assert [entry[0] for entry in rows.description] == [column, f"{TF_COLUMN_PREFIX}{column}"]
+        assert rows.fetchall() == [(f"{column}-value", 0.25)]
 
 
 def test_register_tf_refuses_a_key_missing_a_column(
-    cfg: Config, lake: duckdb.DuckDBPyConnection
+    cfg: Config, lake: duckdb.DuckDBPyConnection, api: DuckDBAPI
 ) -> None:
     """AC5's unit arm: a partially frozen key is a precondition failure, not a subset.
 
@@ -296,7 +304,7 @@ def test_register_tf_refuses_a_key_missing_a_column(
     linker = SpyLinker()
 
     with pytest.raises(MissingTfLookupError) as refusal:
-        register_tf(linker, lake, cfg, model_version, tf_snapshot_id)
+        register_tf(linker, lake, cfg, model_version, tf_snapshot_id, db_api=api)
 
     assert "family_name" in str(refusal.value), "the refusal must name the missing column"
     assert refusal.value.code == 3
@@ -305,6 +313,31 @@ def test_register_tf_refuses_a_key_missing_a_column(
     assert all(
         call.name == "register_term_frequency_lookup" for call in linker.table_management.calls
     )
+
+
+def test_registered_tf_is_frozen_across_lake_updates_and_reregistration(
+    cfg: Config, lake: duckdb.DuckDBPyConnection, api: DuckDBAPI
+) -> None:
+    freeze(
+        lake,
+        "v0001",
+        "snapshot",
+        [(column, f"{column}-value", 0.25) for column in EXPECTED_TF_COLUMNS],
+    )
+    first, second = SpyLinker(), SpyLinker()
+    register_tf(first, lake, cfg, "v0001", "snapshot", db_api=api)
+    lake.execute("UPDATE lake.main.tf_lookup SET tf_value=0.75")
+    register_tf(second, lake, cfg, "v0001", "snapshot", db_api=api)
+
+    for old, new in zip(first.table_management.calls, second.table_management.calls, strict=True):
+        old_name = old.kwargs["input_data"].physical_name
+        new_name = new.kwargs["input_data"].physical_name
+        assert old_name != new_name
+        assert lake.execute(f"SELECT * FROM {old_name}").fetchone()[1] == 0.25
+        assert lake.execute(f"SELECT * FROM {new_name}").fetchone()[1] == 0.75
+        assert lake.execute(
+            "SELECT temporary FROM duckdb_tables() WHERE table_name=?", [old_name]
+        ).fetchone() == (True,)
 
 
 def test_tf_tables_path_round_trips() -> None:

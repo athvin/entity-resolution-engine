@@ -25,6 +25,10 @@ on top of the level's own Bayes factor — and it is retained too: under D4 the
 adjustment is read from a *frozen* `tf_lookup`, so it is part of what makes a
 re-derivation of the score reproducible.
 
+Splink 5 emits these factors as log2 weights (`mw_*` and `mw_tf_adj_*`). The writer
+converts them back with `power(2, weight)` so existing evidence and review payloads
+keep the same meaning and keys. Legacy factor columns are also accepted.
+
 The prefixes themselves are imported from :mod:`er.review.queue`, which validates the
 payload it is handed (a gray-band waterfall carrying no `gamma_*` key or no Bayes
 factor is refused there). Producer and validator agreeing on the spelling of a prefix
@@ -104,6 +108,9 @@ def evidence_keys(cfg: Config, available: Collection[str]) -> tuple[str, ...]:
             on before scoring).
     """
     present = frozenset(available)
+    present |= frozenset(
+        f"{BAYES_FACTOR_PREFIX}{name[3:]}" for name in available if name.startswith("mw_")
+    )
     keys: list[str] = []
     missing: list[str] = []
     for column, spec in cfg.comparisons.items():
@@ -152,5 +159,9 @@ def build_evidence(cfg: Config, available: Collection[str]) -> str:
                 f"evidence expression; a `comparisons:` key is a column of int_std_records "
                 f"(S6.1 V6)"
             )
-    arguments = ", ".join(f"'{key}', {key}" for key in keys)
+    present = frozenset(available)
+    arguments = ", ".join(
+        f"'{key}', {key}" if key in present else f"'{key}', power(2.0, mw_{key[3:]})"
+        for key in keys
+    )
     return f"json_object({arguments})"

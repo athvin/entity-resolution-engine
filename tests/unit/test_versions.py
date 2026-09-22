@@ -188,6 +188,7 @@ def test_pins_cover_exactly_the_s2_1_doctor_rows() -> None:
         "dbt-common",
         "hypothesis",
         "object-store-init-image",
+        "pandas",
     }
 
 
@@ -306,19 +307,19 @@ def test_code_version_is_the_installed_er_distribution() -> None:
     assert code_version() == __version__
 
 
-def test_splink_major_is_4_and_migration_note_is_actionable() -> None:
+def test_splink_major_is_5_and_migration_note_is_actionable() -> None:
     note = SPLINK_MIGRATION_NOTE
     assert note.distribution == "splink"
 
-    # The guard: Splink 5 removes the primitive the incremental new-vs-corpus pass is
-    # built on, so a lockfile refresh that bumps the major must fail here.
-    assert int(PINS["splink"].version.split(".")[0]) == note.pinned_major == 4
+    # Major upgrades remain deliberate: the installed pin must match this migration
+    # record, and its acceptance contracts must remain documented.
+    assert int(PINS["splink"].version.split(".")[0]) == note.pinned_major == 5
     assert note.breaking_major == 5
 
     assert "find_matches_to_new_records" in note.removed
     assert note.replacement == ("predict_between", "predict_within")
-    assert note.blast_radius == ("src/er/matching/incremental.py",)
-    assert set(note.acceptance_tests) == {"T-INC-3", "T-BLK-1"}
+    assert note.blast_radius == ("src/er/matching/", "src/er/entities/cluster.py", "tests/helpers/")
+    assert set(note.acceptance_tests) == {"T-INC-3", "T-BLK-1", "T-MATCH-SYM"}
 
     # Every name the note carries is a name S13 states; a note that had drifted from
     # its spec row would point the migration at the wrong API.

@@ -13,7 +13,7 @@ once could not tell them apart. `fixtures/static/incremental_batch/attribution.c
 names, per batch record, which pass reaches it: four records are `pass1` (three joiners
 onto base personas and the `crm:C010` bridge that merges two base entities), and two —
 `billing:B009` and `webforms:W010`, persona P12 — are `pass2`, because they are the same
-person arriving in one batch and `find_matches_to_new_records` never pairs two new
+person arriving in one batch and `predict_between` never pairs two new
 records with each other. That last pair is the only thing standing between "two passes"
 and "one pass plus a comment", which is why
 :func:`test_pass2_removal_loses_the_new_pair` deletes pass 2 and asserts the pair goes
@@ -388,7 +388,7 @@ def test_two_passes_are_unioned(substrate: Substrate) -> None:
     """AC1: the batch scores, and both passes are visibly in the result.
 
     The union is asserted from both sides. Pass 2's contribution is `NEW_PAIR`, whose two
-    endpoints are both in `batch/` — a pair `find_matches_to_new_records` cannot produce.
+    endpoints are both in `batch/` — a pair `predict_between` cannot produce.
     Pass 1's is the bridge, which pairs a batch record with base records — a pair the
     batch-only linker cannot produce, because neither of its partners is in the batch.
     A run missing either pass satisfies one of these and fails the other.
@@ -424,7 +424,7 @@ def test_two_passes_are_unioned(substrate: Substrate) -> None:
     bridge = {pair for pair in added if BRIDGE_KEY in pair and not set(pair) <= batch}
     assert bridge, (
         f"{BRIDGE_KEY} is paired with no base record; the declared bridge is a `pass1` "
-        f"record and `find_matches_to_new_records` is the only pass that reaches the corpus"
+        f"record and `predict_between` is the only pass that reaches the corpus"
     )
 
 
@@ -436,7 +436,7 @@ def test_pass2_removal_loses_the_new_pair(
     The falsification the ticket asks for. Pass 2 is replaced by a function returning
     ``None`` — the module's spelling for "this pass contributed no rows", i.e. an empty
     frame — leaving pass 1 to run exactly as before against exactly the same batch. If
-    `find_matches_to_new_records` could pair two new records with each other, this test
+    `predict_between` could pair two new records with each other, this test
     would pass with `NEW_PAIR` still present and :func:`test_two_passes_are_unioned`
     would be asserting a tautology.
     """
@@ -455,7 +455,7 @@ def test_pass2_removal_loses_the_new_pair(
     assert added, "pass 1 alone added nothing, so the absence below is not pass 2's doing"
     assert NEW_PAIR not in added, (
         f"{NEW_PAIR} survived the removal of pass 2, so pass 1 produced it: "
-        f"`find_matches_to_new_records` is pairing new records with each other and pass 2 "
+        f"`predict_between` is pairing new records with each other and pass 2 "
         f"is unfalsifiable (S4.3.4)"
     )
     # Pass 1's own contribution is intact, which is what makes the loss attributable.

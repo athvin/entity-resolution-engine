@@ -18,15 +18,10 @@ rather than reimplemented: `--mode full` (this milestone) and the S4.3.4 two-pas
 incremental scorer (ER-065) both read the band from here, and so does clustering,
 whose threshold **is** ``auto_merge``.
 
-**Why the conversion exists at all.** Splink's inference surface is inconsistent about
-units: ``predict()`` takes ``threshold_match_probability``, while
-``find_matches_to_new_records()`` takes ``match_weight_threshold`` and *defaults it to*
-:data:`SPLINK_DEFAULT_MATCH_WEIGHT` — a weight of ``-4``, i.e. a probability of about
-``0.059``. A pass that omits the argument therefore does not score "everything"; it
-scores everything above a threshold nobody chose, and persists pairs S4.3.4 says are
-never written. :func:`prob_to_weight` is what a caller passes instead, and
-:func:`weight_to_prob` is its exact inverse, so a threshold can be read back in the
-units the config states it in.
+Splink 5's full and incremental paths accept probabilities, which this pipeline
+passes explicitly. The weight conversion remains available for diagnostics and
+weight-based callers. SPLINK_DEFAULT_MATCH_WEIGHT records Splink 4's historical
+new-record default; the pipeline does not rely on it.
 """
 
 from __future__ import annotations

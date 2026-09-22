@@ -1756,8 +1756,8 @@ def match(
     ``--mode full`` is one corpus-wide `predict` at `review_low` over the active
     model's frozen settings and frozen term frequency. ``--mode incremental`` is
     S4.3.4's two passes over that same frozen model and the same registered TF tables —
-    `find_matches_to_new_records` for the batch against the corpus, and a batch-only
-    `dedupe_only` linker for the batch against itself, because the first never pairs two
+    `predict_between` for the batch against the corpus, and `predict_within`
+    for the batch against itself, because the first never pairs two
     new records with each other. Either way the result is persisted to
     `lake.main.match_scores` in a single `MERGE INTO` on `(rec_a_key, rec_b_key,
     model_version, tf_snapshot_id)` (S4.3.4, S4.0b), and the gray band

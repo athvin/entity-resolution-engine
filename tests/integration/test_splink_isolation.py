@@ -148,7 +148,8 @@ def predict_pairs(connection: duckdb.DuckDBPyConnection, cfg: Config) -> list[tu
     round-trip through pandas is one more place the order could be imposed rather
     than observed.
     """
-    linker = Linker(FRAME, settings=build_settings(cfg), db_api=splink_api(connection))
+    api = splink_api(connection)
+    linker = Linker(api.register(FRAME), settings=build_settings(cfg))
     predictions = linker.inference.predict(threshold_match_probability=REVIEW_LOW)
     scored = (
         f"SELECT record_key_l, record_key_r, match_probability FROM {predictions.physical_name}"
@@ -250,7 +251,7 @@ def test_assertion_fails_on_misconfigured_api(sub_namespace: Any, cfg: Config) -
         connection.execute(f"USE {LAKE_ALIAS}.main")
         materialize_frame(connection)
         api = DuckDBAPI(connection=connection)
-        linker = Linker(FRAME, settings=build_settings(cfg), db_api=api)
+        linker = Linker(api.register(FRAME), settings=build_settings(cfg))
         linker.table_management.compute_tf_table("email")
 
         leaked = leaked_splink_relations(connection)

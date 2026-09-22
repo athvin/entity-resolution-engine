@@ -7,7 +7,7 @@ S8.2.1 is normative that `parity_pairs.csv` is **DERIVED, not invented**:
                             ∧ (a, b) is scored by the corpus-wide `full.py` pass over
                               base/ ∪ batch/ }
 
-and that — because `find_matches_to_new_records` plus a batch-only `dedupe_only` linker
+and that — because `predict_between` plus a batch-only `dedupe_only` linker
 can only produce pairs with **at least one endpoint in `batch/`**, and because both
 paths regenerate their own candidates from the same blocking rules at the same
 threshold — this is exactly the set of pairs with at least one endpoint in `batch/`
@@ -78,7 +78,7 @@ def derive_parity_pairs(
     with the one the rows were written under, and the set would then be neither path's.
 
     The endpoint condition is asserted rather than assumed. It is a *theorem* about the
-    two-pass path — `find_matches_to_new_records` pairs new against corpus, and the
+    two-pass path — `predict_between` pairs new against corpus, and the
     batch-only `dedupe_only` linker pairs new against new, so neither can emit a pair of
     two base records — and a violation means the incremental path scored something it
     had no candidate source for, which is a defect this set must not quietly absorb.

@@ -46,7 +46,9 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
-from typing import Any, Final, Protocol
+from contextlib import suppress
+from typing import TYPE_CHECKING, Any, Final, Protocol
+from uuid import uuid4
 
 import duckdb
 
@@ -56,6 +58,9 @@ from er.errors import ConfigError, PreconditionFailure
 from er.lake.columns import STD_RECORD_COLUMNS
 from er.lake.model import SCHEMA_QUALIFIER
 from er.obs.profiling import profiled
+
+if TYPE_CHECKING:
+    from splink import DuckDBAPI
 
 __all__ = [
     "TF_COLUMN_PREFIX",
@@ -252,12 +257,6 @@ _COUNT_KEY_SQL: Final = (
     f"SELECT count(*) FROM {_TF_LOOKUP} WHERE model_version = ? AND tf_snapshot_id = ?"
 )
 
-_SELECT_COLUMN_SQL: Final = f"""
-SELECT value, tf_value FROM {_TF_LOOKUP}
- WHERE model_version = ? AND tf_snapshot_id = ? AND column_name = ?
- ORDER BY value
-"""
-
 
 @profiled("train.freeze_tf", "terms")
 def materialize_tf_lookup(
@@ -317,9 +316,7 @@ def materialize_tf_lookup(
 class TfTableManagement(Protocol):
     """The one Splink table-management call D4 permits a scoring run to make."""
 
-    def register_term_frequency_lookup(
-        self, input_data: Any, col_name: str, overwrite: bool = False
-    ) -> Any:
+    def register_term_frequency_lookup(self, input_data: Any, col_name: str) -> Any:
         """Register a precomputed TF table for `col_name`."""
 
 
@@ -343,6 +340,8 @@ def register_tf(
     cfg: Config,
     model_version: str,
     tf_snapshot_id: str,
+    *,
+    db_api: DuckDBAPI,
 ) -> tuple[str, ...]:
     """Register the frozen TF rows of one key with `linker`, one call per TF column.
 
@@ -353,7 +352,7 @@ def register_tf(
     reproducible one.
 
     The rows are read fully qualified and materialized here rather than handed over as
-    a lazy relation: Splink registers what it is given as a view, and a view over
+    a lazy lake relation: a view over
     `lake.main.tf_lookup` would make every predict re-read the lake through a handle
     this function does not control.
 
@@ -364,6 +363,7 @@ def register_tf(
             registered — the frozen rows cannot say which column is missing from them.
         model_version: the registry version to register.
         tf_snapshot_id: the TF snapshot to register.
+        db_api: the same API that registered the linker's inputs.
 
     Returns:
         The columns registered, in :func:`tf_columns` order.
@@ -372,11 +372,14 @@ def register_tf(
         MissingTfLookupError: a TF column has no rows for the key (S4.0 exit ``3``).
     """
     columns = tf_columns(cfg)
+    _reject_unknown_columns(columns)
     for column in columns:
-        rows = connection.execute(
-            _SELECT_COLUMN_SQL, [model_version, tf_snapshot_id, column]
-        ).fetchall()
-        if not rows:
+        present = connection.execute(
+            f"SELECT EXISTS (SELECT 1 FROM {_TF_LOOKUP} WHERE model_version=? "
+            "AND tf_snapshot_id=? AND column_name=?)",
+            [model_version, tf_snapshot_id, column],
+        ).fetchone()
+        if present != (True,):
             raise MissingTfLookupError(
                 f"{TF_LOOKUP_RELATION} holds no rows for column {column!r} at "
                 f"model_version={model_version!r}, tf_snapshot_id={tf_snapshot_id!r}; "
@@ -384,17 +387,24 @@ def register_tf(
                 f"hand and break INV-SCORE (S4.3.3, D4). Re-materialize the snapshot "
                 f"named by {tf_tables_path(model_version, tf_snapshot_id)!r}"
             )
-        # `<col>` and `tf_<col>` are the column names Splink joins the table on; the
-        # value is text because `tf_lookup.value` is (S5).
-        frame = [
-            {column: str(value), f"{TF_COLUMN_PREFIX}{column}": float(tf_value)}
-            for value, tf_value in rows
-        ]
-        # `overwrite=True` because a caller may register one linker twice — the S4.3.4
-        # two-pass path builds a linker per pass, but a full re-score reuses one.
-        linker.table_management.register_term_frequency_lookup(
-            input_data=frame, col_name=column, overwrite=True
+        # Splink 5 requires a registered frame. Keep the frozen lookup in a local
+        # managed table; no Python list or optional Arrow dependency is needed.
+        # A unique physical name also keeps concurrent linkers' snapshots separate.
+        relation = f"er_frozen_tf_{uuid4().hex}"
+        connection.execute(
+            f'CREATE TEMP TABLE {relation} AS SELECT value AS "{column}", '
+            f'tf_value AS "{TF_COLUMN_PREFIX}{column}" FROM {_TF_LOOKUP} '
+            "WHERE model_version=? AND tf_snapshot_id=? AND column_name=?",
+            [model_version, tf_snapshot_id, column],
         )
+        try:
+            linker.table_management.register_term_frequency_lookup(
+                input_data=db_api.register(relation), col_name=column
+            )
+        except BaseException:
+            with suppress(duckdb.Error):
+                connection.execute(f"DROP TABLE {relation}")
+            raise
     return columns
 
 
