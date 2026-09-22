@@ -161,10 +161,19 @@ entity labels and sorts serialized rows; Python serializes/fetches 1,024-row pag
 No complete output or pair list is retained. Gzip container timestamps remain
 non-deterministic as before; decompressed JSON is byte-identical.
 
+Collection compatibility APIs also remain callable: `cluster.load_affected_set`,
+`cluster.affected_edges`, `cluster_full`, `reconcile_plan` / `apply_reconcile_plan`,
+the collection helpers in `entities/retraction.py`, `unscored_record_keys`,
+`review_scored_pairs`, and both legacy touched-entity accessors in `obs/touched.py`
+and `golden/assemble.py`. Their inputs or outputs can still be corpus-sized; the
+normal CLI no longer uses them. The single-item review APIs and explicit incremental
+`record_keys` argument also keep their public interfaces.
+
 The pure reconciliation, threshold, quality, source-adapter and fixture-reader APIs
-remain useful as independent test oracles. Synthetic data generation is an external
-input producer and still owns its persona/truth objects. These are not production
-DuckDB round trips.
+remain independent test oracles. Test invariant/replay helpers deliberately load
+complete fixture results, and the fixed `base_10` benchmark check does the same.
+Synthetic data generation is an external input producer and still owns its
+persona/truth objects. These are not production DuckDB round trips.
 
 **Revisit when:** artifact consumers accept a versioned Parquet/JSONL export, which
 would permit direct `COPY TO`, or model metadata itself becomes large.
