@@ -17,9 +17,8 @@ plus that rest, and four of its decisions are the ones a re-implementation gets 
   of `is_active`.
 
 * **Nothing below `review_low` is persisted.** The threshold is passed to Splink
-  explicitly, in the units Splink's `predict()` takes (probability). Leaving it out
-  would fall back to a default match weight of ``-4`` — a probability near ``0.06`` —
-  and write pairs S4.3.4 says are never written (:mod:`er.matching.thresholds`).
+  explicitly as a probability. Omitting it would retain scores below the configured
+  boundary, violating S4.3.4 (:mod:`er.matching.thresholds`).
 
 * **The gray band is decided in Python, not in SQL.** `review_low <= p < auto_merge`
   is half-open and is defined in exactly one place (:func:`~er.matching.thresholds.in_gray_band`).
@@ -729,9 +728,8 @@ def score_full(
         settings=_scoring_settings(settings),
     )
     register_tf(linker, connection, cfg, model_version, tf_snapshot_id, db_api=api)
-    # Explicit, and in probabilities: Splink's own default is a match WEIGHT of -4,
-    # which is a probability of about 0.06 and would persist pairs S4.3.4 says are
-    # never written (S4.3, MINOR-thresholds).
+    # Pass the configured probability explicitly so Splink filters before the
+    # writer materializes evidence and persists scores (S4.3, MINOR-thresholds).
     predictions = linker.inference.predict(threshold_match_probability=thresholds.review_low)
     relation = str(predictions.physical_name)
 
