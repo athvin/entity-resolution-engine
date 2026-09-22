@@ -80,6 +80,98 @@ services. Memory includes page cache and is sampled every 250 ms.
 This is a capacity measurement, separate from CI regression baselines. Running it
 does not enable scheduled million-record jobs or promote a baseline.
 
+### Ten-million-record capacity test
+
+`make benchmark-10m` runs the same complete initial-load pipeline with **10,000,000
+records representing 4,000,000 people**, using seed 42 and the same three sources.
+It fits the CPU and memory limits to the local Docker host. The experimental `10m`
+scale is available only in the full-pipeline runner; it adds no scheduled CI job.
+
+The generator streams source CSV rows, and delivery directories share immutable
+input files through hard links where supported. File hashing and membership
+partition hashing stream their inputs. Quality validation counts pairs in DuckDB
+and uses the shared metric formulas, so it does not retain all candidate pairs in
+Python. Generation still retains personas and truth labels in memory. Lake data,
+generated inputs and DuckDB spill files also need disk space beyond the startup
+check; a 4 GB DuckDB limit is not a limit on the whole container or on disk use.
+
+The ten-million-record pipeline completed on **2026-09-21**, producing
+**3,898,183 golden records**, **10,000,000 memberships**, and **23,389,098 lineage
+rows**. Reconciliation took **336.30 seconds (5m 36s)** and golden-record assembly
+**310.64 seconds (5m 11s)**. Every standardized record has exactly one membership;
+every entity has one golden record and six lineage decisions whose winning records
+belong to that entity.
+
+The recorded processing total is **7,843.46 seconds (2h 10m 43s)**. This is a
+**resumed pipeline with code changes**, combining the preserved ingestion, cleaning
+and training with repaired matching, review recovery, reconciliation and assembly.
+It is not a fresh full-pipeline pass on one image. Matching includes its interrupted
+836.38-second pass, which saved all scores, and 62.02 seconds to finish reviews after
+a local object-store connection error. Earlier failed matching and reconciliation
+attempts, generation, setup, debugging, validation and downtime are excluded.
+
+| Stage | Seconds |
+|---|---:|
+| Ingestion | 185.12 |
+| Cleaning/standardization | 706.10 |
+| Model training | 5,406.89 |
+| Matching and review recovery | 898.40 |
+| Reconciliation | 336.30 |
+| Golden-record assembly | 310.64 |
+
+The run used **2 CPU cores, 2 DuckDB threads, a 4 GB DuckDB limit and a 10 GiB
+pipeline-container limit**, with roughly 12 GiB allocated to Docker Desktop on the
+local 24-GiB Mac. Reconciliation's sampled peak process RSS was **4.72 GiB** and its
+peak container usage **5.17 GiB**. Whole-pipeline container memory reached **10 GiB**,
+including reclaimable page cache; this excludes the catalog and object-store
+services. These are tested settings, not measured minimum requirements.
+
+Training remains the largest cost: **90m 7s, about 69% of processing time**. Its
+surname/postcode training rule creates **491,624,467 pairs**. Observed training spill
+reached at least **135.40 GiB**, in addition to persistent inputs and lake data; spill
+was sampled occasionally, so this is a lower bound, not total disk required.
+
+Accuracy was measured against the synthetic truth (4 million personas, seed 42):
+
+| Metric | Result |
+|---|---:|
+| Blocking recall | 99.56% |
+| Edge precision | 94.41% |
+| Edge recall within blocked pairs | 97.10% |
+| Edge F1 | 95.74% |
+| Cluster pairwise precision | 82.74% |
+| Cluster pairwise recall | 97.91% |
+| Cluster pairwise F1 | 89.69% |
+
+**Completion and integrity do not establish acceptable match accuracy.** Cluster
+closure contains **1,633,894 false-positive pairs**; false merges need further work.
+No matching threshold, training rule or model parameter was changed during recovery.
+The preserved model still carries its original warnings about unobserved exact email
+and phone u probabilities. This test does not establish that those warnings caused
+the measured errors.
+
+There are **567,184,685 distinct candidate pairs**, **8,451,869 saved scores**,
+**8,192,404 automatic-match edges** and **259,465 gray-band reviews**. The review
+coverage audit found no missing entries. All **3,898,183 created events** have unique
+IDs and dense sequence values; all event hashes are correct, and replay reproduces
+all ten million memberships exactly. Partition SHA-256:
+`0e2fb7d2569f53be68f2d7635ecf33b67fa23070351af5e4f951eb78d95bf9c6`.
+
+The score writer and initial reconciliation now stage large intermediates in
+DuckDB and consume bounded batches. Existing lifecycle rules, ID ordering and event
+semantics are preserved. The bounded reconciliation path applies only to complete
+initial loads without prior lifecycle/assertion state; incremental reconciliation
+has not been measured at this scale. Benchmark validation also uses partitioned
+counts and restricted pair joins to stay within the DuckDB limit.
+
+The complete report and exact results are in
+`artifacts/bench/full-10m-local-retry-20260921/completion-report.md` and
+`completion-analysis.json`. Earlier failures remain archived separately in that
+folder. Checks included 780 unit tests, targeted validation tests, matching and
+reconciliation integration tests, and a one-million-record reconciliation check
+under a 512 MB DuckDB limit. One resumed capacity run was measured; variation is
+unmeasured. The benchmark services are stopped and the completed lake is retained.
+
 ### Optimized local million-record result, 2026-09-21
 
 The optimized full pipeline processed **1,000,000 records in 207.79 seconds

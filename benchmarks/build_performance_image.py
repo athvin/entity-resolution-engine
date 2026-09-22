@@ -27,6 +27,7 @@ def main() -> None:
         for path in (args.context / name).rglob("*")
         if path.is_file()
         and not EXCLUDED.intersection(path.relative_to(args.context).parts)
+        and path.name != ".user.yml"
         and path.suffix not in (".pyc", ".pyo")
     }
     for name in ("pyproject.toml", "uv.lock"):
@@ -59,6 +60,7 @@ def main() -> None:
         + "RUN "
         + json.dumps(["python", "-c", install])
         + "\n"
+        + "RUN dbt deps --project-dir dbt && rm -rf dbt/logs dbt/profiles/.user.yml\n"
     )
     with (args.out / "build.log").open("w") as log:
         subprocess.run(

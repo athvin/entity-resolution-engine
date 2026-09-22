@@ -127,10 +127,9 @@ def evidence_keys(cfg: Config, available: Collection[str]) -> tuple[str, ...]:
 def build_evidence(cfg: Config, available: Collection[str]) -> str:
     """The SQL expression that renders one prediction row's evidence as JSON.
 
-    An expression rather than a Python dict, and that is what makes S4.3.4's "a single
-    write statement" reachable: the payload is built by the same `MERGE INTO` that
-    persists the pair, over the columns of the prediction relation, so no scored pair
-    is ever materialized in Python on the way to the lake.
+    An expression rather than a Python dict: the payload is built in local SQL
+    staging before the single `MERGE INTO` that persists the pair. No scored pair
+    is materialized in Python on the way to the lake.
 
     Args:
         cfg: the validated S6 document.

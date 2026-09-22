@@ -3,6 +3,7 @@
 import json
 import math
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import duckdb
@@ -12,13 +13,13 @@ from er.config.schema import Thresholds
 from er.entities.ids import CountingIdFactory
 from er.lake.bulk import BATCH_ROWS
 from er.lake.model import REGISTRY, create_table_sql
-from er.matching.full import ScoredPair, _scored_rows, review_scored_pairs
+from er.matching.full import ScoredPair, _scored_rows, merge_match_scores, review_scored_pairs
 
 THRESHOLDS = Thresholds(review_low=0.5, auto_merge=0.9)
 EVIDENCE = {"gamma_email": 2, "bf_email": 41.7, "label": "O'Neil 雪"}
 
 
-def test_native_score_batches_survive_review_writes_in_same_transaction(
+def test_score_batches_survive_review_writes_in_same_transaction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     with duckdb.connect() as connection:
@@ -83,6 +84,85 @@ def test_native_score_batches_survive_review_writes_in_same_transaction(
         connection.execute("ROLLBACK")
         assert connection.execute("SELECT count(*) FROM lake.main.review_queue").fetchone() == (0,)
         assert connection.execute("SELECT count(*) FROM lake.main.match_scores").fetchone() == (0,)
+
+
+def test_merge_preserves_winning_evidence_and_hashes_from_a_view() -> None:
+    with duckdb.connect() as connection:
+        connection.execute("ATTACH ':memory:' AS lake")
+        connection.execute(create_table_sql(REGISTRY["match_scores"]))
+        connection.execute(
+            "CREATE TABLE lake.main.int_std_records AS "
+            "SELECT * FROM (VALUES ('crm:a', 'hash-a'), ('webforms:b', 'hash-b')) "
+            "t(record_key, content_hash)"
+        )
+        connection.execute(
+            "CREATE VIEW predictions AS SELECT * FROM (VALUES "
+            "('crm:a', 'webforms:b', 0.7, '{\"selected\":false}'::JSON), "
+            "('webforms:b', 'crm:a', 0.9, '{\"selected\":true}'::JSON), "
+            "('crm:a', 'crm:a', 1.0, '{}'::JSON), "
+            "('crm:a', 'missing:c', 1.0, '{}'::JSON)) "
+            "t(record_key_l, record_key_r, match_probability, evidence)"
+        )
+        connection.execute("BEGIN")
+        scored = list(
+            merge_match_scores(
+                connection,
+                "predictions",
+                "evidence",
+                model_version="v1",
+                tf_snapshot_id="tf1",
+                run_id="run1",
+            )
+        )
+        assert len(scored) == 1
+        assert (scored[0].rec_a_key, scored[0].rec_b_key) == ("crm:a", "webforms:b")
+        assert scored[0].match_probability == 0.9
+        assert scored[0].evidence == {"selected": True}
+        assert connection.execute(
+            "SELECT rec_a_content_hash, rec_b_content_hash FROM lake.main.match_scores"
+        ).fetchone() == ("hash-a", "hash-b")
+        assert connection.execute(
+            "SELECT count(*) FROM duckdb_tables() WHERE table_name LIKE 'er_match_stage_%'"
+        ).fetchone() == (0,)
+        connection.execute("ROLLBACK")
+        assert connection.execute("SELECT count(*) FROM lake.main.match_scores").fetchone() == (0,)
+
+
+def test_large_score_payloads_merge_and_stream_under_memory_limit(tmp_path: Path) -> None:
+    """The old wide DISTINCT ON fails on this corpus at the same 512 MB limit."""
+    with duckdb.connect(config={"threads": 2, "memory_limit": "2GB"}) as connection:
+        connection.execute("SET temp_directory = ?", [str(tmp_path / "spill")])
+        connection.execute("ATTACH ':memory:' AS lake")
+        connection.execute(create_table_sql(REGISTRY["match_scores"]))
+        records = 1_000_000
+        connection.execute(
+            "CREATE TABLE lake.main.int_std_records AS SELECT p || i::VARCHAR record_key, "
+            "md5(p || i::VARCHAR) content_hash FROM range(?) t(i) "
+            "CROSS JOIN (VALUES ('crm:'), ('webforms:')) k(p)",
+            [records],
+        )
+        connection.execute(
+            "CREATE TABLE predictions AS SELECT 'crm:' || i::VARCHAR record_key_l, "
+            "'webforms:' || i::VARCHAR record_key_r, 0.9::DOUBLE match_probability, "
+            "json_object('payload', repeat(md5(i::VARCHAR), 16)) evidence FROM range(?) t(i)",
+            [records],
+        )
+        connection.execute("SET memory_limit = '512MB'")
+        scores = merge_match_scores(
+            connection,
+            "predictions",
+            "evidence",
+            model_version="v1",
+            tf_snapshot_id="tf1",
+            run_id="run1",
+        )
+        assert sum(1 for _ in scores) == records
+        assert connection.execute("SELECT count(*) FROM lake.main.match_scores").fetchone() == (
+            records,
+        )
+        assert connection.execute(
+            "SELECT count(*) FROM duckdb_tables() WHERE table_name LIKE 'er_match_stage_%'"
+        ).fetchone() == (0,)
 
 
 def test_review_candidates_are_written_before_consuming_the_next_batch() -> None:

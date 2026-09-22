@@ -7,6 +7,10 @@ image imports it.
 
 from __future__ import annotations
 
+import csv
+import hashlib
+import json
+import random
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -26,6 +30,7 @@ def _import(module: str) -> ModuleType:
 
 
 quality = _import("quality")
+large = _import("large_validation")
 
 
 def test_quality_at_10k_does_not_construct_all_possible_pairs(
@@ -141,3 +146,103 @@ def test_pair_outside_universe_raises() -> None:
     with pytest.raises(ValueError) as raised:
         quality.cluster_level_metrics(conn, truth_with_ghost)
     assert "crm:99" in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "SELECT 1",
+        "UPDATE lake.main.match_scores SET match_probability=1",
+        "DELETE FROM lake.main.int_blocking_keys WHERE key_value='b'",
+        "UPDATE lake.main.entity_membership SET entity_id='E1'",
+        "UPDATE lake.main.entity_membership SET entity_id=record_key",
+        "INSERT INTO lake.main.int_blocking_keys SELECT * FROM lake.main.int_blocking_keys",
+        "INSERT INTO lake.main.match_scores SELECT * FROM lake.main.match_scores",
+        "DELETE FROM lake.main.match_scores",
+        "DELETE FROM lake.main.int_blocking_keys",
+    ],
+)
+def test_sql_quality_matches_pair_sets(tmp_path: Path, mutation: str) -> None:
+    with _lake() as connection:
+        connection.execute(mutation)
+        # Include a batch sidecar to exercise combined initial/incremental truth.
+        (tmp_path / "batch").mkdir()
+        for directory, rows in (
+            (tmp_path, [("p1", "crm", "1"), ("p1", "crm", "2")]),
+            (tmp_path / "batch", [("p2", "crm", "3"), ("p2", "crm", "4")]),
+        ):
+            with (directory / "truth.csv").open("w") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(["persona_id", "source_system", "source_record_id"])
+                writer.writerows(rows)
+        expected = quality.quality_block(connection, TRUTH, auto_merge=0.95)
+        assert (
+            large.quality_from_csv(
+                connection, tmp_path, 0.95, blocked_count=len(quality._blocked_pairs(connection))
+            )
+            == expected
+        )
+        assert not connection.execute(
+            "SELECT table_name FROM duckdb_tables() WHERE table_name LIKE 'benchmark_truth_%'"
+        ).fetchall()
+
+
+@pytest.mark.parametrize("records", [0, 5, 2500])
+def test_streamed_partition_preserves_legacy_hash(records: int) -> None:
+    rows = [(f'crm:{index:05d}é"\n', str(index % 3)) for index in range(records)]
+    random.Random(42).shuffle(rows)
+    groups: dict[str, list[str]] = {}
+    for key, entity in rows:
+        groups.setdefault(entity, []).append(key)
+    expected = hashlib.sha256(
+        json.dumps(sorted(sorted(group) for group in groups.values())).encode()
+    ).hexdigest()
+    with duckdb.connect() as connection:
+        connection.execute("ATTACH ':memory:' AS lake")
+        connection.execute(
+            "CREATE TABLE lake.main.entity_membership (record_key VARCHAR, entity_id VARCHAR)"
+        )
+        if rows:
+            connection.executemany("INSERT INTO lake.main.entity_membership VALUES (?, ?)", rows)
+        assert large.partition_sha256(connection) == expected
+
+
+@pytest.mark.parametrize("defect", ["missing", "extra", "duplicate"])
+def test_sql_quality_rejects_incomplete_truth(tmp_path: Path, defect: str) -> None:
+    rows = "p1,crm,1\np1,crm,2\np2,crm,3\np2,crm,4\n"
+    if defect == "missing":
+        rows = rows.replace("p2,crm,4\n", "")
+    else:
+        rows += "p2,crm,4\n" if defect == "duplicate" else "p2,crm,99\n"
+    (tmp_path / "truth.csv").write_text("persona_id,source_system,source_record_id\n" + rows)
+    with _lake() as connection, pytest.raises(ValueError, match="truth|corpus"):
+        large.quality_from_csv(connection, tmp_path, 0.95, blocked_count=3)
+
+
+@pytest.mark.parametrize("partitions", [1, 3, 64])
+def test_partitioned_candidate_count_matches_exact_pair_set(partitions: int) -> None:
+    randomizer = random.Random(42)
+    rows = [
+        (
+            f"crm:{randomizer.randrange(40)}",
+            randomizer.choice(["email", "name", None]),
+            randomizer.choice(["x", "y", "O'Brien", None]),
+        )
+        for _ in range(300)
+    ]
+    rows += rows[:20]
+    expected = {
+        (a, b)
+        for a, ta, va in rows
+        for b, tb, vb in rows
+        if a < b and ta is not None and va is not None and ta == tb and va == vb
+    }
+    with _lake() as connection:
+        connection.execute("DELETE FROM lake.main.int_blocking_keys")
+        connection.executemany("INSERT INTO lake.main.int_blocking_keys VALUES (?, ?, ?)", rows)
+        assert large.candidate_pair_count(connection, partitions=partitions) == len(expected)
+        assert not connection.execute(
+            "SELECT table_name FROM duckdb_tables() WHERE table_name LIKE 'er_bulk_%'"
+        ).fetchall()
+        connection.execute("DELETE FROM lake.main.int_blocking_keys")
+        assert large.candidate_pair_count(connection, partitions=partitions) == 0

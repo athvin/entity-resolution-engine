@@ -117,7 +117,8 @@ row.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Final, Protocol
@@ -1274,30 +1275,19 @@ def label_propagate(
 
     _open_loop_relations(connection, node_set, pairs)
     try:
-        iterations = 0
-        while True:
-            iterations += 1
-            from er.obs.profiling import span
-
-            with span("reconcile.label_iteration", unit="records", iteration=iterations) as counts:
-                connection.execute(_ROUND_SQL)
-                row = connection.execute(_CHANGED_SQL).fetchone()
-                assert row is not None, "count(*) returned no row"
-                moved = int(row[0])
-                counts.update(rows_in=len(node_set), rows_out=len(node_set), labels_changed=moved)
-            if not moved:
-                break
-            connection.execute(_ADOPT_SQL)
-            if iterations >= max_iterations:
-                raise NonConvergenceError(
-                    _non_convergence_message(
-                        _labelling(connection),
-                        node_set,
-                        pairs,
-                        iterations=iterations,
-                        max_iterations=max_iterations,
-                    )
+        iterations, converged = _label_iterations(
+            connection, node_count=len(node_set), max_iterations=max_iterations
+        )
+        if not converged:
+            raise NonConvergenceError(
+                _non_convergence_message(
+                    _labelling(connection),
+                    node_set,
+                    pairs,
+                    iterations=iterations,
+                    max_iterations=max_iterations,
                 )
+            )
         labels = _labelling(connection)
     finally:
         _close_loop_relations(connection)
@@ -1312,6 +1302,85 @@ def label_propagate(
         f"the S4.5.2 bound of {MAX_ITERATION_BOUND(len(node_set))}"
     )
     return LabelPropagationResult(labels=labels, iterations=iterations)
+
+
+def _label_iterations(
+    connection: duckdb.DuckDBPyConnection, *, node_count: int, max_iterations: int
+) -> tuple[int, bool]:
+    """Run the shared SQL loop; callers own input loading and failure diagnostics."""
+    from er.obs.profiling import span
+
+    for iteration in range(1, max_iterations + 1):
+        with span("reconcile.label_iteration", unit="records", iteration=iteration) as counts:
+            connection.execute(_ROUND_SQL)
+            row = connection.execute(_CHANGED_SQL).fetchone()
+            assert row is not None
+            moved = int(row[0])
+            counts.update(rows_in=node_count, rows_out=node_count, labels_changed=moved)
+        if not moved:
+            assert iteration <= MAX_ITERATION_BOUND(node_count)
+            return iteration, True
+        connection.execute(_ADOPT_SQL)
+    return max_iterations, False
+
+
+@contextmanager
+def label_propagate_relations(
+    connection: duckdb.DuckDBPyConnection,
+    nodes_relation: str,
+    edges_relation: str,
+    *,
+    max_iterations: int,
+) -> Iterator[tuple[str, int]]:
+    """Run the same propagation over local relations, retaining labels in DuckDB.
+
+    Relation names are trusted internal SQL identifiers. Nodes supply `record_key`;
+    edges supply `rec_a_key` and `rec_b_key`, already selected and validated by the
+    caller. No graph or label mapping crosses into Python on the success path.
+    The yielded relation is valid only within this context and never reaches the lake.
+    """
+    if max_iterations < 1:
+        raise ValueError("max_iterations must be at least 1")
+    try:
+        connection.execute(
+            f"CREATE OR REPLACE TEMP TABLE {_LABELS_RELATION} AS "
+            f"SELECT DISTINCT record_key, record_key AS label FROM {nodes_relation}"
+        )
+        connection.execute(
+            f"CREATE OR REPLACE TEMP TABLE {_ADJACENCY_RELATION} AS "
+            f"SELECT rec_a_key AS node, rec_b_key AS neighbour FROM {edges_relation} "
+            f"UNION ALL SELECT rec_b_key, rec_a_key FROM {edges_relation}"
+        )
+        row = connection.execute(f"SELECT count(*) FROM {_LABELS_RELATION}").fetchone()
+        assert row is not None
+        node_count = int(row[0])
+        iterations, converged = (
+            _label_iterations(connection, node_count=node_count, max_iterations=max_iterations)
+            if node_count
+            else (0, True)
+        )
+        if not converged:
+            # Preserve the existing diagnostic contract on the failure path.
+            labels = _labelling(connection)
+            pairs = connection.execute(
+                f"SELECT node, neighbour FROM {_ADJACENCY_RELATION} WHERE node < neighbour"
+            ).fetchall()
+            raise NonConvergenceError(
+                _non_convergence_message(
+                    labels,
+                    frozenset(labels),
+                    pairs,
+                    iterations=iterations,
+                    max_iterations=max_iterations,
+                )
+            )
+        yield _LABELS_RELATION, iterations
+    except BaseException:
+        with suppress(duckdb.Error):
+            _close_loop_relations(connection)
+        raise
+    else:
+        _close_loop_relations(connection)
 
 
 @profiled("reconcile.label_readback", "records")

@@ -15,6 +15,14 @@ benchmark = importlib.import_module("full_pipeline")
 profile = importlib.import_module("profile_pipeline")
 
 
+def test_experimental_ten_million_scale_keeps_local_envelope() -> None:
+    preset = benchmark.get_scale("10m")
+    local = benchmark.local_scale(preset, cpus=8, memory=int(11.65 * benchmark.GIB))
+    assert (local.records, local.personas, local.incremental_batch) == (10_000_000, 4_000_000, 0)
+    assert (local.cpu_limit, local.mem_limit, local.duckdb_memory_limit) == (2, "10g", "4GB")
+    assert "10m" not in benchmark.load_scales()
+
+
 def test_million_record_capacity_checks_docker_not_host_cpu_count() -> None:
     scale = benchmark.get_scale("1m")
     errors = benchmark.capacity_errors(

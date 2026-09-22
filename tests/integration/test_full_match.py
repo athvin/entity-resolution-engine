@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
@@ -99,12 +100,6 @@ MATCH_SCORE_COLUMNS: Final[tuple[str, ...]] = REGISTRY[MATCH_SCORES_RELATION].co
 #: to move between two runs that produced identical data (S5.0, M7).
 STABLE_COLUMNS: Final[tuple[str, ...]] = tuple(
     column for column in MATCH_SCORE_COLUMNS if column not in VOLATILE_COLUMNS
-)
-
-#: The statement verbs that write. A `SELECT` naming `match_scores` is a read, and the
-#: stage makes several — the point of AC3 is that exactly one statement *wrote*.
-WRITE_VERBS: Final[frozenset[str]] = frozenset(
-    {"INSERT", "UPDATE", "DELETE", "MERGE", "CREATE", "COPY", "DROP", "TRUNCATE", "ALTER"}
 )
 
 #: The stage name S5 records this work under, for the `run_stages` row AC7 reads.
@@ -222,11 +217,39 @@ class StatementLog:
 
     def writes_to(self, relation: str) -> tuple[str, ...]:
         """Every logged statement that WROTE to ``relation``, in log order."""
+        # A CREATE TEMP TABLE ... AS SELECT FROM match_scores reads the scores;
+        # matching any occurrence of the name incorrectly counts it as a lake write.
+        identifier = r'(?:"[^"]+"|[A-Za-z_][A-Za-z_0-9]*)'
+        target = re.compile(
+            r"^\s*(?:MERGE\s+INTO|INSERT\s+INTO|UPDATE|DELETE\s+FROM|COPY|"
+            r"TRUNCATE(?:\s+TABLE)?|"
+            r"CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMP(?:ORARY)?\s+)?(?:TABLE|VIEW)"
+            r"(?:\s+IF\s+NOT\s+EXISTS)?|(?:DROP|ALTER)\s+(?:TABLE|VIEW)"
+            r"(?:\s+IF\s+EXISTS)?)\s+(" + identifier + r"(?:\." + identifier + r")*)",
+            re.IGNORECASE,
+        )
         return tuple(
             statement
             for statement in self.statements()
-            if relation in statement and _verb(statement) in WRITE_VERBS
+            if (match := target.match(statement)) is not None
+            and match.group(1).split(".")[-1].strip('"') == relation
+            and (
+                _verb(statement) != "COPY"
+                or re.match(r"(?:\s*\([^)]*\))?\s+FROM\b", statement[match.end() :], re.IGNORECASE)
+            )
         )
+
+
+def test_statement_log_counts_the_write_target_not_a_read_source() -> None:
+    with duckdb.connect() as connection:
+        connection.execute("ATTACH ':memory:' AS lake")
+        connection.execute("CREATE TABLE lake.main.match_scores (value INTEGER)")
+        with StatementLog(connection) as log:
+            connection.execute("CREATE TEMP TABLE snapshot AS SELECT * FROM lake.main.match_scores")
+            connection.execute("INSERT INTO lake.main.match_scores VALUES (1)")
+        writes = log.writes_to("match_scores")
+        assert len(writes) == 1
+        assert _verb(writes[0]) == "INSERT"
 
 
 def _manifest_line(stdout: str) -> dict[str, Any]:
