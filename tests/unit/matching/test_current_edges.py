@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import datetime
+from math import nextafter
 from typing import Any, Final
 
 import duckdb
@@ -63,11 +64,6 @@ PAIR_CD: Final[tuple[str, str]] = ("crm:c", "crm:d")
 #: The gray band these tests threshold against. `auto_merge` is the clustering threshold
 #: (S4.3) and is what S4.5.1 passes as `min_probability`.
 THRESHOLDS: Final = Thresholds(auto_merge=0.95, review_low=0.7)
-
-#: One ULP below `auto_merge`, which is the strongest form of "immediately below" a
-#: `DOUBLE` column can carry. A round number like ``0.94`` would pass an implementation
-#: that compared with `>` after rounding to two places.
-JUST_BELOW_AUTO_MERGE: Final = 0.9499999999999999
 
 
 @pytest.fixture
@@ -217,7 +213,8 @@ def test_non_strict_resolves_by_total_order(lake: duckdb.DuckDBPyConnection) -> 
     ]
 
 
-def test_min_probability_is_inclusive(lake: duckdb.DuckDBPyConnection) -> None:
+@pytest.mark.parametrize("auto_merge", [0.95, 0.9500000000000001, 0.9999999999999999])
+def test_min_probability_is_inclusive(lake: duckdb.DuckDBPyConnection, auto_merge: float) -> None:
     """AC3: `p >= min_probability`, so a pair at exactly `auto_merge` is an edge.
 
     Half-open the other way round would drop exactly the pairs S4.3 calls matches: the
@@ -226,16 +223,20 @@ def test_min_probability_is_inclusive(lake: duckdb.DuckDBPyConnection) -> None:
     a transcribed number, because a bound written `>` here and `>=` there fragments an
     entity without failing anything.
     """
-    insert_edge(lake, PAIR_AB, THRESHOLDS.auto_merge)
-    insert_edge(lake, PAIR_CD, JUST_BELOW_AUTO_MERGE)
+    thresholds = Thresholds(auto_merge=auto_merge, review_low=THRESHOLDS.review_low)
+    # One ULP below the bound must remain excluded, even when converting a SQL
+    # decimal literal to DOUBLE would otherwise round the threshold itself upward.
+    just_below = nextafter(auto_merge, 0.0)
+    insert_edge(lake, PAIR_AB, auto_merge)
+    insert_edge(lake, PAIR_CD, just_below)
 
-    assert is_auto_merge(THRESHOLDS.auto_merge, THRESHOLDS)
-    assert not is_auto_merge(JUST_BELOW_AUTO_MERGE, THRESHOLDS)
+    assert is_auto_merge(auto_merge, thresholds)
+    assert not is_auto_merge(just_below, thresholds)
 
-    kept = current_edges(lake, MODEL_V1, TF_S1, min_probability=THRESHOLDS.auto_merge)
+    kept = current_edges(lake, MODEL_V1, TF_S1, min_probability=auto_merge)
 
-    assert kept == [(*PAIR_AB, THRESHOLDS.auto_merge)]
-    assert [edge for edge in kept if not is_auto_merge(edge[2], THRESHOLDS)] == [], (
+    assert kept == [(*PAIR_AB, auto_merge)]
+    assert [edge for edge in kept if not is_auto_merge(edge[2], thresholds)] == [], (
         "the bound and is_auto_merge must select the same rows (S4.3, S4.5.1)"
     )
     # Without the bound both pairs are edges, so the exclusion above is the bound's

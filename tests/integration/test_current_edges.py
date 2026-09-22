@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import datetime
+from math import nextafter
 from typing import Any, Final
 
 import duckdb
@@ -169,6 +170,28 @@ def assert_canonical_edge_set(edges: list[tuple[str, str, float]]) -> None:
         )
     pairs = [(rec_a_key, rec_b_key) for rec_a_key, rec_b_key, _ in edges]
     assert len(pairs) == len(set(pairs)), f"the result repeats a pair: {pairs}"
+
+
+@pytest.mark.parametrize("boundary", [0.95, 0.9500000000000001, 0.9999999999999947])
+def test_probability_boundary_survives_ducklake_filtering(
+    initialised_lake: duckdb.DuckDBPyConnection, boundary: float
+) -> None:
+    """A lake scan must include equality and exclude the adjacent lower DOUBLE."""
+    model_version, tf_snapshot_id, _ = load_fixture_model(initialised_lake)
+    below, above = nextafter(boundary, 0.0), nextafter(boundary, 1.0)
+    for pair, probability in ((PAIR_AB, below), (PAIR_CD, boundary), (PAIR_EF, above)):
+        insert_edge(initialised_lake, pair, probability, model_version, tf_snapshot_id)
+
+    # Small inserts otherwise remain in the catalog and miss the Parquet scan
+    # that exposed this boundary failure during incremental matching.
+    flushed = initialised_lake.execute(
+        "CALL ducklake_flush_inlined_data('lake', table_name => 'match_scores')"
+    ).fetchall()
+    assert flushed == [("main", "match_scores", 3)]
+
+    assert current_edges(
+        initialised_lake, model_version, tf_snapshot_id, min_probability=boundary
+    ) == sorted([(*PAIR_CD, boundary), (*PAIR_EF, above)])
 
 
 def test_filters_by_model_version_and_tf_snapshot(

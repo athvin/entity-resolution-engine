@@ -152,7 +152,7 @@ def _validate_key(model_version: str, tf_snapshot_id: str) -> None:
 
 
 def _probability_literal(min_probability: float) -> str:
-    """`min_probability` as a SQL numeric literal.
+    """`min_probability` as a SQL DOUBLE expression with the same binary value.
 
     Raises:
         ValueError: the value is not finite, or lies outside ``[0, 1]``. A `NaN`
@@ -169,7 +169,11 @@ def _probability_literal(min_probability: float) -> str:
             f"min_probability is a probability and must lie in [0, 1], got {min_probability!r} "
             f"(S4.3: all config thresholds are probabilities)"
         )
-    return repr(float(min_probability))
+    # A bare decimal literal passes through DuckDB's DECIMAL-to-DOUBLE conversion,
+    # which can round upward by one ULP (e.g. 0.9999999999999999 becomes 1.0).
+    # Parse the round-trippable string directly as DOUBLE so an equal score stays
+    # included and the adjacent lower score stays excluded.
+    return f"CAST({sql_literal(repr(float(min_probability)))} AS DOUBLE)"
 
 
 def current_edges_sql(
@@ -222,7 +226,11 @@ def current_edges_sql(
         # `NOT NULL` (S5), so there is no three-valued case to guard.
         predicates.append("is_active")
     if min_probability is not None:
-        predicates.append(f"match_probability >= {_probability_literal(min_probability)}")
+        # DuckLake's simple-column numeric filter can exclude an equal DOUBLE
+        # (observed at 0.9999999999999947). Adding zero preserves every probability
+        # but uses an expression filter instead, avoiding that boundary error.
+        # Key and activity predicates remain available for ordinary pushdown.
+        predicates.append(f"(match_probability + 0.0) >= {_probability_literal(min_probability)}")
 
     projection = ", ".join(EDGE_COLUMNS)
     partition = ", ".join(PAIR_COLUMNS)
