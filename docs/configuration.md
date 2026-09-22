@@ -73,6 +73,9 @@ selected config and delivery directories where the process can read them.
 | `ER_S3_USE_SSL` | `true` or `false` |
 | `ER_DUCKDB_THREADS` | Integer worker count |
 | `ER_DUCKDB_MEMORY_LIMIT` | DuckDB buffer limit, below the container memory limit |
+| `ER_SPLINK_NUM_CHUNKS_LEFT`, `ER_SPLINK_NUM_CHUNKS_RIGHT` | Positive integers; full prediction defaults to `1` × `1` |
+| `ER_SPLINK_MATERIALISATION` | `table` (default) or `parquet` for Splink scratch results |
+| `ER_SPLINK_WORK_DIR` | Required absolute local directory for `parquet`; unset for `table` |
 
 `ER_CPU_LIMIT` and `ER_MEM_LIMIT` configure Compose's container limits;
 Compose derives DuckDB's thread count from the CPU limit. The image includes the
@@ -81,6 +84,49 @@ with local credentials and ephemeral service storage.
 
 For separate tenants, use separate metadata schemas and object prefixes as well
 as distinct configs. Changing `tenant` alone does not provision another lake.
+
+Splink execution settings are recorded in benchmark fingerprints and do not change
+`config_hash`. Chunk controls apply to full prediction; the pinned incremental APIs
+do not expose chunk arguments. Parquet scratch is local, outside DuckLake, and files
+created by Splink are removed on completion or failure. Use a directory dedicated
+to this job, with sufficient disk space. A process killed by the operating system
+cannot run cleanup; remove that job's abandoned directory before retrying.
+
+## Training large corpora
+
+The normal config uses exact deterministic-prior estimation, a target of 1,000,000
+random pairs for u, no u early stopping, and uncapped EM sessions.
+`training.u_sampling_method: bernoulli` preserves the previous ordered, seeded
+DuckDB record sample; Splink 5 estimates u over that sample without resampling it.
+The record sample is approximate, so its actual pair count can exceed the target.
+The opt-in `hash` method uses native Splink 5 sampling, which can change quality
+even with the same seed and pair budget. All training
+options and the exact Splink version are stored with the model.
+
+The shipped training defaults are:
+
+```yaml
+training:
+  # Retain the deterministic rules, EM blocking rules, recall and seed.
+  u_max_pairs: 1000000
+  u_sampling_method: bernoulli
+  u_min_count_per_level: null
+  u_num_chunks: 10
+  em:
+    fix_u_probabilities: true
+    max_pairs: null
+```
+
+Early stopping at 100 observations per level reduced measured precision on the
+migration corpus. An EM cap of 1,000,000 pairs missed two additional true cluster
+pairs on the million-record corpus. Both remain disabled; no sampled-training
+preset is shipped.
+
+EM's `max_pairs` is an approximate cap implemented by sampling records before
+blocking. These options can change fitted probabilities, so evaluate precision and
+recall on representative labeled data before enabling them. Set the cap and
+early-stop count to `null` to retain conservative training. Do not change thresholds
+or blocking to compensate for a quality regression without a separate evaluation.
 
 ## Changing rules
 

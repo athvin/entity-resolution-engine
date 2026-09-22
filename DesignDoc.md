@@ -6,7 +6,7 @@ Start with the [README](README.md) for the product overview and the
 [runbook](docs/runbook.md) for operating instructions. This reference preserves the
 numbered contracts and invariants used by the test suite. The implementation
 milestones in S12 record the original build sequence, not current project status.
-**Stack:** Python · Splink 4 (DuckDB backend) · dbt-duckdb · DuckLake (Postgres catalog + S3-compatible object store) · Docker Compose · GitHub Actions
+**Stack:** Python · Splink 5 prerelease (DuckDB backend) · dbt-duckdb · DuckLake (Postgres catalog + S3-compatible object store) · Docker Compose · GitHub Actions
 
 This document is the sole specification. It is self-contained: every algorithm, schema, threshold and invariant an implementer needs is stated here, not delegated. **MUST** marks a normative requirement; a conforming implementation satisfies all of them. Named invariants (INV-PERM, INV-EQ, INV-SCORE, CONTRADICTION-1) are defined once, at the section indicated, and cited by name everywhere else.
 
@@ -37,7 +37,7 @@ Build the entity resolution and golden record pipeline as a testable, benchmarka
 |---|---|---|
 | Language | Python 3.12 | Splink is Python-native; Rust ports of hot paths are a later optimization once benchmarks identify them |
 | Package/env manager | `uv` | Lockfile-based (`uv.lock` committed, `uv sync --frozen` everywhere), fast in CI |
-| Matching | Splink 4, DuckDB backend | Exact pin `splink==4.0.16` (S2.1). The Splink 3 API is incompatible; Splink 5 removes `find_matches_to_new_records`, on which incremental scoring (S4.3) depends — migration is tracked as an S13 risk and is confined to `src/er/matching/` |
+| Matching | Splink 5, DuckDB backend | Exact prerelease pin `splink==5.0.0.dev5` (S2.1). Registered SQL inputs, chunked prediction, log-space evidence, and two incremental passes (S4.3). |
 | Transformations | dbt-core + dbt-duckdb | Standardization, blocking keys, golden assembly as dbt models; dbt runs as a subprocess (S4.0b) |
 | Storage format | DuckLake | Catalog = Postgres in Compose; object store = S3-compatible (MinIO in Compose). DuckLake enforces `NOT NULL` only — see S5.0 for the key model this forces |
 | Query engine | DuckDB, one version by construction | dbt-duckdb executes **in-process against the installed `duckdb` wheel**, so `uv.lock` already guarantees a single engine version — there is no dbt-vs-Python skew axis to police. The pins that actually matter are (a) the `ducklake` / `postgres` / `httpfs` **extension binaries matched to that engine build**, baked at Docker build time into `/opt/duckdb_extensions` with `autoinstall_known_extensions=false` at runtime, and (b) a DuckDB version at or above dbt-duckdb's DuckLake floor, since dbt-duckdb branches on `duckdb_version` for ALTER/RENAME workarounds and MERGE availability. `er doctor` asserts both |
@@ -57,8 +57,10 @@ Every version below is a **literal pin**, not a floor. `er doctor` (S4.0) runs, 
 
 | Component | Pin | Why it is pinned | Asserted by |
 |---|---|---|---|
-| Python | `3.12` (`requires-python = ">=3.12,<3.13"`) | Splink 4 and dbt-core support matrix; the runtime image and CI runner MUST agree | `er doctor`: `sys.version_info[:2] == (3, 12)`; `pyproject.toml`; the `python:3.12-slim` base image tag in `docker/Dockerfile` (S7.3) |
-| Splink | `splink==4.0.16` | Splink 5 removes `find_matches_to_new_records`, the primitive incremental pass 1 (S4.3) is built on; Splink 3's API is incompatible. Exact, not `>=` | `er doctor`: `splink.__version__`; `uv.lock` |
+| Python | `3.12` (`requires-python = ">=3.12,<3.13"`) | Splink 5 and dbt-core support matrix; the runtime image and CI runner MUST agree | `er doctor`: `sys.version_info[:2] == (3, 12)`; `pyproject.toml`; the `python:3.12-slim` base image tag in `docker/Dockerfile` (S7.3) |
+| Splink | `splink==5.0.0.dev5` | Tested prerelease; upgrades require fixed-model scoring parity, retraining quality and fixture reproducibility gates. Exact, not `>=` | `er doctor`: `splink.__version__`; `uv.lock` |
+| PyArrow | `pyarrow==25.0.1` | Splink 5 uses Arrow when registering its u-estimation result | `er doctor`; `uv.lock` |
+| pandas (test helpers) | `pandas==3.0.5` | Explicit development dependency; Splink 5 no longer installs pandas | `er doctor`; `uv.lock` |
 | DuckDB (Python wheel) | `duckdb==1.5.5` | The single engine for both Python and dbt-duckdb; extension binaries are built per engine version | `er doctor`: `duckdb.__version__`; `uv.lock` |
 | dbt-core | `dbt-core==1.12.2` | Adapter/protocol compatibility with dbt-duckdb; `on_schema_change` and contract semantics (S4.2) are version-sensitive | `er doctor`: `dbt.version.__version__`; `uv.lock` |
 | dbt-duckdb | `dbt-duckdb==1.11.0` | Must be at or above the DuckLake floor; it branches on `duckdb_version` for ALTER/RENAME and MERGE behaviour | `er doctor`: adapter version + `dbt debug --target mem`; `uv.lock` |
@@ -344,6 +346,9 @@ One `stg_<source>` model per source maps source columns → the canonical schema
 | `address_parse(cols)` | Regex/`usaddress`-based componentizer behind the `AddressParser` interface, versioned by `versions.address_parser_version`; emits `addr_number, addr_street, addr_unit, addr_city, addr_region, addr_postal`. The fixture generator emits only patterns the v1 parser handles; a libpostal container can replace it later without a model change. |
 | `parse_date(col, fmt)` | Emits exactly one column, `birth_date`. It computes a precision (`day`, `month` or `year`) **internally** to decide the value — a `year`-precision parse yields NULL, because a year-only DOB is not usable matching evidence — and does not persist that precision. v1 has no consumer for a precision column: no comparison level, no blocking key, no survivorship rule and no `golden_records` column reads it, and a stored column no rule consumes is a column that silently drifts. Should review display need it later, it is an additive column under S5.1. |
 
+Standardization evaluates sentinel membership with scalar `list_contains` to avoid repeated MARK joins from nested normalizers. Before dbt starts, `er_standardize_work` journals pending source/batch identities for the run, inheriting any unfinished work (including full-refresh intent). Incremental current-record selection resolves only affected record keys across their complete staged history; blocking replaces all keys for those records, even when their new key set is empty. A successful stage acknowledges the journal after both derived models and counters finish. A retry must not skip work merely because staging already appended its batches. Missing derived relations and full refreshes rebuild the whole current corpus. Direct dbt invocations without the stage's `standardize_delta` var retain full-corpus behavior.
+
+
 `int_std_records` unions the staged sources and materializes `record_key`, `content_hash`, `std_version` (from the `--vars` override the CLI passes; `dbt_project.yml` holds only a fallback), and `updated_at_source`. `int_blocking_keys` materializes `(key_type, key_value, record_key, source_system, source_record_id)`.
 
 **Supersession rule (normative).** `int_std_records` holds **exactly one current row per `(source_system, source_record_id)`**: the row derived from the `raw_records` version with the **greatest `ingested_at`** for that key (ties broken by `ingest_batch_id DESC` — the ULID is time-ordered, so `DESC` selects the *most recent* batch, which is what "current" means; `ASC` would let the older version win). Rows whose winning version has `is_deleted = true` are **excluded** from `int_std_records` entirely. A dbt `unique` test on `record_key` and a `dbt_utils.unique_combination_of_columns` test on `(source_system, source_record_id)` enforce this.
@@ -417,7 +422,7 @@ Normative emission rules: the builder **ALWAYS** emits `NullLevel` first and `El
 <a id="s4-3-2"></a>
 #### 4.3.2 Training (`train.py`)
 
-`er train` runs full-corpus EM. The call sequence is fixed, and every argument comes from the `training:` block in S6, which Pydantic rejects if incomplete:
+`er train` defaults to uncapped full-corpus EM. `training.em.max_pairs` optionally caps each session, `training.u_min_count_per_level` optionally enables u-estimation early stopping, and `training.u_num_chunks` controls its chunks. Defaults are `null`, `null`, and `10`; deterministic prior estimation remains exact. An experimental EM cap of 1,000,000 pairs reduced cluster recall on the million-record migration corpus, so no sampled-training preset is shipped. These controls require a new quality evaluation before adoption. The call sequence is fixed, and every argument comes from the `training:` block in S6, which Pydantic rejects if incomplete:
 
 ```python
 linker.training.estimate_probability_two_random_records_match(
@@ -427,15 +432,20 @@ linker.training.estimate_probability_two_random_records_match(
 linker.training.estimate_u_using_random_sampling(
     max_pairs=cfg.training.u_max_pairs,
     seed=cfg.training.u_seed,          # required; no default — an unseeded u estimate is not reproducible
+    min_count_per_level=cfg.training.u_min_count_per_level,
+    num_chunks=cfg.training.u_num_chunks,
 )
 for rule in cfg.training.em_blocking_rules:        # min 2 sessions; m is not estimated for blocked columns
     linker.training.estimate_parameters_using_expectation_maximisation(
         blocking_rule=rule,
         fix_u_probabilities=cfg.training.em.fix_u_probabilities,
+        max_pairs=cfg.training.em.max_pairs,
     )
 ```
 
-The whole `training:` block is persisted verbatim into `model_registry.metrics` alongside the fitted m/u values.
+The logical call order above is unchanged. By default `training.u_sampling_method: bernoulli` selects the same ordered, seeded DuckDB Bernoulli record sample as Splink 4 in SQL. A sample-only Linker estimates u without a second record sample; its effective pair budget is at least the actual sampled pair count. Public model serialization transfers the learned prior/u values to the full-corpus EM Linker. This retains the legacy quality baseline while using Splink 5's per-comparison estimation. `hash` opts into native Splink 5 sampling and requires a new quality evaluation.
+
+The whole `training:` block and exact `splink_version` are persisted into `model_registry.metrics` alongside the fitted m/u values. A legacy or differently pinned model is refused before scoring writes. Retraining a legacy model sets `migration_requires_full_resolution`: successful full matching, reconciliation and assembly under the new model must finish before incremental matching is permitted. Changing execution settings alone never retrains a model.
 
 **Model artifact lifecycle.**
 
@@ -465,26 +475,25 @@ INV-SCORE is what makes `match_scores` a cumulative, re-derivable table and what
 <a id="s4-3-4"></a>
 #### 4.3.4 Incremental scoring — two passes, unioned
 
-Splink 4's inference surface (`deterministic_link` / `predict` / `find_matches_to_new_records` / `compare_two_records`) accepts no precomputed pair table; every entry point regenerates pairs from blocking rules. Incremental scoring is therefore **two Splink passes over the same frozen model JSON and the same registered TF tables**:
+Incremental scoring uses **two Splink passes over the same frozen model JSON and the same registered TF tables**. Input SQL relations are registered with the API before constructing a Linker. Both passes receive `review_low` as a probability explicitly:
 
 ```python
-# Pass 1 — new vs corpus
-new_vs_corpus = linker_corpus.inference.find_matches_to_new_records(
-    records_or_tablename='batch_std',
-    blocking_rules=blocking_rules_from_config(cfg)[1],
-    match_weight_threshold=log2(review_low / (1 - review_low)),
+# Pass 1 — new vs corpus (the prior corpus excludes the batch)
+new_vs_corpus = linker_corpus.inference.predict_between(
+    api.register('prior_corpus'), api.register('batch_std'),
+    blocking_rules_to_generate_predictions=blocking_rules_from_config(cfg)[1],
+    threshold_match_probability=review_low,
 )
 
-# Pass 2 — new vs new  (find_matches_to_new_records does NOT pair new records with each other)
-linker_batch = Linker(batch_std, settings=frozen_settings_with(link_type='dedupe_only'),
-                      db_api=DuckDBAPI(connection=conn, output_schema='splink_scratch'))
-register_tf_tables(linker_batch, tf_snapshot_id)
-new_vs_new = linker_batch.inference.predict(threshold_match_probability=review_low)
+# Pass 2 — new vs new, using a dedupe_only Linker over the batch
+new_vs_new = linker_batch.inference.predict_within(
+    batch_api.register('batch_std'), threshold_match_probability=review_low,
+)
 ```
 
 UNION the two results, drop self-pairs, canonicalise to `rec_a_key < rec_b_key`, `DISTINCT`, and persist to `lake.main.match_scores` in a single `MERGE INTO` (below) carrying `model_version`, `tf_snapshot_id`, `rec_a_content_hash`, `rec_b_content_hash`, `is_active = true`, `run_id`, `evidence JSON`, `scored_at`. Pass 2 is what makes the "2 new records form a new entity" case in the `incremental_batch` fixture reachable at all.
 
-`--mode full` is one corpus-wide `linker.inference.predict(threshold_match_probability=review_low)`; it is used by training runs and by the correction pass.
+`--mode full` is corpus-wide `linker.inference.predict(threshold_match_probability=review_low, num_chunks_left=..., num_chunks_right=...)`; it is used after training and by the correction pass. Execution-only environment controls `ER_SPLINK_NUM_CHUNKS_LEFT` and `ER_SPLINK_NUM_CHUNKS_RIGHT` default to `1`. `ER_SPLINK_MATERIALISATION` defaults to `table`; `parquet` requires an absolute local `ER_SPLINK_WORK_DIR`. These controls enter runtime fingerprints, never `config_hash`. Scratch stays outside DuckLake and is released on success and failure. Incremental ad hoc prediction does not accept chunk arguments in this pinned release.
 
 **Splink regenerates its own candidate pairs; `int_blocking_keys` is NOT an input to scoring.** It is (a) the blocking-rule generation source, (b) the driver for the S4.5 touched-subgraph computation, and (c) the `candidate_pair_count` benchmark metric.
 
@@ -493,7 +502,7 @@ UNION the two results, drop self-pairs, canonicalise to `rec_a_key < rec_b_key`,
 <a id="s4-3-5"></a>
 #### 4.3.5 Gray band → `review_queue`
 
-Pairs with `review_low <= p < auto_merge` are written to `review_queue` and are **not** clustered. The write is an **upsert**: it refreshes `last_seen_run_id` on an existing `open` row, inserts with `status='open'`, `first_seen_run_id = last_seen_run_id = run_id`, `subject_type='pair'`, `reason='gray_band'` for a new pair, and **skips pairs already resolved** (`resolved_match`, `resolved_no_match`, `dismissed`). That skip is what makes the stage idempotent and stops a dismissed pair resurfacing every run. `waterfall JSON` retains the `gamma_*` comparison-vector columns and per-comparison Bayes factors from `predict()`; they MUST be retained rather than projected away. Resolving a row to `match` / `no_match` writes the corresponding `assertions` row in the same transaction.
+Pairs with `review_low <= p < auto_merge` are written to `review_queue` and are **not** clustered. The write is an **upsert**: it refreshes `last_seen_run_id` on an existing `open` row, inserts with `status='open'`, `first_seen_run_id = last_seen_run_id = run_id`, `subject_type='pair'`, `reason='gray_band'` for a new pair, and **skips pairs already resolved** (`resolved_match`, `resolved_no_match`, `dismissed`). That skip is what makes the stage idempotent and stops a dismissed pair resurfacing every run. `waterfall JSON` retains the `gamma_*` comparison-vector columns and per-comparison log2 match weights (`mw_*`, including `mw_tf_adj_*`) from `predict()`; they MUST be retained rather than projected away. Resolving a row to `match` / `no_match` writes the corresponding `assertions` row in the same transaction.
 
 **Counters** — `run_stages`: `rows_in` = records scored, `rows_out` = pairs persisted; `counters = {mode, model_version, tf_snapshot_id, candidate_pairs, pairs_scored, pairs_above_auto_merge, pairs_in_gray_band, review_queue_added, review_queue_refreshed, duration_ms}`.
 
@@ -649,6 +658,8 @@ The two loss vectors when the preconditions do **not** hold are (a) incremental 
 
 **`golden_display`** is a separate model applying presentation transforms (proper-casing, phone formatting) on top of `golden_records`. It is **presentation casing only and is never read by the matching layer**, so matching-layer data is never re-cased. It carries no `survivorship_version` of its own: it is one row per `entity_id` derived from `golden_records`, so its provenance is read by joining `golden_records` (and `golden_lineage`) on `entity_id`, which is why it is rebuilt and reaped in lockstep with them.
 
+Golden winner selection executes once in `golden_lineage`; `golden_records` reads the winning standardized rows from that lineage. `golden_display` applies the same touched-entity filter as the other marts.
+
 **Touched-only assembly.** `assemble.py` computes the touched set as a formula over this run's `entity_events` — `{entity_id : an event of type created, member_added, member_removed, merged, split, retired or edge_cut exists with this run_id}` — and writes it to `er_touched_entities(run_id, entity_id, disposition)` with `disposition ∈ {rebuild, retire}`. `retire` covers merge losers, emptied split fragments and retired entities; everything else is `rebuild`. dbt is invoked with **only** `--vars '{run_id: <ulid>}'`; the marts join `er_touched_entities` filtered on that `run_id`. Passing the ULID list itself as a var is forbidden: at the 1m scale tens of thousands of 26-char ULIDs exceed Linux's 128 KB per-argv-element limit and the invocation hard-fails with `E2BIG`.
 
 **Explicit reap step (mandatory).** dbt's `delete+insert` deletes only keys **present in the freshly built batch**. A merge loser or an emptied fragment produces zero rows, so its key is absent, nothing is deleted, and its stale golden row survives forever. Therefore, **after** the marts run, `assemble.py` explicitly deletes from `golden_records`, `golden_lineage` **and `golden_display`** every `entity_id` in `er_touched_entities` with `disposition='retire'`. `golden_display` is reaped with the other two: an orphan display row is the same defect, and it is the row a consumer is most likely to read. History remains available through the DuckLake snapshot range recorded in `run_stages`. Mart config: `incremental_strategy='delete+insert', unique_key='entity_id', on_schema_change='append_new_columns'`.
@@ -656,6 +667,11 @@ The two loss vectors when the preconditions do **not** hold are (a) incremental 
 **`assembled_at`** is the **run's `started_at`**, written only for entities in the touched set. Untouched entities keep their prior value untouched, which is exactly what T-INC-2 asserts. dbt tests: every `golden_records.entity_id` has `entities.status='active'`; every active entity with ≥1 member has exactly one golden row.
 
 **Counters** — `run_stages`: `rows_in` = touched entities, `rows_out` = golden rows written; `counters = {entities_touched, entities_rebuilt, entities_reaped, lineage_rows, tiebreak_deterministic_count, duration_ms}`.
+
+Full assembly also schedules every currently merged or retired entity for the reap,
+including retirements from earlier runs. This repairs stale marts after an interrupted
+assembly or a full correction. Its touched count is rebuilt plus scheduled-for-reap
+entities; repeating the reap is idempotent even when their rows are already absent.
 
 <a id="s4-7"></a>
 ### 4.7 Failure semantics & recovery
@@ -717,7 +733,7 @@ CREATE TABLE IF NOT EXISTS lake.main.match_scores (
   tf_snapshot_id       VARCHAR   NOT NULL,
   rec_a_content_hash   VARCHAR   NOT NULL,  -- content_hash of each endpoint at scoring time (INV-SCORE)
   rec_b_content_hash   VARCHAR   NOT NULL,
-  evidence             JSON      NOT NULL,  -- gamma_* vector and per-comparison Bayes factors
+  evidence             JSON      NOT NULL,  -- gamma_* vector and per-comparison log2 match weights (`mw_*`, including `mw_tf_adj_*`)
   is_active            BOOLEAN   NOT NULL,
   invalidated_at       TIMESTAMP,
   invalidated_run_id   VARCHAR,
@@ -776,7 +792,7 @@ CREATE TABLE IF NOT EXISTS lake.main.review_queue (
   entity_id          VARCHAR,              -- non-NULL iff subject_type='entity'
   reason             VARCHAR   NOT NULL,   -- {gray_band, never_unsatisfiable, coherence}
   match_probability  DOUBLE,
-  waterfall          JSON,                 -- gamma_* comparison vector + per-comparison Bayes factors
+  waterfall          JSON,                 -- gamma_* comparison vector + per-comparison log2 match weights (`mw_*`, including `mw_tf_adj_*`)
   status             VARCHAR   NOT NULL,   -- {open, resolved_match, resolved_no_match, dismissed}
   first_seen_run_id  VARCHAR   NOT NULL,
   last_seen_run_id   VARCHAR   NOT NULL,
@@ -881,6 +897,13 @@ CREATE TABLE IF NOT EXISTS lake.main.ingest_batches (
   created_at       TIMESTAMP NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS lake.main.er_standardize_work (
+  run_id VARCHAR NOT NULL,
+  source_system VARCHAR NOT NULL,
+  ingest_batch_id VARCHAR NOT NULL,
+  full_refresh BOOLEAN NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS lake.main.er_touched_entities (
   run_id       VARCHAR   NOT NULL,
   entity_id    VARCHAR   NOT NULL,
@@ -973,6 +996,7 @@ The **eleven** columns from `given_name` through `birth_date` are the **survivab
 | `runs` | ddl.py | `run_id` | `unique` |
 | `run_stages` | ddl.py | `(run_id, seq)`; `(run_id, stage)` | `unique_combination_of_columns` |
 | `ingest_batches` | ddl.py | `ingest_batch_id` | `unique` |
+| `er_standardize_work` | ddl.py | `(run_id, source_system, ingest_batch_id)` | `unique_combination_of_columns` |
 | `er_touched_entities` | ddl.py | `(run_id, entity_id)` | `unique_combination_of_columns` |
 | `stg_crm` / `stg_billing` / `stg_webforms` | dbt | `(source_system, source_record_id, content_hash)` | contract + `unique_combination_of_columns` |
 | `int_std_records` | dbt | `record_key` | contract + `unique` |
@@ -1147,11 +1171,15 @@ training:
   recall: 0.85
   u_max_pairs: 1000000
   u_seed: 20260101
+  u_sampling_method: bernoulli
+  u_min_count_per_level: null
+  u_num_chunks: 10
   em_blocking_rules:
     - "l.email = r.email"
     - "l.family_name = r.family_name and l.addr_postal = r.addr_postal"
   em:
     fix_u_probabilities: true
+    max_pairs: null
 
 storage:
   data_path: "s3://lake/er/"
@@ -1445,7 +1473,7 @@ A session-scoped `pytest` fixture in `tests/conftest.py` implements the followin
 3. Run `er init` against that namespace. `er init` creates only `ddl.py`-owned relations; the dbt-owned relations are created by the first `dbt run` in the session.
 4. On teardown: `CALL lake.expire_snapshots(older_than => now())`, `CALL lake.cleanup_old_files(cleanup_all => true)`, delete the `s3://lake/test/<ns>/` prefix, `DETACH lake`, and `DROP SCHEMA er_test_<ns> CASCADE` in the catalog. Teardown MUST run under `try/finally` so a failing test still reclaims the namespace.
 
-Individual tests are function-isolated by a function-scoped fixture that `DELETE`s from every `ddl.py`-owned relation (`raw_records`, `match_scores`, `entity_membership`, `entities`, `entity_events`, `assertions`, `review_queue`, `model_registry`, `tf_lookup`, `cut_edges`, `runs`, `run_stages`, `ingest_batches`, `er_touched_entities`), drops the dbt-owned relations, and reloads the scenario fixture. A test that needs a second, independent universe inside one session (T-INC-1) requests the `sub_namespace` fixture, which repeats steps 1–4 under `er_test_<ns>_a` / `er_test_<ns>_b`.
+Individual tests are function-isolated by a function-scoped fixture that `DELETE`s from every `ddl.py`-owned relation (`raw_records`, `match_scores`, `entity_membership`, `entities`, `entity_events`, `assertions`, `review_queue`, `model_registry`, `tf_lookup`, `cut_edges`, `runs`, `run_stages`, `ingest_batches`, `er_standardize_work`, `er_touched_entities`), drops the dbt-owned relations, and reloads the scenario fixture. A test that needs a second, independent universe inside one session (T-INC-1) requests the `sub_namespace` fixture, which repeats steps 1–4 under `er_test_<ns>_a` / `er_test_<ns>_b`.
 
 Integration tests run single-process. `-n auto` applies to the unit layer only. v1 is a single-writer batch model: concurrent writers against one namespace are an explicit non-guarantee and are not tested, except by T-CONC-1, which asserts that the second writer is *refused* (exit code 3) rather than admitted.
 
@@ -1550,7 +1578,7 @@ parity_pairs = { (a, b) : (a, b) is scored by the incremental two-pass path over
                         ∧ (a, b) is scored by the corpus-wide `full.py` pass over base/ ∪ batch/ }
 ```
 
-which — because `find_matches_to_new_records` plus a batch-only `dedupe_only` Linker can only produce pairs with **at least one endpoint in `batch/`**, and because both paths regenerate their own candidates from the same blocking rules at the same threshold — is exactly the set of pairs with at least one endpoint in `batch/` that clear `review_low`. Its cardinality is therefore a property of the fixture and its blocking rules, and **no test asserts a fixed pair count**. The file is committed so that a silent shrink of that set (a blocking regression, or a batch that stops linking) is visible as a diff rather than as a still-green parity test; T-INC-3 recomputes the set and asserts the file equals it and is non-empty before comparing probabilities.
+which — because `predict_between` plus batch-only `predict_within` can only produce pairs with **at least one endpoint in `batch/`**, and because both paths regenerate their own candidates from the same blocking rules at the same threshold — is exactly the set of pairs with at least one endpoint in `batch/` that clear `review_low`. Its cardinality is therefore a property of the fixture and its blocking rules, and **no test asserts a fixed pair count**. The file is committed so that a silent shrink of that set (a blocking regression, or a batch that stops linking) is visible as a diff rather than as a still-green parity test; T-INC-3 recomputes the set and asserts the file equals it and is non-empty before comparing probabilities.
 
 **Headers (literal).**
 
@@ -1628,7 +1656,7 @@ Every row is a required test. `pytest node id` is relative to the repository roo
 | T-KEY-1b | the same, for dbt-owned relations | `tests/integration/test_keys.py` | `tests/integration/test_keys.py::test_dbt_owned_duplicate_key_fails_dbt_test` | insert a duplicate `(source_system, source_record_id)` into `int_std_records`; `dbt test --select tag:keys` exits non-zero and names `int_std_records`. Requires the dbt-owned relations to exist, which is why it is a separate arm from T-KEY-1a |
 | T-STD-1 | standardization determinism | `tests/integration/test_standardize.py` | `tests/integration/test_standardize.py::test_std_content_hash_stable` | run `er standardize` twice; for every row, `std_hash` = SHA-256 over the UTF-8 concatenation of `record_key, std_version, given_name, family_name, array_to_string(name_variants,'\x1f'), email, email_valid, phone_e164, phone_valid, addr_number, addr_street, addr_unit, addr_city, addr_region, addr_postal, birth_date, updated_at_source, content_hash` joined by `\x1f` with NULL as the empty string, is unchanged. Byte identity of the Parquet files is NOT asserted — Parquet output is not reproducible and `int_std_records` carries `VOLATILE_COLUMNS` |
 | T-BLK-1 | blocking parity | `tests/integration/test_blocking.py` | `tests/integration/test_blocking.py::test_dbt_and_splink_pair_sets_match` | on `base_10`, the DISTINCT canonicalised (`rec_a_key < rec_b_key`) pair set derived from `int_blocking_keys` equals Splink's blocked pair set exactly — set equality in both directions, with the symmetric difference printed on failure. Both sides come from `blocking_rules_from_config(cfg)` |
-| T-MATCH-SYM | scoring symmetry | `tests/integration/test_matching.py` | `tests/integration/test_matching.py::test_score_is_orientation_invariant` | for all `base_10` blocked pairs, `compare_two_records(a,b).match_probability == compare_two_records(b,a).match_probability` within `1e-12`; guards the `variant_match` symmetry requirement (normalized `given_name` is element 0 of its own `name_variants`) |
+| T-MATCH-SYM | scoring symmetry | `tests/integration/test_matching.py` | `tests/integration/test_matching.py::test_score_is_orientation_invariant` | for all `base_10` blocked pairs, `score_pair(a,b).match_probability == score_pair(b,a).match_probability` within `1e-12`; guards the `variant_match` symmetry requirement (normalized `given_name` is element 0 of its own `name_variants`) |
 | T-MATCH-1a | edge-level quality (G1) | `tests/integration/test_matching.py` | `tests/integration/test_matching.py::test_edge_quality_base_10` | absolute counts against the 18 true pairs: blocking recall == 1.0 (all 18 true pairs are in the candidate set); at `auto_merge`, false-positive pairs == 0 and missed true pairs <= 1 — and a missed pair, if there is one, MUST satisfy the S8.2 authoring constraint that it lies inside a persona of three or more records, which the test asserts on the missed pair itself, because that is what keeps T-MATCH-1b's `entity count == 10` true alongside this tolerance. Named sub-assertions: the robert/bob pair is present; the typo-surname pair is present; the shared-household pair is absent; the two `test@test.com` records produce no edge |
 | T-MATCH-1b | cluster-level quality (G1) | `tests/integration/test_matching.py` | `tests/integration/test_matching.py::test_cluster_quality_base_10` | over the transitive closure of `entity_membership`: cluster-level precision == 1.0, cluster-level recall >= 0.94 (>= 17 of 18 true pairs co-clustered); entity count == 10; the two household personas occupy two distinct entities; the singleton persona is its own entity |
 | T-INC-3 | scoring parity across code paths | `tests/integration/test_incremental.py` | `tests/integration/test_incremental.py::test_incremental_and_full_scores_are_bit_equal` | on `incremental_batch` — **the scenario is named here because the incremental path needs a `batch/` phase and `base_10` has none**: load `base/`, then score `batch/` through the incremental two-pass path (S4.3.4) and score `base/ ∪ batch/` through `full.py`, both at the same pinned `model_version` and `tf_snapshot_id`. Recompute the parity pair set per its normative derivation in S8.2.1, assert it is non-empty and equals `fixtures/static/incremental_batch/parity_pairs.csv`, then assert bit-equal `match_probability` for every pair in it. No pair *count* is asserted — the cardinality follows from the blocking rules and the fixture. A T-INC-1 failure with T-INC-3 green localises the fault to clustering, not scoring |
@@ -1647,7 +1675,7 @@ Every row is a required test. `pytest node id` is relative to the repository roo
 | T-DEL-1 | deletion path end to end (G1) | `tests/integration/test_deletion.py` | `tests/integration/test_deletion.py::test_deletion_retracts_edges_and_resurrection_restores_membership` | `deletion_scenario`, same three phases, run through the full chain: incident `match_scores` edges of each tombstoned record are invalidated (`is_active=false`, `invalidated_run_id` set); `member_removed` is emitted for each departed record, `split` for the fragment the bridge removal disconnects, and `retired` for the entity that empties; after the `resurrect/` phase the resurrected record is scored, re-clustered and holds an `entity_membership` row again, and `expected/resurrect/membership.csv` matches |
 | T-SUPER-1 | supersession: a changed `content_hash` invalidates edges and re-clusters (G1) | `tests/integration/test_supersession.py` | `tests/integration/test_supersession.py::test_superseded_record_invalidates_edges_and_leaves_its_entity` | `supersession_scenario`, phases `base → batch`, run through the full chain. The `batch/` delivery re-delivers one already-ingested key with corrected values: `er ingest` reports `new_count = 0` and `changed_count = 1` and appends one `raw_records` version row rather than overwriting one; after `er standardize`, `int_std_records` holds exactly one current row for that key — the greatest-`ingested_at` version (S4.2) — carrying the new `content_hash`. Then the S4.5.5 supersession arm: every `match_scores` row incident to that record and scored under its **prior** endpoint `content_hash` is invalidated in place (`is_active=false`, `invalidated_at` and `invalidated_run_id` set, and still exactly one row for its `(rec_a_key, rec_b_key, model_version, tf_snapshot_id)` key, per S4.3.4); the record's current entity enters the affected set and widens to that entity's **full membership even though none of its other members appears in this batch** (S4.5.1); re-clustering emits `member_removed` on the old entity for the departed record and the record lands in its own entity; `expected/batch/membership.csv` and `expected/batch/events.csv` match. This is the only deterministic construction in the suite that exercises the supersession arm — the deletion arm is T-DEL-1's — which is why the fixture has an owning test rather than being committed unread |
 | T-CORR-1 | the correction pass finds what incremental cannot | `tests/integration/test_correction.py` | `tests/integration/test_correction.py::test_correction_pass_links_two_pre_existing_records` | build a corpus in which two **pre-existing** records become a true pair only after a third record shifts nothing about them (incremental candidate generation can never pair two pre-existing records); assert the incremental run misses the link, that `er correct` (S4.0) finds it under a new `tf_snapshot_id`, and that its events carry `details.reason='correction_pass'` |
-| T-REVIEW-1 | gray band is captured, not clustered | `tests/integration/test_review.py` | `tests/integration/test_review.py::test_gray_band_pair_lands_open` | `base_10`'s single gray-band pair — cross-persona by construction (S8.2) — produces exactly one `review_queue` row with `subject_type='pair'`, `reason='gray_band'`, `status='open'`, a populated `waterfall` (all `gamma_*` columns and per-comparison Bayes factors), and `first_seen_run_id == last_seen_run_id`; the pair is NOT co-clustered; a second run refreshes `last_seen_run_id` and inserts no duplicate |
+| T-REVIEW-1 | gray band is captured, not clustered | `tests/integration/test_review.py` | `tests/integration/test_review.py::test_gray_band_pair_lands_open` | `base_10`'s single gray-band pair — cross-persona by construction (S8.2) — produces exactly one `review_queue` row with `subject_type='pair'`, `reason='gray_band'`, `status='open'`, a populated `waterfall` (all `gamma_*` columns and per-comparison log2 match weights (`mw_*`, including `mw_tf_adj_*`)), and `first_seen_run_id == last_seen_run_id`; the pair is NOT co-clustered; a second run refreshes `last_seen_run_id` and inserts no duplicate |
 | T-REVIEW-2 | resolution closes the loop | `tests/integration/test_review.py` | `tests/integration/test_review.py::test_resolution_triggers_merge_without_new_records` | `er review resolve --review-id <review_id> --as match --by tester` (the S4.0 signature) writes the `always` assertion row in the same transaction; `er reconcile` with **zero** new records merges the pair — which also proves the assertion-delta arm of the affected-set computation |
 | T-GOLD-1 | survivorship (G1) | `tests/integration/test_golden.py` | `tests/integration/test_golden.py::test_survivorship_values_and_rules` | `assert_golden_equal` on `expected/base/golden.csv`; and for every `(entity_label, attribute)` the `golden_lineage.rule` matches expectation — covering `source_priority`, `recency`, `frequency`, `completeness`, `validated`, and `tiebreak_deterministic` on the designed tie; the six `addr_*` columns all come from one contributing record |
 | T-SNAP-1 | time travel | `tests/integration/test_snapshots.py` | `tests/integration/test_snapshots.py::test_time_travel_to_pre_incremental_golden` | read `run_stages.snapshot_end` for the pre-incremental `assemble` stage at runtime, then `SELECT * FROM lake.main.golden_records AT (VERSION => :snap)` and `assert_golden_equal` against `expected/base/golden.csv`. No absolute version is written in the test |
@@ -1936,7 +1964,7 @@ Each row below is encoded into a table schema or into the identity of stored row
 | # | Decision | Resolution | Status |
 |---|---|---|---|
 | D1 | Tenancy | Namespace-only tenancy, as defined normatively in S1 | **LOCKED** |
-| D2 | Incremental scoring mechanism | Two Splink passes, unioned: `find_matches_to_new_records` for new-vs-corpus and a batch-only `link_type='dedupe_only'` Linker for new-vs-new — the mechanism, and the rule that `int_blocking_keys` is never an input to scoring, are normative in S4.3.4 | **LOCKED** |
+| D2 | Incremental scoring mechanism | Two Splink passes, unioned: `predict_between` for new-vs-corpus and `predict_within` on a batch-only `link_type='dedupe_only'` Linker for new-vs-new — the mechanism, and the rule that `int_blocking_keys` is never an input to scoring, are normative in S4.3.4 | **LOCKED** |
 | D3 | `entity_membership` representation | Current state: exactly one row per `(source_system, source_record_id)`, maintained by `MERGE INTO`; all history in `entity_events`; `merged_into` resolves external ids only, never current membership (S4.5.3) | **LOCKED** |
 | D4 | Term-frequency policy | Frozen at training time, persisted as `tf_lookup` keyed by `tf_snapshot_id`, registered via `register_term_frequency_lookup` before every scoring call; `compute_tf_table` is never called outside `er train`; `er train` mints a `tf_snapshot_id` when it materializes `tf_lookup`, and **outside `er train` the only path that mints one is `er correct`**, via `er match --mode full --new-tf-snapshot` (S4.3.3, S4.0) | **LOCKED** |
 | D5 | `never_match` semantics | Partition-level rather than edge-level: the cut algorithm, and the exclusion of `cut_edges` from every subsequent clustering run, are normative in S4.4.2 | **LOCKED** |
@@ -1949,15 +1977,15 @@ Each row below is encoded into a table schema or into the identity of stored row
 | D12 | Run metadata tables | `runs`, `run_stages`, `ingest_batches`, `er_touched_entities` exist from M1 and are the referents for every `run_id`; each stage records the snapshot **range** it produced, per the range-not-count rule normative in the S4 preamble | **LOCKED** |
 | D13 | Clustering threshold | The clustering cut IS `thresholds.auto_merge`, passed explicitly as `cluster_pairwise_predictions_at_threshold(threshold_match_probability=auto_merge)`; threshold units and the half-open gray band are normative in S4.3 | **LOCKED** |
 | D14 | Relation ownership | Exactly two owners: `ddl.py` (Python `CREATE TABLE IF NOT EXISTS`) and dbt (`contract: {enforced: true}`), per the ownership rule normative in S5.0 | **LOCKED** |
-| D15 | Pinned versions (S2.1) | The S2.1 table carries literal versions for python, `splink==4.0.16`, duckdb, dbt-core, dbt-duckdb, the ducklake/postgres/httpfs extensions, and image **digests** for the catalog and object store; `er doctor` asserts every one | **LOCKED** |
+| D15 | Pinned versions (S2.1) | The S2.1 table carries literal versions for python, `splink==5.0.0.dev5`, duckdb, dbt-core, dbt-duckdb, the ducklake/postgres/httpfs extensions, and image **digests** for the catalog and object store; `er doctor` asserts every one | **LOCKED** |
 
 <a id="s13"></a>
 ## 13. Risks & Mitigations
 
 | Risk | Mitigation |
 |---|---|
-| Splink 4 API churn | `splink==4.0.16` pinned in S2.1 and asserted by `er doctor`; every Splink call is wrapped behind `src/er/matching/`, so an upgrade touches one package |
-| **Splink 5 migration.** Splink 5 removes `find_matches_to_new_records` — the exact primitive D2's new-vs-corpus pass depends on — and also removes implicit caching, `use_cache`, `materialise_blocked_pairs` and salting; `score_pairs` is cartesian and is not a substitute | Blast radius is one module, `src/er/matching/incremental.py`, because nothing outside it calls Splink inference. Migration replaces the two-pass union with `predict_between` + `predict_within`; T-INC-3 (bit-equal scores across paths) and T-BLK-1 (blocking parity) are the acceptance gate for the swap. Do not migrate until both are green on the current pin |
+| Splink prerelease API churn | `splink==5.0.0.dev5` pinned in S2.1 and asserted by `er doctor`; every Splink call is wrapped behind `src/er/matching/`, so an upgrade touches one package |
+| **Splink 5 migration.** The former `find_matches_to_new_records`, `use_cache`, `materialise_blocked_pairs` and salting APIs are removed | Migrated to `predict_between` + `predict_within`, registered inputs/TF, log-space evidence, and the v5 clustering adapter. Blast radius: `src/er/matching/`, `src/er/entities/cluster.py`, fixture models and profiling. T-INC-3 and T-BLK-1 passed on Splink 4 before the migration; both remain required on Splink 5. Also require fixed-model score tolerance 1e-10 with identical decisions, no measured precision/recall regression after retraining, and byte-reproducible fixture generation. |
 | **Incremental candidate generation cannot pair two pre-existing records.** Two records already in the corpus never become a candidate pair in an incremental run, no matter what changes around them | The periodic correction pass — `er correct` (S4.0) — rebuilds candidates over the full corpus under a new `tf_snapshot_id` and re-scores, at `correction_pass.cadence`; T-CORR-1 builds a link only the full pass can find and asserts the pass finds it. This is a **candidate-generation** limit, not a clustering limit |
 | **Corpus-dependent TF shifts move pre-existing pairs across `auto_merge`.** TF values are a property of the corpus, not of the pair | TF is frozen at training time and registered from `tf_lookup` (D4), so within one `tf_snapshot_id` INV-SCORE holds exactly. Drift accumulates only across `tf_snapshot_id` boundaries, is introduced only by the correction pass, and is bounded and measured by T-TF-1 rather than asserted away. T-INC-1b exercises the divergence and its repair |
 | Non-deterministic reconciliation breaks T-INC-1 | Every tiebreak is a total order (fragment ranking, cut choice, path choice, survivorship chains all terminating in `record_key ASC`); minting order is an explicit `ORDER BY` on minimum member `record_key`; `IdFactory` is injectable so the reconciler is unit-testable as a pure function |

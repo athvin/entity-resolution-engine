@@ -46,7 +46,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
-from typing import Any, Final, Protocol
+from typing import TYPE_CHECKING, Any, Final, Protocol, cast
 from uuid import uuid4
 
 import duckdb
@@ -57,6 +57,9 @@ from er.errors import ConfigError, PreconditionFailure
 from er.lake.columns import STD_RECORD_COLUMNS
 from er.lake.model import SCHEMA_QUALIFIER
 from er.obs.profiling import profiled
+
+if TYPE_CHECKING:
+    from splink import DuckDBAPI
 
 __all__ = [
     "TF_COLUMN_PREFIX",
@@ -318,9 +321,7 @@ def materialize_tf_lookup(
 class TfTableManagement(Protocol):
     """The one Splink table-management call D4 permits a scoring run to make."""
 
-    def register_term_frequency_lookup(
-        self, input_data: Any, col_name: str, overwrite: bool = False
-    ) -> Any:
+    def register_term_frequency_lookup(self, input_data: Any, col_name: str) -> Any:
         """Register a precomputed TF table for `col_name`."""
 
 
@@ -344,6 +345,8 @@ def register_tf(
     cfg: Config,
     model_version: str,
     tf_snapshot_id: str,
+    *,
+    db_api: DuckDBAPI | None = None,
 ) -> tuple[str, ...]:
     """Register the frozen TF rows of one key with `linker`, one call per TF column.
 
@@ -389,8 +392,9 @@ def register_tf(
                 f"hand and break INV-SCORE (S4.3.3, D4). Re-materialize the snapshot "
                 f"named by {tf_tables_path(model_version, tf_snapshot_id)!r}"
             )
+        api = db_api if db_api is not None else cast(Any, linker)._db_api
         linker.table_management.register_term_frequency_lookup(
-            input_data=relation, col_name=column, overwrite=True
+            input_data=api.register(relation), col_name=column
         )
     return columns
 

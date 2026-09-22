@@ -9,7 +9,8 @@
   a dbt-manifest check that this node has zero children. This file's job is to give that
   guard something true to protect.
 
-  **It reads `golden_records` and NOTHING else.** Reaching back to `int_std_records`
+  **Values come only from `golden_records`.** The touched-set predicate limits
+  rewrites during incremental assembly. Reaching back to `int_std_records`
   would re-introduce a second survivorship path: two models deciding which record wins,
   agreeing on every fixture until the day they did not. The survivorship decision was
   made once, upstream; this model only re-renders its output.
@@ -117,6 +118,7 @@ with rendered as (
         assembled_at
 
     from {{ ref('golden_records') }}
+    where {{ assemble_entity_filter('entity_id') }}
 
 )
 

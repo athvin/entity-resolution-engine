@@ -384,7 +384,7 @@ def test_registered_tf_scores_without_leaking_into_the_lake(
     # schema, so a later module cannot fail for a reason this one caused.
     search_path = scalar(standardized, "SELECT current_schema()")
     try:
-        linker = Linker(FRAME, settings=build_settings(cfg), db_api=splink_api(standardized))
+        linker = Linker(splink_api(standardized).register(FRAME), settings=build_settings(cfg))
         registered = register_tf(linker, standardized, cfg, MODEL_VERSION, frozen)
         predictions = linker.inference.predict(
             threshold_match_probability=cfg.thresholds.review_low

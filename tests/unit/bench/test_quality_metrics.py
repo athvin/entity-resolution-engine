@@ -187,6 +187,24 @@ def test_sql_quality_matches_pair_sets(tmp_path: Path, mutation: str) -> None:
         ).fetchall()
 
 
+def test_initial_quality_excludes_a_future_delivery(tmp_path: Path) -> None:
+    (tmp_path / "truth.csv").write_text(
+        "persona_id,source_system,source_record_id\np1,crm,1\np1,crm,2\np2,crm,3\np2,crm,4\n"
+    )
+    (tmp_path / "batch").mkdir()
+    (tmp_path / "batch/truth.csv").write_text(
+        "persona_id,source_system,source_record_id\np3,crm,5\n"
+    )
+    with _lake() as connection:
+        expected = quality.quality_block(connection, TRUTH, auto_merge=0.95)
+        assert (
+            large.quality_from_csv(connection, tmp_path, 0.95, blocked_count=3, include_batch=False)
+            == expected
+        )
+        with pytest.raises(ValueError, match="outside the current corpus"):
+            large.quality_from_csv(connection, tmp_path, 0.95, blocked_count=3)
+
+
 @pytest.mark.parametrize("records", [0, 5, 2500])
 def test_streamed_partition_preserves_legacy_hash(records: int) -> None:
     rows = [(f'crm:{index:05d}é"\n', str(index % 3)) for index in range(records)]

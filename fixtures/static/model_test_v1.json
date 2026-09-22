@@ -1,6 +1,5 @@
 {
   "additional_columns_to_retain": [],
-  "bayes_factor_column_prefix": "bf_",
   "blocking_rules_to_generate_predictions": [
     {
       "blocking_rule": "l.\"email\" = r.\"email\"",
@@ -53,7 +52,7 @@
           "fix_m_probability": false,
           "fix_u_probability": false,
           "label_for_charts": "Array intersection size >= 1",
-          "m_probability": 0.06569709603867062,
+          "m_probability": 0.0656970960386706,
           "sql_condition": "array_length(list_intersect(\"name_variants_l\", \"name_variants_r\")) >= 1",
           "u_probability": 0.0020038876996136905
         },
@@ -61,7 +60,7 @@
           "fix_m_probability": false,
           "fix_u_probability": false,
           "label_for_charts": "All other comparisons",
-          "m_probability": 0.033600880466768665,
+          "m_probability": 0.03360088046676867,
           "sql_condition": "ELSE",
           "u_probability": 0.984365542186462
         }
@@ -92,7 +91,7 @@
           "fix_m_probability": false,
           "fix_u_probability": false,
           "label_for_charts": "Jaro-Winkler distance of family_name >= 0.9",
-          "m_probability": 0.06625861732696783,
+          "m_probability": 0.06625861732696785,
           "sql_condition": "jaro_winkler_similarity(\"family_name_l\", \"family_name_r\") >= 0.9",
           "u_probability": 0.0013985876331783175
         },
@@ -244,6 +243,7 @@
   ],
   "em_convergence": 0.0001,
   "link_type": "dedupe_only",
+  "match_weight_column_prefix": "mw_",
   "max_iterations": 25,
   "probability_two_random_records_match": 0.0001851008630274792,
   "retain_intermediate_calculation_columns": false,

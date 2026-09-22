@@ -532,6 +532,26 @@ sources:
           - name: created_at
             data_tests:
               - not_null
+      - name: er_standardize_work
+        columns:
+          - name: run_id
+            data_tests:
+              - not_null
+          - name: source_system
+            data_tests:
+              - not_null
+          - name: ingest_batch_id
+            data_tests:
+              - not_null
+          - name: full_refresh
+            data_tests:
+              - not_null
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: ['run_id', 'source_system', 'ingest_batch_id']
+              config:
+                tags: ['keys']
       - name: er_touched_entities
         columns:
           - name: run_id

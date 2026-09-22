@@ -88,6 +88,7 @@ S8_1_DDL_OWNED = (
     "runs",
     "run_stages",
     "ingest_batches",
+    "er_standardize_work",
     "er_touched_entities",
 )
 
@@ -368,7 +369,7 @@ def test_delete_list_is_derived_from_registry(
 
     # ... and the registry still agrees with S8.1's own list.
     assert set(delete_relations) == set(S8_1_DDL_OWNED)
-    assert len(S8_1_DDL_OWNED) == len(set(S8_1_DDL_OWNED)) == 14
+    assert len(S8_1_DDL_OWNED) == len(set(S8_1_DDL_OWNED)) == 15
 
 
 def test_a_dbt_owned_relation_is_created(lake_conn: duckdb.DuckDBPyConnection) -> None:

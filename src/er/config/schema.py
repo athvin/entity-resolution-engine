@@ -18,9 +18,9 @@ so three things are normative here and are stated nowhere else in Python:
 from __future__ import annotations
 
 import re
-from typing import Self
+from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 __all__ = [
     "CANONICAL_ATTRIBUTES",
@@ -211,6 +211,7 @@ class TrainingEm(_Block):
     """S6 `training.em`: the arguments of every EM session (S4.3.2)."""
 
     fix_u_probabilities: bool
+    max_pairs: int | None = Field(default=None, ge=1)
 
 
 class Training(_Block):
@@ -222,6 +223,9 @@ class Training(_Block):
     #: REQUIRED with no default (V10): a defaulted seed makes the byte-equality
     #: claim of the training determinism test unreproducible.
     u_seed: int
+    u_sampling_method: Literal["bernoulli", "hash"] = "bernoulli"
+    u_min_count_per_level: int | None = Field(default=None, ge=1)
+    u_num_chunks: int = Field(default=10, ge=1)
     em_blocking_rules: list[str]
     em: TrainingEm
 

@@ -242,7 +242,9 @@ _ROWS: Final[tuple[Pin, ...]] = (
     # No distribution backs the interpreter: `er doctor` compares
     # `sys.version_info[:2]` against this literal (S2.1, T-DOCTOR-1).
     Pin("python", "3.12", None, asserted_by_doctor=True),
-    Pin("splink", "4.0.16", "splink", asserted_by_doctor=True),
+    Pin("splink", "5.0.0.dev5", "splink", asserted_by_doctor=True),
+    Pin("pyarrow", "25.0.1", "pyarrow", asserted_by_doctor=True),
+    Pin("pandas", "3.0.5", "pandas", asserted_by_doctor=True),
     Pin("duckdb", "1.5.5", "duckdb", asserted_by_doctor=True),
     Pin("dbt-core", "1.12.2", "dbt-core", asserted_by_doctor=True),
     Pin("dbt-duckdb", "1.11.0", "dbt-duckdb", asserted_by_doctor=True),
@@ -287,30 +289,20 @@ _ROWS: Final[tuple[Pin, ...]] = (
 #: against `uv.lock` and `docker/compose.yaml`.
 PINS: Final[Mapping[str, Pin]] = {pin.component: pin for pin in _ROWS}
 
-#: The S13 Splink 5 row, machine-readable. The splink pin's major is asserted
-#: against :attr:`MigrationNote.pinned_major` in the unit layer, so bumping the pin
-#: to 5 turns a test red rather than quietly removing the primitive the D2
-#: new-vs-corpus pass is built on.
+#: The S13 migration remains explicit even after the pinned major changes.
 SPLINK_MIGRATION_NOTE: Final[MigrationNote] = MigrationNote(
     distribution="splink",
-    pinned_major=4,
+    pinned_major=5,
     breaking_major=5,
-    removed=(
-        "find_matches_to_new_records",
-        "use_cache",
-        "materialise_blocked_pairs",
-    ),
+    removed=("find_matches_to_new_records", "use_cache", "materialise_blocked_pairs"),
     replacement=("predict_between", "predict_within"),
-    blast_radius=("src/er/matching/incremental.py",),
+    blast_radius=("src/er/matching/", "src/er/entities/cluster.py"),
     acceptance_tests=("T-INC-3", "T-BLK-1"),
     rationale=(
-        "Splink 5 removes find_matches_to_new_records, the exact primitive D2's "
-        "new-vs-corpus pass depends on, along with implicit caching, use_cache, "
-        "materialise_blocked_pairs and salting; score_pairs is cartesian and is not a "
-        "substitute. Blast radius is one module, src/er/matching/incremental.py, "
-        "because nothing outside it calls Splink inference. Migration replaces the "
-        "two-pass union with predict_between + predict_within; T-INC-3 and T-BLK-1 "
-        "are the acceptance gate and MUST be green on the current pin first (S13)."
+        "Splink 5 requires registered inputs, predict_between/predict_within, log-space "
+        "evidence and the v5 clustering adapter. T-INC-3 and T-BLK-1 passed on Splink 4 "
+        "before migration and remain required. Legacy models require retraining and "
+        "full matching, reconciliation and assembly before incremental processing."
     ),
 )
 

@@ -44,7 +44,7 @@ from er.lake.model import DBT_OWNED, DDL_OWNED, REGISTRY, SCHEMA_QUALIFIER
 # S4.0 makes `er init` print one line per relation. Spelled as a literal because a
 # count derived from `DDL_OWNED` would agree with the registry no matter what the
 # registry said.
-DDL_OWNED_COUNT = 14
+DDL_OWNED_COUNT = 15
 
 # The constraints DuckLake supports none of (S5.0). `NOT NULL` is deliberately
 # absent: it is the one constraint a generated statement may carry.

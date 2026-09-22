@@ -312,12 +312,12 @@ def test_splink_major_is_4_and_migration_note_is_actionable() -> None:
 
     # The guard: Splink 5 removes the primitive the incremental new-vs-corpus pass is
     # built on, so a lockfile refresh that bumps the major must fail here.
-    assert int(PINS["splink"].version.split(".")[0]) == note.pinned_major == 4
+    assert int(PINS["splink"].version.split(".")[0]) == note.pinned_major == 5
     assert note.breaking_major == 5
 
     assert "find_matches_to_new_records" in note.removed
     assert note.replacement == ("predict_between", "predict_within")
-    assert note.blast_radius == ("src/er/matching/incremental.py",)
+    assert note.blast_radius == ("src/er/matching/", "src/er/entities/cluster.py")
     assert set(note.acceptance_tests) == {"T-INC-3", "T-BLK-1"}
 
     # Every name the note carries is a name S13 states; a note that had drifted from

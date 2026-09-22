@@ -1,5 +1,9 @@
 # Performance
 
+See the [Splink 5 pipeline measurements](performance-splink5.md) for the latest
+standardization, matching and golden-record changes, quality gates and migration
+benchmark procedure. Historical comparisons below retain their original revisions.
+
 ## Million-record full pipeline benchmark
 
 Run one initial load of **1,000,000 synthetic source records representing 400,000
@@ -82,7 +86,7 @@ does not enable scheduled million-record jobs or promote a baseline.
 
 ### SQL pushdown: full million-record comparison, 2026-09-22
 
-The current pipeline processed **1,000,000 source records in 168.57 seconds
+This earlier SQL pushdown measurement processed **1,000,000 source records in 168.57 seconds
 (2 minutes 49 seconds)**, versus **181.44 seconds (3 minutes 1 second)** on the
 revision immediately before the SQL pushdown changes. That is **1.08 times the
 throughput and 7.1% less processing time** in this single before/after comparison.

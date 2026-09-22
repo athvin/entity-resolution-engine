@@ -317,7 +317,7 @@ def test_smoke_pass_produces_schema_valid_result(
         model_version=str(active[0]),
         tf_snapshot_id=str(active[1]),
     )
-    assert fp["splink_version"] == "4.0.16", fp["splink_version"]
+    assert fp["splink_version"] == "5.0.0.dev5", fp["splink_version"]
     assert fp["dbt_core_version"] == "1.12.2", fp["dbt_core_version"]
     assert fp["dbt_duckdb_version"] == "1.11.0", fp["dbt_duckdb_version"]
 

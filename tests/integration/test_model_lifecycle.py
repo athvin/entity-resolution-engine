@@ -368,3 +368,43 @@ def test_retrain_full_rescore_preserves_ids(
     after = membership_snapshot(reconciled)
     assert after == before, "the rescore at an identical model moved a membership row"
     assert int(scalar(reconciled, f"SELECT count(*) FROM {EVENTS}")) == events_before
+
+
+def test_splink_migration_requires_full_resolution_before_incrementals(reconciled) -> None:
+    """Version refusal precedes invalidation; migration finishes only after assembly."""
+    from er.versions import PINS
+
+    before = reconciled.execute(f"SELECT * FROM {MATCH_SCORES} ORDER BY ALL").fetchall()
+    reconciled.execute(
+        f"UPDATE {MODEL_REGISTRY} SET metrics=json_merge_patch(metrics, "
+        "'{\"splink_version\":\"4.0.16\"}') WHERE status='active'"
+    )
+    refused = run_er("match", "--mode", "full")
+    assert refused.returncode == int(ExitCode.PRECONDITION), refused.stdout + refused.stderr
+    assert "Train a new model" in refused.stderr
+    assert reconciled.execute(f"SELECT * FROM {MATCH_SCORES} ORDER BY ALL").fetchall() == before
+    # Registering/retraining the replacement supplies these two metadata fields.
+    # The model stays fixed here so this tests lifecycle independently of quality.
+    import json
+
+    reconciled.execute(
+        f"UPDATE {MODEL_REGISTRY} SET metrics=json_merge_patch(metrics, ?::JSON) "
+        "WHERE status='active'",
+        [
+            json.dumps(
+                {
+                    "splink_version": PINS["splink"].version,
+                    "migration_requires_full_resolution": True,
+                }
+            )
+        ],
+    )
+    for stage in ("match", "reconcile", "assemble"):
+        refused = run_er("match", "--mode", "incremental")
+        assert refused.returncode == int(ExitCode.PRECONDITION), refused.stdout + refused.stderr
+        assert "full matching, reconciliation and assembly" in refused.stderr
+        args = ("--mode", "full") if stage == "match" else ()
+        result = run_er(stage, *args, "--run-id", str(ULID()))
+        assert result.returncode in (0, 10), result.stdout + result.stderr
+    allowed = run_er("match", "--mode", "incremental")
+    assert allowed.returncode in (0, 10), allowed.stdout + allowed.stderr

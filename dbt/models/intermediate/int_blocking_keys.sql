@@ -31,6 +31,7 @@
 #}
 {{ config(materialized='incremental', incremental_strategy='delete+insert',
           unique_key=['source_system','source_record_id'],
-          on_schema_change='append_new_columns') }}
+          on_schema_change='append_new_columns',
+          pre_hook='{{ remove_changed_blocking_keys() }}') }}
 
 {{ int_blocking_keys_union() }}

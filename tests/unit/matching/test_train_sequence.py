@@ -101,17 +101,18 @@ EXPECTED_CALLS: Final[tuple[TrainCall, ...]] = (
     ),
     TrainCall(
         "training.estimate_u_using_random_sampling",
-        {"max_pairs": 1000000, "seed": 20260101},
+        {"max_pairs": 1000000, "seed": 20260101, "min_count_per_level": None, "num_chunks": 10},
     ),
     TrainCall(
         "training.estimate_parameters_using_expectation_maximisation",
-        {"blocking_rule": "l.email = r.email", "fix_u_probabilities": True},
+        {"blocking_rule": "l.email = r.email", "fix_u_probabilities": True, "max_pairs": None},
     ),
     TrainCall(
         "training.estimate_parameters_using_expectation_maximisation",
         {
             "blocking_rule": "l.family_name = r.family_name and l.addr_postal = r.addr_postal",
             "fix_u_probabilities": True,
+            "max_pairs": None,
         },
     ),
 )
@@ -389,9 +390,19 @@ def test_estimate_u_is_seeded_from_config(corpus: duckdb.DuckDBPyConnection, cfg
     (sampling,) = [
         call for call in spy.calls if call.method_path.endswith("estimate_u_using_random_sampling")
     ]
-    assert sampling.kwargs == {"max_pairs": cfg.training.u_max_pairs, "seed": cfg.training.u_seed}
+    assert sampling.kwargs == {
+        "max_pairs": cfg.training.u_max_pairs,
+        "seed": cfg.training.u_seed,
+        "min_count_per_level": cfg.training.u_min_count_per_level,
+        "num_chunks": cfg.training.u_num_chunks,
+    }
     assert sampling.kwargs["seed"] is not None
-    assert sampling.kwargs == {"max_pairs": 1000000, "seed": 20260101}
+    assert sampling.kwargs == {
+        "max_pairs": 1000000,
+        "seed": 20260101,
+        "min_count_per_level": None,
+        "num_chunks": 10,
+    }
 
     # The value is read from the document, not pinned in the module: a different seed
     # in the config is a different seed on the call.
@@ -468,10 +479,13 @@ def test_training_block_persisted_verbatim(corpus: duckdb.DuckDBPyConnection, cf
         "recall",
         "u_max_pairs",
         "u_seed",
+        "u_min_count_per_level",
+        "u_num_chunks",
+        "u_sampling_method",
         "em_blocking_rules",
         "em",
     }
-    assert result.metrics["training"]["em"] == {"fix_u_probabilities": True}
+    assert result.metrics["training"]["em"] == {"fix_u_probabilities": True, "max_pairs": None}
 
     # The rest of the payload is the fit, not the config, and the TF key the frozen
     # rows were written under is part of it (S4.3.2 step 3).

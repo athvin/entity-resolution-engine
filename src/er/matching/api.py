@@ -31,7 +31,7 @@ make two runs of one corpus disagree for a reason no test could attribute to it.
 
 from __future__ import annotations
 
-from typing import Final
+from typing import Final, Protocol
 
 import duckdb
 from splink import DuckDBAPI
@@ -39,6 +39,7 @@ from splink import DuckDBAPI
 from er.errors import StageFailure
 from er.lake.ducklake import LAKE_ALIAS, SPLINK_OUTPUT_SCHEMA
 from er.lake.env import require_int_env
+from er.matching.runtime import MatchingRuntime
 
 __all__ = [
     "SPLINK_RELATION_PREFIX",
@@ -46,6 +47,7 @@ __all__ = [
     "assert_no_splink_relations_in_lake",
     "leaked_splink_relations",
     "splink_api",
+    "cleanup_splink",
 ]
 
 #: The schema Splink materializes into, under this ticket's name for it. It is
@@ -137,7 +139,13 @@ def splink_api(connection: duckdb.DuckDBPyConnection) -> DuckDBAPI:
     connection.execute(f'CREATE SCHEMA IF NOT EXISTS "{database}".{SPLINK_SCRATCH_SCHEMA}')
     from er.obs.sql_profile import raw_connection
 
-    api = DuckDBAPI(connection=raw_connection(connection), output_schema=SPLINK_SCRATCH_SCHEMA)
+    runtime = MatchingRuntime.from_env()
+    api = DuckDBAPI(
+        connection=raw_connection(connection),
+        output_schema=SPLINK_SCRATCH_SCHEMA,
+        materialisation=runtime.materialisation,
+        materialisation_dir=runtime.materialisation_dir,
+    )
     # Splink validates the native connection in its constructor. Its SQL backend
     # subsequently uses our transparent proxy to correlate deferred query profiles.
     api._con = connection
@@ -181,3 +189,12 @@ def assert_no_splink_relations_in_lake(connection: duckdb.DuckDBPyConnection) ->
             f"connection has a :memory: primary database and output_schema="
             f"{SPLINK_SCRATCH_SCHEMA!r}"
         )
+
+
+class ScratchOwner(Protocol):
+    def delete_tables_created_by_splink_from_db(self) -> None: ...
+
+
+def cleanup_splink(api: ScratchOwner) -> None:
+    """Release tracked scratch tables and Parquet files, preserving registered inputs."""
+    api.delete_tables_created_by_splink_from_db()

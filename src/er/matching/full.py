@@ -49,7 +49,7 @@ both endpoint hashes joined on) to be got subtly differently.
 loaded from `model_registry` and used verbatim except for
 ``retain_intermediate_calculation_columns``, which is forced on. That flag decides
 which columns `predict()` *emits*, not what it computes: with it off, Splink projects
-away the `gamma_*` vector's Bayes factors, and S4.3.5 requires them to be "retained
+away the `gamma_*` vector's log2 weights, and S4.3.5 requires them to be "retained
 rather than projected away". No m or u value, no blocking rule and no comparison level
 is touched, so no probability moves — and the alternative would be a model artifact
 that cannot produce the evidence the spec requires of every scored pair.
@@ -76,9 +76,10 @@ from er.errors import ExitCode, StageFailure
 from er.lake.bulk import BATCH_ROWS
 from er.lake.columns import STD_RECORD_COLUMNS
 from er.lake.model import REGISTRY, SCHEMA_QUALIFIER
-from er.matching.api import assert_no_splink_relations_in_lake, splink_api
+from er.matching.api import assert_no_splink_relations_in_lake, cleanup_splink, splink_api
 from er.matching.evidence import build_evidence
 from er.matching.model import UNIQUE_ID_COLUMN
+from er.matching.runtime import MatchingRuntime
 from er.matching.tf import (
     STD_RECORDS_RELATION,
     assert_tf_lookup_complete,
@@ -425,7 +426,7 @@ def prediction_columns(connection: duckdb.DuckDBPyConnection, relation: str) -> 
     the two into a refusal instead of a payload with a hole in it.
 
     Public because the S4.3.4 two-pass scorer asks the same question of two prediction
-    relations — `find_matches_to_new_records` and `predict` need not emit the same
+    relations — `predict_between` and `predict` need not emit the same
     columns — and answering it from the config instead is exactly the mistake the
     paragraph above rules out.
     """
@@ -626,7 +627,8 @@ def review_score_relation(
             invalid = connection.execute(
                 f"SELECT rec_a_key, rec_b_key, match_probability, waterfall FROM {subjects} "
                 "WHERE len(list_filter(json_keys(waterfall), k -> starts_with(k, 'gamma_'))) = 0 "
-                "OR len(list_filter(json_keys(waterfall), k -> starts_with(k, 'bf_'))) = 0 "
+                "OR len(list_filter(json_keys(waterfall), k -> starts_with(k, 'mw_') "
+                "OR starts_with(k, 'bf_'))) = 0 "
                 "OR waterfall IS NULL "
                 "OR NOT regexp_full_match(rec_a_key, '[^:]+:[^:]+', 's') "
                 "OR NOT regexp_full_match(rec_b_key, '[^:]+:[^:]+', 's') "
@@ -804,50 +806,53 @@ def score_full(
     # The API first, then the corpus: the constructor's `SET schema` is what decides
     # where an unqualified `CREATE OR REPLACE TABLE` lands (see `_materialize_corpus`).
     api = splink_api(connection)
-    rows_in = _materialize_corpus(connection)
-    linker = Linker(
-        MATCH_CORPUS_RELATION,
-        settings=_scoring_settings(settings),
-        db_api=api,
-    )
-    register_tf(linker, connection, cfg, model_version, tf_snapshot_id)
-    # Explicit, and in probabilities: Splink's own default is a match WEIGHT of -4,
-    # which is a probability of about 0.06 and would persist pairs S4.3.4 says are
-    # never written (S4.3, MINOR-thresholds).
-    predictions = linker.inference.predict(threshold_match_probability=thresholds.review_low)
-    relation = str(predictions.physical_name)
+    try:
+        rows_in = _materialize_corpus(connection)
+        linker = Linker(api.register(MATCH_CORPUS_RELATION), settings=_scoring_settings(settings))
+        register_tf(linker, connection, cfg, model_version, tf_snapshot_id)
+        # Explicit probability threshold: never depend on a library default.
+        runtime = MatchingRuntime.from_env()
+        run_ctx.counters.set("matching_runtime", runtime.fingerprint())
+        predictions = linker.inference.predict(
+            threshold_match_probability=thresholds.review_low,
+            num_chunks_left=runtime.num_chunks_left,
+            num_chunks_right=runtime.num_chunks_right,
+        )
+        relation = str(predictions.physical_name)
 
-    merge_match_scores(
-        connection,
-        relation,
-        build_evidence(cfg, prediction_columns(connection, relation)),
-        model_version=model_version,
-        tf_snapshot_id=tf_snapshot_id,
-        run_id=run_ctx.run_id,
-        scored_at=scored_at,
-    )
-    summary = review_score_relation(
-        connection,
-        thresholds,
-        model_version=model_version,
-        tf_snapshot_id=tf_snapshot_id,
-        run_id=run_ctx.run_id,
-        id_factory=id_factory,
-    )
+        merge_match_scores(
+            connection,
+            relation,
+            build_evidence(cfg, prediction_columns(connection, relation)),
+            model_version=model_version,
+            tf_snapshot_id=tf_snapshot_id,
+            run_id=run_ctx.run_id,
+            scored_at=scored_at,
+        )
+        summary = review_score_relation(
+            connection,
+            thresholds,
+            model_version=model_version,
+            tf_snapshot_id=tf_snapshot_id,
+            run_id=run_ctx.run_id,
+            id_factory=id_factory,
+        )
 
-    assert_no_splink_relations_in_lake(connection)
+        assert_no_splink_relations_in_lake(connection)
 
-    result = FullMatchResult(
-        mode=MODE_FULL,
-        model_version=model_version,
-        tf_snapshot_id=tf_snapshot_id,
-        candidate_pairs=candidate_pairs,
-        pairs_scored=summary.pairs_scored,
-        pairs_above_auto_merge=summary.pairs_above_auto_merge,
-        pairs_in_gray_band=summary.pairs_in_gray_band,
-        review_queue_added=summary.review_queue_added,
-        review_queue_refreshed=summary.review_queue_refreshed,
-        rows_in=rows_in,
-    )
-    result.record(run_ctx)
-    return result
+        result = FullMatchResult(
+            mode=MODE_FULL,
+            model_version=model_version,
+            tf_snapshot_id=tf_snapshot_id,
+            candidate_pairs=candidate_pairs,
+            pairs_scored=summary.pairs_scored,
+            pairs_above_auto_merge=summary.pairs_above_auto_merge,
+            pairs_in_gray_band=summary.pairs_in_gray_band,
+            review_queue_added=summary.review_queue_added,
+            review_queue_refreshed=summary.review_queue_refreshed,
+            rows_in=rows_in,
+        )
+        result.record(run_ctx)
+        return result
+    finally:
+        cleanup_splink(api)

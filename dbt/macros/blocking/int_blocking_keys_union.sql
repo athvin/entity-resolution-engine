@@ -97,6 +97,9 @@ union all
 {% macro blocking_keys_branch(entry) -%}
 select '{{ entry['key_type'] | replace("'", "''") }}' as key_type, {{ entry['expr'] }} as key_value,
        record_key, source_system, source_record_id
-from {{ ref('int_std_records') }}
+from {{ ref('int_std_records') }} as std
 where {{ entry['where'] }}
+{%- if var('standardize_delta', false) %}
+  and {{ standardize_key_filter('std.source_system', 'std.source_record_id') }}
+{%- endif %}
 {%- endmacro %}

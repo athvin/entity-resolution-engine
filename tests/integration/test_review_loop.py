@@ -41,7 +41,7 @@ from er.lake.model import SCHEMA_QUALIFIER
 from er.matching.full import score_full
 from er.matching.model import BLOCKING_DBT_VAR, BlockingPayload, blocking_rules_from_config
 from er.obs.runctx import DECLARED_COUNTERS, StageCounters, StageRun
-from er.review.queue import BAYES_FACTOR_PREFIX, GAMMA_PREFIX
+from er.review.queue import GAMMA_PREFIX, MATCH_WEIGHT_PREFIX
 
 REPO_ROOT: Final = Path(__file__).resolve().parents[2]
 
@@ -309,8 +309,8 @@ def test_gray_band_pair_lands_open(loop: Loop, gray_pair: tuple[str, str], cfg: 
             f"waterfall lacks {GAMMA_PREFIX}{comparison}; S4.3.5 retains the full "
             f"gamma vector: {sorted(waterfall)}"
         )
-        assert f"{BAYES_FACTOR_PREFIX}{comparison}" in waterfall, (
-            f"waterfall lacks {BAYES_FACTOR_PREFIX}{comparison} (S4.3.5)"
+        assert f"{MATCH_WEIGHT_PREFIX}{comparison}" in waterfall, (
+            f"waterfall lacks {MATCH_WEIGHT_PREFIX}{comparison} (S4.3.5)"
         )
 
     assert loop.entity_of(gray_pair[0]) != loop.entity_of(gray_pair[1]), (

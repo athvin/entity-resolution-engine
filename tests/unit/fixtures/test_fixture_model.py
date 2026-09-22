@@ -416,3 +416,18 @@ def test_copy_export_preserves_committed_tf_bytes(
     target = tmp_path / "frozen.tf.csv"
     assert regen_module()._export_tf_csv(lake, target) == len(fixture_tf_rows())
     assert target.read_bytes() == FIXTURE_TF_PATH.read_bytes()
+
+
+def test_bernoulli_training_preserves_legacy_u_and_prior() -> None:
+    """The migrated fixture keeps the seeded sample; log-space EM changes only rounding."""
+    baseline = json.loads((REPO_ROOT / "tests/fixtures/splink4/model.json").read_text())
+    current = fixture_settings()
+    assert (
+        current["probability_two_random_records_match"]
+        == baseline["probability_two_random_records_match"]
+    )
+    for old, new in zip(baseline["comparisons"], current["comparisons"], strict=True):
+        for a, b in zip(old["comparison_levels"], new["comparison_levels"], strict=True):
+            if "u_probability" in a:
+                assert b["u_probability"] == a["u_probability"]
+                assert b["m_probability"] == pytest.approx(a["m_probability"], rel=0, abs=1e-12)

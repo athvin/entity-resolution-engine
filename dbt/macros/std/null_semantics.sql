@@ -24,5 +24,5 @@
 {%- endmacro %}
 
 {% macro null_semantics(col) -%}
-case when lower(trim({{ col }})) in ({{ NULL_SENTINELS() }}) then null else {{ col }} end
+case when list_contains([{{ NULL_SENTINELS() }}], lower(trim({{ col }}))) then null else {{ col }} end
 {%- endmacro %}

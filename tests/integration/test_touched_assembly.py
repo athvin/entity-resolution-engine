@@ -281,6 +281,11 @@ def test_rewritten_plus_reaped_equals_touched(merge_pipeline: Pipeline) -> None:
     """T-INC-2 / AC2, AC3, AC7: the touched-set accounting is an equality."""
     merge_pipeline.phase("base", touched_only=False)
     before = merge_pipeline.assembled_at()
+    # A sentinel proves untouched display rows are not rewritten, even when a
+    # rewrite would otherwise reproduce the same assembled_at timestamp.
+    merge_pipeline.connection.execute(
+        f"UPDATE {GOLDEN_DISPLAY} SET display_name='untouched display sentinel'"
+    )
 
     merge_pipeline.phase("batch", touched_only=True)
     run_id = merge_pipeline.run_id
@@ -301,6 +306,14 @@ def test_rewritten_plus_reaped_equals_touched(merge_pipeline: Pipeline) -> None:
     for entity, stamp in after.items():
         if entity not in touched:
             assert before.get(entity) == stamp, f"{entity} was re-stamped but not touched"
+            assert (
+                scalar(
+                    merge_pipeline.connection,
+                    f"SELECT display_name FROM {GOLDEN_DISPLAY} WHERE entity_id=?",
+                    entity,
+                )
+                == "untouched display sentinel"
+            )
 
     # AC7: the reconcile-touched counters add up on the assemble stage's row.
     counters = json.loads(
@@ -319,7 +332,10 @@ def test_rewritten_plus_reaped_equals_touched(merge_pipeline: Pipeline) -> None:
     ), counters
 
 
-def test_retire_disposition_reaps_all_three_marts(merge_pipeline: Pipeline) -> None:
+@pytest.mark.parametrize("touched_only", [True, False])
+def test_retire_disposition_reaps_all_three_marts(
+    merge_pipeline: Pipeline, touched_only: bool
+) -> None:
     """AC4: the merge loser is retired and has zero golden/lineage/display rows."""
     merge_pipeline.phase("base", touched_only=False)
     loser = str(
@@ -328,7 +344,7 @@ def test_retire_disposition_reaps_all_three_marts(merge_pipeline: Pipeline) -> N
             f"SELECT entity_id FROM {MEMBERSHIP} WHERE record_key = 'billing:B501'",
         )
     )
-    merge_pipeline.phase("batch", touched_only=True)
+    merge_pipeline.phase("batch", touched_only=touched_only)
 
     disposition = merge_pipeline.touched_set(merge_pipeline.run_id).get(loser)
     assert disposition == "retire", f"the merge loser {loser} is {disposition}, not retire"
@@ -412,7 +428,10 @@ def test_dbt_vars_carry_no_entity_id_list(merge_pipeline: Pipeline, cfg: Config)
         )
 
 
-def test_deletion_empties_entity_and_reaps_its_golden_rows(deletion_pipeline: Pipeline) -> None:
+@pytest.mark.parametrize("touched_only", [True, False])
+def test_deletion_empties_entity_and_reaps_its_golden_rows(
+    deletion_pipeline: Pipeline, touched_only: bool
+) -> None:
     """AC8: the entity a refresh empties is retired and its golden rows are gone."""
     deletion_pipeline.phase("base", touched_only=False)
     singleton = str(
@@ -440,9 +459,9 @@ def test_deletion_empties_entity_and_reaps_its_golden_rows(deletion_pipeline: Pi
         )
     )
 
-    deletion_pipeline.phase("refresh", touched_only=True, refresh=True)
+    deletion_pipeline.phase("refresh", touched_only=touched_only, refresh=True)
     assert deletion_pipeline.touched_set(deletion_pipeline.run_id).get(singleton) == "retire"
-    for relation in (GOLDEN_RECORDS, GOLDEN_LINEAGE):
+    for relation in (GOLDEN_RECORDS, GOLDEN_LINEAGE, GOLDEN_DISPLAY):
         count = int(
             scalar(
                 deletion_pipeline.connection,

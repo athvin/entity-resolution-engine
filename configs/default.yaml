@@ -94,11 +94,15 @@ training:
   recall: 0.85
   u_max_pairs: 1000000
   u_seed: 20260101              # required, no default: an unseeded u estimate is not reproducible
+  u_sampling_method: bernoulli
+  u_min_count_per_level: null
+  u_num_chunks: 10
   em_blocking_rules:
     - "l.email = r.email"
     - "l.family_name = r.family_name and l.addr_postal = r.addr_postal"
   em:
     fix_u_probabilities: true
+    max_pairs: null
 
 storage:
   data_path: "s3://lake/er/"

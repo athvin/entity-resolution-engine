@@ -148,7 +148,7 @@ def summarize_run(path: Path) -> dict[str, Any]:
         for stage in STAGES
     }
     seconds = sum(stages.values())
-    return {
+    summary = {
         "status": "succeeded",
         "processing_seconds": seconds,
         "records_per_second": run["base_records"] / seconds,
@@ -158,14 +158,28 @@ def summarize_run(path: Path) -> dict[str, Any]:
         )
         / 1000,
         "worker_seconds": run["total_ms"] / 1000,
-        "resources": processing_resources(path, run),
+        "resources": processing_resources(path, {**run, "commands": commands}),
         "counts": run["base_counts"],
-        "validation": run["output_validation"],
+        "validation": run.get("output_validation"),
         "partition_sha256": run["base_partition_hash"],
         "input_sha256": run["input_sha256"],
         "quality": run["quality"],
+        "initial_quality": run.get("base_quality"),
         "fingerprint": run["fingerprint"],
     }
+    batch = [entry for entry in run["commands"] if entry["phase"] == "batch"]
+    if batch:
+        if [entry["command"][1] for entry in batch] != ["ingest"] * 3 + ["run-all"]:
+            raise ValueError(f"incomplete incremental command sequence: {path}")
+        if any(entry["exit_code"] != 0 for entry in batch):
+            raise ValueError(f"incremental delivery contained a skipped/failed stage: {path}")
+        mode = run.get("batch_mode", "incremental")
+        prefix = "incremental" if mode == "incremental" else "full_batch_reference"
+        summary[f"{prefix}_seconds"] = sum(entry["duration_ms"] for entry in batch) / 1000
+        summary[f"{prefix}_records"] = run["incremental_records"]
+        summary[f"{prefix}_counts"] = run["batch_counts"]
+        summary[f"{prefix}_resources"] = processing_resources(path, {**run, "commands": batch})
+    return summary
 
 
 def write_report(out: Path, manifest: dict[str, Any]) -> dict[str, Any]:
@@ -187,8 +201,10 @@ def write_report(out: Path, manifest: dict[str, Any]) -> dict[str, Any]:
         "",
         "Processing includes CLI startup, ingestion, cleaning/standardization, model training, "
         "matching, reconciliation and golden record assembly. It excludes image/stack setup, "
-        "data generation, validation and teardown. No incremental delivery is run. "
-        "Detailed SQL profiling is disabled; resource samples are collected every 250 ms.",
+        "data generation, validation and teardown. Incremental deliveries, when requested, "
+        "are measured separately. "
+        f"Detailed SQL profiling is {'enabled' if manifest.get('profile') else 'disabled'}; "
+        "resource samples are collected every 250 ms.",
         "",
     ]
     if manifest.get("error"):
@@ -225,6 +241,29 @@ def write_report(out: Path, manifest: dict[str, Any]) -> dict[str, Any]:
             if len(successful) > 1
             else None,
         }
+        incremental = [
+            run["incremental_seconds"] for run in successful if "incremental_seconds" in run
+        ]
+        if incremental:
+            result["summary"]["incremental_median_seconds"] = statistics.median(incremental)
+            lines += [
+                f"Median incremental delivery: **{statistics.median(incremental):.2f} seconds**, "
+                f"{successful[0]['incremental_records']:,} input records.",
+                "",
+            ]
+        references = [
+            run["full_batch_reference_seconds"]
+            for run in successful
+            if "full_batch_reference_seconds" in run
+        ]
+        if references:
+            result["summary"]["full_batch_reference_median_seconds"] = statistics.median(references)
+            lines += [
+                f"Median full rescore after delivery: **{statistics.median(references):.2f} "
+                "seconds**. This reference keeps the initial model and TF snapshot; "
+                "it is excluded from incremental timing comparisons.",
+                "",
+            ]
         lines += [
             f"Median processing: **{median:.2f} seconds ({median / 60:.2f} minutes)**; "
             f"{manifest['records'] / median:,.0f} input records/second.",
@@ -276,10 +315,13 @@ def worker(args: argparse.Namespace) -> None:
         args.scale,
         args.iteration,
         label=f"run-{args.iteration:03d}",
-        detailed=False,
-        initial_only=True,
-        corpus_root=args.out / "inputs",
+        detailed=args.profile,
+        initial_only=not args.with_incremental,
+        config_template=args.config,
+        corpus_root=args.corpus_root or args.out / "inputs",
         workload=get_scale(args.scale),
+        prediction_matrix=args.prediction_matrix,
+        batch_mode=args.batch_mode,
     )
     errors = comparability_violations(
         {"fingerprint": run["fingerprint"], "phases": []},
@@ -299,6 +341,11 @@ def campaign(args: argparse.Namespace, checked: dict[str, Any]) -> None:
         "status": "running",
         "git_sha": output(["git", "rev-parse", "HEAD"]),
         "source_files": source_manifest(),
+        "with_incremental": getattr(args, "with_incremental", False),
+        "image": getattr(args, "image", None),
+        "profile": getattr(args, "profile", False),
+        "prediction_matrix": getattr(args, "prediction_matrix", False),
+        "batch_mode": getattr(args, "batch_mode", "incremental"),
     }
     manifest["source_sha256"] = hashlib.sha256(
         json.dumps(manifest["source_files"], sort_keys=True).encode()
@@ -306,7 +353,8 @@ def campaign(args: argparse.Namespace, checked: dict[str, Any]) -> None:
     (args.out / "working-tree.patch").write_text(output(["git", "diff", "HEAD", "--binary"]))
     manifest_path = args.out / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2))
-    tag = f"er-full-bench:{uuid.uuid4().hex[:12]}"
+    supplied_image = getattr(args, "image", None)
+    tag = supplied_image or f"er-full-bench:{uuid.uuid4().hex[:12]}"
     scale = measured_scale(get_scale(args.scale), checked)
     env = {
         **os.environ,
@@ -316,17 +364,24 @@ def campaign(args: argparse.Namespace, checked: dict[str, Any]) -> None:
     }
     started = time.monotonic()
     try:
-        print(f"[benchmark] building current source; logs: {args.out}", flush=True)
-        with (args.out / "build.log").open("w") as log:
-            subprocess.run(
-                ["docker", "build", "-f", "docker/Dockerfile", "-t", tag, "."],
-                cwd=ROOT,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                check=True,
-            )
-        if source_manifest() != manifest["source_files"]:
-            raise RuntimeError("source changed during build; rerun with a stable checkout")
+        if not supplied_image:
+            print(f"[benchmark] building current source; logs: {args.out}", flush=True)
+            with (args.out / "build.log").open("w") as log:
+                subprocess.run(
+                    ["docker", "build", "-f", "docker/Dockerfile", "-t", tag, "."],
+                    cwd=ROOT,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    check=True,
+                )
+            if source_manifest() != manifest["source_files"]:
+                raise RuntimeError("source changed during build; rerun with a stable checkout")
+        else:
+            # The host checkout is the measurement harness, not the image's source.
+            manifest["harness_source_sha256"] = manifest.pop("source_sha256")
+            manifest["harness_source_files"] = manifest.pop("source_files")
+            manifest["source_sha256"] = getattr(args, "image_source", None) or "unknown"
+            manifest["git_sha"] = getattr(args, "image_source", None) or "unknown"
         digest = output(["docker", "image", "inspect", tag, "--format", "{{.Id}}"])
         manifest["image_digest"] = digest
         engine_free = int(
@@ -354,6 +409,34 @@ def campaign(args: argparse.Namespace, checked: dict[str, Any]) -> None:
             }
         }
         override["services"]["benchmark"]["volumes"] = [f"{args.out}:/benchmark"]
+        # Freeze one harness for both versions, including images built before these
+        # measurement options existed. Application code and config stay in the image.
+        harness = args.out / "harness"
+        shutil.copytree(ROOT / "benchmarks", harness, ignore=shutil.ignore_patterns("__pycache__"))
+        override["services"]["benchmark"]["volumes"].append(f"{harness}:/app/benchmarks:ro")
+        worker_options = []
+        for option in ("profile", "prediction_matrix"):
+            if getattr(args, option, False):
+                worker_options.append("--" + option.replace("_", "-"))
+        if getattr(args, "with_incremental", False):
+            worker_options.append("--with-incremental")
+        if getattr(args, "batch_mode", "incremental") != "incremental":
+            worker_options += ["--batch-mode", args.batch_mode]
+        if getattr(args, "config", None):
+            shutil.copyfile(args.config, args.out / "config.yaml")
+            manifest["config_sha256"] = hashlib.sha256(args.config.read_bytes()).hexdigest()
+            worker_options += ["--config", "/benchmark/config.yaml"]
+        if getattr(args, "corpus_root", None):
+            args.corpus_root.mkdir(parents=True, exist_ok=True)
+            override["services"]["benchmark"]["volumes"].append(
+                f"{args.corpus_root}:/benchmark-inputs"
+            )
+            worker_options += ["--corpus-root", "/benchmark-inputs"]
+        runtime_env = {
+            key: value for key, value in os.environ.items() if key.startswith("ER_SPLINK_")
+        }
+        override["services"]["benchmark"]["environment"] = runtime_env
+        manifest["matching_runtime_env"] = runtime_env
         override_path = args.out / "compose.json"
         override_path.write_text(json.dumps(override))
         for iteration in range(1, args.repeat + 1):
@@ -398,6 +481,7 @@ def campaign(args: argparse.Namespace, checked: dict[str, Any]) -> None:
                             args.scale,
                             "--iteration",
                             str(iteration),
+                            *worker_options,
                         ],
                         cwd=ROOT,
                         env=env,
@@ -444,7 +528,7 @@ def campaign(args: argparse.Namespace, checked: dict[str, Any]) -> None:
     finally:
         manifest["campaign_seconds"] = time.monotonic() - started
         manifest_path.write_text(json.dumps(manifest, indent=2))
-        if "retained_project" not in manifest:
+        if "retained_project" not in manifest and not supplied_image:
             subprocess.run(["docker", "image", "rm", tag], capture_output=True, check=False)
         write_report(args.out, manifest)
     print(f"[benchmark] complete: {args.out / 'report.md'}", flush=True)
@@ -454,6 +538,29 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scale", choices=(*load_scales(), "10m"), default="1m")
     parser.add_argument("--repeat", type=int, default=1, help="fresh initial loads; default: 1")
+    parser.add_argument("--image", help="use an existing immutable image instead of building")
+    parser.add_argument("--image-source", help="source commit/hash that produced --image")
+    parser.add_argument(
+        "--with-incremental", action="store_true", help="also time a delta delivery"
+    )
+    parser.add_argument(
+        "--batch-mode",
+        choices=("incremental", "full"),
+        default="incremental",
+        help="use full for a frozen-model rescore reference after the delta delivery",
+    )
+    parser.add_argument("--config", type=Path, help="explicit training/configuration variant")
+    parser.add_argument("--corpus-root", type=Path, help="reuse identical generated inputs")
+    parser.add_argument(
+        "--profile",
+        action="store_true",
+        help="collect SQL profiles; exclude from timing comparisons",
+    )
+    parser.add_argument(
+        "--prediction-matrix",
+        action="store_true",
+        help="rescore one model with 1/2/4 chunks and table/Parquet scratch",
+    )
     parser.add_argument(
         "--local",
         action="store_true",
@@ -475,6 +582,14 @@ def main() -> int:
         parser.error("repeat and iteration must be positive")
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     args.out = (args.out or ROOT / f"artifacts/bench/full-{args.scale}-{stamp}").resolve()
+    if args.config:
+        args.config = args.config.resolve()
+    if args.corpus_root:
+        args.corpus_root = args.corpus_root.resolve()
+    if args.with_incremental and args.scale == "10m":
+        parser.error("10m defines an initial load only; use 1m for incremental measurements")
+    if args.batch_mode == "full" and not args.with_incremental:
+        parser.error("--batch-mode full requires --with-incremental")
     try:
         if args.worker:
             worker(args)

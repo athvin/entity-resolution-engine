@@ -26,6 +26,7 @@ from large_validation import (
 from profile_report import write_report
 from scales import Scale
 from semantic_outputs import save_semantic_outputs
+from storage_sampler import StorageSampler
 from ulid import ULID
 
 from er.config.hashing import config_hash
@@ -34,7 +35,7 @@ from er.lake.ducklake import connect
 from er.lake.model_registry import register_model
 from er.lake.objectstore import ObjectStore
 from er.matching.tf import tf_tables_path
-from er.obs.profiling import ResourceSampler, cgroup_readings, span, stream_command
+from er.obs.profiling import cgroup_readings, span, stream_command
 
 SOURCES = ("crm", "billing", "webforms")
 ROOT = Path(__file__).resolve().parents[1]
@@ -111,7 +112,11 @@ def check_fixture(connection: Any, phase: str = "base") -> None:
 
 
 def validate_coverage(
-    directory: Path, *, trained: bool, initial_only: bool = False
+    directory: Path,
+    *,
+    trained: bool,
+    initial_only: bool = False,
+    batch_mode: str = "incremental",
 ) -> dict[str, Any]:
     events = read_events(directory)
     starts = {event["span_id"] for event in events if event["event"] == "span_start"}
@@ -128,7 +133,7 @@ def validate_coverage(
         "match.full",
         "reconcile.label_propagation",
     }
-    if not initial_only:
+    if not initial_only and batch_mode == "incremental":
         required.add("match.incremental")
     if trained:
         required |= {"train", "train.fit", "train.estimation_call", "train.publish_model"}
@@ -221,11 +226,15 @@ def run_case(
     compare_outputs: bool = False,
     initial_only: bool = False,
     workload: Scale | None = None,
+    prediction_matrix: bool = False,
+    batch_mode: str = "incremental",
 ) -> dict[str, Any]:
     if initial_only and case == "tiny":
         raise ValueError("initial-only measurements require a generated benchmark scale")
     if workload is not None and workload.name != case:
         raise ValueError("workload name must match the measured case")
+    if batch_mode not in ("incremental", "full"):
+        raise ValueError("batch mode must be incremental or full")
     label = label or (f"{case}-{iteration}" if detailed else f"{case}-control")
     directory = out / label
     directory.mkdir(parents=True)
@@ -252,6 +261,7 @@ def run_case(
         "iteration": iteration,
         "detailed": detailed,
         "initial_only": initial_only,
+        "batch_mode": batch_mode,
         "namespace": namespace,
         "status": "running",
         "commands": [],
@@ -262,11 +272,11 @@ def run_case(
             json.dumps(comparable_config, sort_keys=True).encode()
         ).hexdigest(),
     }
-    sampler = ResourceSampler(directory / "resources.jsonl")
+    sampler = StorageSampler(directory / "resources.jsonl")
     sampler.start()
     started = time.monotonic()
 
-    def command(args: list[str], run_id: str | None = None, phase: str = "setup") -> None:
+    def command(args: list[str], run_id: str | None = None, phase: str = "setup") -> dict[str, Any]:
         invocation = uuid.uuid4().hex
         os.environ["ER_PROFILE_INVOCATION_ID"] = invocation
         argv = list(args)
@@ -312,6 +322,7 @@ def run_case(
         (directory / "result.json").write_text(json.dumps(result, indent=2))
         if completed.returncode not in (0, 10):
             raise RuntimeError(f"{args[:3]} failed ({completed.returncode}); see {command_dir}")
+        return entry
 
     try:
         command(["er", "init"])
@@ -366,7 +377,7 @@ def run_case(
             for source in SOURCES
         }
         for phase in drops:
-            mode = "full" if phase == "base" else "incremental"
+            mode = "full" if phase == "base" else batch_mode
             run_id = str(ULID())
             for source in SOURCES:
                 command(
@@ -399,10 +410,18 @@ def run_case(
                 assert tables["golden_records"] > 0, tables
                 if phase == "base":
                     assert tables["raw_records"] == base_records, tables
-                    if initial_only:
+                    if case != "tiny":
                         result["output_validation"] = validate_initial_outputs(
                             connection, base_records
                         )
+                        if not initial_only:
+                            result["base_quality"] = quality_from_csv(
+                                connection,
+                                corpus,
+                                config.thresholds.auto_merge,
+                                blocked_count=result["base_candidate_pairs"],
+                                include_batch=False,
+                            )
                 else:
                     assert tables["raw_records"] >= base_records, tables
                 if case == "tiny":
@@ -412,6 +431,10 @@ def run_case(
                     result[f"{phase}_semantic_hashes"] = save_semantic_outputs(
                         connection, config, directory, phase
                     )
+        if prediction_matrix:
+            from prediction_matrix import run_matrix
+
+            result["prediction_matrix"] = run_matrix(directory, command)
         with span("validation.quality", unit="pairs"), connect() as connection:
             if case != "tiny":
                 result["quality"] = quality_from_csv(
@@ -420,6 +443,7 @@ def run_case(
                     config.thresholds.auto_merge,
                     blocked_count=result[f"{phase}_candidate_pairs"],
                 )
+                result[f"{phase}_quality"] = result["quality"]
             from fingerprint import environment_fingerprint
 
             active = connection.execute(
@@ -451,7 +475,10 @@ def run_case(
         assert sum(stage["rows_in"] for stage in ingests) == base_records + batch_records
         if detailed:
             result["coverage"] = validate_coverage(
-                directory, trained=case != "tiny", initial_only=initial_only
+                directory,
+                trained=case != "tiny",
+                initial_only=initial_only,
+                batch_mode=batch_mode,
             )
         result["status"] = "succeeded"
     except BaseException as error:

@@ -61,7 +61,7 @@ DESIGN_DOC = (REPO_ROOT / "DesignDoc.md").read_text(encoding="utf-8")
 # S5's own count of each owner's relations; the ticket and S5.0's table agree on
 # fourteen + eight, and a parser that silently found fewer would make every
 # comparison below vacuous.
-DDL_RELATION_COUNT = 14
+DDL_RELATION_COUNT = 15
 DBT_RELATION_COUNT = 8
 
 # The three `golden_records` columns survivorship does not produce (S5).

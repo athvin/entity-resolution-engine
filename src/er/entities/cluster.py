@@ -130,7 +130,7 @@ from er.entities.ids import canonicalize_pair, record_key
 from er.errors import NonConvergenceError
 from er.lake.bulk import insert_batches
 from er.lake.model import SCHEMA_QUALIFIER
-from er.matching.api import splink_api
+from er.matching.api import cleanup_splink, splink_api
 from er.matching.edges import current_edges
 from er.matching.model import UNIQUE_ID_COLUMN
 from er.obs.profiling import profiled, span
@@ -1402,7 +1402,7 @@ class ClusterFrame(Protocol):
 class ClusterTableManagement(Protocol):
     """The one table-management call the clustering path makes."""
 
-    def register_table_predict(self, input_data: Any, overwrite: bool = False) -> ClusterFrame:
+    def register_table_predict(self, input_data: Any) -> ClusterFrame:
         """Register an edge list as the predictions frame clustering consumes."""
 
 
@@ -1501,39 +1501,44 @@ def cluster_full(
     edge_list = list(edges)
 
     api = splink_api(connection)
-    connection.execute(
-        f"CREATE OR REPLACE TABLE {CLUSTER_NODES_RELATION} ({UNIQUE_ID_COLUMN} VARCHAR)"
-    )
-    insert_batches(
-        connection,
-        f"INSERT INTO {CLUSTER_NODES_RELATION} SELECT unnest(?::VARCHAR[])",
-        ((key,) for key in node_set),
-        columns=1,
-    )
-    connection.execute(
-        f"CREATE OR REPLACE TABLE {CLUSTER_EDGES_RELATION} "
-        f"({_LEFT_COLUMN} VARCHAR, {_RIGHT_COLUMN} VARCHAR, match_probability DOUBLE)"
-    )
-    insert_batches(
-        connection,
-        f"INSERT INTO {CLUSTER_EDGES_RELATION} SELECT "
-        "unnest(?::VARCHAR[]), unnest(?::VARCHAR[]), unnest(?::DOUBLE[])",
-        ((edge.rec_a_key, edge.rec_b_key, edge.match_probability) for edge in edge_list),
-        columns=3,
-    )
+    try:
+        connection.execute(
+            f"CREATE OR REPLACE TABLE {CLUSTER_NODES_RELATION} ({UNIQUE_ID_COLUMN} VARCHAR)"
+        )
+        insert_batches(
+            connection,
+            f"INSERT INTO {CLUSTER_NODES_RELATION} SELECT unnest(?::VARCHAR[])",
+            ((key,) for key in node_set),
+            columns=1,
+        )
+        connection.execute(
+            f"CREATE OR REPLACE TABLE {CLUSTER_EDGES_RELATION} "
+            f"({_LEFT_COLUMN} VARCHAR, {_RIGHT_COLUMN} VARCHAR, match_probability DOUBLE)"
+        )
+        insert_batches(
+            connection,
+            f"INSERT INTO {CLUSTER_EDGES_RELATION} SELECT "
+            "unnest(?::VARCHAR[]), unnest(?::VARCHAR[]), unnest(?::DOUBLE[])",
+            ((edge.rec_a_key, edge.rec_b_key, edge.match_probability) for edge in edge_list),
+            columns=3,
+        )
 
-    linker: ClusterLinker = Linker(CLUSTER_NODES_RELATION, settings=dict(settings), db_api=api)
-    predictions = linker.table_management.register_table_predict(
-        connection.sql(f"SELECT * FROM {CLUSTER_EDGES_RELATION}"), overwrite=True
-    )
-    clustered = linker.clustering.cluster_pairwise_predictions_at_threshold(
-        predictions, threshold_match_probability=auto_merge
-    )
+        linker: ClusterLinker = Linker(
+            api.register(CLUSTER_NODES_RELATION), settings=dict(settings)
+        )
+        predictions = linker.table_management.register_table_predict(
+            api.register(CLUSTER_EDGES_RELATION)
+        )
+        clustered = linker.clustering.cluster_pairwise_predictions_at_threshold(
+            predictions, threshold_match_probability=auto_merge
+        )
 
-    components: dict[str, set[str]] = {}
-    rows = connection.execute(
-        f"SELECT {CLUSTER_ID_COLUMN}, {UNIQUE_ID_COLUMN} FROM {clustered.physical_name}"
-    ).fetchall()
-    for cluster_id, key in rows:
-        components.setdefault(str(cluster_id), set()).add(str(key))
-    return frozenset(frozenset(member) for member in components.values())
+        components: dict[str, set[str]] = {}
+        rows = connection.execute(
+            f"SELECT {CLUSTER_ID_COLUMN}, {UNIQUE_ID_COLUMN} FROM {clustered.physical_name}"
+        ).fetchall()
+        for cluster_id, key in rows:
+            components.setdefault(str(cluster_id), set()).add(str(key))
+        return frozenset(frozenset(member) for member in components.values())
+    finally:
+        cleanup_splink(api)
