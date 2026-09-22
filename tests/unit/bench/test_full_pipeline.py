@@ -271,7 +271,10 @@ def test_killed_worker_with_partial_json_still_gets_a_failure_report(tmp_path: P
     assert "summary" not in result
 
 
-def test_incremental_delivery_is_accounted_separately_from_matrix_probes(tmp_path: Path) -> None:
+@pytest.mark.parametrize("batch_mode", ["incremental", "full"])
+def test_incremental_delivery_is_accounted_separately_from_matrix_probes(
+    tmp_path: Path, batch_mode: str
+) -> None:
     path = measured_run(tmp_path / "run-001")
     run = json.loads(path.read_text())
     for stage in ["ingest"] * 3 + ["run-all"]:
@@ -297,15 +300,18 @@ def test_incremental_delivery_is_accounted_separately_from_matrix_probes(tmp_pat
             "cpu": {"usage_usec": 100, "throttled_usec": 0},
         }
     )
-    run.update(incremental_records=10, batch_counts={"golden_records": 405})
+    run.update(batch_mode=batch_mode, incremental_records=10, batch_counts={"golden_records": 405})
     with (path.parent / "resources.jsonl").open("a") as handle:
         handle.write('\n{"monotonic_ns": 100, "memory.current": 200, "spill_bytes": 5}\n')
         handle.write('{"monotonic_ns": 110, "memory.current": 9999, "spill_bytes": 9000}\n')
     path.write_text(json.dumps(run))
     measured = benchmark.summarize_run(path)
     assert measured["processing_seconds"] == 8
-    assert measured["incremental_seconds"] == 1
-    assert measured["incremental_records"] == 10
+    prefix = "incremental" if batch_mode == "incremental" else "full_batch_reference"
+    assert measured[f"{prefix}_seconds"] == 1
+    assert measured[f"{prefix}_records"] == 10
     assert measured["resources"]["sampled_memory_peak_bytes"] == 100
-    assert measured["incremental_resources"]["sampled_memory_peak_bytes"] == 200
-    assert measured["incremental_resources"]["sampled_spill_bytes_peak"] == 5
+    assert measured[f"{prefix}_resources"]["sampled_memory_peak_bytes"] == 200
+    assert measured[f"{prefix}_resources"]["sampled_spill_bytes_peak"] == 5
+    if batch_mode == "full":
+        assert "incremental_seconds" not in measured

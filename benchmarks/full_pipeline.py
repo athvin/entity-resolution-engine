@@ -173,10 +173,12 @@ def summarize_run(path: Path) -> dict[str, Any]:
             raise ValueError(f"incomplete incremental command sequence: {path}")
         if any(entry["exit_code"] != 0 for entry in batch):
             raise ValueError(f"incremental delivery contained a skipped/failed stage: {path}")
-        summary["incremental_seconds"] = sum(entry["duration_ms"] for entry in batch) / 1000
-        summary["incremental_records"] = run["incremental_records"]
-        summary["incremental_counts"] = run["batch_counts"]
-        summary["incremental_resources"] = processing_resources(path, {**run, "commands": batch})
+        mode = run.get("batch_mode", "incremental")
+        prefix = "incremental" if mode == "incremental" else "full_batch_reference"
+        summary[f"{prefix}_seconds"] = sum(entry["duration_ms"] for entry in batch) / 1000
+        summary[f"{prefix}_records"] = run["incremental_records"]
+        summary[f"{prefix}_counts"] = run["batch_counts"]
+        summary[f"{prefix}_resources"] = processing_resources(path, {**run, "commands": batch})
     return summary
 
 
@@ -249,6 +251,19 @@ def write_report(out: Path, manifest: dict[str, Any]) -> dict[str, Any]:
                 f"{successful[0]['incremental_records']:,} input records.",
                 "",
             ]
+        references = [
+            run["full_batch_reference_seconds"]
+            for run in successful
+            if "full_batch_reference_seconds" in run
+        ]
+        if references:
+            result["summary"]["full_batch_reference_median_seconds"] = statistics.median(references)
+            lines += [
+                f"Median full rescore after delivery: **{statistics.median(references):.2f} "
+                "seconds**. This reference keeps the initial model and TF snapshot; "
+                "it is excluded from incremental timing comparisons.",
+                "",
+            ]
         lines += [
             f"Median processing: **{median:.2f} seconds ({median / 60:.2f} minutes)**; "
             f"{manifest['records'] / median:,.0f} input records/second.",
@@ -306,6 +321,7 @@ def worker(args: argparse.Namespace) -> None:
         corpus_root=args.corpus_root or args.out / "inputs",
         workload=get_scale(args.scale),
         prediction_matrix=args.prediction_matrix,
+        batch_mode=args.batch_mode,
     )
     errors = comparability_violations(
         {"fingerprint": run["fingerprint"], "phases": []},
@@ -329,6 +345,7 @@ def campaign(args: argparse.Namespace, checked: dict[str, Any]) -> None:
         "image": getattr(args, "image", None),
         "profile": getattr(args, "profile", False),
         "prediction_matrix": getattr(args, "prediction_matrix", False),
+        "batch_mode": getattr(args, "batch_mode", "incremental"),
     }
     manifest["source_sha256"] = hashlib.sha256(
         json.dumps(manifest["source_files"], sort_keys=True).encode()
@@ -403,6 +420,8 @@ def campaign(args: argparse.Namespace, checked: dict[str, Any]) -> None:
                 worker_options.append("--" + option.replace("_", "-"))
         if getattr(args, "with_incremental", False):
             worker_options.append("--with-incremental")
+        if getattr(args, "batch_mode", "incremental") != "incremental":
+            worker_options += ["--batch-mode", args.batch_mode]
         if getattr(args, "config", None):
             shutil.copyfile(args.config, args.out / "config.yaml")
             manifest["config_sha256"] = hashlib.sha256(args.config.read_bytes()).hexdigest()
@@ -524,6 +543,12 @@ def main() -> int:
     parser.add_argument(
         "--with-incremental", action="store_true", help="also time a delta delivery"
     )
+    parser.add_argument(
+        "--batch-mode",
+        choices=("incremental", "full"),
+        default="incremental",
+        help="use full for a frozen-model rescore reference after the delta delivery",
+    )
     parser.add_argument("--config", type=Path, help="explicit training/configuration variant")
     parser.add_argument("--corpus-root", type=Path, help="reuse identical generated inputs")
     parser.add_argument(
@@ -563,6 +588,8 @@ def main() -> int:
         args.corpus_root = args.corpus_root.resolve()
     if args.with_incremental and args.scale == "10m":
         parser.error("10m defines an initial load only; use 1m for incremental measurements")
+    if args.batch_mode == "full" and not args.with_incremental:
+        parser.error("--batch-mode full requires --with-incremental")
     try:
         if args.worker:
             worker(args)

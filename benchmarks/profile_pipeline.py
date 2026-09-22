@@ -112,7 +112,11 @@ def check_fixture(connection: Any, phase: str = "base") -> None:
 
 
 def validate_coverage(
-    directory: Path, *, trained: bool, initial_only: bool = False
+    directory: Path,
+    *,
+    trained: bool,
+    initial_only: bool = False,
+    batch_mode: str = "incremental",
 ) -> dict[str, Any]:
     events = read_events(directory)
     starts = {event["span_id"] for event in events if event["event"] == "span_start"}
@@ -129,7 +133,7 @@ def validate_coverage(
         "match.full",
         "reconcile.label_propagation",
     }
-    if not initial_only:
+    if not initial_only and batch_mode == "incremental":
         required.add("match.incremental")
     if trained:
         required |= {"train", "train.fit", "train.estimation_call", "train.publish_model"}
@@ -223,11 +227,14 @@ def run_case(
     initial_only: bool = False,
     workload: Scale | None = None,
     prediction_matrix: bool = False,
+    batch_mode: str = "incremental",
 ) -> dict[str, Any]:
     if initial_only and case == "tiny":
         raise ValueError("initial-only measurements require a generated benchmark scale")
     if workload is not None and workload.name != case:
         raise ValueError("workload name must match the measured case")
+    if batch_mode not in ("incremental", "full"):
+        raise ValueError("batch mode must be incremental or full")
     label = label or (f"{case}-{iteration}" if detailed else f"{case}-control")
     directory = out / label
     directory.mkdir(parents=True)
@@ -254,6 +261,7 @@ def run_case(
         "iteration": iteration,
         "detailed": detailed,
         "initial_only": initial_only,
+        "batch_mode": batch_mode,
         "namespace": namespace,
         "status": "running",
         "commands": [],
@@ -369,7 +377,7 @@ def run_case(
             for source in SOURCES
         }
         for phase in drops:
-            mode = "full" if phase == "base" else "incremental"
+            mode = "full" if phase == "base" else batch_mode
             run_id = str(ULID())
             for source in SOURCES:
                 command(
@@ -467,7 +475,10 @@ def run_case(
         assert sum(stage["rows_in"] for stage in ingests) == base_records + batch_records
         if detailed:
             result["coverage"] = validate_coverage(
-                directory, trained=case != "tiny", initial_only=initial_only
+                directory,
+                trained=case != "tiny",
+                initial_only=initial_only,
+                batch_mode=batch_mode,
             )
         result["status"] = "succeeded"
     except BaseException as error:
