@@ -420,7 +420,7 @@ def _lake_snapshots(context: DoctorContext) -> str:
     extension that does not match the engine fails it at ATTACH rather than at query
     time (S2.1).
     """
-    context.lake().execute(f"SELECT * FROM {LAKE_ALIAS}.snapshots()").fetchall()
+    context.lake().execute(f"SELECT count(*) FROM {LAKE_ALIAS}.snapshots()").fetchone()
     return OK
 
 

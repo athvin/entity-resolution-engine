@@ -54,6 +54,7 @@ import duckdb
 
 from er.entities.ids import IdFactory, MonotonicUlidFactory, canonicalize_pair
 from er.errors import NonConvergenceError
+from er.lake.bulk import staged_ids, staged_query, staged_rows
 from er.lake.model import SCHEMA_QUALIFIER
 from er.obs.profiling import profiled
 from er.review.assertions import NEVER, Assertion
@@ -411,38 +412,53 @@ def persist_cuts(
     factory: IdFactory = MonotonicUlidFactory() if ids is None else ids
     minted: Mapping[tuple[str, str], str] = {} if cut_ids is None else cut_ids
 
-    existing = {
-        (str(left), str(right))
-        for left, right in connection.execute(
-            f"SELECT rec_a_key, rec_b_key FROM {_CUT_EDGES} WHERE active"
-        ).fetchall()
-    }
-    fresh = [cut for cut in pending if cut.pair not in existing]
-    if not fresh:
-        return 0
-
-    placeholders = ", ".join("(" + ", ".join("?" for _ in _CUT_COLUMNS) + ")" for _ in fresh)
-    values: list[object] = []
-    for cut in fresh:
-        values += [
-            minted.get(cut.pair) or factory.new(),
-            cut.rec_a_key,
-            cut.rec_b_key,
-            cut.match_probability,
-            model_version,
-            tf_snapshot_id,
-            cut.assertion_id,
-            True,
-            run_id,
-            stamp,
-            None,
-            None,
-        ]
-    connection.execute(
-        f"INSERT INTO {_CUT_EDGES} ({', '.join(_CUT_COLUMNS)}) VALUES {placeholders}",
-        values,
-    )
-    return len(fresh)
+    with (
+        staged_rows(
+            connection,
+            (
+                ("position", "BIGINT"),
+                ("rec_a_key", "VARCHAR"),
+                ("rec_b_key", "VARCHAR"),
+                ("probability", "DOUBLE"),
+                ("assertion_id", "VARCHAR"),
+                ("cut_id", "VARCHAR"),
+            ),
+            (
+                (
+                    i,
+                    c.rec_a_key,
+                    c.rec_b_key,
+                    c.match_probability,
+                    c.assertion_id,
+                    minted.get(c.pair) or None,
+                )
+                for i, c in enumerate(pending, 1)
+            ),
+        ) as requested,
+        staged_query(
+            connection,
+            f"SELECT r.*, count(*) FILTER (WHERE cut_id IS NULL) OVER (ORDER BY position) "
+            f"AS id_position FROM {requested} r WHERE NOT EXISTS "
+            f"(SELECT 1 FROM {_CUT_EDGES} e WHERE e.active AND e.rec_a_key=r.rec_a_key "
+            "AND e.rec_b_key=r.rec_b_key)",
+        ) as fresh,
+    ):
+        counts = connection.execute(
+            f"SELECT count(*), count(*) FILTER (WHERE cut_id IS NULL) FROM {fresh}"
+        ).fetchone()
+        assert counts is not None
+        if not counts[0]:
+            return 0
+        with staged_ids(connection, int(counts[1]), factory) as generated:
+            connection.execute(
+                f"INSERT INTO {_CUT_EDGES} ({', '.join(_CUT_COLUMNS)}) "
+                "SELECT coalesce(f.cut_id, g.id), f.rec_a_key, f.rec_b_key, f.probability, "
+                "?, ?, f.assertion_id, true, ?, ?, NULL, NULL "
+                f"FROM {fresh} f LEFT JOIN {generated} g "
+                "ON f.cut_id IS NULL AND f.id_position=g.position ORDER BY f.position",
+                [model_version, tf_snapshot_id, run_id, stamp],
+            )
+        return int(counts[0])
 
 
 def release_cuts(

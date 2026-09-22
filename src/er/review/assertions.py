@@ -8,10 +8,10 @@ Four rules govern the module and are stated nowhere else in Python:
   and stamps ``retracted_by``/``retracted_at``; the row stays. The assertion delta
   between two runs (S4.5.1) is computed from those stamps, and a deleted row would
   make the delta silently smaller rather than visibly wrong.
-* **Every write canonicalises through :func:`er.entities.ids.canonicalize_pair`.**
-  A caller passing ``--a`` greater than ``--b`` gets a canonicalised row, not an
-  error, so ``rec_a_key < rec_b_key`` holds on every row and readers never join
-  two-sided (S5.0, D9). There is no second ordering implementation in this package.
+* **Every write preserves the same canonical pair order.** Single-item writers use
+  :func:`er.entities.ids.canonicalize_pair`; the native bulk importer expresses its
+  lexical order in SQL. A caller passing ``--a`` greater than ``--b`` gets a
+  canonicalised row, so readers always join one-sided (S5.0, D9).
 * **Precedence is enforced at WRITE time.** ``never`` dominates ``always`` for the
   same pair, and S4.4 rejects a conflicting insert (exit ``1``) rather than
   ordering around it — so at most one ``active`` row per pair exists and no reader
@@ -615,27 +615,13 @@ def load_assertions_csv(
     Raises:
         er.errors.ConfigError: the file violates S8.2.1 (exit ``2``).
         AssertionConflict: a row contradicts an active assertion of the other kind
-            for the same pair (exit ``1``). The rows before it stay applied — S4.7
-            gives the stage no cross-row transaction, and each row's own insert is
-            atomic.
+            for the same pair (exit ``1``). The valid prefix before it stays applied;
+            the native loader commits that prefix before raising the same diagnostic.
     """
+    from er.review.assertion_import import load_file
+
     factory = id_factory if id_factory is not None else UlidFactory()
-    stamped = _stamp(created_at)
-    inserted: list[Assertion] = []
-    for row in parse_assertions_csv(path):
-        written, is_new = _add(
-            connection,
-            a=row.rec_a_key,
-            b=row.rec_b_key,
-            kind=row.kind,
-            created_by=row.created_by,
-            note=row.note,
-            id_factory=factory,
-            created_at=stamped,
-        )
-        if is_new:
-            inserted.append(written)
-    return inserted
+    return load_file(connection, path, factory, _stamp(created_at))
 
 
 def _find(parent: dict[str, str], key: str) -> str:

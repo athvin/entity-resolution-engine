@@ -13,14 +13,22 @@ from er.config.schema import Thresholds
 from er.entities.ids import CountingIdFactory
 from er.lake.bulk import BATCH_ROWS
 from er.lake.model import REGISTRY, create_table_sql
-from er.matching.full import ScoredPair, _scored_rows, merge_match_scores, review_scored_pairs
+from er.matching.full import (
+    ScoredPair,
+    _scored_rows,
+    merge_match_scores,
+    review_score_relation,
+    review_scored_pairs,
+)
 
 THRESHOLDS = Thresholds(review_low=0.5, auto_merge=0.9)
 EVIDENCE = {"gamma_email": 2, "bf_email": 41.7, "label": "O'Neil 雪"}
 
 
+@pytest.mark.parametrize("native", [False, True])
 def test_score_batches_survive_review_writes_in_same_transaction(
     monkeypatch: pytest.MonkeyPatch,
+    native: bool,
 ) -> None:
     with duckdb.connect() as connection:
         connection.execute("ATTACH ':memory:' AS lake")
@@ -48,12 +56,23 @@ def test_score_batches_survive_review_writes_in_same_transaction(
             return decode(value)
 
         monkeypatch.setattr(json, "loads", tracked_decode)
-        summary = review_scored_pairs(
-            connection,
-            _scored_rows(connection, model_version="v1", tf_snapshot_id="tf1", run_id="run1"),
-            THRESHOLDS,
-            run_id="run1",
-            id_factory=CountingIdFactory(),
+        summary = (
+            review_score_relation(
+                connection,
+                THRESHOLDS,
+                model_version="v1",
+                tf_snapshot_id="tf1",
+                run_id="run1",
+                id_factory=CountingIdFactory(),
+            )
+            if native
+            else review_scored_pairs(
+                connection,
+                _scored_rows(connection, model_version="v1", tf_snapshot_id="tf1", run_id="run1"),
+                THRESHOLDS,
+                run_id="run1",
+                id_factory=CountingIdFactory(),
+            )
         )
         review_count = sum(i % 5 in (1, 2) for i in range(count))
         auto_count = sum(i % 5 in (3, 4) for i in range(count))
@@ -63,7 +82,7 @@ def test_score_batches_survive_review_writes_in_same_transaction(
         assert summary.review_queue_added == review_count
         assert summary.review_queue_refreshed == 0
         # Evidence of auto-merged and below-review pairs never becomes Python JSON.
-        assert decoded == review_count
+        assert decoded == (0 if native else review_count)
         queued = connection.execute(
             "SELECT rec_a_key, match_probability, waterfall FROM lake.main.review_queue "
             "ORDER BY rec_a_key"
@@ -188,3 +207,64 @@ def test_review_candidates_are_written_before_consuming_the_next_batch() -> None
             connection, scores(), THRESHOLDS, run_id="run1", id_factory=CountingIdFactory()
         )
         assert summary.pairs_scored == summary.review_queue_added == count
+
+
+@pytest.mark.parametrize("corruption", ["evidence", "duplicate_open"])
+def test_native_review_keeps_legacy_error_and_committed_prefix(corruption: str) -> None:
+    from er.errors import StageFailure
+
+    observed = []
+    for native in (False, True):
+        with duckdb.connect() as connection:
+            connection.execute("ATTACH ':memory:' AS lake")
+            connection.execute(create_table_sql(REGISTRY["review_queue"]))
+            connection.execute(
+                "CREATE TABLE lake.main.match_scores AS "
+                "SELECT 'crm:' || printf('%06d', i) rec_a_key, "
+                "'web:' || printf('%06d', i) rec_b_key, 0.7::DOUBLE AS match_probability, "
+                "?::JSON evidence, 'v1' model_version, 'tf1' tf_snapshot_id, 'run' run_id "
+                "FROM range(?) t(i)",
+                [json.dumps(EVIDENCE), 2 * BATCH_ROWS + 10],
+            )
+            bad = f"crm:{BATCH_ROWS + 3:06d}"
+            if corruption == "evidence":
+                connection.execute(
+                    "UPDATE lake.main.match_scores SET evidence='{}' WHERE rec_a_key=?", [bad]
+                )
+            else:
+                connection.execute(
+                    "INSERT INTO lake.main.review_queue "
+                    "SELECT 'existing' || i, 'pair', ?, ?, NULL, "
+                    "'gray_band', 0.7, ?::JSON, 'open', 'before', 'before', NULL, NULL "
+                    "FROM range(2) t(i)",
+                    [bad, bad.replace("crm:", "web:"), json.dumps(EVIDENCE)],
+                )
+            with pytest.raises(StageFailure) as error:
+                if native:
+                    review_score_relation(
+                        connection,
+                        THRESHOLDS,
+                        model_version="v1",
+                        tf_snapshot_id="tf1",
+                        run_id="run",
+                        id_factory=CountingIdFactory(),
+                    )
+                else:
+                    review_scored_pairs(
+                        connection,
+                        _scored_rows(
+                            connection, model_version="v1", tf_snapshot_id="tf1", run_id="run"
+                        ),
+                        THRESHOLDS,
+                        run_id="run",
+                        id_factory=CountingIdFactory(),
+                    )
+            observed.append(
+                (
+                    str(error.value),
+                    connection.execute(
+                        "SELECT * FROM lake.main.review_queue ORDER BY review_id"
+                    ).fetchall(),
+                )
+            )
+    assert observed[0] == observed[1]

@@ -47,6 +47,7 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 from typing import Any, Final, Protocol
+from uuid import uuid4
 
 import duckdb
 
@@ -352,10 +353,9 @@ def register_tf(
     hand and the resulting `match_probability` would be neither the frozen value nor a
     reproducible one.
 
-    The rows are read fully qualified and materialized here rather than handed over as
-    a lazy relation: Splink registers what it is given as a view, and a view over
-    `lake.main.tf_lookup` would make every predict re-read the lake through a handle
-    this function does not control.
+    Frozen values are copied into local temporary DuckDB tables and registered by
+    name. They remain independent of subsequent lake scans and never become Python
+    dictionaries or pandas/Arrow frames. The connection owns their lifetime.
 
     Args:
         linker: the Splink linker about to score.
@@ -373,10 +373,15 @@ def register_tf(
     """
     columns = tf_columns(cfg)
     for column in columns:
-        rows = connection.execute(
-            _SELECT_COLUMN_SQL, [model_version, tf_snapshot_id, column]
-        ).fetchall()
-        if not rows:
+        relation = f"er_frozen_tf_{uuid4().hex}"
+        connection.execute(
+            f'CREATE TEMP TABLE {relation} AS SELECT value AS "{column}", '
+            f'tf_value AS "{TF_COLUMN_PREFIX}{column}" FROM {_TF_LOOKUP} '
+            "WHERE model_version = ? AND tf_snapshot_id = ? AND column_name = ?",
+            [model_version, tf_snapshot_id, column],
+        )
+        if connection.execute(f"SELECT EXISTS (SELECT 1 FROM {relation})").fetchone() == (False,):
+            connection.execute(f"DROP TABLE {relation}")
             raise MissingTfLookupError(
                 f"{TF_LOOKUP_RELATION} holds no rows for column {column!r} at "
                 f"model_version={model_version!r}, tf_snapshot_id={tf_snapshot_id!r}; "
@@ -384,16 +389,8 @@ def register_tf(
                 f"hand and break INV-SCORE (S4.3.3, D4). Re-materialize the snapshot "
                 f"named by {tf_tables_path(model_version, tf_snapshot_id)!r}"
             )
-        # `<col>` and `tf_<col>` are the column names Splink joins the table on; the
-        # value is text because `tf_lookup.value` is (S5).
-        frame = [
-            {column: str(value), f"{TF_COLUMN_PREFIX}{column}": float(tf_value)}
-            for value, tf_value in rows
-        ]
-        # `overwrite=True` because a caller may register one linker twice — the S4.3.4
-        # two-pass path builds a linker per pass, but a full re-score reuses one.
         linker.table_management.register_term_frequency_lookup(
-            input_data=frame, col_name=column, overwrite=True
+            input_data=relation, col_name=column, overwrite=True
         )
     return columns
 

@@ -1,46 +1,13 @@
-"""`er reconcile`: the S4.5 chain, and the write that commits its plan (S4.5.3, D3).
+"""Orchestrate SQL reconciliation and preserve the pure planner's persistence API.
 
-ER-073 made the reconciler a pure function — given two partitions it returns the
-membership assignments, entity transitions and events a reconcile *would* write. This
-module is the half that runs it against a lake: it assembles the two partitions from
-the affected set, calls the plan, and applies it.
+The production chain checks assertion contradictions and scoring generations before
+writes, discovers affected records in DuckDB, clusters local relations, applies
+ordered graph cuts when needed, and plans entity lifecycle changes relationally.
+Only exact event encoding and ID generation cross the normal Python boundary.
 
-**The order of the chain is normative, and two steps in it are ordering constraints
-rather than data dependencies.**
-
-1. `active_assertions`, then **CONTRADICTION-1** (S4.4.1). It runs *before* clustering
-   and before anything is written, which is what makes the S4.7 guarantee — exit ``1``,
-   no snapshot, no events, membership byte-identical — true by construction rather than
-   by rollback. M6 is explicit that this is a hard deterministic failure and never a
-   warning, so it is raised even when the affected set would have been empty: an
-   unsatisfiable assertion set is a fact about the lake, not about this batch.
-2. The affected node set (S4.5.1), then the affected edge set over it, then S4.4's
-   assertion adjustment. `never` edges are removed and `always` edges injected at
-   ``p = 1.0`` — **in memory only**. An assertion edge is never persisted to
-   `match_scores`, which is what keeps `model_version` and `tf_snapshot_id` NOT NULL
-   there and what makes `assertions` the durable record of a steward's decision (S4.4).
-3. Label propagation to a bounded fixpoint (S4.5.2), then :func:`reconcile_plan`.
-4. Apply.
-
-**Membership is current state, written only by `MERGE INTO`** on
-`(source_system, source_record_id)` — D3. Not delete+insert and not append: a record
-has exactly one entity at any time, and the history lives in `entity_events`. A merge
-loser's rows are rewritten to the survivor in the same statement as everyone else's, so
-there is never an instant at which a record belongs to a `merged` entity. `merged_into`
-is a redirect for external id resolution and is never a way to resolve current
-membership.
-
-**One snapshot per relation, not one per row.** DuckLake takes a snapshot per statement,
-so all assignments go through one `MERGE`, all transitions through a second, and all
-events through :func:`~er.entities.events.append_events`'s single insert. S4.5.3
-requires an event and the membership rewrite it describes to be visible together; a
-per-row flush would publish a half-written history.
-
-**Nothing here re-derives the overlap mapping.** M5's whole point is that the mapping
-lives in one place. This module reads :class:`~er.entities.reconcile.ReconcilePlan` and
-writes what it says; a second implementation in SQL would be a second thing to keep
-correct, and the two would disagree first on the case ER-073 exists for — a cluster that
-is simultaneously a merge of two entities and a split of a third.
+`apply_reconcile_plan` remains available for collection callers and parity tests.
+Both paths share the same entity/membership MERGEs and event append, preserving
+current membership, redirect history, immutable event hashes and retry semantics.
 """
 
 from __future__ import annotations
@@ -54,41 +21,18 @@ from typing import Any, Final
 import duckdb
 
 from er.config.schema import Config
-from er.entities.cluster import (
-    adjust_edges_with_assertions,
-    affected_edges,
-    label_propagate,
-    last_reconciled_watermark,
-    load_affected_set,
-)
 from er.entities.events import EventLog, append_events
-from er.entities.guards import assert_single_scoring_generation, scoring_generation_rows
+from er.entities.guards import assert_scoring_generation
 from er.entities.ids import IdFactory, MonotonicUlidFactory
 from er.entities.reconcile import (
-    MEMBER_ADDED,
-    MEMBER_REMOVED,
-    MERGED,
-    RETIRED,
-    SPLIT,
     ReconcilePlan,
-    reconcile_plan,
 )
-from er.entities.retraction import corpus_absent_keys, retract_tombstoned_records
 from er.errors import ErrorClass, ExitCode, StageFailure
 from er.lake.bulk import staged_rows
 from er.lake.model import SCHEMA_QUALIFIER
-from er.matching.edges import current_edges
 from er.obs.profiling import profiled
 from er.obs.runctx import StageRun
 from er.review.assertions import Assertion, active_assertions, check_contradiction_1
-from er.review.never_cut import (
-    CutResult,
-    never_cut_fixpoint,
-    persist_cuts,
-    recheck_violations,
-    release_cuts,
-)
-from er.review.queue import upsert_escalation
 
 __all__ = [
     "RECONCILE_STAGE",
@@ -391,19 +335,7 @@ def apply_reconcile_plan(
     # conclusion twice emit one row, and this makes re-applying a plan a no-op. S4.5.4
     # states the idempotency key as `(run_id, entity_id, event_type, details_hash)`, so
     # that tuple is what is compared — not the row count, which a retry would inflate.
-    recorded = {
-        (str(entity_id), str(event_type), str(digest))
-        for entity_id, event_type, digest in connection.execute(
-            f"SELECT entity_id, event_type, details_hash FROM {_EVENTS} WHERE run_id = ?",
-            [run_id],
-        ).fetchall()
-    }
-    fresh = [
-        event
-        for event in log
-        if (event.entity_id, event.event_type, event.details_hash) not in recorded
-    ]
-    return append_events(connection, fresh, occurred_at=stamp)
+    return append_events(connection, log, occurred_at=stamp)
 
 
 @profiled("reconcile.lifecycle", "entities")
@@ -455,8 +387,8 @@ def run_reconcile_stage(
     # probability scales against one threshold, and the refusal (exit 3,
     # `precondition`) is what forces the full rescore first. Assertion edges can
     # never appear here — S4.4 keeps them out of `match_scores` entirely.
-    assert_single_scoring_generation(
-        scoring_generation_rows(connection),
+    assert_scoring_generation(
+        connection,
         review_low=cfg.thresholds.review_low,
     )
 
@@ -501,179 +433,17 @@ def run_reconcile_stage(
                 result.record(run_ctx, duration_ms=int((time.monotonic() - started) * 1000))
                 return result
 
-    watermark = last_reconciled_watermark(connection)
-    scored = current_edges(connection, model_version, tf_snapshot_id)
-    affected = load_affected_set(
+    from er.entities.relational_stage import run_affected_reconcile
+
+    return run_affected_reconcile(
         connection,
-        run_id=run_ctx.run_id,
-        auto_merge=cfg.thresholds.auto_merge,
-        edges=scored,
+        cfg,
+        run_ctx,
+        model_version=model_version,
+        tf_snapshot_id=tf_snapshot_id,
         assertions=assertions,
-        watermark=watermark,
-    )
-    if not affected.nodes:
-        run_ctx.counters.set("rows_in", 0)
-        run_ctx.counters.set("rows_out", 0)
-        empty = _nothing_to_do()
-        empty.record(run_ctx, duration_ms=int((time.monotonic() - started) * 1000))
-        return empty
-    run_ctx.counters.set("rows_in", len(affected.nodes))
-    run_ctx.counters.set("input_unit", "records")
-    run_ctx.counters.set("output_unit", "entities")
-
-    # S4.5.5's membership half, before clustering: the prior partition is read while
-    # the tombstoned records still hold their rows, the rows are then removed, and
-    # the departed keys are subtracted from BOTH sides — from `p_old`, so the entity
-    # that lost them shrinks (and splits, or empties and retires) through the
-    # ordinary overlap mapping, and from the node set, so the propagation cannot
-    # hand a deleted record back as a one-node group. The subtraction keeps an
-    # emptied entity as a zero-member `p_old` entry, which is exactly the input
-    # S4.5.3 retires.
-    nodes_all = tuple(sorted(affected.nodes))
-    prior = _current_partition(connection, nodes_all)
-    absent = corpus_absent_keys(connection, nodes_all)
-    retracted = retract_tombstoned_records(connection, nodes_all)
-    removed_keys = frozenset(key for keys in retracted.values() for key in keys)
-    nodes = tuple(key for key in nodes_all if key not in absent)
-    p_old = {entity_id: members - removed_keys for entity_id, members in prior.items()}
-
-    edges = affected_edges(
-        connection,
-        nodes,
-        model_version=model_version,
-        tf_snapshot_id=tf_snapshot_id,
-        auto_merge=cfg.thresholds.auto_merge,
-    )
-    adjusted = adjust_edges_with_assertions(edges, assertions, nodes=nodes)
-
-    propagation = label_propagate(
-        connection,
-        nodes,
-        [edge.pair for edge in adjusted],
-        max_iterations=cfg.clustering.max_iterations,
-    )
-
-    # S4.4.2 between clustering and the plan. A `never` is enforced at the PARTITION
-    # level, so it needs a clustering to look at — and the plan must be built over the
-    # POST-cut partition, or INV-PERM would be applied to an answer the cut is about to
-    # change. Releasing first is what lets a retracted `never` re-merge in the same run
-    # that retracted it: a stale active cut would keep the component apart for one more
-    # run and the retraction would look like it had not taken.
-    release_cuts(connection, run_id=run_ctx.run_id, released_at=occurred_at)
-    # D5's stale-violation recheck, against the POST-clustering membership this run
-    # just computed: a `never` is a live violation only if its endpoints are
-    # co-clustered NOW. `recheck_violations` reads exactly that, so a run whose
-    # clustering already honours every `never` runs no cut search — the correct no-op
-    # — and a violation that resolved itself for an unrelated reason is not re-cut.
-    post_cluster_membership = {key: label for key, label in propagation.labels.items()}
-    live_violations = recheck_violations(assertions, post_cluster_membership)
-    cut = (
-        never_cut_fixpoint(
-            [(edge.rec_a_key, edge.rec_b_key, edge.match_probability) for edge in adjusted],
-            assertions,
-            nodes=nodes,
-            cut_protect_probability=cfg.clustering.cut_protect_probability,
-            max_iterations=cfg.clustering.max_iterations,
-        )
-        if live_violations
-        else CutResult()
-    )
-    if cut.cuts:
-        adjusted = [edge for edge in adjusted if edge.pair not in cut.cut_pairs]
-        propagation = label_propagate(
-            connection,
-            nodes,
-            [edge.pair for edge in adjusted],
-            max_iterations=cfg.clustering.max_iterations,
-        )
-
-    groups = _groups(propagation.labels)
-    run_ctx.counters.set("rows_out", len(groups))
-    plan = reconcile_plan(p_old, groups, factory)
-
-    # S4.4.2 step 5: an `edge_cut` event on the affected entity. The id is minted here
-    # rather than inside `persist_cuts` because the event carries it too — one mint,
-    # two writers, so the row and the event name the same cut.
-    cut_ids = {cut_edge.pair: factory.new() for cut_edge in cut.cuts}
-    placement = {assignment.record_key: assignment.entity_id for assignment in plan.assignments}
-    for entity_id, members in _current_partition(connection, nodes).items():
-        for member in members:
-            placement.setdefault(member, entity_id)
-    cut_events = [
-        (
-            placement[cut_edge.rec_a_key],
-            EDGE_CUT,
-            {
-                "rec_a_key": cut_edge.rec_a_key,
-                "rec_b_key": cut_edge.rec_b_key,
-                "match_probability": cut_edge.match_probability,
-                "assertion_id": cut_edge.assertion_id,
-                "cut_id": cut_ids[cut_edge.pair],
-            },
-        )
-        for cut_edge in cut.cuts
-        if cut_edge.rec_a_key in placement
-    ]
-
-    # `member_removed` for the tombstoned records, on the entity each departed from
-    # (S4.5.5). Emitted as extra events for the plan's reason for `edge_cut`: the plan
-    # never saw the departed keys — subtracting them beforehand is what routed the
-    # split/retire through the ordinary mapping — so only the stage can say who left.
-    # The details take the plan's own `member_removed` shape, so event replay folds
-    # both kinds through one rule.
-    removal_events = [
-        (entity_id, MEMBER_REMOVED, {"member_keys": list(keys), "cause": TOMBSTONE_CAUSE})
-        for entity_id, keys in retracted.items()
-    ]
-
-    events_written = apply_reconcile_plan(
-        connection,
-        plan,
-        run_id=run_ctx.run_id,
-        occurred_at=occurred_at,
         ids=factory,
-        extra_events=(*removal_events, *cut_events),
+        occurred_at=occurred_at,
         reason=reason,
+        started=started,
     )
-    cuts_written = persist_cuts(
-        connection,
-        cut.cuts,
-        run_id=run_ctx.run_id,
-        model_version=model_version,
-        tf_snapshot_id=tf_snapshot_id,
-        cut_at=occurred_at,
-        cut_ids=cut_ids,
-    )
-    # S4.4.2 step 4: a pair every path between which is protected is escalated rather
-    # than cut. The assertion id travels in the CutResult for the operator's benefit but
-    # is not a `review_queue` column (S5) — the row is keyed by the pair and the reason.
-    for rec_a_key, rec_b_key, _assertion_id in cut.escalations:
-        upsert_escalation(
-            connection,
-            rec_a_key=rec_a_key,
-            rec_b_key=rec_b_key,
-            run_id=run_ctx.run_id,
-            id_factory=factory,
-        )
-
-    statuses = [transition.status for transition in plan.transitions]
-    event_types = [planned.event_type for planned in plan.events]
-    result = ReconcileResult(
-        exit_code=int(ExitCode.SUCCESS),
-        affected_entities=len(affected.entities),
-        affected_edges=len(adjusted),
-        label_prop_iterations=propagation.iterations,
-        clusters_out=len(groups),
-        entities_created=sum(1 for transition in plan.transitions if transition.is_new),
-        entities_merged=statuses.count(MERGED),
-        entities_split=event_types.count(SPLIT),
-        entities_retired=statuses.count(RETIRED),
-        members_added=event_types.count(MEMBER_ADDED),
-        members_removed=event_types.count(MEMBER_REMOVED) + len(removal_events),
-        events_emitted=events_written,
-        edges_cut=cuts_written,
-        cut_iterations=cut.iterations,
-        never_unsatisfiable_escalations=len(cut.escalations),
-    )
-    result.record(run_ctx, duration_ms=int((time.monotonic() - started) * 1000))
-    return result

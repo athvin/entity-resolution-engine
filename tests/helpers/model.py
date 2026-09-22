@@ -93,10 +93,6 @@ _MODEL_REGISTRY: Final = f"{SCHEMA_QUALIFIER}.model_registry"
 _TF_COLUMNS: Final[tuple[str, ...]] = REGISTRY[TF_LOOKUP_RELATION].column_names
 _REGISTRY_COLUMNS: Final[tuple[str, ...]] = REGISTRY["model_registry"].column_names
 
-_INSERT_TF_SQL: Final = (
-    f"INSERT INTO {_TF_LOOKUP} ({', '.join(_TF_COLUMNS)}) "
-    f"VALUES ({', '.join('?' for _ in _TF_COLUMNS)})"
-)
 _INSERT_REGISTRY_SQL: Final = (
     f"INSERT INTO {_MODEL_REGISTRY} ({', '.join(_REGISTRY_COLUMNS)}) "
     f"VALUES ({', '.join('?' for _ in _REGISTRY_COLUMNS)})"
@@ -174,13 +170,21 @@ def load_fixture_model(
         without an object store to fetch `params_path` from.
     """
     settings = fixture_settings()
-    rows = fixture_tf_rows()
+    with FIXTURE_TF_PATH.open(encoding="utf-8", newline="") as handle:
+        header = tuple(next(csv.reader(handle)))
+    if header != _TF_COLUMNS:
+        raise ValueError(f"{FIXTURE_TF_PATH.name} header is {header}, expected {_TF_COLUMNS}")
 
     connection.execute(
         f"DELETE FROM {_TF_LOOKUP} WHERE model_version = ? AND tf_snapshot_id = ?",
         [FIXTURE_MODEL_VERSION, FIXTURE_TF_SNAPSHOT_ID],
     )
-    connection.executemany(_INSERT_TF_SQL, [list(row) for row in rows])
+    connection.execute(
+        f"COPY {_TF_LOOKUP} ({', '.join(_TF_COLUMNS)}) FROM ? "
+        "(FORMAT CSV, HEADER true, DELIMITER ',', QUOTE '\"', ESCAPE '\"', "
+        "FORCE_NOT_NULL (model_version, tf_snapshot_id, column_name, value))",
+        [str(FIXTURE_TF_PATH)],
+    )
 
     connection.execute(
         f"UPDATE {_MODEL_REGISTRY} SET status = ? WHERE status = ?", [SUPERSEDED, ACTIVE]

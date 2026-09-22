@@ -278,7 +278,10 @@ def test_register_tf_calls_register_term_frequency_lookup_per_column(
     # The frame Splink joins on is read by column name, so the shape is the interface.
     for call, column in zip(calls, EXPECTED_TF_COLUMNS, strict=True):
         frame = call.kwargs["input_data"]
-        assert frame == [{column: f"{column}-value", f"{TF_COLUMN_PREFIX}{column}": 0.25}]
+        assert isinstance(frame, str)
+        result = lake.execute(f"SELECT * FROM {frame}")
+        assert [field[0] for field in result.description] == [column, f"{TF_COLUMN_PREFIX}{column}"]
+        assert result.fetchall() == [(f"{column}-value", 0.25)]
 
 
 def test_register_tf_refuses_a_key_missing_a_column(

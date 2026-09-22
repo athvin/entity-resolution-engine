@@ -88,7 +88,7 @@ from er.matching.tf import (
 from er.matching.thresholds import in_gray_band, is_auto_merge
 from er.obs.profiling import profiled
 from er.obs.runctx import StageRun
-from er.review.queue import GrayBandPair, upsert_gray_band_pairs
+from er.review.queue import GrayBandPair, upsert_gray_band_pairs, upsert_subject_relation
 
 __all__ = [
     "BLOCKING_KEYS_RELATION",
@@ -570,6 +570,89 @@ def review_scored_pairs(
     return summary
 
 
+@profiled("match.classify_scores_sql", "pairs")
+def review_score_relation(
+    connection: duckdb.DuckDBPyConnection,
+    thresholds: Thresholds,
+    *,
+    model_version: str,
+    tf_snapshot_id: str,
+    run_id: str,
+    id_factory: IdFactory | None = None,
+) -> ScoreSummary:
+    """Classify saved scores and populate reviews without reading score payloads."""
+
+    def compatibility() -> ScoreSummary:
+        return review_scored_pairs(
+            connection,
+            _scored_rows(
+                connection,
+                model_version=model_version,
+                tf_snapshot_id=tf_snapshot_id,
+                run_id=run_id,
+            ),
+            thresholds,
+            run_id=run_id,
+            id_factory=id_factory,
+        )
+
+    query = (
+        f"SELECT rec_a_key, rec_b_key, match_probability, evidence FROM {_MATCH_SCORES} "
+        "WHERE model_version = ? AND tf_snapshot_id = ? AND run_id = ?"
+    )
+    with _staged_query(connection, query, [model_version, tf_snapshot_id, run_id]) as scores:
+        invalid = connection.execute(
+            f"SELECT rec_a_key, rec_b_key FROM {scores} WHERE rec_a_key >= rec_b_key "
+            "ORDER BY rec_a_key, rec_b_key LIMIT 1"
+        ).fetchone()
+        if invalid is not None:
+            return compatibility()
+        row = connection.execute(
+            f"SELECT count(*), count(*) FILTER (WHERE match_probability >= ? "
+            f"AND NOT isnan(match_probability)) FROM {scores}",
+            [thresholds.auto_merge],
+        ).fetchone()
+        assert row is not None
+        summary = ScoreSummary(pairs_scored=int(row[0]), pairs_above_auto_merge=int(row[1]))
+        with _staged_query(
+            connection,
+            "SELECT row_number() OVER (ORDER BY rec_a_key, rec_b_key) AS position, "
+            "'pair'::VARCHAR AS subject_type, 'gray_band'::VARCHAR AS reason, "
+            "rec_a_key, rec_b_key, NULL::VARCHAR AS entity_id, match_probability, "
+            f"evidence AS waterfall FROM {scores} WHERE match_probability >= ? "
+            "AND match_probability < ? AND NOT isnan(match_probability)",
+            [thresholds.review_low, thresholds.auto_merge],
+        ) as subjects:
+            invalid = connection.execute(
+                f"SELECT rec_a_key, rec_b_key, match_probability, waterfall FROM {subjects} "
+                "WHERE len(list_filter(json_keys(waterfall), k -> starts_with(k, 'gamma_'))) = 0 "
+                "OR len(list_filter(json_keys(waterfall), k -> starts_with(k, 'bf_'))) = 0 "
+                "OR waterfall IS NULL "
+                "OR NOT regexp_full_match(rec_a_key, '[^:]+:[^:]+', 's') "
+                "OR NOT regexp_full_match(rec_b_key, '[^:]+:[^:]+', 's') "
+                "ORDER BY position LIMIT 1"
+            ).fetchone()
+            if invalid is not None:
+                # Preserve the legacy batch-prefix behavior and diagnostic for
+                # corrupt evidence; ordinary evidence is never decoded in Python.
+                return compatibility()
+            counted = connection.execute(f"SELECT count(*) FROM {subjects}").fetchone()
+            assert counted is not None
+            summary.pairs_in_gray_band = int(counted[0])
+            if summary.pairs_in_gray_band:
+                try:
+                    summary.review_queue_added, summary.review_queue_refreshed = (
+                        upsert_subject_relation(
+                            connection, subjects, run_id=run_id, id_factory=id_factory
+                        )
+                    )
+                except StageFailure:
+                    # Duplicate-open diagnostics are detected before any queue
+                    # writes. Replay the bounded path to preserve its prefix.
+                    return compatibility()
+    return summary
+
+
 @profiled("match.persist_scores", "pairs")
 def merge_match_scores(
     connection: duckdb.DuckDBPyConnection,
@@ -589,15 +672,13 @@ def merge_match_scores(
     deleted and nothing is truncated: `match_scores` is cumulative, so a key already
     scored is rewritten in place and a key that is not is inserted.
 
-    The read-back is part of the same unit rather than a separate call a caller might
-    forget. It is what makes :func:`~er.entities.ids.canonicalize_pair` the authority
-    for an ordering the merge had to express in SQL, and its result is what the gray
-    band is classified from — in Python, through :mod:`er.matching.thresholds`, because
-    the band is half-open and is defined in exactly one place.
+    The returned iterator is a compatibility read-back for collection callers.
+    Production classifies the written relation with :func:`review_score_relation`,
+    leaving probabilities and evidence inside DuckDB.
 
     Both S4.3.4 scoring paths call this: full mode hands it one corpus-wide prediction,
     and the two-pass incremental scorer hands it the union of its two passes. Which is
-    the point — one write statement, one canonicalisation site, one read-back.
+    the point — one write statement and one canonicalisation site.
 
     Args:
         connection: an open S4.0b connection with the lake attached by alias.
@@ -677,7 +758,7 @@ def score_full(
     3. **Predict at `review_low`**, explicitly, in probabilities.
     4. **Merge once**, over a source that drops self-pairs, canonicalises, deduplicates
        and joins both endpoint content hashes on.
-    5. **Classify the result in Python** through :mod:`er.matching.thresholds`, and
+    5. **Classify the result in SQL** using the same half-open thresholds, and
        upsert the gray band to `review_queue` (S4.3.5) — which is an upsert with three
        outcomes, so a dismissed pair does not resurface.
     6. **Assert M17** before returning, so a leak is attributed to the stage that
@@ -736,7 +817,7 @@ def score_full(
     predictions = linker.inference.predict(threshold_match_probability=thresholds.review_low)
     relation = str(predictions.physical_name)
 
-    scored = merge_match_scores(
+    merge_match_scores(
         connection,
         relation,
         build_evidence(cfg, prediction_columns(connection, relation)),
@@ -745,10 +826,11 @@ def score_full(
         run_id=run_ctx.run_id,
         scored_at=scored_at,
     )
-    summary = review_scored_pairs(
+    summary = review_score_relation(
         connection,
-        scored,
         thresholds,
+        model_version=model_version,
+        tf_snapshot_id=tf_snapshot_id,
         run_id=run_ctx.run_id,
         id_factory=id_factory,
     )

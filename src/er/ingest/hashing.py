@@ -1,12 +1,9 @@
 """``content_hash``, defined normatively in DesignDoc.md S4.1.
 
-S4.1 pins the digest and then pins its *cardinality*: it is "computed by exactly one
-function", because two implementations that disagree make T-IDEM-1a and T-IDEM-1
-non-reproducible. That one function is :func:`content_hash` here. S4.1 spells its
-import path ``er.ingest.landing.content_hash`` while the S3 tree puts the file at
-``ingest/hashing.py``; ER-031 re-exports this object from ``landing.py`` so both
-spellings resolve to the same function. A second implementation behind the other
-name is the defect S4.1 forbids.
+S4.1 pins one digest contract for both execution paths. :func:`content_hash` is
+its reference/compatibility implementation, also exported as
+``er.ingest.landing.content_hash``. :func:`content_hash_sql` renders the native
+DuckDB expression, with file-path parity checked against the reference.
 
 The module imports only ``hashlib``, ``unicodedata`` and ``collections.abc`` — not
 even ``__future__``, which is asserted rather than merely intended (see
@@ -20,7 +17,7 @@ import hashlib
 import unicodedata
 from collections.abc import Mapping, Sequence
 
-__all__ = ["TOMBSTONE_CONTENT_HASH", "UNIT_SEPARATOR", "content_hash"]
+__all__ = ["TOMBSTONE_CONTENT_HASH", "UNIT_SEPARATOR", "content_hash", "content_hash_sql"]
 
 #: S4.1: source values are joined by the ``0x1f`` unit separator. Values are hashed
 #: verbatim, so a value that itself contains ``0x1f`` is ambiguous with a column
@@ -61,3 +58,20 @@ def content_hash(row: Mapping[str, str | None], columns: Sequence[str]) -> str:
         value = row.get(column)
         values.append("" if value is None else unicodedata.normalize("NFC", value))
     return hashlib.sha256(UNIT_SEPARATOR.join(values).encode("utf-8")).hexdigest()
+
+
+def content_hash_sql(columns: Sequence[str], delivered_columns: Sequence[str]) -> str:
+    """The native expression for the same hash contract, over rendered VARCHARs.
+
+    Names are quoted as identifiers, never interpolated as executable expressions.
+    The reference function remains the oracle for native file-path parity tests.
+    """
+    values = []
+    for name in columns:
+        quoted = '"' + name.replace('"', '""') + '"'
+        values.append(
+            f"coalesce(nfc_normalize({quoted}), '')" if name in delivered_columns else "''"
+        )
+    if not values:
+        return "sha256('')"
+    return f"sha256(concat_ws(chr({ord(UNIT_SEPARATOR)}), " + ", ".join(values) + "))"

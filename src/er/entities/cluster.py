@@ -133,7 +133,7 @@ from er.lake.model import SCHEMA_QUALIFIER
 from er.matching.api import splink_api
 from er.matching.edges import current_edges
 from er.matching.model import UNIQUE_ID_COLUMN
-from er.obs.profiling import profiled
+from er.obs.profiling import profiled, span
 from er.review.assertions import ALWAYS, NEVER, Assertion
 from er.review.queue import ENTITY, PAIR, RESOLVED_STATUSES
 
@@ -579,12 +579,10 @@ def adjust_edges_with_assertions(
 ) -> list[Edge]:
     """S4.4's edge adjustment: minus active `never`, plus active `always` at `p = 1.0`.
 
-    PURE, and that is normative rather than convenient. S4.4 states the adjustment "is
-    not a SQL clause and is not part of the `select`": the query loads the scored edges
-    and this runs over the loaded result. Nothing here executes a statement, so no
-    assertion edge can reach `match_scores` — `assertions` is their durable record, and
-    every `match_scores` row stays a scored one with `model_version` and `tf_snapshot_id`
-    `NOT NULL` (S5).
+    Pure reference implementation for collection callers and parity tests. The
+    production stage applies these overrides to local SQL relations. Neither path
+    persists assertion edges to `match_scores`; `assertions` remains their durable
+    record, and every persisted score retains its model and TF snapshot (S5).
 
     `always` first and `never` second, which is the order S4.4 fixes so that the two
     precedence readings cannot disagree: a pair carrying both is removed either way.
@@ -915,10 +913,9 @@ def affected_edges(
     (S4.4.2); and both endpoints must still be in `int_std_records`, which excludes a
     tombstoned endpoint whose `match_scores` row is still `is_active` (S4.5.5).
 
-    The result is NOT assertion-adjusted. :func:`adjust_edges_with_assertions` is the
-    other half and is deliberately separate: it is pure, it is what the unit layer can
-    exercise without a lake, and keeping it out of the query is how S4.4's "not a SQL
-    clause" stays true by construction.
+    This collection API returns scored edges before assertion adjustment. The
+    production stage composes the same filters and overrides in local SQL relations;
+    the pure adjustment helper remains an independent reference for tests.
 
     Args:
         connection: a connection with the lake attached (S4.0b). Nothing is written.
@@ -1342,38 +1339,40 @@ def label_propagate_relations(
     if max_iterations < 1:
         raise ValueError("max_iterations must be at least 1")
     try:
-        connection.execute(
-            f"CREATE OR REPLACE TEMP TABLE {_LABELS_RELATION} AS "
-            f"SELECT DISTINCT record_key, record_key AS label FROM {nodes_relation}"
-        )
-        connection.execute(
-            f"CREATE OR REPLACE TEMP TABLE {_ADJACENCY_RELATION} AS "
-            f"SELECT rec_a_key AS node, rec_b_key AS neighbour FROM {edges_relation} "
-            f"UNION ALL SELECT rec_b_key, rec_a_key FROM {edges_relation}"
-        )
-        row = connection.execute(f"SELECT count(*) FROM {_LABELS_RELATION}").fetchone()
-        assert row is not None
-        node_count = int(row[0])
-        iterations, converged = (
-            _label_iterations(connection, node_count=node_count, max_iterations=max_iterations)
-            if node_count
-            else (0, True)
-        )
-        if not converged:
-            # Preserve the existing diagnostic contract on the failure path.
-            labels = _labelling(connection)
-            pairs = connection.execute(
-                f"SELECT node, neighbour FROM {_ADJACENCY_RELATION} WHERE node < neighbour"
-            ).fetchall()
-            raise NonConvergenceError(
-                _non_convergence_message(
-                    labels,
-                    frozenset(labels),
-                    pairs,
-                    iterations=iterations,
-                    max_iterations=max_iterations,
-                )
+        with span("reconcile.label_propagation", unit="records") as metrics:
+            connection.execute(
+                f"CREATE OR REPLACE TEMP TABLE {_LABELS_RELATION} AS "
+                f"SELECT DISTINCT record_key, record_key AS label FROM {nodes_relation}"
             )
+            connection.execute(
+                f"CREATE OR REPLACE TEMP TABLE {_ADJACENCY_RELATION} AS "
+                f"SELECT rec_a_key AS node, rec_b_key AS neighbour FROM {edges_relation} "
+                f"UNION ALL SELECT rec_b_key, rec_a_key FROM {edges_relation}"
+            )
+            row = connection.execute(f"SELECT count(*) FROM {_LABELS_RELATION}").fetchone()
+            assert row is not None
+            node_count = int(row[0])
+            iterations, converged = (
+                _label_iterations(connection, node_count=node_count, max_iterations=max_iterations)
+                if node_count
+                else (0, True)
+            )
+            metrics.update(rows_in=node_count, rows_out=node_count, iterations=iterations)
+            if not converged:
+                # Preserve the existing diagnostic contract on the failure path.
+                labels = _labelling(connection)
+                pairs = connection.execute(
+                    f"SELECT node, neighbour FROM {_ADJACENCY_RELATION} WHERE node < neighbour"
+                ).fetchall()
+                raise NonConvergenceError(
+                    _non_convergence_message(
+                        labels,
+                        frozenset(labels),
+                        pairs,
+                        iterations=iterations,
+                        max_iterations=max_iterations,
+                    )
+                )
         yield _LABELS_RELATION, iterations
     except BaseException:
         with suppress(duckdb.Error):

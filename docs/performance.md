@@ -80,6 +80,58 @@ services. Memory includes page cache and is sampled every 250 ms.
 This is a capacity measurement, separate from CI regression baselines. Running it
 does not enable scheduled million-record jobs or promote a baseline.
 
+### SQL pushdown: full million-record comparison, 2026-09-22
+
+The current pipeline processed **1,000,000 source records in 168.57 seconds
+(2 minutes 49 seconds)**, versus **181.44 seconds (3 minutes 1 second)** on the
+revision immediately before the SQL pushdown changes. That is **1.08 times the
+throughput and 7.1% less processing time** in this single before/after comparison.
+The roughly 52-times improvement in the [isolated lifecycle measurement](#sql-data-flow-comparisons)
+does not describe the full pipeline.
+
+| CLI stage | Before, seconds | Current, seconds |
+|---|---:|---:|
+| Ingestion, all sources | 20.98 | 10.66 |
+| Cleaning/standardization | 83.52 | 83.02 |
+| Model training | 12.46 | 11.66 |
+| Matching | 17.29 | 20.54 |
+| Reconciliation/entity assignment | 30.23 | 23.83 |
+| Golden record assembly | 16.96 | 18.87 |
+| **Total processing** | **181.44** | **168.57** |
+
+Ingestion used **49.2% less time**, and reconciliation used **21.2% less time**.
+Matching and golden assembly were slower in this pass. Cleaning, which already
+runs in SQL, was essentially unchanged and accounted for **49.2%** of the current
+total. Input throughput rose from **5,511 to 5,932 records/second**. These results
+do not establish that every stage benefits from SQL pushdown.
+
+Both revisions ran sequentially on fresh disposable lakes, baseline first, using
+the local Apple Silicon Docker host, **2 CPUs, 10 GiB container memory, 2 DuckDB
+threads and a 4 GB DuckDB limit**. Baseline source was `e86a64b`; current source was
+`2c75cc0`. Input file hashes, semantic configuration, resource limits and dependency
+versions matched. The corpus represents 400,000 people across CRM, billing and
+webforms, using seed 42. Training and CLI startup are included in processing time;
+generation, image/stack setup, validation and teardown are excluded. The complete
+campaigns took 246.03 and 256.33 seconds respectively, including those excluded
+steps. No tests or other benchmark runs overlapped these measurements.
+
+All **1,000,000 memberships**, **395,867 golden records**, and **2,375,202 lineage
+rows** passed integrity validation. Counts, membership-partition hashes and
+synthetic quality metrics matched exactly. Golden attribute values and individual
+scores were not compared row by row in this measurement.
+
+Processing CPU time fell from **278.72 to 275.64 CPU-seconds**, while sampled peak
+pipeline memory increased from **3.88 to 4.02 GiB**. Memory includes page cache and
+child processes, excludes the catalog/object store, and uses 250 ms samples.
+This is one pass per revision; variation is unmeasured and host caches were not
+flushed. Repeated runs are needed to distinguish small timing changes from noise.
+
+The reports and raw command logs are retained in
+`artifacts/bench/full-1m-sql-baseline-20260922T122736Z/` and
+`artifacts/bench/full-1m-sql-current-20260922T122736Z/`. The comparison report,
+per-stage CSV, resource breakdown and equality checks are in
+`artifacts/bench/full-1m-sql-comparison-20260922T122736Z/`.
+
 ### Ten-million-record capacity test
 
 `make benchmark-10m` runs the same complete initial-load pipeline with **10,000,000
@@ -476,3 +528,51 @@ The command refuses a `NON_COMPARABLE` run. Commit the generated baseline with i
 `REGRESSION` means a comparable phase exceeded it, `NON_COMPARABLE` means the
 measurement cannot be judged, and `NO_BASELINE` means no comparison was possible.
 Historical optimization results above are separate from these CI baselines.
+
+## SQL data-flow comparisons
+
+`benchmarks/data_flows.py` compares native execution with the retained collection
+interfaces on deterministic inputs. Each case runs in a fresh process with two
+DuckDB threads, a 512 MB DuckDB buffer limit and a private spill directory. Input
+generation and output fingerprinting are outside the timer. Peak RSS includes the
+whole process and input preparation; it is not a Python-heap measurement.
+
+```sh
+uv run python benchmarks/data_flows.py --case ingest --mode reference --records 1000000
+uv run python benchmarks/data_flows.py --case ingest --mode sql --records 1000000
+```
+
+Other cases are `tf`, `review`, and `reconcile`. Review selects 40% of scores for
+the gray band. Reconciliation changes four-record groups to five-record groups and
+includes lifecycle planning, persistence and event serialization, excluding graph
+clustering. TF uses real Splink registration. No training runs in these cases.
+
+An initial single-pass measurement on macOS ARM64, Python 3.12 and DuckDB 1.5.5:
+
+| Case | Input rows | Reference seconds | SQL seconds | Reference peak RSS MiB | SQL peak RSS MiB |
+|---|---:|---:|---:|---:|---:|
+| ingest | 100,000 | 0.860 | 0.125 | 124.9 | 183.3 |
+| tf | 100,000 | 0.080 | 0.016 | 142.6 | 124.0 |
+| review | 100,000 | 0.996 | 0.220 | 179.6 | 194.6 |
+| reconcile | 100,000 | 47.997 | 0.923 | 235.4 | 208.8 |
+| ingest | 1,000,000 | 8.566 | 0.726 | 322.3 | 650.5 |
+| tf | 1,000,000 | 0.664 | 0.068 | 392.0 | 194.5 |
+| review | 1,000,000 | 11.569 | 1.762 | 554.5 | 661.0 |
+| reconcile | 1,000,000 | >174 (stopped) | 10.309 | not recorded | 616.9 |
+
+Completed reference/SQL pairs produced the same count and aggregate fingerprint.
+The million-record reference reconciliation was still running after 174 seconds
+and was stopped; no completed reference fingerprint exists for that case. The SQL
+case emitted 300,000 events. Small randomized partition tests independently check
+assignments, transitions and ordered event details against the pure planner.
+
+These are initial stage measurements, not repeated regression baselines or complete
+pipeline benchmarks. The later [full million-record comparison](#sql-pushdown-full-million-record-comparison-2026-09-22)
+measured the complete pipeline at 168.57 seconds versus 181.44 seconds before.
+Native ingestion and review were faster while using **more**
+total RSS at this buffer limit; TF registration used less. Removing Python data
+round trips is not a guarantee of lower whole-process memory. SQL intermediate
+relations, parallel readers and buffer allocations remain part of capacity planning.
+Exact-format serialization and graph exceptions are documented in
+[Python processing exceptions](python-processing-exceptions.md). Re-run both modes
+on an idle host before making deployment capacity or regression-threshold decisions.
