@@ -283,6 +283,43 @@ def _current_partition(
     return {entity_id: frozenset(members) for entity_id, members in grouped.items()}
 
 
+def _merge_entity_relation(
+    connection: duckdb.DuckDBPyConnection, staged: str, stamp: datetime, run_id: str
+) -> None:
+    """Commit a prepared local relation using the shared lifecycle write."""
+    connection.execute(
+        f"MERGE INTO {_ENTITIES} AS target USING "
+        f"(SELECT *, CAST(? AS TIMESTAMP) AS stamp, ? AS run_id FROM {staged}) "
+        "AS source ON target.entity_id = source.entity_id "
+        " WHEN MATCHED THEN UPDATE SET status = source.status, "
+        "        merged_into = source.merged_into, updated_at = source.stamp, "
+        "        updated_run_id = source.run_id "
+        f" WHEN NOT MATCHED THEN INSERT ({', '.join(_ENTITY_COLUMNS)}) "
+        "      VALUES (source.entity_id, source.status, source.merged_into, "
+        "              source.stamp, source.stamp, source.run_id, source.run_id)",
+        [stamp, run_id],
+    )
+
+
+def _merge_membership_relation(
+    connection: duckdb.DuckDBPyConnection, staged: str, stamp: datetime, run_id: str
+) -> None:
+    """Commit a prepared local relation using the shared lifecycle write."""
+    connection.execute(
+        f"MERGE INTO {_MEMBERSHIP} AS target USING "
+        f"(SELECT *, CAST(? AS TIMESTAMP) AS assigned_at, ? AS run_id FROM {staged}) "
+        "AS source ON target.source_system = source.source_system "
+        "  AND target.source_record_id = source.source_record_id "
+        " WHEN MATCHED THEN UPDATE SET entity_id = source.entity_id, "
+        "        assigned_at = source.assigned_at, run_id = source.run_id "
+        f" WHEN NOT MATCHED THEN INSERT ({', '.join(_MEMBERSHIP_COLUMNS)}) "
+        "      VALUES (source.source_system, source.source_record_id, "
+        "              source.record_key, source.entity_id, source.assigned_at, "
+        "              source.run_id)",
+        [stamp, run_id],
+    )
+
+
 @profiled("reconcile.persist", "entities")
 def apply_reconcile_plan(
     connection: duckdb.DuckDBPyConnection,
@@ -326,18 +363,7 @@ def apply_reconcile_plan(
                 for transition in plan.transitions
             ),
         ) as staged:
-            connection.execute(
-                f"MERGE INTO {_ENTITIES} AS target USING "
-                f"(SELECT *, CAST(? AS TIMESTAMP) AS stamp, ? AS run_id FROM {staged}) "
-                "AS source ON target.entity_id = source.entity_id "
-                " WHEN MATCHED THEN UPDATE SET status = source.status, "
-                "        merged_into = source.merged_into, updated_at = source.stamp, "
-                "        updated_run_id = source.run_id "
-                f" WHEN NOT MATCHED THEN INSERT ({', '.join(_ENTITY_COLUMNS)}) "
-                "      VALUES (source.entity_id, source.status, source.merged_into, "
-                "              source.stamp, source.stamp, source.run_id, source.run_id)",
-                [stamp, run_id],
-            )
+            _merge_entity_relation(connection, staged, stamp, run_id)
 
     if plan.assignments:
         with staged_rows(
@@ -348,19 +374,7 @@ def apply_reconcile_plan(
                 for assignment in plan.assignments
             ),
         ) as staged:
-            connection.execute(
-                f"MERGE INTO {_MEMBERSHIP} AS target USING "
-                f"(SELECT *, CAST(? AS TIMESTAMP) AS assigned_at, ? AS run_id FROM {staged}) "
-                "AS source ON target.source_system = source.source_system "
-                "  AND target.source_record_id = source.source_record_id "
-                " WHEN MATCHED THEN UPDATE SET entity_id = source.entity_id, "
-                "        assigned_at = source.assigned_at, run_id = source.run_id "
-                f" WHEN NOT MATCHED THEN INSERT ({', '.join(_MEMBERSHIP_COLUMNS)}) "
-                "      VALUES (source.source_system, source.source_record_id, "
-                "              source.record_key, source.entity_id, source.assigned_at, "
-                "              source.run_id)",
-                [stamp, run_id],
-            )
+            _merge_membership_relation(connection, staged, stamp, run_id)
 
     # A rebuild's reason rides every event of the run (S4.0, S5.1). It joins the
     # canonicalised details and therefore `details_hash`, so a stamped run's events
@@ -445,6 +459,47 @@ def run_reconcile_stage(
         scoring_generation_rows(connection),
         review_low=cfg.thresholds.review_low,
     )
+
+    if not assertions:
+        from er.entities.initial import prepare_initial_plan
+
+        with prepare_initial_plan(
+            connection,
+            run_id=run_ctx.run_id,
+            model_version=model_version,
+            tf_snapshot_id=tf_snapshot_id,
+            auto_merge=cfg.thresholds.auto_merge,
+            max_iterations=cfg.clustering.max_iterations,
+            ids=factory,
+            reason=reason,
+        ) as initial:
+            if initial is not None:
+                stamp = (
+                    datetime.now(UTC).replace(tzinfo=None) if occurred_at is None else occurred_at
+                )
+                _merge_entity_relation(connection, initial.entities, stamp, run_ctx.run_id)
+                _merge_membership_relation(connection, initial.membership, stamp, run_ctx.run_id)
+                events_written = append_events(connection, initial.events, occurred_at=stamp)
+                result = ReconcileResult(
+                    exit_code=int(ExitCode.SUCCESS),
+                    affected_entities=0,
+                    affected_edges=initial.edges,
+                    label_prop_iterations=initial.iterations,
+                    clusters_out=initial.clusters,
+                    entities_created=initial.clusters,
+                    entities_merged=0,
+                    entities_split=0,
+                    entities_retired=0,
+                    members_added=0,
+                    members_removed=0,
+                    events_emitted=events_written,
+                )
+                run_ctx.counters.set("rows_in", initial.records)
+                run_ctx.counters.set("rows_out", initial.clusters)
+                run_ctx.counters.set("input_unit", "records")
+                run_ctx.counters.set("output_unit", "entities")
+                result.record(run_ctx, duration_ms=int((time.monotonic() - started) * 1000))
+                return result
 
     watermark = last_reconciled_watermark(connection)
     scored = current_edges(connection, model_version, tf_snapshot_id)

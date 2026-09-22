@@ -8,7 +8,6 @@ import gzip
 import hashlib
 import json
 import os
-import shutil
 import sys
 import time
 import uuid
@@ -18,7 +17,15 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from large_validation import (
+    candidate_pair_count,
+    copy_input,
+    file_sha256,
+    partition_sha256,
+    quality_from_csv,
+)
 from profile_report import write_report
+from scales import Scale
 from ulid import ULID
 
 from er.config.hashing import config_hash
@@ -213,9 +220,12 @@ def run_case(
     corpus_root: Path | None = None,
     compare_outputs: bool = False,
     initial_only: bool = False,
+    workload: Scale | None = None,
 ) -> dict[str, Any]:
     if initial_only and case == "tiny":
         raise ValueError("initial-only measurements require a generated benchmark scale")
+    if workload is not None and workload.name != case:
+        raise ValueError("workload name must match the measured case")
     label = label or (f"{case}-{iteration}" if detailed else f"{case}-control")
     directory = out / label
     directory.mkdir(parents=True)
@@ -313,7 +323,7 @@ def run_case(
         else:
             from scales import get_scale
 
-            scale = get_scale(case)
+            scale = workload or get_scale(case)
             suffix = "-initial" if initial_only else ""
             corpus = (corpus_root or out) / f"corpus-{case}{suffix}"
             base_records = scale.records
@@ -347,13 +357,11 @@ def run_case(
             drop = directory / f"drop-{phase}"
             for source in SOURCES:
                 (drop / source).mkdir(parents=True)
-                shutil.copy2(inputs / f"{source}.csv", drop / source / f"{source}.csv")
+                copy_input(inputs / f"{source}.csv", drop / source / f"{source}.csv")
             drops[phase] = drop
         result.update(base_records=base_records, incremental_records=batch_records)
         result["input_sha256"] = {
-            f"{phase}/{source}.csv": hashlib.sha256(
-                (drop / source / f"{source}.csv").read_bytes()
-            ).hexdigest()
+            f"{phase}/{source}.csv": file_sha256(drop / source / f"{source}.csv")
             for phase, drop in drops.items()
             for source in SOURCES
         }
@@ -386,12 +394,7 @@ def run_case(
                     )
                 }
                 result[f"{phase}_counts"] = tables
-                result[f"{phase}_candidate_pairs"] = connection.execute(
-                    "SELECT count(*) FROM (SELECT DISTINCT a.record_key, b.record_key "
-                    "FROM lake.main.int_blocking_keys a JOIN lake.main.int_blocking_keys b "
-                    "ON a.key_type=b.key_type AND a.key_value=b.key_value "
-                    "AND a.record_key < b.record_key)"
-                ).fetchone()[0]
+                result[f"{phase}_candidate_pairs"] = candidate_pair_count(connection)
                 assert tables["int_std_records"] == tables["entity_membership"], tables
                 assert tables["golden_records"] > 0, tables
                 if phase == "base":
@@ -404,24 +407,18 @@ def run_case(
                     assert tables["raw_records"] >= base_records, tables
                 if case == "tiny":
                     check_fixture(connection, phase)
-                groups: dict[str, list[str]] = {}
-                for key, entity in connection.execute(
-                    "SELECT record_key, entity_id FROM lake.main.entity_membership"
-                ).fetchall():
-                    groups.setdefault(entity, []).append(key)
-                result[f"{phase}_partition_hash"] = hashlib.sha256(
-                    json.dumps(sorted(sorted(group) for group in groups.values())).encode()
-                ).hexdigest()
+                result[f"{phase}_partition_hash"] = partition_sha256(connection)
                 if compare_outputs:
                     result[f"{phase}_semantic_hashes"] = save_semantic_outputs(
                         connection, config, directory, phase
                     )
         with span("validation.quality", unit="pairs"), connect() as connection:
             if case != "tiny":
-                from report import _quality_contribution
-
-                result["quality"] = _quality_contribution(
-                    connection, corpus, config.thresholds.auto_merge
+                result["quality"] = quality_from_csv(
+                    connection,
+                    corpus,
+                    config.thresholds.auto_merge,
+                    blocked_count=result[f"{phase}_candidate_pairs"],
                 )
             from fingerprint import environment_fingerprint
 

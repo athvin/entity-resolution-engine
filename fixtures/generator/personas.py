@@ -362,7 +362,13 @@ def _draw_address(rng: random.Random) -> _Address:
     )
 
 
-def _draw_email(rng: random.Random, given_name: str, family_name: str, taken: set[str]) -> str:
+def _draw_email(
+    rng: random.Random,
+    given_name: str,
+    family_name: str,
+    taken: set[str],
+    next_suffix: dict[str, int],
+) -> str:
     """`<given>.<family>@<domain>`, disambiguated by a counter when it collides.
 
     The counter rather than a redraw is deliberate: it consumes exactly one value
@@ -371,12 +377,14 @@ def _draw_email(rng: random.Random, given_name: str, family_name: str, taken: se
     """
     domain = _pick(EMAIL_DOMAINS, rng)
     local = f"{given_name}.{family_name}"
-    candidate = f"{local}@{domain}"
-    suffix = 1
+    base = f"{local}@{domain}"
+    suffix = next_suffix.get(base, 1)
+    candidate = base if suffix == 1 else f"{local}{suffix}@{domain}"
     while candidate in taken:
         suffix += 1
         candidate = f"{local}{suffix}@{domain}"
     taken.add(candidate)
+    next_suffix[base] = suffix + 1
     return candidate
 
 
@@ -395,15 +403,17 @@ def _households(rng: random.Random, n: int, household_rate: float) -> list[tuple
     pool = order[:shared_target] if shared_target >= 2 else []
 
     groups: list[tuple[int, ...]] = []
-    while len(pool) >= 2:
+    offset = 0
+    while len(pool) - offset >= 2:
+        remaining = len(pool) - offset
         size = _pick(HOUSEHOLD_SIZES, rng)
-        if len(pool) - size == 1:
+        if remaining - size == 1:
             # Never strand one person: they would fall out of every household and
             # the realised share would sit below the requested rate.
-            size = len(pool) - 2 if len(pool) - 2 >= 2 else len(pool)
-        size = min(size, len(pool))
-        groups.append(tuple(sorted(pool[:size])))
-        pool = pool[size:]
+            size = remaining - 2 if remaining - 2 >= 2 else remaining
+        size = min(size, remaining)
+        groups.append(tuple(sorted(pool[offset : offset + size])))
+        offset += size
 
     housed = {index for group in groups for index in group}
     groups.extend((index,) for index in range(n) if index not in housed)
@@ -442,6 +452,7 @@ def generate_personas(seed: int, n: int, household_rate: float) -> list[Persona]
     family = family_names()
 
     seen_emails: set[str] = set()
+    email_suffixes: dict[str, int] = {}
     seen_phones: set[str] = set()
     seen_addresses: set[_Address] = set()
 
@@ -465,7 +476,9 @@ def generate_personas(seed: int, n: int, household_rate: float) -> list[Persona]
                         persona_id=f"{PERSONA_ID_PREFIX}{index:0{PERSONA_ID_WIDTH}d}",
                         given_name=given_name,
                         family_name=family_name,
-                        email=_draw_email(rng, given_name, family_name, seen_emails),
+                        email=_draw_email(
+                            rng, given_name, family_name, seen_emails, email_suffixes
+                        ),
                         phone=_draw_unique(lambda: _draw_phone(rng), seen_phones, "phone number"),
                         address_line=address.line,
                         addr_number=address.number,

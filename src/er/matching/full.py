@@ -10,8 +10,8 @@ plus that rest, and four of its decisions are the ones a re-implementation gets 
   `lake.main.match_scores`, in a single write statement"), and S4.3.4 makes it a
   `MERGE INTO` on `(rec_a_key, rec_b_key, model_version, tf_snapshot_id)`. The two are
   one requirement: every intermediate Splink materializes lives in the in-memory
-  database, so the merge's source is a query over a `__splink__` relation joined to
-  the lake, and the lake sees a single statement. `match_scores` is cumulative and is
+  database. Predictions, selected row IDs and endpoint hashes are staged locally
+  before the lake sees a single statement. `match_scores` is cumulative and is
   **never** truncated — nothing here deletes from it — and invalidation (S4.5.5) is an
   in-place `UPDATE`, so the relation holds at most one row per logical key regardless
   of `is_active`.
@@ -59,11 +59,13 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable, Iterator, Mapping
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from itertools import batched
 from types import MappingProxyType
 from typing import Any, Final
+from uuid import uuid4
 
 import duckdb
 from splink import Linker
@@ -191,20 +193,19 @@ SELECT count(*) FROM (
 #: read by `run_id` because a `MERGE` that updated an existing row stamps it with this
 #: run — so the projection is exactly the set of pairs this stage scored.
 _SCORED_ROWS_SQL: Final = f"""
-SELECT rec_a_key, rec_b_key, match_probability, evidence
+SELECT row_number() OVER (ORDER BY rec_a_key, rec_b_key) AS batch_row,
+       rec_a_key, rec_b_key, match_probability, evidence
   FROM {_MATCH_SCORES}
  WHERE model_version = ? AND tf_snapshot_id = ? AND run_id = ?
  ORDER BY rec_a_key, rec_b_key
 """
 
 
-def _source_sql(prediction_relation: str, evidence_expression: str) -> str:
-    """The merge's source: the prediction, canonicalised, deduplicated, hash-joined.
+def _selected_predictions_sql(prediction_relation: str) -> str:
+    """Deduplicate a local table by row ID, without aggregating evidence payloads.
 
-    Four things happen in this one relation, in the order S4.3.4 lists them: self-pairs
-    are dropped, the pair is canonicalised to `rec_a_key < rec_b_key`, the result is
-    made distinct on that pair, and both endpoints' `content_hash` are joined on — the
-    two halves of the INV-SCORE key that make the score checkable after the fact.
+    Self-pairs are dropped and endpoints are canonicalised to `rec_a_key < rec_b_key`
+    before duplicate selection. Endpoint content hashes are joined on afterward.
 
     `least`/`greatest` are the canonicalisation, and S5.0's helper
     :func:`~er.entities.ids.canonicalize_pair` remains its authority: the helper is a
@@ -214,42 +215,51 @@ def _source_sql(prediction_relation: str, evidence_expression: str) -> str:
     Python instead would mean materializing the whole scored set in the process before
     it could be written, which is the one thing the single-statement rule forbids.
 
-    `DISTINCT ON` carries an explicit `ORDER BY`: without one the surviving row for a
-    duplicated pair is whichever the scan reached first, and a `MERGE` whose source
-    holds two rows for one target key has no defined outcome either.
+    Only the winning row ID is aggregated. Aggregating the evidence JSON with
+    `DISTINCT ON` retains variable-size state for every pair and can exceed the
+    memory limit even when there is ample spill space. The payload is retrieved
+    after selection. The caller stages a physical local table so its row IDs stay
+    stable throughout this statement, including when the input was a view.
+
+    Highest probability wins; local row ID breaks equal-probability ties. A merge
+    source with duplicate logical keys would otherwise have an undefined result.
     """
     left = f"{UNIQUE_ID_COLUMN}_l"
     right = f"{UNIQUE_ID_COLUMN}_r"
     return f"""
+    SELECT DISTINCT ON (rec_a_key, rec_b_key) rec_a_key, rec_b_key, prediction_id
+      FROM (
+            SELECT least({left}, {right}) AS rec_a_key,
+                   greatest({left}, {right}) AS rec_b_key,
+                   match_probability, rowid AS prediction_id
+              FROM {prediction_relation}
+             WHERE {left} <> {right}
+           )
+     ORDER BY rec_a_key, rec_b_key, match_probability DESC, prediction_id
+    """
+
+
+def _source_sql(prediction_relation: str, selected_relation: str) -> str:
+    """Retrieve the selected payloads and canonical endpoint hashes after deduplication."""
+    return f"""
     SELECT pair.rec_a_key,
            pair.rec_b_key,
-           pair.match_probability,
+           prediction.match_probability,
            ? AS model_version,
            ? AS tf_snapshot_id,
            rec_a.content_hash AS rec_a_content_hash,
            rec_b.content_hash AS rec_b_content_hash,
-           pair.evidence,
+           prediction.evidence,
            ? AS run_id,
            CAST(? AS TIMESTAMP) AS scored_at
-      FROM (
-            SELECT DISTINCT ON (rec_a_key, rec_b_key)
-                   rec_a_key, rec_b_key, match_probability, evidence
-              FROM (
-                    SELECT least({left}, {right})    AS rec_a_key,
-                           greatest({left}, {right}) AS rec_b_key,
-                           match_probability,
-                           {evidence_expression}     AS evidence
-                      FROM {prediction_relation}
-                     WHERE {left} <> {right}
-                   )
-             ORDER BY rec_a_key, rec_b_key, match_probability DESC
-           ) AS pair
+      FROM {selected_relation} AS pair
+      JOIN {prediction_relation} AS prediction ON prediction.rowid = pair.prediction_id
       JOIN {_STD_RECORDS} AS rec_a ON rec_a.{UNIQUE_ID_COLUMN} = pair.rec_a_key
       JOIN {_STD_RECORDS} AS rec_b ON rec_b.{UNIQUE_ID_COLUMN} = pair.rec_b_key
     """
 
 
-def _merge_sql(prediction_relation: str, evidence_expression: str) -> str:
+def _merge_sql(source_relation: str) -> str:
     """THE write: one `MERGE INTO` on S5.0's logical key (S4.3.4, S4.0b).
 
     One `WHEN MATCHED` and one `WHEN NOT MATCHED`, which is what DuckLake's `MERGE`
@@ -266,7 +276,7 @@ def _merge_sql(prediction_relation: str, evidence_expression: str) -> str:
     values = ", ".join(_SOURCE_EXPRESSION[column] for column in _COLUMNS)
     return f"""
 MERGE INTO {_MATCH_SCORES} AS target
-USING ({_source_sql(prediction_relation, evidence_expression)}) AS source
+USING {source_relation} AS source
    ON {predicate}
  WHEN MATCHED THEN UPDATE SET
          {assignments}
@@ -464,6 +474,24 @@ class ScoreSummary:
     review_queue_refreshed: int = 0
 
 
+@contextmanager
+def _staged_query(
+    connection: duckdb.DuckDBPyConnection, query: str, parameters: list[Any] | None = None
+) -> Iterator[str]:
+    """Keep intermediate payloads in spillable local storage, with caller-owned transactions."""
+    relation = f"temp.main.er_match_stage_{uuid4().hex}"
+    connection.execute(f"CREATE TEMP TABLE {relation} AS {query}", parameters or [])
+    try:
+        yield relation
+    except BaseException:
+        # Cleanup must not hide the original failure in an aborted transaction.
+        with suppress(duckdb.Error):
+            connection.execute(f"DROP TABLE {relation}")
+        raise
+    else:
+        connection.execute(f"DROP TABLE {relation}")
+
+
 def _scored_rows(
     connection: duckdb.DuckDBPyConnection,
     *,
@@ -478,15 +506,20 @@ def _scored_rows(
     had to express in SQL. A row whose keys came back in the other order — or with the
     two equal — raises here, before anything downstream joins one-sided on it.
     """
-    # Finish the query into a native result before interleaving review writes:
-    # lazy fetchmany() would otherwise lose unread chunks on the next execute().
-    # Python receives only bounded batches. Using this connection also preserves
-    # visibility of the caller's uncommitted scores, unlike a duplicate connection.
-    result = connection.sql(_SCORED_ROWS_SQL, params=[model_version, tf_snapshot_id, run_id])
-    assert result is not None
-    try:
-        result.execute()
-        while rows := result.fetchmany(BATCH_ROWS):
+    # A native materialized result can retain the whole payload outside DuckDB's
+    # managed buffer pool. A temporary table can spill and also survives interleaved
+    # review writes on this same connection, including in an uncommitted transaction.
+    # The ordered batch ordinal gives each read a bounded, zone-map-prunable range.
+    with _staged_query(
+        connection, _SCORED_ROWS_SQL, [model_version, tf_snapshot_id, run_id]
+    ) as relation:
+        offset = 0
+        while rows := connection.execute(
+            f"SELECT rec_a_key, rec_b_key, match_probability, evidence FROM {relation} "
+            "WHERE batch_row > ? AND batch_row <= ? ORDER BY batch_row",
+            [offset, offset + BATCH_ROWS],
+        ).fetchall():
+            offset += BATCH_ROWS
             for rec_a_key, rec_b_key, match_probability, evidence in rows:
                 canonical = canonicalize_pair(str(rec_a_key), str(rec_b_key))
                 if canonical != (str(rec_a_key), str(rec_b_key)):
@@ -501,8 +534,6 @@ def _scored_rows(
                     match_probability=float(match_probability),
                     evidence_json=str(evidence),
                 )
-    finally:
-        result.close()
 
 
 @profiled("match.classify_scores", "pairs")
@@ -592,10 +623,24 @@ def merge_match_scores(
     Raises:
         er.errors.StageFailure: a persisted pair is not in the S5.0 canonical ordering.
     """
-    connection.execute(
-        _merge_sql(prediction_relation, evidence_expression),
-        [model_version, tf_snapshot_id, run_id, _stamp(scored_at)],
-    )
+    # Materialize only the score payload in the local catalog. This also supplies
+    # stable row IDs when an incremental caller passes a view or derived relation.
+    # The lake still receives exactly one atomic MERGE, with no partial score batches.
+    with _staged_query(
+        connection,
+        f"SELECT {UNIQUE_ID_COLUMN}_l, {UNIQUE_ID_COLUMN}_r, match_probability, "
+        f"{evidence_expression} AS evidence FROM {prediction_relation} "
+        f"WHERE {UNIQUE_ID_COLUMN}_l <> {UNIQUE_ID_COLUMN}_r",
+    ) as staged:
+        # Separate the aggregate, endpoint joins and lake writer, so their
+        # working sets do not have to fit in memory simultaneously.
+        with _staged_query(connection, _selected_predictions_sql(staged)) as selected:
+            with _staged_query(
+                connection,
+                _source_sql(staged, selected),
+                [model_version, tf_snapshot_id, run_id, _stamp(scored_at)],
+            ) as source:
+                connection.execute(_merge_sql(source))
     return _scored_rows(
         connection,
         model_version=model_version,

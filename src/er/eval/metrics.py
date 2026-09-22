@@ -1,8 +1,9 @@
 """The single quality-metric implementation of S8.5 (DesignDoc.md S8.5, S5.0).
 
 Every match-quality number in the repository — T-MATCH-1a, T-MATCH-1b, the
-benchmark's quality block — is computed by :func:`pairwise_metrics` and by nothing
-else. `scripts/lint_metrics.py` runs in the static job (S9.1) and fails on a second
+benchmark's quality block — uses the shared formulas in this module, through
+:func:`pairwise_metrics` or :func:`pairwise_metrics_from_counts` for SQL counts.
+`scripts/lint_metrics.py` runs in the static job (S9.1) and fails on a second
 implementation, so the function's conventions are load-bearing for every caller and
 are pinned here rather than left to each call site:
 
@@ -34,6 +35,7 @@ __all__ = [
     "cluster_closure_pairs",
     "membership_partition",
     "pairwise_metrics",
+    "pairwise_metrics_from_counts",
 ]
 
 #: A canonical pair: `rec_a_key < rec_b_key` (S5.0).
@@ -156,7 +158,21 @@ def pairwise_metrics(
     tp = len(predicted & truth)
     fp = len(predicted - truth)
     fn = len(truth - predicted)
-    precision = 1.0 if not predicted else tp / (tp + fp)
-    recall = 1.0 if not truth else tp / (tp + fn)
+    return pairwise_metrics_from_counts(tp, fp, fn)
+
+
+def pairwise_metrics_from_counts(tp: int, fp: int, fn: int) -> PairwiseMetrics:
+    """Compute the same metrics after a caller validates and counts its pair sets.
+
+    Large benchmark validators count intersections in SQL instead of constructing
+    hundreds of millions of Python pairs. Canonical ordering and universe checks
+    remain the caller's responsibility; the ratio conventions stay here.
+    """
+    if any(
+        isinstance(count, bool) or not isinstance(count, int) or count < 0 for count in (tp, fp, fn)
+    ):
+        raise ValueError("pair counts must be non-negative integers")
+    precision = 1.0 if tp + fp == 0 else tp / (tp + fp)
+    recall = 1.0 if tp + fn == 0 else tp / (tp + fn)
     f1 = 0.0 if precision + recall == 0 else 2 * precision * recall / (precision + recall)
     return PairwiseMetrics(tp=tp, fp=fp, fn=fn, precision=precision, recall=recall, f1=f1)

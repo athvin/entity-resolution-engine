@@ -19,11 +19,25 @@ from typing import Any
 
 from build_performance_image import EXCLUDED, PATHS
 from performance import processing_resources
-from scales import Scale, _memory_bytes, get_scale, load_scales
+from scales import Scale, _memory_bytes, load_scales
+from scales import get_scale as standard_scale
 
 ROOT = Path(__file__).resolve().parents[1]
 GIB = 1024**3
 STAGES = ("ingest", "standardize", "train", "match", "reconcile", "assemble")
+
+
+def get_scale(name: str) -> Scale:
+    """The experimental 10m initial load reuses 1m's envelope, outside scheduled CI."""
+    if name == "10m":
+        return replace(
+            standard_scale("1m"),
+            name="10m",
+            personas=4_000_000,
+            records=10_000_000,
+            incremental_batch=0,
+        )
+    return standard_scale(name)
 
 
 def output(command: list[str]) -> str:
@@ -265,6 +279,7 @@ def worker(args: argparse.Namespace) -> None:
         detailed=False,
         initial_only=True,
         corpus_root=args.out / "inputs",
+        workload=get_scale(args.scale),
     )
     errors = comparability_violations(
         {"fingerprint": run["fingerprint"], "phases": []},
@@ -437,7 +452,7 @@ def campaign(args: argparse.Namespace, checked: dict[str, Any]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scale", choices=tuple(load_scales()), default="1m")
+    parser.add_argument("--scale", choices=(*load_scales(), "10m"), default="1m")
     parser.add_argument("--repeat", type=int, default=1, help="fresh initial loads; default: 1")
     parser.add_argument(
         "--local",

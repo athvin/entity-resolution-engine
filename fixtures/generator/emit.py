@@ -37,7 +37,8 @@ hand-authored (S8.2) and is a `protected_paths` entry of this ticket.
 from __future__ import annotations
 
 import csv
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
+from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -262,7 +263,7 @@ def _counts_per_persona(persona_count: int, records: int) -> list[int]:
     return [base + (1 if index < remainder else 0) for index in range(persona_count)]
 
 
-def _deal(counts: Sequence[int], offsets: Sequence[int]) -> list[tuple[int, int, str]]:
+def _deal(counts: Sequence[int], offsets: Sequence[int]) -> Iterator[tuple[int, int, str]]:
     """`(persona index, ordinal, source)` for every row of one delivery.
 
     ``offsets[i]`` is the number of records persona ``i`` already holds, so a `batch/`
@@ -270,12 +271,10 @@ def _deal(counts: Sequence[int], offsets: Sequence[int]) -> list[tuple[int, int,
     of one persona with the same ordinal would draw the same corruptions from the
     same stream and be byte-identical apart from their record id.
     """
-    rows: list[tuple[int, int, str]] = []
     for index, count in enumerate(counts):
         for step in range(count):
             ordinal = offsets[index] + step
-            rows.append((index, ordinal, SOURCE_ORDER[(index + ordinal) % len(SOURCE_ORDER)]))
-    return rows
+            yield index, ordinal, SOURCE_ORDER[(index + ordinal) % len(SOURCE_ORDER)]
 
 
 def _updated_at(seed: int, source: str, persona_index: int, ordinal: int) -> str:
@@ -333,7 +332,7 @@ def _write_csv(path: Path, header: Sequence[str], rows: Sequence[Sequence[str]])
 
 def _write_delivery(
     out_dir: Path,
-    deal: Sequence[tuple[int, int, str]],
+    deal: Iterable[tuple[int, int, str]],
     personas: Sequence[Persona],
     profiles: Mapping[str, CorruptionProfile],
     config: Config,
@@ -347,38 +346,42 @@ def _write_delivery(
     same `(source_system, source_record_id)`, which S5.0 makes one record's key.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
-    rows: dict[str, list[tuple[str, ...]]] = {source: [] for source in SOURCE_ORDER}
     truth: list[tuple[str, str, str]] = []
-
-    for persona_index, ordinal, source in deal:
-        record_id = f"{SOURCE_RECORD_ID_PREFIXES[source]}{next_id[source]:0{RECORD_ID_WIDTH}d}"
-        next_id[source] += 1
-        persona = personas[persona_index]
-        rows[source].append(
-            _row(
-                record_id,
-                persona,
-                profiles[source],
-                seed,
-                source,
-                persona_index,
-                ordinal,
-                config.sources[source].date_format,
+    written = [out_dir / f"{source}.csv" for source in SOURCE_ORDER]
+    with ExitStack() as files:
+        writers = {
+            source: csv.writer(
+                files.enter_context(path.open("w", encoding="utf-8", newline="")),
+                lineterminator=_LINE_TERMINATOR,
             )
-        )
-        truth.append((persona.persona_id, source, record_id))
-
-    written: list[Path] = []
-    for source in SOURCE_ORDER:
-        path = out_dir / f"{source}.csv"
-        _write_csv(path, SOURCE_HEADERS[source], rows[source])
-        written.append(path)
+            for source, path in zip(SOURCE_ORDER, written, strict=True)
+        }
+        for source, writer in writers.items():
+            writer.writerow(SOURCE_HEADERS[source])
+        for persona_index, ordinal, source in deal:
+            record_id = f"{SOURCE_RECORD_ID_PREFIXES[source]}{next_id[source]:0{RECORD_ID_WIDTH}d}"
+            next_id[source] += 1
+            persona = personas[persona_index]
+            writers[source].writerow(
+                _row(
+                    record_id,
+                    persona,
+                    profiles[source],
+                    seed,
+                    source,
+                    persona_index,
+                    ordinal,
+                    config.sources[source].date_format,
+                )
+            )
+            truth.append((persona.persona_id, source, record_id))
 
     truth_path = out_dir / TRUTH_FILENAME
     # Sorted on the full column tuple, which is S8.2.1's rule for every committed
     # truth file: a corpus regenerated with a reordered deal then produces a
     # byte-identical truth set, so a diff here means the LABELS changed.
-    _write_csv(truth_path, TRUTH_HEADER, sorted(truth))
+    truth.sort()
+    _write_csv(truth_path, TRUTH_HEADER, truth)
     written.append(truth_path)
     return written
 

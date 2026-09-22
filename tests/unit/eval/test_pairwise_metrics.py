@@ -12,11 +12,17 @@ from itertools import combinations
 
 import pytest
 
-from er.eval.metrics import PairwiseMetrics, pairwise_metrics
+from er.eval.metrics import PairwiseMetrics, pairwise_metrics, pairwise_metrics_from_counts
 
 #: Three records, canonically ordered, and their full C(3,2) universe.
 A, B, C = "s:a", "s:b", "s:c"
 UNIVERSE = {(A, B), (A, C), (B, C)}
+
+
+@pytest.mark.parametrize("counts", [(-1, 0, 0), (0, -1, 0), (0, 0, -1), (True, 0, 0), (1.5, 0, 0)])
+def test_precounted_metrics_reject_invalid_counts(counts) -> None:
+    with pytest.raises(ValueError, match="non-negative integers"):
+        pairwise_metrics_from_counts(*counts)
 
 
 def test_hand_computed_case() -> None:
