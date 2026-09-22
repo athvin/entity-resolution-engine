@@ -179,15 +179,16 @@ def test_probability_boundary_survives_ducklake_filtering(
     """A lake scan must include equality and exclude the adjacent lower DOUBLE."""
     model_version, tf_snapshot_id, _ = load_fixture_model(initialised_lake)
     below, above = nextafter(boundary, 0.0), nextafter(boundary, 1.0)
-    for pair, probability in ((PAIR_AB, below), (PAIR_CD, boundary), (PAIR_EF, above)):
+    for pair, probability in ((PAIR_AB, below), (PAIR_CD, boundary)):
         insert_edge(initialised_lake, pair, probability, model_version, tf_snapshot_id)
 
-    # Small inserts otherwise remain in the catalog and miss the Parquet scan
-    # that exposed this boundary failure during incremental matching.
+    # Make the boundary the file maximum: putting the higher score in this file
+    # would hide incorrect file pruning. Small inserts otherwise stay inlined.
     flushed = initialised_lake.execute(
         "CALL ducklake_flush_inlined_data('lake', table_name => 'match_scores')"
     ).fetchall()
-    assert flushed == [("main", "match_scores", 3)]
+    assert flushed == [("main", "match_scores", 2)]
+    insert_edge(initialised_lake, PAIR_EF, above, model_version, tf_snapshot_id)
 
     assert current_edges(
         initialised_lake, model_version, tf_snapshot_id, min_probability=boundary
