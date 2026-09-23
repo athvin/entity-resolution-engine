@@ -13,22 +13,24 @@ workload reuses the trained model. This is a measured scale test, not a repeated
 baseline/candidate comparison or a claim that the earlier 1M tuning gains hold at
 10M. See the [1M tuning measurements](performance-workload-tuning.md) separately.
 
-**Validation status: recovery running.** Both timed command chains succeeded. The
-original campaign failed afterward in the benchmark's corpus-wide candidate-pair
-`DISTINCT`, which exceeded the 4 GB DuckDB limit across 567,184,685 candidate pairs.
+**Validation status: passed through snapshot recovery.** Both timed command chains
+succeeded. The original campaign failed afterward in the benchmark's corpus-wide
+candidate-pair `DISTINCT`, which exceeded the 4 GB DuckDB limit across 567,184,685 pairs.
 The application's full load and incremental commands did not fail. The original
 failed result is retained unchanged.
 
 The [benchmark serializer](../benchmarks/semantic_outputs.py) now deduplicates
 ordered ranges of integer record IDs and encodes JSON in pages. Six focused checks
 verify unchanged legacy hashes, including overlapping keys, duplicates, nulls,
-empty strings, Unicode and page boundaries. Recovery uses the saved lake snapshots,
-the same application image and the same resource limits. It repeats only deferred
+empty strings, Unicode and page boundaries. Recovery used the saved lake snapshots,
+the same application image and the same resource limits. It repeated only deferred
 validation and the frozen-model reference run, without retraining or replacing
 the measured workload times. The
 [recovery log](../artifacts/bench/workload-10m-100k-20260923T122937Z/recovery.log)
 and [recovery result](../artifacts/bench/workload-10m-100k-20260923T122937Z/validation-recovery/result.json)
-record that separate audit. Full equivalence remains pending until it completes.
+record that separate audit. Recovery completed successfully, including the
+frozen-model incremental/full equivalence check. This does not overwrite the
+original campaign's failed status or error.
 
 ## Stage times
 
@@ -51,7 +53,39 @@ command took 155.775s. Reconciliation processed 243,391 affected records, with
 72,399 touched entity IDs entering golden assembly and 70,651 output entities.
 The full reload created 3,898,183 entities and stored 8,451,869 scored pairs,
 of which 8,192,404 exceeded the auto-merge threshold. Candidate-pair counts and
-ground-truth quality are separate deferred measurements.
+ground-truth quality below were measured separately from workload timing.
+
+## Outputs and quality
+
+The full-load and incremental snapshot audits passed their record, membership,
+golden-record and lineage checks. Model and frozen-TF content hashes are identical
+before and after the increment and the full reference run. The reference's cluster
+partition and all six canonical output hashes match the incremental snapshot:
+standardized records, blocking keys, candidate pairs, golden records, lineage and
+score classifications. Comparing all **8,621,617 scored pairs** found **zero
+mismatches and a maximum probability difference of 0.0** (tolerance `1e-10`).
+The reference used the same frozen model and TF snapshot, without retraining.
+
+| Output or metric | After full reload | After 100K increment |
+|---|---:|---:|
+| Active records and memberships | 10,000,000 | 10,100,000 |
+| Golden records | 3,898,183 | 3,916,446 |
+| Golden lineage rows | 23,389,098 | 23,498,676 |
+| Candidate pairs | 567,184,685 | 578,562,960 |
+| Stored scored pairs | 8,451,869 | 8,621,617 |
+| Blocking recall | 99.5622% | 99.5622% |
+| Cluster precision | 82.7406% | 82.7336% |
+| Cluster recall | 97.9097% | 97.9230% |
+| False-positive cluster pairs | 1,633,894 | 1,668,579 |
+
+The existing precision gap remains. Completing the pipeline and preserving
+incremental semantics are distinct from meeting a production accuracy target.
+
+At the same local resource envelope and application image, the earlier three
+1M trials had medians of 91.70s for reload and 39.48s for a 100K increment. This
+single 10M result took about 69.5 times as long for reload and 4.3 times as long for
+the same-sized increment against the larger lake. These describe observed workload
+scaling, not a controlled tuning gain or a prediction for other machines/corpora.
 
 ## Resource envelope and observations
 
@@ -63,7 +97,9 @@ ground-truth quality are separate deferred measurements.
 
 The pipeline used two CPUs, two DuckDB threads, a 4 GB DuckDB memory limit and
 a 10 GiB container limit on the local ARM64 Docker host. PostgreSQL and MinIO
-provided the DuckLake catalog and object storage. Container memory includes
+provided the DuckLake catalog and object storage. Runtime pins were DuckDB 1.5.5,
+DuckLake `d8a1881e`, Splink `5.0.0.dev5`, dbt-core 1.12.2 and dbt-duckdb 1.11.0.
+Container memory includes
 children and page cache and excludes the catalog/object-store services. Sampling
 can miss brief peaks; these numbers are not minimum memory requirements. Spill is
 the size of live temporary files, not cumulative bytes written.

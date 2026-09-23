@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-09-23T14:53:42.710464+00:00",
+  "updated_at": "2026-09-23T16:12:30.007869+00:00",
   "scope": "one unprofiled 10M full reload followed by a 100K mixed-v1 increment",
   "artifact_root": "artifacts/bench/workload-10m-100k-20260923T122937Z",
   "timed_workloads_status": "succeeded",
-  "validation_status": "running",
+  "validation_status": "passed",
   "limitations": [
     "single local trial; no controlled 10M tuning speedup comparison",
     "baseline synthetic generator; not hard-profile or real tenant data",
@@ -914,7 +914,7 @@
     }
   ],
   "validation_recovery": {
-    "status": "running",
+    "status": "succeeded",
     "original_run_status": "failed",
     "original_error": "OutOfMemoryException: Out of Memory Error: failed to allocate data of size 4.0 KiB (3.7 GiB/3.7 GiB used)\n\nPossible solutions:\n* Reducing the number of threads (SET threads=X)\n* Disabling insertion-order preservation (SET preserve_insertion_order=false)\n* Increasing the memory limit (SET memory_limit='...GB')\n\nSee also https://duckdb.org/docs/stable/guides/performance/how_to_tune_workloads",
     "checkpoints": {
@@ -1044,6 +1044,212 @@
             }
           }
         }
+      },
+      "base.semantics": {
+        "seconds": 1154.9212392749905,
+        "value": {
+          "int_std_records": "a73e958bfe68dc34173750107ef265b61c658cc3ca13ea96b1f5bc1535937a6e",
+          "int_blocking_keys": "4f4974ade1c73b8223159182c40940e339b5d003cf365265a4249bcd3cac1045",
+          "golden_records": "3554cd592920e66eb2c4735a0bfe1f4a685cbf18dc3ee6d1a6cd8e7f68ce22e5",
+          "golden_lineage": "609479ae348dc3e3d07e8b370a43fc1413331253f23362457ee74dd9c518ed85",
+          "candidate_pairs": "cbacf2b63e420b8945590482da66764acc42456e552a751466d15bc762599552",
+          "score_classifications": "481a111ec26c8d2a58ab332881c79021758f1823db818a16cac08e19ceaad71f"
+        }
+      },
+      "batch.outputs": {
+        "seconds": 16.649881466000807,
+        "value": {
+          "raw_records": 10100000,
+          "int_std_records": 10100000,
+          "entity_membership": 10100000,
+          "golden_records": 3916446,
+          "entities": 3916446,
+          "golden_lineage": 23498676
+        }
+      },
+      "batch.counts": {
+        "seconds": 0.02711274998728186,
+        "value": {
+          "raw_records": 10100000,
+          "int_std_records": 10100000,
+          "int_blocking_keys": 38443405,
+          "match_scores": 8621617,
+          "entity_membership": 10100000,
+          "golden_records": 3916446,
+          "golden_lineage": 23498676
+        }
+      },
+      "batch.blocking": {
+        "seconds": 8.434738587005995,
+        "value": [
+          {
+            "key_type": "dob_name",
+            "key_rows": 9323893,
+            "buckets": 1818654,
+            "largest_bucket": 59,
+            "p99_bucket": 22,
+            "raw_pair_occurrences": 36464674
+          },
+          {
+            "key_type": "email_exact",
+            "key_rows": 9526352,
+            "buckets": 4844563,
+            "largest_bucket": 6,
+            "p99_bucket": 4,
+            "raw_pair_occurrences": 6166463
+          },
+          {
+            "key_type": "name_postal",
+            "key_rows": 10100000,
+            "buckets": 332371,
+            "largest_bucket": 388,
+            "p99_bucket": 228,
+            "raw_pair_occurrences": 545136525
+          },
+          {
+            "key_type": "phone_exact",
+            "key_rows": 9493160,
+            "buckets": 4363583,
+            "largest_bucket": 7,
+            "p99_bucket": 4,
+            "raw_pair_occurrences": 6949219
+          }
+        ]
+      },
+      "batch.candidate_count": {
+        "seconds": 107.81294650700875,
+        "value": 578562960
+      },
+      "batch.partition": {
+        "seconds": 8.383046211994952,
+        "value": "7c34727ea1aad7324657a9e89dccab622707cffb15e6f199d257c549b25676b9"
+      },
+      "batch.model": {
+        "seconds": 2.446931376005523,
+        "value": {
+          "model_sha256": "10e8256bc9027f25a4de0510ceb88287a9ff60c1c0b2640e6113fc7754a22933",
+          "tf_sha256": "9600059c421aa2e81a7286b98187927aea627f185400355977a7c98c6cd7b643"
+        }
+      },
+      "batch.quality": {
+        "seconds": 59.98241311102174,
+        "value": {
+          "blocking_recall": 0.9956218941058343,
+          "quality": {
+            "edge_precision": 0.9443786063316496,
+            "edge_recall": 0.9709907968682879,
+            "edge_f1": 0.9574998263785167,
+            "cluster_precision": 0.827335710748182,
+            "cluster_recall": 0.9792302685775552,
+            "cluster_f1": 0.8968974059193975
+          },
+          "families": {
+            "blocking": {
+              "tp": 8128972,
+              "fp": 570433988,
+              "fn": 35746,
+              "precision": 0.01405028071620762,
+              "recall": 0.9956218941058343,
+              "f1": 0.02770952284954248
+            },
+            "edge": {
+              "tp": 7893157,
+              "fp": 464886,
+              "fn": 235815,
+              "precision": 0.9443786063316496,
+              "recall": 0.9709907968682879,
+              "f1": 0.9574998263785167
+            },
+            "cluster": {
+              "tp": 7995139,
+              "fp": 1668579,
+              "fn": 169579,
+              "precision": 0.827335710748182,
+              "recall": 0.9792302685775552,
+              "f1": 0.8968974059193975
+            }
+          }
+        }
+      },
+      "batch.semantics": {
+        "seconds": 1184.4378229999857,
+        "value": {
+          "int_std_records": "5fd1f45f340e34aa46b4a6c53e49a2156daf141393e1b839cac85ebcea08e883",
+          "int_blocking_keys": "9e7c5faa7b8d3ed65c9ee63f84b1bf1321cb9e1174b1ff827247970ad10dcb21",
+          "golden_records": "743a32fc771b69ae998dcfbb8b5a714aadbd53fc7651504efcd720203453d043",
+          "golden_lineage": "472569eaa494bf5b42323986d048789d8fc0594c77d443190d081e627ad9ad5d",
+          "candidate_pairs": "628df44e9c98df4b91ae01240a39b5347576caa938f89ad942c7142f643354b4",
+          "score_classifications": "34fe35ebadd1a7b9030c241b453a6b938e85a315b2785c8320a4274e1a5899a6"
+        }
+      },
+      "reference.command": {
+        "seconds": 1240.98785623,
+        "value": {
+          "command": [
+            "er",
+            "run-all",
+            "--mode",
+            "full",
+            "--skip-ingest",
+            "--config",
+            "/benchmark/run-001/config.yaml",
+            "--json",
+            "--run-id",
+            "01M37E7GNBEJF9FKY9JT5JZESE"
+          ],
+          "exit_code": 0
+        }
+      },
+      "reference.generation": {
+        "seconds": 0.07345612498465925,
+        "value": {
+          "snapshot": 134,
+          "model_version": "v0001",
+          "tf_snapshot_id": "01M374DTJ1A3TNM30ZKGCXRYTG"
+        }
+      },
+      "reference.outputs": {
+        "seconds": 13.892937090015039,
+        "value": {
+          "raw_records": 10100000,
+          "int_std_records": 10100000,
+          "entity_membership": 10100000,
+          "golden_records": 3916446,
+          "entities": 3916446,
+          "golden_lineage": 23498676
+        }
+      },
+      "reference.partition": {
+        "seconds": 8.190181461017346,
+        "value": "7c34727ea1aad7324657a9e89dccab622707cffb15e6f199d257c549b25676b9"
+      },
+      "reference.model": {
+        "seconds": 2.6383397099853028,
+        "value": {
+          "model_sha256": "10e8256bc9027f25a4de0510ceb88287a9ff60c1c0b2640e6113fc7754a22933",
+          "tf_sha256": "9600059c421aa2e81a7286b98187927aea627f185400355977a7c98c6cd7b643"
+        }
+      },
+      "reference.semantics": {
+        "seconds": 1182.3731934539974,
+        "value": {
+          "int_std_records": "5fd1f45f340e34aa46b4a6c53e49a2156daf141393e1b839cac85ebcea08e883",
+          "int_blocking_keys": "9e7c5faa7b8d3ed65c9ee63f84b1bf1321cb9e1174b1ff827247970ad10dcb21",
+          "golden_records": "743a32fc771b69ae998dcfbb8b5a714aadbd53fc7651504efcd720203453d043",
+          "golden_lineage": "472569eaa494bf5b42323986d048789d8fc0594c77d443190d081e627ad9ad5d",
+          "candidate_pairs": "628df44e9c98df4b91ae01240a39b5347576caa938f89ad942c7142f643354b4",
+          "score_classifications": "34fe35ebadd1a7b9030c241b453a6b938e85a315b2785c8320a4274e1a5899a6"
+        }
+      },
+      "equivalence.scores": {
+        "seconds": 44.510293478000676,
+        "value": {
+          "pairs": 8621617,
+          "mismatches": 0,
+          "max_probability_delta": 0.0,
+          "tolerance": 1e-10,
+          "status": "passed"
+        }
       }
     },
     "code_sha256": {
@@ -1077,6 +1283,35 @@
       "model_version": "v0001",
       "tf_snapshot_id": "01M374DTJ1A3TNM30ZKGCXRYTG"
     },
-    "active_step": "base.semantics"
+    "incremental_equivalence": {
+      "status": "passed",
+      "partition_sha256": "7c34727ea1aad7324657a9e89dccab622707cffb15e6f199d257c549b25676b9",
+      "semantic_hashes": {
+        "int_std_records": "5fd1f45f340e34aa46b4a6c53e49a2156daf141393e1b839cac85ebcea08e883",
+        "int_blocking_keys": "9e7c5faa7b8d3ed65c9ee63f84b1bf1321cb9e1174b1ff827247970ad10dcb21",
+        "golden_records": "743a32fc771b69ae998dcfbb8b5a714aadbd53fc7651504efcd720203453d043",
+        "golden_lineage": "472569eaa494bf5b42323986d048789d8fc0594c77d443190d081e627ad9ad5d",
+        "candidate_pairs": "628df44e9c98df4b91ae01240a39b5347576caa938f89ad942c7142f643354b4",
+        "score_classifications": "34fe35ebadd1a7b9030c241b453a6b938e85a315b2785c8320a4274e1a5899a6"
+      },
+      "generation": {
+        "snapshot": 134,
+        "model_version": "v0001",
+        "tf_snapshot_id": "01M374DTJ1A3TNM30ZKGCXRYTG"
+      },
+      "scores": {
+        "pairs": 8621617,
+        "mismatches": 0,
+        "max_probability_delta": 0.0,
+        "tolerance": 1e-10,
+        "status": "passed"
+      },
+      "model_fingerprint": {
+        "model_sha256": "10e8256bc9027f25a4de0510ceb88287a9ff60c1c0b2640e6113fc7754a22933",
+        "tf_sha256": "9600059c421aa2e81a7286b98187927aea627f185400355977a7c98c6cd7b643"
+      }
+    },
+    "sampler_error": null,
+    "attempt_seconds": 5234.138990836014
   }
 }
