@@ -53,6 +53,19 @@ quality. `make benchmark BENCHMARK_REPEAT=3` repeats the load for a median;
 a correction separately. Resource limits fit the local Docker host and are
 recorded with the results; see the [performance guide](docs/performance.md).
 
+Use `make profile-workloads` for the primary diagnostic campaign: a **1M full reload
+followed by 100K net-new record keys on the same lake**, with separate unprofiled and
+profiled trials. Both workloads get independent reports, native DuckDB query files,
+DuckLake storage evidence and output-equivalence checks. See the
+[profiling guide](docs/profiling.md) and repository
+[analysis skill](.agents/skills/ducklake-performance/SKILL.md).
+The first [1M/100K measurements and tuning backlog](docs/performance-profiling-1m-100k.md)
+record a 93.3s reload and a 39.6s incremental delivery on the documented local envelope.
+The follow-up [profile-guided tuning](docs/performance-workload-tuning.md) compares
+three trials per version: medians improve from 94.07s to 91.70s for reload and from
+39.96s to 39.48s for incremental processing. It also records rejected SQL and layout
+experiments, including the cost of ordered and partitioned writes.
+
 ## Documentation
 
 | Guide | Use it for |

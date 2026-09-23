@@ -1821,6 +1821,59 @@ Smoke remains a quick harness check; its timings are not a substitute for the
 confirmation in S10.6. These local measurements do not create a CI regression
 baseline for a different runner or resource envelope.
 
+**Dual-workload profiling contract.** `make profile-workloads` measures
+`full-1m-incremental-100k-v1`: a fresh 1,000,000-record full load, including training
+and golden lineage, followed on the same lake by 100,000 net-new record keys.
+The baseline profile and reference configuration use seed 42. `mixed-v1` adds
+50,000 records for distinct existing people and 50,000 records for 20,000 new
+people (two or three records each). Base input bytes remain unchanged. Existing
+scale definitions and legacy incremental scenarios remain compatible.
+
+The campaign runs a timing control and a separately instrumented trial, on
+identical immutable inputs, source/image versions and resource envelopes. Full
+and incremental processing times, stages, resources and findings MUST be reported
+separately. The incremental phase MUST reuse its full load's model and frozen TF.
+Heavy validation is deferred until both timed workloads finish, using recorded
+DuckLake snapshots. An untimed full rescore of the final corpus with the same
+model/TF MUST reproduce the incremental partition, golden values and lineage.
+Across independent control/diagnostic trainings, retain model hashes and compare
+learned probabilities with absolute tolerance `1e-12`; other model fields and TF
+content compare exactly. Report roundoff and byte differences explicitly. Within
+each trial the model/TF hashes MUST remain identical. Pair probabilities compare
+within `1e-10` across trials; threshold classifications and resolved outputs are exact.
+
+Native SQL JSON profiles are unique per execution and correlated with workload,
+connection, stage, dbt model and training estimator. Coverage must account for
+executed workload statements, EM sessions and both incremental passes; one profile
+per stage is insufficient. Collection failures or missing measurements cannot be
+successful zeroes. Python diagnostic profiles and DuckLake file/catalog evidence
+are collected separately from the timing control. Diagnostics never replay writes
+through EXPLAIN ANALYZE, and instrumentation stays opt-in.
+
+The first delivery measures the existing algorithms and publishes evidence-linked
+tuning proposals. DuckLake tables have no ordinary indexes. Ordered writes,
+partitioning, compaction, native scratch indexes and Python-to-SQL pushdown are
+evaluated against the actual access paths and pinned capabilities. Proposed layout
+changes include sort/build/rewrite/maintenance costs and effects on BOTH workloads.
+See [the implementation plan](docs/performance-profiling-plan.md).
+
+**Profile-guided implementation experiments.** Preserve candidate generation,
+model/TF parameters, exact event bytes and hashes, deterministic partitions and
+survivorship rule attribution. Reconciliation may capture the current scored edges
+once in a temporary table under its writer lock; assertion overrides and cut
+rederivation remain separate and must not be cached across mutations or runs.
+Event serialization may reuse immutable encoded bytes for hashing and persistence,
+and bounded staging pages may grow when measured memory remains within the envelope.
+Survivorship may use a bounded top-two aggregate instead of ranking every member,
+provided it preserves both the winner and the nearest rival used for rule attribution,
+including null ordering and the terminal record-key tie break. Ordered writes and
+partition experiments require measured gains including their write costs. Publish
+baseline/candidate timings and correctness for both workloads before retaining a
+candidate; no model, threshold or blocking change is implied by these experiments.
+The [measured follow-up](docs/performance-workload-tuning.md) records retained
+event-encoding reuse, 8,192-row staging pages and temporary current-score reuse,
+along with rejected survivorship and raw-record layout alternatives.
+
 | Scale | Personas | Records | Incremental batch | `min_free_gb` | Baseline committed | Dispatchable |
 |---|---|---|---|---|---|---|
 | `smoke` | 400 | 1,000 | 50 | 4 | no | yes |

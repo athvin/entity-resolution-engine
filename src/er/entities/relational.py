@@ -5,12 +5,12 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Any
 
 import duckdb
 
-from er.entities.events import Event, EventLog, canonical_details, details_hash
+from er.entities.events import Event, EventLog, encode_details
 from er.entities.ids import IdFactory
 from er.entities.reconcile import PLANNED_EVENT_ORDER
 from er.lake.bulk import relation_pages, staged_ids, staged_query, staged_rows
@@ -49,11 +49,10 @@ def event_stream(
     EventLog(run_id, ids=ids, reason=reason)  # Validate even an empty event stream.
     offset = 0
     for page in relation_pages(connection, relation, "entity_id, event_type, details"):
-        log = EventLog(run_id, ids=ids, reason=reason)
+        log = EventLog(run_id, ids=ids, reason=reason, seq_offset=offset)
         for entity_id, event_type, details in page:
             log.emit(str(entity_id), str(event_type), json.loads(str(details)))
-        for event in log:
-            yield replace(event, seq=offset + event.seq)
+        yield from log
         offset += len(log)
 
 
@@ -176,7 +175,8 @@ def lifecycle_plan(
             for page in relation_pages(connection, numbered, "entity_id, event_type, details"):
                 for entity_id, event_type, text in page:
                     details = json.loads(str(text))
-                    yield entity_id, event_type, canonical_details(details), details_hash(details)
+                    encoded, digest = encode_details(details)
+                    yield entity_id, event_type, encoded, digest
 
         encoded = stack.enter_context(
             staged_rows(

@@ -43,12 +43,15 @@ uses the adapter's native bulk loader. There is no production unload CLI to conv
 DuckDB determines group ownership and event membership sets. The existing event
 encoder still validates and sorts details, stamps reasons, computes exact JSON
 bytes/hashes, and mints event IDs in the established order. ID factories generate
-only ordered IDs, in 1,024-row batches; they never receive membership rows.
+only ordered IDs, in bounded 8,192-row batches; they never receive membership rows.
 
-Event encoding holds at most one page of 1,024 events at each batching boundary,
+Event encoding holds at most one page of 8,192 events at each batching boundary,
 plus their payloads. A single event can contain an entire large component, so this
 is a row bound, not a fixed byte bound. Canonical unreasoned hashes determine event
-sort order; the final pass stamps reasons and IDs. Membership relations stay in SQL.
+sort order; the final pass stamps reasons and IDs. Each pass encodes its document
+once and reuses the bytes for hashing and persistence. Page sequence offsets are
+assigned when events are created, without copying each event. Membership relations
+stay in SQL.
 
 **Evidence:** DuckDB JSON and Python JSON differ on values such as `1e-6` and the
 hexadecimal case in control-character escapes. Replacing the encoder would change
@@ -147,7 +150,8 @@ relation-based scoring interface for a new scorer.
 ### Model/configuration metadata and exact benchmark artifacts
 
 **Code:** `matching/train.py`, `lake/model_registry.py`, `lake/maintain.py`,
-`benchmarks/semantic_outputs.py`, fixture/test helpers.
+`benchmarks/semantic_outputs.py`, `benchmarks/workload_report.py`,
+`benchmarks/workload_validation.py`, `obs/sql_profile.py`, fixture/test helpers.
 
 Splink training returns learned parameter summaries, not the training corpus. Model
 JSON, configuration, schema descriptions, counters and CLI manifests remain Python
@@ -157,9 +161,17 @@ reported outcomes, at most 1,024 at a time.
 
 Benchmark artifacts preserve the existing Python JSON encoding, lexically sorted
 row hashes, candidate-pair JSON array hash and gzip JSON score array. SQL resolves
-entity labels and sorts serialized rows; Python serializes/fetches 1,024-row pages.
+entity labels and sorts serialized rows; relation serialization/staging uses bounded
+8,192-row pages, and final cursor/score exports fetch 1,024 rows at a time.
 No complete output or pair list is retained. Gzip container timestamps remain
 non-deterministic as before; decompressed JSON is byte-identical.
+
+Opt-in diagnostics decode native profile trees, cProfile statistics and small catalog
+metadata inventories in Python. Query/operator indexes are diagnostic artifacts;
+DuckDB aggregates the compact SQL index and compares streamed gzip score arrays.
+Native query collection uses a FIFO and never replays pipeline statements. Storage
+logs are exported in pages of 1,024. These collectors are outside the unprofiled
+control; their overhead is reported separately for full reloads and incremental runs.
 
 Collection compatibility APIs also remain callable: `cluster.load_affected_set`,
 `cluster.affected_edges`, `cluster_full`, `reconcile_plan` / `apply_reconcile_plan`,

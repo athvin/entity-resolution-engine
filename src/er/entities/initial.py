@@ -103,7 +103,9 @@ def prepare_initial_plan(
 
         edges = table((("rec_a_key", "VARCHAR"), ("rec_b_key", "VARCHAR")))
         view = f"er_initial_edges_{uuid4().hex}"
-        materialize_current_edges(connection, model_version, tf_snapshot_id, name=view)
+        materialize_current_edges(
+            connection, model_version, tf_snapshot_id, name=view, materialized=True
+        )
         try:
             invalid = connection.execute(
                 f"SELECT rec_a_key, rec_b_key FROM {view} WHERE rec_a_key >= rec_b_key LIMIT 1"
@@ -125,7 +127,7 @@ def prepare_initial_plan(
             )
         finally:
             with suppress(duckdb.Error):
-                connection.execute(f"DROP VIEW {view}")
+                connection.execute(f"DROP TABLE {view}")
         edge_count = connection.execute(f"SELECT count(*) FROM {edges}").fetchone()
         assert edge_count is not None
         ordered = table((("record_key", "VARCHAR"), ("label", "VARCHAR"), ("position", "BIGINT")))

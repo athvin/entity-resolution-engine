@@ -70,6 +70,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="the S6 document supplying generator.seed and sources.<name>.columns",
     )
     parser.add_argument("--profile", choices=("baseline", "hard-v1"), default="baseline")
+    parser.add_argument(
+        "--incremental-scenario", choices=("existing", "mixed-v1"), default="existing"
+    )
     return parser
 
 
@@ -93,6 +96,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         batch=args.batch,
         household_rate=DEFAULT_HOUSEHOLD_RATE,
         profile=args.profile,
+        incremental_scenario=args.incremental_scenario,
     )
     personas = generate_personas(spec.seed, spec.personas, spec.household_rate)
     for path in emit_corpus(spec, personas, args.out, config=config):

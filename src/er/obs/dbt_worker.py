@@ -8,6 +8,7 @@ import time
 from typing import Any
 
 from er.obs.profiling import emit, span
+from er.obs.python_profile import python_profile
 from er.obs.sql_profile import instrument_connection
 
 
@@ -138,4 +139,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    with python_profile("dbt"):
+        main()

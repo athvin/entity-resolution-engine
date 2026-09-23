@@ -1,9 +1,15 @@
 """Time CLI import and execution without loading stage engines for telemetry."""
 
 from er.obs.profiling import span
+from er.obs.python_profile import python_profile
 
 
 def main() -> None:
+    with python_profile("cli"):
+        _main()
+
+
+def _main() -> None:
     with span("command.import"):
         from er.cli import main as cli_main
     exit_request = None

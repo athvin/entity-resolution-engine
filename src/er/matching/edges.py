@@ -377,15 +377,19 @@ def materialize_current_edges(
     include_inactive: bool = False,
     strict: bool = True,
     name: str = CURRENT_EDGES_RELATION,
+    materialized: bool = False,
 ) -> str:
     """Create the current edge set as a named relation and return its name.
 
-    A **temporary view**, and both halves of that matter. Temporary, because S4.0b
+    By default a **temporary view**. Temporary, because S4.0b
     confines the S4.5 loop's intermediates to the in-memory database — only the final
     labelling is written to the lake, and a relation created in `lake` would commit a
     DuckLake snapshot for a set of edges that is a working value, not a result. A view
     rather than a table, because the caller composes it into a larger statement and a
     view costs nothing to create and cannot go stale against the rows it names.
+    Reconciliation can request a temporary table to reuse its captured scored rows
+    under the writer lock. Such callers must not mutate scores during its lifetime;
+    assertion overrides and cuts are applied separately to the captured scores.
 
     Args:
         connection: a connection with the lake attached (S4.0b). The view is created in
@@ -398,6 +402,8 @@ def materialize_current_edges(
             query of the view — a view cannot raise.
         name: the relation name to create. Replaced if it exists, so one caller may
             re-materialize under a changing threshold without dropping first.
+        materialized: create a temporary table instead of a live view. The caller
+            owns cleanup and the lifetime of this captured edge set.
 
     Returns:
         `name`, so a caller can write ``f"... FROM {materialize_current_edges(...)}"``
@@ -421,5 +427,6 @@ def materialize_current_edges(
     )
     if strict:
         _assert_one_row_per_key(connection, model_version, tf_snapshot_id)
-    connection.execute(f"CREATE OR REPLACE TEMP VIEW {name} AS {statement}")
+    kind = "TABLE" if materialized else "VIEW"
+    connection.execute(f"CREATE OR REPLACE TEMP {kind} {name} AS {statement}")
     return name

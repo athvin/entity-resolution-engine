@@ -13,7 +13,8 @@ import duckdb
 from er.entities.ids import IdFactory
 from er.obs.profiling import span
 
-BATCH_ROWS = 1024
+# Amortize DuckDB binding/statement costs while retaining bounded Python pages.
+BATCH_ROWS = 8192
 
 
 @contextmanager

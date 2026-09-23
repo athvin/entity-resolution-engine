@@ -1,0 +1,1082 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-09-23T14:53:42.710464+00:00",
+  "scope": "one unprofiled 10M full reload followed by a 100K mixed-v1 increment",
+  "artifact_root": "artifacts/bench/workload-10m-100k-20260923T122937Z",
+  "timed_workloads_status": "succeeded",
+  "validation_status": "running",
+  "limitations": [
+    "single local trial; no controlled 10M tuning speedup comparison",
+    "baseline synthetic generator; not hard-profile or real tenant data",
+    "fresh lake does not imply cold OS caches",
+    "native SQL and Python profiling disabled for workload timing",
+    "sampled pipeline memory includes page cache and children; excludes service containers",
+    "spill peaks are live temporary bytes, not cumulative write volume"
+  ],
+  "manifest": {
+    "status": "failed",
+    "error": "CalledProcessError: Command '['docker', 'compose', '-p', 'er-full-bench-d2057634139d', '-f', '/Users/athvin/github.com/athvin/entity-resolution-engine/docker/compose.yaml', '-f', '/Users/athvin/github.com/athvin/entity-resolution-engine/artifacts/bench/workload-10m-100k-20260923T122937Z/compose.json', '--profile', 'bench', 'run', '--rm', '-T', '-e', 'ER_IMAGE_DIGEST=sha256:3a89366a7d39286e75c4267263bc21ebe6424e3edbfe55b7516e1da9faa4499b', '-e', 'ER_GIT_SHA=0bc7697574a02b2da49a8fc198b6b3d98b5345e67491dda207a5d98c0351fb54', '-e', 'ER_SOURCE_SHA=0bc7697574a02b2da49a8fc198b6b3d98b5345e67491dda207a5d98c0351fb54', 'benchmark', 'python', 'benchmarks/full_pipeline.py', '--worker', '--out', '/benchmark', '--scale', '10m', '--iteration', '1', '--with-incremental', '--generator-profile', 'baseline', '--incremental-scenario', 'mixed-v1', '--incremental-records', '100000', '--config', '/benchmark/config.yaml']' returned non-zero exit status 1.",
+    "source_sha256": "0bc7697574a02b2da49a8fc198b6b3d98b5345e67491dda207a5d98c0351fb54",
+    "image_digest": "sha256:3a89366a7d39286e75c4267263bc21ebe6424e3edbfe55b7516e1da9faa4499b",
+    "harness_source_sha256": "f78426cec61ae1c8163d434b6a4b707be5cdb84c1b85f16b8e9a6a6ffad34632",
+    "profile": false,
+    "resource_profile": "local",
+    "scale": "10m",
+    "records": 10000000,
+    "personas": 4000000,
+    "cpu_limit": 2,
+    "mem_limit": "10g",
+    "duckdb_memory_limit": "4GB",
+    "docker_architecture": "aarch64",
+    "available": {
+      "cpus": 8,
+      "memory": 12529836032,
+      "disk": 535012491264
+    },
+    "docker_disk_free_bytes": 868803846144,
+    "matching_runtime_env": {},
+    "campaign_seconds": 7718.000483667012
+  },
+  "workloads": {
+    "full_reload": {
+      "processing_seconds": 6376.628690239,
+      "commands": [
+        {
+          "command": [
+            "er",
+            "ingest",
+            "--source",
+            "crm"
+          ],
+          "run_id": "01M37490Z5J2SKGJZB6RZTM1AK",
+          "duration_ms": 13070.395006,
+          "started_ns": 141250816881320,
+          "ended_ns": 141263887276326,
+          "cpu": {
+            "usage_usec": 20113554,
+            "user_usec": 17768297,
+            "system_usec": 2345257,
+            "throttled_usec": 5009764
+          },
+          "phase": "base",
+          "invocation_id": "58998a505e654fb8923227ec52a8b495",
+          "exit_code": 0,
+          "stages": [
+            {
+              "run_id": "01M37490Z5J2SKGJZB6RZTM1AK",
+              "stage": "ingest",
+              "seq": 1,
+              "status": "succeeded",
+              "exit_code": 0,
+              "started_at": "2026-09-23T12:36:34.106Z",
+              "ended_at": "2026-09-23T12:36:44.718Z",
+              "snapshot_start": 16,
+              "snapshot_end": 19,
+              "config_hash": "ad8e3e12b8c6f07b47ccb58505f160b99229a4b6bb6fda3085351c6cf32dc250",
+              "model_version": null,
+              "tf_snapshot_id": null,
+              "rows_in": 3333334,
+              "rows_out": 3333334,
+              "candidate_pairs": null,
+              "pairs_above_auto_merge": null,
+              "entities_created": null,
+              "entities_merged": null,
+              "entities_split": null,
+              "entities_retired": null,
+              "edges_cut": null,
+              "review_queue_added": null,
+              "duration_ms": 10611,
+              "error_class": null,
+              "error_detail": null
+            }
+          ]
+        },
+        {
+          "command": [
+            "er",
+            "ingest",
+            "--source",
+            "billing"
+          ],
+          "run_id": "01M37490Z5J2SKGJZB6RZTM1AK",
+          "duration_ms": 14099.633882,
+          "started_ns": 141263889458701,
+          "ended_ns": 141277989092583,
+          "cpu": {
+            "usage_usec": 22170198,
+            "user_usec": 19318186,
+            "system_usec": 2852012,
+            "throttled_usec": 4015872
+          },
+          "phase": "base",
+          "invocation_id": "be33a28832ab4cb392c92934464c6a8d",
+          "exit_code": 0,
+          "stages": [
+            {
+              "run_id": "01M37490Z5J2SKGJZB6RZTM1AK",
+              "stage": "ingest",
+              "seq": 1,
+              "status": "succeeded",
+              "exit_code": 0,
+              "started_at": "2026-09-23T12:36:46.868Z",
+              "ended_at": "2026-09-23T12:36:58.751Z",
+              "snapshot_start": 22,
+              "snapshot_end": 25,
+              "config_hash": "ad8e3e12b8c6f07b47ccb58505f160b99229a4b6bb6fda3085351c6cf32dc250",
+              "model_version": null,
+              "tf_snapshot_id": null,
+              "rows_in": 3333333,
+              "rows_out": 3333333,
+              "candidate_pairs": null,
+              "pairs_above_auto_merge": null,
+              "entities_created": null,
+              "entities_merged": null,
+              "entities_split": null,
+              "entities_retired": null,
+              "edges_cut": null,
+              "review_queue_added": null,
+              "duration_ms": 11883,
+              "error_class": null,
+              "error_detail": null
+            }
+          ]
+        },
+        {
+          "command": [
+            "er",
+            "ingest",
+            "--source",
+            "webforms"
+          ],
+          "run_id": "01M37490Z5J2SKGJZB6RZTM1AK",
+          "duration_ms": 15495.296633,
+          "started_ns": 141277991394374,
+          "ended_ns": 141293486691007,
+          "cpu": {
+            "usage_usec": 24608415,
+            "user_usec": 21336638,
+            "system_usec": 3271777,
+            "throttled_usec": 4440971
+          },
+          "phase": "base",
+          "invocation_id": "df0b4b6a8cdb4b32b597807e98bdd9f5",
+          "exit_code": 0,
+          "stages": [
+            {
+              "run_id": "01M37490Z5J2SKGJZB6RZTM1AK",
+              "stage": "ingest",
+              "seq": 1,
+              "status": "succeeded",
+              "exit_code": 0,
+              "started_at": "2026-09-23T12:37:01.308Z",
+              "ended_at": "2026-09-23T12:37:14.030Z",
+              "snapshot_start": 28,
+              "snapshot_end": 31,
+              "config_hash": "ad8e3e12b8c6f07b47ccb58505f160b99229a4b6bb6fda3085351c6cf32dc250",
+              "model_version": null,
+              "tf_snapshot_id": null,
+              "rows_in": 3333333,
+              "rows_out": 3333333,
+              "candidate_pairs": null,
+              "pairs_above_auto_merge": null,
+              "entities_created": null,
+              "entities_merged": null,
+              "entities_split": null,
+              "entities_retired": null,
+              "edges_cut": null,
+              "review_queue_added": null,
+              "duration_ms": 12721,
+              "error_class": null,
+              "error_detail": null
+            }
+          ]
+        },
+        {
+          "command": [
+            "er",
+            "standardize"
+          ],
+          "run_id": "01M37490Z5J2SKGJZB6RZTM1AK",
+          "duration_ms": 107380.517714,
+          "started_ns": 141293489457007,
+          "ended_ns": 141400869974721,
+          "cpu": {
+            "usage_usec": 193478755,
+            "user_usec": 182824460,
+            "system_usec": 10654295,
+            "throttled_usec": 16318271
+          },
+          "phase": "base",
+          "invocation_id": "1f40d91137634e0c9871b270c70ad8fb",
+          "exit_code": 0,
+          "stages": [
+            {
+              "run_id": "01M37490Z5J2SKGJZB6RZTM1AK",
+              "stage": "standardize",
+              "seq": 2,
+              "status": "succeeded",
+              "exit_code": 0,
+              "started_at": "2026-09-23T12:37:16.598Z",
+              "ended_at": "2026-09-23T12:39:01.648Z",
+              "snapshot_start": 34,
+              "snapshot_end": 43,
+              "config_hash": "ad8e3e12b8c6f07b47ccb58505f160b99229a4b6bb6fda3085351c6cf32dc250",
+              "model_version": null,
+              "tf_snapshot_id": null,
+              "rows_in": 10000000,
+              "rows_out": 10000000,
+              "candidate_pairs": null,
+              "pairs_above_auto_merge": null,
+              "entities_created": null,
+              "entities_merged": null,
+              "entities_split": null,
+              "entities_retired": null,
+              "edges_cut": null,
+              "review_queue_added": null,
+              "duration_ms": 105050,
+              "error_class": null,
+              "error_detail": null
+            }
+          ]
+        },
+        {
+          "command": [
+            "er",
+            "train"
+          ],
+          "run_id": "01M374DKGDN5Q8418VEB1SDFVJ",
+          "duration_ms": 4998686.631779,
+          "started_ns": 141400873321888,
+          "ended_ns": 146399559953667,
+          "cpu": {
+            "usage_usec": 4621412298,
+            "user_usec": 3367778207,
+            "system_usec": 1253634091,
+            "throttled_usec": 2761979
+          },
+          "phase": "base",
+          "invocation_id": "02d3ccf98d92475e909545818f580ac0",
+          "exit_code": 0,
+          "stages": [
+            {
+              "run_id": "01M374DKGDN5Q8418VEB1SDFVJ",
+              "stage": "train",
+              "seq": 1,
+              "status": "succeeded",
+              "exit_code": 0,
+              "started_at": "2026-09-23T12:39:03.848Z",
+              "ended_at": "2026-09-23T14:02:18.978Z",
+              "snapshot_start": 46,
+              "snapshot_end": 49,
+              "config_hash": "ad8e3e12b8c6f07b47ccb58505f160b99229a4b6bb6fda3085351c6cf32dc250",
+              "model_version": "v0001",
+              "tf_snapshot_id": "01M374DTJ1A3TNM30ZKGCXRYTG",
+              "rows_in": 10000000,
+              "rows_out": 1,
+              "candidate_pairs": null,
+              "pairs_above_auto_merge": null,
+              "entities_created": null,
+              "entities_merged": null,
+              "entities_split": null,
+              "entities_retired": null,
+              "edges_cut": null,
+              "review_queue_added": null,
+              "duration_ms": 4994955,
+              "error_class": null,
+              "error_detail": null
+            }
+          ]
+        },
+        {
+          "command": [
+            "er",
+            "match",
+            "--mode",
+            "full"
+          ],
+          "run_id": "01M37490Z5J2SKGJZB6RZTM1AK",
+          "duration_ms": 751125.5983,
+          "started_ns": 146399570165417,
+          "ended_ns": 147150695763717,
+          "cpu": {
+            "usage_usec": 1171436587,
+            "user_usec": 1066823862,
+            "system_usec": 104612724,
+            "throttled_usec": 4803814
+          },
+          "phase": "base",
+          "invocation_id": "ac00cdaf54314d51b3a5de6aea4889b0",
+          "exit_code": 0,
+          "stages": [
+            {
+              "run_id": "01M37490Z5J2SKGJZB6RZTM1AK",
+              "stage": "match",
+              "seq": 3,
+              "status": "succeeded",
+              "exit_code": 0,
+              "started_at": "2026-09-23T14:02:23.784Z",
+              "ended_at": "2026-09-23T14:14:51.226Z",
+              "snapshot_start": 52,
+              "snapshot_end": 55,
+              "config_hash": "ad8e3e12b8c6f07b47ccb58505f160b99229a4b6bb6fda3085351c6cf32dc250",
+              "model_version": "v0001",
+              "tf_snapshot_id": "01M374DTJ1A3TNM30ZKGCXRYTG",
+              "rows_in": 10000000,
+              "rows_out": 8451869,
+              "candidate_pairs": null,
+              "pairs_above_auto_merge": 8192404,
+              "entities_created": null,
+              "entities_merged": null,
+              "entities_split": null,
+              "entities_retired": null,
+              "edges_cut": null,
+              "review_queue_added": 259465,
+              "duration_ms": 747426,
+              "error_class": null,
+              "error_detail": null
+            }
+          ]
+        },
+        {
+          "command": [
+            "er",
+            "reconcile"
+          ],
+          "run_id": "01M37490Z5J2SKGJZB6RZTM1AK",
+          "duration_ms": 317684.97281,
+          "started_ns": 147150794066509,
+          "ended_ns": 147468479039319,
+          "cpu": {
+            "usage_usec": 392863063,
+            "user_usec": 371867903,
+            "system_usec": 20995161,
+            "throttled_usec": 5084038
+          },
+          "phase": "base",
+          "invocation_id": "5d7e44b5416a4d3cba4714067794bd6e",
+          "exit_code": 0,
+          "stages": [
+            {
+              "run_id": "01M37490Z5J2SKGJZB6RZTM1AK",
+              "stage": "reconcile",
+              "seq": 4,
+              "status": "succeeded",
+              "exit_code": 0,
+              "started_at": "2026-09-23T14:14:55.438Z",
+              "ended_at": "2026-09-23T14:20:09.250Z",
+              "snapshot_start": 58,
+              "snapshot_end": 60,
+              "config_hash": "ad8e3e12b8c6f07b47ccb58505f160b99229a4b6bb6fda3085351c6cf32dc250",
+              "model_version": "v0001",
+              "tf_snapshot_id": "01M374DTJ1A3TNM30ZKGCXRYTG",
+              "rows_in": 10000000,
+              "rows_out": 3898183,
+              "candidate_pairs": null,
+              "pairs_above_auto_merge": null,
+              "entities_created": 3898183,
+              "entities_merged": 0,
+              "entities_split": 0,
+              "entities_retired": 0,
+              "edges_cut": 0,
+              "review_queue_added": null,
+              "duration_ms": 313903,
+              "error_class": null,
+              "error_detail": null
+            }
+          ]
+        },
+        {
+          "command": [
+            "er",
+            "assemble"
+          ],
+          "run_id": "01M37490Z5J2SKGJZB6RZTM1AK",
+          "duration_ms": 159085.644115,
+          "started_ns": 147468484519778,
+          "ended_ns": 147627570163893,
+          "cpu": {
+            "usage_usec": 230221053,
+            "user_usec": 191789126,
+            "system_usec": 38431927,
+            "throttled_usec": 6536998
+          },
+          "phase": "base",
+          "invocation_id": "8dbf9979e9ef48478a9ec51a4095372e",
+          "exit_code": 0,
+          "stages": [
+            {
+              "run_id": "01M37490Z5J2SKGJZB6RZTM1AK",
+              "stage": "assemble",
+              "seq": 5,
+              "status": "succeeded",
+              "exit_code": 0,
+              "started_at": "2026-09-23T14:20:11.822Z",
+              "ended_at": "2026-09-23T14:22:48.499Z",
+              "snapshot_start": 63,
+              "snapshot_end": 67,
+              "config_hash": "ad8e3e12b8c6f07b47ccb58505f160b99229a4b6bb6fda3085351c6cf32dc250",
+              "model_version": "v0001",
+              "tf_snapshot_id": "01M374DTJ1A3TNM30ZKGCXRYTG",
+              "rows_in": 3898183,
+              "rows_out": 3898183,
+              "candidate_pairs": null,
+              "pairs_above_auto_merge": null,
+              "entities_created": null,
+              "entities_merged": null,
+              "entities_split": null,
+              "entities_retired": null,
+              "edges_cut": null,
+              "review_queue_added": null,
+              "duration_ms": 156676,
+              "error_class": null,
+              "error_detail": null
+            }
+          ]
+        }
+      ],
+      "stage_ledger_seconds": {
+        "ingest": 35.215,
+        "standardize": 105.05,
+        "train": 4994.955,
+        "match": 747.426,
+        "reconcile": 313.903,
+        "assemble": 156.676
+      },
+      "resources": {
+        "cpu_s": 6676.303923,
+        "throttled_s": 48.971707,
+        "sampled_memory_peak_bytes": 10056142848,
+        "sampled_spill_bytes_peak": 151909072896,
+        "sampled_parquet_scratch_bytes_peak": 0
+      },
+      "records_in_delivery": 10000000
+    },
+    "incremental": {
+      "processing_seconds": 169.888450118,
+      "commands": [
+        {
+          "command": [
+            "er",
+            "ingest",
+            "--source",
+            "crm"
+          ],
+          "run_id": "01M37ABNWF75W1KHFG7XDF6C9H",
+          "duration_ms": 4726.939044,
+          "started_ns": 147629128440810,
+          "ended_ns": 147633855379854,
+          "cpu": {
+            "usage_usec": 6470582,
+            "user_usec": 5976972,
+            "system_usec": 493609,
+            "throttled_usec": 1427030
+          },
+          "phase": "batch",
+          "invocation_id": "a1f58ebd2abb4c04896dafb4fe8f1151",
+          "exit_code": 0,
+          "stages": [
+            {
+              "run_id": "01M37ABNWF75W1KHFG7XDF6C9H",
+              "stage": "ingest",
+              "seq": 1,
+              "status": "succeeded",
+              "exit_code": 0,
+              "started_at": "2026-09-23T14:22:52.343Z",
+              "ended_at": "2026-09-23T14:22:54.823Z",
+              "snapshot_start": 70,
+              "snapshot_end": 73,
+              "config_hash": "ad8e3e12b8c6f07b47ccb58505f160b99229a4b6bb6fda3085351c6cf32dc250",
+              "model_version": "v0001",
+              "tf_snapshot_id": "01M374DTJ1A3TNM30ZKGCXRYTG",
+              "rows_in": 33243,
+              "rows_out": 33243,
+              "candidate_pairs": null,
+              "pairs_above_auto_merge": null,
+              "entities_created": null,
+              "entities_merged": null,
+              "entities_split": null,
+              "entities_retired": null,
+              "edges_cut": null,
+              "review_queue_added": null,
+              "duration_ms": 2479,
+              "error_class": null,
+              "error_detail": null
+            }
+          ]
+        },
+        {
+          "command": [
+            "er",
+            "ingest",
+            "--source",
+            "billing"
+          ],
+          "run_id": "01M37ABNWF75W1KHFG7XDF6C9H",
+          "duration_ms": 4671.785835,
+          "started_ns": 147633857379271,
+          "ended_ns": 147638529165106,
+          "cpu": {
+            "usage_usec": 6769362,
+            "user_usec": 6311252,
+            "system_usec": 458110,
+            "throttled_usec": 1404538
+          },
+          "phase": "batch",
+          "invocation_id": "2398f678528e4f07adc3cdf9787ffdb5",
+          "exit_code": 0,
+          "stages": [
+            {
+              "run_id": "01M37ABNWF75W1KHFG7XDF6C9H",
+              "stage": "ingest",
+              "seq": 1,
+              "status": "succeeded",
+              "exit_code": 0,
+              "started_at": "2026-09-23T14:22:56.934Z",
+              "ended_at": "2026-09-23T14:22:59.464Z",
+              "snapshot_start": 76,
+              "snapshot_end": 79,
+              "config_hash": "ad8e3e12b8c6f07b47ccb58505f160b99229a4b6bb6fda3085351c6cf32dc250",
+              "model_version": "v0001",
+              "tf_snapshot_id": "01M374DTJ1A3TNM30ZKGCXRYTG",
+              "rows_in": 33460,
+              "rows_out": 33460,
+              "candidate_pairs": null,
+              "pairs_above_auto_merge": null,
+              "entities_created": null,
+              "entities_merged": null,
+              "entities_split": null,
+              "entities_retired": null,
+              "edges_cut": null,
+              "review_queue_added": null,
+              "duration_ms": 2529,
+              "error_class": null,
+              "error_detail": null
+            }
+          ]
+        },
+        {
+          "command": [
+            "er",
+            "ingest",
+            "--source",
+            "webforms"
+          ],
+          "run_id": "01M37ABNWF75W1KHFG7XDF6C9H",
+          "duration_ms": 4714.785461,
+          "started_ns": 147638531314522,
+          "ended_ns": 147643246099983,
+          "cpu": {
+            "usage_usec": 6934778,
+            "user_usec": 6467410,
+            "system_usec": 467367,
+            "throttled_usec": 1347513
+          },
+          "phase": "batch",
+          "invocation_id": "7c6e1caa960f447e9afcac84f2cf42f9",
+          "exit_code": 0,
+          "stages": [
+            {
+              "run_id": "01M37ABNWF75W1KHFG7XDF6C9H",
+              "stage": "ingest",
+              "seq": 1,
+              "status": "succeeded",
+              "exit_code": 0,
+              "started_at": "2026-09-23T14:23:01.635Z",
+              "ended_at": "2026-09-23T14:23:04.188Z",
+              "snapshot_start": 82,
+              "snapshot_end": 85,
+              "config_hash": "ad8e3e12b8c6f07b47ccb58505f160b99229a4b6bb6fda3085351c6cf32dc250",
+              "model_version": "v0001",
+              "tf_snapshot_id": "01M374DTJ1A3TNM30ZKGCXRYTG",
+              "rows_in": 33297,
+              "rows_out": 33297,
+              "candidate_pairs": null,
+              "pairs_above_auto_merge": null,
+              "entities_created": null,
+              "entities_merged": null,
+              "entities_split": null,
+              "entities_retired": null,
+              "edges_cut": null,
+              "review_queue_added": null,
+              "duration_ms": 2553,
+              "error_class": null,
+              "error_detail": null
+            }
+          ]
+        },
+        {
+          "command": [
+            "er",
+            "run-all",
+            "--mode",
+            "incremental"
+          ],
+          "run_id": "01M37ABNWF75W1KHFG7XDF6C9H",
+          "duration_ms": 155774.939778,
+          "started_ns": 147643248270733,
+          "ended_ns": 147799023210511,
+          "cpu": {
+            "usage_usec": 246565617,
+            "user_usec": 211061463,
+            "system_usec": 35504154,
+            "throttled_usec": 5586615
+          },
+          "phase": "batch",
+          "invocation_id": "a5dcad2fcbd94698a94165ec4bcbfda9",
+          "exit_code": 0,
+          "stages": [
+            {
+              "run_id": "01M37ABNWF75W1KHFG7XDF6C9H",
+              "stage": "standardize",
+              "seq": 2,
+              "status": "succeeded",
+              "exit_code": 0,
+              "started_at": "2026-09-23T14:23:06.395Z",
+              "ended_at": "2026-09-23T14:24:02.738Z",
+              "snapshot_start": 88,
+              "snapshot_end": 96,
+              "config_hash": "ad8e3e12b8c6f07b47ccb58505f160b99229a4b6bb6fda3085351c6cf32dc250",
+              "model_version": "v0001",
+              "tf_snapshot_id": "01M374DTJ1A3TNM30ZKGCXRYTG",
+              "rows_in": 100000,
+              "rows_out": 10100000,
+              "candidate_pairs": null,
+              "pairs_above_auto_merge": null,
+              "entities_created": null,
+              "entities_merged": null,
+              "entities_split": null,
+              "entities_retired": null,
+              "edges_cut": null,
+              "review_queue_added": null,
+              "duration_ms": 56343,
+              "error_class": null,
+              "error_detail": null
+            },
+            {
+              "run_id": "01M37ABNWF75W1KHFG7XDF6C9H",
+              "stage": "match",
+              "seq": 3,
+              "status": "succeeded",
+              "exit_code": 0,
+              "started_at": "2026-09-23T14:24:02.763Z",
+              "ended_at": "2026-09-23T14:25:01.116Z",
+              "snapshot_start": 97,
+              "snapshot_end": 100,
+              "config_hash": "ad8e3e12b8c6f07b47ccb58505f160b99229a4b6bb6fda3085351c6cf32dc250",
+              "model_version": "v0001",
+              "tf_snapshot_id": "01M374DTJ1A3TNM30ZKGCXRYTG",
+              "rows_in": 100000,
+              "rows_out": 169748,
+              "candidate_pairs": null,
+              "pairs_above_auto_merge": 165639,
+              "entities_created": null,
+              "entities_merged": null,
+              "entities_split": null,
+              "entities_retired": null,
+              "edges_cut": null,
+              "review_queue_added": 4109,
+              "duration_ms": 58352,
+              "error_class": null,
+              "error_detail": null
+            },
+            {
+              "run_id": "01M37ABNWF75W1KHFG7XDF6C9H",
+              "stage": "reconcile",
+              "seq": 4,
+              "status": "succeeded",
+              "exit_code": 0,
+              "started_at": "2026-09-23T14:25:01.138Z",
+              "ended_at": "2026-09-23T14:25:19.723Z",
+              "snapshot_start": 101,
+              "snapshot_end": 103,
+              "config_hash": "ad8e3e12b8c6f07b47ccb58505f160b99229a4b6bb6fda3085351c6cf32dc250",
+              "model_version": "v0001",
+              "tf_snapshot_id": "01M374DTJ1A3TNM30ZKGCXRYTG",
+              "rows_in": 243391,
+              "rows_out": 70651,
+              "candidate_pairs": null,
+              "pairs_above_auto_merge": null,
+              "entities_created": 20011,
+              "entities_merged": 1748,
+              "entities_split": 0,
+              "entities_retired": 0,
+              "edges_cut": 0,
+              "review_queue_added": null,
+              "duration_ms": 18585,
+              "error_class": null,
+              "error_detail": null
+            },
+            {
+              "run_id": "01M37ABNWF75W1KHFG7XDF6C9H",
+              "stage": "assemble",
+              "seq": 5,
+              "status": "succeeded",
+              "exit_code": 0,
+              "started_at": "2026-09-23T14:25:19.739Z",
+              "ended_at": "2026-09-23T14:25:39.830Z",
+              "snapshot_start": 104,
+              "snapshot_end": 112,
+              "config_hash": "ad8e3e12b8c6f07b47ccb58505f160b99229a4b6bb6fda3085351c6cf32dc250",
+              "model_version": "v0001",
+              "tf_snapshot_id": "01M374DTJ1A3TNM30ZKGCXRYTG",
+              "rows_in": 72399,
+              "rows_out": 70651,
+              "candidate_pairs": null,
+              "pairs_above_auto_merge": null,
+              "entities_created": null,
+              "entities_merged": null,
+              "entities_split": null,
+              "entities_retired": null,
+              "edges_cut": null,
+              "review_queue_added": null,
+              "duration_ms": 20091,
+              "error_class": null,
+              "error_detail": null
+            }
+          ]
+        }
+      ],
+      "stage_ledger_seconds": {
+        "ingest": 7.561,
+        "standardize": 56.343,
+        "match": 58.352,
+        "reconcile": 18.585,
+        "assemble": 20.091
+      },
+      "resources": {
+        "cpu_s": 266.740339,
+        "throttled_s": 9.765696,
+        "sampled_memory_peak_bytes": 9223954432,
+        "sampled_spill_bytes_peak": 6454738944,
+        "sampled_parquet_scratch_bytes_peak": 0
+      },
+      "records_in_delivery": 100000
+    }
+  },
+  "run": {
+    "status": "failed",
+    "error": "OutOfMemoryException: Out of Memory Error: failed to allocate data of size 4.0 KiB (3.7 GiB/3.7 GiB used)\n\nPossible solutions:\n* Reducing the number of threads (SET threads=X)\n* Disabling insertion-order preservation (SET preserve_insertion_order=false)\n* Increasing the memory limit (SET memory_limit='...GB')\n\nSee also https://duckdb.org/docs/stable/guides/performance/how_to_tune_workloads",
+    "base_records": 10000000,
+    "incremental_records": 100000,
+    "batch_mode": "incremental",
+    "generator_profile": "baseline",
+    "generator_seed": 42,
+    "incremental_scenario": "mixed-v1",
+    "config_hash": "ad8e3e12b8c6f07b47ccb58505f160b99229a4b6bb6fda3085351c6cf32dc250",
+    "semantic_config_sha256": "9ac6531965d4cb8d89df009cc143d06e41cbef1f8dd77e9bdab66e6096e0eec9",
+    "input_sha256": {
+      "base/crm.csv": "feb1d96d7b1bdaae4eeb6384d05184d3f62f0bd42d294881bd8d970066fe5db2",
+      "base/billing.csv": "dbb467a6c29d55b580c392171105aad8525e5f1e1dead64e84d81beaf52cd6ed",
+      "base/webforms.csv": "fc54c1a42007b57e2463083a22296c52ee947d3674a451f954389bfa8a6ea660",
+      "batch/crm.csv": "75656dc42203836e43824eb466cd35319054bf0182151e0812182aeabc92179d",
+      "batch/billing.csv": "3eb4469053abee1c76cb0df2de65d1e3c7e5f8b4717c05c6c9c08b733245adb9",
+      "batch/webforms.csv": "71a7cbab85db43b21da8213a43a7665281dc4f5e5e20e7ec8ad01ed235e6b3da"
+    },
+    "checkpoints": {
+      "base": {
+        "snapshot": 69,
+        "model_version": "v0001",
+        "tf_snapshot_id": "01M374DTJ1A3TNM30ZKGCXRYTG"
+      },
+      "batch": {
+        "snapshot": 114,
+        "model_version": "v0001",
+        "tf_snapshot_id": "01M374DTJ1A3TNM30ZKGCXRYTG"
+      }
+    },
+    "base_counts": {
+      "raw_records": 10000000,
+      "int_std_records": 10000000,
+      "int_blocking_keys": 38062711,
+      "match_scores": 8451869,
+      "entity_membership": 10000000,
+      "golden_records": 3898183,
+      "golden_lineage": 23389098
+    },
+    "base_candidate_pairs": 567184685,
+    "base_blocking": [
+      {
+        "key_type": "dob_name",
+        "key_rows": 9231484,
+        "buckets": 1814813,
+        "largest_bucket": 59,
+        "p99_bucket": 22,
+        "raw_pair_occurrences": 35737885
+      },
+      {
+        "key_type": "email_exact",
+        "key_rows": 9432046,
+        "buckets": 4815625,
+        "largest_bucket": 6,
+        "p99_bucket": 4,
+        "raw_pair_occurrences": 6045155
+      },
+      {
+        "key_type": "name_postal",
+        "key_rows": 10000000,
+        "buckets": 330472,
+        "largest_bucket": 386,
+        "p99_bucket": 226,
+        "raw_pair_occurrences": 534419347
+      },
+      {
+        "key_type": "phone_exact",
+        "key_rows": 9399181,
+        "buckets": 4341552,
+        "largest_bucket": 7,
+        "p99_bucket": 4,
+        "raw_pair_occurrences": 6809773
+      }
+    ],
+    "output_validation": {
+      "raw_records": 10000000,
+      "int_std_records": 10000000,
+      "entity_membership": 10000000,
+      "golden_records": 3898183,
+      "entities": 3898183,
+      "golden_lineage": 23389098
+    },
+    "base_partition_hash": "0e2fb7d2569f53be68f2d7635ecf33b67fa23070351af5e4f951eb78d95bf9c6",
+    "sampler_error": null,
+    "total_ms": 7708689.595720003,
+    "processing_ms": 6546517.140357
+  },
+  "untimed_commands": [
+    {
+      "command": [
+        "er",
+        "init"
+      ],
+      "run_id": null,
+      "duration_ms": 2457.468751,
+      "started_ns": 140856146043682,
+      "ended_ns": 140858603512433,
+      "cpu": {
+        "usage_usec": 2833156,
+        "user_usec": 2705270,
+        "system_usec": 127886,
+        "throttled_usec": 1205117
+      },
+      "phase": "setup",
+      "invocation_id": "3532fc8a1e6e498d99b012b189bc410b",
+      "exit_code": 0,
+      "stages": [
+        {
+          "run_id": "01M373X0F54DDC3XC7TQ4EZSCX",
+          "stage": "init",
+          "seq": 1,
+          "status": "succeeded",
+          "exit_code": 0,
+          "started_at": "2026-09-23T12:29:58.127Z",
+          "ended_at": "2026-09-23T12:29:59.514Z",
+          "snapshot_start": null,
+          "snapshot_end": null,
+          "config_hash": "ad8e3e12b8c6f07b47ccb58505f160b99229a4b6bb6fda3085351c6cf32dc250",
+          "model_version": null,
+          "tf_snapshot_id": null,
+          "rows_in": null,
+          "rows_out": null,
+          "candidate_pairs": null,
+          "pairs_above_auto_merge": null,
+          "entities_created": null,
+          "entities_merged": null,
+          "entities_split": null,
+          "entities_retired": null,
+          "edges_cut": null,
+          "review_queue_added": null,
+          "duration_ms": 1387,
+          "error_class": null,
+          "error_detail": null
+        }
+      ]
+    },
+    {
+      "command": [
+        "/app/.venv/bin/python",
+        "-m",
+        "fixtures.generator.cli",
+        "--personas"
+      ],
+      "run_id": null,
+      "duration_ms": 390684.242344,
+      "started_ns": 140858605126600,
+      "ended_ns": 141249289368944,
+      "cpu": {
+        "usage_usec": 380637746,
+        "user_usec": 375252526,
+        "system_usec": 5385219,
+        "throttled_usec": 0
+      },
+      "phase": "setup",
+      "invocation_id": "e35cd64b99534beb8a1a7fbbc31dcc3d",
+      "exit_code": 0,
+      "stages": []
+    }
+  ],
+  "validation_recovery": {
+    "status": "running",
+    "original_run_status": "failed",
+    "original_error": "OutOfMemoryException: Out of Memory Error: failed to allocate data of size 4.0 KiB (3.7 GiB/3.7 GiB used)\n\nPossible solutions:\n* Reducing the number of threads (SET threads=X)\n* Disabling insertion-order preservation (SET preserve_insertion_order=false)\n* Increasing the memory limit (SET memory_limit='...GB')\n\nSee also https://duckdb.org/docs/stable/guides/performance/how_to_tune_workloads",
+    "checkpoints": {
+      "base": {
+        "snapshot": 69,
+        "model_version": "v0001",
+        "tf_snapshot_id": "01M374DTJ1A3TNM30ZKGCXRYTG"
+      },
+      "batch": {
+        "snapshot": 114,
+        "model_version": "v0001",
+        "tf_snapshot_id": "01M374DTJ1A3TNM30ZKGCXRYTG"
+      }
+    },
+    "completed": {
+      "base.outputs": {
+        "seconds": 14.36412217200268,
+        "value": {
+          "raw_records": 10000000,
+          "int_std_records": 10000000,
+          "entity_membership": 10000000,
+          "golden_records": 3898183,
+          "entities": 3898183,
+          "golden_lineage": 23389098
+        }
+      },
+      "base.counts": {
+        "seconds": 0.08352749998448417,
+        "value": {
+          "raw_records": 10000000,
+          "int_std_records": 10000000,
+          "int_blocking_keys": 38062711,
+          "match_scores": 8451869,
+          "entity_membership": 10000000,
+          "golden_records": 3898183,
+          "golden_lineage": 23389098
+        }
+      },
+      "base.blocking": {
+        "seconds": 7.909434211993357,
+        "value": [
+          {
+            "key_type": "dob_name",
+            "key_rows": 9231484,
+            "buckets": 1814813,
+            "largest_bucket": 59,
+            "p99_bucket": 22,
+            "raw_pair_occurrences": 35737885
+          },
+          {
+            "key_type": "email_exact",
+            "key_rows": 9432046,
+            "buckets": 4815625,
+            "largest_bucket": 6,
+            "p99_bucket": 4,
+            "raw_pair_occurrences": 6045155
+          },
+          {
+            "key_type": "name_postal",
+            "key_rows": 10000000,
+            "buckets": 330472,
+            "largest_bucket": 386,
+            "p99_bucket": 226,
+            "raw_pair_occurrences": 534419347
+          },
+          {
+            "key_type": "phone_exact",
+            "key_rows": 9399181,
+            "buckets": 4341552,
+            "largest_bucket": 7,
+            "p99_bucket": 4,
+            "raw_pair_occurrences": 6809773
+          }
+        ]
+      },
+      "base.candidate_count": {
+        "seconds": 103.64129154599505,
+        "value": 567184685
+      },
+      "base.partition": {
+        "seconds": 7.957616044994211,
+        "value": "0e2fb7d2569f53be68f2d7635ecf33b67fa23070351af5e4f951eb78d95bf9c6"
+      },
+      "base.model": {
+        "seconds": 2.525475500995526,
+        "value": {
+          "model_sha256": "10e8256bc9027f25a4de0510ceb88287a9ff60c1c0b2640e6113fc7754a22933",
+          "tf_sha256": "9600059c421aa2e81a7286b98187927aea627f185400355977a7c98c6cd7b643"
+        }
+      },
+      "base.quality": {
+        "seconds": 57.61003148500458,
+        "value": {
+          "blocking_recall": 0.99562175,
+          "quality": {
+            "edge_precision": 0.9440817371799535,
+            "edge_recall": 0.9710388257387909,
+            "edge_f1": 0.9573705585151253,
+            "cluster_precision": 0.8274055876893538,
+            "cluster_recall": 0.97909675,
+            "cluster_f1": 0.8968824506196602
+          },
+          "families": {
+            "blocking": {
+              "tp": 7964974,
+              "fp": 559219711,
+              "fn": 35026,
+              "precision": 0.014042999062994799,
+              "recall": 0.99562175,
+              "f1": 0.027695361881897113
+            },
+            "edge": {
+              "tp": 7734299,
+              "fp": 458105,
+              "fn": 230675,
+              "precision": 0.9440817371799535,
+              "recall": 0.9710388257387909,
+              "f1": 0.9573705585151253
+            },
+            "cluster": {
+              "tp": 7832774,
+              "fp": 1633894,
+              "fn": 167226,
+              "precision": 0.8274055876893538,
+              "recall": 0.97909675,
+              "f1": 0.8968824506196602
+            }
+          }
+        }
+      }
+    },
+    "code_sha256": {
+      "/benchmark/resume_validation.py": "0e46181bbf810cfc873130fa3dee8ed481f432ffb19f25e36240f658ac6f3d47",
+      "/app/benchmarks/semantic_outputs.py": "2f1fccd7fd0f56d89dbf0c14a03931135dd7d2a92fd0ed531dbe28c32111658f"
+    },
+    "fingerprint": {
+      "matching_runtime": {
+        "num_chunks_left": 1,
+        "num_chunks_right": 1,
+        "materialisation": "table",
+        "materialisation_dir": null
+      },
+      "scale": "10m",
+      "image_digest": "sha256:3a89366a7d39286e75c4267263bc21ebe6424e3edbfe55b7516e1da9faa4499b",
+      "git_sha": "0bc7697574a02b2da49a8fc198b6b3d98b5345e67491dda207a5d98c0351fb54",
+      "runner": "local",
+      "cgroup_cpu_max": "2.0",
+      "cgroup_memory_max": 10737418240,
+      "cgroup_memory_peak": 236867584,
+      "nproc": 8,
+      "er_duckdb_threads": 2,
+      "er_duckdb_memory_limit": "4GB",
+      "duckdb_version": "1.5.5",
+      "splink_version": "5.0.0.dev5",
+      "dbt_core_version": "1.12.2",
+      "dbt_duckdb_version": "1.11.0",
+      "ducklake_extension_version": "d8a1881e",
+      "config_hash": "ad8e3e12b8c6f07b47ccb58505f160b99229a4b6bb6fda3085351c6cf32dc250",
+      "generator_seed": 42,
+      "model_version": "v0001",
+      "tf_snapshot_id": "01M374DTJ1A3TNM30ZKGCXRYTG"
+    },
+    "active_step": "base.semantics"
+  }
+}

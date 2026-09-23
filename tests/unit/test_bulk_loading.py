@@ -3,10 +3,12 @@ from collections.abc import Iterator
 import duckdb
 import pytest
 
-from er.lake.bulk import insert_batches, staged_rows
+from er.lake.bulk import BATCH_ROWS, insert_batches, staged_rows
 
 
-@pytest.mark.parametrize("count", [0, 1, 1023, 1024, 1025, 2050])
+@pytest.mark.parametrize(
+    "count", [0, 1, BATCH_ROWS - 1, BATCH_ROWS, BATCH_ROWS + 1, 2 * BATCH_ROWS + 2]
+)
 def test_bulk_preserves_values_order_and_bounded_consumption(count: int) -> None:
     with duckdb.connect() as connection:
         connection.execute("CREATE TABLE staged (seq BIGINT, value VARCHAR, weight DOUBLE)")
@@ -14,7 +16,7 @@ def test_bulk_preserves_values_order_and_bounded_consumption(count: int) -> None
         def rows() -> Iterator[tuple[int, str | None, float]]:
             for index in range(count):
                 # At the start of each new batch, all earlier batches are already loaded.
-                if index and index % 1024 == 0:
+                if index and index % BATCH_ROWS == 0:
                     assert connection.execute("SELECT count(*) FROM staged").fetchone()[0] == index
                 yield index, None if index % 7 == 0 else "O'Neil 雪 \n \"", index / 7
 

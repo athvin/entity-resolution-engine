@@ -1,0 +1,986 @@
+{
+  "schema_version": 1,
+  "measured_date_utc": "2026-09-23",
+  "status": "passed",
+  "artifact_directory": "artifacts/bench/workload-1m-100k-20260923",
+  "base_git_revision": "00a65e4",
+  "application_source_sha256": "b9da830995ebfe7ce1c45c9d61851a0feac78f1d7f21ee885ed576433ddea9c6",
+  "harness_source_sha256": "73d0187d953067617104ecc4de5e0929f7a50ddb4247c06db0e334c923d5a3bf",
+  "image_digest": "sha256:d3d6927490cc8639cc38a9b9dd8e39bacd1743b5969b883431550bd2e3211a99",
+  "resource_envelope": {
+    "resource_profile": "local",
+    "scale": "1m",
+    "records": 1000000,
+    "personas": 400000,
+    "cpu_limit": 2,
+    "mem_limit": "10g",
+    "duckdb_memory_limit": "4GB",
+    "min_free_gb": 2,
+    "available": {
+      "cpus": 8,
+      "memory": 12529836032,
+      "disk": 548605104128
+    },
+    "docker_architecture": "aarch64",
+    "errors": []
+  },
+  "generator_profile": "baseline",
+  "generator_seed": 42,
+  "scenario": "full-1000000-incremental-100000-mixed-v1",
+  "repetitions_per_arm": 1,
+  "timing_scope": "Complete workload CLI commands, including startup. Excludes generation, setup, checkpoint validation and untimed full reference.",
+  "comparison_scope": "Instrumentation overhead only; no production algorithm, configuration or layout optimization.",
+  "profile_scope_at_measurement": "Setup, workloads and untimed validation were profiled. Derived indexes now contain workloads only. Subsequent harness disables SQL/cProfile during untimed validation/reference.",
+  "python_timing_limitation": "All 16 workload cProfile files have internally inconsistent function timings. Use call counts only; use native SQL and unprofiled command/stage times for timing evidence.",
+  "trials": {
+    "control": {
+      "processing_seconds": 93.30349345900001,
+      "incremental_seconds": 39.641791684000005,
+      "command_seconds": {
+        "base": {
+          "ingest": 10.290526254,
+          "standardize": 20.878020219000003,
+          "train": 10.551164046,
+          "match": 13.001781673,
+          "reconcile": 25.388534677,
+          "assemble": 13.19346659
+        },
+        "batch": {
+          "ingest": 7.63568967,
+          "run-all": 32.006102014
+        }
+      },
+      "stage_ledger": {
+        "base": {
+          "ingest": {
+            "seconds": 4.043,
+            "rows_in": 1000000,
+            "rows_out": 1000000
+          },
+          "standardize": {
+            "seconds": 18.715,
+            "rows_in": 1000000,
+            "rows_out": 1000000
+          },
+          "train": {
+            "seconds": 8.257,
+            "rows_in": 1000000,
+            "rows_out": 1
+          },
+          "match": {
+            "seconds": 10.623,
+            "rows_in": 1000000,
+            "rows_out": 840771
+          },
+          "reconcile": {
+            "seconds": 23.061,
+            "rows_in": 1000000,
+            "rows_out": 395867
+          },
+          "assemble": {
+            "seconds": 11.055,
+            "rows_in": 395867,
+            "rows_out": 395867
+          }
+        },
+        "batch": {
+          "ingest": {
+            "seconds": 1.2489999999999999,
+            "rows_in": 100000,
+            "rows_out": 100000
+          },
+          "standardize": {
+            "seconds": 10.353,
+            "rows_in": 100000,
+            "rows_out": 1100000
+          },
+          "match": {
+            "seconds": 5.301,
+            "rows_in": 100000,
+            "rows_out": 170558
+          },
+          "reconcile": {
+            "seconds": 5.805,
+            "rows_in": 234337,
+            "rows_out": 69947
+          },
+          "assemble": {
+            "seconds": 8.245,
+            "rows_in": 71086,
+            "rows_out": 69947
+          }
+        }
+      },
+      "resources": {
+        "cpu_s": 126.30956699999999,
+        "throttled_s": 14.857652999999999,
+        "sampled_memory_peak_bytes": 4198289408,
+        "sampled_spill_bytes_peak": 0,
+        "sampled_parquet_scratch_bytes_peak": 0
+      },
+      "incremental_resources": {
+        "cpu_s": 51.847675,
+        "throttled_s": 7.431495,
+        "sampled_memory_peak_bytes": 2679365632,
+        "sampled_spill_bytes_peak": 0,
+        "sampled_parquet_scratch_bytes_peak": 0
+      },
+      "fingerprint": {
+        "matching_runtime": {
+          "num_chunks_left": 1,
+          "num_chunks_right": 1,
+          "materialisation": "table",
+          "materialisation_dir": null
+        },
+        "scale": "1m",
+        "image_digest": "sha256:d3d6927490cc8639cc38a9b9dd8e39bacd1743b5969b883431550bd2e3211a99",
+        "git_sha": "b9da830995ebfe7ce1c45c9d61851a0feac78f1d7f21ee885ed576433ddea9c6",
+        "runner": "local",
+        "cgroup_cpu_max": "2.0",
+        "cgroup_memory_max": 10737418240,
+        "cgroup_memory_peak": 5134983168,
+        "nproc": 8,
+        "er_duckdb_threads": 2,
+        "er_duckdb_memory_limit": "4GB",
+        "duckdb_version": "1.5.5",
+        "splink_version": "5.0.0.dev5",
+        "dbt_core_version": "1.12.2",
+        "dbt_duckdb_version": "1.11.0",
+        "ducklake_extension_version": "d8a1881e",
+        "config_hash": "2c6a5d8eac097829a9ad5ac3dbf6482984dc31ca3e8f59596270f557ae338699",
+        "generator_seed": 42,
+        "model_version": "v0001",
+        "tf_snapshot_id": "01M36D3V4TT95R34D524YV5XQ4"
+      },
+      "input_sha256": {
+        "base/crm.csv": "68facd15eeae0c08379b7d5537b44c9781ee330cc0664622ee0bf7bfc2cb410e",
+        "base/billing.csv": "f1c8ab4e4059251a0ef27fc6d8913bb51a00242987b31786aeef553d9a85e4c1",
+        "base/webforms.csv": "a3e03b397aa2283fd78035734b92a89a3b3351a0986805128cb238c7f09f1146",
+        "batch/crm.csv": "d961153c040705e975c8d44e50b0eec9f00f7f63c4be7320f55be92c305df87f",
+        "batch/billing.csv": "f9c07f4868b4512f7d3cc20597fb03d8aaf45c4778599bdcd9d709995f362bad",
+        "batch/webforms.csv": "6d3af9d573ff46ddaf9af043c1a2a41ab951b4079ae60604fbac186c8a0c481c"
+      },
+      "semantic_config_sha256": "9ac6531965d4cb8d89df009cc143d06e41cbef1f8dd77e9bdab66e6096e0eec9",
+      "incremental_equivalence": {
+        "status": "passed",
+        "partition_sha256": "ede0a7cbd08f8411df308033a96196102fb3083b1c3b4d6e5155c882b5868dc4",
+        "semantic_hashes": {
+          "int_std_records": "fbcebdc5187f4edc7890f384e2a9349db60038ac3e544dfa4a49730534041418",
+          "int_blocking_keys": "0ff5513312cfe2bd5f09f745ecd6fffb9d69aceae70bff6e86145a9206db68df",
+          "golden_records": "b2e692b91e7fafefc37c6bb296658e7842c03d585e47fbb6afc25910aa7924d4",
+          "golden_lineage": "63281d566d4d866d1a357a0ab22b9235cf59d8f46411d18475389ff743b2258f",
+          "candidate_pairs": "850af8e5b44726115bad9e86f0f1b822d4935772e224e93e568c95dfc2e08d24",
+          "score_classifications": "5e29cc9dae80863aa6f1a65f367303eb0d2a69b2a86ddf8483e5ddfbccd89698"
+        },
+        "generation": {
+          "snapshot": 134,
+          "model_version": "v0001",
+          "tf_snapshot_id": "01M36D3V4TT95R34D524YV5XQ4"
+        },
+        "scores": {
+          "pairs": 1011329,
+          "mismatches": 0,
+          "max_probability_delta": 0.0,
+          "tolerance": 1e-10,
+          "status": "passed"
+        }
+      },
+      "base_counts": {
+        "raw_records": 1000000,
+        "int_std_records": 1000000,
+        "int_blocking_keys": 3806694,
+        "match_scores": 840771,
+        "entity_membership": 1000000,
+        "golden_records": 395867,
+        "golden_lineage": 2375202
+      },
+      "base_candidate_pairs": 6430399,
+      "base_quality": {
+        "blocking_recall": 0.9955825,
+        "quality": {
+          "edge_precision": 0.9735047764302233,
+          "edge_recall": 0.9825215388980822,
+          "edge_f1": 0.9779923752225351,
+          "cluster_precision": 0.9033942499001758,
+          "cluster_recall": 0.987,
+          "cluster_f1": 0.9433483250370213
+        },
+        "families": {
+          "blocking": {
+            "tp": 796466,
+            "fp": 5633933,
+            "fn": 3534,
+            "precision": 0.1238594992316962,
+            "recall": 0.9955825,
+            "f1": 0.22031038674352552
+          },
+          "edge": {
+            "tp": 782545,
+            "fp": 21298,
+            "fn": 13921,
+            "precision": 0.9735047764302233,
+            "recall": 0.9825215388980822,
+            "f1": 0.9779923752225351
+          },
+          "cluster": {
+            "tp": 789600,
+            "fp": 84437,
+            "fn": 10400,
+            "precision": 0.9033942499001758,
+            "recall": 0.987,
+            "f1": 0.9433483250370213
+          }
+        }
+      },
+      "base_blocking": [
+        {
+          "key_type": "dob_name",
+          "key_rows": 922992,
+          "buckets": 402964,
+          "largest_bucket": 17,
+          "p99_bucket": 6,
+          "raw_pair_occurrences": 878001
+        },
+        {
+          "key_type": "email_exact",
+          "key_rows": 943363,
+          "buckets": 485747,
+          "largest_bucket": 6,
+          "p99_bucket": 4,
+          "raw_pair_occurrences": 596660
+        },
+        {
+          "key_type": "name_postal",
+          "key_rows": 1000000,
+          "buckets": 136236,
+          "largest_bucket": 58,
+          "p99_bucket": 30,
+          "raw_pair_occurrences": 5939078
+        },
+        {
+          "key_type": "phone_exact",
+          "key_rows": 940339,
+          "buckets": 471913,
+          "largest_bucket": 5,
+          "p99_bucket": 3,
+          "raw_pair_occurrences": 599432
+        }
+      ],
+      "base_model_fingerprint": {
+        "model_sha256": "fc973f57c0db384b5742fe1fa53192ffc18bf550193c13f783afe61b92281e39",
+        "tf_sha256": "b767042ac61890e79a4b570135f17106f5113be1c69a8869a6ac84847ada7ceb"
+      },
+      "base_partition_hash": "9bb8e515ef80803bbae9329c560f4203bbe6863d7b5b8ec966758175fae78582",
+      "base_semantic_hashes": {
+        "int_std_records": "7a351ce386b1a03834d777257cd5105cb2850a6c2029e55d2cbf8bdc23ee60f6",
+        "int_blocking_keys": "ef20f0ffd15e2d13f85b9feef3667524e7b0b44861069de4723c42318cc44cac",
+        "golden_records": "0e155fa7d8fb521409a3b5bd37a3d35676c9dac2f29f0a18d59bf422dc40c9af",
+        "golden_lineage": "b667eb1c4efaf644dc91c0fe0c3a392a77e59e8c1f8b5b1c2efc542f3674a5ee",
+        "candidate_pairs": "7689275fe3870c0be4ba1a6406747ee14e06cf0f3d17abd21b9abc0364005c50",
+        "score_classifications": "7d8c093983e414f213410665e9c987c89e183b4d67553458514f96230682d63c"
+      },
+      "base_files": {
+        "raw_records": {
+          "data_files": 3,
+          "delete_files": 0,
+          "data_bytes": 169339742,
+          "delete_bytes": 0
+        },
+        "int_std_records": {
+          "data_files": 1,
+          "delete_files": 0,
+          "data_bytes": 116966762,
+          "delete_bytes": 0
+        },
+        "int_blocking_keys": {
+          "data_files": 1,
+          "delete_files": 0,
+          "data_bytes": 71438259,
+          "delete_bytes": 0
+        },
+        "match_scores": {
+          "data_files": 1,
+          "delete_files": 0,
+          "data_bytes": 183457659,
+          "delete_bytes": 0
+        },
+        "entity_membership": {
+          "data_files": 1,
+          "delete_files": 0,
+          "data_bytes": 16348420,
+          "delete_bytes": 0
+        },
+        "golden_records": {
+          "data_files": 1,
+          "delete_files": 0,
+          "data_bytes": 17004556,
+          "delete_bytes": 0
+        },
+        "golden_lineage": {
+          "data_files": 1,
+          "delete_files": 0,
+          "data_bytes": 34659872,
+          "delete_bytes": 0
+        },
+        "tf_lookup": {
+          "data_files": 1,
+          "delete_files": 0,
+          "data_bytes": 5685778,
+          "delete_bytes": 0
+        }
+      },
+      "batch_counts": {
+        "raw_records": 1100000,
+        "int_std_records": 1100000,
+        "int_blocking_keys": 4187425,
+        "match_scores": 1011329,
+        "entity_membership": 1100000,
+        "golden_records": 414457,
+        "golden_lineage": 2486742
+      },
+      "batch_candidate_pairs": 7785713,
+      "batch_quality": {
+        "blocking_recall": 0.9955891710833684,
+        "quality": {
+          "edge_precision": 0.9737934677639019,
+          "edge_recall": 0.9824929578344482,
+          "edge_f1": 0.9781238697401788,
+          "cluster_precision": 0.899791598237646,
+          "cluster_recall": 0.988002876988034,
+          "cluster_f1": 0.941836306245338
+        },
+        "families": {
+          "blocking": {
+            "tp": 960642,
+            "fp": 6825071,
+            "fn": 4256,
+            "precision": 0.1233852313847171,
+            "recall": 0.9955891710833684,
+            "f1": 0.21955998272577767
+          },
+          "edge": {
+            "tp": 943824,
+            "fp": 25400,
+            "fn": 16818,
+            "precision": 0.9737934677639019,
+            "recall": 0.9824929578344482,
+            "f1": 0.9781238697401788
+          },
+          "cluster": {
+            "tp": 953322,
+            "fp": 106170,
+            "fn": 11576,
+            "precision": 0.899791598237646,
+            "recall": 0.988002876988034,
+            "f1": 0.941836306245338
+          }
+        }
+      },
+      "batch_blocking": [
+        {
+          "key_type": "dob_name",
+          "key_rows": 1015366,
+          "buckets": 423045,
+          "largest_bucket": 22,
+          "p99_bucket": 7,
+          "raw_pair_occurrences": 1060841
+        },
+        {
+          "key_type": "email_exact",
+          "key_rows": 1037731,
+          "buckets": 515260,
+          "largest_bucket": 6,
+          "p99_bucket": 4,
+          "raw_pair_occurrences": 717238
+        },
+        {
+          "key_type": "name_postal",
+          "key_rows": 1100000,
+          "buckets": 139336,
+          "largest_bucket": 65,
+          "p99_bucket": 33,
+          "raw_pair_occurrences": 7194916
+        },
+        {
+          "key_type": "phone_exact",
+          "key_rows": 1034328,
+          "buckets": 499593,
+          "largest_bucket": 6,
+          "p99_bucket": 4,
+          "raw_pair_occurrences": 722616
+        }
+      ],
+      "batch_model_fingerprint": {
+        "model_sha256": "fc973f57c0db384b5742fe1fa53192ffc18bf550193c13f783afe61b92281e39",
+        "tf_sha256": "b767042ac61890e79a4b570135f17106f5113be1c69a8869a6ac84847ada7ceb"
+      },
+      "batch_partition_hash": "ede0a7cbd08f8411df308033a96196102fb3083b1c3b4d6e5155c882b5868dc4",
+      "batch_semantic_hashes": {
+        "int_std_records": "fbcebdc5187f4edc7890f384e2a9349db60038ac3e544dfa4a49730534041418",
+        "int_blocking_keys": "0ff5513312cfe2bd5f09f745ecd6fffb9d69aceae70bff6e86145a9206db68df",
+        "golden_records": "b2e692b91e7fafefc37c6bb296658e7842c03d585e47fbb6afc25910aa7924d4",
+        "golden_lineage": "63281d566d4d866d1a357a0ab22b9235cf59d8f46411d18475389ff743b2258f",
+        "candidate_pairs": "850af8e5b44726115bad9e86f0f1b822d4935772e224e93e568c95dfc2e08d24",
+        "score_classifications": "5e29cc9dae80863aa6f1a65f367303eb0d2a69b2a86ddf8483e5ddfbccd89698"
+      },
+      "batch_files": {
+        "raw_records": {
+          "data_files": 6,
+          "delete_files": 0,
+          "data_bytes": 186598106,
+          "delete_bytes": 0
+        },
+        "int_std_records": {
+          "data_files": 2,
+          "delete_files": 0,
+          "data_bytes": 128685854,
+          "delete_bytes": 0
+        },
+        "int_blocking_keys": {
+          "data_files": 2,
+          "delete_files": 0,
+          "data_bytes": 78601319,
+          "delete_bytes": 0
+        },
+        "match_scores": {
+          "data_files": 2,
+          "delete_files": 0,
+          "data_bytes": 221799549,
+          "delete_bytes": 0
+        },
+        "entity_membership": {
+          "data_files": 3,
+          "delete_files": 1,
+          "data_bytes": 18961275,
+          "delete_bytes": 11555
+        },
+        "golden_records": {
+          "data_files": 2,
+          "delete_files": 1,
+          "data_bytes": 20185248,
+          "delete_bytes": 211472
+        },
+        "golden_lineage": {
+          "data_files": 2,
+          "delete_files": 1,
+          "data_bytes": 40366866,
+          "delete_bytes": 1261746
+        },
+        "tf_lookup": {
+          "data_files": 1,
+          "delete_files": 0,
+          "data_bytes": 5685778,
+          "delete_bytes": 0
+        }
+      }
+    },
+    "profiled": {
+      "processing_seconds": 132.386653309,
+      "incremental_seconds": 59.01960115199999,
+      "command_seconds": {
+        "base": {
+          "ingest": 11.655636713,
+          "standardize": 28.475040971,
+          "train": 12.365000589,
+          "match": 13.782541506,
+          "reconcile": 46.354563897,
+          "assemble": 19.753869632999997
+        },
+        "batch": {
+          "ingest": 8.740310171,
+          "run-all": 50.279290980999995
+        }
+      },
+      "stage_ledger": {
+        "base": {
+          "ingest": {
+            "seconds": 4.195,
+            "rows_in": 1000000,
+            "rows_out": 1000000
+          },
+          "standardize": {
+            "seconds": 25.962,
+            "rows_in": 1000000,
+            "rows_out": 1000000
+          },
+          "train": {
+            "seconds": 9.806,
+            "rows_in": 1000000,
+            "rows_out": 1
+          },
+          "match": {
+            "seconds": 11.144,
+            "rows_in": 1000000,
+            "rows_out": 840771
+          },
+          "reconcile": {
+            "seconds": 43.632,
+            "rows_in": 1000000,
+            "rows_out": 395867
+          },
+          "assemble": {
+            "seconds": 17.229,
+            "rows_in": 395867,
+            "rows_out": 395867
+          }
+        },
+        "batch": {
+          "ingest": {
+            "seconds": 1.4180000000000001,
+            "rows_in": 100000,
+            "rows_out": 100000
+          },
+          "standardize": {
+            "seconds": 17.28,
+            "rows_in": 100000,
+            "rows_out": 1100000
+          },
+          "match": {
+            "seconds": 5.714,
+            "rows_in": 100000,
+            "rows_out": 170558
+          },
+          "reconcile": {
+            "seconds": 9.538,
+            "rows_in": 234337,
+            "rows_out": 69947
+          },
+          "assemble": {
+            "seconds": 14.979,
+            "rows_in": 71086,
+            "rows_out": 69947
+          }
+        }
+      },
+      "resources": {
+        "cpu_s": 166.46940899999998,
+        "throttled_s": 15.290932999999999,
+        "sampled_memory_peak_bytes": 4203405312,
+        "sampled_spill_bytes_peak": 0,
+        "sampled_parquet_scratch_bytes_peak": 0
+      },
+      "incremental_resources": {
+        "cpu_s": 71.410555,
+        "throttled_s": 8.162789,
+        "sampled_memory_peak_bytes": 2591399936,
+        "sampled_spill_bytes_peak": 0,
+        "sampled_parquet_scratch_bytes_peak": 0
+      },
+      "fingerprint": {
+        "matching_runtime": {
+          "num_chunks_left": 1,
+          "num_chunks_right": 1,
+          "materialisation": "table",
+          "materialisation_dir": null
+        },
+        "scale": "1m",
+        "image_digest": "sha256:d3d6927490cc8639cc38a9b9dd8e39bacd1743b5969b883431550bd2e3211a99",
+        "git_sha": "b9da830995ebfe7ce1c45c9d61851a0feac78f1d7f21ee885ed576433ddea9c6",
+        "runner": "local",
+        "cgroup_cpu_max": "2.0",
+        "cgroup_memory_max": 10737418240,
+        "cgroup_memory_peak": 5173268480,
+        "nproc": 8,
+        "er_duckdb_threads": 2,
+        "er_duckdb_memory_limit": "4GB",
+        "duckdb_version": "1.5.5",
+        "splink_version": "5.0.0.dev5",
+        "dbt_core_version": "1.12.2",
+        "dbt_duckdb_version": "1.11.0",
+        "ducklake_extension_version": "d8a1881e",
+        "config_hash": "f6754ff5afb06da55e2936af2b9d6ea9f4c69ffc189daf500dfe27c502354e74",
+        "generator_seed": 42,
+        "model_version": "v0001",
+        "tf_snapshot_id": "01M36DJA4WA2QK85VX21JRTQD7"
+      },
+      "input_sha256": {
+        "base/crm.csv": "68facd15eeae0c08379b7d5537b44c9781ee330cc0664622ee0bf7bfc2cb410e",
+        "base/billing.csv": "f1c8ab4e4059251a0ef27fc6d8913bb51a00242987b31786aeef553d9a85e4c1",
+        "base/webforms.csv": "a3e03b397aa2283fd78035734b92a89a3b3351a0986805128cb238c7f09f1146",
+        "batch/crm.csv": "d961153c040705e975c8d44e50b0eec9f00f7f63c4be7320f55be92c305df87f",
+        "batch/billing.csv": "f9c07f4868b4512f7d3cc20597fb03d8aaf45c4778599bdcd9d709995f362bad",
+        "batch/webforms.csv": "6d3af9d573ff46ddaf9af043c1a2a41ab951b4079ae60604fbac186c8a0c481c"
+      },
+      "semantic_config_sha256": "9ac6531965d4cb8d89df009cc143d06e41cbef1f8dd77e9bdab66e6096e0eec9",
+      "incremental_equivalence": {
+        "status": "passed",
+        "partition_sha256": "ede0a7cbd08f8411df308033a96196102fb3083b1c3b4d6e5155c882b5868dc4",
+        "semantic_hashes": {
+          "int_std_records": "fbcebdc5187f4edc7890f384e2a9349db60038ac3e544dfa4a49730534041418",
+          "int_blocking_keys": "0ff5513312cfe2bd5f09f745ecd6fffb9d69aceae70bff6e86145a9206db68df",
+          "golden_records": "b2e692b91e7fafefc37c6bb296658e7842c03d585e47fbb6afc25910aa7924d4",
+          "golden_lineage": "63281d566d4d866d1a357a0ab22b9235cf59d8f46411d18475389ff743b2258f",
+          "candidate_pairs": "850af8e5b44726115bad9e86f0f1b822d4935772e224e93e568c95dfc2e08d24",
+          "score_classifications": "5e29cc9dae80863aa6f1a65f367303eb0d2a69b2a86ddf8483e5ddfbccd89698"
+        },
+        "generation": {
+          "snapshot": 134,
+          "model_version": "v0001",
+          "tf_snapshot_id": "01M36DJA4WA2QK85VX21JRTQD7"
+        },
+        "scores": {
+          "pairs": 1011329,
+          "mismatches": 0,
+          "max_probability_delta": 0.0,
+          "tolerance": 1e-10,
+          "status": "passed"
+        }
+      },
+      "base_counts": {
+        "raw_records": 1000000,
+        "int_std_records": 1000000,
+        "int_blocking_keys": 3806694,
+        "match_scores": 840771,
+        "entity_membership": 1000000,
+        "golden_records": 395867,
+        "golden_lineage": 2375202
+      },
+      "base_candidate_pairs": 6430399,
+      "base_quality": {
+        "blocking_recall": 0.9955825,
+        "quality": {
+          "edge_precision": 0.9735047764302233,
+          "edge_recall": 0.9825215388980822,
+          "edge_f1": 0.9779923752225351,
+          "cluster_precision": 0.9033942499001758,
+          "cluster_recall": 0.987,
+          "cluster_f1": 0.9433483250370213
+        },
+        "families": {
+          "blocking": {
+            "tp": 796466,
+            "fp": 5633933,
+            "fn": 3534,
+            "precision": 0.1238594992316962,
+            "recall": 0.9955825,
+            "f1": 0.22031038674352552
+          },
+          "edge": {
+            "tp": 782545,
+            "fp": 21298,
+            "fn": 13921,
+            "precision": 0.9735047764302233,
+            "recall": 0.9825215388980822,
+            "f1": 0.9779923752225351
+          },
+          "cluster": {
+            "tp": 789600,
+            "fp": 84437,
+            "fn": 10400,
+            "precision": 0.9033942499001758,
+            "recall": 0.987,
+            "f1": 0.9433483250370213
+          }
+        }
+      },
+      "base_blocking": [
+        {
+          "key_type": "dob_name",
+          "key_rows": 922992,
+          "buckets": 402964,
+          "largest_bucket": 17,
+          "p99_bucket": 6,
+          "raw_pair_occurrences": 878001
+        },
+        {
+          "key_type": "email_exact",
+          "key_rows": 943363,
+          "buckets": 485747,
+          "largest_bucket": 6,
+          "p99_bucket": 4,
+          "raw_pair_occurrences": 596660
+        },
+        {
+          "key_type": "name_postal",
+          "key_rows": 1000000,
+          "buckets": 136236,
+          "largest_bucket": 58,
+          "p99_bucket": 30,
+          "raw_pair_occurrences": 5939078
+        },
+        {
+          "key_type": "phone_exact",
+          "key_rows": 940339,
+          "buckets": 471913,
+          "largest_bucket": 5,
+          "p99_bucket": 3,
+          "raw_pair_occurrences": 599432
+        }
+      ],
+      "base_model_fingerprint": {
+        "model_sha256": "170cd4b25d1a6f6100e7ca263e47a3b47b2edc515e654e1def835d92ae65fad8",
+        "tf_sha256": "b767042ac61890e79a4b570135f17106f5113be1c69a8869a6ac84847ada7ceb"
+      },
+      "base_partition_hash": "9bb8e515ef80803bbae9329c560f4203bbe6863d7b5b8ec966758175fae78582",
+      "base_semantic_hashes": {
+        "int_std_records": "7a351ce386b1a03834d777257cd5105cb2850a6c2029e55d2cbf8bdc23ee60f6",
+        "int_blocking_keys": "ef20f0ffd15e2d13f85b9feef3667524e7b0b44861069de4723c42318cc44cac",
+        "golden_records": "0e155fa7d8fb521409a3b5bd37a3d35676c9dac2f29f0a18d59bf422dc40c9af",
+        "golden_lineage": "b667eb1c4efaf644dc91c0fe0c3a392a77e59e8c1f8b5b1c2efc542f3674a5ee",
+        "candidate_pairs": "7689275fe3870c0be4ba1a6406747ee14e06cf0f3d17abd21b9abc0364005c50",
+        "score_classifications": "7d8c093983e414f213410665e9c987c89e183b4d67553458514f96230682d63c"
+      },
+      "base_files": {
+        "raw_records": {
+          "data_files": 3,
+          "delete_files": 0,
+          "data_bytes": 169410651,
+          "delete_bytes": 0
+        },
+        "int_std_records": {
+          "data_files": 1,
+          "delete_files": 0,
+          "data_bytes": 117013537,
+          "delete_bytes": 0
+        },
+        "int_blocking_keys": {
+          "data_files": 1,
+          "delete_files": 0,
+          "data_bytes": 71436753,
+          "delete_bytes": 0
+        },
+        "match_scores": {
+          "data_files": 1,
+          "delete_files": 0,
+          "data_bytes": 183687149,
+          "delete_bytes": 0
+        },
+        "entity_membership": {
+          "data_files": 1,
+          "delete_files": 0,
+          "data_bytes": 17087230,
+          "delete_bytes": 0
+        },
+        "golden_records": {
+          "data_files": 1,
+          "delete_files": 0,
+          "data_bytes": 18275651,
+          "delete_bytes": 0
+        },
+        "golden_lineage": {
+          "data_files": 1,
+          "delete_files": 0,
+          "data_bytes": 38371252,
+          "delete_bytes": 0
+        },
+        "tf_lookup": {
+          "data_files": 1,
+          "delete_files": 0,
+          "data_bytes": 5688654,
+          "delete_bytes": 0
+        }
+      },
+      "batch_counts": {
+        "raw_records": 1100000,
+        "int_std_records": 1100000,
+        "int_blocking_keys": 4187425,
+        "match_scores": 1011329,
+        "entity_membership": 1100000,
+        "golden_records": 414457,
+        "golden_lineage": 2486742
+      },
+      "batch_candidate_pairs": 7785713,
+      "batch_quality": {
+        "blocking_recall": 0.9955891710833684,
+        "quality": {
+          "edge_precision": 0.9737934677639019,
+          "edge_recall": 0.9824929578344482,
+          "edge_f1": 0.9781238697401788,
+          "cluster_precision": 0.899791598237646,
+          "cluster_recall": 0.988002876988034,
+          "cluster_f1": 0.941836306245338
+        },
+        "families": {
+          "blocking": {
+            "tp": 960642,
+            "fp": 6825071,
+            "fn": 4256,
+            "precision": 0.1233852313847171,
+            "recall": 0.9955891710833684,
+            "f1": 0.21955998272577767
+          },
+          "edge": {
+            "tp": 943824,
+            "fp": 25400,
+            "fn": 16818,
+            "precision": 0.9737934677639019,
+            "recall": 0.9824929578344482,
+            "f1": 0.9781238697401788
+          },
+          "cluster": {
+            "tp": 953322,
+            "fp": 106170,
+            "fn": 11576,
+            "precision": 0.899791598237646,
+            "recall": 0.988002876988034,
+            "f1": 0.941836306245338
+          }
+        }
+      },
+      "batch_blocking": [
+        {
+          "key_type": "dob_name",
+          "key_rows": 1015366,
+          "buckets": 423045,
+          "largest_bucket": 22,
+          "p99_bucket": 7,
+          "raw_pair_occurrences": 1060841
+        },
+        {
+          "key_type": "email_exact",
+          "key_rows": 1037731,
+          "buckets": 515260,
+          "largest_bucket": 6,
+          "p99_bucket": 4,
+          "raw_pair_occurrences": 717238
+        },
+        {
+          "key_type": "name_postal",
+          "key_rows": 1100000,
+          "buckets": 139336,
+          "largest_bucket": 65,
+          "p99_bucket": 33,
+          "raw_pair_occurrences": 7194916
+        },
+        {
+          "key_type": "phone_exact",
+          "key_rows": 1034328,
+          "buckets": 499593,
+          "largest_bucket": 6,
+          "p99_bucket": 4,
+          "raw_pair_occurrences": 722616
+        }
+      ],
+      "batch_model_fingerprint": {
+        "model_sha256": "170cd4b25d1a6f6100e7ca263e47a3b47b2edc515e654e1def835d92ae65fad8",
+        "tf_sha256": "b767042ac61890e79a4b570135f17106f5113be1c69a8869a6ac84847ada7ceb"
+      },
+      "batch_partition_hash": "ede0a7cbd08f8411df308033a96196102fb3083b1c3b4d6e5155c882b5868dc4",
+      "batch_semantic_hashes": {
+        "int_std_records": "fbcebdc5187f4edc7890f384e2a9349db60038ac3e544dfa4a49730534041418",
+        "int_blocking_keys": "0ff5513312cfe2bd5f09f745ecd6fffb9d69aceae70bff6e86145a9206db68df",
+        "golden_records": "b2e692b91e7fafefc37c6bb296658e7842c03d585e47fbb6afc25910aa7924d4",
+        "golden_lineage": "63281d566d4d866d1a357a0ab22b9235cf59d8f46411d18475389ff743b2258f",
+        "candidate_pairs": "850af8e5b44726115bad9e86f0f1b822d4935772e224e93e568c95dfc2e08d24",
+        "score_classifications": "5e29cc9dae80863aa6f1a65f367303eb0d2a69b2a86ddf8483e5ddfbccd89698"
+      },
+      "batch_files": {
+        "raw_records": {
+          "data_files": 6,
+          "delete_files": 0,
+          "data_bytes": 186687970,
+          "delete_bytes": 0
+        },
+        "int_std_records": {
+          "data_files": 2,
+          "delete_files": 0,
+          "data_bytes": 128717643,
+          "delete_bytes": 0
+        },
+        "int_blocking_keys": {
+          "data_files": 2,
+          "delete_files": 0,
+          "data_bytes": 78601001,
+          "delete_bytes": 0
+        },
+        "match_scores": {
+          "data_files": 2,
+          "delete_files": 0,
+          "data_bytes": 222045108,
+          "delete_bytes": 0
+        },
+        "entity_membership": {
+          "data_files": 3,
+          "delete_files": 1,
+          "data_bytes": 19920482,
+          "delete_bytes": 11554
+        },
+        "golden_records": {
+          "data_files": 2,
+          "delete_files": 1,
+          "data_bytes": 21659379,
+          "delete_bytes": 211406
+        },
+        "golden_lineage": {
+          "data_files": 2,
+          "delete_files": 1,
+          "data_bytes": 44574059,
+          "delete_bytes": 1261680
+        },
+        "tf_lookup": {
+          "data_files": 1,
+          "delete_files": 0,
+          "data_bytes": 5688654,
+          "delete_bytes": 0
+        }
+      },
+      "model_comparison": {
+        "status": "passed",
+        "mismatches": [],
+        "max_parameter_delta": 2.403632848313464e-14,
+        "tolerance": 1e-12,
+        "evidence": [
+          "model_json",
+          "model_json"
+        ],
+        "byte_identical": false
+      },
+      "score_comparisons": {
+        "base": {
+          "pairs": 840771,
+          "mismatches": 0,
+          "max_probability_delta": 1.759703494030873e-13,
+          "tolerance": 1e-10,
+          "status": "passed"
+        },
+        "batch": {
+          "pairs": 1011329,
+          "mismatches": 0,
+          "max_probability_delta": 1.759703494030873e-13,
+          "tolerance": 1e-10,
+          "status": "passed"
+        }
+      },
+      "query_coverage": {
+        "submitted": 51398,
+        "profiles": 51378,
+        "missing": [],
+        "errors": [],
+        "unattributed": [],
+        "workloads": {
+          "base": {
+            "profiles": 2881,
+            "missing_spans": [],
+            "missing_sql_stages": [],
+            "missing_sql_models": [],
+            "empty_estimators": []
+          },
+          "batch": {
+            "profiles": 843,
+            "missing_spans": [],
+            "missing_sql_stages": [],
+            "missing_sql_models": [],
+            "empty_estimators": []
+          }
+        },
+        "explicit_exclusions": 24
+      },
+      "sql_index": {
+        "profiles": 51378,
+        "indexed_profiles": 3724,
+        "excluded_phases": {
+          "validation": 47185,
+          "validation_reference": 398,
+          "setup": 63,
+          "checkpoint": 8
+        },
+        "missing_workload_profiles": [],
+        "status": "captured"
+      }
+    }
+  },
+  "indicative_profiling_overhead_percent": {
+    "reload": 41.88820632656605,
+    "incremental": 48.88227460168293
+  }
+}

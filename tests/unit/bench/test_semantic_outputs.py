@@ -15,6 +15,39 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "benchmarks"))
 semantic = importlib.import_module("semantic_outputs")
 
 
+@pytest.mark.parametrize("partitions", [1, 3, 128])
+def test_partitioned_candidates_preserve_legacy_hash(partitions: int) -> None:
+    with duckdb.connect() as connection:
+        connection.execute("ATTACH ':memory:' AS lake")
+        connection.execute(
+            "CREATE TABLE lake.main.int_blocking_keys "
+            "(record_key VARCHAR, key_type VARCHAR, key_value VARCHAR)"
+        )
+        # Enough pairs to cross JSON pages; overlapping keys and duplicate rows
+        # must not repeat a pair. Nulls, empty strings and Unicode retain the
+        # original SQL equality and json.dumps encoding semantics.
+        rows = [(f"r:{i:03d}", "a", "shared") for i in range(140)]
+        rows += [(key, "a", "shared") for key in ['a"', "雪", "é", "z\\", ""]]
+        rows += [("r:000", "b", "other"), ("雪", "b", "other"), rows[0]]
+        rows += [(None, "a", "shared"), ("null-key", None, "shared")]
+        rows += [("null-value", "a", None), ("empty-a", "empty", "")]
+        rows += [("empty-b", "empty", ""), ("isolated", "a", "alone")]
+        connection.executemany("INSERT INTO lake.main.int_blocking_keys VALUES (?, ?, ?)", rows)
+        expected = connection.execute(
+            "SELECT DISTINCT a.record_key, b.record_key FROM lake.main.int_blocking_keys a "
+            "JOIN lake.main.int_blocking_keys b ON a.key_type=b.key_type "
+            "AND a.key_value=b.key_value AND a.record_key<b.record_key ORDER BY 1,2"
+        ).fetchall()
+        assert semantic.candidate_pair_sha256(connection, partitions=partitions) == (
+            hashlib.sha256(json.dumps(expected).encode()).hexdigest()
+        )
+
+
+def test_candidate_hash_rejects_invalid_partition_count() -> None:
+    with pytest.raises(ValueError, match="partitions must be positive"):
+        semantic.candidate_pair_sha256(None, partitions=0)
+
+
 @pytest.mark.parametrize("size", [0, 2051])
 def test_streaming_artifacts_match_collection_format(tmp_path: Path, size: int) -> None:
     with duckdb.connect() as connection:

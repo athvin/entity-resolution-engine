@@ -16,6 +16,52 @@ def _identifier(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
+def candidate_pair_sha256(connection: Any, *, partitions: int = 128) -> str:
+    """Hash the sorted legacy JSON pair array without a corpus-wide DISTINCT.
+
+    Ordered integer ranks preserve record-key ordering. Disjoint ranges of the
+    smaller endpoint bound each deduplication/sort, including overlapping keys.
+    Page encoding preserves json.dumps' exact bytes while avoiding one Python
+    encoder call per pair. Neither the candidate definition nor its hash changes.
+    """
+    if partitions < 1:
+        raise ValueError("partitions must be positive")
+    digest = hashlib.sha256(b"[")
+    separator = b""
+    with staged_query(
+        connection,
+        "SELECT record_key, row_number() OVER (ORDER BY record_key) AS record_id "
+        "FROM (SELECT DISTINCT record_key FROM lake.main.int_blocking_keys "
+        "WHERE record_key IS NOT NULL AND key_type IS NOT NULL AND key_value IS NOT NULL)",
+    ) as records:
+        count = connection.execute(f"SELECT count(*) FROM {records}").fetchone()[0]
+        if count:
+            with staged_query(
+                connection,
+                "SELECT r.record_id, dense_rank() OVER (ORDER BY k.key_type, k.key_value) "
+                f"AS key_id FROM lake.main.int_blocking_keys k JOIN {records} r "
+                "USING(record_key) WHERE k.key_type IS NOT NULL AND k.key_value IS NOT NULL",
+            ) as keys:
+                width = (count + partitions - 1) // partitions
+                for first in range(1, count + 1, width):
+                    cursor = connection.execute(
+                        "WITH pairs AS MATERIALIZED (SELECT DISTINCT a.record_id AS a_id, "
+                        f"b.record_id AS b_id FROM {keys} a JOIN {keys} b "
+                        "ON a.key_id=b.key_id AND a.record_id<b.record_id "
+                        "WHERE a.record_id>=? AND a.record_id<?) "
+                        f"SELECT l.record_key, r.record_key FROM pairs p JOIN {records} l "
+                        f"ON p.a_id=l.record_id JOIN {records} r ON p.b_id=r.record_id "
+                        "ORDER BY p.a_id, p.b_id",
+                        [first, first + width],
+                    )
+                    for page in iter(lambda cursor=cursor: cursor.fetchmany(8192), []):
+                        digest.update(separator)
+                        digest.update(json.dumps(page).encode()[1:-1])
+                        separator = b", "
+    digest.update(b"]")
+    return digest.hexdigest()
+
+
 def save_semantic_outputs(
     connection: Any, config: Any, directory: Path, phase: str
 ) -> dict[str, str]:
@@ -73,20 +119,7 @@ def save_semantic_outputs(
                             digest.update(row.encode())
                             separator = b"\n"
                     hashes[table] = digest.hexdigest()
-    pairs = connection.execute(
-        "SELECT DISTINCT a.record_key, b.record_key FROM lake.main.int_blocking_keys a "
-        "JOIN lake.main.int_blocking_keys b ON a.key_type=b.key_type AND a.key_value=b.key_value "
-        "AND a.record_key < b.record_key ORDER BY 1,2"
-    )
-    digest = hashlib.sha256(b"[")
-    separator = b""
-    for page in iter(lambda: pairs.fetchmany(1024), []):
-        for pair in page:
-            digest.update(separator)
-            digest.update(json.dumps(pair).encode())
-            separator = b", "
-    digest.update(b"]")
-    hashes["candidate_pairs"] = digest.hexdigest()
+    hashes["candidate_pairs"] = candidate_pair_sha256(connection)
     scores = connection.execute(
         "SELECT rec_a_key, rec_b_key, match_probability, rec_a_content_hash, "
         "rec_b_content_hash, is_active, "

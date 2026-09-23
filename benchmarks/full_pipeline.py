@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import os
@@ -10,6 +11,7 @@ import shutil
 import statistics
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from dataclasses import replace
@@ -18,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from build_performance_image import EXCLUDED, PATHS
-from performance import processing_resources
+from performance import capture_services, processing_resources
 from scales import Scale, _memory_bytes, load_scales
 from scales import get_scale as standard_scale
 
@@ -358,6 +360,8 @@ def worker(args: argparse.Namespace) -> None:
         blocking_experiments=getattr(args, "blocking_experiments", False),
         lsh_seed=getattr(args, "lsh_seed", None),
         onnx_directory=getattr(args, "onnx_directory", None),
+        incremental_records=getattr(args, "incremental_records", None),
+        incremental_scenario=getattr(args, "incremental_scenario", "existing"),
     )
     errors = comparability_violations(
         {"fingerprint": run["fingerprint"], "phases": []},
@@ -378,6 +382,8 @@ def campaign(args: argparse.Namespace, checked: dict[str, Any]) -> None:
         "git_sha": output(["git", "rev-parse", "HEAD"]),
         "source_files": source_manifest(),
         "with_incremental": getattr(args, "with_incremental", False),
+        "incremental_records": getattr(args, "incremental_records", None),
+        "incremental_scenario": getattr(args, "incremental_scenario", "existing"),
         "with_correction": getattr(args, "with_correction", False),
         "generator_profile": getattr(args, "generator_profile", "baseline"),
         "blocking_experiments": getattr(args, "blocking_experiments", False),
@@ -464,6 +470,12 @@ def campaign(args: argparse.Namespace, checked: dict[str, Any]) -> None:
         if getattr(args, "with_incremental", False):
             worker_options.append("--with-incremental")
         worker_options += ["--generator-profile", getattr(args, "generator_profile", "baseline")]
+        worker_options += [
+            "--incremental-scenario",
+            getattr(args, "incremental_scenario", "existing"),
+        ]
+        if getattr(args, "incremental_records", None) is not None:
+            worker_options += ["--incremental-records", str(args.incremental_records)]
         if getattr(args, "lsh_seed", None) is not None:
             worker_options += ["--lsh-seed", str(args.lsh_seed)]
         if getattr(args, "onnx_directory", None) is not None:
@@ -505,6 +517,17 @@ def campaign(args: argparse.Namespace, checked: dict[str, Any]) -> None:
                 f"[benchmark] {scale.records:,} records, pass {iteration}/{args.repeat}", flush=True
             )
             passed = False
+            monitor_stop = threading.Event()
+            monitor = threading.Thread(
+                target=capture_services,
+                args=(
+                    compose,
+                    args.out / f"services-resources-{iteration:03d}.jsonl",
+                    monitor_stop,
+                ),
+                daemon=True,
+            )
+            monitor.start()
             try:
                 with (args.out / f"pass-{iteration:03d}.log").open("w") as log:
                     subprocess.run(
@@ -539,6 +562,8 @@ def campaign(args: argparse.Namespace, checked: dict[str, Any]) -> None:
                     )
                 passed = True
             finally:
+                monitor_stop.set()
+                monitor.join(timeout=10)
                 with (args.out / f"services-{iteration:03d}.log").open("w") as log:
                     subprocess.run(
                         [*compose, "logs", "--no-color"],
@@ -582,6 +607,65 @@ def campaign(args: argparse.Namespace, checked: dict[str, Any]) -> None:
     print(f"[benchmark] complete: {args.out / 'report.md'}", flush=True)
 
 
+def paired_campaign(args: argparse.Namespace, checked: dict[str, Any]) -> None:
+    """One immutable application and input corpus; isolated sequential trials."""
+    from workload_report import write_campaign_report
+
+    args.out.mkdir(parents=True, exist_ok=False)
+    sources = source_manifest()
+    source_hash = hashlib.sha256(json.dumps(sources, sort_keys=True).encode()).hexdigest()
+    tag = args.image or f"er-workload-profile-{uuid.uuid4().hex[:12]}"
+    manifest = {
+        "schema_version": 1,
+        "status": "running",
+        "source_sha256": source_hash,
+        "source_files": sources,
+        "resource_envelope": checked,
+        "scenario": f"full-{checked['records']}-incremental-{args.incremental_records}-mixed-v1",
+        "repeat": args.repeat,
+        "generator_profile": args.generator_profile,
+    }
+    try:
+        if not args.image:
+            with (args.out / "build.log").open("w") as log:
+                subprocess.run(
+                    ["docker", "build", "-f", "docker/Dockerfile", "-t", tag, "."],
+                    cwd=ROOT,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    check=True,
+                )
+        digest = output(["docker", "image", "inspect", tag, "--format", "{{.Id}}"])
+        manifest["image_digest"] = digest
+        manifest["application_source_sha256"] = args.image_source if args.image else source_hash
+        for mode in ("control", "profiled"):
+            if source_manifest() != sources:
+                raise RuntimeError("source changed during paired campaign")
+            trial = copy.copy(args)
+            trial.out = args.out / mode
+            trial.corpus_root = args.corpus_root or args.out / "inputs"
+            trial.profile = mode == "profiled"
+            trial.with_profile_control = False
+            trial.image = digest
+            trial.image_source = manifest["application_source_sha256"]
+            campaign(trial, checked)
+        manifest["status"] = "succeeded"
+    except BaseException as error:
+        manifest.update(status="failed", error=f"{type(error).__name__}: {error}")
+        raise
+    finally:
+        (args.out / "campaign.json").write_text(json.dumps(manifest, indent=2))
+        try:
+            try:
+                write_campaign_report(args.out)
+            except Exception:
+                if manifest["status"] == "succeeded":
+                    raise
+        finally:
+            if not args.image and not (args.keep_failed and manifest["status"] == "failed"):
+                subprocess.run(["docker", "image", "rm", tag], capture_output=True, check=False)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scale", choices=(*load_scales(), "10m"), default="1m")
@@ -599,6 +683,15 @@ def main() -> int:
     )
     parser.add_argument(
         "--with-correction", action="store_true", help="also time refreshed-TF correction"
+    )
+    parser.add_argument("--incremental-records", type=int, help="override the scale delivery size")
+    parser.add_argument(
+        "--incremental-scenario", choices=("existing", "mixed-v1"), default="existing"
+    )
+    parser.add_argument(
+        "--with-profile-control",
+        action="store_true",
+        help="paired unprofiled and diagnostic trials",
     )
     parser.add_argument("--generator-profile", choices=("baseline", "hard-v1"), default="baseline")
     parser.add_argument(
@@ -648,7 +741,31 @@ def main() -> int:
         parser.error("--onnx-directory requires --blocking-experiments")
     if args.repeat < 1 or args.iteration < 1:
         parser.error("repeat and iteration must be positive")
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    if args.incremental_records is not None and (
+        args.incremental_records < 1 or not args.with_incremental
+    ):
+        parser.error("--incremental-records requires a positive size and --with-incremental")
+    if args.incremental_scenario == "mixed-v1":
+        batch = args.incremental_records or get_scale(args.scale).incremental_batch
+        if (
+            not args.with_incremental
+            or batch < 10
+            or batch % 10
+            or batch // 2 > get_scale(args.scale).personas
+        ):
+            parser.error(
+                "mixed-v1 requires an incremental multiple of 10, at most twice the personas"
+            )
+        if args.with_correction or args.batch_mode != "incremental":
+            parser.error(
+                "mixed-v1 audits incremental equivalence without TF correction or full batch mode"
+            )
+        args.incremental_records = batch
+    if args.with_profile_control and (not args.profile or args.incremental_scenario != "mixed-v1"):
+        parser.error(
+            "--with-profile-control requires --profile and --incremental-scenario mixed-v1"
+        )
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:12]
     args.out = (args.out or ROOT / f"artifacts/bench/full-{args.scale}-{stamp}").resolve()
     if args.config:
         args.config = args.config.resolve()
@@ -666,7 +783,10 @@ def main() -> int:
             print("Preflight failed; no image build or pipeline run started.", file=sys.stderr)
             return 2
         if not args.check_only:
-            campaign(args, checked)
+            if args.with_profile_control:
+                paired_campaign(args, checked)
+            else:
+                campaign(args, checked)
         return 0
     except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
         print(f"benchmark failed: {error}", file=sys.stderr)

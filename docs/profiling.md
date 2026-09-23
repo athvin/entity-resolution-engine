@@ -3,6 +3,80 @@
 For a controlled baseline/candidate performance comparison, see
 [performance.md](performance.md).
 
+## Primary workload: 1M reload followed by 100K new record keys
+
+```sh
+make profile-workloads
+```
+
+This runs one unprofiled control and one diagnostic trial using the same immutable
+image, input files, reference config and seed 42. Each has an independent Compose
+stack. Within each stack the full reload runs ingestion, cleaning, training, matching,
+reconciliation and golden/lineage assembly; then the same lake receives 100,000 net-new
+record keys and runs incremental standardization through assembly with the existing
+model and frozen TF snapshot. Half the batch represents 50,000 existing people; half
+represents 20,000 new people with two or three records each (`mixed-v1`). Existing
+generator scenarios remain unchanged.
+
+The runner prints the artifact path under `artifacts/bench/`. Open `report.md`, then
+`full-report.md` and `incremental-report.md`; **both workloads are primary**. Inspect
+control timing for throughput and diagnostic timing for collection overhead. A single
+pair is evidence for choosing experiments, not a performance regression baseline.
+`BENCHMARK_REPEAT=3 make profile-workloads` creates three trials in each arm.
+
+Correctness and storage scans run after both measured workloads, reading their saved
+DuckLake snapshots. An untimed full re-resolution of the final corpus checks
+incremental/full equivalence. Timing includes CLI startup and the stage chains;
+generation, stack setup, snapshots' validation and the full reference are excluded.
+Independent trainings can differ at floating-point roundoff: reports retain byte
+hashes and compare learned probabilities within `1e-12`, with other model fields
+exact. Model/TF byte hashes must be unchanged from reload to incremental processing
+within each trial. Scores compare within `1e-10` across trials; threshold classes,
+clusters, golden values and lineage compare exactly.
+The local resource envelope is recorded and verified; comparisons must use the same
+CPU, container memory, DuckDB settings and versions. Other running workloads and OS
+caches can still affect timing.
+
+The diagnostic trial adds native SQL profiles, Python cProfile files and
+capability-gated DuckLake/HTTP logs. Each SQL execution gets a unique file; immutable
+identities link it to its phase, invocation, stage, dbt model and estimator/pass span.
+Native SQL and Python profiling stop before the untimed correctness scans and full
+reference. Those checks still run. Offline query/operator indexes include only the
+two measured workloads; any older setup/validation profiles remain in the raw files.
+Coverage checks catch missing consumed SQL, writes, dbt models, training estimators
+and either incremental matching pass. Unsupported optional telemetry is marked
+unavailable. File inventories and Parquet footer statistics are captured at each
+checkpoint; current options are not mislabeled as historical settings.
+
+cProfile observes each process's main thread. In particular, dbt worker-thread
+Python work is not completely covered; native SQL profiles still capture the dbt
+queries. Treat native calls, subprocess waits and lock time as boundaries to inspect,
+not as measured Python CPU. Use model timings and process/cgroup samples alongside
+the call summaries before proposing pushdown.
+The Python summary also checks timing consistency. If self time exceeds cumulative
+time, the profile is marked `inconsistent`: use its call counts, not duration rankings.
+Native SQL profiles and unprofiled command/stage times remain the timing evidence.
+
+Per-trial artifacts include `query-coverage.json`, `query-index.jsonl`,
+`operator-index.jsonl`, `queries.parquet`, `python-summary.json`,
+`base-lake-layout.json`, `batch-lake-layout.json`, Parquet metadata files, native
+`sql/*.json`, `python/*.pstats` and `storage/*.jsonl`. Raw profiles can contain source
+values; apply source-data access controls. Regenerate reports without Docker/network:
+
+```sh
+uv run python benchmarks/workload_report.py artifacts/bench/<campaign>
+```
+
+For a small harness check, use `benchmarks/full_pipeline.py --scale smoke --local
+--with-incremental --incremental-records 100 --incremental-scenario mixed-v1 --profile
+--with-profile-control` with `uv run python`. See the
+[implementation plan](performance-profiling-plan.md) and the repository
+[analysis skill](../.agents/skills/ducklake-performance/SKILL.md). The first completed
+[1M/100K campaign and tuning backlog](performance-profiling-1m-100k.md) retain both
+workloads' measured results. Ordered writes and
+partitioning are future measured experiments; this campaign changes no production
+layout, clustering or scoring algorithm.
+
 Run from the repository root with Docker available:
 
 ```sh
@@ -88,8 +162,10 @@ and persistence spans.
   `clusters_out`, `tf_rows`). Unmeasured values are unavailable. A short span with no
   sample does not receive another stage's memory peak.
 - cgroup v2 CPU deltas include the benchmark's CLI and dbt descendants. Throttling
-  measures quota-related delays. The standard envelope is two CPUs, 6 GiB container
-  memory, two DuckDB threads and a 4 GB DuckDB limit.
+  measures quota-related delays. The small `scripts/ci/profile.sh` campaign uses
+  two CPUs, 6 GiB container memory, two DuckDB threads and a 4 GB DuckDB limit.
+  The primary local 1M/100K campaign uses a 10 GiB container with the same CPU and
+  DuckDB limits; always read the recorded resource envelope.
 - Phase memory is the maximum **memory.current** observed inside that phase. It
   includes page cache. The sampled sum of process RSS is also retained; shared pages
   can be counted repeatedly. The fingerprint's **memory.peak** is the container's
