@@ -1,5 +1,7 @@
 .DEFAULT_GOAL := check
-.PHONY: spec lint types unit dbt fixtures workflows integration check check-all clean benchmark-1m benchmark-10m
+.PHONY: spec lint types unit dbt fixtures workflows integration check check-all clean benchmark benchmark-1m benchmark-workloads benchmark-10m
+
+BENCHMARK_REPEAT ?= 1
 
 spec:
 	uv run python scripts/lint_spec.py DesignDoc.md
@@ -33,11 +35,16 @@ check:
 check-all: check
 	$(MAKE) integration
 
+benchmark: benchmark-1m
+
 benchmark-1m:
-	uv run python benchmarks/full_pipeline.py --scale 1m --local
+	uv run python benchmarks/full_pipeline.py --scale 1m --local --repeat $(BENCHMARK_REPEAT) --config configs/default.yaml
+
+benchmark-workloads:
+	uv run python benchmarks/full_pipeline.py --scale 1m --local --repeat $(BENCHMARK_REPEAT) --config configs/default.yaml --with-incremental --with-correction
 
 benchmark-10m:
-	uv run python benchmarks/full_pipeline.py --scale 10m --local
+	uv run python benchmarks/full_pipeline.py --scale 10m --local --repeat $(BENCHMARK_REPEAT) --config configs/default.yaml
 
 # Rebuildable local caches only. Run outputs under artifacts/ are removed separately.
 clean:

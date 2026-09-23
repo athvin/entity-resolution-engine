@@ -5,6 +5,10 @@ rules come from the active configuration, a full rescore retires obsolete active
 pairs atomically, never cuts are rederived from the current graph, and `er correct`
 refreshes TF with a resumable journal. Initial loads, incremental deliveries and
 corrections are separate workloads. The existing defaults remain unchanged.
+One million records is the standard performance workload: `make benchmark` runs
+the complete initial load, and `make benchmark-workloads` also measures ongoing
+deliveries and correction separately. Both benchmark entrypoints default to
+`configs/default.yaml`; smoke validates the harness, while 10M confirms scale.
 The [screening results](performance-screening.md) record the first million-record
 quality comparisons and provider smoke test.
 The [single full-load confirmation](performance-training-full-load.md) records

@@ -1806,6 +1806,21 @@ Deterministic, seeded synthetic corpus generator, shared by fixtures and benchma
 <a id="s10-2"></a>
 ### 10.2 Scales (`benchmarks/scales.yaml`)
 
+**The standard performance benchmark is a full load of 1,000,000 records.**
+`make benchmark` (alias `make benchmark-1m`) runs `benchmarks/full_pipeline.py`
+with `configs/default.yaml`, the baseline generator profile, and the config's
+seed. It measures ingestion, standardization, training, matching, reconciliation
+and golden assembly on a fresh disposable lake. Training is included in the
+initial-load total and reported separately. One pass is the default;
+`BENCHMARK_REPEAT=3` requests repeated measurements. The command uses the recorded
+local resource envelope and never reduces the record count to fit the host.
+`make benchmark-workloads` uses the same 1M initial load, followed by a separately
+timed 10,000-record incremental delivery and correction with the model reused.
+Smoke remains a quick harness check; its timings are not a substitute for the
+1M training-performance comparison. The 10M workload remains the separate scale
+confirmation in S10.6. These local measurements do not create a CI regression
+baseline for a different runner or resource envelope.
+
 | Scale | Personas | Records | Incremental batch | `min_free_gb` | Baseline committed | Dispatchable |
 |---|---|---|---|---|---|---|
 | `smoke` | 400 | 1,000 | 50 | 4 | no | yes |
@@ -1865,7 +1880,7 @@ Run-level metrics: **incremental ratio** = phase 6 wall time ÷ (phases 1+2+4+5)
 
 All three are reported separately in `latest.json`; the cgroup peak is the number S10.4 feeds to k8s sizing. Because DuckDB reads neither cgroup CPU nor cgroup memory limits, `ER_DUCKDB_THREADS` and `ER_DUCKDB_MEMORY_LIMIT` MUST be applied with `SET threads` / `SET memory_limit` on every connection opened by the harness, the CLI, and the dbt profile; without them DuckDB plans against host resources and the numbers are not comparable across machines.
 
-**`benchmarks/report.py`** is the single entrypoint. `benchmarks/run_benchmark.py` executes one measured pass and returns raw phase records; `report.py` drives it, aggregates, compares, and writes.
+**`benchmarks/report.py`** is the CI regression entrypoint. `benchmarks/run_benchmark.py` executes one measured pass and returns raw phase records; `report.py` drives it, aggregates, compares, and writes. The standard 1M full-load command uses `benchmarks/full_pipeline.py` as described in S10.2, with explicit initial-load totals and separate optional incremental/correction totals.
 
 | Flag | Meaning |
 |---|---|

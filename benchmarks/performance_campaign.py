@@ -116,7 +116,7 @@ def main() -> None:
     parser.add_argument("--seeds", nargs="+", type=int, default=[20260102, 20260103])
     parser.add_argument("--arms", nargs="+", choices=ARMS, default=list(ARMS))
     parser.add_argument("--repeat", type=int, default=3)
-    parser.add_argument("--config", type=Path, default=ROOT / "configs/test.yaml")
+    parser.add_argument("--config", type=Path, default=ROOT / "configs/default.yaml")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--local", action="store_true")
     args = parser.parse_args()

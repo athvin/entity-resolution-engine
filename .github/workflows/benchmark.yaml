@@ -1,4 +1,6 @@
-# Smoke runs weekly or on demand; without a measured baseline it reports NO_BASELINE.
+# Smoke checks the harness weekly or on demand; `make benchmark` is the standard
+# 1M full-load performance workload, including training. Without a measured CI
+# baseline this workflow reports NO_BASELINE.
 # Add larger dispatch options only with a reviewed baseline and matching scales.yaml.
 name: benchmark
 

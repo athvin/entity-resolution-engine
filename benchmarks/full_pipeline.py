@@ -608,7 +608,12 @@ def main() -> int:
     parser.add_argument(
         "--onnx-directory", type=Path, help="baked model directory INSIDE the supplied image"
     )
-    parser.add_argument("--config", type=Path, help="explicit training/configuration variant")
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=ROOT / "configs/default.yaml",
+        help="training/configuration variant (default: configs/default.yaml)",
+    )
     parser.add_argument("--corpus-root", type=Path, help="reuse identical generated inputs")
     parser.add_argument(
         "--profile",
