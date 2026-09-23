@@ -424,7 +424,13 @@ def _households(rng: random.Random, n: int, household_rate: float) -> list[tuple
     return groups
 
 
-def generate_personas(seed: int, n: int, household_rate: float) -> list[Persona]:
+def generate_personas(
+    seed: int,
+    n: int,
+    household_rate: float,
+    *,
+    existing: Sequence[Persona] = (),
+) -> list[Persona]:
     """Return ``n`` ground-truth personas, determined entirely by the arguments.
 
     Args:
@@ -433,6 +439,8 @@ def generate_personas(seed: int, n: int, household_rate: float) -> list[Persona]
         n: how many personas; the `Personas` column of the S10.2 scale table.
         household_rate: the fraction of personas that share an address with at least
             one other persona.
+        existing: prior personas whose identifiers, contacts and addresses must
+            remain disjoint from this new population. Empty preserves the base stream.
 
     Returns:
         The personas in `persona_id` order.
@@ -451,14 +459,19 @@ def generate_personas(seed: int, n: int, household_rate: float) -> list[Persona]
     given = given_names()
     family = family_names()
 
-    seen_emails: set[str] = set()
+    seen_emails: set[str] = {person.email for person in existing}
     email_suffixes: dict[str, int] = {}
-    seen_phones: set[str] = set()
-    seen_addresses: set[_Address] = set()
+    seen_phones: set[str] = {person.phone for person in existing}
+    seen_addresses: set[_Address] = {
+        _Address(
+            p.addr_number, p.addr_street, p.addr_unit, p.addr_city, p.addr_region, p.addr_postal
+        )
+        for p in existing
+    }
 
     drafts: list[tuple[int, Persona]] = []
     for house_number, members in enumerate(_households(rng, n, household_rate)):
-        household_id = f"{HOUSEHOLD_ID_PREFIX}{house_number:0{PERSONA_ID_WIDTH}d}"
+        household_id = f"{HOUSEHOLD_ID_PREFIX}{house_number + len(existing):0{PERSONA_ID_WIDTH}d}"
         address = _draw_unique(lambda: _draw_address(rng), seen_addresses, "address")
         # Per household, not per corpus: S10.1 wants people who share an address and
         # nothing else, so these two are what a household member may NOT repeat.
@@ -469,11 +482,12 @@ def generate_personas(seed: int, n: int, household_rate: float) -> list[Persona]
             family_name = _draw_unique(lambda: family.pick(rng), used_family_names, "family name")
             birth_date = _draw_unique(lambda: _draw_birth_date(rng), used_birth_dates, "birth date")
             given_name = given.pick(rng)
+            persona_number = index + len(existing)
             drafts.append(
                 (
                     index,
                     Persona(
-                        persona_id=f"{PERSONA_ID_PREFIX}{index:0{PERSONA_ID_WIDTH}d}",
+                        persona_id=f"{PERSONA_ID_PREFIX}{persona_number:0{PERSONA_ID_WIDTH}d}",
                         given_name=given_name,
                         family_name=family_name,
                         email=_draw_email(

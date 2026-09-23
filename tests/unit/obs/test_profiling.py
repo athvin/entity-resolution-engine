@@ -152,3 +152,59 @@ def test_parameter_batch_profiles_use_full_unique_identifiers(
     connection.close()
     profiles = list((tmp_path / "sql").glob("*.json"))
     assert len(profiles) == 4
+
+
+def test_every_statement_in_dbt_style_batch_is_attributed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ER_PROFILE_DIR", str(tmp_path))
+    monkeypatch.setenv("ER_PROFILE_SQL", "1")
+    connection = instrument_connection(duckdb.connect())
+    with span("dbt.example"):
+        assert connection.execute(
+            "CREATE TABLE multi (s VARCHAR); INSERT INTO multi VALUES ('semi;colon'); "
+            "SELECT * FROM multi"
+        ).fetchall() == [("semi;colon",)]
+    connection.close()
+    profiles = [json.loads(p.read_text()) for p in (tmp_path / "sql").glob("*.json")]
+    assert len(profiles) == len({p["query_id"] for p in profiles}) == 3
+    assert {p["statement_kind"] for p in profiles} == {"CREATE", "INSERT", "SELECT"}
+    assert all(p["name"] == "dbt.example" for p in profiles)
+
+
+def test_transformed_deferred_relations_keep_their_own_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ER_PROFILE_DIR", str(tmp_path))
+    monkeypatch.setenv("ER_PROFILE_SQL", "1")
+    connection = instrument_connection(duckdb.connect())
+    with span("first"):
+        first = connection.sql("SELECT i FROM range(4) t(i)")
+    with span("second"):
+        second = connection.query("SELECT i FROM range(4) t(i)")
+    assert second.project("i+1 AS n").aggregate("sum(n)").fetchall() == [(10,)]
+    assert len(first) == 4
+    first.create_view("deferred_view")
+    assert first.fetchall() == [(0,), (1,), (2,), (3,)]
+    connection.close()
+    profiles = [json.loads(p.read_text()) for p in (tmp_path / "sql").glob("*.json")]
+    assert len(profiles) == 4
+    assert len({p["query_id"] for p in profiles}) == 2
+    assert sorted(p["name"] for p in profiles) == ["first", "first", "first", "second"]
+    assert not [
+        e
+        for e in events(tmp_path)
+        if e["event"] == "sql_unattributed" and not e.get("exclusion_reason")
+    ]
+
+
+def test_native_relation_registration_does_not_fall_back_to_arrow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ER_PROFILE_DIR", str(tmp_path))
+    monkeypatch.setenv("ER_PROFILE_SQL", "1")
+    connection = instrument_connection(duckdb.connect())
+    relation = connection.sql("SELECT i FROM range(3) t(i)")
+    connection.register("registered", relation)
+    assert connection.execute("SELECT sum(i) FROM registered").fetchall() == [(3,)]
+    connection.close()

@@ -234,6 +234,8 @@ def run_case(
     blocking_experiments: bool = False,
     lsh_seed: int | None = None,
     onnx_directory: Path | None = None,
+    incremental_records: int | None = None,
+    incremental_scenario: str = "existing",
 ) -> dict[str, Any]:
     if initial_only and case == "tiny":
         raise ValueError("initial-only measurements require a generated benchmark scale")
@@ -241,12 +243,16 @@ def run_case(
         raise ValueError("workload name must match the measured case")
     if batch_mode not in ("incremental", "full"):
         raise ValueError("batch mode must be incremental or full")
+    deferred = incremental_scenario == "mixed-v1"
+    compare_outputs = compare_outputs or deferred
     label = label or (f"{case}-{iteration}" if detailed else f"{case}-control")
     directory = out / label
     directory.mkdir(parents=True)
     os.environ["ER_PROFILE_SESSION_ID"] = out.name
     os.environ["ER_PROFILE_DIR"] = str(directory) if detailed else ""
     os.environ["ER_PROFILE_SQL"] = "1" if detailed else "0"
+    os.environ["ER_PROFILE_PYTHON"] = "1" if detailed and deferred else "0"
+    os.environ["ER_PROFILE_STORAGE"] = "1" if detailed and deferred else "0"
     namespace = f"profile_{uuid.uuid4().hex}"
     os.environ["ER_LAKE_METADATA_SCHEMA"] = namespace
     os.environ["ER_LAKE_DATA_PATH"] = f"s3://lake/profile/{namespace}/data/"
@@ -270,6 +276,8 @@ def run_case(
         "batch_mode": batch_mode,
         "with_correction": with_correction,
         "generator_profile": generator_profile,
+        "incremental_scenario": incremental_scenario,
+        "checkpoints": {},
         "namespace": namespace,
         "status": "running",
         "commands": [],
@@ -287,13 +295,14 @@ def run_case(
     def command(args: list[str], run_id: str | None = None, phase: str = "setup") -> dict[str, Any]:
         invocation = uuid.uuid4().hex
         os.environ["ER_PROFILE_INVOCATION_ID"] = invocation
+        os.environ["ER_PROFILE_PHASE"] = phase
         argv = list(args)
         if argv[0] == "er":
             argv += ["--config", str(config_path), "--json"]
             if run_id is not None:
                 argv += ["--run-id", run_id]
         command_dir = directory / "commands" / invocation
-        if initial_only:
+        if initial_only or deferred:
             print(f"[benchmark] {phase}: {' '.join(args[:4])}", flush=True)
         cpu_before = cgroup_readings()
         tick = time.monotonic_ns()
@@ -332,6 +341,52 @@ def run_case(
             raise RuntimeError(f"{args[:3]} failed ({completed.returncode}); see {command_dir}")
         return entry
 
+    def validate_phase(phase: str, connection: Any) -> None:
+        tables = {
+            name: connection.execute(f"SELECT count(*) FROM lake.main.{name}").fetchone()[0]
+            for name in (
+                "raw_records",
+                "int_std_records",
+                "int_blocking_keys",
+                "match_scores",
+                "entity_membership",
+                "golden_records",
+                "golden_lineage",
+            )
+        }
+        result[f"{phase}_counts"] = tables
+        result[f"{phase}_blocking"] = block_statistics(connection)
+        result[f"{phase}_candidate_pairs"] = candidate_pair_count(connection)
+        assert tables["int_std_records"] == tables["entity_membership"], tables
+        assert tables["golden_records"] > 0, tables
+        if phase == "base":
+            assert tables["raw_records"] == base_records, tables
+            if case != "tiny":
+                result["output_validation"] = validate_initial_outputs(connection, base_records)
+                if not initial_only and not deferred:
+                    result["base_quality"] = quality_from_csv(
+                        connection,
+                        corpus,
+                        config.thresholds.auto_merge,
+                        blocked_count=result["base_candidate_pairs"],
+                        include_batch=False,
+                    )
+        else:
+            if deferred:
+                assert tables["raw_records"] == base_records + batch_records, tables
+                result["batch_output_validation"] = validate_initial_outputs(
+                    connection, base_records + batch_records
+                )
+            else:
+                assert tables["raw_records"] >= base_records, tables
+        if case == "tiny":
+            check_fixture(connection, phase)
+        result[f"{phase}_partition_hash"] = partition_sha256(connection)
+        if compare_outputs:
+            result[f"{phase}_semantic_hashes"] = save_semantic_outputs(
+                connection, config, directory, phase
+            )
+
     try:
         command(["er", "init"])
         if case == "tiny":
@@ -347,13 +402,22 @@ def run_case(
             if generator_profile != "baseline":
                 suffix += "-" + generator_profile
             base_records = scale.records
-            batch_records = 0 if initial_only else scale.incremental_batch
+            batch_records = (
+                0
+                if initial_only
+                else (
+                    incremental_records
+                    if incremental_records is not None
+                    else scale.incremental_batch
+                )
+            )
             identity = {
                 "profile": generator_profile,
                 "seed": config.generator.seed,
                 "records": base_records,
                 "personas": scale.personas,
                 "batch": batch_records,
+                **({"incremental_scenario": incremental_scenario} if deferred else {}),
                 "sources": {
                     name: source.model_dump(mode="json") for name, source in config.sources.items()
                 },
@@ -379,6 +443,8 @@ def run_case(
                         str(scale.records),
                         "--batch",
                         str(batch_records),
+                        "--incremental-scenario",
+                        incremental_scenario,
                         "--seed",
                         str(config.generator.seed),
                         "--out",
@@ -425,47 +491,80 @@ def run_case(
                 command(["er", "assemble"], run_id, phase)
             else:
                 command(["er", "run-all", "--mode", mode, "--skip-ingest"], run_id, phase)
-            with span(f"validation.{phase}", unit="records"), connect() as connection:
-                tables = {
-                    name: connection.execute(f"SELECT count(*) FROM lake.main.{name}").fetchone()[0]
-                    for name in (
-                        "raw_records",
-                        "int_std_records",
-                        "int_blocking_keys",
-                        "match_scores",
-                        "entity_membership",
-                        "golden_records",
-                        "golden_lineage",
+            if deferred:
+                from workload_validation import checkpoint
+
+                os.environ["ER_PROFILE_INVOCATION_ID"] = uuid.uuid4().hex
+                os.environ["ER_PROFILE_PHASE"] = "checkpoint"
+                with connect() as connection:
+                    result["checkpoints"][phase] = checkpoint(connection)
+            else:
+                with span(f"validation.{phase}", unit="records"), connect() as connection:
+                    validate_phase(phase, connection)
+        if deferred:
+            # Validation can issue tens of thousands of page/serialization queries.
+            # Keep its correctness checks, but reserve expensive SQL/cProfile
+            # collection for the two timed workloads and their pipeline code.
+            os.environ["ER_PROFILE_SQL"] = "0"
+            os.environ["ER_PROFILE_PYTHON"] = "0"
+            result["profile_scope"] = "timed_workloads"
+            from workload_validation import (
+                SnapshotReader,
+                capture_layout,
+                checkpoint,
+                compare_score_files,
+                model_fingerprint,
+            )
+
+            before, after = result["checkpoints"]["base"], result["checkpoints"]["batch"]
+            assert all(before[key] == after[key] for key in ("model_version", "tf_snapshot_id"))
+            os.environ["ER_PROFILE_INVOCATION_ID"] = uuid.uuid4().hex
+            os.environ["ER_PROFILE_PHASE"] = "validation"
+            for phase in drops:
+                with span(f"validation.{phase}"), connect() as connection:
+                    snapshot = result["checkpoints"][phase]["snapshot"]
+                    reader = SnapshotReader(connection, snapshot)
+                    validate_phase(phase, reader)
+                    result[f"{phase}_model_fingerprint"] = model_fingerprint(
+                        reader, directory, phase
                     )
-                }
-                result[f"{phase}_counts"] = tables
-                result[f"{phase}_blocking"] = block_statistics(connection)
-                result[f"{phase}_candidate_pairs"] = candidate_pair_count(connection)
-                assert tables["int_std_records"] == tables["entity_membership"], tables
-                assert tables["golden_records"] > 0, tables
-                if phase == "base":
-                    assert tables["raw_records"] == base_records, tables
-                    if case != "tiny":
-                        result["output_validation"] = validate_initial_outputs(
-                            connection, base_records
-                        )
-                        if not initial_only:
-                            result["base_quality"] = quality_from_csv(
-                                connection,
-                                corpus,
-                                config.thresholds.auto_merge,
-                                blocked_count=result["base_candidate_pairs"],
-                                include_batch=False,
-                            )
-                else:
-                    assert tables["raw_records"] >= base_records, tables
-                if case == "tiny":
-                    check_fixture(connection, phase)
-                result[f"{phase}_partition_hash"] = partition_sha256(connection)
-                if compare_outputs:
-                    result[f"{phase}_semantic_hashes"] = save_semantic_outputs(
-                        connection, config, directory, phase
+                    capture_layout(connection, directory, phase, snapshot)
+                    result[f"{phase}_quality"] = quality_from_csv(
+                        reader,
+                        corpus,
+                        config.thresholds.auto_merge,
+                        blocked_count=result[f"{phase}_candidate_pairs"],
+                        include_batch=phase == "batch",
                     )
+            assert result["base_model_fingerprint"] == result["batch_model_fingerprint"]
+            result["quality"] = result["batch_quality"]
+            command(
+                ["er", "run-all", "--mode", "full", "--skip-ingest"],
+                str(ULID()),
+                "validation_reference",
+            )
+            os.environ["ER_PROFILE_INVOCATION_ID"] = uuid.uuid4().hex
+            os.environ["ER_PROFILE_PHASE"] = "validation"
+            with connect() as connection:
+                reference = save_semantic_outputs(connection, config, directory, "reference")
+                partition = partition_sha256(connection)
+                generation = checkpoint(connection)
+            assert reference == result["batch_semantic_hashes"], (
+                "incremental/full semantic outputs differ"
+            )
+            assert partition == result["batch_partition_hash"], "incremental/full partitions differ"
+            assert all(after[key] == generation[key] for key in ("model_version", "tf_snapshot_id"))
+            score_comparison = compare_score_files(
+                directory / "batch-scores.json.gz", directory / "reference-scores.json.gz"
+            )
+            assert score_comparison["status"] == "passed", score_comparison
+            result["incremental_equivalence"] = {
+                "status": "passed",
+                "partition_sha256": partition,
+                "semantic_hashes": reference,
+                "generation": generation,
+                "scores": score_comparison,
+            }
         if prediction_matrix:
             from prediction_matrix import run_matrix
 
@@ -508,11 +607,15 @@ def run_case(
                 result["correction_partition_hash"] = partition_sha256(connection)
         with span("validation.quality", unit="pairs"), connect() as connection:
             if case != "tiny":
-                result["quality"] = result.get("pre_correction_quality") or quality_from_csv(
-                    connection,
-                    corpus,
-                    config.thresholds.auto_merge,
-                    blocked_count=result[f"{phase}_candidate_pairs"],
+                result["quality"] = (
+                    result.get("pre_correction_quality")
+                    or result.get("batch_quality")
+                    or quality_from_csv(
+                        connection,
+                        corpus,
+                        config.thresholds.auto_merge,
+                        blocked_count=result[f"{phase}_candidate_pairs"],
+                    )
                 )
                 result[f"{phase}_quality"] = result["quality"]
             from fingerprint import environment_fingerprint
@@ -551,6 +654,10 @@ def run_case(
                 initial_only=initial_only,
                 batch_mode=batch_mode,
             )
+        if detailed and deferred:
+            from workload_validation import query_coverage
+
+            result["query_coverage"] = query_coverage(directory, result["commands"])
         result["status"] = "succeeded"
     except BaseException as error:
         result.update(status="failed", error=f"{type(error).__name__}: {error}")
@@ -583,7 +690,7 @@ def run_case(
         result["processing_ms"] = sum(
             entry["duration_ms"]
             for entry in result["commands"]
-            if entry["command"][0] == "er" and entry["command"][1] != "init"
+            if entry["command"][0] == "er" and entry["phase"] in ("base", "batch", "correction")
         )
         (directory / "result.json").write_text(json.dumps(result, indent=2))
     if result["status"] != "succeeded":

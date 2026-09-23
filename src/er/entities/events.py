@@ -62,6 +62,7 @@ __all__ = [
     "UnknownEventTypeError",
     "append_events",
     "canonical_details",
+    "encode_details",
     "details_hash",
     "stamp_reason",
     "replay_membership",
@@ -249,6 +250,12 @@ def stamp_reason(details: Mapping[str, Any], reason: str) -> dict[str, Any]:
     return {**details, "reason": reason}
 
 
+def encode_details(details: Mapping[str, Any]) -> tuple[str, str]:
+    """Encode once and return the exact stored bytes and their idempotency digest."""
+    encoded = canonical_details(details)
+    return encoded, hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
 def details_hash(details: Mapping[str, Any]) -> str:
     """SHA-256 hex digest of :func:`canonical_details`.
 
@@ -256,7 +263,7 @@ def details_hash(details: Mapping[str, Any]) -> str:
     reproducible across processes and runs if every writer and every reader hashes
     the same bytes.
     """
-    return hashlib.sha256(canonical_details(details).encode("utf-8")).hexdigest()
+    return encode_details(details)[1]
 
 
 def _record_key_list(event_type: str, key: str, value: Any) -> list[str]:
@@ -320,7 +327,8 @@ class Event:
     """One accumulated `entity_events` row, minus its flush-time `occurred_at`.
 
     Built only by :meth:`EventLog.emit`, which is what guarantees ``details`` is
-    normalised and ``details_hash`` is the digest of it.
+    normalised and ``details_hash`` is the digest of ``details_json``. The encoded
+    document is captured at emission and reused unchanged when the event is written.
     """
 
     event_id: str
@@ -330,6 +338,7 @@ class Event:
     event_type: str
     details: Mapping[str, Any]
     details_hash: str
+    details_json: str = field(repr=False, compare=False)
 
     @property
     def idempotency_key(self) -> tuple[str, str, str, str]:
@@ -348,7 +357,7 @@ class Event:
             self.run_id,
             self.entity_id,
             self.event_type,
-            canonical_details(self.details),
+            self.details_json,
             self.details_hash,
             occurred_at,
         )
@@ -378,22 +387,29 @@ class EventLog:
             is a total order over the stream; tests pass
             :class:`~er.entities.ids.CountingIdFactory` for the same ids in every
             process.
+        seq_offset: events already emitted by a preceding bounded page; ordinary
+            accumulators start at zero. This changes sequence numbers only.
     """
 
-    __slots__ = ("_by_key", "_events", "_ids", "_reason", "_run_id")
+    __slots__ = ("_by_key", "_events", "_ids", "_reason", "_run_id", "_seq_offset")
 
     def __init__(
         self,
         run_id: str,
         ids: IdFactory | None = None,
         reason: str | None = None,
+        *,
+        seq_offset: int = 0,
     ) -> None:
+        if seq_offset < 0:
+            raise ValueError("seq_offset must be non-negative")
         if reason is not None and reason not in EVENT_REASONS:
             raise ValueError(
                 f"{reason!r} is not a rebuild reason; S5.1 allows "
                 f"{', '.join(sorted(EVENT_REASONS))}"
             )
         self._run_id = run_id
+        self._seq_offset = seq_offset
         self._ids: IdFactory = MonotonicUlidFactory() if ids is None else ids
         self._reason = reason
         self._events: list[Event] = []
@@ -440,19 +456,20 @@ class EventLog:
         # unstamped emission of otherwise-identical details are two DIFFERENT
         # idempotency keys, which is what lets a rebuild's events coexist with an
         # ordinary run's without either suppressing the other.
-        digest = details_hash(normalised)
+        encoded, digest = encode_details(normalised)
         key = (self._run_id, entity_id, event_type, digest)
         recorded = self._by_key.get(key)
         if recorded is not None:
             return recorded
         event = Event(
             event_id=self._ids.new(),
-            seq=len(self._events) + 1,
+            seq=self._seq_offset + len(self._events) + 1,
             run_id=self._run_id,
             entity_id=entity_id,
             event_type=event_type,
             details=normalised,
             details_hash=digest,
+            details_json=encoded,
         )
         self._events.append(event)
         self._by_key[key] = event

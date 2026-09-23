@@ -103,16 +103,18 @@ def run_affected_reconcile(
             return stack.enter_context(staged_query(connection, sql, parameters))
 
         view = f"er_affected_edges_{uuid4().hex}"
-        materialize_current_edges(connection, model_version, tf_snapshot_id, name=view)
+        materialize_current_edges(
+            connection, model_version, tf_snapshot_id, name=view, materialized=True
+        )
 
         # Drop before returning/raising, including when the caller's transaction aborts.
-        def drop_view() -> None:
+        def drop_edges() -> None:
             from contextlib import suppress
 
             with suppress(duckdb.Error):
-                connection.execute(f"DROP VIEW IF EXISTS {view}")
+                connection.execute(f"DROP TABLE IF EXISTS {view}")
 
-        stack.callback(drop_view)
+        stack.callback(drop_edges)
         invalid = connection.execute(
             f"SELECT rec_a_key, rec_b_key FROM {view} WHERE rec_a_key >= rec_b_key "
             "ORDER BY rec_a_key, rec_b_key LIMIT 1"

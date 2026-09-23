@@ -3,6 +3,10 @@
 
 BENCHMARK_REPEAT ?= 1
 
+.PHONY: profile-workloads
+profile-workloads:
+	uv run python benchmarks/full_pipeline.py --scale 1m --local --repeat $(BENCHMARK_REPEAT) --config configs/default.yaml --with-incremental --incremental-records 100000 --incremental-scenario mixed-v1 --profile --with-profile-control
+
 spec:
 	uv run python scripts/lint_spec.py DesignDoc.md
 

@@ -49,7 +49,7 @@ from er.config.loader import load_config
 from er.config.schema import Config, SourceSpec
 
 from .corruptions import CorruptionProfile, corrupt_record, load_profiles, record_rng
-from .personas import Persona
+from .personas import Persona, generate_personas
 
 __all__ = [
     "BATCH_DIRNAME",
@@ -203,8 +203,15 @@ class CorpusSpec:
     batch: int = 0
     household_rate: float = DEFAULT_HOUSEHOLD_RATE
     profile: str = "baseline"
+    incremental_scenario: str = "existing"
 
     def __post_init__(self) -> None:
+        if self.incremental_scenario not in ("existing", "mixed-v1"):
+            raise ValueError(f"unknown incremental scenario: {self.incremental_scenario}")
+        if self.incremental_scenario == "mixed-v1" and (
+            self.batch < 10 or self.batch % 10 or self.batch // 2 > self.personas
+        ):
+            raise ValueError("mixed-v1 needs a positive multiple of 10 records, at most 2*personas")
         if self.profile not in ("baseline", "hard-v1"):
             raise ValueError(f"unknown generator profile: {self.profile}")
         if self.personas < 1:
@@ -459,11 +466,25 @@ def emit_corpus(
 
     if spec.batch:
         batch_counts = _counts_per_persona(spec.personas, spec.batch)
+        offsets = base_counts
+        batch_personas = personas
+        if spec.incremental_scenario == "mixed-v1":
+            # Independent, named streams keep base inputs byte-for-byte stable.
+            selector = record_rng(spec.seed, "mixed-v1:existing", 0, 0)
+            selected = set(selector.sample(range(spec.personas), spec.batch // 2))
+            cohort_seed = record_rng(spec.seed, "mixed-v1:new", 0, 0).getrandbits(64)
+            new_people = generate_personas(
+                cohort_seed, spec.batch // 5, spec.household_rate, existing=personas
+            )
+            batch_personas = [*personas, *new_people]
+            batch_counts = [int(i in selected) for i in range(spec.personas)]
+            batch_counts += _counts_per_persona(len(new_people), spec.batch // 2)
+            offsets = [*base_counts, *([0] * len(new_people))]
         written.extend(
             _write_delivery(
                 out_path / BATCH_DIRNAME,
-                _deal(batch_counts, base_counts),
-                personas,
+                _deal(batch_counts, offsets),
+                batch_personas,
                 resolved_profiles,
                 resolved_config,
                 spec.seed,

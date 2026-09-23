@@ -277,6 +277,7 @@ def test_failed_worker_respects_cleanup_and_retains_failed_report(
     monkeypatch.setattr(benchmark.subprocess, "run", invoke)
     monkeypatch.setattr(benchmark, "output", output)
     monkeypatch.setattr(benchmark, "source_manifest", lambda: {"example.py": "hash"})
+    monkeypatch.setattr(benchmark, "capture_services", lambda *_args: None)
     args = Namespace(out=tmp_path / "measurement", scale="smoke", repeat=1, keep_failed=keep_failed)
     with pytest.raises(subprocess.CalledProcessError):
         benchmark.campaign(args, {"scale": "smoke", "records": 1000})

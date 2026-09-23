@@ -38,6 +38,7 @@ def context() -> dict[str, Any]:
             "run_id": os.environ.get("ER_PROFILE_RUN_ID"),
             "span_id": os.environ.get("ER_PROFILE_PARENT_SPAN"),
             "stage": os.environ.get("ER_PROFILE_STAGE"),
+            "phase": os.environ.get("ER_PROFILE_PHASE", "setup"),
         }
     )
 
