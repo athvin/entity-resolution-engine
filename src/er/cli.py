@@ -104,7 +104,7 @@ from er.lake.ducklake import clear_session_scratch, connect, invocation_session
 from er.lake.env import MissingEnvError
 from er.lake.init import init_lake, reset_lake
 from er.lake.maintain import DEFAULT_RETAIN_DAYS, maintain
-from er.lake.model import REBUILD_REASONS
+from er.lake.model import REBUILD_REASONS, SCHEMA_QUALIFIER
 from er.lake.model_registry import active_model, find_active_model, load_model_settings
 from er.lake.objectstore import ObjectStore
 from er.matching.tf import assert_tf_lookup_complete, tf_columns
@@ -602,6 +602,7 @@ class _ReconcileStage:
     #: The S5.1 rebuild reason, stamped into every emitted event's details. `None`
     #: for ordinary runs — a reason puts the run outside T-INC-2's accounting.
     reason: str | None = None
+    full: bool = False
 
     def bind(self, stage_run: StageRun) -> None:
         self.stage_run = stage_run
@@ -623,6 +624,7 @@ class _ReconcileStage:
                 model_version=active.model_version,
                 tf_snapshot_id=active.tf_snapshot_id,
                 reason=self.reason,
+                full=self.full,
             )
         _write_stdout(result.manifest(), result.stdout_line(), options)
         return result.exit_code
@@ -649,11 +651,8 @@ class _MatchStage:
     (S4.0). Both modes write the same seven stdout fields and the same S4.3.5 counters,
     which is why this stage does not know which one ran beyond choosing the call.
 
-    **One flag of S4.0's table is accepted and refused rather than honoured.**
-    ``--new-tf-snapshot`` is the only path that mints a `tf_snapshot_id` outside
-    `er train` (D4) and is unwritten. Refusing is the one behaviour that is never wrong:
-    silently ignoring it would leave `er correct` believing it had rebuilt term
-    frequency when it had not.
+    ``--new-tf-snapshot`` is restricted to a journaled correction run. The run's
+    frozen target is activated atomically with replacement of its complete scores.
 
     ``--model-version`` is honoured for the active version, which is the value S4.0
     gives it as a default. Scoring at a *superseded* version needs a registry lookup by
@@ -691,12 +690,6 @@ class _MatchStage:
                 f"er match --mode {self.mode} is not a mode; S4.0 gives the flag "
                 f"{MODE_INCREMENTAL!r} and {MODE_FULL!r}"
             )
-        if self.new_tf_snapshot:
-            raise StageFailure(
-                "er match --new-tf-snapshot is not implemented; it is the only path that "
-                "mints a tf_snapshot_id outside `er train` (D4, S4.3.3) and rebuilding "
-                "tf_lookup under a new one is not wired yet"
-            )
         store = ObjectStore.from_env()
         with connect() as connection:
             active = active_model(connection)
@@ -710,26 +703,18 @@ class _MatchStage:
             assert_matching_model(connection, active, incremental=self.mode == MODE_INCREMENTAL)
             settings = load_model_settings(connection, store, active.model_version)
 
-            # S4.5.5, and deliberately here rather than inside the two scorers. S4.0b
-            # permits the scoring path exactly one write to `match_scores` — "only final
-            # scored pairs are written ... in a single write statement" — and this
-            # retirement is not a scored pair, so it belongs to the STAGE, one level out.
-            # It runs before scoring so a pair whose endpoints moved is retired and then
-            # re-scored back to `is_active = true` by the S4.3.4 MERGE carrying the NEW
-            # hashes, which is INV-SCORE (S4.3.3) working rather than breaking.
-            #
-            # The D4 preflight is re-asserted first, and it is not redundant with the one
-            # each scorer opens with: an incomplete frozen snapshot must refuse at exit 3
-            # having written NOTHING, and invalidating ahead of that check would retire
-            # edges on a run that then declined to replace them — leaving the next
-            # reconcile to cluster a corpus whose edges this run had just deleted.
-            assert_tf_lookup_complete(
-                connection,
-                active.model_version,
-                active.tf_snapshot_id,
-                tf_columns(options.config),
+            from er.matching.correction import prepare_correction
+
+            snapshot = (
+                prepare_correction(connection, options.config, self.stage_run, active.model_version)
+                if self.new_tf_snapshot
+                else active.tf_snapshot_id
             )
-            invalidate_incident_edges(connection, run_id=self.stage_run.run_id)
+            assert_tf_lookup_complete(
+                connection, active.model_version, snapshot, tf_columns(options.config)
+            )
+            if self.mode == MODE_INCREMENTAL:
+                invalidate_incident_edges(connection, run_id=self.stage_run.run_id)
 
             result: FullMatchResult | IncrementalScoreResult
             if self.mode == MODE_FULL:
@@ -738,8 +723,9 @@ class _MatchStage:
                     options.config,
                     self.stage_run,
                     model_version=active.model_version,
-                    tf_snapshot_id=active.tf_snapshot_id,
+                    tf_snapshot_id=snapshot,
                     settings=settings,
+                    activate_tf=self.new_tf_snapshot,
                 )
             else:
                 result = score_incremental(
@@ -747,7 +733,7 @@ class _MatchStage:
                     options.config,
                     self.stage_run,
                     model_version=active.model_version,
-                    tf_snapshot_id=active.tf_snapshot_id,
+                    tf_snapshot_id=snapshot,
                     settings=settings,
                 )
         _write_stdout(result.manifest(), result.stdout_line(), options)
@@ -959,6 +945,20 @@ def _writer_lock(command: str, options: GlobalOptions) -> Iterator[None]:
             raise typer.Exit(exit_code_for(exc)) from exc
         if command not in _PREFLIGHT_EXEMPT:
             held.enter_context(invocation_session())
+            try:
+                from er.matching.correction import assert_no_pending_correction
+
+                with connect() as connection:
+                    if command != "lake maintain":
+                        assert_no_pending_correction(
+                            connection,
+                            resume_run_id=options.run_id if command == "correct" else None,
+                            assertion_repair=command in {"assert", "review resolve"},
+                        )
+            except MissingEnvError:
+                pass
+            except PreconditionFailure as exc:
+                raise typer.Exit(_refuse(options.run_id, exc)) from exc
         yield
 
 
@@ -1013,9 +1013,13 @@ def _stage_for(name: str, args: Sequence[str] = ()) -> Stage:
     if name == "standardize":
         return _StandardizeStage(changed_only="--changed-only" in flags, args=flags)
     if name == "match":
-        return _MatchStage(mode=value("--mode", "full") or "full", args=flags)
+        return _MatchStage(
+            mode=value("--mode", "full") or "full",
+            new_tf_snapshot="--new-tf-snapshot" in flags,
+            args=flags,
+        )
     if name == "reconcile":
-        return _ReconcileStage(reason=value("--reason"), args=flags)
+        return _ReconcileStage(reason=value("--reason"), full="--full" in flags, args=flags)
     if name == "assemble":
         return _AssembleStage(touched_only="--touched-only" in flags, args=flags)
     return NotImplementedStage(name=name, args=flags)
@@ -1082,7 +1086,10 @@ def run_all_chain(
         stages.append(_stage_for("ingest", ingest_args))
     stages.append(_stage_for("standardize", ("--changed-only",) if incremental else ()))
     stages.append(_stage_for("match", ("--mode", mode)))
-    stages.append(_stage_for("reconcile", ("--reason", reason) if reason is not None else ()))
+    reconcile_args = ([] if incremental else ["--full"]) + (
+        ["--reason", reason] if reason is not None else []
+    )
+    stages.append(_stage_for("reconcile", reconcile_args))
     stages.append(_stage_for("assemble", ("--touched-only",) if incremental else ()))
     return stages
 
@@ -1160,6 +1167,13 @@ def _run_context(
             if active is not None:
                 model_version = model_version or active.model_version
                 tf_snapshot_id = active.tf_snapshot_id
+            if mode == MODE_CORRECTION_PASS:
+                with connect() as connection:
+                    prior = connection.execute(
+                        f"SELECT tf_snapshot_id FROM {SCHEMA_QUALIFIER}.runs WHERE run_id=?",
+                        [options.run_id],
+                    ).fetchone()
+                tf_snapshot_id = None if prior is None or prior[0] is None else str(prior[0])
         except MissingEnvError:
             pass
     return RunContext(
@@ -1213,12 +1227,12 @@ def _execute(stage: Stage, options: GlobalOptions, run: RunContext) -> _Outcome:
         else:
             stage_run.finish(code)
         finally:
+            if stage_run.model_version is not None:
+                run.model_version = stage_run.model_version
+                run.tf_snapshot_id = stage_run.tf_snapshot_id
             clear_session_scratch()
         metrics.update(stage_run.counters.payload())
         metrics["exit_code"] = code
-        if stage_run.model_version is not None:
-            run.model_version = stage_run.model_version
-            run.tf_snapshot_id = stage_run.tf_snapshot_id
     return _Outcome(
         stage=stage.name,
         exit_code=code,
@@ -1991,35 +2005,66 @@ def run_all(
         )
 
 
+def correction_chain() -> list[Stage]:
+    """The correction always matches, reconciles and assembles the whole corpus."""
+    return [
+        _MatchStage(mode=MODE_FULL, new_tf_snapshot=True),
+        _ReconcileStage(full=True, reason="correction_pass"),
+        _AssembleStage(touched_only=False),
+    ]
+
+
 @app.command()
 def correct(
+    resume: Annotated[str | None, typer.Option("--resume", help="Resume a correction run.")] = None,
     config: ConfigOption = None,
     run_id: RunIdOption = None,
     json_output: JsonOption = False,
 ) -> None:
-    """The periodic correction pass that restores INV-EQ (S4.0, S4.5.6).
-
-    Its chain is ``match --mode full --new-tf-snapshot`` -> ``reconcile`` ->
-    ``assemble``, and it is the only caller allowed to pass ``--new-tf-snapshot``
-    (D4). It never trains.
-
-    S4.0 gives it ``runs.rebuild_reason='correction_pass'`` unconditionally: the pass
-    rebuilds by definition, so the reason does not depend on whether anything drifted,
-    and the run is outside T-INC-2's accounting like every other planned rebuild
-    (S5.1).
-    """
-    options = GlobalOptions.resolve(config_path=config, run_id=run_id, json_output=json_output)
-    current = _current_fingerprint(options)
-    _run_single(
-        "correct",
-        options,
-        mode=MODE_CORRECTION_PASS,
-        rebuild_reason=(
-            None
-            if current is None
-            else rebuild_reason_for(None, current, mode=MODE_CORRECTION_PASS)
-        ),
+    """Refresh frozen TF and resolve the whole corpus without retraining."""
+    if resume is not None and run_id is not None and resume != run_id:
+        raise typer.BadParameter("--run-id must equal --resume when both are provided")
+    options = GlobalOptions.resolve(
+        config_path=config, run_id=resume or run_id, json_output=json_output
     )
+    with _writer_lock("correct", options):
+        _preflight_schema("correct")
+        try:
+            with connect() as connection:
+                active_model(connection)
+        except ErError as exc:
+            raise typer.Exit(_refuse(options.run_id, exc)) from exc
+        if resume is None:
+            with connect() as connection:
+                existing = connection.execute(
+                    f"SELECT status FROM {SCHEMA_QUALIFIER}.runs WHERE run_id=?", [options.run_id]
+                ).fetchone()
+            if existing is not None:
+                raise typer.Exit(
+                    _refuse(
+                        options.run_id,
+                        PreconditionFailure(
+                            "correction run already exists; use --resume for an unfinished run"
+                        ),
+                    )
+                )
+        chain = correction_chain()
+        model_version = None
+        if resume is not None:
+            plan = _resume(resume, options)
+            if plan.mode != MODE_CORRECTION_PASS:
+                raise typer.Exit(_refuse(resume, PreconditionFailure("run is not a correction")))
+            chain = chain[
+                next(i for i, stage in enumerate(chain) if stage.name == plan.resume_from) :
+            ]
+            model_version = plan.model_version
+        _run_chain(
+            chain,
+            options,
+            mode=MODE_CORRECTION_PASS,
+            model_version=model_version,
+            rebuild_reason="correction_pass",
+        )
 
 
 @app.command("assert")

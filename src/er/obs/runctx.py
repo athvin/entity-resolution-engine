@@ -357,8 +357,11 @@ class RunContext:
                     "ended_at": _sql_timestamp(self.ended_at),
                     "snapshot_start": self.snapshot_start,
                     "snapshot_end": self.snapshot_end,
-                    "model_version": self.model_version,
-                    "tf_snapshot_id": self.tf_snapshot_id,
+                    **(
+                        {"model_version": self.model_version, "tf_snapshot_id": self.tf_snapshot_id}
+                        if self.mode != "correction_pass"
+                        else {}
+                    ),
                 },
                 {"run_id": self.run_id},
             )

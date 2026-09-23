@@ -400,10 +400,9 @@ def persist_cuts(
     """Write ``cuts`` to `cut_edges`, one statement. Returns the rows written.
 
     A cut already recorded and still `active` for the same pair is not written again:
-    S4.4.2 keeps a cut until its assertion is retracted or an endpoint's `content_hash`
-    changes, so a second run over an unchanged corpus must add nothing. Without that,
-    `cut_edges` would grow one row per run and the release path would have to guess
-    which one to deactivate.
+    The production caller rederives cuts from the current graph and releases
+    obsolete rows before invoking this helper. An unchanged derived cut retains
+    its identity, so replay adds neither a duplicate row nor an event.
     """
     pending = list(cuts)
     if not pending:

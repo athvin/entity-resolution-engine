@@ -124,6 +124,22 @@ def resume_plan(rows: Sequence[ResumeRow], on_disk_config_hash: str) -> ResumePl
         raise PreconditionFailure(f"run {first.run_id} already succeeded: nothing to resume")
 
     unfinished = [row for row in ordered if row.status != STATUS_SUCCEEDED]
+    if first.mode == "correction_pass":
+        completed = tuple(row.stage for row in ordered if row.status == STATUS_SUCCEEDED)
+        # A crash may occur between stages, before the next row exists. If all
+        # stages committed but run finalization failed, replay assembly to finish.
+        restart = next(
+            (name for name in ("match", "reconcile", "assemble") if name not in completed),
+            "assemble",
+        )
+        return ResumePlan(
+            run_id=first.run_id,
+            mode=first.mode,
+            config_hash=first.config_hash,
+            model_version=first.model_version,
+            resume_from=restart,
+            completed=tuple(name for name in completed if name != restart),
+        )
     if not unfinished:
         # `runs.status` says the run failed, but every stage it recorded succeeded --
         # the run died between its last stage and its own terminal write. There is no
@@ -170,10 +186,12 @@ def read_resume_rows(connection: duckdb.DuckDBPyConnection, run_id: str) -> tupl
     """
     rows = connection.execute(
         f"SELECT run.run_id, run.mode, run.status, run.config_hash, run.model_version, "
-        f"stage.stage, stage.seq, stage.status "
+        f"coalesce(stage.stage, 'match'), coalesce(stage.seq, 1), "
+        f"coalesce(stage.status, 'running') "
         f"FROM {SCHEMA_QUALIFIER}.{_RUNS} AS run "
-        f"JOIN {SCHEMA_QUALIFIER}.{_RUN_STAGES} AS stage ON stage.run_id = run.run_id "
-        f"WHERE run.run_id = ? ORDER BY stage.seq",
+        f"LEFT JOIN {SCHEMA_QUALIFIER}.{_RUN_STAGES} AS stage ON stage.run_id = run.run_id "
+        f"WHERE run.run_id = ? AND (stage.stage IS NOT NULL OR run.mode='correction_pass') "
+        f"ORDER BY stage.seq",
         [run_id],
     ).fetchall()
     return tuple(

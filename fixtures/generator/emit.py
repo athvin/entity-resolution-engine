@@ -202,8 +202,11 @@ class CorpusSpec:
     #: Rows in the incremental `batch/` delivery; ``0`` emits none.
     batch: int = 0
     household_rate: float = DEFAULT_HOUSEHOLD_RATE
+    profile: str = "baseline"
 
     def __post_init__(self) -> None:
+        if self.profile not in ("baseline", "hard-v1"):
+            raise ValueError(f"unknown generator profile: {self.profile}")
         if self.personas < 1:
             raise ValueError(f"personas must be >= 1, got {self.personas}")
         if self.records < self.personas:
@@ -303,9 +306,23 @@ def _row(
     persona_index: int,
     ordinal: int,
     date_format: str,
+    hard_partner: Persona | None = None,
+    household_anchor: Persona | None = None,
 ) -> tuple[str, ...]:
     """One CSV row, in :func:`source_header` order."""
     record = corrupt_record(persona, profile, record_rng(seed, source, persona_index, ordinal))
+    if hard_partner is not None and household_anchor is not None:
+        from .hard_v1 import corrupt_hard
+
+        record = corrupt_hard(
+            record,
+            seed=seed,
+            source=source,
+            index=persona_index,
+            ordinal=ordinal,
+            partner=hard_partner,
+            household_anchor=household_anchor,
+        )
     return (
         record_id,
         record.given_name,
@@ -338,6 +355,7 @@ def _write_delivery(
     config: Config,
     seed: int,
     next_id: dict[str, int],
+    profile: str = "baseline",
 ) -> list[Path]:
     """Emit one delivery's three source CSVs plus its `truth.csv`.
 
@@ -372,6 +390,8 @@ def _write_delivery(
                     persona_index,
                     ordinal,
                     config.sources[source].date_format,
+                    personas[(persona_index + 1) % len(personas)] if profile == "hard-v1" else None,
+                    personas[persona_index - persona_index % 2] if profile == "hard-v1" else None,
                 )
             )
             truth.append((persona.persona_id, source, record_id))
@@ -434,6 +454,7 @@ def emit_corpus(
         resolved_config,
         spec.seed,
         next_id,
+        spec.profile,
     )
 
     if spec.batch:
@@ -447,6 +468,27 @@ def emit_corpus(
                 resolved_config,
                 spec.seed,
                 next_id,
+                spec.profile,
             )
+        )
+    if spec.profile == "hard-v1":
+        import json
+
+        from .hard_v1 import RATES
+
+        (out_path / "profile.json").write_text(
+            json.dumps(
+                {
+                    "profile": spec.profile,
+                    "seed": spec.seed,
+                    "rates": RATES,
+                    "personas": spec.personas,
+                    "records": spec.records,
+                    "batch": spec.batch,
+                },
+                sort_keys=True,
+                indent=2,
+            )
+            + "\n"
         )
     return written

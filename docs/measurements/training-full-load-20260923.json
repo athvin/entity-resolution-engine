@@ -1,0 +1,217 @@
+{
+  "schema_version": 1,
+  "measured_date_utc": "2026-09-23",
+  "records": 1000000,
+  "profile": "hard-v1",
+  "generator_seed": 20260101,
+  "repetitions_per_arm": 1,
+  "resource_envelope": {
+    "pipeline_cpus": 2,
+    "container_memory_bytes": 10737418240,
+    "duckdb_memory_limit": "4GB",
+    "docker_host_cpus": 8,
+    "docker_host_memory_bytes": 12529836032,
+    "architecture": "aarch64"
+  },
+  "timing_scope": "Initial load: CLI startup, ingest, standardize, train, match, reconcile, assemble. Excludes synthetic-data generation, stack setup, validation and teardown.",
+  "isolation": "Sequential pipeline runs after all integration workers finished. Only the pre-existing idle audit catalog and object store remained.",
+  "selection": "One tuning seed; the user stopped the repetition campaign and requested one complete initial-load run. The interrupted candidate trial is excluded.",
+  "promotion_eligible": false,
+  "promotion_note": "Training improves in this single comparison. Production defaults remain unchanged pending three 10M trials on held-out datasets and tenant validation.",
+  "trials": {
+    "uncapped": {
+      "processing_seconds": 97.128024253,
+      "stage_seconds": {
+        "ingest": 10.908698714,
+        "standardize": 21.228525843,
+        "train": 10.530105504,
+        "match": 13.071568173,
+        "reconcile": 28.121427596,
+        "assemble": 13.267698423
+      },
+      "resources": {
+        "cpu_s": 133.007464,
+        "throttled_s": 14.041226,
+        "sampled_memory_peak_bytes": 4271230976,
+        "sampled_spill_bytes_peak": 0,
+        "sampled_parquet_scratch_bytes_peak": 0
+      },
+      "validation": {
+        "raw_records": 1000000,
+        "int_std_records": 1000000,
+        "entity_membership": 1000000,
+        "golden_records": 397756,
+        "entities": 397756,
+        "golden_lineage": 2386536
+      },
+      "initial_quality": {
+        "blocking_recall": 0.9490525,
+        "quality": {
+          "edge_precision": 0.8362111871669243,
+          "edge_recall": 0.9227716591021045,
+          "edge_f1": 0.8773615799363463,
+          "cluster_precision": 0.7562816797109406,
+          "cluster_recall": 0.88851375,
+          "cluster_f1": 0.8170823667893574
+        },
+        "families": {
+          "blocking": {
+            "tp": 759242,
+            "fp": 4649368,
+            "fn": 40758,
+            "precision": 0.14037654776365832,
+            "recall": 0.9490525,
+            "f1": 0.24457712756961705
+          },
+          "edge": {
+            "tp": 700607,
+            "fp": 137228,
+            "fn": 58635,
+            "precision": 0.8362111871669243,
+            "recall": 0.9227716591021045,
+            "f1": 0.8773615799363463
+          },
+          "cluster": {
+            "tp": 710811,
+            "fp": 229065,
+            "fn": 89189,
+            "precision": 0.7562816797109406,
+            "recall": 0.88851375,
+            "f1": 0.8170823667893574
+          }
+        }
+      },
+      "partition_sha256": "acc7dc67c54351e009140a87e8ccdbde51d7f0aa6727a6c7d1533c65a0651c50",
+      "scoring_generations": {
+        "base": [
+          {
+            "model_version": "v0001",
+            "tf_snapshot_id": "01M3672N978D81RXS2XX23FENP"
+          }
+        ]
+      },
+      "input_sha256": {
+        "base/crm.csv": "efc06674b364f13fc68331d59d29632b8cb32f2a691782129ad4dab2c4a203a2",
+        "base/billing.csv": "ca23c8bdf4ae724dacb49b4ab7777a56527f13dcee1a29247bf0328b21a807b1",
+        "base/webforms.csv": "2b6c638d603498fe4d4645ad6d49292bff2e18897162b917883a31ac1756fc2e"
+      },
+      "image_digest": "sha256:c26abee272b92ff20568c0d974df2ef2acb0975c3a848b87ceffd3937dfea3fd",
+      "application_source_sha256": "9da93d9a0c89cc89469f6ba2cce563b3800dbf9366cf5d91a49e0b2d60228806",
+      "harness_source_sha256": "b72b52c6b367b3fe97133233464cd82f12e556ce33ac752be80e7abe718ab047",
+      "config_sha256": "a00d95b63a462ff8af73e92b185e4459949f48677252b5efba0344723c96631a",
+      "semantic_config_sha256": "8e0c102ff55b7de5ed1eb5ae8574ef74f4b5f0112727b57d0f68484a173f3db8",
+      "candidate_pairs": 5408610,
+      "versions": {
+        "duckdb_version": "1.5.5",
+        "splink_version": "5.0.0.dev5",
+        "dbt_core_version": "1.12.2",
+        "dbt_duckdb_version": "1.11.0",
+        "ducklake_extension_version": "d8a1881e"
+      }
+    },
+    "em_1m": {
+      "processing_seconds": 91.82028941600001,
+      "stage_seconds": {
+        "ingest": 10.893172047,
+        "standardize": 21.814933009,
+        "train": 7.433609712,
+        "match": 13.225173381000001,
+        "reconcile": 25.558767928,
+        "assemble": 12.894633339
+      },
+      "resources": {
+        "cpu_s": 122.40528,
+        "throttled_s": 13.221687000000001,
+        "sampled_memory_peak_bytes": 4328681472,
+        "sampled_spill_bytes_peak": 0,
+        "sampled_parquet_scratch_bytes_peak": 0
+      },
+      "validation": {
+        "raw_records": 1000000,
+        "int_std_records": 1000000,
+        "entity_membership": 1000000,
+        "golden_records": 397753,
+        "entities": 397753,
+        "golden_lineage": 2386518
+      },
+      "initial_quality": {
+        "blocking_recall": 0.9490525,
+        "quality": {
+          "edge_precision": 0.8362141194724593,
+          "edge_recall": 0.9227914156487654,
+          "edge_f1": 0.8773721238350701,
+          "cluster_precision": 0.7563462092990839,
+          "cluster_recall": 0.88853,
+          "cluster_f1": 0.8171268981206602
+        },
+        "families": {
+          "blocking": {
+            "tp": 759242,
+            "fp": 4649368,
+            "fn": 40758,
+            "precision": 0.14037654776365832,
+            "recall": 0.9490525,
+            "f1": 0.24457712756961705
+          },
+          "edge": {
+            "tp": 700622,
+            "fp": 137228,
+            "fn": 58620,
+            "precision": 0.8362141194724593,
+            "recall": 0.9227914156487654,
+            "f1": 0.8773721238350701
+          },
+          "cluster": {
+            "tp": 710824,
+            "fp": 228989,
+            "fn": 89176,
+            "precision": 0.7563462092990839,
+            "recall": 0.88853,
+            "f1": 0.8171268981206602
+          }
+        }
+      },
+      "partition_sha256": "15d1898d94d9722606e05b568976dfe2e638656e7428e161504e47d9543320e9",
+      "scoring_generations": {
+        "base": [
+          {
+            "model_version": "v0001",
+            "tf_snapshot_id": "01M367E8HFPRVQNBJYFQ4MTN2J"
+          }
+        ]
+      },
+      "input_sha256": {
+        "base/crm.csv": "efc06674b364f13fc68331d59d29632b8cb32f2a691782129ad4dab2c4a203a2",
+        "base/billing.csv": "ca23c8bdf4ae724dacb49b4ab7777a56527f13dcee1a29247bf0328b21a807b1",
+        "base/webforms.csv": "2b6c638d603498fe4d4645ad6d49292bff2e18897162b917883a31ac1756fc2e"
+      },
+      "image_digest": "sha256:c26abee272b92ff20568c0d974df2ef2acb0975c3a848b87ceffd3937dfea3fd",
+      "application_source_sha256": "9da93d9a0c89cc89469f6ba2cce563b3800dbf9366cf5d91a49e0b2d60228806",
+      "harness_source_sha256": "b72b52c6b367b3fe97133233464cd82f12e556ce33ac752be80e7abe718ab047",
+      "config_sha256": "c7d0f2bece4769cd20d6a1886b9500c69266c004fc34fe1f47702939842bcf5c",
+      "semantic_config_sha256": "c7f9d8e89c1b9d8b1503b36739f5b189a0bc92e630588dc064f3e9c202dfce2d",
+      "candidate_pairs": 5408610,
+      "versions": {
+        "duckdb_version": "1.5.5",
+        "splink_version": "5.0.0.dev5",
+        "dbt_core_version": "1.12.2",
+        "dbt_duckdb_version": "1.11.0",
+        "ducklake_extension_version": "d8a1881e"
+      }
+    }
+  },
+  "comparison": {
+    "training_time_reduction": 0.29406123146855034,
+    "initial_load_time_reduction": 0.05464679095267455,
+    "precision_decreased": false,
+    "recall_decreased": false
+  },
+  "validation_before_final_run": {
+    "unit_tests_passed": 909,
+    "regular_integration_cases_passed": 347,
+    "initial_integration_failures": 3,
+    "repaired_cases_passed_on_rerun": 3,
+    "slow_training_artifact_regeneration_excluded": 1,
+    "static_checks": "spec, ruff, format, mypy, workflow lint, fixtures and dbt parse passed"
+  }
+}

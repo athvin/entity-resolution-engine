@@ -2,7 +2,10 @@
 
 See the [Splink 5 pipeline measurements](performance-splink5.md) for the latest
 standardization, matching and golden-record changes, quality gates and migration
-benchmark procedure. Historical comparisons below retain their original revisions.
+benchmark procedure. The [performance experiment guide](performance-experiments.md)
+covers separate initial/incremental/correction workloads, held-out quality gates,
+EM caps, the hard generator and optional LSH/ONNX comparisons. Historical
+comparisons below retain their original revisions.
 
 ## Million-record full pipeline benchmark
 

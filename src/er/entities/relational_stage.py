@@ -22,7 +22,7 @@ from er.lake.model import SCHEMA_QUALIFIER
 from er.matching.edges import _canonical, materialize_current_edges
 from er.obs.runctx import StageRun
 from er.review.assertions import Assertion
-from er.review.never_cut import CutResult, never_cut_fixpoint, persist_cuts, release_cuts
+from er.review.never_cut import CutResult, never_cut_fixpoint, persist_cuts
 from er.review.queue import RESOLVED_STATUSES, upsert_subject_relation
 
 if TYPE_CHECKING:
@@ -87,6 +87,7 @@ def run_affected_reconcile(
     occurred_at: datetime | None,
     reason: str | None,
     started: float,
+    full: bool = False,
 ) -> ReconcileResult:
     from er.entities.reconcile_stage import (
         ReconcileResult,
@@ -118,7 +119,14 @@ def run_affected_reconcile(
         ).fetchone()
         if invalid is not None:
             _canonical(str(invalid[0]), str(invalid[1]))
-        seeds = stage(*seed_query(run_ctx.run_id, last_reconciled_watermark(connection)))
+        seeds = (
+            stage(
+                f"SELECT record_key FROM {L}.int_std_records UNION "
+                f"SELECT record_key FROM {L}.entity_membership"
+            )
+            if full
+            else stage(*seed_query(run_ctx.run_id, last_reconciled_watermark(connection)))
+        )
         adjusted = stage(
             f"SELECT e.rec_a_key, e.rec_b_key, e.match_probability FROM {view} e "
             f"WHERE NOT EXISTS (SELECT 1 FROM {L}.assertions a WHERE a.active "
@@ -128,19 +136,53 @@ def run_affected_reconcile(
             f"(SELECT 1 FROM {L}.assertions n WHERE n.active AND n.kind = 'never' "
             "AND n.rec_a_key = a.rec_a_key AND n.rec_b_key = a.rec_b_key)"
         )
-        reached = stage(
-            f"SELECT record_key FROM {seeds} UNION "
-            f"SELECT e.rec_b_key FROM {adjusted} e JOIN {seeds} s ON s.record_key=e.rec_a_key "
-            "WHERE e.match_probability >= ? UNION "
-            f"SELECT e.rec_a_key FROM {adjusted} e JOIN {seeds} s ON s.record_key=e.rec_b_key "
-            "WHERE e.match_probability >= ?",
-            [cfg.thresholds.auto_merge, cfg.thresholds.auto_merge],
-        )
+        # Close over the graph BEFORE cuts, plus old memberships (including deleted
+        # nodes). A new path may invalidate an old cut in a previously split entity.
+        all_nodes = stage(f"SELECT record_key FROM {seeds}")
+        has_cuts = scalar(connection, f"SELECT EXISTS (SELECT 1 FROM {L}.cut_edges WHERE active)")
+        if not full and not has_cuts and not any(a.kind == "never" for a in assertions):
+            # With no cuts, each prior entity is a whole threshold component.
+            # One scored-partner join plus prior membership is the exact closure.
+            reached = stage(
+                f"SELECT record_key FROM {seeds} UNION "
+                f"SELECT e.rec_b_key FROM {adjusted} e JOIN {seeds} s "
+                "ON s.record_key=e.rec_a_key WHERE e.match_probability>=? UNION "
+                f"SELECT e.rec_a_key FROM {adjusted} e JOIN {seeds} s "
+                "ON s.record_key=e.rec_b_key WHERE e.match_probability>=?",
+                [cfg.thresholds.auto_merge, cfg.thresholds.auto_merge],
+            )
+            all_nodes = stage(
+                f"SELECT record_key FROM {reached} UNION SELECT p.record_key "
+                f"FROM {L}.entity_membership p WHERE p.entity_id IN (SELECT m.entity_id "
+                f"FROM {L}.entity_membership m JOIN {reached} USING(record_key))"
+            )
+        elif not full:
+            while True:
+                with staged_query(
+                    connection,
+                    f"SELECT record_key FROM {all_nodes} UNION "
+                    f"SELECT e.rec_b_key FROM {adjusted} e JOIN {all_nodes} s "
+                    "ON s.record_key=e.rec_a_key WHERE e.match_probability >= ? UNION "
+                    f"SELECT e.rec_a_key FROM {adjusted} e JOIN {all_nodes} s "
+                    "ON s.record_key=e.rec_b_key WHERE e.match_probability >= ? UNION "
+                    f"SELECT p.record_key FROM {L}.entity_membership p WHERE p.entity_id IN "
+                    f"(SELECT m.entity_id FROM {L}.entity_membership m "
+                    f"JOIN {all_nodes} n USING(record_key))",
+                    [cfg.thresholds.auto_merge, cfg.thresholds.auto_merge],
+                ) as expanded:
+                    unchanged = scalar(connection, f"SELECT count(*) FROM {expanded}") == scalar(
+                        connection, f"SELECT count(*) FROM {all_nodes}"
+                    )
+                    if not unchanged:
+                        connection.execute(f"DELETE FROM {all_nodes}")
+                        connection.execute(f"INSERT INTO {all_nodes} SELECT * FROM {expanded}")
+                    if unchanged:
+                        break
         entities = stage(
-            f"SELECT DISTINCT entity_id FROM {L}.entity_membership JOIN {reached} USING(record_key)"
+            f"SELECT DISTINCT entity_id FROM {L}.entity_membership "
+            f"JOIN {all_nodes} USING(record_key)"
         )
         prior = stage(f"SELECT m.* FROM {L}.entity_membership m JOIN {entities} USING(entity_id)")
-        all_nodes = stage(f"SELECT record_key FROM {reached} UNION SELECT record_key FROM {prior}")
         affected_count = scalar(connection, f"SELECT count(*) FROM {all_nodes}")
         if not affected_count:
             run_ctx.counters.set("rows_in", 0)
@@ -165,14 +207,11 @@ def run_affected_reconcile(
             f"SELECT n.record_key FROM {all_nodes} n SEMI JOIN "
             f"{L}.int_std_records USING(record_key)"
         )
-        # Scored edges are filtered before always/never overrides, exactly as the
-        # collection path: an always assertion can re-add a previously cut pair.
+        # Derive cuts afresh; historical cuts cannot constrain this search.
         edges = stage(
             "SELECT e.rec_a_key, e.rec_b_key, e.match_probability "
             f"FROM {view} e JOIN {nodes} a ON a.record_key=e.rec_a_key "
             f"JOIN {nodes} b ON b.record_key=e.rec_b_key WHERE e.match_probability >= ? "
-            f"AND NOT EXISTS (SELECT 1 FROM {L}.cut_edges c WHERE c.active "
-            "AND c.rec_a_key=e.rec_a_key AND c.rec_b_key=e.rec_b_key) "
             f"AND NOT EXISTS (SELECT 1 FROM {L}.assertions s WHERE s.active "
             "AND s.rec_a_key=e.rec_a_key AND s.rec_b_key=e.rec_b_key) "
             "UNION ALL SELECT s.rec_a_key, s.rec_b_key, 1.0 "
@@ -190,7 +229,6 @@ def run_affected_reconcile(
                 return stage(f"SELECT * FROM {labels}"), iterations
 
         labels, iterations = cluster()
-        release_cuts(connection, run_id=run_ctx.run_id, released_at=occurred_at)
         violating = stage(
             f"SELECT DISTINCT a.label FROM {L}.assertions s "
             f"JOIN {labels} a ON a.record_key=s.rec_a_key "
@@ -223,8 +261,41 @@ def run_affected_reconcile(
                         "WHERE e.rec_a_key=r.a AND e.rec_b_key=r.b"
                     )
                 labels, iterations = cluster()
+        with staged_rows(
+            connection,
+            (
+                ("rec_a_key", "VARCHAR"),
+                ("rec_b_key", "VARCHAR"),
+                ("probability", "DOUBLE"),
+                ("assertion_id", "VARCHAR"),
+            ),
+            ((c.rec_a_key, c.rec_b_key, c.match_probability, c.assertion_id) for c in cut.cuts),
+        ) as derived:
+            identity = (
+                "d.rec_a_key=c.rec_a_key AND d.rec_b_key=c.rec_b_key AND "
+                "d.assertion_id=c.assertion_id AND d.probability=c.match_probability AND "
+                "c.model_version=? AND c.tf_snapshot_id=?"
+            )
+            released = connection.execute(
+                f"UPDATE {L}.cut_edges c SET active=false, released_run_id=?, released_at=? "
+                f"WHERE c.active AND (c.rec_a_key IN (SELECT record_key FROM {all_nodes}) "
+                f"OR c.rec_b_key IN (SELECT record_key FROM {all_nodes})) "
+                f"AND NOT EXISTS (SELECT 1 FROM {derived} d WHERE {identity})",
+                [run_ctx.run_id, stamp, model_version, tf_snapshot_id],
+            ).fetchone()
+            assert released is not None
+            cuts_released = int(released[0])
+            retained = {
+                (str(a), str(b))
+                for a, b in connection.execute(
+                    f"SELECT d.rec_a_key, d.rec_b_key FROM {derived} d "
+                    f"JOIN {L}.cut_edges c ON {identity} WHERE c.active",
+                    [model_version, tf_snapshot_id],
+                ).fetchall()
+            }
+        fresh_cuts = tuple(c for c in cut.cuts if c.pair not in retained)
         with lifecycle_plan(connection, old, entities, labels, ids) as plan:
-            cut_ids = {c.pair: ids.new() for c in cut.cuts}
+            cut_ids = {c.pair: ids.new() for c in fresh_cuts}
             cuts = stack.enter_context(
                 staged_rows(
                     connection,
@@ -245,7 +316,7 @@ def run_affected_reconcile(
                             c.assertion_id,
                             cut_ids[c.pair],
                         )
-                        for i, c in enumerate(cut.cuts, 1)
+                        for i, c in enumerate(fresh_cuts, 1)
                     ),
                 )
             )
@@ -268,9 +339,13 @@ def run_affected_reconcile(
                 f"c.position + {plan_count + removal_count} FROM {cuts} c "
                 f"JOIN {plan.placement} p ON p.record_key=c.rec_a_key"
             )
-            if scalar(connection, f"SELECT EXISTS (SELECT 1 FROM {plan.entities})"):
+            entities_changed = scalar(connection, f"SELECT EXISTS (SELECT 1 FROM {plan.entities})")
+            membership_changed = scalar(
+                connection, f"SELECT EXISTS (SELECT 1 FROM {plan.membership})"
+            )
+            if entities_changed:
                 _merge_entity_relation(connection, plan.entities, stamp, run_ctx.run_id)
-            if scalar(connection, f"SELECT EXISTS (SELECT 1 FROM {plan.membership})"):
+            if membership_changed:
                 _merge_membership_relation(connection, plan.membership, stamp, run_ctx.run_id)
             written = append_events(
                 connection,
@@ -279,7 +354,7 @@ def run_affected_reconcile(
             )
             cuts_written = persist_cuts(
                 connection,
-                cut.cuts,
+                fresh_cuts,
                 run_id=run_ctx.run_id,
                 model_version=model_version,
                 tf_snapshot_id=tf_snapshot_id,
@@ -308,7 +383,21 @@ def run_affected_reconcile(
                 )
                 upsert_subject_relation(connection, subjects, run_id=run_ctx.run_id, id_factory=ids)
             result = ReconcileResult(
-                exit_code=int(ExitCode.SUCCESS),
+                exit_code=int(
+                    ExitCode.SUCCESS
+                    if any(
+                        (
+                            entities_changed,
+                            membership_changed,
+                            removal_count,
+                            written,
+                            cuts_written,
+                            cuts_released,
+                            cut.escalations,
+                        )
+                    )
+                    else ExitCode.NOTHING_TO_DO
+                ),
                 affected_entities=scalar(connection, f"SELECT count(*) FROM {entities}"),
                 affected_edges=scalar(connection, f"SELECT count(*) FROM {edges}"),
                 label_prop_iterations=iterations,

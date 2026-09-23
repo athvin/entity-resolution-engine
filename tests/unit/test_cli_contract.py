@@ -29,8 +29,6 @@ from er import cli
 from er.cli import (
     COMMANDS,
     GlobalOptions,
-    NoOpStage,
-    NotImplementedStage,
     Stage,
     app,
     dbt_vars,
@@ -194,7 +192,7 @@ def test_run_all_chain_order_per_mode() -> None:
     assert [(stage.name, stage.args) for stage in run_all_chain("full", True)] == [
         ("standardize", ()),
         ("match", ("--mode", "full")),
-        ("reconcile", ()),
+        ("reconcile", ("--full",)),
         ("assemble", ()),
     ]
     with_ingest = run_all_chain("incremental", False, source="crm", path="/app/drop/crm")
@@ -240,28 +238,15 @@ class FailingStage:
         raise StageFailure(f"{self.name} blew up")
 
 
-def test_not_implemented_stage_is_exit_1() -> None:
-    """AC6: an unwritten stage is exit 1 with its message, and never in the chain.
+def test_correction_is_a_real_full_resolution_chain() -> None:
+    from er.cli import correction_chain
 
-    ``er correct`` is the example because it is still a stub. ``er train`` was until
-    ER-055 implemented it, ``er assert`` until ER-062 did and ``er review`` until
-    ER-063 did; a test that keeps asserting a stub over an implemented stage stops
-    testing the split it is named for.
-    """
-    result = invoke("correct")
-
-    assert result.exit_code == int(ExitCode.STAGE_FAILURE)
-    assert "stage not implemented: correct" in result.stderr
-    record = stage_lines(result.stderr)[0]
-    assert record["status"] == "failed"
-    assert record["error_class"] == ErrorClass.DATA.value
-    assert record["exit_code"] not in (int(ExitCode.SUCCESS), int(ExitCode.NOTHING_TO_DO))
-
-    for mode in ("incremental", "full"):
-        for skip_ingest in (True, False):
-            chain = run_all_chain(mode, skip_ingest, source="crm", path="/app/drop/crm")
-            assert all(isinstance(stage, NoOpStage) for stage in chain)
-            assert not any(isinstance(stage, NotImplementedStage) for stage in chain)
+    stages = correction_chain()
+    assert [stage.name for stage in stages] == ["match", "reconcile", "assemble"]
+    assert stages[0].new_tf_snapshot  # type: ignore[attr-defined]
+    assert stages[1].full  # type: ignore[attr-defined]
+    assert stages[1].reason == "correction_pass"  # type: ignore[attr-defined]
+    assert not stages[2].touched_only  # type: ignore[attr-defined]
 
 
 def test_run_id_is_minted_once_and_threaded() -> None:

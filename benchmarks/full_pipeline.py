@@ -35,7 +35,7 @@ def get_scale(name: str) -> Scale:
             name="10m",
             personas=4_000_000,
             records=10_000_000,
-            incremental_batch=0,
+            incremental_batch=100_000,
         )
     return standard_scale(name)
 
@@ -164,8 +164,22 @@ def summarize_run(path: Path) -> dict[str, Any]:
         "partition_sha256": run["base_partition_hash"],
         "input_sha256": run["input_sha256"],
         "quality": run["quality"],
-        "initial_quality": run.get("base_quality"),
+        "initial_quality": run.get("base_quality", run["quality"]),
         "fingerprint": run["fingerprint"],
+        "fingerprint_scope": "final_state",
+        "scoring_generations": {
+            phase: [
+                {
+                    "model_version": stage.get("model_version"),
+                    "tf_snapshot_id": stage.get("tf_snapshot_id"),
+                }
+                for entry in run["commands"]
+                if entry["phase"] == phase
+                for stage in entry.get("stages", [])
+                if stage["stage"] == "match"
+            ]
+            for phase in ("base", "batch", "correction")
+        },
     }
     batch = [entry for entry in run["commands"] if entry["phase"] == "batch"]
     if batch:
@@ -179,6 +193,17 @@ def summarize_run(path: Path) -> dict[str, Any]:
         summary[f"{prefix}_records"] = run["incremental_records"]
         summary[f"{prefix}_counts"] = run["batch_counts"]
         summary[f"{prefix}_resources"] = processing_resources(path, {**run, "commands": batch})
+    correction = [entry for entry in run["commands"] if entry["phase"] == "correction"]
+    if correction:
+        if len(correction) != 1 or correction[0]["command"][1] != "correct":
+            raise ValueError(f"incomplete correction command sequence: {path}")
+        if correction[0]["exit_code"] != 0:
+            raise ValueError(f"correction failed: {path}")
+        summary["correction_seconds"] = correction[0]["duration_ms"] / 1000
+        summary["correction_quality"] = run["correction_quality"]
+        summary["correction_resources"] = processing_resources(
+            path, {**run, "commands": correction}
+        )
     return summary
 
 
@@ -251,6 +276,12 @@ def write_report(out: Path, manifest: dict[str, Any]) -> dict[str, Any]:
                 f"{successful[0]['incremental_records']:,} input records.",
                 "",
             ]
+        corrections = [
+            run["correction_seconds"] for run in successful if "correction_seconds" in run
+        ]
+        if corrections:
+            result["summary"]["correction_median_seconds"] = statistics.median(corrections)
+            lines += [f"Median correction: **{statistics.median(corrections):.2f} seconds**.", ""]
         references = [
             run["full_batch_reference_seconds"]
             for run in successful
@@ -322,6 +353,11 @@ def worker(args: argparse.Namespace) -> None:
         workload=get_scale(args.scale),
         prediction_matrix=args.prediction_matrix,
         batch_mode=args.batch_mode,
+        with_correction=getattr(args, "with_correction", False),
+        generator_profile=getattr(args, "generator_profile", "baseline"),
+        blocking_experiments=getattr(args, "blocking_experiments", False),
+        lsh_seed=getattr(args, "lsh_seed", None),
+        onnx_directory=getattr(args, "onnx_directory", None),
     )
     errors = comparability_violations(
         {"fingerprint": run["fingerprint"], "phases": []},
@@ -342,6 +378,13 @@ def campaign(args: argparse.Namespace, checked: dict[str, Any]) -> None:
         "git_sha": output(["git", "rev-parse", "HEAD"]),
         "source_files": source_manifest(),
         "with_incremental": getattr(args, "with_incremental", False),
+        "with_correction": getattr(args, "with_correction", False),
+        "generator_profile": getattr(args, "generator_profile", "baseline"),
+        "blocking_experiments": getattr(args, "blocking_experiments", False),
+        "lsh_seed": getattr(args, "lsh_seed", None),
+        "onnx_directory": str(args.onnx_directory)
+        if getattr(args, "onnx_directory", None)
+        else None,
         "image": getattr(args, "image", None),
         "profile": getattr(args, "profile", False),
         "prediction_matrix": getattr(args, "prediction_matrix", False),
@@ -415,11 +458,16 @@ def campaign(args: argparse.Namespace, checked: dict[str, Any]) -> None:
         shutil.copytree(ROOT / "benchmarks", harness, ignore=shutil.ignore_patterns("__pycache__"))
         override["services"]["benchmark"]["volumes"].append(f"{harness}:/app/benchmarks:ro")
         worker_options = []
-        for option in ("profile", "prediction_matrix"):
+        for option in ("profile", "prediction_matrix", "with_correction", "blocking_experiments"):
             if getattr(args, option, False):
                 worker_options.append("--" + option.replace("_", "-"))
         if getattr(args, "with_incremental", False):
             worker_options.append("--with-incremental")
+        worker_options += ["--generator-profile", getattr(args, "generator_profile", "baseline")]
+        if getattr(args, "lsh_seed", None) is not None:
+            worker_options += ["--lsh-seed", str(args.lsh_seed)]
+        if getattr(args, "onnx_directory", None) is not None:
+            worker_options += ["--onnx-directory", str(args.onnx_directory)]
         if getattr(args, "batch_mode", "incremental") != "incremental":
             worker_options += ["--batch-mode", args.batch_mode]
         if getattr(args, "config", None):
@@ -549,6 +597,17 @@ def main() -> int:
         default="incremental",
         help="use full for a frozen-model rescore reference after the delta delivery",
     )
+    parser.add_argument(
+        "--with-correction", action="store_true", help="also time refreshed-TF correction"
+    )
+    parser.add_argument("--generator-profile", choices=("baseline", "hard-v1"), default="baseline")
+    parser.add_argument(
+        "--blocking-experiments", action="store_true", help="exploratory frozen-model arms"
+    )
+    parser.add_argument("--lsh-seed", type=int, help="required seed for LSH experiments")
+    parser.add_argument(
+        "--onnx-directory", type=Path, help="baked model directory INSIDE the supplied image"
+    )
     parser.add_argument("--config", type=Path, help="explicit training/configuration variant")
     parser.add_argument("--corpus-root", type=Path, help="reuse identical generated inputs")
     parser.add_argument(
@@ -578,6 +637,10 @@ def main() -> int:
     parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--iteration", type=int, default=1, help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if args.blocking_experiments and args.lsh_seed is None:
+        parser.error("--blocking-experiments requires --lsh-seed")
+    if args.onnx_directory is not None and not args.blocking_experiments:
+        parser.error("--onnx-directory requires --blocking-experiments")
     if args.repeat < 1 or args.iteration < 1:
         parser.error("repeat and iteration must be positive")
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -586,8 +649,6 @@ def main() -> int:
         args.config = args.config.resolve()
     if args.corpus_root:
         args.corpus_root = args.corpus_root.resolve()
-    if args.with_incremental and args.scale == "10m":
-        parser.error("10m defines an initial load only; use 1m for incremental measurements")
     if args.batch_mode == "full" and not args.with_incremental:
         parser.error("--batch-mode full requires --with-incremental")
     try:

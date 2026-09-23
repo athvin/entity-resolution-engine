@@ -119,6 +119,17 @@ def blocking_rules_from_config(
     return [spec.as_payload() for spec in specs], [block_on(spec.expr) for spec in specs]
 
 
+def scoring_settings(cfg: Config, settings: Mapping[str, Any], **overrides: Any) -> dict[str, Any]:
+    """Keep learned parameters frozen; derive prediction blocking from today's config."""
+    _, rules = blocking_rules_from_config(cfg)
+    return {
+        **settings,
+        "retain_intermediate_calculation_columns": True,
+        "blocking_rules_to_generate_predictions": rules,
+        **overrides,
+    }
+
+
 #: The dialect every construct here is rendered for. Splink defers dialecting to
 #: render time, so the settings dict does not exist until a dialect is named, and
 #: naming a second one anywhere would produce a second settings document.

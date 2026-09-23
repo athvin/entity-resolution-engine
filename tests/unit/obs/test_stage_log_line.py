@@ -73,7 +73,7 @@ def test_exactly_one_json_line_with_exact_key_set() -> None:
     result = invoke("standardize")
 
     assert result.exit_code == int(ExitCode.NOTHING_TO_DO)
-    emitted = lines(result.stderr)
+    emitted = [line for line in lines(result.stderr) if line.startswith("{")]
     assert len(emitted) == 1, f"a stage emitted more than its one S5.2 line:\n{result.stderr}"
 
     record = json.loads(emitted[0])
@@ -100,24 +100,26 @@ def test_key_set_is_s5_2_plus_exit_code() -> None:
     assert set(STAGE_RECORD_KEYS) - set(S5_2_KEYS) == {"exit_code"}
 
 
-def test_failed_stage_line_carries_error_class() -> None:
-    """AC2/AC6: a failed stage emits the same line, classified, and still one of it.
+def test_failed_stage_line_carries_error_class(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A failed scoring stage emits classified telemetry without a lake."""
+    from er.cli import _MatchStage
+    from er.errors import StageFailure
 
-    ``er correct`` is the example because it is still an unimplemented stub, and a stub
-    fails without a lake. ``er train`` was until ER-055 implemented it, ``er assert``
-    until ER-062 did and ``er review`` until ER-063 did.
-    """
-    result = invoke("correct")
+    def fail(self: object, options: object) -> int:
+        raise StageFailure("injected scoring failure")
+
+    monkeypatch.setattr(_MatchStage, "run", fail)
+    result = invoke("match", "--mode", "full")
 
     assert result.exit_code == int(ExitCode.STAGE_FAILURE)
-    emitted = lines(result.stderr)
+    emitted = [line for line in lines(result.stderr) if line.startswith("{")]
     assert len(emitted) == 1
 
     record = json.loads(emitted[0])
     assert tuple(record) == STAGE_RECORD_KEYS
     assert record["status"] == "failed"
     assert record["error_class"] == ErrorClass.DATA.value
-    assert record["error_detail"] == "stage not implemented: correct"
+    assert record["error_detail"] == "injected scoring failure"
     assert record["ended_at"] is not None
 
 

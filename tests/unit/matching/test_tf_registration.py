@@ -94,6 +94,7 @@ COMPUTE_TF_CALL_SITES: Mapping[str, str] = {
 #: order in which the allowlist ever describes the tree it is guarding.
 MINT_CALL_SITES: Mapping[str, str] = {
     "src/er/matching/tf.py": "the definition, and the single mint site D4 requires",
+    "src/er/matching/correction.py": "er correct freezes its journaled target snapshot",
     "src/er/matching/train.py": "`er train` mints when it materializes tf_lookup (D4)",
     "tests/integration/test_tf_schema.py": (
         "the materialization suite, which must have a snapshot id to materialize under. "
