@@ -17,6 +17,7 @@ from typing import Any
 
 import yaml
 from large_validation import (
+    block_statistics,
     candidate_pair_count,
     copy_input,
     file_sha256,
@@ -228,6 +229,11 @@ def run_case(
     workload: Scale | None = None,
     prediction_matrix: bool = False,
     batch_mode: str = "incremental",
+    with_correction: bool = False,
+    generator_profile: str = "baseline",
+    blocking_experiments: bool = False,
+    lsh_seed: int | None = None,
+    onnx_directory: Path | None = None,
 ) -> dict[str, Any]:
     if initial_only and case == "tiny":
         raise ValueError("initial-only measurements require a generated benchmark scale")
@@ -262,6 +268,8 @@ def run_case(
         "detailed": detailed,
         "initial_only": initial_only,
         "batch_mode": batch_mode,
+        "with_correction": with_correction,
+        "generator_profile": generator_profile,
         "namespace": namespace,
         "status": "running",
         "commands": [],
@@ -336,15 +344,35 @@ def run_case(
 
             scale = workload or get_scale(case)
             suffix = "-initial" if initial_only else ""
-            corpus = (corpus_root or out) / f"corpus-{case}{suffix}"
+            if generator_profile != "baseline":
+                suffix += "-" + generator_profile
             base_records = scale.records
             batch_records = 0 if initial_only else scale.incremental_batch
+            identity = {
+                "profile": generator_profile,
+                "seed": config.generator.seed,
+                "records": base_records,
+                "personas": scale.personas,
+                "batch": batch_records,
+                "sources": {
+                    name: source.model_dump(mode="json") for name, source in config.sources.items()
+                },
+            }
+            identity_hash = hashlib.sha256(
+                json.dumps(identity, sort_keys=True).encode()
+            ).hexdigest()
+            corpus = (corpus_root or out) / f"corpus-{case}{suffix}-{identity_hash[:16]}"
             if not corpus.exists():
                 command(
                     [
                         sys.executable,
                         "-m",
                         "fixtures.generator.cli",
+                        *(
+                            ["--profile", generator_profile]
+                            if generator_profile != "baseline"
+                            else []
+                        ),
                         "--personas",
                         str(scale.personas),
                         "--records",
@@ -359,6 +387,12 @@ def run_case(
                         str(config_path),
                     ]
                 )
+                (corpus / "benchmark-input.json").write_text(json.dumps(identity, sort_keys=True))
+            elif (
+                not (corpus / "benchmark-input.json").exists()
+                or json.loads((corpus / "benchmark-input.json").read_text()) != identity
+            ):
+                raise ValueError(f"incomplete or incompatible cached corpus: {corpus}")
             base_inputs, batch_inputs = corpus, corpus / "batch"
         drops = {}
         deliveries = [("base", base_inputs)]
@@ -405,6 +439,7 @@ def run_case(
                     )
                 }
                 result[f"{phase}_counts"] = tables
+                result[f"{phase}_blocking"] = block_statistics(connection)
                 result[f"{phase}_candidate_pairs"] = candidate_pair_count(connection)
                 assert tables["int_std_records"] == tables["entity_membership"], tables
                 assert tables["golden_records"] > 0, tables
@@ -435,9 +470,45 @@ def run_case(
             from prediction_matrix import run_matrix
 
             result["prediction_matrix"] = run_matrix(directory, command)
+        if blocking_experiments:
+            from blocking_experiments import run_experiments
+
+            if lsh_seed is None:
+                raise ValueError("LSH experiments require an explicit seed")
+            with connect() as connection:
+                result["blocking_experiments"] = run_experiments(
+                    connection,
+                    config,
+                    corpus,
+                    seed=lsh_seed,
+                    include_batch=not initial_only,
+                    onnx_directory=onnx_directory,
+                )
+            (directory / "blocking-experiments.json").write_text(
+                json.dumps(result["blocking_experiments"], indent=2)
+            )
+        if with_correction:
+            with connect() as connection:
+                result["pre_correction_quality"] = quality_from_csv(
+                    connection,
+                    corpus,
+                    config.thresholds.auto_merge,
+                    blocked_count=result[f"{phase}_candidate_pairs"],
+                    include_batch=not initial_only,
+                )
+            command(["er", "correct"], str(ULID()), "correction")
+            with connect() as connection:
+                result["correction_quality"] = quality_from_csv(
+                    connection,
+                    corpus,
+                    config.thresholds.auto_merge,
+                    blocked_count=result[f"{phase}_candidate_pairs"],
+                    include_batch=not initial_only,
+                )
+                result["correction_partition_hash"] = partition_sha256(connection)
         with span("validation.quality", unit="pairs"), connect() as connection:
             if case != "tiny":
-                result["quality"] = quality_from_csv(
+                result["quality"] = result.get("pre_correction_quality") or quality_from_csv(
                     connection,
                     corpus,
                     config.thresholds.auto_merge,

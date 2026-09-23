@@ -5,8 +5,8 @@ real lake: `base_10` is delivered through `er ingest`, standardized through dbt,
 scored at the committed `model_test_v1` with its frozen `tf_lookup` rows. Nothing is
 trained (S4.3.2 item 6: EM over 23 records is degenerate) and nothing is stubbed —
 `score_full` is called with the connection the harness attached, which is what makes
-"exactly one write statement reached `lake.main.match_scores`" a statement about the
-engine rather than about a mock.
+"one batched MERGE and one retirement UPDATE reached `lake.main.match_scores`"
+a statement about the engine rather than about a mock.
 
 **How the two spies work, and why they are spies rather than inspections.**
 
@@ -481,16 +481,12 @@ def test_single_write_statement_to_match_scores(
     model: tuple[str, str],
     predict_spy: PredictSpy,
 ) -> None:
-    """AC3, and AC6's spy half: one write, and a threshold that came from `review_low`."""
+    """A score MERGE and retirement UPDATE; prediction uses the configured threshold."""
     with StatementLog(standardized) as log:
         scored = score(standardized, cfg, model)
 
     writes = log.writes_to(MATCH_SCORES_RELATION)
-    assert len(writes) == 1, (
-        f"{len(writes)} statements wrote to {MATCH_SCORES_RELATION}; S4.0b permits one "
-        f"per stage:\n" + "\n---\n".join(writes)
-    )
-    assert _verb(writes[0]) == "MERGE", f"the write is not the S4.3.4 MERGE: {writes[0][:120]}"
+    assert [_verb(write) for write in writes] == ["MERGE", "UPDATE"]
     assert scored.result.pairs_scored > 0, "a stage that wrote nothing writes one statement too"
 
     # AC6: the threshold Splink received is `review_low` itself, in probabilities —
@@ -608,6 +604,11 @@ def test_counters_and_no_active_model_exit_3(
     refused = run_er("match", "--mode", MODE_FULL)
     assert refused.returncode == int(ExitCode.PRECONDITION), refused.stdout + refused.stderr
     assert scalar(standardized, f"SELECT count(*) FROM {MATCH_SCORES}") == 0
+    assert run_er("correct").returncode == int(ExitCode.PRECONDITION)
+    assert (
+        scalar(standardized, "SELECT count(*) FROM lake.main.runs WHERE mode='correction_pass'")
+        == 0
+    )
 
     model_version, tf_snapshot_id, settings = load_fixture_model(standardized)
     published = model_params_uri(cfg.storage.model_uri_prefix, model_version)
@@ -674,7 +675,71 @@ def test_no_splink_relations_in_lake(
         "SELECT count(*) FROM duckdb_tables() WHERE database_name = current_database() "
         "AND table_name LIKE '__splink__%'",
     )
+
     assert materialized == 0, "scoring must release its local scratch relations"
 
     assert leaked_splink_relations(standardized) == ()
+
+
+def test_correction_reuses_frozen_target_after_contradiction_and_resumes_all_records(
+    standardized: duckdb.DuckDBPyConnection,
+    cfg: Config,
+    object_store: ObjectStore,
+) -> None:
+    """Real CLI recovery across a committed match and a rejected reconcile."""
+    c = standardized
+    model, old_tf, settings = load_fixture_model(c)
+    published = model_params_uri(cfg.storage.model_uri_prefix, model)
+    object_store.put_bytes(published, json.dumps(settings).encode())
+    c.execute(
+        f"UPDATE {MODEL_REGISTRY} SET params_path=? WHERE model_version=?", [published, model]
+    )
+    keys = [
+        row[0]
+        for row in c.execute(
+            "SELECT record_key FROM lake.main.int_std_records ORDER BY record_key LIMIT 3"
+        ).fetchall()
+    ]
+    assertions = [str(ULID()) for _ in range(3)]
+    for identity, a, b, kind in zip(
+        assertions,
+        [keys[0], keys[1], keys[0]],
+        [keys[1], keys[2], keys[2]],
+        ["always", "always", "never"],
+        strict=True,
+    ):
+        c.execute(
+            "INSERT INTO lake.main.assertions "
+            "(assertion_id,rec_a_key,rec_b_key,kind,active,created_by,created_at) "
+            "VALUES (?,?,?,?,true,'test',current_timestamp)",
+            [identity, a, b, kind],
+        )
+    run = str(ULID())
+    failed = run_er("correct", "--run-id", run)
+    assert failed.returncode == 1, failed.stdout + failed.stderr
+    target = scalar(c, f"SELECT tf_snapshot_id FROM {MODEL_REGISTRY} WHERE status='active'")
+    assert target != old_tf
+    frozen = c.execute(
+        "SELECT * FROM lake.main.tf_lookup WHERE tf_snapshot_id=? ORDER BY ALL", [target]
+    ).fetchall()
+    blocked = run_er("match", "--mode", "incremental")
+    assert blocked.returncode == 3 and "ERR_CORRECTION_INCOMPLETE" in blocked.stderr
+    for identity in assertions:
+        removed = run_er("assert", "remove", "--assertion-id", identity, "--by", "test")
+        assert removed.returncode == 0, removed.stdout + removed.stderr
+    resumed = run_er("correct", "--resume", run)
+    assert resumed.returncode == 0, resumed.stdout + resumed.stderr
+    assert (
+        c.execute(
+            "SELECT * FROM lake.main.tf_lookup WHERE tf_snapshot_id=? ORDER BY ALL", [target]
+        ).fetchall()
+        == frozen
+    )
+    assert scalar(c, "SELECT count(*) FROM lake.main.entity_membership") == scalar(
+        c, "SELECT count(*) FROM lake.main.int_std_records"
+    )
+    assert scalar(c, "SELECT status FROM lake.main.runs WHERE run_id=?", run) == "succeeded"
+    assert scalar(c, f"SELECT count(*) FROM {RUN_STAGES} WHERE run_id=?", run) == 3
+    assert scalar(c, f"SELECT model_version FROM {MODEL_REGISTRY} WHERE status='active'") == model
+    assert run_er("correct", "--resume", run).returncode == 3
     assert_no_splink_relations_in_lake(standardized)

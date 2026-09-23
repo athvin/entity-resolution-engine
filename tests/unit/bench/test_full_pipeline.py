@@ -18,7 +18,11 @@ profile = importlib.import_module("profile_pipeline")
 def test_experimental_ten_million_scale_keeps_local_envelope() -> None:
     preset = benchmark.get_scale("10m")
     local = benchmark.local_scale(preset, cpus=8, memory=int(11.65 * benchmark.GIB))
-    assert (local.records, local.personas, local.incremental_batch) == (10_000_000, 4_000_000, 0)
+    assert (local.records, local.personas, local.incremental_batch) == (
+        10_000_000,
+        4_000_000,
+        100_000,
+    )
     assert (local.cpu_limit, local.mem_limit, local.duckdb_memory_limit) == (2, "10g", "4GB")
     assert "10m" not in benchmark.load_scales()
 
@@ -143,6 +147,40 @@ def test_initial_load_accounting_includes_training_and_all_ingests_but_excludes_
     assert result["setup_command_seconds"] == 10
     assert result["resources"]["cpu_s"] == 4
     assert result["resources"]["sampled_memory_peak_bytes"] == 100
+
+
+def test_correction_accounting_cannot_contaminate_initial_quality_or_time(tmp_path: Path) -> None:
+    path = measured_run(tmp_path / "run")
+    run = json.loads(path.read_text())
+    run["quality"] = {"before": True}
+    run["correction_quality"] = {"after": True}
+    for command in run["commands"]:
+        if command["command"][1] == "match":
+            command["stages"] = [
+                {"stage": "match", "model_version": "model", "tf_snapshot_id": "original"}
+            ]
+    with (path.parent / "resources.jsonl").open("a") as samples:
+        samples.write("\n" + json.dumps({"monotonic_ns": 201, "memory.current": 200}))
+    run["commands"].append(
+        {
+            "command": ["er", "correct"],
+            "phase": "correction",
+            "duration_ms": 20_000,
+            "started_ns": 200,
+            "ended_ns": 205,
+            "exit_code": 0,
+            "cpu": {"usage_usec": 1_000_000, "throttled_usec": 0},
+            "stages": [{"stage": "match", "model_version": "model", "tf_snapshot_id": "refreshed"}],
+        }
+    )
+    path.write_text(json.dumps(run))
+    result = benchmark.summarize_run(path)
+    assert result["processing_seconds"] == 8
+    assert result["correction_seconds"] == 20
+    assert result["quality"] == {"before": True}
+    assert result["correction_quality"] == {"after": True}
+    assert result["scoring_generations"]["base"][0]["tf_snapshot_id"] == "original"
+    assert result["scoring_generations"]["correction"][0]["tf_snapshot_id"] == "refreshed"
 
 
 @pytest.mark.parametrize("defect", ["missing_assembly", "skipped_assembly"])

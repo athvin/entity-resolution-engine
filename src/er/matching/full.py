@@ -1,58 +1,9 @@
-"""`er match --mode full`: one corpus-wide predict, one write (S4.3.4, S4.3.5, S4.0b).
+"""Full scoring with frozen parameters/TF and config-generated prediction rules.
 
-S4.3.4 gives full-mode scoring in one sentence — "`--mode full` is one corpus-wide
-`linker.inference.predict(threshold_match_probability=review_low)`" — and then spends
-the rest of the section on what happens to the result. This module is that sentence
-plus that rest, and four of its decisions are the ones a re-implementation gets wrong:
-
-* **One write statement, and it is a `MERGE INTO`.** S4.0b permits exactly one write
-  to the lake per scoring stage ("only final scored pairs are written to
-  `lake.main.match_scores`, in a single write statement"), and S4.3.4 makes it a
-  `MERGE INTO` on `(rec_a_key, rec_b_key, model_version, tf_snapshot_id)`. The two are
-  one requirement: every intermediate Splink materializes lives in the in-memory
-  database. Predictions, selected row IDs and endpoint hashes are staged locally
-  before the lake sees a single statement. `match_scores` is cumulative and is
-  **never** truncated — nothing here deletes from it — and invalidation (S4.5.5) is an
-  in-place `UPDATE`, so the relation holds at most one row per logical key regardless
-  of `is_active`.
-
-* **Nothing below `review_low` is persisted.** The threshold is passed to Splink
-  explicitly, in the units Splink's `predict()` takes (probability). Leaving it out
-  would fall back to a default match weight of ``-4`` — a probability near ``0.06`` —
-  and write pairs S4.3.4 says are never written (:mod:`er.matching.thresholds`).
-
-* **The gray band is decided in Python, not in SQL.** `review_low <= p < auto_merge`
-  is half-open and is defined in exactly one place (:func:`~er.matching.thresholds.in_gray_band`).
-  Writing the same inequality into a `WHERE` clause here would be a second definition,
-  and the failure of a second definition is silent: a pair at exactly `auto_merge`
-  queued for review is a steward being asked about an edge that has already been
-  merged. So this stage reads back the rows it wrote and classifies them through the
-  one predicate.
-
-* **Term frequency is registered, never computed.** D4/S4.3.3: the frozen `tf_lookup`
-  rows of `(model_version, tf_snapshot_id)` are registered on the linker before it
-  scores, so `match_probability` is a pure function of the INV-SCORE key. Both
-  endpoint content hashes are written onto the row, which is what makes that claim
-  checkable after the fact rather than merely asserted.
-
-**The write is published, because there are two scoring paths and one write.** S4.0b's
-"a single write statement" and S4.3.4's `MERGE INTO` are properties of `match_scores`,
-not of full mode: the S4.3.4 two-pass incremental scorer (:mod:`er.matching.incremental`)
-persists the same relation on the same logical key. So :func:`merge_match_scores` — the
-merge, its canonicalising source and the read-back that re-checks the ordering through
-the S5.0 helper — is a function both paths call rather than a private helper one path
-owns and the other reimplements. A second copy would be a second place for the four
-things S4.3.4 requires of the source (self-pairs dropped, canonicalised, made distinct,
-both endpoint hashes joined on) to be got subtly differently.
-
-**The one thing this stage changes about the frozen model.** The settings document is
-loaded from `model_registry` and used verbatim except for
-``retain_intermediate_calculation_columns``, which is forced on. That flag decides
-which columns `predict()` *emits*, not what it computes: with it off, Splink projects
-away the `gamma_*` vector's log2 weights, and S4.3.5 requires them to be "retained
-rather than projected away". No m or u value, no blocking rule and no comparison level
-is touched, so no probability moves — and the alternative would be a model artifact
-that cannot produce the evidence the spec requires of every scored pair.
+Predictions and evidence remain SQL relations. One MERGE writes the final scores;
+full mode retires absent active pairs in the same transaction. A correction also
+activates its journaled TF snapshot in that transaction. Historical rows remain
+queryable, and review evidence is classified in DuckDB after score publication.
 """
 
 from __future__ import annotations
@@ -76,15 +27,17 @@ from er.errors import ExitCode, StageFailure
 from er.lake.bulk import BATCH_ROWS
 from er.lake.columns import STD_RECORD_COLUMNS
 from er.lake.model import REGISTRY, SCHEMA_QUALIFIER
+from er.lake.transaction import transaction
 from er.matching.api import assert_no_splink_relations_in_lake, cleanup_splink, splink_api
 from er.matching.evidence import build_evidence
-from er.matching.model import UNIQUE_ID_COLUMN
+from er.matching.model import UNIQUE_ID_COLUMN, scoring_settings
 from er.matching.runtime import MatchingRuntime
 from er.matching.tf import (
     STD_RECORDS_RELATION,
     assert_tf_lookup_complete,
     register_tf,
     tf_columns,
+    tf_tables_path,
 )
 from er.matching.thresholds import in_gray_band, is_auto_merge
 from er.obs.profiling import profiled
@@ -434,15 +387,6 @@ def prediction_columns(connection: duckdb.DuckDBPyConnection, relation: str) -> 
     return tuple(str(row[0]) for row in rows)
 
 
-def _scoring_settings(settings: Mapping[str, Any]) -> dict[str, Any]:
-    """The frozen settings with the evidence columns retained (S4.3.5).
-
-    A copy, so the caller's document — which is the artifact `model_registry` points
-    at — is not mutated by having been scored with.
-    """
-    return {**settings, RETAIN_INTERMEDIATE_KEY: True}
-
-
 def _stamp(moment: datetime | None) -> datetime:
     """``moment`` as the naive UTC value S5's `TIMESTAMP` columns hold."""
     stamped = datetime.now(UTC) if moment is None else moment
@@ -665,22 +609,26 @@ def merge_match_scores(
     tf_snapshot_id: str,
     run_id: str,
     scored_at: datetime | None = None,
+    replace_active: bool = False,
+    activate_tf: bool = False,
 ) -> Iterator[ScoredPair]:
     """THE `match_scores` write, and the rows it left behind (S4.3.4, S4.0b, S5.0).
 
-    One statement reaches the lake — the `MERGE INTO` of :func:`_merge_sql`, over a
+    The `MERGE INTO` of :func:`_merge_sql` reaches the lake over a
     source that drops self-pairs, canonicalises to `rec_a_key < rec_b_key`, makes the
     result distinct on the pair and joins both endpoints' `content_hash` on. Nothing is
     deleted and nothing is truncated: `match_scores` is cumulative, so a key already
-    scored is rewritten in place and a key that is not is inserted.
+    scored is rewritten in place and a key that is not is inserted. Full replacement
+    retires absent active pairs in the same transaction; correction also activates
+    the journaled TF snapshot there. Historical score rows remain available.
 
     The returned iterator is a compatibility read-back for collection callers.
     Production classifies the written relation with :func:`review_score_relation`,
     leaving probabilities and evidence inside DuckDB.
 
     Both S4.3.4 scoring paths call this: full mode hands it one corpus-wide prediction,
-    and the two-pass incremental scorer hands it the union of its two passes. Which is
-    the point — one write statement and one canonicalisation site.
+    and the two-pass incremental scorer hands it the union of its two passes. Both
+    use the same canonicalisation and score MERGE.
 
     Args:
         connection: an open S4.0b connection with the lake attached by alias.
@@ -688,7 +636,7 @@ def merge_match_scores(
             `record_key_r`, `match_probability` and whatever ``evidence_expression``
             names. It lives in the in-memory database — a Splink prediction, or a local
             relation built from several — so the merge's source is a join across the
-            two catalogs and the lake still sees a single statement.
+            two catalogs without transferring row payloads to Python.
         evidence_expression: the SQL producing each row's `evidence JSON`, from
             :func:`~er.matching.evidence.build_evidence` over
             :func:`prediction_columns` of that same relation. A caller whose relation
@@ -698,6 +646,8 @@ def merge_match_scores(
         run_id: this stage's run, written onto every row the merge touched — which is
             what makes the read-back exactly the set this call scored.
         scored_at: the stamp every row carries; now, in UTC, when omitted.
+        replace_active: retire active pairs absent from this complete prediction.
+        activate_tf: activate the snapshot atomically with complete replacement.
 
     Returns:
         A bounded iterator over every pair this run scored, in canonical pair
@@ -723,7 +673,31 @@ def merge_match_scores(
                 _source_sql(staged, selected),
                 [model_version, tf_snapshot_id, run_id, _stamp(scored_at)],
             ) as source:
-                connection.execute(_merge_sql(source))
+                if replace_active:
+                    with transaction(connection):
+                        connection.execute(_merge_sql(source))
+                        connection.execute(
+                            f"UPDATE {_MATCH_SCORES} AS target SET is_active=false, "
+                            "invalidated_at=?, invalidated_run_id=? WHERE target.is_active "
+                            f"AND NOT EXISTS (SELECT 1 FROM {source} s WHERE "
+                            "s.model_version=target.model_version AND "
+                            "s.tf_snapshot_id=target.tf_snapshot_id AND "
+                            "s.rec_a_key=target.rec_a_key AND s.rec_b_key=target.rec_b_key)",
+                            [_stamp(scored_at), run_id],
+                        )
+                        if activate_tf:
+                            connection.execute(
+                                f"UPDATE {SCHEMA_QUALIFIER}.model_registry SET "
+                                "tf_snapshot_id=?, tf_tables_path=? "
+                                "WHERE model_version=? AND status='active'",
+                                [
+                                    tf_snapshot_id,
+                                    tf_tables_path(model_version, tf_snapshot_id),
+                                    model_version,
+                                ],
+                            )
+                else:
+                    connection.execute(_merge_sql(source))
     return _scored_rows(
         connection,
         model_version=model_version,
@@ -743,8 +717,9 @@ def score_full(
     settings: Mapping[str, Any],
     scored_at: datetime | None = None,
     id_factory: IdFactory | None = None,
+    activate_tf: bool = False,
 ) -> FullMatchResult:
-    """Score the whole corpus at one model and persist it in one statement (S4.3.4).
+    """Score the whole corpus and atomically replace its active scores (S4.3.4).
 
     The order below is the section's, and every step of it is a decision:
 
@@ -808,7 +783,9 @@ def score_full(
     api = splink_api(connection)
     try:
         rows_in = _materialize_corpus(connection)
-        linker = Linker(api.register(MATCH_CORPUS_RELATION), settings=_scoring_settings(settings))
+        linker = Linker(
+            api.register(MATCH_CORPUS_RELATION), settings=scoring_settings(cfg, settings)
+        )
         register_tf(linker, connection, cfg, model_version, tf_snapshot_id)
         # Explicit probability threshold: never depend on a library default.
         runtime = MatchingRuntime.from_env()
@@ -828,6 +805,8 @@ def score_full(
             tf_snapshot_id=tf_snapshot_id,
             run_id=run_ctx.run_id,
             scored_at=scored_at,
+            replace_active=True,
+            activate_tf=activate_tf,
         )
         summary = review_score_relation(
             connection,

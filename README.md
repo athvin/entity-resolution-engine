@@ -37,6 +37,22 @@ run. To keep a development lake and inspect its golden records, follow the
 Training is explicit: `er run-all` runs ingest → standardize → match → reconcile →
 assemble using an existing model. It does not train a model automatically.
 
+## Performance benchmark
+
+**One million records is the standard performance workload.** Run the complete
+initial load, including training and golden-record assembly, with:
+
+```sh
+make benchmark
+```
+
+This uses `configs/default.yaml`, the baseline generator profile and seed 42.
+It reports total processing time, each stage's duration, CPU/memory use, and match
+quality. `make benchmark BENCHMARK_REPEAT=3` repeats the load for a median;
+`make benchmark-workloads` also measures a 10,000-record incremental delivery and
+a correction separately. Resource limits fit the local Docker host and are
+recorded with the results; see the [performance guide](docs/performance.md).
+
 ## Documentation
 
 | Guide | Use it for |
@@ -50,10 +66,11 @@ assemble using an existing model. It does not train a model automatically.
 | [Contributing](CONTRIBUTING.md) | Local setup, tests and CI |
 | [Technical specification](DesignDoc.md) | Numbered schemas, algorithms and invariants referenced by tests |
 
-The measured 100k initial load took **84.80 seconds** after the reconciliation
-optimization, down from 273.06 seconds in five matched runs per version. See the
-[workload and measurement limits](docs/performance.md#measured-results) before
-using these numbers for capacity planning.
+In a [single 1M hard-profile comparison](docs/performance-training-full-load.md),
+the experimental 1M EM pair target reduced training from **10.53s to 7.43s** and
+the complete initial load from **97.13s to 91.82s**, with no quality regression on
+that corpus. The reference configuration retains uncapped EM; these measurements
+are specific to the recorded corpus and resource limits.
 
 ## Repository
 

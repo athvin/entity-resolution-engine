@@ -133,6 +133,25 @@ standardized corpus. It does not ingest or standardize new data. Invoke it from
 your scheduler at the configured `correction_pass.cadence`; the CLI itself does
 not run a scheduler.
 
+Correction freezes one new TF snapshot without retraining and atomically activates
+it with full score replacement. Scores absent from the replacement are retired;
+reconciliation covers all records, including old-old score changes.
+
+After a failed correction, use its run ID:
+
+```sh
+erdev correct --resume RUN_ID
+```
+
+Resume preserves the frozen snapshot and restarts the first unfinished or missing
+stage. A pending correction blocks other pipeline mutations. Assertion edits and
+review resolution remain available under the tenant lock until reconciliation
+succeeds; resolve a reported contradiction before resuming. After reconciliation,
+finish the correction before editing assertions. Maintenance remains available.
+A completed correction cannot be
+resumed. Standardize changed inputs or blocking configuration before starting a
+new correction.
+
 ## Migrating an existing lake to Splink 5
 
 This release pins `splink==5.0.0.dev5`, a prerelease. Keep the previous image and

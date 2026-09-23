@@ -69,6 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_CONFIG_PATH,
         help="the S6 document supplying generator.seed and sources.<name>.columns",
     )
+    parser.add_argument("--profile", choices=("baseline", "hard-v1"), default="baseline")
     return parser
 
 
@@ -91,6 +92,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         records=args.records,
         batch=args.batch,
         household_rate=DEFAULT_HOUSEHOLD_RATE,
+        profile=args.profile,
     )
     personas = generate_personas(spec.seed, spec.personas, spec.household_rate)
     for path in emit_corpus(spec, personas, args.out, config=config):

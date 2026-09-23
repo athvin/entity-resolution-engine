@@ -17,7 +17,7 @@ mean the CLI still uses them.
 | Score classification | Fetch every score, compare thresholds, decode review evidence | `matching/full.py:review_score_relation` aggregates counters and selects gray-band subjects in SQL |
 | Review queue persistence | Fetch existing subjects and group their state in Python | `review/queue.py:upsert_subject_relation` joins existing state; settled subjects are skipped and open subjects refresh only their last-seen run |
 | Scoring-generation guard | Fetch every current edge before counting generations | `entities/guards.py:assert_scoring_generation` returns only grouped generation counts |
-| Affected-set discovery | Load score tuples, seed sets and membership dictionaries | `entities/relational_stage.py` materializes seed unions, assertion overrides, one-hop partners and whole-entity membership joins |
+| Affected-set discovery | Load score tuples, seed sets and membership dictionaries | `entities/relational_stage.py` materializes seed unions, assertion overrides, threshold neighbours and whole-entity membership joins, iterated to closure when cuts can change |
 | Clustering input and output | Upload edge/node collections and fetch labels | `label_propagate_relations` consumes and returns local relations |
 | Entity lifecycle mapping | Build overlap sets, offers, acceptances, assignments and transitions | `entities/relational.py` computes overlap aggregates, rankings and changes in SQL, for both initial and subsequent runs |
 | Tombstone membership removal | Fetch absent keys, build sets, upload delete keys | A departed-record relation feeds the membership delete and removal-event grouping |
@@ -196,3 +196,18 @@ Use `benchmarks/data_flows.py` to compare the retained reference paths with SQL 
 identical input sizes, thread counts and memory limits. SQL avoids corpus-sized
 Python collections, but total process RSS is not guaranteed to decrease: DuckDB
 buffers, intermediate relations and parallel file readers also consume memory.
+
+## Benchmark-only dense inference
+
+`benchmarks/vector_runtime.py` reads distinct text inputs in batches of 64, uses
+the baked tokenizer and CPU ONNX Runtime, then uploads band keys. Text deduplication,
+record joins, composite keys, stoplist application and candidate evaluation remain
+in DuckDB. This exception belongs to the optional benchmark image; no production
+stage imports it. Model/runtime versions and hashes are checked before inference,
+and runtime downloads are prohibited.
+
+Memory includes ONNX and NumPy allocations outside DuckDB's memory limit. Batch
+size bounds inference inputs; model weights and output width add a fixed footprint.
+If measurements justify production inference, a separately reviewed exception and
+cache contract are required. Revisit moving inference into DuckDB, potentially via
+a Rust extension, only after profiling identifies it as a material hot path.

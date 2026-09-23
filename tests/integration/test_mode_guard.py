@@ -240,7 +240,7 @@ def test_allow_escalate_promotes_to_full_mode(
     assert executed == {
         "standardize": (),
         "match": ("--mode", MODE_FULL),
-        "reconcile": (),
+        "reconcile": ("--full",),
         "assemble": (),
     }
     # Not vacuous: the mode the operator typed would have run a different chain.

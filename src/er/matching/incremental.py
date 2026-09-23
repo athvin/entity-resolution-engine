@@ -27,13 +27,17 @@ from er.matching.api import assert_no_splink_relations_in_lake, cleanup_splink, 
 from er.matching.evidence import build_evidence
 from er.matching.full import (
     MATCH_SCORES_RELATION,
-    RETAIN_INTERMEDIATE_KEY,
     ScoreSummary,
     merge_match_scores,
     prediction_columns,
     review_score_relation,
 )
-from er.matching.model import LINK_TYPE, UNIQUE_ID_COLUMN, blocking_rules_from_config
+from er.matching.model import (
+    LINK_TYPE,
+    UNIQUE_ID_COLUMN,
+    blocking_rules_from_config,
+    scoring_settings,
+)
 from er.matching.runtime import MatchingRuntime
 from er.matching.tf import (
     STD_RECORDS_RELATION,
@@ -231,19 +235,6 @@ def _materialize_batch(connection: duckdb.DuckDBPyConnection, keys: Sequence[str
     return _count(connection, PRIOR_CORPUS_RELATION)
 
 
-def _pass_settings(settings: Mapping[str, Any], **overrides: Any) -> dict[str, Any]:
-    """The frozen settings with the evidence columns retained, plus ``overrides``.
-
-    A copy, so the caller's document — the artifact `model_registry` points at — is not
-    mutated by having been scored with. `retain_intermediate_calculation_columns` is
-    forced on for both passes for the reason `er.matching.full`'s module docstring
-    gives: the flag decides which columns the prediction *emits*, not what it computes,
-    and S4.3.5 requires the `gamma_*` vector and the per-comparison log2 weights to be
-    retained rather than projected away.
-    """
-    return {**settings, RETAIN_INTERMEDIATE_KEY: True, **overrides}
-
-
 def _pair_select(connection: duckdb.DuckDBPyConnection, cfg: Config, relation: str) -> str:
     """One pass's prediction, projected onto the four columns the union carries.
 
@@ -303,7 +294,7 @@ def pass1_new_vs_corpus(
     if _count(connection, PRIOR_CORPUS_RELATION) == 0:
         return None
     _, generated = blocking_rules_from_config(cfg)
-    linker = Linker(api.register(PRIOR_CORPUS_RELATION), settings=_pass_settings(settings))
+    linker = Linker(api.register(PRIOR_CORPUS_RELATION), settings=scoring_settings(cfg, settings))
     register_tf(linker, connection, cfg, model_version, tf_snapshot_id)
     predictions = linker.inference.predict_between(
         api.register(PRIOR_CORPUS_RELATION),
@@ -360,7 +351,7 @@ def pass2_new_vs_new(
         return None
     linker = Linker(
         api.register(BATCH_RELATION),
-        settings=_pass_settings(settings, **{LINK_TYPE_KEY: LINK_TYPE}),
+        settings=scoring_settings(cfg, settings, **{LINK_TYPE_KEY: LINK_TYPE}),
     )
     register_tf(linker, connection, cfg, model_version, tf_snapshot_id)
     predictions = linker.inference.predict_within(

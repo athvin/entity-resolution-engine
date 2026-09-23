@@ -516,9 +516,8 @@ _DDL_SPECS: Final[tuple[TableSpec, ...]] = (
             Column("released_run_id", VARCHAR),
             Column("released_at", TIMESTAMP),
         ),
-        # Active cuts are excluded from the clustering edge set on every later run;
-        # without that, every cut is re-merged next run and `never` becomes a no-op
-        # with a one-run half-life (S4.4.2, D5).
+        # Active rows describe cuts derived for the current graph. Reconcile
+        # releases obsolete rows before inserting replacements; history is retained.
         keys=(
             LogicalKey(("cut_id",)),
             LogicalKey(("rec_a_key", "rec_b_key"), where="active"),

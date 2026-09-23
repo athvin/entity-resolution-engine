@@ -2,25 +2,33 @@
 
 See the [Splink 5 pipeline measurements](performance-splink5.md) for the latest
 standardization, matching and golden-record changes, quality gates and migration
-benchmark procedure. Historical comparisons below retain their original revisions.
+benchmark procedure. The [performance experiment guide](performance-experiments.md)
+covers separate initial/incremental/correction workloads, held-out quality gates,
+EM caps, the hard generator and optional LSH/ONNX comparisons. Historical
+comparisons below retain their original revisions.
 
 ## Million-record full pipeline benchmark
 
+**One million records is the standard workload for performance comparisons.**
 Run one initial load of **1,000,000 synthetic source records representing 400,000
-people**, spread across CRM, billing and webforms (seed 42):
+people**, spread across CRM, billing and webforms, using `configs/default.yaml`,
+the baseline generator profile and seed 42:
 
 ```sh
-make benchmark-1m
+make benchmark
 ```
 
 The command builds the current checkout, starts a fresh disposable lake, and times
 ingestion → cleaning/standardization → model training → matching → reconciliation
 → golden record assembly. Training is included in the first-load total. Generation,
 image/stack setup, validation and teardown are outside that processing time. There
-is no incremental delivery, and detailed SQL profiling is disabled. The existing
-CI benchmark still measures its separate six-phase workload including incrementals.
+is no incremental delivery, and detailed SQL profiling is disabled.
+`make benchmark-1m` is an alias for the same workload. Use
+`make benchmark-workloads` to follow the 1M initial load with a separately timed
+10,000-record delivery and a correction that reuse the model. The weekly CI smoke
+job checks the harness at a small scale; it is not the training-performance baseline.
 
-`make benchmark-1m` uses **local mode**, which fits the resource limits to the current
+`make benchmark` uses **local mode**, which fits the resource limits to the current
 Docker host without reducing the million-record input. It leaves two CPUs and at
 least 1 GiB of Docker memory outside the pipeline limit, assigns at most two thirds
 of container memory (capped at 4 GB) to DuckDB, and limits workers to one per 2 GiB
@@ -41,7 +49,7 @@ million-record passes for a median and variation:
 ```sh
 uv run python benchmarks/full_pipeline.py --scale 1m --local --check-only
 uv run python benchmarks/full_pipeline.py --scale smoke --local
-uv run python benchmarks/full_pipeline.py --scale 1m --local --repeat 3
+make benchmark BENCHMARK_REPEAT=3
 ```
 
 Run from a checkout on the Docker host (Docker Desktop bind mounts also work).
@@ -81,8 +89,13 @@ cluster quality metrics, outside the processing timer. CPU and memory cover the
 pipeline container and its descendants; the database and object store are separate
 services. Memory includes page cache and is sampled every 250 ms.
 
-This is a capacity measurement, separate from CI regression baselines. Running it
-does not enable scheduled million-record jobs or promote a baseline.
+This is the standard local performance measurement, separate from CI regression
+baselines. Running it does not enable scheduled million-record jobs or promote a
+baseline for a different environment. Keep training time and complete initial-load
+time visible in every comparison; report incremental and correction time separately.
+The [latest full-load confirmation](performance-training-full-load.md) records the
+experimental EM-cap comparison on the hard profile. Its timings are not directly
+comparable to the baseline profile or a different seed/resource envelope.
 
 ### SQL pushdown: full million-record comparison, 2026-09-22
 

@@ -16,7 +16,29 @@ from er.eval.metrics import pairwise_metrics_from_counts
 from er.lake.bulk import staged_rows
 
 
-def candidate_pair_count(connection: Any, *, partitions: int = 64) -> int:
+def block_statistics(connection: Any) -> list[dict[str, Any]]:
+    """Measure skew without exporting key values or enumerating candidate pairs."""
+    rows = connection.execute(
+        "SELECT key_type, sum(n), count(*), max(n), quantile_disc(n, .99), "
+        "sum(n::HUGEINT * (n - 1) // 2) FROM (SELECT key_type, key_value, "
+        "count(DISTINCT record_key) n FROM lake.main.int_blocking_keys "
+        "WHERE key_value IS NOT NULL AND key_value <> '' GROUP BY key_type, key_value) "
+        "GROUP BY key_type ORDER BY key_type"
+    ).fetchall()
+    names = (
+        "key_type",
+        "key_rows",
+        "buckets",
+        "largest_bucket",
+        "p99_bucket",
+        "raw_pair_occurrences",
+    )
+    return [dict(zip(names, row, strict=True)) for row in rows]
+
+
+def candidate_pair_count(
+    connection: Any, *, partitions: int = 64, keys_relation: str = "lake.main.int_blocking_keys"
+) -> int:
     """Count each canonical pair once without one corpus-wide DISTINCT state.
 
     Numeric ranks preserve equality and record ordering. Partitioning by the
@@ -34,7 +56,7 @@ def candidate_pair_count(connection: Any, *, partitions: int = 64) -> int:
             f"INSERT INTO {keys} SELECT record_id, key_id, record_id % ? AS partition FROM ("
             "SELECT dense_rank() OVER (ORDER BY record_key) AS record_id, "
             "dense_rank() OVER (ORDER BY key_type, key_value) AS key_id "
-            "FROM lake.main.int_blocking_keys WHERE record_key IS NOT NULL "
+            f"FROM {keys_relation} WHERE record_key IS NOT NULL "
             "AND key_type IS NOT NULL AND key_value IS NOT NULL) ORDER BY partition",
             [partitions],
         )
@@ -134,6 +156,9 @@ def quality_from_csv(
     *,
     blocked_count: int,
     include_batch: bool = True,
+    keys_relation: str = "lake.main.int_blocking_keys",
+    membership_relation: str = "lake.main.entity_membership",
+    scores_relation: str = "lake.main.match_scores",
 ) -> dict[str, Any]:
     """Count the three quality families over a fully labelled generated corpus.
 
@@ -167,10 +192,9 @@ def quality_from_csv(
         ).fetchone()
         if invalid is not None:
             raise ValueError(f"invalid or duplicate truth record: {invalid[0]!r}")
-        for table in ("int_std_records", "int_blocking_keys", "entity_membership"):
+        for table in ("lake.main.int_std_records", keys_relation, membership_relation):
             stray = connection.execute(
-                f"SELECT s.record_key FROM lake.main.{table} s "
-                f"ANTI JOIN {truth} t USING (record_key) LIMIT 1"
+                f"SELECT s.record_key FROM {table} s ANTI JOIN {truth} t USING (record_key) LIMIT 1"
             ).fetchone()
             if stray is not None:
                 raise ValueError(f"{table} record {stray[0]!r} is outside the labelled corpus")
@@ -186,7 +210,7 @@ def quality_from_csv(
             connection.execute(
                 f"INSERT INTO {keys} SELECT record_key, "
                 "dense_rank() OVER (ORDER BY key_type, key_value) "
-                "FROM lake.main.int_blocking_keys WHERE record_key IS NOT NULL "
+                f"FROM {keys_relation} WHERE record_key IS NOT NULL "
                 "AND key_type IS NOT NULL AND key_value IS NOT NULL"
             )
             blocked_true, _ = _blocked_subset_counts(
@@ -199,7 +223,7 @@ def quality_from_csv(
                 connection,
                 keys,
                 "WITH p AS (SELECT DISTINCT least(rec_a_key, rec_b_key) rec_a_key, "
-                "greatest(rec_a_key, rec_b_key) rec_b_key FROM lake.main.match_scores "
+                f"greatest(rec_a_key, rec_b_key) rec_b_key FROM {scores_relation} "
                 "WHERE is_active AND match_probability >= ?) "
                 "SELECT p.rec_a_key, p.rec_b_key, a.persona_id=b.persona_id "
                 f"FROM p JOIN {truth} a ON p.rec_a_key=a.record_key "
@@ -207,11 +231,10 @@ def quality_from_csv(
                 [auto_merge],
             )
         cluster_total = closure(
-            "SELECT count(DISTINCT record_key) n FROM lake.main.entity_membership "
-            "GROUP BY entity_id"
+            f"SELECT count(DISTINCT record_key) n FROM {membership_relation} GROUP BY entity_id"
         )
         cluster_true = closure(
-            "SELECT count(DISTINCT m.record_key) n FROM lake.main.entity_membership m "
+            f"SELECT count(DISTINCT m.record_key) n FROM {membership_relation} m "
             f"JOIN {truth} t USING (record_key) GROUP BY m.entity_id, t.persona_id"
         )
         blocking = pairwise_metrics_from_counts(

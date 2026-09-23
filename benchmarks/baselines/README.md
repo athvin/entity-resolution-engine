@@ -2,6 +2,9 @@
 
 No measured CI baseline is currently committed. The smoke workflow runs and reports
 `NO_BASELINE` until a comparable measurement is reviewed and written here.
+The standard local performance workload is `make benchmark`: a complete 1M load
+including training. Its measured reports live under `docs/measurements/`; they do
+not stand in for a CI baseline on a different resource envelope.
 
 The former `smoke.json` was synthetic unit-test data. Its fixture remains at
 `tests/unit/bench/data/smoke_baseline.json`; it is not a performance measurement.

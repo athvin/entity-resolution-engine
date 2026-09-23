@@ -25,6 +25,90 @@ THRESHOLDS = Thresholds(review_low=0.5, auto_merge=0.9)
 EVIDENCE = {"gamma_email": 2, "bf_email": 41.7, "label": "O'Neil 雪"}
 
 
+@pytest.mark.parametrize("snapshot", ["tf1", "tf2"])
+def test_full_replacement_retires_absent_pairs_and_preserves_history(snapshot: str) -> None:
+    with duckdb.connect() as c:
+        c.execute("ATTACH ':memory:' AS lake")
+        c.execute(create_table_sql(REGISTRY["match_scores"]))
+        c.execute(
+            "CREATE TABLE lake.main.int_std_records AS SELECT "
+            "'crm:' || i record_key, 'h' content_hash FROM range(3) t(i)"
+        )
+        c.execute(
+            "CREATE TABLE predictions AS SELECT 'crm:0' record_key_l, "
+            "'crm:1' record_key_r, .98::DOUBLE match_probability, '{}'::JSON evidence"
+        )
+        merge_match_scores(
+            c,
+            "predictions",
+            "evidence",
+            model_version="v1",
+            tf_snapshot_id="tf1",
+            run_id="base",
+            replace_active=True,
+        )
+        c.execute("UPDATE predictions SET record_key_r='crm:2'")
+        merge_match_scores(
+            c,
+            "predictions",
+            "evidence",
+            model_version="v1",
+            tf_snapshot_id=snapshot,
+            run_id="next",
+            replace_active=True,
+        )
+        assert c.execute(
+            "SELECT rec_b_key, is_active FROM lake.main.match_scores ORDER BY rec_b_key"
+        ).fetchall() == [("crm:1", False), ("crm:2", True)]
+        c.execute("DELETE FROM predictions")
+        merge_match_scores(
+            c,
+            "predictions",
+            "evidence",
+            model_version="v1",
+            tf_snapshot_id=snapshot,
+            run_id="empty",
+            replace_active=True,
+        )
+        assert c.execute(
+            "SELECT count(*) FROM lake.main.match_scores WHERE is_active"
+        ).fetchone() == (0,)
+        assert c.execute("SELECT count(*) FROM lake.main.match_scores").fetchone() == (2,)
+
+
+def test_failed_snapshot_activation_rolls_back_score_replacement() -> None:
+    with duckdb.connect() as c:
+        c.execute("ATTACH ':memory:' AS lake")
+        c.execute(create_table_sql(REGISTRY["match_scores"]))
+        c.execute(
+            "CREATE TABLE lake.main.int_std_records AS SELECT "
+            "'crm:' || i record_key, 'h' content_hash FROM range(3) t(i)"
+        )
+        c.execute(
+            "CREATE TABLE predictions AS SELECT 'crm:0' record_key_l, "
+            "'crm:1' record_key_r, .98::DOUBLE match_probability, '{}'::JSON evidence"
+        )
+        merge_match_scores(
+            c, "predictions", "evidence", model_version="v1", tf_snapshot_id="old", run_id="base"
+        )
+        before = c.execute("SELECT * FROM lake.main.match_scores").fetchall()
+        c.execute("UPDATE predictions SET record_key_r='crm:2'")
+        # Activation fails after the replacement writes because the registry is
+        # unavailable. Neither the new rows nor retirements may survive that failure.
+        with pytest.raises(duckdb.CatalogException, match="model_registry"):
+            merge_match_scores(
+                c,
+                "predictions",
+                "evidence",
+                model_version="v1",
+                tf_snapshot_id="new",
+                run_id="correction",
+                replace_active=True,
+                activate_tf=True,
+            )
+        assert c.execute("SELECT * FROM lake.main.match_scores").fetchall() == before
+
+
 @pytest.mark.parametrize("native", [False, True])
 @pytest.mark.parametrize(
     "evidence",

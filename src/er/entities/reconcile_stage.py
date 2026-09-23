@@ -349,6 +349,7 @@ def run_reconcile_stage(
     id_factory: IdFactory | None = None,
     occurred_at: datetime | None = None,
     reason: str | None = None,
+    full: bool = False,
 ) -> ReconcileResult:
     """Run the S4.5 chain and commit its plan.
 
@@ -363,7 +364,7 @@ def run_reconcile_stage(
 
     Returns:
         The counters, with :attr:`ReconcileResult.exit_code` ``10`` for an empty
-        affected set and ``0`` otherwise.
+        affected set or an unchanged plan, and ``0`` otherwise.
 
     Raises:
         er.errors.StageFailure: CONTRADICTION-1 holds (exit ``1``, `error_class`
@@ -371,79 +372,98 @@ def run_reconcile_stage(
         er.entities.cluster.NonConvergenceError: label propagation exceeded
             `clustering.max_iterations` (exit ``1``), likewise before any write.
     """
-    started = time.monotonic()
-    factory: IdFactory = MonotonicUlidFactory() if id_factory is None else id_factory
-    assertions = active_assertions(connection)
+    from er.lake.transaction import transaction
 
-    # Before clustering and before any write (S4.4.1, M6). Deliberately ahead of the
-    # affected-set query too: an unsatisfiable assertion set is a property of the lake,
-    # so reporting "nothing to do" for it would hide the contradiction until a later
-    # batch happened to be non-empty.
-    if check_contradiction_1(assertions):
-        raise _contradiction_failure(assertions)
+    with transaction(connection):
+        # Standalone `match --mode full` followed by `reconcile` must have the
+        # same scope as run-all/correct, even when no record content changed.
+        if not full:
+            pending_full = connection.execute(
+                f"SELECT EXISTS (SELECT 1 FROM {SCHEMA_QUALIFIER}.run_stages m "
+                "WHERE m.stage='match' AND m.status='succeeded' "
+                "AND (m.counters->>'mode')='full' AND m.started_at > coalesce(("
+                f"SELECT max(r.started_at) FROM {SCHEMA_QUALIFIER}.run_stages r "
+                "WHERE r.stage='reconcile' AND r.status='succeeded'), TIMESTAMP 'epoch'))"
+            ).fetchone()
+            full = bool(pending_full and pending_full[0])
+        started = time.monotonic()
+        factory: IdFactory = MonotonicUlidFactory() if id_factory is None else id_factory
+        assertions = active_assertions(connection)
 
-    # The S4.3.2 activation guard, likewise before anything is written: a current
-    # edge set speaking two scoring generations above `review_low` is two
-    # probability scales against one threshold, and the refusal (exit 3,
-    # `precondition`) is what forces the full rescore first. Assertion edges can
-    # never appear here — S4.4 keeps them out of `match_scores` entirely.
-    assert_scoring_generation(
-        connection,
-        review_low=cfg.thresholds.review_low,
-    )
+        # Before clustering and before any write (S4.4.1, M6). Deliberately ahead of the
+        # affected-set query too: an unsatisfiable assertion set is a property of the lake,
+        # so reporting "nothing to do" for it would hide the contradiction until a later
+        # batch happened to be non-empty.
+        if check_contradiction_1(assertions):
+            raise _contradiction_failure(assertions)
 
-    if not assertions:
-        from er.entities.initial import prepare_initial_plan
-
-        with prepare_initial_plan(
+        # The S4.3.2 activation guard, likewise before anything is written: a current
+        # edge set speaking two scoring generations above `review_low` is two
+        # probability scales against one threshold, and the refusal (exit 3,
+        # `precondition`) is what forces the full rescore first. Assertion edges can
+        # never appear here — S4.4 keeps them out of `match_scores` entirely.
+        assert_scoring_generation(
             connection,
-            run_id=run_ctx.run_id,
+            review_low=cfg.thresholds.review_low,
+        )
+
+        if not assertions:
+            from er.entities.initial import prepare_initial_plan
+
+            with prepare_initial_plan(
+                connection,
+                run_id=run_ctx.run_id,
+                model_version=model_version,
+                tf_snapshot_id=tf_snapshot_id,
+                auto_merge=cfg.thresholds.auto_merge,
+                max_iterations=cfg.clustering.max_iterations,
+                ids=factory,
+                reason=reason,
+            ) as initial:
+                if initial is not None:
+                    stamp = (
+                        datetime.now(UTC).replace(tzinfo=None)
+                        if occurred_at is None
+                        else occurred_at
+                    )
+                    _merge_entity_relation(connection, initial.entities, stamp, run_ctx.run_id)
+                    _merge_membership_relation(
+                        connection, initial.membership, stamp, run_ctx.run_id
+                    )
+                    events_written = append_events(connection, initial.events, occurred_at=stamp)
+                    result = ReconcileResult(
+                        exit_code=int(ExitCode.SUCCESS),
+                        affected_entities=0,
+                        affected_edges=initial.edges,
+                        label_prop_iterations=initial.iterations,
+                        clusters_out=initial.clusters,
+                        entities_created=initial.clusters,
+                        entities_merged=0,
+                        entities_split=0,
+                        entities_retired=0,
+                        members_added=0,
+                        members_removed=0,
+                        events_emitted=events_written,
+                    )
+                    run_ctx.counters.set("rows_in", initial.records)
+                    run_ctx.counters.set("rows_out", initial.clusters)
+                    run_ctx.counters.set("input_unit", "records")
+                    run_ctx.counters.set("output_unit", "entities")
+                    result.record(run_ctx, duration_ms=int((time.monotonic() - started) * 1000))
+                    return result
+
+        from er.entities.relational_stage import run_affected_reconcile
+
+        return run_affected_reconcile(
+            connection,
+            cfg,
+            run_ctx,
             model_version=model_version,
             tf_snapshot_id=tf_snapshot_id,
-            auto_merge=cfg.thresholds.auto_merge,
-            max_iterations=cfg.clustering.max_iterations,
+            assertions=assertions,
             ids=factory,
+            occurred_at=occurred_at,
             reason=reason,
-        ) as initial:
-            if initial is not None:
-                stamp = (
-                    datetime.now(UTC).replace(tzinfo=None) if occurred_at is None else occurred_at
-                )
-                _merge_entity_relation(connection, initial.entities, stamp, run_ctx.run_id)
-                _merge_membership_relation(connection, initial.membership, stamp, run_ctx.run_id)
-                events_written = append_events(connection, initial.events, occurred_at=stamp)
-                result = ReconcileResult(
-                    exit_code=int(ExitCode.SUCCESS),
-                    affected_entities=0,
-                    affected_edges=initial.edges,
-                    label_prop_iterations=initial.iterations,
-                    clusters_out=initial.clusters,
-                    entities_created=initial.clusters,
-                    entities_merged=0,
-                    entities_split=0,
-                    entities_retired=0,
-                    members_added=0,
-                    members_removed=0,
-                    events_emitted=events_written,
-                )
-                run_ctx.counters.set("rows_in", initial.records)
-                run_ctx.counters.set("rows_out", initial.clusters)
-                run_ctx.counters.set("input_unit", "records")
-                run_ctx.counters.set("output_unit", "entities")
-                result.record(run_ctx, duration_ms=int((time.monotonic() - started) * 1000))
-                return result
-
-    from er.entities.relational_stage import run_affected_reconcile
-
-    return run_affected_reconcile(
-        connection,
-        cfg,
-        run_ctx,
-        model_version=model_version,
-        tf_snapshot_id=tf_snapshot_id,
-        assertions=assertions,
-        ids=factory,
-        occurred_at=occurred_at,
-        reason=reason,
-        started=started,
-    )
+            started=started,
+            full=full,
+        )
