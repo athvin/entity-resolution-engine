@@ -38,6 +38,10 @@ ID-generation, serialization and graph operations process rows in Python; see
 Logical keys are enforced by writers and tests because DuckLake does not enforce
 primary-key or unique constraints.
 
+See [table relationships](table-relationships.md) for the complete application
+table inventory, Mermaid diagrams, runtime objects and the catalog audit from a
+100,000-record initial load.
+
 ## Identity and golden records
 
 An unchanged membership partition retains its entity ID. Merges select a survivor

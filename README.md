@@ -44,6 +44,7 @@ assemble using an existing model. It does not train a model automatically.
 | [Runbook](docs/runbook.md) | Initial load, incremental deliveries, reviews, recovery and maintenance |
 | [Configuration](docs/configuration.md) | Source mappings, matching rules, survivorship and runtime settings |
 | [Architecture](docs/architecture.md) | Pipeline stages, data ownership and entity lifecycle |
+| [Table relationships](docs/table-relationships.md) | Mermaid diagrams, table purposes and the validated 100,000-record catalog inventory |
 | [Performance](docs/performance.md) | Million-record benchmark, measured results and comparisons |
 | [Profiling](docs/profiling.md) | Detailed traces, SQL profiles and artifact interpretation |
 | [Contributing](CONTRIBUTING.md) | Local setup, tests and CI |
