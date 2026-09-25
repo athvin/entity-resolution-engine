@@ -1,12 +1,31 @@
-# The single image every Compose service runs (S7.3): `pipeline`, `benchmark` and
-# `catalog-init` all execute this build, and the k8s job image later will too.
+# The application and both MinIO services use this image (S7.3). MinIO's
+# registries and binary downloads no longer serve the pinned community releases.
+# Build those releases from verified source archives for the host architecture.
 #
-# Both base images are pinned by tag, matching the S2.1 Python and `uv` rows (M25).
-# The `@sha256:` digest requirement in S2.1 covers the three Compose *service*
-# images, whose digests are literal in S7.1 -- not these two build stages.
+# Python and uv are pinned by tag; the Go build image is pinned by digest.
+# The source commits and archive checksums are recorded in er.versions (S2.1).
 #
 # The build context is the repository root (`docker build -f docker/Dockerfile .`
 # here, `context: ..` in compose), so every COPY path below is repo-root-relative.
+
+# ---- storage-builder ----
+FROM golang:1.24.6-bookworm@sha256:ab1d1823abb55a9504d2e3e003b75b36dbeb1cbcc4c92593d85a84ee46becc6c AS storage-builder
+ENV CGO_ENABLED=0 GOTOOLCHAIN=local GOFLAGS=-mod=readonly
+WORKDIR /src/minio
+ADD --checksum=sha256:8819e3e7817e46b7b3798f8f200ead208562e571563c2e040352378031abe9f2 https://codeload.github.com/minio/minio/tar.gz/07c3a429bfed433e49018cb0f78a52145d4bedeb /tmp/minio.tar.gz
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    tar -xzf /tmp/minio.tar.gz --strip-components=1 && \
+    go build -trimpath -buildvcs=false -tags kqueue \
+      -ldflags="-s -w -X github.com/minio/minio/cmd.Version=2025-09-07T16:13:09Z -X github.com/minio/minio/cmd.ReleaseTag=RELEASE.2025-09-07T16-13-09Z -X github.com/minio/minio/cmd.CommitID=07c3a429bfed433e49018cb0f78a52145d4bedeb -X github.com/minio/minio/cmd.ShortCommitID=07c3a429bfed -X github.com/minio/minio/cmd.CopyrightYear=2025" \
+      -o /out/minio . && /out/minio --version
+
+WORKDIR /src/mc
+ADD --checksum=sha256:95cd293c7119f16921a6dc515a1fb74a2227f19fd994b9c8b770a154e802ac44 https://codeload.github.com/minio/mc/tar.gz/7394ce0dd2a80935aded936b09fa12cbb3cb8096 /tmp/mc.tar.gz
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    tar -xzf /tmp/mc.tar.gz --strip-components=1 && \
+    go build -trimpath -buildvcs=false -tags kqueue \
+      -ldflags="-s -w -X github.com/minio/mc/cmd.Version=2025-08-13T08:35:41Z -X github.com/minio/mc/cmd.ReleaseTag=RELEASE.2025-08-13T08-35-41Z -X github.com/minio/mc/cmd.CommitID=7394ce0dd2a80935aded936b09fa12cbb3cb8096 -X github.com/minio/mc/cmd.ShortCommitID=7394ce0dd2a8 -X github.com/minio/mc/cmd.CopyrightYear=2025" \
+      -o /out/mc . && /out/mc --version
 
 # ---- builder ----
 FROM python:3.12-slim AS builder
@@ -48,6 +67,9 @@ ENV PATH=/app/.venv/bin:$PATH \
     DBT_PROFILES_DIR=/app/dbt/profiles
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /opt/duckdb_extensions /opt/duckdb_extensions
+COPY --from=storage-builder /out/minio /out/mc /usr/local/bin/
+COPY --from=storage-builder /src/minio/LICENSE /src/minio/NOTICE /src/minio/CREDITS /usr/share/licenses/minio/
+COPY --from=storage-builder /src/mc/LICENSE /src/mc/NOTICE /src/mc/CREDITS /usr/share/licenses/mc/
 WORKDIR /app
 COPY src/ src/
 COPY dbt/ dbt/

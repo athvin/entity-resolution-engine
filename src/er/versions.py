@@ -37,7 +37,7 @@ lowercased with runs of ``-_.`` and whitespace collapsed to ``-``. A row that pi
 distributions contributes one entry *per distribution*, because that is the
 granularity `importlib.metadata` can be asked about — S2.1's ``pytest`` row pins
 ``pytest`` and ``pytest-xdist``, and its ``typer`` row pins three. Every other row
-(the interpreter, the three extensions, the three images) contributes one entry
+(the interpreter, extensions, images and source builds) contributes one entry
 named after the row itself. ``tests/unit/test_versions.py`` re-derives that set by
 parsing S2.1 and asserts equality in both directions, so an added spec row with no
 entry here fails on the unit layer.
@@ -69,6 +69,7 @@ __all__ = [
     "ESCALATION_MESSAGE",
     "EXTENSION_PINS",
     "FINGERPRINT_FIELDS",
+    "GO_BUILD_IMAGE",
     "IMAGE_PINS",
     "MODE_CORRECTION_PASS",
     "MODE_FULL",
@@ -79,6 +80,7 @@ __all__ = [
     "REBUILD_STD_VERSION_BUMP",
     "REBUILD_SURVIVORSHIP_VERSION_BUMP",
     "REFUSAL_MESSAGE",
+    "SOURCE_PINS",
     "SPLINK_MIGRATION_NOTE",
     "STATUS_SUCCEEDED",
     "UNSET_VALUE",
@@ -90,6 +92,7 @@ __all__ = [
     "ModeOutcome",
     "Pin",
     "RunFingerprint",
+    "SourcePin",
     "VersionCheck",
     "check_installed_versions",
     "check_mode_preconditions",
@@ -162,6 +165,26 @@ class ImagePin:
 
 
 @dataclass(frozen=True, slots=True)
+class SourcePin:
+    """An upstream release built from an immutable, checksum-verified archive."""
+
+    repository: str
+    release: str
+    commit: str
+    archive_sha256: str
+
+    @property
+    def reference(self) -> str:
+        """The repository and full commit recorded in S2.1."""
+        return f"{self.repository}@{self.commit}"
+
+    @property
+    def archive_url(self) -> str:
+        """The commit-addressed source archive used by the Dockerfile."""
+        return f"https://codeload.github.com/{self.repository}/tar.gz/{self.commit}"
+
+
+@dataclass(frozen=True, slots=True)
 class VersionCheck:
     """One row of :func:`check_installed_versions`: expected, actual, verdict.
 
@@ -207,11 +230,9 @@ EXTENSION_PINS: Final[Mapping[str, ExtensionPin]] = {
     "httpfs": ExtensionPin("httpfs", "827222f", "httpfs"),
 }
 
-#: The three Compose service images, keyed by the service name `docker/compose.yaml`
-#: declares (S7.1), because the consumer is the compose contract test. The catalog
-#: digest is the multi-arch index digest, so it resolves on amd64 CI and on arm64
-#: developer machines alike. Both minio images are EOL and are pinned by digest
-#: precisely so an unmaintained substrate cannot drift (S2.1, S13).
+#: The externally pulled Compose service images (S7.1). MinIO services use the
+#: locally built pipeline image, with their source inputs pinned below. Index
+#: digests resolve on both amd64 CI and arm64 developer machines.
 IMAGE_PINS: Final[Mapping[str, ImagePin]] = {
     "catalog": ImagePin(
         "catalog",
@@ -219,19 +240,29 @@ IMAGE_PINS: Final[Mapping[str, ImagePin]] = {
         "16",
         "sha256:11a9d238fbb48bab14599c57e41123254452b1a2d93c6c8595bce96f346bd082",
     ),
-    "objectstore": ImagePin(
-        "objectstore",
+}
+
+GO_BUILD_IMAGE: Final[ImagePin] = ImagePin(
+    "storage-builder",
+    "golang",
+    "1.24.6-bookworm",
+    "sha256:ab1d1823abb55a9504d2e3e003b75b36dbeb1cbcc4c92593d85a84ee46becc6c",
+)
+
+#: The same MinIO releases used before their binary registries became unavailable.
+#: The Dockerfile verifies these archive digests before compiling either tool.
+SOURCE_PINS: Final[Mapping[str, SourcePin]] = {
+    "objectstore": SourcePin(
         "minio/minio",
         "RELEASE.2025-09-07T16-13-09Z",
-        "sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e",
-        mirror_repository="quay.io/minio/minio",
+        "07c3a429bfed433e49018cb0f78a52145d4bedeb",
+        "8819e3e7817e46b7b3798f8f200ead208562e571563c2e040352378031abe9f2",
     ),
-    "objectstore-init": ImagePin(
-        "objectstore-init",
+    "objectstore-init": SourcePin(
         "minio/mc",
         "RELEASE.2025-08-13T08-35-41Z",
-        "sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727",
-        mirror_repository="quay.io/minio/mc",
+        "7394ce0dd2a80935aded936b09fa12cbb3cb8096",
+        "95cd293c7119f16921a6dc515a1fb74a2227f19fd994b9c8b770a154e802ac44",
     ),
 }
 
@@ -275,10 +306,11 @@ _ROWS: Final[tuple[Pin, ...]] = (
     Pin("pyyaml", "6.0.3", "pyyaml", asserted_by_doctor=True),
     Pin("types-pyyaml", "6.0.12.20260724", "types-pyyaml", asserted_by_doctor=True),
     Pin("catalog-image", IMAGE_PINS["catalog"].reference, None, asserted_by_doctor=True),
-    Pin("object-store-image", IMAGE_PINS["objectstore"].reference, None, asserted_by_doctor=True),
+    Pin("go-build-image", GO_BUILD_IMAGE.reference, None, asserted_by_doctor=False),
+    Pin("object-store-image", SOURCE_PINS["objectstore"].reference, None, asserted_by_doctor=True),
     Pin(
         "object-store-init-image",
-        IMAGE_PINS["objectstore-init"].reference,
+        SOURCE_PINS["objectstore-init"].reference,
         None,
         asserted_by_doctor=False,
     ),

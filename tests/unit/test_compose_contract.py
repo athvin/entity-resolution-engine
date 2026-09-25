@@ -24,7 +24,7 @@ from typing import Any
 
 import yaml
 
-from er.versions import IMAGE_PINS
+from er.versions import IMAGE_PINS, SOURCE_PINS
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DESIGN_DOC = REPO_ROOT / "DesignDoc.md"
@@ -222,6 +222,23 @@ def test_image_digests_match_versions_module() -> None:
     )
 
 
+def test_storage_services_use_the_built_pipeline_image() -> None:
+    pipeline = rendered_service("pipeline")
+    for name in SOURCE_PINS:
+        service = rendered_service(name)
+        assert service["image"] == pipeline["image"] == "er-pipeline:ci"
+        assert service["pull_policy"] == "never"
+        assert service["build"] == pipeline["build"]
+    assert rendered_service("objectstore")["command"] == [
+        "minio",
+        "server",
+        "/data",
+        "--console-address",
+        ":9001",
+    ]
+    assert "/data" in {volume["target"] for volume in rendered_service("objectstore")["volumes"]}
+
+
 def test_no_abort_on_container_exit_anywhere() -> None:
     offenders = []
     for directory in SUBSTRATE_DIRECTORIES:
@@ -276,8 +293,7 @@ def test_objectstore_credentials_and_readiness() -> None:
     assert environment["ER_S3_ACCESS_KEY_ID"] == user
     assert environment["ER_S3_SECRET_ACCESS_KEY"] == password
 
-    # A probe that can never pass is worse than none: the server image ships no `mc`
-    # and no HTTP client, so anything gated on `service_healthy` here hangs forever.
+    # Readiness belongs to the init service, which configures its own client alias.
     assert "healthcheck" not in server, "objectstore must declare no healthcheck (S7.1)"
 
 

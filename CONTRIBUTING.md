@@ -24,6 +24,10 @@ COMPOSE_PROJECT_NAME=er-integration bash scripts/ci/itest.sh \
 
 The runner builds the image and resets its Compose project before and after the
 suite. Use a dedicated project name; the commands above use `er-integration`.
+The image also compiles the pinned MinIO server and client from verified source
+archives. The first build needs access to GitHub and Go modules; later builds
+reuse Docker's cached layers. Both storage services use this image, so startup
+does not require access to the retired MinIO container registries.
 `make check-all` runs the local checks followed by the non-slow integration suite.
 Run slow model-regeneration checks separately when changing the trained fixture.
 

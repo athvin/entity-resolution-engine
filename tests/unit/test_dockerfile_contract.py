@@ -16,15 +16,15 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from er.versions import PINS
+from er.versions import GO_BUILD_IMAGE, PINS, SOURCE_PINS
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DESIGN_DOC = REPO_ROOT / "DesignDoc.md"
 DOCKERFILE = REPO_ROOT / "docker" / "Dockerfile"
 DOCKERIGNORE = REPO_ROOT / ".dockerignore"
 
-# S7.3: two stages, in this order, and no third.
-EXPECTED_STAGES = ("builder", "runtime")
+# S7.3: compile storage tools, build Python, then assemble the shared runtime.
+EXPECTED_STAGES = ("storage-builder", "builder", "runtime")
 
 # AC8's list. Each entry is something a COPY could otherwise carry into the image.
 REQUIRED_DOCKERIGNORE_ENTRIES = (
@@ -84,24 +84,39 @@ def dockerignore_entries() -> set[str]:
     }
 
 
-def test_two_stages_and_pinned_base_images() -> None:
+def test_build_stages_and_pinned_base_images() -> None:
     text = dockerfile_text()
 
     stages = FROM_RE.findall(text)
     assert tuple(name for _, name in stages) == EXPECTED_STAGES
     assert len(re.findall(r"^FROM\s", text, re.MULTILINE)) == len(stages), (
-        "every FROM must name a stage, or the two-stage contract is not checkable"
+        "every FROM must name a stage, or the build contract is not checkable"
     )
 
     expected_python = f"python:{PINS['python'].version}-slim"
     for image, name in stages:
-        assert image == expected_python, (
-            f"stage {name} is built on {image}, not the S2.1 Python pin {expected_python}"
-        )
+        expected = GO_BUILD_IMAGE.reference if name == "storage-builder" else expected_python
+        assert image == expected, f"stage {name} is built on {image}, not the S2.1 pin {expected}"
 
     assert UV_IMAGE_RE.findall(text) == [f"ghcr.io/astral-sh/uv:{PINS['uv'].version}"], (
         "the uv binary must come from the S2.1 uv pin, by tag -- never :latest"
     )
+
+
+def test_storage_build_verifies_sources_and_bundles_both_tools() -> None:
+    builder = stage_body("storage-builder")
+    runtime = stage_body("runtime")
+    archives = re.findall(r"^ADD --checksum=sha256:([0-9a-f]{64}) (\S+) ", builder, re.MULTILINE)
+    assert set(archives) == {(pin.archive_sha256, pin.archive_url) for pin in SOURCE_PINS.values()}
+    assert "GOTOOLCHAIN=local" in builder and "GOFLAGS=-mod=readonly" in builder
+    assert "CGO_ENABLED=0" in builder
+    for pin in SOURCE_PINS.values():
+        binary = pin.repository.split("/")[-1]
+        assert f"cmd.ReleaseTag={pin.release}" in builder
+        assert f"cmd.CommitID={pin.commit}" in builder
+        assert f"/out/{binary} --version" in builder
+        assert f"/src/{binary}/LICENSE" in runtime and f"/src/{binary}/NOTICE" in runtime
+    assert "COPY --from=storage-builder /out/minio /out/mc /usr/local/bin/" in runtime
 
 
 def test_builder_syncs_twice_and_never_uses_no_dev() -> None:

@@ -38,8 +38,10 @@ from er import __version__
 from er.versions import (
     CODE_DISTRIBUTION,
     EXTENSION_PINS,
+    GO_BUILD_IMAGE,
     IMAGE_PINS,
     PINS,
+    SOURCE_PINS,
     SPLINK_MIGRATION_NOTE,
     Pin,
     check_installed_versions,
@@ -57,7 +59,7 @@ PYPROJECT = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf
 # distribution name `importlib.metadata` knows.
 REQUIREMENT = re.compile(r"([A-Za-z0-9_.-]+?)(?:\[[a-z0-9,-]+\])?==([^`\s,]+)")
 
-# The three service images are pinned by digest, never by a mutable tag (S2.1).
+# Externally pulled images are pinned by digest, never by a mutable tag (S2.1).
 IMAGE_REFERENCE = re.compile(r"(\S+):([^@\s]+)@(sha256:[0-9a-f]{64})")
 
 # The only names `src/er/versions.py` may reach for. Anything that opens a connection
@@ -187,6 +189,7 @@ def test_pins_cover_exactly_the_s2_1_doctor_rows() -> None:
         "dbt-adapters",
         "dbt-common",
         "hypothesis",
+        "go-build-image",
         "object-store-init-image",
     }
 
@@ -209,7 +212,7 @@ def test_installed_versions_match_pins() -> None:
     assert backed == declared_distributions()
 
     # A pin with no distribution is one nothing in the metadata database can answer
-    # for: the interpreter, the three extensions, the three images, and `uv`, which
+    # for: the interpreter, extensions, image/source build inputs, and `uv`, which
     # produced the lockfile but is not installed into this environment.
     unbacked = {component for component, pin in PINS.items() if pin.distribution is None}
     assert unbacked == {
@@ -219,6 +222,7 @@ def test_installed_versions_match_pins() -> None:
         "httpfs",
         "uv",
         "catalog-image",
+        "go-build-image",
         "object-store-image",
         "object-store-init-image",
     }
@@ -250,8 +254,6 @@ def test_image_digests_match_s2_1() -> None:
     spec = spec_components()
     references = {
         "catalog": spec["catalog-image"],
-        "objectstore": spec["object-store-image"],
-        "objectstore-init": spec["object-store-init-image"],
     }
     assert set(IMAGE_PINS) == set(references)
 
@@ -268,6 +270,21 @@ def test_image_digests_match_s2_1() -> None:
         pulled = IMAGE_REFERENCE.fullmatch(image.pull_reference)
         assert pulled is not None
         assert pulled.groups()[1:] == matched.groups()[1:], "a mirror changed the pinned bytes"
+
+
+def test_storage_source_and_compiler_pins_match_s2_1() -> None:
+    spec = spec_components()
+    assert GO_BUILD_IMAGE.reference == spec["go-build-image"]
+    assert IMAGE_REFERENCE.fullmatch(GO_BUILD_IMAGE.reference)
+    for service, component in (
+        ("objectstore", "object-store-image"),
+        ("objectstore-init", "object-store-init-image"),
+    ):
+        pin = SOURCE_PINS[service]
+        assert pin.reference == spec[component]
+        assert re.fullmatch(r"[0-9a-f]{40}", pin.commit)
+        assert re.fullmatch(r"[0-9a-f]{64}", pin.archive_sha256)
+        assert pin.archive_sha256 in DESIGN_DOC
 
 
 def test_check_installed_versions_reports_mismatch() -> None:
