@@ -8,7 +8,7 @@ from typing import Final
 from er.config.schema import Config
 from er.config.validators import FAILURE_KEYS, _expression_columns
 from er.errors import ConfigError
-from er.lake.columns import STD_RECORD_COLUMNS
+from er.lake.columns import MATCHING_RECORD_COLUMNS
 
 #: The name the CLI passes the payload to dbt under, merged into
 #: :func:`er.dbt_runner.render_dbt_vars`'s `extra`. It is the S6 block's own name
@@ -79,14 +79,14 @@ def _reject_unknown_columns(cfg: Config) -> None:
     because those two rejection sites are its only callers, and this ticket may not
     edit that module to publish it.
     """
-    known = frozenset(STD_RECORD_COLUMNS)
+    known = frozenset(MATCHING_RECORD_COLUMNS)
     for index, rule in enumerate(cfg.blocking):
         for column in _expression_columns(rule.expr):
             if column not in known:
                 raise ConfigError(
-                    f"{FAILURE_KEYS['V6']}: /blocking/{index}/expr: {column!r} is not a "
-                    f"column of int_std_records (S5); the relation has "
-                    f"{list(STD_RECORD_COLUMNS)}"
+                    f"{FAILURE_KEYS['V6']}: /blocking/{index}/expr: {column!r} is not an "
+                    f"eligible matching column; allowed columns are "
+                    f"{list(MATCHING_RECORD_COLUMNS)}"
                 )
 
 

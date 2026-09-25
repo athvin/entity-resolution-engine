@@ -86,6 +86,7 @@ GOLDEN_VALUE_COLUMNS: Final = (
     "addr_postal",
     "birth_date",
     "survivorship_version",
+    "metadata",
 )
 
 

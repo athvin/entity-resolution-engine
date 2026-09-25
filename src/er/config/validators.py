@@ -32,6 +32,7 @@ from er.lake.columns import (
     ADDRESS_ATTRIBUTE,
     ADDRESS_COMPOSITE_COLUMNS,
     GOLDEN_LINEAGE_ATTRIBUTES,
+    MATCHING_RECORD_COLUMNS,
     STD_RECORD_COLUMNS,
 )
 
@@ -286,14 +287,14 @@ def _v6_referential_columns(config: Config) -> None:
         if _VARIANT_MATCH in comparison.levels:
             required.setdefault(_VARIANTS_COLUMN, ("comparisons", column, "levels"))
 
-    known = frozenset(STD_RECORD_COLUMNS)
+    known = frozenset(MATCHING_RECORD_COLUMNS)
     for column, loc in required.items():
         if column not in known:
             raise _fail(
                 "V6",
                 loc,
-                f"{column!r} is not a column of int_std_records (S5); the relation has "
-                f"{list(STD_RECORD_COLUMNS)}",
+                f"{column!r} is not an eligible matching column; allowed columns are "
+                f"{list(MATCHING_RECORD_COLUMNS)}",
             )
 
 

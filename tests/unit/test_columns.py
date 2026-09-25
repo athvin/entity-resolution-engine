@@ -37,7 +37,7 @@ DESIGN_DOC = (REPO_ROOT / "DesignDoc.md").read_text(encoding="utf-8")
 
 # The three provenance/key columns of `golden_records` that survivorship does not
 # produce (S5, paragraph under the dbt-owned DDL).
-GOLDEN_NON_SURVIVABLE = ("entity_id", "survivorship_version", "assembled_at")
+GOLDEN_NON_SURVIVABLE = ("entity_id", "metadata", "survivorship_version", "assembled_at")
 
 # The stdlib modules S5.0's dependency-free rule allows this module to import.
 ALLOWED_IMPORTS = frozenset({"typing", "collections.abc"})

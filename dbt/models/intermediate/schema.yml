@@ -96,6 +96,9 @@ models:
         data_type: VARCHAR
       - name: birth_date
         data_type: DATE
+      - name: metadata
+        description: "Unmapped client fields as JSON; excluded from matching and survivorship."
+        data_type: JSON
       - name: updated_at_source
         data_type: TIMESTAMP
       - name: ingest_batch_id

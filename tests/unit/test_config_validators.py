@@ -197,6 +197,18 @@ def test_v7_duplicate_key_type(tmp_path: Path) -> None:
     assert len(accept(tmp_path, doc).blocking) == 5
 
 
+def test_client_metadata_cannot_be_used_for_matching(tmp_path: Path) -> None:
+    doc = document()
+    doc["blocking"][0]["expr"] = "metadata ->> 'tier'"
+    assert rejected_key(tmp_path, doc) == "columns.unknown"
+    doc = document()
+    doc["comparisons"]["metadata"] = {"levels": ["exact", None]}
+    assert rejected_key(tmp_path, doc) == "columns.unknown"
+    doc = document()
+    doc["survivorship"]["metadata"] = ["source_priority", "recency"]
+    assert rejected_key(tmp_path, doc) == "survivorship.keyset"
+
+
 def test_v8_unknown_level_token_rejects_phonetic(tmp_path: Path) -> None:
     rejected = ("phonetic", "jaro_winkler:1.5", "jaro_winkler:0", "jaro_winkler:", "exact_match")
     for token in rejected:

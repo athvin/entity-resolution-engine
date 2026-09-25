@@ -23,6 +23,7 @@ __all__ = [
     "GOLDEN_LINEAGE_ATTRIBUTES",
     "GOLDEN_MART_RELATIONS",
     "GOLDEN_SURVIVABLE_COLUMNS",
+    "MATCHING_RECORD_COLUMNS",
     "STD_RECORD_COLUMNS",
     "VOLATILE_COLUMNS",
 ]
@@ -47,8 +48,8 @@ VOLATILE_COLUMNS: Final[frozenset[str]] = frozenset(
 )
 
 # The eleven `golden_records` columns produced by survivorship, in S5 DDL order:
-# every column except `entity_id` (the key) and `survivorship_version` /
-# `assembled_at` (provenance stamps, not survivable attributes). `email_valid` and
+# every column except `metadata` (aggregated client data), `entity_id` (the key),
+# `survivorship_version` and `assembled_at` (provenance stamps). `email_valid` and
 # `phone_valid` are deliberately absent — they live on `int_std_records` as inputs
 # to the `validated` rule (S6.1 V4) and are not columns of `golden_records`.
 # S6.1 V2 keeps this set-equal to the `survivorship:` key set with `address`
@@ -114,9 +115,8 @@ GOLDEN_MART_RELATIONS: Final[tuple[str, ...]] = (
 )
 
 
-# The `int_std_records` column list of S5, in DDL order. S6.1 V6 validates every
-# column named by `blocking[].expr` and every key of `comparisons` against it, and
-# T-STD-1's `std_hash` projection (ER-044) is a subset of it. `record_key` leads
+# The `int_std_records` column list of S5, in DDL order. Matching uses the subset
+# below; T-STD-1's `std_hash` projection (ER-044) is also a subset. `record_key` leads
 # because it is the relation's logical key and Splink's `unique_id_column_name`
 # (S5.0, D6). The two `VOLATILE_COLUMNS` members that appear here — the ingest
 # stamps — trail the payload, as they do in the DDL.
@@ -140,7 +140,13 @@ STD_RECORD_COLUMNS: Final[tuple[str, ...]] = (
     "addr_region",
     "addr_postal",
     "birth_date",
+    "metadata",
     "updated_at_source",
     "ingest_batch_id",
     "ingested_at",
+)
+
+# Client-only data never enters Splink, blocking expressions or term frequencies.
+MATCHING_RECORD_COLUMNS: Final[tuple[str, ...]] = tuple(
+    column for column in STD_RECORD_COLUMNS if column != "metadata"
 )

@@ -151,7 +151,9 @@ def stage_file(
             # Replay only on the exceptional path to preserve the original error.
             return None
         fields = ", ".join(f"{_literal(name)}, {_identifier(name)}" for name in names)
-        digest = content_hash_sql(adapter.columns, names)
+        digest = content_hash_sql(
+            adapter.columns, names, metadata_columns=adapter.spec.metadata_columns(names)
+        )
         count = connection.execute(
             f"INSERT INTO {destination} SELECT ordinality + ?, ?, {key}, "
             f"json_object({fields})::VARCHAR, {digest} FROM {delivered} ORDER BY ordinality",

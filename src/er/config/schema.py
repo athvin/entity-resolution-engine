@@ -18,6 +18,7 @@ so three things are normative here and are stated nowhere else in Python:
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -177,6 +178,16 @@ class SourceSpec(_Block):
     #: canonical attribute -> the column that carries it in this source. Extra
     #: entries are allowed; the nine canonical ones are mandatory (V11).
     columns: dict[str, str]
+
+    def metadata_columns(self, delivered: Iterable[str]) -> tuple[str, ...]:
+        """Unconsumed source fields, sorted for stable JSON and delivery hashes."""
+        excluded = {
+            *(self.columns[attribute] for attribute in CANONICAL_ATTRIBUTES),
+            self.record_id_column,
+            self.updated_at_column,
+            "persona_id",  # Reserved fixture bookkeeping, never client data.
+        }
+        return tuple(sorted(set(delivered) - excluded))
 
     @model_validator(mode="after")
     def _v11_columns_complete(self) -> Self:

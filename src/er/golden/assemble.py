@@ -5,10 +5,11 @@ current membership. Two things S4.6 requires cannot live in dbt, and this module
 both of them plus the stage that sequences the marts between them:
 
 * **The touched set goes through a relation, not the argv.** An incremental run
-  rebuilds only the entities it changed, and the naive way to say which — a `--vars`
-  payload of their ids — hard-fails with `E2BIG` once there are tens of thousands
-  (M10). So :func:`compute_touched_set` derives the set from THIS run's
-  `entity_events`, :func:`write_touched_entities` writes one
+  rebuilds entities whose membership or client metadata changed. A `--vars`
+  payload of their ids hard-fails with `E2BIG` once there are tens of thousands
+  (M10). :func:`compute_touched_set` derives the set from this run's membership
+  events, metadata differences and previously saved work for the same run, and
+  :func:`materialize_touched_entities` writes one
   `er_touched_entities(run_id, entity_id, disposition)` row each BEFORE the marts run,
   and the marts join it on `var('run_id')` (assembly/touched_entities.sql). No entity
   id ever reaches dbt.
@@ -51,7 +52,7 @@ from er.dbt_runner import (
 from er.embeddings.coherence import NoopScorer, get_scorer
 from er.entities.ids import IdFactory
 from er.errors import ExitCode, StageFailure
-from er.lake.bulk import staged_rows
+from er.lake.bulk import staged_query, staged_rows
 from er.lake.model import SCHEMA_QUALIFIER
 from er.obs.profiling import profiled, span
 from er.obs.runctx import ConnectionSource
@@ -102,12 +103,47 @@ _TOUCHED: Final = f"{SCHEMA_QUALIFIER}.er_touched_entities"
 _TIMESTAMP_FORMAT: Final = "%Y-%m-%d %H:%M:%S.%f"
 
 
+def _touched_query(connection: duckdb.DuckDBPyConnection) -> str:
+    """Saved run work, membership events and client metadata differences.
+
+    Metadata updates need no membership event, so separately invoked commands
+    compare the stored JSON. A retry also retains the run's saved set: matching
+    JSON cannot prove that every mart finished after golden_records committed.
+    Re-executing a run repeats its saved work, including after a successful attempt.
+    """
+    placeholders = ", ".join("?" for _ in TOUCHED_EVENT_TYPES)
+    saved_and_events = (
+        f"SELECT entity_id FROM {_TOUCHED} WHERE run_id = ? UNION "
+        f"SELECT entity_id FROM {_EVENTS} WHERE run_id = ? AND event_type IN ({placeholders})"
+    )
+    present = connection.execute(
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns "
+        "WHERE table_catalog='lake' AND table_schema='main' "
+        "AND table_name='golden_records' AND column_name='metadata')"
+    ).fetchone()
+    members = f"{SCHEMA_QUALIFIER}.entity_membership"
+    if not present or not present[0]:
+        return saved_and_events + f" UNION SELECT entity_id FROM {members}"
+    return saved_and_events + (
+        f" UNION SELECT m.entity_id FROM {members} m "
+        f"JOIN {SCHEMA_QUALIFIER}.int_std_records r USING (record_key) "
+        f"LEFT JOIN {SCHEMA_QUALIFIER}.golden_records g USING (entity_id) "
+        "WHERE g.entity_id IS NULL OR g.metadata IS NULL OR "
+        "coalesce(r.metadata, '{}'::JSON) IS DISTINCT FROM "
+        "coalesce(json_extract(g.metadata, "
+        "'/' || replace(replace(r.source_system, '~', '~0'), '/', '~1') || "
+        "'/' || replace(replace(r.source_record_id, '~', '~0'), '/', '~1')), '{}'::JSON)"
+    )
+
+
 @profiled("assemble.touched_set", "entities")
 def compute_touched_set(connection: duckdb.DuckDBPyConnection, run_id: str) -> dict[str, str]:
-    """`entity_id -> disposition` for every entity this run's events touched (S4.6).
+    """`entity_id -> disposition` for every entity this run must assemble (S4.6).
 
-    The formula S4.6 states: an entity is touched when an event of a
-    :data:`TOUCHED_EVENT_TYPES` type carries this `run_id`. Its disposition is
+    An entity is touched when an event of a :data:`TOUCHED_EVENT_TYPES` type
+    carries this `run_id`, or a current member's metadata differs from its stored
+    golden metadata, or a previous attempt saved it in this run's touched set.
+    Its disposition is
     `retire` when its CURRENT `entities.status` is `merged` or `retired` — a merge
     loser, an emptied split fragment, a tombstoned entity, all of which hold no member
     — and `rebuild` otherwise.
@@ -124,19 +160,18 @@ def compute_touched_set(connection: duckdb.DuckDBPyConnection, run_id: str) -> d
     Returns:
         `entity_id -> 'rebuild' | 'retire'`, empty when the run touched nothing.
     """
-    placeholders = ", ".join("?" for _ in TOUCHED_EVENT_TYPES)
+    touched_query = _touched_query(connection)
     rows = connection.execute(
         f"""
         SELECT touched.entity_id,
                CASE WHEN e.status IN ('merged', 'retired') THEN 'retire' ELSE 'rebuild' END
           FROM (
-                SELECT DISTINCT entity_id FROM {_EVENTS}
-                 WHERE run_id = ? AND event_type IN ({placeholders})
+                {touched_query}
                ) AS touched
           LEFT JOIN {_ENTITIES} AS e ON e.entity_id = touched.entity_id
          ORDER BY touched.entity_id
         """,
-        [run_id, *TOUCHED_EVENT_TYPES],
+        [run_id, run_id, *TOUCHED_EVENT_TYPES],
     ).fetchall()
     return {str(entity_id): str(disposition) for entity_id, disposition in rows}
 
@@ -144,12 +179,12 @@ def compute_touched_set(connection: duckdb.DuckDBPyConnection, run_id: str) -> d
 def materialize_touched_entities(
     connection: duckdb.DuckDBPyConnection, run_id: str, *, touched_only: bool
 ) -> tuple[int, int]:
-    """Populate the dbt input directly; return touched and rebuild counts."""
-    connection.execute(f"DELETE FROM {_TOUCHED} WHERE run_id = ?", [run_id])
+    """Save the dbt input without losing earlier attempts' work; return counts."""
     if not touched_only:
         # A full correction can merge or retire entities, too. Include older
         # retirements so a new run also repairs an interrupted assembly. The
         # marts rebuild all active entities without consulting this retire set.
+        connection.execute(f"DELETE FROM {_TOUCHED} WHERE run_id = ?", [run_id])
         connection.execute(
             f"INSERT INTO {_TOUCHED} (run_id, entity_id, disposition, created_at) "
             f"SELECT ?, entity_id, 'retire', ? FROM {_ENTITIES} "
@@ -157,16 +192,30 @@ def materialize_touched_entities(
             [run_id, datetime.now(UTC).replace(tzinfo=None)],
         )
         return 0, 0
-    placeholders = ", ".join("?" for _ in TOUCHED_EVENT_TYPES)
-    connection.execute(
-        f"INSERT INTO {_TOUCHED} (run_id, entity_id, disposition, created_at) "
-        "SELECT ?, touched.entity_id, "
-        "CASE WHEN e.status IN ('merged', 'retired') THEN 'retire' ELSE 'rebuild' END, ? "
-        f"FROM (SELECT DISTINCT entity_id FROM {_EVENTS} "
-        f"WHERE run_id = ? AND event_type IN ({placeholders})) touched "
+    touched_query = _touched_query(connection)
+    # Read saved work before replacing it, and commit the replacement atomically.
+    # Neither a partial mart commit nor a failed preparation may erase retry work.
+    with staged_query(
+        connection,
+        "SELECT touched.entity_id, "
+        "CASE WHEN e.status IN ('merged', 'retired') THEN 'retire' ELSE 'rebuild' END "
+        "AS disposition "
+        f"FROM ({touched_query}) touched "
         f"LEFT JOIN {_ENTITIES} e ON e.entity_id = touched.entity_id",
-        [run_id, datetime.now(UTC).replace(tzinfo=None), run_id, *TOUCHED_EVENT_TYPES],
-    )
+        [run_id, run_id, *TOUCHED_EVENT_TYPES],
+    ) as relation:
+        connection.execute("BEGIN TRANSACTION")
+        try:
+            connection.execute(f"DELETE FROM {_TOUCHED} WHERE run_id = ?", [run_id])
+            connection.execute(
+                f"INSERT INTO {_TOUCHED} (run_id, entity_id, disposition, created_at) "
+                f"SELECT ?, entity_id, disposition, ? FROM {relation}",
+                [run_id, datetime.now(UTC).replace(tzinfo=None)],
+            )
+            connection.execute("COMMIT")
+        except BaseException:
+            connection.execute("ROLLBACK")
+            raise
     row = connection.execute(
         f"SELECT count(*), count(*) FILTER (WHERE disposition = 'rebuild') "
         f"FROM {_TOUCHED} WHERE run_id = ?",

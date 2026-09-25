@@ -25,7 +25,7 @@ from er.config.schema import Config, Thresholds
 from er.entities.ids import IdFactory, canonicalize_pair
 from er.errors import ExitCode, StageFailure
 from er.lake.bulk import BATCH_ROWS
-from er.lake.columns import STD_RECORD_COLUMNS
+from er.lake.columns import MATCHING_RECORD_COLUMNS
 from er.lake.model import REGISTRY, SCHEMA_QUALIFIER
 from er.lake.transaction import transaction
 from er.matching.api import assert_no_splink_relations_in_lake, cleanup_splink, splink_api
@@ -123,7 +123,7 @@ if set(_SOURCE_EXPRESSION) != set(_COLUMNS):
 
 _CORPUS_SQL: Final = (
     f"CREATE OR REPLACE TABLE {MATCH_CORPUS_RELATION} AS "
-    f"SELECT {', '.join(STD_RECORD_COLUMNS)} FROM {_STD_RECORDS}"
+    f"SELECT {', '.join(MATCHING_RECORD_COLUMNS)} FROM {_STD_RECORDS}"
 )
 
 _CORPUS_COUNT_SQL: Final = f"SELECT count(*) FROM {MATCH_CORPUS_RELATION}"

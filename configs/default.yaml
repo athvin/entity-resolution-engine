@@ -2,7 +2,7 @@
 # new tenant starts from. `configs/test.yaml` is the fixture/CI document and is
 # equal to the S6 listing verbatim; this file is the one a deployment copies.
 # Nothing here is read by the fixtures, so a value may differ from test.yaml only
-# where the difference is deliberate (tenant, model prefix, drop directory).
+# where the difference is deliberate (tenant, model prefix, drop directory, versions).
 tenant: default
 
 thresholds:
@@ -110,8 +110,10 @@ storage:
   model_uri_prefix: "s3://lake/models/default/"   # already names the tenant (V14, S4.3.2)
 
 versions:
-  std_version: "1"
-  survivorship_version: "1"
+  # Metadata adds columns to staging/current records and changes golden assembly.
+  # Existing deployments require the planned full rebuild for these version bumps.
+  std_version: "2"
+  survivorship_version: "2"
   address_parser_version: "1"
 
 generator:

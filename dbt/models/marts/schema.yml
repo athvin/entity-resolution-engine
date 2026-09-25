@@ -22,7 +22,8 @@ models:
     description: >
       One row per active entity holding at least one member (S4.6). Each attribute is
       decided by its own S6 survivorship chain; the six addr_* columns are ONE decision
-      and all come from the single winning contributing record.
+      and all come from the single winning contributing record. Metadata aggregates
+      every current member's extra fields under source system and source record ID.
     config:
       contract:
         enforced: true
@@ -72,6 +73,9 @@ models:
         data_type: VARCHAR
       - name: birth_date
         data_type: DATE
+      - name: metadata
+        description: "Unmapped client fields as JSON; excluded from matching and survivorship."
+        data_type: JSON
       - name: survivorship_version
         description: "versions.survivorship_version from S6, passed as a --vars override."
         data_type: VARCHAR

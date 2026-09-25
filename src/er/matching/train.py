@@ -49,7 +49,7 @@ from splink import Linker
 
 from er.config.schema import Config
 from er.errors import ExitCode, StageFailure
-from er.lake.columns import STD_RECORD_COLUMNS
+from er.lake.columns import MATCHING_RECORD_COLUMNS
 from er.lake.model import SCHEMA_QUALIFIER
 from er.lake.model_registry import (
     ModelRow,
@@ -486,13 +486,13 @@ FITTED_METRICS_KEY: Final = "fitted_m_u"
 
 _CORPUS_SQL: Final = (
     f"CREATE OR REPLACE TABLE {TRAIN_CORPUS_RELATION} AS "
-    f"SELECT {', '.join(STD_RECORD_COLUMNS)} "
+    f"SELECT {', '.join(MATCHING_RECORD_COLUMNS)} "
     f"FROM {SCHEMA_QUALIFIER}.{STD_RECORDS_RELATION}"
 )
 
 #: The columns are projected by name and never `SELECT *`: S5.1 makes explicit
 #: projection the rule for reading a relation that may have grown a column, and the
-#: list is S5's own (:data:`~er.lake.columns.STD_RECORD_COLUMNS`).
+#: list is S5's own (:data:`~er.lake.columns.MATCHING_RECORD_COLUMNS`).
 _CORPUS_COUNT_SQL: Final = f"SELECT count(*) FROM {TRAIN_CORPUS_RELATION}"
 
 

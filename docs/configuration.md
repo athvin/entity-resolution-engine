@@ -53,6 +53,50 @@ delivery is the complete key set for that source: absent keys become tombstones.
 Configuration is validated by Pydantic and cross-field rules before processing.
 All blocks and their exact constraints are in [S6](../DesignDoc.md#s6).
 
+## Extra source fields
+
+Fields outside the nine canonical mappings automatically become `metadata`; no
+extra mapping or survivorship rule is needed. The source ID, update timestamp and
+reserved fixture `persona_id` are excluded. Names and values retain their delivered
+spelling, including blanks and nulls (CSV/Parquet adapters render values as text/null).
+
+Staging and `int_std_records` store the record's extra fields directly. Golden
+records collect all current members under source and record ID:
+
+```json
+{
+  "crm": {
+    "123": {"loyalty_tier": "gold"},
+    "456": {"loyalty_tier": "silver"}
+  },
+  "billing": {
+    "A789": {"payment_terms": "net30"}
+  }
+}
+```
+
+The record ID layer preserves conflicts within one source. Records with no extra
+fields are omitted, and an entity with no metadata receives `{}`. Metadata never
+enters blocking, matching comparisons, training features or winner selection.
+Metadata-only changes are ingested as new versions and refresh touched golden rows
+even when membership is unchanged. Merges, splits and deletions rebuild metadata
+from the current membership rather than accumulating historical values.
+
+For example, a client can retrieve the original CRM detail directly:
+
+```sql
+SELECT entity_id,
+       metadata -> 'crm' -> '123' ->> 'loyalty_tier' AS loyalty_tier
+FROM lake.main.golden_records;
+```
+
+For a lake created before this feature, bump `versions.std_version` and
+`versions.survivorship_version` and run the planned full rebuild (`er run-all
+--mode full`). This backfills metadata from retained raw payloads. The default
+configuration now uses version `2` for both; the fixture configuration retains its
+existing version labels. Identical historical deliveries still follow the engine's
+existing replay/anti-join rules.
+
 ## Runtime environment
 
 The Compose file supplies these values for its disposable development lake. For

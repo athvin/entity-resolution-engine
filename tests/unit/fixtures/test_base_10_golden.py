@@ -42,7 +42,7 @@ MEMBERSHIP_CSV: Final = BASE / "expected" / "base" / "membership.csv"
 
 GOLDEN_HEADER: Final = (
     "entity_label,given_name,family_name,email,phone_e164,addr_number,addr_street,"
-    "addr_unit,addr_city,addr_region,addr_postal,birth_date,survivorship_version"
+    "addr_unit,addr_city,addr_region,addr_postal,birth_date,metadata,survivorship_version"
 ).split(",")
 LINEAGE_HEADER: Final = (
     "entity_label,attribute,record_key,source_system,source_record_id,rule,survivorship_version"

@@ -94,6 +94,7 @@ GOLDEN_VALUE_COLUMNS: Final[tuple[str, ...]] = (
     "addr_postal",
     "birth_date",
     "survivorship_version",
+    "metadata",
 )
 
 #: S5's closed `golden_lineage.rule` vocabulary: the five chain rules plus the terminal.
@@ -113,7 +114,7 @@ RULE_VOCABULARY: Final[frozenset[str]] = frozenset(
 _COLUMN_ATTRIBUTE: Final[dict[str, str]] = {
     column: (ADDRESS_ATTRIBUTE if column.startswith("addr_") else column)
     for column in GOLDEN_VALUE_COLUMNS
-    if column != "survivorship_version"
+    if column not in ("survivorship_version", "metadata")
 }
 
 SOURCE_PRIORITY: Final = "source_priority"

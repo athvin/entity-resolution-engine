@@ -50,6 +50,7 @@ vars:
     phone_default_region: US
   sources:
     crm:
+      record_id_column: crm_id
       updated_at_column: last_modified
       date_format: "%Y-%m-%d"
       columns:
@@ -63,6 +64,7 @@ vars:
         addr_postal: zip
         birth_date: dob
     billing:
+      record_id_column: account_no
       updated_at_column: updated_ts
       date_format: "%m/%d/%Y"
       columns:
@@ -76,6 +78,7 @@ vars:
         addr_postal: postal_code
         birth_date: birth_date
     webforms:
+      record_id_column: submission_id
       updated_at_column: submitted_at
       date_format: "%Y-%m-%d"
       columns:
