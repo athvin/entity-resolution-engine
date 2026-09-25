@@ -147,6 +147,7 @@ EXPECTED_HEADERS: Final[Mapping[str, tuple[str, ...]]] = {
         "addr_region",
         "addr_postal",
         "birth_date",
+        "metadata",
         "survivorship_version",
     ),
     "expected/<phase>/events.csv": ("entity_label", "event_type", "count"),

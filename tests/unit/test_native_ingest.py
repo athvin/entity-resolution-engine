@@ -24,7 +24,9 @@ def check_rows(connection: duckdb.DuckDBPyConnection, adapter: CsvAdapter | Parq
         seq, source, key, payload, digest = actual
         assert (seq, source, key) == (index, reference.source_system, reference.source_record_id)
         assert json.loads(payload) == reference.payload
-        assert digest == content_hash(reference.payload, adapter.columns)
+        assert digest == content_hash(
+            reference.payload, adapter.columns, metadata_columns=tuple(reference.metadata)
+        )
 
 
 @pytest.mark.parametrize(

@@ -13,8 +13,8 @@
   `email_norm` to two, `phone_e164` to two, `address_parse` to six -- and they
   carry their own aliases, which is why those lines have none: the alias is part
   of the S5 column contract and this model must not restate it. `persona_id` is a
-  fixture bookkeeping column and is named by no `columns:` mapping, so it cannot
-  reach a staged row (S8.2).
+  reserved fixture bookkeeping column; `source_metadata` explicitly excludes it
+  while retaining other unmapped fields (S8.2).
 
   Rows are staged as delivered, tombstones included: S4.2 excludes a tombstoned
   record in `int_std_records`, not here, so that `stg_*` stays a faithful
@@ -61,6 +61,7 @@ select
         field['address_line'], field['addr_city'], field['addr_region'], field['addr_postal']
     ) }},
     {{ parse_date(field['birth_date'], spec['date_format']) }} as birth_date,
+    {{ source_metadata('payload', spec) }} as metadata,
     try_cast({{ updated_at }} as timestamp) as updated_at_source,
     ingest_batch_id,
     ingested_at

@@ -65,7 +65,7 @@ DDL_RELATION_COUNT = 15
 DBT_RELATION_COUNT = 8
 
 # The three `golden_records` columns survivorship does not produce (S5).
-GOLDEN_NON_SURVIVABLE = ("entity_id", "survivorship_version", "assembled_at")
+GOLDEN_NON_SURVIVABLE = ("entity_id", "metadata", "survivorship_version", "assembled_at")
 
 # What DuckLake cannot enforce and `create_table_sql` may therefore never emit
 # (S5.0). `ARRAY` is the fixed-size type; `LIST(VARCHAR)` is supported and stays.

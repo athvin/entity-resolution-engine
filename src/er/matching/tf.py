@@ -54,7 +54,7 @@ import duckdb
 from er.config.schema import Config
 from er.entities.ids import IdFactory, MonotonicUlidFactory
 from er.errors import ConfigError, PreconditionFailure
-from er.lake.columns import STD_RECORD_COLUMNS
+from er.lake.columns import MATCHING_RECORD_COLUMNS
 from er.lake.model import SCHEMA_QUALIFIER
 from er.obs.profiling import profiled
 
@@ -211,19 +211,19 @@ def new_tf_snapshot_id(factory: IdFactory | None = None) -> str:
 
 
 def _reject_unknown_columns(columns: tuple[str, ...]) -> None:
-    """Refuse a TF column `int_std_records` does not have (S6.1 V6, re-checked).
+    """Refuse unknown or client-only TF columns (S6.1 V6, re-checked).
 
     The loader rejects it too, but a caller may hand this module a `Config` that never
     went through `load_config`, and the column name is interpolated into an identifier
     position below — a `comparisons` key is a config-authored string, and this is the
     only place in this module where one reaches SQL as anything but a parameter.
     """
-    known = frozenset(STD_RECORD_COLUMNS)
+    known = frozenset(MATCHING_RECORD_COLUMNS)
     for column in columns:
         if column not in known:
             raise ConfigError(
-                f"columns.unknown: /comparisons/{column}: {column!r} is not a column of "
-                f"int_std_records (S5); the relation has {list(STD_RECORD_COLUMNS)}"
+                f"columns.unknown: /comparisons/{column}: {column!r} is not an eligible "
+                f"matching column; allowed columns are {list(MATCHING_RECORD_COLUMNS)}"
             )
 
 

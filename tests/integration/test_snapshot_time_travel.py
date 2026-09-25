@@ -11,7 +11,7 @@ cannot pass. Three properties are load-bearing:
   it (M22). `test_no_snapshot_version_literal_in_module` asserts this of the source.
 * **The column projection is explicit.** S5.1 forbids `SELECT *` across additive schema
   changes, so the time-travel query names `GOLDEN_SURVIVABLE_COLUMNS` + `entity_id` +
-  `survivorship_version`.
+  `survivorship_version` + `metadata`.
 * **The label map is the base state's.** Entity ids are stable under INV-PERM, but the
   batch's bridge merges two base entities, so the base partition is captured in Python
   before the batch rather than recomputed from the merged present.
@@ -82,6 +82,7 @@ GOLDEN_PROJECTION: Final[tuple[str, ...]] = (
     "entity_id",
     *GOLDEN_SURVIVABLE_COLUMNS,
     "survivorship_version",
+    "metadata",
 )
 
 

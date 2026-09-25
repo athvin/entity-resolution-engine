@@ -503,7 +503,7 @@ def _hashed_rows(
             row.source_system,
             row.source_record_id,
             payload,
-            content_hash(row.payload, columns),
+            content_hash(row.payload, columns, metadata_columns=tuple(row.metadata)),
         )
 
 

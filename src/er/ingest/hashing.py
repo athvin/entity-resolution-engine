@@ -33,7 +33,9 @@ UNIT_SEPARATOR = "\x1f"
 TOMBSTONE_CONTENT_HASH = "0" * 64
 
 
-def content_hash(row: Mapping[str, str | None], columns: Sequence[str]) -> str:
+def content_hash(
+    row: Mapping[str, str | None], columns: Sequence[str], *, metadata_columns: Sequence[str] = ()
+) -> str:
     """Return the S4.1 ``content_hash`` of ``row`` over ``columns``.
 
     ``columns`` is the source column names from ``sources.<name>.columns`` (S6) **in
@@ -52,15 +54,38 @@ def content_hash(row: Mapping[str, str | None], columns: Sequence[str]) -> str:
 
     A column absent from ``row`` is treated as NULL, so a source row missing an
     optional column hashes the same as one carrying it empty.
+
+    Ingestion supplies ``metadata_columns`` for the unmapped client fields. When
+    present, their sorted names and verbatim values extend the digest, so edits to
+    metadata are delivered even when every standardized attribute is unchanged.
+    Omitting this argument retains the original mapped-field digest.
     """
     values = []
     for column in columns:
         value = row.get(column)
         values.append("" if value is None else unicodedata.normalize("NFC", value))
-    return hashlib.sha256(UNIT_SEPARATOR.join(values).encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(UNIT_SEPARATOR.join(values).encode("utf-8")).hexdigest()
+    if not metadata_columns:
+        return digest
+    # Metadata is verbatim: distinguish null from empty and include field names.
+    # Fixed-length name/value hashes and presence tags avoid delimiter ambiguity.
+    extras = []
+    for name in sorted(set(metadata_columns)):
+        value = row[name]
+        extras.append(hashlib.sha256(name.encode("utf-8")).hexdigest())
+        extras.append(
+            "N" if value is None else "V" + hashlib.sha256(value.encode("utf-8")).hexdigest()
+        )
+    preimage = digest + UNIT_SEPARATOR + "metadata-v1" + UNIT_SEPARATOR + "".join(extras)
+    return hashlib.sha256(preimage.encode("utf-8")).hexdigest()
 
 
-def content_hash_sql(columns: Sequence[str], delivered_columns: Sequence[str]) -> str:
+def content_hash_sql(
+    columns: Sequence[str],
+    delivered_columns: Sequence[str],
+    *,
+    metadata_columns: Sequence[str] = (),
+) -> str:
     """The native expression for the same hash contract, over rendered VARCHARs.
 
     Names are quoted as identifiers, never interpolated as executable expressions.
@@ -72,6 +97,17 @@ def content_hash_sql(columns: Sequence[str], delivered_columns: Sequence[str]) -
         values.append(
             f"coalesce(nfc_normalize({quoted}), '')" if name in delivered_columns else "''"
         )
-    if not values:
-        return "sha256('')"
-    return f"sha256(concat_ws(chr({ord(UNIT_SEPARATOR)}), " + ", ".join(values) + "))"
+    digest = (
+        f"sha256(concat_ws(chr({ord(UNIT_SEPARATOR)}), " + ", ".join(values) + "))"
+        if values
+        else "sha256('')"
+    )
+    if not metadata_columns:
+        return digest
+    extras = []
+    for name in sorted(set(metadata_columns)):
+        quoted = '"' + name.replace('"', '""') + '"'
+        literal = "'" + name.replace("'", "''") + "'"
+        extras.append(f"sha256({literal})")
+        extras.append(f"CASE WHEN {quoted} IS NULL THEN 'N' ELSE 'V' || sha256({quoted}) END")
+    return f"sha256({digest} || chr(31) || 'metadata-v1' || chr(31) || " + " || ".join(extras) + ")"

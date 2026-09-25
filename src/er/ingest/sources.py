@@ -43,7 +43,7 @@ import csv
 import datetime as dt
 import os
 from collections.abc import Collection, Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 from typing import ClassVar, Protocol, runtime_checkable
@@ -90,12 +90,15 @@ class SourceRow:
             order** -- the input tuple ``content_hash`` (S4.1) is defined over. A
             mapped column absent from the file is ``None``, which the digest
             encodes as the empty string.
+        metadata: unmapped client fields, excluding the source ID, update timestamp
+            and reserved fixture ``persona_id``. Included in delivery hashing.
     """
 
     source_system: str
     source_record_id: str
     payload: Mapping[str, str | None]
     values: tuple[str | None, ...]
+    metadata: Mapping[str, str | None] = field(default_factory=dict)
 
 
 @runtime_checkable
@@ -240,6 +243,7 @@ class _DropFolderAdapter:
             source_record_id=source_record_id,
             payload=payload,
             values=tuple(payload.get(column) for column in self.columns),
+            metadata={column: payload[column] for column in self.spec.metadata_columns(payload)},
         )
 
 

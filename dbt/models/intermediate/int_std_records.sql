@@ -64,6 +64,7 @@
     'addr_region',
     'addr_postal',
     'birth_date',
+    'metadata',
     'updated_at_source',
     'ingest_batch_id',
     'ingested_at'

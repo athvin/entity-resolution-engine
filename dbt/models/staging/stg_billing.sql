@@ -38,6 +38,7 @@ select
         field['address_line'], field['addr_city'], field['addr_region'], field['addr_postal']
     ) }},
     {{ parse_date(field['birth_date'], spec['date_format']) }} as birth_date,
+    {{ source_metadata('payload', spec) }} as metadata,
     try_cast({{ updated_at }} as timestamp) as updated_at_source,
     ingest_batch_id,
     ingested_at

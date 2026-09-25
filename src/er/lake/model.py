@@ -228,6 +228,7 @@ _STD_PAYLOAD: Final[tuple[Column, ...]] = (
     Column("addr_region", VARCHAR),
     Column("addr_postal", VARCHAR),
     Column("birth_date", DATE),
+    Column("metadata", JSON),
     Column("updated_at_source", TIMESTAMP),
     _nn("ingest_batch_id", VARCHAR),
     _nn("ingested_at", TIMESTAMP),
@@ -655,6 +656,7 @@ _DBT_SPECS: Final[tuple[TableSpec, ...]] = (
         columns=(
             _nn("entity_id", VARCHAR),
             *_GOLDEN_SURVIVABLE,
+            Column("metadata", JSON),
             _nn("survivorship_version", VARCHAR),
             _nn("assembled_at", TIMESTAMP),
         ),

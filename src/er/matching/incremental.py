@@ -21,7 +21,7 @@ from er.config.schema import Config
 from er.entities.ids import IdFactory
 from er.errors import ExitCode
 from er.lake.bulk import insert_batches
-from er.lake.columns import STD_RECORD_COLUMNS
+from er.lake.columns import MATCHING_RECORD_COLUMNS
 from er.lake.model import SCHEMA_QUALIFIER
 from er.matching.api import assert_no_splink_relations_in_lake, cleanup_splink, splink_api
 from er.matching.evidence import build_evidence
@@ -144,12 +144,12 @@ _BATCH_KEYS_INSERT: Final = f"INSERT INTO {BATCH_KEYS_RELATION} SELECT unnest(?:
 #: the batch against nothing.
 _BATCH_SQL: Final = (
     f"CREATE OR REPLACE TABLE {BATCH_RELATION} AS "
-    f"SELECT {', '.join(STD_RECORD_COLUMNS)} FROM {_STD_RECORDS} "
+    f"SELECT {', '.join(MATCHING_RECORD_COLUMNS)} FROM {_STD_RECORDS} "
     f"WHERE {UNIQUE_ID_COLUMN} IN (SELECT {UNIQUE_ID_COLUMN} FROM {BATCH_KEYS_RELATION})"
 )
 _PRIOR_CORPUS_SQL: Final = (
     f"CREATE OR REPLACE TABLE {PRIOR_CORPUS_RELATION} AS "
-    f"SELECT {', '.join(STD_RECORD_COLUMNS)} FROM {_STD_RECORDS} "
+    f"SELECT {', '.join(MATCHING_RECORD_COLUMNS)} FROM {_STD_RECORDS} "
     f"WHERE {UNIQUE_ID_COLUMN} NOT IN (SELECT {UNIQUE_ID_COLUMN} FROM {BATCH_KEYS_RELATION})"
 )
 

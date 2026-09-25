@@ -58,7 +58,7 @@ S8_2_1_HEADER_ROWS = {
     "expected/<phase>/membership.csv": "persona_id,source_system,source_record_id,entity_label",
     "expected/<phase>/golden.csv": (
         "entity_label,given_name,family_name,email,phone_e164,addr_number,addr_street,"
-        "addr_unit,addr_city,addr_region,addr_postal,birth_date,survivorship_version"
+        "addr_unit,addr_city,addr_region,addr_postal,birth_date,metadata,survivorship_version"
     ),
     "expected/<phase>/events.csv": "entity_label,event_type,count",
     "expected/<phase>/std_hashes.csv": "source_system,source_record_id,std_hash",
