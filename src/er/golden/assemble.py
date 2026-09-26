@@ -110,19 +110,30 @@ def _touched_query(connection: duckdb.DuckDBPyConnection) -> str:
     compare the stored JSON. A retry also retains the run's saved set: matching
     JSON cannot prove that every mart finished after golden_records committed.
     Re-executing a run repeats its saved work, including after a successful attempt.
+
+    The metadata arm has three shapes. A `golden_records` that has never been
+    assembled contributes nothing: there is no stored JSON to migrate or diff, and
+    touching every member would turn an unchanged re-run into a full assembly,
+    which S4.0 forbids (T-DEL-1 AC8). A table from before the metadata column is
+    touched whole, once, so the upgrade materialises the column. A current table
+    is compared row by row.
     """
     placeholders = ", ".join("?" for _ in TOUCHED_EVENT_TYPES)
     saved_and_events = (
         f"SELECT entity_id FROM {_TOUCHED} WHERE run_id = ? UNION "
         f"SELECT entity_id FROM {_EVENTS} WHERE run_id = ? AND event_type IN ({placeholders})"
     )
-    present = connection.execute(
-        "SELECT EXISTS (SELECT 1 FROM information_schema.columns "
+    shape = connection.execute(
+        "SELECT count(*), count(*) FILTER (WHERE column_name = 'metadata') "
+        "FROM information_schema.columns "
         "WHERE table_catalog='lake' AND table_schema='main' "
-        "AND table_name='golden_records' AND column_name='metadata')"
+        "AND table_name='golden_records'"
     ).fetchone()
+    columns, with_metadata = (int(shape[0]), int(shape[1])) if shape else (0, 0)
     members = f"{SCHEMA_QUALIFIER}.entity_membership"
-    if not present or not present[0]:
+    if not columns:
+        return saved_and_events
+    if not with_metadata:
         return saved_and_events + f" UNION SELECT entity_id FROM {members}"
     return saved_and_events + (
         f" UNION SELECT m.entity_id FROM {members} m "
