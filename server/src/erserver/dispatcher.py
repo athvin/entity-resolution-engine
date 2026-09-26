@@ -311,6 +311,10 @@ def tick_schedules(connection: psycopg.Connection) -> int:
             # leader loop; the anchor still advances, so nothing backlogs.
             pass
         schedules.record_enqueued(connection, schedule.schedule_id, fire)
+    # A quiet tick is all reads, and psycopg's implicit BEGIN would leave the
+    # leader idle-in-transaction between polls — holding ACCESS SHARE locks
+    # that queue a booting API's ensure_schema DDL behind them, forever.
+    connection.rollback()
     return enqueued
 
 
@@ -337,6 +341,7 @@ def drain_staged(connection: psycopg.Connection) -> int:
         except (ConfigValidationError, OSError, UnresolvedSecretError):
             continue  # stays pending; the API surfaces the same fault to users
         applied += steward.drain_org(connection, org, env, tenant)
+    connection.rollback()  # same reasoning as tick_schedules: never idle in a read tx
     return applied
 
 

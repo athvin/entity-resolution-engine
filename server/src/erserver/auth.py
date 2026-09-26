@@ -15,11 +15,13 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import re
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import psycopg
+from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from ulid import ULID
 
@@ -28,10 +30,17 @@ __all__ = [
     "Principal",
     "ROLE_RANK",
     "audit",
+    "audit_rows",
     "authenticate",
     "issue_key",
     "revoke_key",
+    "with_acting_user",
 ]
+
+# What an X-Acting-User value may look like: an email or opaque user id from the
+# web tier. Deliberately narrow — this string lands verbatim in audit rows and
+# in the lake's created_by/resolved_by columns.
+ACTING_USER = re.compile(r"^[\w.@+-]{1,120}$")
 
 ROLE_RANK: dict[str, int] = {"viewer": 0, "steward": 1, "admin": 2, "operator": 3}
 
@@ -46,11 +55,24 @@ class AuthError(Exception):
 
 @dataclass(frozen=True)
 class Principal:
-    """Who is calling: the audit actor, the org scope, and the role."""
+    """Who is calling: the audit actor, the org scope, and the role.
+
+    ``acting_user`` is the person a trusted intermediary (the web tier) acts
+    for; credentials themselves are machines, so person-level attribution can
+    only arrive as an assertion alongside the credential (design §7.0).
+    """
 
     actor: str
     org: str | None  # None only for the operator
     role: str
+    acting_user: str | None = None
+
+    @property
+    def effective_actor(self) -> str:
+        """The attribution string mutations record: person first, mechanism second."""
+        if self.acting_user is None:
+            return self.actor
+        return f"user:{self.acting_user} via {self.actor}"
 
     def require(self, org: str, minimum: str) -> None:
         """Refuse unless this principal holds ``minimum`` role within ``org``."""
@@ -60,6 +82,21 @@ class Principal:
             raise AuthError(404, f"no org {org!r}")  # scope errors do not enumerate orgs
         if ROLE_RANK[self.role] < ROLE_RANK[minimum]:
             raise AuthError(403, f"requires {minimum} role")
+
+
+def with_acting_user(principal: Principal, value: str | None) -> Principal:
+    """Bind a validated ``X-Acting-User`` assertion onto the principal.
+
+    Any authenticated caller may assert one: API keys are bearer secrets held by
+    trusted services (today, only the web tier), and the mechanism half of
+    :attr:`Principal.effective_actor` always preserves *which* credential made
+    the assertion, so a spoofed header incriminates its own key.
+    """
+    if value is None:
+        return principal
+    if not ACTING_USER.match(value):
+        raise AuthError(422, "X-Acting-User must match [\\w.@+-]{1,120}")
+    return replace(principal, acting_user=value)
 
 
 def _hash(secret: str) -> str:
@@ -139,3 +176,33 @@ def audit(
             (actor, org, action, Jsonb(detail or {})),
         )
     connection.commit()
+
+
+def audit_rows(
+    connection: psycopg.Connection,
+    *,
+    org: str | None = None,
+    action: str | None = None,
+    before_id: int | None = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """Read the audit ledger, newest first; ``before_id`` is the keyset cursor."""
+    clauses = ["TRUE"]
+    params: list[Any] = []
+    if org is not None:
+        clauses.append("org = %s")
+        params.append(org)
+    if action is not None:
+        clauses.append("action = %s")
+        params.append(action)
+    if before_id is not None:
+        clauses.append("id < %s")
+        params.append(before_id)
+    params.append(limit)
+    with connection.cursor(row_factory=dict_row) as cursor:
+        cursor.execute(
+            "SELECT id, at, actor, org, action, detail FROM audit_log "
+            f"WHERE {' AND '.join(clauses)} ORDER BY id DESC LIMIT %s",
+            params,
+        )
+        return list(cursor.fetchall())

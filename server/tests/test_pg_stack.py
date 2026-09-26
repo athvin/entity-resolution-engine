@@ -756,3 +756,148 @@ def test_different_orgs_run_concurrently_same_org_never_does(
     for name in orgs:
         jobs = queue.list_jobs(conn, name)
         assert jobs and jobs[0].state == SUCCEEDED
+
+
+# --------------------------------------------------------------------------- #
+# M1 batch: operator directory, global queue, attribution, audit reads
+# --------------------------------------------------------------------------- #
+
+
+def test_operator_directory_and_global_queue(
+    client: TestClient, conn: psycopg.Connection, org: str
+) -> None:
+    """GET /v1/orgs and GET /v1/jobs are the operator console's read surface."""
+    other = f"tenant-{uuid.uuid4().hex[:8]}"
+    queue.ensure_org(conn, other, config_path=str(TEST_CONFIG), env={}, drop_root=None)
+
+    listed = client.get("/v1/orgs", headers=operator())
+    assert listed.status_code == 200
+    rows = listed.json()
+    assert {row["name"] for row in rows} >= {org, other}
+    assert all({"name", "state", "active_config_version", "created_at"} <= set(row) for row in rows)
+
+    queue.enqueue(conn, org, "run_all_full", idempotency_key="global-1")
+    queue.enqueue(conn, other, "train", idempotency_key="global-2")
+    everything = client.get("/v1/jobs", headers=operator()).json()
+    assert {job["org"] for job in everything} >= {org, other}
+    scoped = client.get("/v1/jobs", params={"org": org}, headers=operator()).json()
+    assert scoped and {job["org"] for job in scoped} == {org}
+    queued = client.get("/v1/jobs", params={"state": "queued"}, headers=operator()).json()
+    assert queued and all(job["state"] == "queued" for job in queued)
+    bad = client.get("/v1/jobs", params={"state": "nope"}, headers=operator())
+    assert bad.status_code == 422
+
+    # Global surfaces are operator-only: a tenant admin key gets a plain 403.
+    admin = key_headers(conn, org, "admin")
+    assert client.get("/v1/orgs", headers=admin).status_code == 403
+    assert client.get("/v1/jobs", headers=admin).status_code == 403
+
+
+def test_acting_user_attribution_reaches_audit_and_created_by(
+    client: TestClient, conn: psycopg.Connection, org: str
+) -> None:
+    """X-Acting-User makes 'who did this' a person; the key remains in the trail."""
+    admin = key_headers(conn, org, "admin")
+    acting = {**admin, "X-Acting-User": "jane@acme.dev"}
+
+    created = client.post(
+        f"/v1/orgs/{org}/schedules",
+        json={"kind": "run_all_incremental", "cron": "0 6 * * *"},
+        headers=acting,
+    )
+    assert created.status_code == 201
+    with conn.cursor() as cursor:
+        cursor.execute(
+            "SELECT actor FROM audit_log WHERE org = %s AND action = 'schedule.create'", (org,)
+        )
+        row = cursor.fetchone()
+    conn.rollback()
+    assert row is not None and row[0].startswith("user:jane@acme.dev via key:")
+
+    drafted = client.post(
+        f"/v1/orgs/{org}/config/versions",
+        json={"yaml": TEST_CONFIG.read_text()},
+        headers=acting,
+    )
+    assert drafted.status_code == 201
+    versions = client.get(f"/v1/orgs/{org}/config/versions", headers=admin).json()
+    assert any(str(v["created_by"]).startswith("user:jane@acme.dev via key:") for v in versions)
+
+    # Without the header nothing changes; with a malformed one the request refuses.
+    assert client.get(f"/v1/orgs/{org}", headers=admin).status_code == 200
+    malformed = client.get(f"/v1/orgs/{org}", headers={**admin, "X-Acting-User": "not ok"})
+    assert malformed.status_code == 422
+
+
+def test_audit_read_routes_and_webhook_delete_is_audited(
+    client: TestClient, conn: psycopg.Connection, org: str
+) -> None:
+    admin = key_headers(conn, org, "admin")
+    steward_headers = key_headers(conn, org, "steward")
+
+    hook = client.post(
+        f"/v1/orgs/{org}/webhooks", json={"url": "https://example.test/hook"}, headers=admin
+    ).json()
+    deleted = client.delete(f"/v1/orgs/{org}/webhooks/{hook['webhook_id']}", headers=admin)
+    assert deleted.status_code == 200 and deleted.json() == {"deleted": True}
+
+    rows = client.get(f"/v1/orgs/{org}/audit", headers=admin)
+    assert rows.status_code == 200
+    actions = [row["action"] for row in rows.json()]
+    assert "webhook.create" in actions and "webhook.delete" in actions
+    assert all(row["org"] == org for row in rows.json())
+
+    # Role edges: org audit needs admin; the global feed needs the operator.
+    assert client.get(f"/v1/orgs/{org}/audit", headers=steward_headers).status_code == 403
+    assert client.get("/v1/audit", headers=admin).status_code == 403
+
+    filtered = client.get(
+        "/v1/audit", params={"org": org, "action": "webhook.delete"}, headers=operator()
+    ).json()
+    assert len(filtered) == 1 and filtered[0]["detail"]["deleted"] is True
+
+    # Keyset pagination: newest first; before_id walks strictly backwards.
+    first = client.get(f"/v1/orgs/{org}/audit", params={"limit": 1}, headers=admin).json()
+    second = client.get(
+        f"/v1/orgs/{org}/audit", params={"limit": 1, "before_id": first[0]["id"]}, headers=admin
+    ).json()
+    assert first[0]["id"] > second[0]["id"]
+
+
+def test_boot_never_deadlocks_and_quiet_ticks_leave_no_open_transaction(
+    conn: psycopg.Connection, org: str
+) -> None:
+    """The two halves of the API-vs-dispatcher first-boot hang, kept fixed.
+
+    ensure_schema is advisory-locked so concurrent boots serialize instead of
+    racing the drop-then-recreate index idiom; and a quiet leader tick ends with
+    the connection idle, because an implicit read transaction left open between
+    polls holds ACCESS SHARE locks that queue a booting API's DDL forever.
+    """
+    from psycopg.pq import TransactionStatus
+
+    errors: list[Exception] = []
+
+    def boot() -> None:
+        try:
+            booting = db.connect(DSN)
+            try:
+                db.ensure_schema(booting)
+            finally:
+                booting.close()
+        except Exception as exc:  # pragma: no cover - the assertion below reports it
+            errors.append(exc)
+
+    threads = [threading.Thread(target=boot, daemon=True) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+    assert not any(thread.is_alive() for thread in threads), "concurrent ensure_schema hung"
+    assert not errors, errors
+
+    dispatcher.tick_schedules(conn)
+    dispatcher.drain_staged(conn)
+    assert conn.info.transaction_status == TransactionStatus.IDLE, (
+        "a quiet tick left the leader idle-in-transaction; its locks block boot-time DDL"
+    )

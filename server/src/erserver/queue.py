@@ -175,6 +175,15 @@ def org_record(connection: psycopg.Connection, name: str) -> dict[str, Any] | No
         return cursor.fetchone()
 
 
+def list_orgs(connection: psycopg.Connection) -> list[dict[str, Any]]:
+    """Every org's directory row, for the operator console (design §7.1)."""
+    with connection.cursor(row_factory=dict_row) as cursor:
+        cursor.execute(
+            "SELECT name, state, active_config_version, created_at FROM orgs ORDER BY name"
+        )
+        return list(cursor.fetchall())
+
+
 def org_state(connection: psycopg.Connection, name: str) -> str | None:
     """The org's lifecycle state, or ``None`` when it does not exist."""
     with connection.cursor() as cursor:
@@ -387,6 +396,33 @@ def list_jobs(
                 f"ORDER BY job_id DESC LIMIT %s",
                 (org, state, limit),
             )
+        rows = cursor.fetchall()
+    return [_job(row) for row in rows]
+
+
+def list_jobs_all(
+    connection: psycopg.Connection,
+    *,
+    org: str | None = None,
+    state: str | None = None,
+    limit: int = 50,
+) -> list[Job]:
+    """The cross-org queue view for the operator console (design §7.3)."""
+    clauses = ["TRUE"]
+    params: list[Any] = []
+    if org is not None:
+        clauses.append("org = %s")
+        params.append(org)
+    if state is not None:
+        clauses.append("state = %s")
+        params.append(state)
+    params.append(limit)
+    with connection.cursor(row_factory=dict_row) as cursor:
+        cursor.execute(
+            f"SELECT {_JOB_COLUMNS} FROM jobs WHERE {' AND '.join(clauses)} "
+            f"ORDER BY job_id DESC LIMIT %s",
+            params,
+        )
         rows = cursor.fetchall()
     return [_job(row) for row in rows]
 

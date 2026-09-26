@@ -34,7 +34,16 @@ from er.config.loader import ConfigValidationError, load_config
 from er.errors import ErError, exit_code_for
 from er.lake.env import EnvError
 from erserver import configsvc, db, provision, queue, readapi, schedules, steward, webhooks
-from erserver.auth import AuthError, Principal, audit, authenticate, issue_key, revoke_key
+from erserver.auth import (
+    AuthError,
+    Principal,
+    audit,
+    audit_rows,
+    authenticate,
+    issue_key,
+    revoke_key,
+    with_acting_user,
+)
 from erserver.policy import JOB_KINDS, STATES
 from erserver.secrets import UnresolvedSecretError, resolve_env
 from erserver.settings import ServerSettings
@@ -155,9 +164,11 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
     def principal_of(
         conn: Conn,
         authorization: Annotated[str | None, Header(alias="Authorization")] = None,
+        x_acting_user: Annotated[str | None, Header(alias="X-Acting-User")] = None,
     ) -> Principal:
         try:
-            return authenticate(conn, authorization, operator_token=resolved.operator_token)
+            principal = authenticate(conn, authorization, operator_token=resolved.operator_token)
+            return with_acting_user(principal, x_acting_user)
         except AuthError as exc:
             raise HTTPException(exc.status, str(exc)) from exc
 
@@ -168,6 +179,11 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
             caller.require(org, minimum)
         except AuthError as exc:
             raise HTTPException(exc.status, str(exc)) from exc
+
+    def operator_only(caller: Principal) -> None:
+        """Global (cross-org) surfaces have no org to scope 404s to; plain 403."""
+        if caller.role != "operator":
+            raise HTTPException(403, "requires operator role")
 
     def org_or_404(conn: psycopg.Connection, org: str) -> dict[str, Any]:
         record = queue.org_record(conn, org)
@@ -205,7 +221,13 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
                 drop_root=body.drop_root,
                 state="active",
             )
-            audit(conn, caller.actor, body.name, "org.upsert", {"config_path": body.config_path})
+            audit(
+                conn,
+                caller.effective_actor,
+                body.name,
+                "org.upsert",
+                {"config_path": body.config_path},
+            )
             return {"name": body.name}
         # Auto mode: derive, seed, issue, enqueue. Every step is idempotent, so
         # a replayed POST resumes onboarding instead of stranding the org.
@@ -231,7 +253,7 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
         )
         Path(plan.drop_root).mkdir(parents=True, exist_ok=True)
         seeded = provision.seed_config(
-            conn, body.name, yaml_text, caller.actor, config_path=plan.config_path
+            conn, body.name, yaml_text, caller.effective_actor, config_path=plan.config_path
         )
         response: dict[str, Any] = {
             "name": body.name,
@@ -253,7 +275,7 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
         )
         audit(
             conn,
-            caller.actor,
+            caller.effective_actor,
             body.name,
             "org.provision",
             {"db_name": plan.db_name, "tenant": plan.tenant, "job_id": job.job_id},
@@ -261,6 +283,62 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
         response["job_id"] = job.job_id
         response["state"] = queue.org_state(conn, body.name)
         return response
+
+    @app.get("/v1/orgs")
+    def orgs_index(conn: Conn, caller: Caller) -> list[dict[str, Any]]:
+        """The tenant directory for the operator console (design §7.1)."""
+        operator_only(caller)
+        return [
+            {
+                "name": row["name"],
+                "state": row["state"],
+                "active_config_version": row["active_config_version"],
+                "created_at": row["created_at"].isoformat(),
+            }
+            for row in queue.list_orgs(conn)
+        ]
+
+    @app.get("/v1/jobs")
+    def jobs_global(
+        conn: Conn,
+        caller: Caller,
+        org: Annotated[str | None, Query()] = None,
+        state: Annotated[str | None, Query()] = None,
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    ) -> list[JobOut]:
+        """The cross-org queue view for the operator console (design §7.3)."""
+        operator_only(caller)
+        if state is not None and state not in STATES:
+            raise HTTPException(422, f"unknown state {state!r}; one of {list(STATES)}")
+        return [
+            JobOut.of(job) for job in queue.list_jobs_all(conn, org=org, state=state, limit=limit)
+        ]
+
+    @app.get("/v1/audit")
+    def audit_global(
+        conn: Conn,
+        caller: Caller,
+        org: Annotated[str | None, Query()] = None,
+        action: Annotated[str | None, Query()] = None,
+        before_id: Annotated[int | None, Query(ge=1)] = None,
+        limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    ) -> list[dict[str, Any]]:
+        """The cross-tenant audit feed (design §7.20); org-scoped reads live under the org."""
+        operator_only(caller)
+        return audit_rows(conn, org=org, action=action, before_id=before_id, limit=limit)
+
+    @app.get("/v1/orgs/{org}/audit")
+    def audit_index(
+        org: str,
+        conn: Conn,
+        caller: Caller,
+        action: Annotated[str | None, Query()] = None,
+        before_id: Annotated[int | None, Query(ge=1)] = None,
+        limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    ) -> list[dict[str, Any]]:
+        guard(caller, org, "admin")
+        org_or_404(conn, org)
+        return audit_rows(conn, org=org, action=action, before_id=before_id, limit=limit)
 
     @app.get("/v1/orgs/{org}")
     def org_detail(org: str, conn: Conn, caller: Caller) -> dict[str, Any]:
@@ -282,14 +360,16 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
             key_id, full_key = issue_key(conn, org, body.role)
         except AuthError as exc:
             raise HTTPException(exc.status, str(exc)) from exc
-        audit(conn, caller.actor, org, "key.issue", {"key_id": key_id, "role": body.role})
+        audit(conn, caller.effective_actor, org, "key.issue", {"key_id": key_id, "role": body.role})
         return {"key_id": key_id, "key": full_key, "role": body.role}
 
     @app.delete("/v1/orgs/{org}/api-keys/{key_id}")
     def delete_key(org: str, key_id: str, conn: Conn, caller: Caller) -> dict[str, bool]:
         guard(caller, org, "operator")
         revoked = revoke_key(conn, org, key_id)
-        audit(conn, caller.actor, org, "key.revoke", {"key_id": key_id, "revoked": revoked})
+        audit(
+            conn, caller.effective_actor, org, "key.revoke", {"key_id": key_id, "revoked": revoked}
+        )
         return {"revoked": revoked}
 
     # ---------------------------------------------------------------- jobs
@@ -323,7 +403,13 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
             raise HTTPException(404, str(exc)) from exc
         except queue.OrgNotActiveError as exc:
             raise HTTPException(409, str(exc)) from exc
-        audit(conn, caller.actor, org, "job.submit", {"job_id": job.job_id, "kind": body.kind})
+        audit(
+            conn,
+            caller.effective_actor,
+            org,
+            "job.submit",
+            {"job_id": job.job_id, "kind": body.kind},
+        )
         return JobOut.of(job)
 
     @app.get("/v1/orgs/{org}/jobs")
@@ -353,7 +439,7 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
         state = queue.cancel(conn, org, job_id)
         if state is None:
             raise HTTPException(409, "job is not cancelable (already terminal or unknown)")
-        audit(conn, caller.actor, org, "job.cancel", {"job_id": job_id, "state": state})
+        audit(conn, caller.effective_actor, org, "job.cancel", {"job_id": job_id, "state": state})
         return {"job_id": job_id, "state": state}
 
     @app.post("/v1/orgs/{org}/jobs/{job_id}:resume")
@@ -361,7 +447,7 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
         guard(caller, org, "steward")
         if not queue.resume_job(conn, org, job_id):
             raise HTTPException(409, "job is not resumable (not failed or canceled)")
-        audit(conn, caller.actor, org, "job.resume", {"job_id": job_id})
+        audit(conn, caller.effective_actor, org, "job.resume", {"job_id": job_id})
         return {"job_id": job_id, "state": "queued"}
 
     # ------------------------------------------------------------ schedules
@@ -376,7 +462,13 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
             )
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
-        audit(conn, caller.actor, org, "schedule.create", {"schedule_id": schedule.schedule_id})
+        audit(
+            conn,
+            caller.effective_actor,
+            org,
+            "schedule.create",
+            {"schedule_id": schedule.schedule_id},
+        )
         return {"schedule_id": schedule.schedule_id, "kind": schedule.kind, "cron": schedule.cron}
 
     @app.get("/v1/orgs/{org}/schedules")
@@ -398,7 +490,7 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
     def delete_schedule(org: str, schedule_id: str, conn: Conn, caller: Caller) -> dict[str, bool]:
         guard(caller, org, "admin")
         deleted = schedules.delete(conn, org, schedule_id)
-        audit(conn, caller.actor, org, "schedule.delete", {"schedule_id": schedule_id})
+        audit(conn, caller.effective_actor, org, "schedule.delete", {"schedule_id": schedule_id})
         return {"deleted": deleted}
 
     # --------------------------------------------------------------- config
@@ -410,10 +502,10 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
         guard(caller, org, "admin")
         org_or_404(conn, org)
         try:
-            version = configsvc.create_version(conn, org, body.yaml, caller.actor)
+            version = configsvc.create_version(conn, org, body.yaml, caller.effective_actor)
         except ConfigValidationError as exc:
             raise HTTPException(422, f"config error at {exc.pointer}: {exc}") from exc
-        audit(conn, caller.actor, org, "config.draft", {"version": version["version"]})
+        audit(conn, caller.effective_actor, org, "config.draft", {"version": version["version"]})
         return version
 
     @app.get("/v1/orgs/{org}/config/versions")
@@ -438,7 +530,7 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
                 conn,
                 org,
                 version,
-                actor=caller.actor,
+                actor=caller.effective_actor,
                 is_operator=caller.role == "operator",
             )
         except configsvc.PublishRefused as exc:
@@ -447,7 +539,7 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
             raise HTTPException(422, f"config error at {exc.pointer}: {exc}") from exc
         except queue.OrgNotActiveError as exc:
             raise HTTPException(409, str(exc)) from exc
-        audit(conn, caller.actor, org, "config.publish", result)
+        audit(conn, caller.effective_actor, org, "config.publish", result)
         return result
 
     # -------------------------------------------------------------- webhooks
@@ -457,7 +549,7 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
         guard(caller, org, "admin")
         org_or_404(conn, org)
         hook = webhooks.create(conn, org, url=body.url, events=body.events, secret=body.secret)
-        audit(conn, caller.actor, org, "webhook.create", {"webhook_id": hook.webhook_id})
+        audit(conn, caller.effective_actor, org, "webhook.create", {"webhook_id": hook.webhook_id})
         return {"webhook_id": hook.webhook_id, "url": hook.url, "events": hook.events}
 
     @app.get("/v1/orgs/{org}/webhooks")
@@ -471,7 +563,15 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
     @app.delete("/v1/orgs/{org}/webhooks/{webhook_id}")
     def delete_webhook(org: str, webhook_id: str, conn: Conn, caller: Caller) -> dict[str, bool]:
         guard(caller, org, "admin")
-        return {"deleted": webhooks.delete(conn, org, webhook_id)}
+        deleted = webhooks.delete(conn, org, webhook_id)
+        audit(
+            conn,
+            caller.effective_actor,
+            org,
+            "webhook.delete",
+            {"webhook_id": webhook_id, "deleted": deleted},
+        )
+        return {"deleted": deleted}
 
     # --------------------------------------------------------------- imports
 
@@ -519,7 +619,7 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
             raise HTTPException(409, str(exc)) from exc
         audit(
             conn,
-            caller.actor,
+            caller.effective_actor,
             org,
             "import.create",
             {"delivery_id": delivery_id, "source": source, "job_id": job.job_id},
@@ -715,13 +815,19 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
         tenant = org_tenant(record)
         try:
             status, result = steward.try_apply_or_stage(
-                conn, org, env, tenant, action, caller.actor
+                conn, org, env, tenant, action, caller.effective_actor
             )
         except EnvError as exc:
             raise HTTPException(422, str(exc)) from exc
         except (ErError, KeyError, ValueError) as exc:
             raise HTTPException(409 if exit_code_for(exc) == 3 else 422, str(exc)) from exc
-        audit(conn, caller.actor, org, f"steward.{action['type']}", {**result, "status": status})
+        audit(
+            conn,
+            caller.effective_actor,
+            org,
+            f"steward.{action['type']}",
+            {**result, "status": status},
+        )
         return {"status": status, **result, "pending_until_next_reconcile": status == "applied"}
 
     @app.post("/v1/orgs/{org}/reviews/{review_id}:resolve")

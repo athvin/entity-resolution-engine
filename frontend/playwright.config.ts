@@ -59,9 +59,12 @@ export default defineConfig({
       env: {
         ERSERVER_BASE_URL: "http://localhost:8010",
         ERSERVER_OPERATOR_TOKEN: "mock-operator-token",
-        ERWEB_DATABASE_URL: "postgresql://mock:mock@localhost:1/mock",
+        // PGlite: the real session/auth/vault code paths, no Docker.
+        ERWEB_DATABASE_URL: "pglite://memory",
+        ERWEB_TEST_FIXTURES: "1",
         ERWEB_SESSION_SECRET: "mock-session-secret-mock-session-secret",
         ERWEB_CREDENTIAL_KEY: "3q2+7wEirykuXBXRO26AY9nbZAqAnDzws76jd2GxwkE=",
+        ERWEB_INSECURE_COOKIES: "1", // plain-HTTP localhost
       },
     },
   ],

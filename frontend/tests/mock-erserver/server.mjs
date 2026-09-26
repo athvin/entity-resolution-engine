@@ -30,6 +30,74 @@ export function initialState() {
         snapshot: 42,
       },
     },
+    runs: {
+      "acme-dev": [
+        {
+          run_id: "01jm0000000000000000000002",
+          mode: "incremental",
+          status: "succeeded",
+          started_at: "2026-09-24T06:00:04Z",
+          finished_at: "2026-09-24T06:01:16Z",
+        },
+        {
+          run_id: "01jm0000000000000000000001",
+          mode: "full",
+          status: "succeeded",
+          started_at: "2026-09-23T06:00:02Z",
+          finished_at: "2026-09-23T06:03:41Z",
+        },
+      ],
+    },
+    jobs: {
+      "acme-dev": [
+        {
+          job_id: "01jm000000000000000000000b",
+          org: "acme-dev",
+          kind: "run_all_incremental",
+          params: {},
+          state: "succeeded",
+          priority: 0,
+          idempotency_key: "sched:nightly:2026-09-24T06:00:00Z",
+          run_id: "01jm0000000000000000000002",
+          attempt: 1,
+          max_attempts: 3,
+          exit_code: 0,
+          error_class: null,
+          error_detail: null,
+          outcome: "applied",
+          progress: {
+            stages: [{ stage: "standardize" }, { stage: "match" }, { stage: "reconcile" }],
+          },
+        },
+        {
+          job_id: "01jm000000000000000000000a",
+          org: "acme-dev",
+          kind: "train",
+          params: {},
+          state: "succeeded",
+          priority: 0,
+          idempotency_key: "bootstrap-train",
+          run_id: null,
+          attempt: 1,
+          max_attempts: 3,
+          exit_code: 0,
+          error_class: null,
+          error_detail: null,
+          outcome: "model_activated",
+          progress: { stages: [{ stage: "train" }] },
+        },
+      ],
+    },
+    reviews: {
+      "acme-dev": Array.from({ length: 14 }, (_, index) => ({
+        review_id: `rev-${String(index + 1).padStart(3, "0")}`,
+        a: `crm:${String(1000 + index)}`,
+        b: `webforms:${String(2000 + index)}`,
+        match_probability: 0.82,
+        reason: "gray_band",
+        status: "open",
+      })),
+    },
   };
 }
 
@@ -68,6 +136,17 @@ const server = http.createServer((req, res) => {
   if ((match = /^\/v1\/orgs\/([^/]+)\/metrics$/.exec(path)) && req.method === "GET") {
     const metrics = state.metrics[match[1]];
     return metrics ? send(res, 200, metrics) : send(res, 503, { detail: "lake unavailable" });
+  }
+  if ((match = /^\/v1\/orgs\/([^/]+)\/runs$/.exec(path)) && req.method === "GET") {
+    return send(res, 200, state.runs[match[1]] ?? []);
+  }
+  if ((match = /^\/v1\/orgs\/([^/]+)\/jobs$/.exec(path)) && req.method === "GET") {
+    const limit = Number(url.searchParams.get("limit") ?? 50);
+    return send(res, 200, (state.jobs[match[1]] ?? []).slice(0, limit));
+  }
+  if ((match = /^\/v1\/orgs\/([^/]+)\/reviews$/.exec(path)) && req.method === "GET") {
+    const limit = Number(url.searchParams.get("limit") ?? 100);
+    return send(res, 200, (state.reviews[match[1]] ?? []).slice(0, limit));
   }
 
   return send(res, 404, { detail: "not found" });
