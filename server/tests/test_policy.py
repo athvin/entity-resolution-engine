@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from erserver.policy import FAILED, QUEUED, SUCCEEDED, dispose
+from erserver.policy import FAILED, JOB_KINDS, QUEUED, SCHEDULABLE_KINDS, SUCCEEDED, dispose
 
 
 def test_success_and_no_op_are_both_terminal_successes() -> None:
@@ -62,3 +62,9 @@ def test_a_dead_runner_is_infra_and_retries_with_resume() -> None:
 @pytest.mark.parametrize("attempt", [2, 5])
 def test_infra_retries_also_respect_max_attempts(attempt: int) -> None:
     assert dispose(None, "infra", attempt=attempt, max_attempts=3).state == FAILED
+
+
+def test_provision_is_a_kind_but_never_schedulable() -> None:
+    assert "provision" in JOB_KINDS
+    assert "provision" not in SCHEDULABLE_KINDS
+    assert set(SCHEDULABLE_KINDS) < set(JOB_KINDS)

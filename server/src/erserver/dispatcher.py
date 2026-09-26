@@ -34,7 +34,7 @@ import psycopg
 from ulid import ULID
 
 from erserver import db, queue, schedules, steward, webhooks
-from erserver.policy import CANCELING, dispose
+from erserver.policy import CANCELING, SUCCEEDED, dispose
 from erserver.secrets import UnresolvedSecretError, resolve_env
 from erserver.settings import ServerSettings
 
@@ -272,6 +272,10 @@ def run_once(connection: psycopg.Connection, *, launch: LaunchFn = launch_runner
         error_class=error_class,
         error_detail=error_detail,
     )
+    if job.kind == "provision" and disposition.state == SUCCEEDED:
+        # The org's lake exists: onboarding is complete and jobs may flow.
+        # ``expected`` makes an operator's re-provision of an active org a no-op.
+        queue.set_org_state(connection, job.org, "active", expected="provisioning")
     _deliver_async(
         connection,
         job.org,
@@ -302,7 +306,9 @@ def tick_schedules(connection: psycopg.Connection) -> int:
                 idempotency_key=f"sched:{schedule.schedule_id}:{fire.isoformat()}",
             )
             enqueued += 1
-        except queue.UnknownOrgError:
+        except (queue.UnknownOrgError, queue.OrgNotActiveError):
+            # A provisioning or suspended org's cron fires must not crash the
+            # leader loop; the anchor still advances, so nothing backlogs.
             pass
         schedules.record_enqueued(connection, schedule.schedule_id, fire)
     return enqueued

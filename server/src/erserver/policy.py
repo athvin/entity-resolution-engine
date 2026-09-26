@@ -19,6 +19,7 @@ __all__ = [
     "FAILED",
     "JOB_KINDS",
     "QUEUED",
+    "SCHEDULABLE_KINDS",
     "RUNNING",
     "STATES",
     "SUCCEEDED",
@@ -51,7 +52,19 @@ ACTIVE_STATES: tuple[str, ...] = (DISPATCHING, RUNNING, CANCELING)
 
 #: The pipeline work the dispatcher knows how to run (docs/backend-design.md §5).
 #: ``train`` is deliberately a separate kind: S4.0 says run-all never trains.
-JOB_KINDS: tuple[str, ...] = ("run_all_full", "run_all_incremental", "correct", "train")
+#: ``provision`` is tenant lifecycle work (§7): create the tenant's dedicated
+#: catalog database and run ``er init`` — the one kind an org may run before it
+#: is active.
+JOB_KINDS: tuple[str, ...] = (
+    "run_all_full",
+    "run_all_incremental",
+    "correct",
+    "train",
+    "provision",
+)
+
+#: Kinds a tenant may put on a cron; provision is lifecycle work, not a cadence.
+SCHEDULABLE_KINDS: tuple[str, ...] = ("run_all_full", "run_all_incremental", "correct", "train")
 
 #: Fixed backoff for a lock conflict: the dispatcher serializes per org, so a
 #: conflict means an out-of-band writer (an operator's CLI run) holds the lock.

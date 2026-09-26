@@ -74,6 +74,16 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
     # Orgs grew columns after the skeleton; additive and idempotent.
     "ALTER TABLE orgs ADD COLUMN IF NOT EXISTS drop_root text",
     "ALTER TABLE orgs ADD COLUMN IF NOT EXISTS active_config_version integer",
+    # Org lifecycle (docs/backend-design.md §7). Rows that predate the column
+    # were provisioned manually and are therefore active. CHECK has no
+    # IF NOT EXISTS, so drop-then-add is the idempotency idiom, as with
+    # jobs_one_active_per_org above.
+    "ALTER TABLE orgs ADD COLUMN IF NOT EXISTS state text NOT NULL DEFAULT 'active'",
+    "ALTER TABLE orgs DROP CONSTRAINT IF EXISTS orgs_state_check",
+    """
+    ALTER TABLE orgs ADD CONSTRAINT orgs_state_check
+      CHECK (state IN ('provisioning', 'active', 'suspended', 'purging'))
+    """,
     """
     CREATE TABLE IF NOT EXISTS api_keys (
       key_id     text PRIMARY KEY,

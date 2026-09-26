@@ -24,7 +24,7 @@ dependencies = [
 [project.optional-dependencies]
 # The server's own test suite (server/tests) runs from the repo root with:
 #   uv run --project server --extra test pytest server/tests
-test = ["pytest>=9,<10", "mypy>=2.3,<3"]
+test = ["pytest>=9,<10", "mypy>=2.3,<3", "types-PyYAML>=6"]
 
 [tool.uv.sources]
 er = { path = "..", editable = true }
