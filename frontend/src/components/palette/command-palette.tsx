@@ -1,30 +1,62 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
+import { useQuery } from "@tanstack/react-query";
 import { Command } from "cmdk";
-import { Building2, LogOut, Moon, Sun } from "lucide-react";
+import { Building2, Eye, LogOut, Moon, ShieldCheck, Sun, User } from "lucide-react";
 
 import { bffFetch } from "@/lib/api/client";
-import type { Membership } from "@/lib/auth/types";
+import type { Membership, SessionUser } from "@/lib/auth/types";
 import { NAV_ITEMS } from "@/lib/nav";
+import { useImpersonation, type AdminOrgRow } from "@/lib/query/admin";
+import type { GoldenPage } from "@/lib/query/hooks";
 
 interface CommandPaletteProps {
   org: string;
+  user: SessionUser;
   memberships: Membership[];
+  impersonating: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
+const GROUP_CLASS =
+  "[&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium";
+const ITEM_CLASS =
+  "data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground flex min-h-11 cursor-default items-center gap-3 rounded-md px-3 text-sm data-[disabled=true]:opacity-50 lg:min-h-9";
+
+function useDebounced(value: string, ms: number): string {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebounced(value);
+    }, ms);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [value, ms]);
+  return debounced;
+}
+
 /**
- * The ⌘K palette — the spine of the app (design doc §3.2). M1 resolves pages,
- * workspaces, theme and session; records/runs/tenants/actions join as their
- * screens land.
+ * The ⌘K palette — the spine of the app (design doc §3.2). Resolves pages,
+ * golden records (live search), workspaces, operator commands, theme, session.
  */
-export function CommandPalette({ org, memberships, open, onOpenChange }: CommandPaletteProps) {
+export function CommandPalette({
+  org,
+  user,
+  memberships,
+  impersonating,
+  open,
+  onOpenChange,
+}: CommandPaletteProps) {
   const router = useRouter();
   const { setTheme } = useTheme();
+  const { enter, exit } = useImpersonation();
+  const [input, setInput] = useState("");
+  const q = useDebounced(input.trim(), 200);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -39,8 +71,24 @@ export function CommandPalette({ org, memberships, open, onOpenChange }: Command
     };
   }, [open, onOpenChange]);
 
+  const records = useQuery({
+    queryKey: ["org", org, "palette-records", q],
+    queryFn: () =>
+      bffFetch<GoldenPage>(`/api/orgs/${org}/golden-records?q=${encodeURIComponent(q)}&limit=6`),
+    enabled: open && q.length >= 2,
+    staleTime: 10_000,
+  });
+
+  const adminOrgs = useQuery({
+    queryKey: ["admin", "palette-orgs"],
+    queryFn: () => bffFetch<AdminOrgRow[]>("/api/admin/orgs"),
+    enabled: open && user.isSuperAdmin && !impersonating,
+    staleTime: 30_000,
+  });
+
   function run(action: () => void) {
     onOpenChange(false);
+    setInput("");
     action();
   }
 
@@ -53,7 +101,9 @@ export function CommandPalette({ org, memberships, open, onOpenChange }: Command
       overlayClassName="fixed inset-0 z-50 bg-black/50"
     >
       <Command.Input
-        placeholder="Type a page, workspace or command…"
+        value={input}
+        onValueChange={setInput}
+        placeholder="Search records, pages, commands…"
         className="placeholder:text-muted-foreground h-14 w-full border-b bg-transparent px-4 text-base outline-none lg:h-12 lg:text-sm"
       />
       <Command.List className="max-h-[calc(100dvh-3.5rem)] overflow-y-auto p-2 lg:max-h-96">
@@ -61,10 +111,35 @@ export function CommandPalette({ org, memberships, open, onOpenChange }: Command
           Nothing matches.
         </Command.Empty>
 
-        <Command.Group
-          heading="Pages"
-          className="[&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium"
-        >
+        {(records.data?.items.length ?? 0) > 0 && (
+          <Command.Group heading="Records" className={GROUP_CLASS}>
+            {records.data?.items.map((record) => {
+              const name =
+                [record.given_name, record.family_name].filter(Boolean).join(" ") ||
+                record.entity_id;
+              return (
+                <Command.Item
+                  key={record.entity_id}
+                  value={`record ${name} ${record.email ?? ""} ${record.entity_id}`}
+                  onSelect={() => {
+                    run(() => {
+                      router.push(`/${org}/records/${record.entity_id}`);
+                    });
+                  }}
+                  className={ITEM_CLASS}
+                >
+                  <User className="size-4" />
+                  <span className="min-w-0 truncate">{name}</span>
+                  <span className="text-muted-foreground ml-auto truncate text-xs">
+                    {record.email ?? ""}
+                  </span>
+                </Command.Item>
+              );
+            })}
+          </Command.Group>
+        )}
+
+        <Command.Group heading="Pages" className={GROUP_CLASS}>
           {NAV_ITEMS.map((item) => (
             <Command.Item
               key={item.id}
@@ -74,7 +149,7 @@ export function CommandPalette({ org, memberships, open, onOpenChange }: Command
                   router.push(item.path(org));
                 });
               }}
-              className="data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground flex min-h-11 cursor-default items-center gap-3 rounded-md px-3 text-sm data-[disabled=true]:opacity-50 lg:min-h-9"
+              className={ITEM_CLASS}
             >
               <item.icon className="size-4" />
               {item.label}
@@ -88,10 +163,7 @@ export function CommandPalette({ org, memberships, open, onOpenChange }: Command
         </Command.Group>
 
         {memberships.length > 1 && (
-          <Command.Group
-            heading="Workspaces"
-            className="[&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium"
-          >
+          <Command.Group heading="Workspaces" className={GROUP_CLASS}>
             {memberships.map((membership) => (
               <Command.Item
                 key={membership.org}
@@ -100,7 +172,7 @@ export function CommandPalette({ org, memberships, open, onOpenChange }: Command
                     router.push(`/${membership.org}/dashboard`);
                   });
                 }}
-                className="data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground flex min-h-11 cursor-default items-center gap-3 rounded-md px-3 text-sm lg:min-h-9"
+                className={ITEM_CLASS}
               >
                 <Building2 className="size-4" />
                 Open {membership.org}
@@ -109,17 +181,61 @@ export function CommandPalette({ org, memberships, open, onOpenChange }: Command
           </Command.Group>
         )}
 
-        <Command.Group
-          heading="Preferences"
-          className="[&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium"
-        >
+        {user.isSuperAdmin && !impersonating && (
+          <Command.Group heading="Operator" className={GROUP_CLASS}>
+            <Command.Item
+              value="operator console tenants"
+              onSelect={() => {
+                run(() => {
+                  router.push("/admin/tenants");
+                });
+              }}
+              className={ITEM_CLASS}
+            >
+              <ShieldCheck className="size-4" />
+              Operator console
+            </Command.Item>
+            {(adminOrgs.data ?? []).slice(0, 8).map((row) => (
+              <Command.Item
+                key={row.name}
+                value={`view as ${row.name} ${row.display_name}`}
+                disabled={row.state !== "active" || !row.has_credentials}
+                onSelect={() => {
+                  run(() => {
+                    enter.mutate({ org: row.name, role: "admin" });
+                  });
+                }}
+                className={ITEM_CLASS}
+              >
+                <Eye className="size-4" />
+                View {row.name} as admin
+              </Command.Item>
+            ))}
+          </Command.Group>
+        )}
+
+        <Command.Group heading="Preferences" className={GROUP_CLASS}>
+          {impersonating && (
+            <Command.Item
+              value="exit impersonation stop viewing"
+              onSelect={() => {
+                run(() => {
+                  exit.mutate();
+                });
+              }}
+              className={ITEM_CLASS}
+            >
+              <Eye className="size-4" />
+              Exit impersonation
+            </Command.Item>
+          )}
           <Command.Item
             onSelect={() => {
               run(() => {
                 setTheme("light");
               });
             }}
-            className="data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground flex min-h-11 cursor-default items-center gap-3 rounded-md px-3 text-sm lg:min-h-9"
+            className={ITEM_CLASS}
           >
             <Sun className="size-4" />
             Light theme
@@ -130,7 +246,7 @@ export function CommandPalette({ org, memberships, open, onOpenChange }: Command
                 setTheme("dark");
               });
             }}
-            className="data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground flex min-h-11 cursor-default items-center gap-3 rounded-md px-3 text-sm lg:min-h-9"
+            className={ITEM_CLASS}
           >
             <Moon className="size-4" />
             Dark theme
@@ -144,7 +260,7 @@ export function CommandPalette({ org, memberships, open, onOpenChange }: Command
                 });
               });
             }}
-            className="data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground flex min-h-11 cursor-default items-center gap-3 rounded-md px-3 text-sm lg:min-h-9"
+            className={ITEM_CLASS}
           >
             <LogOut className="size-4" />
             Sign out

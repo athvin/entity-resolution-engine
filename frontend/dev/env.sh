@@ -15,18 +15,19 @@ export ERSERVER_TENANT_DSN_TEMPLATE="postgresql://postgres:er@localhost:5434/{db
 export ERSERVER_CONFIG_ROOT="${STATE_DIR}/configs"
 export ERSERVER_DROP_ROOT="${STATE_DIR}/drop"
 export ERSERVER_LAKE_DATA_PATH_TEMPLATE="s3://lake/tenants/{ns}/"
-export ERSERVER_TENANT_ENV_JSON='{
-  "ER_S3_ENDPOINT": "localhost:9000",
-  "ER_S3_ACCESS_KEY_ID": "minioadmin",
-  "ER_S3_SECRET_ACCESS_KEY": "minioadmin",
-  "ER_S3_REGION": "us-east-1",
-  "ER_S3_URL_STYLE": "path",
-  "ER_S3_USE_SSL": "false",
-  "ER_LAKE_ALIAS": "lake",
-  "ER_DUCKDB_THREADS": "4",
-  "ER_DUCKDB_MEMORY_LIMIT": "4GB",
-  "DBT_PROFILES_DIR": "dbt/profiles"
-}'
+export ERSERVER_TENANT_ENV_JSON="{
+  \"ER_S3_ENDPOINT\": \"localhost:9000\",
+  \"ER_S3_ACCESS_KEY_ID\": \"minioadmin\",
+  \"ER_S3_SECRET_ACCESS_KEY\": \"minioadmin\",
+  \"ER_S3_REGION\": \"us-east-1\",
+  \"ER_S3_URL_STYLE\": \"path\",
+  \"ER_S3_USE_SSL\": \"false\",
+  \"ER_LAKE_ALIAS\": \"lake\",
+  \"ER_DUCKDB_THREADS\": \"4\",
+  \"ER_DUCKDB_MEMORY_LIMIT\": \"4GB\",
+  \"ER_DUCKDB_EXTENSION_DIR\": \"${STATE_DIR}/ext\",
+  \"DBT_PROFILES_DIR\": \"dbt/profiles\"
+}"
 
 # BFF (Next.js server side)
 export ERSERVER_BASE_URL="http://localhost:8000"

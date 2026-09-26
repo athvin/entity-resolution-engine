@@ -10,6 +10,8 @@ export const USERS = {
 
 export const PASSWORD = "password-123!";
 export const ORG = "acme-dev";
+/** Reserved for tests that mutate mock state; never pixel-compared. */
+export const ORG_MUTABLE = "mutable-dev";
 
 /** Sign in through the real BFF; page.request shares the page's cookie jar. */
 export async function login(page: Page, email: string): Promise<void> {

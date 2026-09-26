@@ -44,12 +44,26 @@ export interface EffectiveOrgAccess {
   viaOperator: boolean;
 }
 
-/** Resolve what the acting user may do inside `org`; impersonation (M2) hooks in here. */
+/** Resolve what the acting user may do inside `org`. */
 export async function requireOrgAccess(
   org: string,
   minimum: Membership["role"],
 ): Promise<EffectiveOrgAccess> {
   const identity = await requireIdentity();
+
+  // An active impersonation REPLACES the super admin's powers entirely: the
+  // impersonated role is enforced with the org's real stored key, and every
+  // other org answers 404 — "view as tenant" means seeing exactly what they see.
+  if (identity.impersonating && identity.user.isSuperAdmin) {
+    if (identity.impersonating.org !== org) {
+      throw new BffFailure(404, "not_found", "not found");
+    }
+    if (ROLE_RANK[identity.impersonating.role] < ROLE_RANK[minimum]) {
+      throw new BffFailure(403, "forbidden", `requires the ${minimum} role in ${org}`);
+    }
+    return { identity, org, role: identity.impersonating.role, viaOperator: false };
+  }
+
   const membership = identity.memberships.find((m) => m.org === org);
   if (membership) {
     if (ROLE_RANK[membership.role] < ROLE_RANK[minimum]) {
@@ -156,6 +170,13 @@ export async function forward<T>(
       // non-JSON upstream error body; the status is enough
     }
     throw mapUpstreamError(response.status, detail);
+  }
+  const method = options.method ?? "GET";
+  if (method !== "GET" && access.identity.impersonating) {
+    // Dual-identity trail: erserver's audit_log records "user:<email> via key:…";
+    // this row records that the person was a super admin acting as the tenant.
+    const { writeAudit } = await import("./audit");
+    await writeAudit(access.identity, "impersonated.mutation", { method, path }, access.org);
   }
   return (await response.json()) as T;
 }

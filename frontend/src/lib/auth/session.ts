@@ -78,7 +78,8 @@ export async function identityFromCookies(): Promise<Identity | null> {
   const memberships = await database
     .select({ org: schema.orgMembers.org, role: schema.orgMembers.role })
     .from(schema.orgMembers)
-    .where(eq(schema.orgMembers.userId, row.user.id));
+    .where(eq(schema.orgMembers.userId, row.user.id))
+    .orderBy(schema.orgMembers.org);
 
   const impersonation =
     row.session.impersonatingOrg &&

@@ -22,6 +22,9 @@ export const TEST_USERS = {
 } as const;
 
 export const TEST_ORG = "acme-dev";
+/** A second org reserved for tests that MUTATE state (job cancel/resume), so the
+ * pixel-compared acme-dev fixtures stay byte-stable under parallel projects. */
+export const TEST_ORG_MUTABLE = "mutable-dev";
 
 export async function installTestFixtures(db: Db): Promise<void> {
   const passwordHash = await hashPassword(TEST_PASSWORD);
@@ -33,7 +36,10 @@ export async function installTestFixtures(db: Db): Promise<void> {
   ].map((user) => ({ ...user, id: ulid().toLowerCase(), passwordHash }));
   await db.insert(schema.users).values(users);
 
-  await db.insert(schema.orgsRegistry).values({ org: TEST_ORG, displayName: "Acme (dev)" });
+  await db.insert(schema.orgsRegistry).values([
+    { org: TEST_ORG, displayName: "Acme (dev)" },
+    { org: TEST_ORG_MUTABLE, displayName: "Mutable (dev)" },
+  ]);
 
   const byEmail = new Map<string, string>(users.map((user) => [user.email, user.id]));
   const idOf = (email: string): string => {
@@ -45,19 +51,23 @@ export async function installTestFixtures(db: Db): Promise<void> {
     { userId: idOf(TEST_USERS.admin), org: TEST_ORG, role: "admin" },
     { userId: idOf(TEST_USERS.steward), org: TEST_ORG, role: "steward" },
     { userId: idOf(TEST_USERS.viewer), org: TEST_ORG, role: "viewer" },
+    { userId: idOf(TEST_USERS.admin), org: TEST_ORG_MUTABLE, role: "admin" },
+    { userId: idOf(TEST_USERS.steward), org: TEST_ORG_MUTABLE, role: "steward" },
   ]);
 
   const key = Buffer.from(env().ERWEB_CREDENTIAL_KEY, "base64");
   await db.insert(schema.orgCredentials).values(
-    (["viewer", "steward", "admin"] as const).map((role) => {
-      const sealed = seal(key, TEST_ORG, role, `erk_mock_${role}_secret`);
-      return {
-        org: TEST_ORG,
-        role,
-        keyId: `mock-${role}`,
-        ciphertext: sealed.ciphertext,
-        nonce: sealed.nonce,
-      };
-    }),
+    [TEST_ORG, TEST_ORG_MUTABLE].flatMap((org) =>
+      (["viewer", "steward", "admin"] as const).map((role) => {
+        const sealed = seal(key, org, role, `erk_mock_${role}_secret_${org}`);
+        return {
+          org,
+          role,
+          keyId: `mock-${org}-${role}`,
+          ciphertext: sealed.ciphertext,
+          nonce: sealed.nonce,
+        };
+      }),
+    ),
   );
 }

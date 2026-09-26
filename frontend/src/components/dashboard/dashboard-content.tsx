@@ -49,7 +49,7 @@ function describeRun(run: RunRow): string {
   const mode = typeof run.mode === "string" ? run.mode : "run";
   const status = typeof run.status === "string" ? run.status : "unknown";
   const started = typeof run.started_at === "string" ? run.started_at : undefined;
-  const finished = typeof run.finished_at === "string" ? run.finished_at : undefined;
+  const finished = typeof run.ended_at === "string" ? run.ended_at : undefined;
   let duration = "";
   if (started && finished) {
     const seconds = Math.round((Date.parse(finished) - Date.parse(started)) / 1000);

@@ -17,11 +17,15 @@ test.describe("dashboard", () => {
     await expect(page.getByTestId("snapshot-indicator")).toContainText("snapshot 42");
   });
 
-  test("shows the last run and the review-queue nudge", async ({ page }) => {
+  test("shows the last run, the active job, and honest nudges", async ({ page }) => {
     await expect(page.getByTestId("last-run-strip")).toContainText(
       "incremental — succeeded in 72s",
     );
+    await expect(page.getByTestId("active-job-strip")).toContainText("run_all_incremental");
     await expect(page.getByTestId("attention-nudges")).toContainText("14 reviews waiting");
+    await expect(page.getByTestId("attention-nudges")).toContainText(
+      "last job failed (transient_io)",
+    );
   });
 
   test("navigation matches the form factor", async ({ page, isMobile }) => {
