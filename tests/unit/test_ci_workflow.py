@@ -292,15 +292,26 @@ def test_frontend_job_runs_checks_then_the_mock_playwright_tier() -> None:
     )
     assert upload["with"]["name"] == "frontend-artifacts"
 
-    browser_cache = next(
-        step
-        for step in definition["steps"]
-        if str(step.get("uses", "")).startswith("actions/cache@")
+    # Visual baselines are only stable if CI renders in the exact image
+    # `make frontend-baselines` renders in, which in turn must ship the browsers
+    # of the pinned @playwright/test. One version, three places, one assertion.
+    import json
+
+    package = json.loads((REPO_ROOT / "frontend" / "package.json").read_text(encoding="utf-8"))
+    playwright_pin = package["devDependencies"]["@playwright/test"]
+    assert re.fullmatch(r"\d+\.\d+\.\d+", playwright_pin), (
+        "@playwright/test must be pinned exactly — the container tag cannot track a range"
     )
-    assert browser_cache["with"]["path"] == "~/.cache/ms-playwright"
-    assert "hashFiles('frontend/pnpm-lock.yaml')" in browser_cache["with"]["key"], (
-        "the browser cache must key on the lockfile, so a Playwright bump can never "
-        "hit a stale cache holding the previous browser build"
+    expected_image = f"mcr.microsoft.com/playwright:v{playwright_pin}-jammy"
+    assert definition["container"] == expected_image, (
+        f"the frontend job must run in {expected_image}; comparing screenshots rendered "
+        "on a bare runner against container-rendered baselines fails on font rasterization"
+    )
+    baseline_script = (REPO_ROOT / "frontend" / "dev" / "update-baselines.sh").read_text(
+        encoding="utf-8"
+    )
+    assert expected_image in baseline_script, (
+        "frontend/dev/update-baselines.sh must render in the same image the CI job uses"
     )
 
 
