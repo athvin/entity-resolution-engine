@@ -10,6 +10,15 @@ This module is the definition site of that read. ``lake/ducklake.py`` (ER-016) b
 its SQL literals *on top of* these functions rather than beside them, so there is one
 env convention and one spelling of the failure.
 
+Because it is the one reader, it is also the one place a *hosting process* can
+substitute a tenant's lake environment without mutating ``os.environ``:
+:func:`lake_environment` installs a contextvar overlay that :func:`require_env`
+consults before the process environment. A CLI invocation never enters the
+overlay and reads exactly what it always read; a server serving several tenants
+from one process enters it per request, and because it is a contextvar the
+overlay follows the task or thread the request runs on rather than leaking
+process-wide.
+
 Nothing here imports ``er.errors``: every exception below exposes an int ``code``,
 which is exactly the convention :func:`er.errors.exit_code_for` honours for the
 modules that must not drag the taxonomy into their import graph.
@@ -19,16 +28,44 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import ClassVar, Final
 
 __all__ = [
     "EnvError",
     "InvalidEnvError",
     "MissingEnvError",
+    "lake_environment",
+    "optional_env",
     "require_bool_env",
     "require_env",
     "require_int_env",
 ]
+
+#: The per-context overlay :func:`lake_environment` installs. ``None`` — the CLI
+#: case — means "read the process environment alone".
+_OVERLAY: ContextVar[Mapping[str, str] | None] = ContextVar("er_lake_env_overlay", default=None)
+
+
+@contextmanager
+def lake_environment(overrides: Mapping[str, str]) -> Iterator[None]:
+    """Read ``ER_*`` variables from ``overrides`` first, for this context only.
+
+    Merge semantics, not replacement: a name absent from ``overrides`` still
+    resolves from ``os.environ``, so a host process supplies the shared
+    substrate (catalog DSN, S3 credentials) once and each tenant's overlay adds
+    only what distinguishes it (metadata schema, data path) — the same split
+    S8.1 gives the test harness. Nested overlays shadow, restoring the outer
+    one on exit.
+    """
+    token = _OVERLAY.set({**(_OVERLAY.get() or {}), **overrides})
+    try:
+        yield
+    finally:
+        _OVERLAY.reset(token)
+
 
 # An optionally-signed run of ASCII digits and nothing else. `int()` is far more
 # permissive than the SQL positions these values reach: it accepts `1_0` as ten,
@@ -91,11 +128,29 @@ def require_env(name: str) -> str:
     while carrying no value, which is the failure this function exists to prevent.
     The value itself is returned unstripped — trailing space in a secret is the
     caller's business, not this function's.
+
+    An overlay installed by :func:`lake_environment` is consulted first; the
+    process environment answers for every name the overlay does not carry.
     """
-    value = os.environ.get(name)
+    overlay = _OVERLAY.get()
+    value = overlay.get(name) if overlay is not None and name in overlay else os.environ.get(name)
     if value is None or not value.strip():
         raise MissingEnvError(name)
     return value
+
+
+def optional_env(name: str) -> str | None:
+    """``$name`` through the same overlay-then-process resolution, or ``None``.
+
+    For the variables that are legitimately optional (``ER_DUCKDB_EXTENSION_DIR``);
+    an optional read that bypassed the overlay would give a hosted tenant the
+    host's value, which is exactly the leak :func:`lake_environment` exists to
+    prevent.
+    """
+    overlay = _OVERLAY.get()
+    if overlay is not None and name in overlay:
+        return overlay[name]
+    return os.environ.get(name)
 
 
 def require_int_env(name: str) -> int:

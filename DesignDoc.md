@@ -53,7 +53,7 @@ Build the entity resolution and golden record pipeline as a testable, benchmarka
 <a id="s2-1"></a>
 ## 2.1 Pinned Versions
 
-Every version below is a **literal pin**, not a floor. `er doctor` (S4.0) runs, at runtime, **every check below whose *Asserted by* cell names `er doctor`**, plus the six runtime assertions enumerated in T-DOCTOR-1 (S8.3); it prints one line per check and exits `1` if any check fails (`1` — not `3` — because a pin mismatch is a check failure under the S4.0 exit-code table, and exit `3` is reserved there for the five named precondition failures). The integration job runs `er doctor` as its first step. The three **Compose service images** are pinned by `@sha256:` **digest**, never by mutable tag; the Dockerfile's build-stage base images are pinned by tag (S7.3).
+Every version below is a **literal pin**, not a floor. `er doctor` (S4.0) runs, at runtime, **every check below whose *Asserted by* cell names `er doctor`**, plus the six runtime assertions enumerated in T-DOCTOR-1 (S8.3); it prints one line per check and exits `1` if any check fails (`1` — not `3` — because a pin mismatch is a check failure under the S4.0 exit-code table, and exit `3` is reserved there for the five named precondition failures). The integration job runs `er doctor` as its first step. The external catalog image and Go compiler image are pinned by `@sha256:` **digest**. MinIO services use the locally built pipeline image, with their source commits and archive SHA-256 checksums pinned below. Python and uv build inputs remain pinned by tag (S7.3).
 
 | Component | Pin | Why it is pinned | Asserted by |
 |---|---|---|---|
@@ -79,8 +79,9 @@ Every version below is a **literal pin**, not a floor. `er doctor` (S4.0) runs, 
 | `psycopg` | `psycopg[binary]==3.3.4` | The tenant advisory lock (S4.0b) and catalog-schema teardown must run on a Postgres connection the DuckLake attachment does not own, since the lock outlives every DuckDB connection in the process | `er doctor`; `uv.lock` |
 | `PyYAML` | `pyyaml==6.0.3`, `types-PyYAML==6.0.12.20260724` | The S6 config document is YAML and S4.0 loads it before any other stage runs, so the parser is a first-class runtime dependency and MUST be declared — it is currently reachable only as a dbt-core transitive, which would silently change or vanish under a dbt bump. PyYAML ships no `py.typed`, and mypy bundles no third-party stubs, so `mypy --strict src/er/config` cannot pass without the stub distribution; the alternatives are an `ignore_missing_imports` override or a hand-written `.pyi` typing `safe_load` as `Any`, both of which loosen the very gate this pin protects | `er doctor`; `uv.lock` |
 | Catalog image | `postgres:16@sha256:11a9d238fbb48bab14599c57e41123254452b1a2d93c6c8595bce96f346bd082` | DuckLake catalog; a floating `:16` tag silently changes the catalog engine under a committed lake. The digest is the multi-arch index digest, so it resolves on both amd64 CI and arm64 developer machines | `er doctor`: `server_version`; `docker/compose.yaml` |
-| Object store image | `minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e` | S3-compatible data-file store. **This image is EOL and unmaintained** — upstream archived it at this release and it receives no further security fixes. Retained as the v1 test/dev substrate only, pinned by digest so the substrate cannot drift; migration to a maintained S3-compatible store is an S13 risk row | `er doctor`: bucket round-trip; `docker/compose.yaml` |
-| Object-store init image | `minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727` | Bucket creation in `objectstore-init`; same EOL caveat as above | `docker/compose.yaml` |
+| Go build image | `golang:1.24.6-bookworm@sha256:ab1d1823abb55a9504d2e3e003b75b36dbeb1cbcc4c92593d85a84ee46becc6c` | Compiles the MinIO source releases; `GOTOOLCHAIN=local` prevents implicit compiler downloads. The multi-arch index supports amd64 CI and arm64 development | `docker/Dockerfile`; CI build |
+| Object store image | `minio/minio@07c3a429bfed433e49018cb0f78a52145d4bedeb` | Source for `RELEASE.2025-09-07T16-13-09Z`, compiled into `er-pipeline:ci`. Archive SHA-256: `8819e3e7817e46b7b3798f8f200ead208562e571563c2e040352378031abe9f2`. **EOL and unmaintained**; retained as the v1 test/dev substrate. Migration to a maintained S3-compatible store remains an S13 risk row | `er doctor`: bucket round-trip; `docker/Dockerfile`; `docker/compose.yaml` |
+| Object-store init image | `minio/mc@7394ce0dd2a80935aded936b09fa12cbb3cb8096` | Source for `RELEASE.2025-08-13T08-35-41Z`, compiled into `er-pipeline:ci`. Archive SHA-256: `95cd293c7119f16921a6dc515a1fb74a2227f19fd994b9c8b770a154e802ac44`. Creates the bucket; same EOL caveat as above | `docker/Dockerfile`; `docker/compose.yaml` |
 
 Rules governing this table:
 
@@ -1328,18 +1329,18 @@ services:
       retries: 30
 
   objectstore:                             # S3-compatible storage for DuckLake data files
-    # EOL upstream; pinned by digest so the substrate cannot drift (S2.1, S13)
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
-    command: server /data --console-address ":9001"
+    # Pinned source release compiled into the pipeline image (S2.1, S7.3).
+    <<: *er-image
+    command: minio server /data --console-address ":9001"
+    volumes:
+      - /data                             # preserve the upstream image's data-volume behavior
     environment:
       MINIO_ROOT_USER:     erminio         # >= 3 chars — MinIO refuses to start below the minimum
       MINIO_ROOT_PASSWORD: erminiopassword # >= 8 chars
-    # NO healthcheck: the server image ships no `mc` binary and holds no `local` alias, so a
-    # `mc ready local` probe can never pass, objectstore-init would never start, and the stack
-    # would hang exactly as it did before. Readiness is proven by objectstore-init instead.
+    # Readiness and bucket creation share the configured alias in objectstore-init.
 
   objectstore-init:                        # create the bucket; same credentials as the server
-    image: minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    <<: *er-image
     depends_on:
       objectstore: { condition: service_started }
     entrypoint:
@@ -1405,8 +1406,8 @@ Normative points on the file above:
 - `pipeline` and `benchmark` carry the identical `ER_*` set; `ER_CONFIG` is mandatory on both. Every variable in the environment contract appears exactly once, in `x-er-env`.
 - `deploy.resources.limits` is honoured by `docker compose` outside swarm mode. The three values `ER_CPU_LIMIT` / `ER_MEM_LIMIT` / `ER_DUCKDB_MEMORY_LIMIT` are the **resource envelope**, and the envelope is a property of the benchmark **scale**, not of this file: S10.2 owns the per-scale table and the S9.2 preflight exports the row before `docker compose` reads it. The defaults compiled in here — `2` / `6g` / `4GB` — are the `test` profile's envelope and are identical to S10.2's `smoke` and `10k` row, so the PR path fits a standard 2-vCPU / 8 GB hosted runner with RAM headroom for `catalog` and `objectstore` — the CPU value is a quota and deliberately reserves nothing for them (S10.2) — and a `100k` dispatch gets the larger envelope its larger runner can actually supply.
 - **`cpus` is a quota, not a cpuset.** `deploy.resources.limits.cpus` sets the cgroup CPU *quota* (`cpu.max` = quota/period); it does not restrict which cores are visible, so in-container `nproc` keeps reporting the **host** core count no matter what the limit says. That is why DuckDB must be told the number explicitly — it reads neither cgroup CPU nor cgroup memory limits and otherwise plans against host RAM and host core count. `ER_DUCKDB_THREADS` and `ER_DUCKDB_MEMORY_LIMIT` MUST be applied with `SET threads` / `SET memory_limit` on every connection the process opens (S4.0b), and the benchmark marks a run NON_COMPARABLE when the *measured cgroup quota and limit* disagree with the scale's envelope — the rule, including why it reads `cpu.max` rather than `nproc`, is normative in S10.4.
-- Every service image carries the literal `@sha256:` digest from the S2.1 pinned-versions table; a comment asserting that a digest ought to be there is not a pin. The object store image is unmaintained upstream; the pinned digest is deliberate and is tracked as a risk in S13.
-- **Object-store readiness.** `objectstore` declares no healthcheck, because no probe that works exists inside that image: `mc` is not installed in the server image and the server exposes `/minio/health/live` but the image ships no HTTP client to call it. `objectstore-init` therefore retries `mc alias set` for up to 60 s from the `minio/mc` image — which does have `mc` — then runs `mc ready local` and creates the bucket. Everything downstream gates on `objectstore-init` with `service_completed_successfully`, so bucket existence, not a container liveness guess, is the readiness signal. A healthcheck that can never pass is worse than none: it hangs the whole stack behind `condition: service_healthy`.
+- The catalog is pulled by its literal S2.1 digest. The other services use the locally built `er-pipeline:ci` with `pull_policy: never`; MinIO inputs are pinned by source commit and archive checksum. The object store remains unmaintained upstream, tracked as a risk in S13.
+- **Object-store readiness.** Both MinIO services use the pipeline image's compiled tools. `objectstore-init` configures its own alias, retrying `mc alias set` for up to 60 s, then runs `mc ready local` and creates the bucket. Everything downstream gates on `objectstore-init` with `service_completed_successfully`, so readiness includes bucket existence. No separate server healthcheck is required.
 
 <a id="s7-2"></a>
 ### 7.2 Lake attach sequence
@@ -1420,7 +1421,9 @@ Normative points on the file above:
 <a id="s7-3"></a>
 ### 7.3 `docker/Dockerfile`
 
-Multi-stage, single image, used by `pipeline`, `benchmark`, `catalog-init`, and later as the k8s job image.
+Multi-stage, single image, used by `pipeline`, `benchmark`, `catalog-init`, `objectstore`, `objectstore-init`, and later as the k8s job image.
+
+The `storage-builder` stage compiles the pinned MinIO and mc releases before the Python stages shown below. It fetches commit-addressed archives from `codeload.github.com` and verifies each S2.1 SHA-256 checksum with `ADD --checksum`. Builds use the pinned Go image, `CGO_ENABLED=0`, `GOTOOLCHAIN=local`, `GOFLAGS=-mod=readonly`, the upstream `kqueue` build tag, and fixed release/commit linker metadata. The runtime receives both binaries plus their LICENSE, NOTICE and CREDITS files. No MinIO registry pull or binary download occurs at service startup. Go modules remain checked by the upstream `go.sum` files.
 
 ```dockerfile
 # ---- builder ----
@@ -1446,6 +1449,9 @@ ENV PATH=/app/.venv/bin:$PATH \
     DBT_PROFILES_DIR=/app/dbt/profiles
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /opt/duckdb_extensions /opt/duckdb_extensions
+COPY --from=storage-builder /out/minio /out/mc /usr/local/bin/
+COPY --from=storage-builder /src/minio/LICENSE /src/minio/NOTICE /src/minio/CREDITS /usr/share/licenses/minio/
+COPY --from=storage-builder /src/mc/LICENSE /src/mc/NOTICE /src/mc/CREDITS /usr/share/licenses/mc/
 WORKDIR /app
 COPY src/ src/
 COPY dbt/ dbt/
@@ -1461,7 +1467,7 @@ CMD ["er", "--help"]
 
 - **The builder syncs twice on purpose.** `pyproject.toml` declares a `src/er` layout, so `uv sync --frozen` builds and installs the `er` project itself — which cannot work in a stage whose context holds only `pyproject.toml` and `uv.lock`. The first sync therefore passes `--no-install-project`: it resolves and installs the *dependencies*, which is the expensive layer and the one Docker should cache across source edits. `COPY src/` then invalidates only the second sync, which installs the project. `uv sync` installs the project in editable mode, which is why the runtime stage still copies `src/`.
 - **The dev dependency group is installed on purpose.** The `pipeline` service's command is `pytest`, and `benchmarks/scales.py` is called from the S9.2 preflight, so `pytest`, `pytest-xdist` and `hypothesis` (all pinned in S2.1) MUST be present in the runtime image. `uv sync --frozen --no-dev` would produce an image that cannot run the integration suite it exists to run.
-- Both base images (`python:3.12-slim`, `ghcr.io/astral-sh/uv:0.11.3`) are pinned by **tag**, matching the S2.1 Python and `uv` rows. The `@sha256:` digest requirement in S2.1 covers the three Compose *service* images, whose digests are literal in S7.1.
+- Python and uv images (`python:3.12-slim`, `ghcr.io/astral-sh/uv:0.11.3`) are pinned by **tag**, matching S2.1. The Go compiler and external catalog images are pinned by digest; MinIO source commits and archive checksums are pinned separately.
 - `benchmarks/baselines/` and `benchmarks/scales.py` ship inside the image, so the in-image comparison in S9.2 needs no bind mount and no runner toolchain.
 - `dbt` runs inside this image as a subprocess of the CLI, against `dbt/profiles/profiles.yml` (S9.1), which performs the S7.2 attach for its `lake` target.
 

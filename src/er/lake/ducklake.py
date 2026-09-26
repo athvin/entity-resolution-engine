@@ -35,7 +35,6 @@ and the spelling of its failure; this module adds the SQL escaping on top of it.
 
 from __future__ import annotations
 
-import os
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager
 from contextvars import ContextVar
@@ -44,7 +43,7 @@ from typing import Final
 
 import duckdb
 
-from er.lake.env import require_bool_env, require_env, require_int_env
+from er.lake.env import optional_env, require_bool_env, require_env, require_int_env
 from er.obs.profiling import profiled, span
 from er.obs.sql_profile import instrument_connection
 
@@ -125,7 +124,7 @@ def ducklake_uri(dsn: str) -> str:
 
 def _extension_directory() -> str:
     """The directory extensions are loaded from, with the S7.3 baked path as default."""
-    override = os.environ.get(EXTENSION_DIRECTORY_ENV)
+    override = optional_env(EXTENSION_DIRECTORY_ENV)
     if override is None or not override.strip():
         return EXTENSION_DIRECTORY_DEFAULT
     return override

@@ -1,0 +1,47 @@
+[project]
+name = "erserver"
+version = "0.1.0"
+description = "Control plane for the entity-resolution engine: jobs API, dispatcher, runner"
+requires-python = ">=3.12,<3.13"
+
+# The server is a STANDALONE uv project, not a workspace member, on purpose:
+# DesignDoc.md S2.1 makes the engine's dependency set closed and its
+# pyproject/uv.lock are contract-tested and copied verbatim into the pipeline
+# image build — so nothing at the repo root may reference this directory.
+# `er` is consumed as an editable path dependency; everything the engine pins
+# exactly (psycopg, pydantic, python-ulid) resolves to those pins here too.
+dependencies = [
+  "er",
+  "fastapi>=0.115,<1",
+  "uvicorn>=0.30,<1",
+  "psycopg[binary]>=3.2",
+  "python-ulid>=4",
+  "httpx>=0.27,<1",
+  "croniter>=2,<7",
+  "python-multipart>=0.0.9",
+]
+
+[project.optional-dependencies]
+# The server's own test suite (server/tests) runs from the repo root with:
+#   uv run --project server --extra test pytest server/tests
+test = ["pytest>=9,<10", "mypy>=2.3,<3"]
+
+[tool.uv.sources]
+er = { path = "..", editable = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/erserver"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src/erserver"]
+
+# croniter ships no type information; everything else here is typed.
+[[tool.mypy.overrides]]
+module = ["croniter", "croniter.*"]
+ignore_missing_imports = true

@@ -1,4 +1,5 @@
-# PR and main checks. Static and unit jobs precede 32 isolated integration shards.
+# PR and main checks. Static and unit jobs precede 32 isolated integration
+# shards; the server control plane tests in its own parallel job.
 name: ci
 
 on:
@@ -55,6 +56,38 @@ jobs:
           name: unit-artifacts
           path: artifacts/
           if-no-files-found: error
+
+  server:
+    # The erserver control plane (standalone uv project; see server/README.md).
+    # Bare + Postgres-backed suites; the lake E2E needs MinIO and stays local.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: er
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: 0.11.3
+          enable-cache: true
+          cache-dependency-glob: server/uv.lock
+      - run: uv sync --frozen --extra test
+        working-directory: server
+      - run: uv run --frozen --extra test mypy src/erserver
+        working-directory: server
+      - run: uv run --frozen --project server --extra test pytest server/tests -q
+        env:
+          ERSERVER_TEST_DSN: postgresql://postgres:er@localhost:5433/postgres
 
   integration:
     runs-on: ubuntu-latest
