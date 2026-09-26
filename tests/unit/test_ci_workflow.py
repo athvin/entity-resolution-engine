@@ -37,8 +37,13 @@ USES_LINE = re.compile(r"^\s*(?:-\s+)?uses:\s*(?P<ref>\S+)(?P<rest>.*)$")
 TAG_COMMENT = re.compile(r"^\s*#\s*(?P<tag>v[0-9][\w.-]*)\s*$")
 
 # S9.1's timeouts are the enforcement mechanism for the <10 min PR budget, not advice:
-# `static` and `unit` run concurrently, so the wall clock is max(10, 10) + 25.
-EXPECTED_TIMEOUTS = {"static": 10, "unit": 10, "integration": 25}
+# `static` and `unit` run concurrently, so the wall clock is max(10, 10) + 25. The
+# `server` job is off that critical path: it depends on nothing and nothing waits on it.
+EXPECTED_TIMEOUTS = {"static": 10, "unit": 10, "server": 15, "integration": 25}
+
+# The uv the setup action installs must be the S2.1 pin everywhere, but the cache key
+# differs: the server control plane is a standalone project with its own lockfile.
+EXPECTED_UV_CACHE_GLOBS = {"static": "uv.lock", "unit": "uv.lock", "server": "server/uv.lock"}
 
 # AC6. The order matters twice over: the cheap lints have to fail before the expensive
 # ones are paid for, and `uv sync --frozen` must precede everything that runs through it.
@@ -165,10 +170,10 @@ def test_job_graph_runs_static_and_unit_in_parallel() -> None:
 
     # The serial static -> unit -> integration chain paid for two `uv sync` runs ahead
     # of the expensive job and bought no extra signal (S9.1).
-    for name in ("static", "unit"):
+    for name in ("static", "unit", "server"):
         assert "needs" not in job(name), (
-            f"{name} must not depend on another job, or the two 10-minute jobs "
-            "serialise into 20 minutes of wall clock for the same result"
+            f"{name} must not depend on another job, or the parallel jobs "
+            "serialise into extra wall clock for the same result"
         )
     assert job("integration")["needs"] == ["static", "unit"]
 
@@ -186,7 +191,7 @@ def test_all_uses_are_sha_pinned_with_tag_comments() -> None:
 
     # S2.1's `uv` row: the action is pinned by SHA *and* told which uv to install, so
     # the runner resolves the lockfile with the version that produced it.
-    for name in ("static", "unit"):
+    for name, glob in EXPECTED_UV_CACHE_GLOBS.items():
         setup = next(
             step
             for step in job(name)["steps"]
@@ -194,7 +199,35 @@ def test_all_uses_are_sha_pinned_with_tag_comments() -> None:
         )
         assert setup["with"]["version"] == PINS["uv"].version
         assert setup["with"]["enable-cache"] is True
-        assert setup["with"]["cache-dependency-glob"] == "uv.lock"
+        assert setup["with"]["cache-dependency-glob"] == glob
+
+
+def test_server_job_runs_both_server_suites_against_a_real_postgres() -> None:
+    """The control plane's CI tier: strict mypy plus the bare and Postgres-backed suites.
+
+    The Postgres service is what makes the queue/dispatcher/auth tests run at all --
+    without ERSERVER_TEST_DSN they self-skip, and a job that silently skips 40 tests
+    reports the same green as one that ran them. The lake E2E additionally needs MinIO
+    and stays a local tier (server/README.md), which is why it is not asserted here.
+    """
+    definition = job("server")
+
+    postgres = definition["services"]["postgres"]
+    assert postgres["image"] == "postgres:16"
+    assert "pg_isready" in postgres["options"], (
+        "without a health command the steps race a Postgres that is still starting"
+    )
+
+    sync, mypy, pytest_step = (step for step in definition["steps"] if "run" in step)
+    assert sync["run"] == "uv sync --frozen --extra test"
+    assert sync["working-directory"] == "server"
+    assert mypy["run"] == "uv run --frozen --extra test mypy src/erserver"
+    assert mypy["working-directory"] == "server"
+    assert "pytest server/tests" in pytest_step["run"]
+    assert pytest_step["env"]["ERSERVER_TEST_DSN"].startswith("postgresql://"), (
+        "the DSN is what opts the Postgres-backed tier in; drop it and the suite "
+        "quietly shrinks to the bare tier"
+    )
 
 
 def test_cache_to_is_a_quoted_scalar() -> None:
