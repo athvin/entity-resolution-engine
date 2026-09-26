@@ -1,0 +1,71 @@
+{
+  "name": "er-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Standalone cloud UI for the entity-resolution engine (see docs/frontend-design.md)",
+  "packageManager": "pnpm@10.34.5",
+  "engines": {
+    "node": ">=22"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "unrs-resolver",
+      "@tailwindcss/oxide",
+      "sharp"
+    ]
+  },
+  "scripts": {
+    "dev": "next dev --port 3000",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint . --max-warnings 0",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:e2e:full": "playwright test --config playwright.e2e.config.ts",
+    "gen:api": "node scripts/gen-api-types.mjs",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "node scripts/db-migrate.mjs",
+    "check": "eslint . --max-warnings 0 && prettier --check . && tsc --noEmit && vitest run"
+  },
+  "dependencies": {
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "drizzle-orm": "^0.45.3",
+    "lucide-react": "^1.48.0",
+    "next": "16.3.6",
+    "openapi-fetch": "^0.17.0",
+    "postgres": "^3.4.9",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "server-only": "^0.0.1",
+    "tailwind-merge": "^3.7.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@next/eslint-plugin-next": "16.3.6",
+    "@playwright/test": "1.63.0",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.3",
+    "@types/node": "^26.6.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "drizzle-kit": "^0.31.11",
+    "eslint": "^10.11.0",
+    "eslint-config-next": "16.3.6",
+    "jsdom": "^30.1.1",
+    "openapi-typescript": "^7.13.0",
+    "prettier": "^3.9.9",
+    "prettier-plugin-tailwindcss": "^0.8.1",
+    "tailwindcss": "^4.3.3",
+    "typescript": "5.x",
+    "typescript-eslint": "^8.70.1",
+    "vitest": "^5.0.2"
+  }
+}

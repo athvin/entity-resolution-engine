@@ -38,8 +38,9 @@ TAG_COMMENT = re.compile(r"^\s*#\s*(?P<tag>v[0-9][\w.-]*)\s*$")
 
 # S9.1's timeouts are the enforcement mechanism for the <10 min PR budget, not advice:
 # `static` and `unit` run concurrently, so the wall clock is max(10, 10) + 25. The
-# `server` job is off that critical path: it depends on nothing and nothing waits on it.
-EXPECTED_TIMEOUTS = {"static": 10, "unit": 10, "server": 15, "integration": 25}
+# `server` and `frontend` jobs are off that critical path: each depends on nothing
+# and nothing waits on it.
+EXPECTED_TIMEOUTS = {"static": 10, "unit": 10, "server": 15, "frontend": 15, "integration": 25}
 
 # The uv the setup action installs must be the S2.1 pin everywhere, but the cache key
 # differs: the server control plane is a standalone project with its own lockfile.
@@ -66,10 +67,10 @@ EXPECTED_UNIT_RUN_STEPS = [
     "uv run pytest tests/unit -n auto -q --junitxml=artifacts/junit-unit.xml",
 ]
 
-# AC5: the three directories whose contents a `run:` step can name. A path under one of
+# AC5: the directories whose contents a `run:` step can name. A path under one of
 # them that does not exist is the M5-early-step failure mode, caught here rather than on
 # the first pull request.
-REPOSITORY_PATH = re.compile(r"\b(?:scripts|benchmarks|docker)/[\w./-]*[\w]")
+REPOSITORY_PATH = re.compile(r"\b(?:scripts|benchmarks|docker|frontend)/[\w./-]*[\w]")
 
 # AC1: what the wrapper must not contain. Named here rather than in the script, so the
 # script itself stays free of the tokens the assertion looks for.
@@ -135,7 +136,7 @@ def upload_steps() -> list[dict[str, Any]]:
         for step in definition["steps"]
         if str(step.get("uses", "")).startswith("actions/upload-artifact@")
     ]
-    assert len(steps) == 2, "S9.1 uploads exactly two artifact sets: unit and integration"
+    assert len(steps) == 3, "exactly three artifact sets upload: unit, integration and frontend"
     return steps
 
 
@@ -170,7 +171,7 @@ def test_job_graph_runs_static_and_unit_in_parallel() -> None:
 
     # The serial static -> unit -> integration chain paid for two `uv sync` runs ahead
     # of the expensive job and bought no extra signal (S9.1).
-    for name in ("static", "unit", "server"):
+    for name in ("static", "unit", "server", "frontend"):
         assert "needs" not in job(name), (
             f"{name} must not depend on another job, or the parallel jobs "
             "serialise into extra wall clock for the same result"
@@ -218,7 +219,7 @@ def test_server_job_runs_both_server_suites_against_a_real_postgres() -> None:
         "without a health command the steps race a Postgres that is still starting"
     )
 
-    sync, mypy, pytest_step = (step for step in definition["steps"] if "run" in step)
+    sync, mypy, pytest_step, drift = (step for step in definition["steps"] if "run" in step)
     assert sync["run"] == "uv sync --frozen --extra test"
     assert sync["working-directory"] == "server"
     assert mypy["run"] == "uv run --frozen --extra test mypy src/erserver"
@@ -227,6 +228,79 @@ def test_server_job_runs_both_server_suites_against_a_real_postgres() -> None:
     assert pytest_step["env"]["ERSERVER_TEST_DSN"].startswith("postgresql://"), (
         "the DSN is what opts the Postgres-backed tier in; drop it and the suite "
         "quietly shrinks to the bare tier"
+    )
+    # The frontend's committed OpenAPI snapshot is checked here — the only job with
+    # the server environment — so an API change cannot land without the frontend diff.
+    assert "scripts/ci/check_openapi_drift.py" in drift["run"]
+
+
+def test_frontend_job_runs_checks_then_the_mock_playwright_tier() -> None:
+    """The web UI's CI tier: lint/format/types/unit, then Playwright vs the mock erserver.
+
+    The order is the budget: the cheap npm-script checks fail before browsers are
+    downloaded and the app is built. `playwright install` names exactly the two
+    engines the device projects use (Chromium for desktop + Pixel, WebKit for the
+    iPhone project) — a bare `install` would pull Firefox too and pay for it on
+    every cache miss. The full-stack tier needs the seeded lake substrate and stays
+    local (`make frontend-e2e`), like the server lake E2E.
+    """
+    definition = job("frontend")
+
+    setup_pnpm = next(
+        step
+        for step in definition["steps"]
+        if str(step.get("uses", "")).startswith("pnpm/action-setup@")
+    )
+    # The version comes from packageManager in frontend/package.json — one pin, not two.
+    assert setup_pnpm["with"]["package_json_file"] == "frontend/package.json"
+
+    setup_node = next(
+        step
+        for step in definition["steps"]
+        if str(step.get("uses", "")).startswith("actions/setup-node@")
+    )
+    assert setup_node["with"]["node-version"] == "22"
+    assert setup_node["with"]["cache"] == "pnpm"
+    assert setup_node["with"]["cache-dependency-path"] == "frontend/pnpm-lock.yaml"
+
+    run_steps_in_order = [step for step in definition["steps"] if "run" in step]
+    commands = [step["run"] for step in run_steps_in_order]
+    assert commands == [
+        "pnpm install --frozen-lockfile",
+        "pnpm lint",
+        "pnpm format:check",
+        "pnpm typecheck",
+        "pnpm test",
+        "pnpm exec playwright install --with-deps chromium webkit",
+        "pnpm build",
+        "mkdir -p artifacts",
+        "pnpm test:e2e",
+    ]
+    for step in run_steps_in_order:
+        if step["run"].startswith("pnpm"):
+            assert step["working-directory"] == "frontend", (
+                f"{step['run']!r} must run in frontend/ — the repo root has no package.json"
+            )
+
+    playwright_step = run_steps_in_order[-1]
+    assert playwright_step["env"]["PLAYWRIGHT_ARTIFACTS_DIR"] == (
+        "${{ github.workspace }}/artifacts"
+    ), "the report must land in artifacts/ — the shared upload contract asserts that path"
+
+    upload = next(
+        step for step in definition["steps"] if "upload-artifact@" in str(step.get("uses", ""))
+    )
+    assert upload["with"]["name"] == "frontend-artifacts"
+
+    browser_cache = next(
+        step
+        for step in definition["steps"]
+        if str(step.get("uses", "")).startswith("actions/cache@")
+    )
+    assert browser_cache["with"]["path"] == "~/.cache/ms-playwright"
+    assert "hashFiles('frontend/pnpm-lock.yaml')" in browser_cache["with"]["key"], (
+        "the browser cache must key on the lockfile, so a Playwright bump can never "
+        "hit a stale cache holding the previous browser build"
     )
 
 

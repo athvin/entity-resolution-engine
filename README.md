@@ -76,6 +76,8 @@ experiments, including the cost of ordered and partitioned writes.
 | [Table relationships](docs/table-relationships.md) | Mermaid diagrams, table purposes and the validated 100,000-record catalog inventory |
 | [Performance](docs/performance.md) | Million-record benchmark, measured results and comparisons |
 | [Profiling](docs/profiling.md) | Detailed traces, SQL profiles and artifact interpretation |
+| [Backend design](docs/backend-design.md) | The multi-tenant control plane: orgs, jobs, config service and read path |
+| [Frontend design](docs/frontend-design.md) | Product design for the cloud UI: personas, screens, BFF and the phased plan |
 | [Contributing](CONTRIBUTING.md) | Local setup, tests and CI |
 | [Technical specification](DesignDoc.md) | Numbered schemas, algorithms and invariants referenced by tests |
 
@@ -90,6 +92,8 @@ are specific to the recorded corpus and resource limits.
 `src/er/` contains the CLI and engine; `dbt/` contains transformation models;
 `configs/` contains reference configurations; `fixtures/` and `tests/` define
 correctness checks; `benchmarks/` and `scripts/ci/` run measurements and validation.
-Generated outputs belong in the ignored `artifacts/` directory.
+`server/` is the multi-tenant control plane and `frontend/` the standalone web UI —
+each a standalone sub-project with its own lockfile (see `server/README.md` and
+`frontend/README.md`). Generated outputs belong in the ignored `artifacts/` directory.
 
 Licensed under [MIT](LICENSE).

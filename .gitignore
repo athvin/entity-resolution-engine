@@ -18,3 +18,10 @@ artifacts/
 *.duckdb
 *.duckdb.wal
 .DS_Store
+
+# Frontend build/test output and dev-stack state (frontend/.gitignore has the rest)
+frontend/node_modules/
+frontend/.next/
+frontend/playwright-report/
+frontend/test-results/
+frontend/dev/.state/
