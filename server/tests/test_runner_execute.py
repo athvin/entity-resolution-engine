@@ -74,3 +74,36 @@ def test_main_prints_one_result_line_and_exits_with_the_status(
 def test_unknown_kind_is_a_caller_bug() -> None:
     with pytest.raises(ValueError, match="unknown job kind"):
         runner.execute(payload(kind="sideways"))
+
+
+def test_provision_dispatches_to_the_provision_module(monkeypatch: pytest.MonkeyPatch) -> None:
+    from erserver import provision as provision_module
+
+    from er.service import RunOutcome
+
+    seen: dict[str, object] = {}
+
+    def fake_execute(params: dict[str, object], *, run_id: str) -> RunOutcome:
+        seen["params"], seen["run_id"] = params, run_id
+        return RunOutcome(
+            run_id=run_id,
+            mode="provision",
+            exit_code=0,
+            error_class=None,
+            error_detail=None,
+            stages=(),
+        )
+
+    monkeypatch.setattr(provision_module, "execute", fake_execute)
+    record = runner.execute(
+        {
+            "job_id": "job-p",
+            "kind": "provision",
+            "params": {"tenant": "t_x", "db_name": "er_t_x", "data_path": "s3://lake/t_x/"},
+            "config_path": str(TEST_CONFIG),
+            "run_id": RUN_ID,
+        }
+    )
+    assert (record["mode"], record["exit_code"], record["job_id"]) == ("provision", 0, "job-p")
+    assert seen["run_id"] == RUN_ID
+    assert seen["params"] == {"tenant": "t_x", "db_name": "er_t_x", "data_path": "s3://lake/t_x/"}

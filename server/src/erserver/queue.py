@@ -37,6 +37,7 @@ from erserver.policy import (
 
 __all__ = [
     "Job",
+    "OrgNotActiveError",
     "UnknownKindError",
     "UnknownOrgError",
     "cancel",
@@ -51,14 +52,20 @@ __all__ = [
     "mark_canceled",
     "mark_running",
     "org_row",
+    "org_state",
     "parse_result_line",
     "reap_stale",
     "resume_job",
+    "set_org_state",
 ]
 
 
 class UnknownOrgError(LookupError):
     """The org named by the request does not exist."""
+
+
+class OrgNotActiveError(RuntimeError):
+    """The org exists but is not accepting jobs in its current state."""
 
 
 class UnknownKindError(ValueError):
@@ -103,14 +110,21 @@ def ensure_org(
     config_path: str,
     env: dict[str, str] | None = None,
     drop_root: str | None = None,
+    state: str | None = None,
 ) -> None:
-    """Create or update the org row the dispatcher reads at launch time."""
+    """Create or update the org row the dispatcher reads at launch time.
+
+    ``state`` applies only on insert — a replayed create must never knock an
+    active org back to ``provisioning`` — and defaults to ``active`` for the
+    manually provisioned orgs that predate the lifecycle.
+    """
     with connection.cursor() as cursor:
         cursor.execute(
-            "INSERT INTO orgs (name, config_path, env, drop_root) VALUES (%s, %s, %s, %s) "
+            "INSERT INTO orgs (name, config_path, env, drop_root, state) "
+            "VALUES (%s, %s, %s, %s, coalesce(%s, 'active')) "
             "ON CONFLICT (name) DO UPDATE SET config_path = EXCLUDED.config_path, "
             "env = EXCLUDED.env, drop_root = EXCLUDED.drop_root",
-            (name, config_path, Jsonb(env or {}), drop_root),
+            (name, config_path, Jsonb(env or {}), drop_root, state),
         )
     connection.commit()
 
@@ -127,11 +141,47 @@ def org_record(connection: psycopg.Connection, name: str) -> dict[str, Any] | No
     """The full org row the API works from, or ``None``."""
     with connection.cursor(row_factory=dict_row) as cursor:
         cursor.execute(
-            "SELECT name, config_path, env, drop_root, active_config_version "
+            "SELECT name, config_path, env, drop_root, active_config_version, state "
             "FROM orgs WHERE name = %s",
             (name,),
         )
         return cursor.fetchone()
+
+
+def org_state(connection: psycopg.Connection, name: str) -> str | None:
+    """The org's lifecycle state, or ``None`` when it does not exist."""
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT state FROM orgs WHERE name = %s", (name,))
+        row = cursor.fetchone()
+    return None if row is None else str(row[0])
+
+
+def set_org_state(
+    connection: psycopg.Connection,
+    org: str,
+    state: str,
+    *,
+    expected: str | None = None,
+) -> bool:
+    """Transition the org's state; with ``expected``, only from that state.
+
+    Returns whether a row changed — a re-run of provision against an already
+    active org is then a visible no-op rather than a silent overwrite.
+    """
+    with connection.cursor() as cursor:
+        if expected is None:
+            cursor.execute(
+                "UPDATE orgs SET state = %s WHERE name = %s",
+                (state, org),
+            )
+        else:
+            cursor.execute(
+                "UPDATE orgs SET state = %s WHERE name = %s AND state = %s",
+                (state, org, expected),
+            )
+        changed = cursor.rowcount == 1
+    connection.commit()
+    return changed
 
 
 def enqueue(
@@ -149,11 +199,18 @@ def enqueue(
     Raises:
         UnknownOrgError: the org has no row — submission is not provisioning.
         UnknownKindError: ``kind`` is outside :data:`~erserver.policy.JOB_KINDS`.
+        OrgNotActiveError: the org is not ``active``. Only ``provision`` itself
+            is exempt — it must run while the org is still ``provisioning``.
     """
     if kind not in JOB_KINDS:
         raise UnknownKindError(f"unknown job kind: {kind!r}")
-    if org_row(connection, org) is None:
+    state = org_state(connection, org)
+    if state is None:
         raise UnknownOrgError(f"unknown org: {org!r}")
+    if kind != "provision" and state != "active":
+        raise OrgNotActiveError(
+            f"org {org!r} is {state}; jobs are accepted only when active"
+        )
     job_id = str(ULID())
     with connection.cursor(row_factory=dict_row) as cursor:
         cursor.execute(

@@ -20,7 +20,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from ulid import ULID
 
-from erserver.policy import JOB_KINDS
+from erserver.policy import SCHEDULABLE_KINDS
 
 __all__ = [
     "Schedule",
@@ -53,8 +53,10 @@ def _schedule(row: dict[str, Any]) -> Schedule:
 
 
 def _validate(kind: str, cron: str) -> None:
-    if kind not in JOB_KINDS:
-        raise ValueError(f"unknown job kind: {kind!r}")
+    if kind not in SCHEDULABLE_KINDS:
+        raise ValueError(
+            f"kind {kind!r} is not schedulable; one of {list(SCHEDULABLE_KINDS)}"
+        )
     if not croniter.is_valid(cron):
         raise ValueError(f"invalid cron expression: {cron!r}")
 

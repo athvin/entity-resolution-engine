@@ -33,7 +33,7 @@ from ulid import ULID
 from er.config.loader import ConfigValidationError, load_config
 from er.errors import ErError, exit_code_for
 from er.lake.env import EnvError
-from erserver import configsvc, db, queue, readapi, schedules, steward, webhooks
+from erserver import configsvc, db, provision, queue, readapi, schedules, steward, webhooks
 from erserver.auth import AuthError, Principal, audit, authenticate, issue_key, revoke_key
 from erserver.policy import JOB_KINDS, STATES
 from erserver.secrets import UnresolvedSecretError, resolve_env
@@ -54,7 +54,10 @@ _IMPORT_CHUNK_BYTES = 1024 * 1024
 
 class OrgIn(BaseModel):
     name: str = Field(min_length=1, max_length=128, pattern=r"^[a-z0-9][a-z0-9_-]*$")
-    config_path: str
+    #: Present: manual/BYO mode — the operator provisioned the lake out of band
+    #: and supplies everything. Absent: auto mode — the server derives the
+    #: namespace, seeds the config, and enqueues a provision job.
+    config_path: str | None = None
     env: dict[str, str] = Field(default_factory=dict)
     drop_root: str | None = None
 
@@ -189,17 +192,87 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
     # ------------------------------------------------------- operator: orgs
 
     @app.post("/v1/orgs", status_code=201)
-    def create_org(body: OrgIn, conn: Conn, caller: Caller) -> dict[str, str]:
+    def create_org(body: OrgIn, conn: Conn, caller: Caller) -> dict[str, Any]:
         guard(caller, body.name, "operator")
-        queue.ensure_org(
+        if body.config_path is not None:
+            # Manual/BYO mode: the operator provisioned the lake out of band,
+            # so the org starts active. A replay never touches state.
+            queue.ensure_org(
+                conn,
+                body.name,
+                config_path=body.config_path,
+                env=body.env,
+                drop_root=body.drop_root,
+                state="active",
+            )
+            audit(conn, caller.actor, body.name, "org.upsert", {"config_path": body.config_path})
+            return {"name": body.name}
+        # Auto mode: derive, seed, issue, enqueue. Every step is idempotent, so
+        # a replayed POST resumes onboarding instead of stranding the org.
+        try:
+            plan = provision.plan_for(resolved, body.name)
+            template_text = provision.seed_template_text(resolved)
+            yaml_text = provision.render_seed_config(template_text, plan)
+        except provision.ProvisioningNotConfigured as exc:
+            raise HTTPException(503, str(exc)) from exc
+        except ConfigValidationError as exc:
+            raise HTTPException(
+                500, f"seed config template invalid at {exc.pointer}: {exc}"
+            ) from exc
+        first_time = queue.org_record(conn, body.name) is None
+        if first_time:
+            queue.ensure_org(
+                conn,
+                body.name,
+                config_path=plan.config_path,
+                env=plan.env,
+                drop_root=plan.drop_root,
+                state="provisioning",
+            )
+        Path(plan.drop_root).mkdir(parents=True, exist_ok=True)
+        seeded = provision.seed_config(
+            conn, body.name, yaml_text, caller.actor, config_path=plan.config_path
+        )
+        response: dict[str, Any] = {
+            "name": body.name,
+            "tenant": plan.tenant,
+            "config_version": seeded["version"],
+        }
+        if first_time:
+            # Shown once, on the first POST only — a replay never re-issues.
+            key_id, admin_key = issue_key(conn, body.name, "admin")
+            response["admin_key_id"] = key_id
+            response["admin_key"] = admin_key
+        job = queue.enqueue(
             conn,
             body.name,
-            config_path=body.config_path,
-            env=body.env,
-            drop_root=body.drop_root,
+            "provision",
+            params={"tenant": plan.tenant, "db_name": plan.db_name, "data_path": plan.data_path},
+            idempotency_key=f"provision:{body.name}",
+            max_attempts=3,
         )
-        audit(conn, caller.actor, body.name, "org.upsert", {"config_path": body.config_path})
-        return {"name": body.name}
+        audit(
+            conn,
+            caller.actor,
+            body.name,
+            "org.provision",
+            {"db_name": plan.db_name, "tenant": plan.tenant, "job_id": job.job_id},
+        )
+        response["job_id"] = job.job_id
+        response["state"] = queue.org_state(conn, body.name)
+        return response
+
+    @app.get("/v1/orgs/{org}")
+    def org_detail(org: str, conn: Conn, caller: Caller) -> dict[str, Any]:
+        """The onboarding poll target: is my org active yet?"""
+        guard(caller, org, "viewer")
+        record = org_or_404(conn, org)
+        return {
+            "name": record["name"],
+            "state": record["state"],
+            "active_config_version": record["active_config_version"],
+            "drop_root": record["drop_root"],
+        }
 
     @app.post("/v1/orgs/{org}/api-keys", status_code=201)
     def create_key(org: str, body: KeyIn, conn: Conn, caller: Caller) -> dict[str, str]:
@@ -234,6 +307,8 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
             raise HTTPException(400, "Idempotency-Key header is required")
         if body.kind not in JOB_KINDS:
             raise HTTPException(422, f"unknown job kind {body.kind!r}; one of {list(JOB_KINDS)}")
+        if body.kind == "provision" and caller.role != "operator":
+            raise HTTPException(403, "provision jobs are operator-only")
         try:
             job = queue.enqueue(
                 conn,
@@ -246,6 +321,8 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
             )
         except queue.UnknownOrgError as exc:
             raise HTTPException(404, str(exc)) from exc
+        except queue.OrgNotActiveError as exc:
+            raise HTTPException(409, str(exc)) from exc
         audit(conn, caller.actor, org, "job.submit", {"job_id": job.job_id, "kind": body.kind})
         return JobOut.of(job)
 
@@ -368,6 +445,8 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
             raise HTTPException(exc.status, str(exc)) from exc
         except ConfigValidationError as exc:
             raise HTTPException(422, f"config error at {exc.pointer}: {exc}") from exc
+        except queue.OrgNotActiveError as exc:
+            raise HTTPException(409, str(exc)) from exc
         audit(conn, caller.actor, org, "config.publish", result)
         return result
 
@@ -427,13 +506,17 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
                         "sync bulk history into the drop dir directly",
                     )
                 sink.write(chunk)
-        job = queue.enqueue(
-            conn,
-            org,
-            "run_all_incremental",
-            params={"source": source, "path": record["drop_root"]},
-            idempotency_key=f"import:{delivery_id}",
-        )
+        try:
+            job = queue.enqueue(
+                conn,
+                org,
+                "run_all_incremental",
+                params={"source": source, "path": record["drop_root"]},
+                idempotency_key=f"import:{delivery_id}",
+            )
+        except queue.OrgNotActiveError as exc:
+            target.unlink(missing_ok=True)
+            raise HTTPException(409, str(exc)) from exc
         audit(
             conn,
             caller.actor,
@@ -668,13 +751,16 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
             },
         )
         if body.apply_now:
-            job = queue.enqueue(
-                conn,
-                org,
-                "run_all_incremental",
-                params={"skip_ingest": True},
-                idempotency_key=f"assert-apply:{ULID()}",
-            )
+            try:
+                job = queue.enqueue(
+                    conn,
+                    org,
+                    "run_all_incremental",
+                    params={"skip_ingest": True},
+                    idempotency_key=f"assert-apply:{ULID()}",
+                )
+            except queue.OrgNotActiveError as exc:
+                raise HTTPException(409, str(exc)) from exc
             result["apply_job"] = job.job_id
         return result
 

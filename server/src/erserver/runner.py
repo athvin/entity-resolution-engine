@@ -56,6 +56,10 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
             run_id=run_id,
             if_changed=bool(params.get("if_changed", False)),
         )
+    elif kind == "provision":
+        from erserver import provision
+
+        outcome = provision.execute(params, run_id=run_id or str(payload.get("job_id")))
     else:
         raise ValueError(f"unknown job kind: {kind!r}")
 

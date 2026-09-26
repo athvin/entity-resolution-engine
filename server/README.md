@@ -26,6 +26,23 @@ uv run --project server uvicorn --factory erserver.api:create_app
 uv run --project server python -m erserver.dispatcher
 ```
 
+Automatic tenant provisioning (`POST /v1/orgs` without `config_path`)
+additionally needs:
+
+```sh
+export ERSERVER_MAINT_DSN=postgresql://…            # role with CREATEDB (NOT superuser
+                                                    # in prod — a dedicated er_provisioner);
+                                                    # read by the runner at provision time
+export ERSERVER_TENANT_DSN_TEMPLATE='postgresql://…/{dbname}'  # each org's ER_CATALOG_DSN
+export ERSERVER_CONFIG_ROOT=/var/lib/er/configs     # server-managed {org}.yaml files
+export ERSERVER_DROP_ROOT=/var/lib/er/drop          # per-org drop dirs
+# optional:
+export ERSERVER_LAKE_DATA_PATH_TEMPLATE='s3://er-lake/{ns}/'   # the default
+export ERSERVER_CONFIG_TEMPLATE=…                   # defaults to the repo's configs/default.yaml
+export ERSERVER_TENANT_ENV_JSON='{"ER_S3_ENDPOINT":"…","ER_S3_SECRET_ACCESS_KEY":"secret://S3",…}'
+                                                    # shared ER_* merged into every new org's env
+```
+
 ## What exists
 
 - **Jobs** — Postgres `SKIP LOCKED` queue; one active job per org by unique
@@ -34,7 +51,21 @@ uv run --project server python -m erserver.dispatcher
   requeues without consuming an attempt); Idempotency-Key submission;
   cancel (SIGTERM, resumable) and resume; live per-stage heartbeats streamed
   off the engine's S5.2 stderr records. Kinds: `run_all_full`,
-  `run_all_incremental`, `correct`, `train`.
+  `run_all_incremental`, `correct`, `train`, `provision` (operator-only,
+  never schedulable).
+- **Tenant provisioning** — `POST /v1/orgs {"name": …}` (no `config_path`)
+  onboards a tenant end to end: the server derives the namespace
+  (`t_<org>_<hash>`), seeds config version 1 from `configs/default.yaml`,
+  issues a one-time admin key, and enqueues a `provision` job that creates the
+  org's **dedicated Postgres database** (`er_t_<org>_<hash>` — hard isolation:
+  no tenant's tables share a database with another's) and runs `er init`
+  inside it under the org's own S3 prefix. Orgs carry a lifecycle `state`
+  (`provisioning → active`, with `suspended`/`purging` reserved); every job
+  submission is refused with 409 until the provision job flips the org
+  active. `GET /v1/orgs/{org}` is the poll target. Passing `config_path`
+  keeps the old manual/BYO behavior: the operator provisioned out of band and
+  the org starts `active`. The whole flow is idempotent — a replayed POST
+  returns the same provision job and never re-issues the admin key.
 - **Auth** — org-scoped API keys (`erk_…`, hashed at rest) with
   admin/steward/viewer roles, operator token for provisioning, audit log on
   every mutation.
@@ -99,6 +130,11 @@ docker run -d --rm --name er-e2e-minio -p 9000:9000 \
 # create the `lake` bucket, then:
 ERSERVER_E2E=1 ERSERVER_TEST_DSN=postgresql://postgres:er@localhost:5433/postgres \
   uv run --project server --extra test pytest server/tests/test_lake_e2e.py
+
+# auto-provisioning end to end (same substrate): one POST → dedicated
+# database + er init + active org
+ERSERVER_E2E=1 ERSERVER_TEST_DSN=postgresql://postgres:er@localhost:5433/postgres \
+  uv run --project server --extra test pytest server/tests/test_provision_e2e.py
 ```
 
 ## Deliberately not built (design phases 4–5 / needs external systems)
