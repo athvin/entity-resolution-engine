@@ -296,6 +296,50 @@ def test_auto_mode_onboards_idempotently(
     assert replay_body["config_version"] == 1  # seed replays as a no-op
 
 
+def test_register_org_reports_exactly_one_creator(conn: psycopg.Connection) -> None:
+    name = f"tenant-{uuid.uuid4().hex[:8]}"
+    assert queue.register_org(conn, name, config_path="/tmp/a.yaml", state="provisioning")
+    # The second registration neither wins nor touches the existing row.
+    assert not queue.register_org(conn, name, config_path="/tmp/OTHER.yaml", state="active")
+    record = queue.org_record(conn, name)
+    assert record is not None
+    assert (record["config_path"], record["state"]) == ("/tmp/a.yaml", "provisioning")
+
+
+def test_replayed_post_repairs_a_missing_config_file(
+    conn: psycopg.Connection, auto_client: TestClient
+) -> None:
+    """A crash between the publish commit and the file write must self-heal."""
+    org = f"auto-{uuid.uuid4().hex[:8]}"
+    first = auto_client.post("/v1/orgs", json={"name": org}, headers=operator())
+    assert first.status_code == 201, first.text
+
+    record = queue.org_record(conn, org)
+    assert record is not None
+    config_file = Path(record["config_path"])
+    assert config_file.is_file()
+    seeded_text = config_file.read_text()
+    config_file.unlink()  # simulate the torn crash window
+
+    replay = auto_client.post("/v1/orgs", json={"name": org}, headers=operator())
+    assert replay.status_code == 201
+    assert replay.json()["config_version"] == 1  # still one published version
+    assert config_file.is_file()
+    assert config_file.read_text() == seeded_text
+
+
+def test_steward_actions_against_a_provisioning_org_are_409(
+    conn: psycopg.Connection, provisioning_org: str, bare_client: TestClient
+) -> None:
+    response = bare_client.post(
+        f"/v1/orgs/{provisioning_org}/assertions",
+        json={"kind": "never", "a": "crm:1", "b": "crm:2"},
+        headers=operator(),
+    )
+    assert response.status_code == 409
+    assert "provisioning" in response.json()["detail"]
+
+
 def test_ensure_schema_is_idempotent_with_the_state_column(conn: psycopg.Connection) -> None:
     db.ensure_schema(conn)
     db.ensure_schema(conn)

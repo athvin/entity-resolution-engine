@@ -219,16 +219,16 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
             raise HTTPException(
                 500, f"seed config template invalid at {exc.pointer}: {exc}"
             ) from exc
-        first_time = queue.org_record(conn, body.name) is None
-        if first_time:
-            queue.ensure_org(
-                conn,
-                body.name,
-                config_path=plan.config_path,
-                env=plan.env,
-                drop_root=plan.drop_root,
-                state="provisioning",
-            )
+        # The insert is the mutex: two racing POSTs get exactly one True, so
+        # the one-time admin key below is issued exactly once.
+        first_time = queue.register_org(
+            conn,
+            body.name,
+            config_path=plan.config_path,
+            env=plan.env,
+            drop_root=plan.drop_root,
+            state="provisioning",
+        )
         Path(plan.drop_root).mkdir(parents=True, exist_ok=True)
         seeded = provision.seed_config(
             conn, body.name, yaml_text, caller.actor, config_path=plan.config_path
@@ -704,6 +704,13 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
         conn: psycopg.Connection, org: str, caller: Principal, action: dict[str, Any]
     ) -> dict[str, Any]:
         record = org_or_404(conn, org)
+        if record["state"] != "active":
+            # Before the flip the tenant database may not even exist; refuse
+            # here rather than surface a raw connection error from the attach.
+            raise HTTPException(
+                409,
+                f"org {org!r} is {record['state']}; steward actions are accepted only when active",
+            )
         env = dict(record["env"] or {})
         tenant = org_tenant(record)
         try:

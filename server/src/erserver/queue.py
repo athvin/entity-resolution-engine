@@ -55,6 +55,7 @@ __all__ = [
     "org_state",
     "parse_result_line",
     "reap_stale",
+    "register_org",
     "resume_job",
     "set_org_state",
 ]
@@ -127,6 +128,32 @@ def ensure_org(
             (name, config_path, Jsonb(env or {}), drop_root, state),
         )
     connection.commit()
+
+
+def register_org(
+    connection: psycopg.Connection,
+    name: str,
+    *,
+    config_path: str,
+    env: dict[str, str] | None = None,
+    drop_root: str | None = None,
+    state: str = "active",
+) -> bool:
+    """Insert the org only if absent; returns whether this call created it.
+
+    The insert is the onboarding mutex: of two racing creators exactly one
+    gets ``True``, so one-time effects (the admin key) happen exactly once.
+    An existing row is left completely untouched.
+    """
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO orgs (name, config_path, env, drop_root, state) "
+            "VALUES (%s, %s, %s, %s, %s) ON CONFLICT (name) DO NOTHING RETURNING name",
+            (name, config_path, Jsonb(env or {}), drop_root, state),
+        )
+        created = cursor.fetchone() is not None
+    connection.commit()
+    return created
 
 
 def org_row(connection: psycopg.Connection, name: str) -> tuple[str, dict[str, str]] | None:

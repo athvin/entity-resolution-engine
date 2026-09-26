@@ -180,6 +180,25 @@ def render_seed_config(template_text: str, plan: TenantPlan) -> str:
     return rendered
 
 
+def _write_config_file(config_path: str, yaml_text: str) -> None:
+    """Atomic swap, as configsvc.publish does: a runner starting mid-seed
+    reads a whole document or none."""
+    target = Path(config_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, staged = tempfile.mkstemp(dir=target.parent, suffix=".yaml.tmp")
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        handle.write(yaml_text)
+    os.replace(staged, target)
+
+
+def _seed_lock_key(org: str) -> int:
+    """A signed-bigint advisory key in its own domain — same recipe as the
+    engine's tenant lock (er.lake.catalog.advisory_lock_key), different
+    prefix so the two lock spaces cannot collide."""
+    digest = hashlib.blake2b(f"erserver:seed:{org}".encode(), digest_size=8).digest()
+    return int.from_bytes(digest, "big", signed=True)
+
+
 def seed_config(
     connection: psycopg.Connection,
     org: str,
@@ -194,44 +213,56 @@ def seed_config(
     for a tenant with no data, and refused by the state guard anyway — so this
     replicates its publish bookkeeping (stamp published, set the active
     version, atomic file write, correction-schedule sync) minus the jobs.
-    Replays no-op: an org with a published version keeps it.
+
+    Serialized per org by a session advisory lock, so concurrent onboarding
+    POSTs produce exactly one published version. A replay rewrites the config
+    file from the *stored* published version — which both repairs a crash
+    between the publish commit and the file write, and keeps the file matching
+    whatever version is actually live.
     """
     from erserver import configsvc, schedules
 
-    with connection.cursor(row_factory=dict_row) as cursor:
-        cursor.execute(
-            "SELECT version FROM config_versions "
-            "WHERE org = %s AND state = 'published' ORDER BY version DESC LIMIT 1",
-            (org,),
-        )
-        existing = cursor.fetchone()
-    if existing is not None:
-        return {"org": org, "version": int(existing["version"]), "replayed": True}
-
-    config, _ = configsvc.validate_yaml(yaml_text)
-    version = int(configsvc.create_version(connection, org, yaml_text, actor)["version"])
+    key = _seed_lock_key(org)
     with connection.cursor() as cursor:
-        cursor.execute(
-            "UPDATE config_versions SET state = 'published', tier = 'C', published_at = now() "
-            "WHERE org = %s AND version = %s",
-            (org, version),
-        )
-        cursor.execute(
-            "UPDATE orgs SET active_config_version = %s WHERE name = %s", (version, org)
-        )
-    connection.commit()
+        cursor.execute("SELECT pg_advisory_lock(%s)", (key,))
+    try:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(
+                "SELECT version, yaml FROM config_versions "
+                "WHERE org = %s AND state = 'published' ORDER BY version DESC LIMIT 1",
+                (org,),
+            )
+            existing = cursor.fetchone()
+        if existing is not None:
+            _write_config_file(config_path, str(existing["yaml"]))
+            return {"org": org, "version": int(existing["version"]), "replayed": True}
 
-    target = Path(config_path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    # Atomic swap, as configsvc.publish does: a runner starting mid-seed reads
-    # a whole document or none.
-    descriptor, staged = tempfile.mkstemp(dir=target.parent, suffix=".yaml.tmp")
-    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-        handle.write(yaml_text)
-    os.replace(staged, target)
+        config, _ = configsvc.validate_yaml(yaml_text)
+        version = int(configsvc.create_version(connection, org, yaml_text, actor)["version"])
+        # File before the publish commit: if either side dies, the replay path
+        # above reconverges (an unpublished draft is superseded by re-seeding;
+        # a published version rewrites its file).
+        _write_config_file(config_path, yaml_text)
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE config_versions SET state = 'published', tier = 'C', "
+                "published_at = now() WHERE org = %s AND version = %s",
+                (org, version),
+            )
+            cursor.execute(
+                "UPDATE orgs SET active_config_version = %s WHERE name = %s", (version, org)
+            )
+        connection.commit()
 
-    schedules.sync_correction_schedule(connection, org, config.correction_pass.cadence)
-    return {"org": org, "version": version, "replayed": False}
+        schedules.sync_correction_schedule(connection, org, config.correction_pass.cadence)
+        return {"org": org, "version": version, "replayed": False}
+    finally:
+        # An aborted transaction would refuse the unlock statement; the lock
+        # itself is session-scoped, so a dead connection releases it anyway.
+        connection.rollback()
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT pg_advisory_unlock(%s)", (key,))
+        connection.commit()
 
 
 def create_tenant_database(maint_dsn: str, db_name: str) -> bool:
