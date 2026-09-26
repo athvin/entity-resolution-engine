@@ -109,6 +109,31 @@ def test_metadata_refresh_is_independent_of_events_and_idempotent(metadata_lake)
     assert compute_touched_set(connection, "remove") == {"e": "rebuild"}
 
 
+def test_never_assembled_lake_contributes_no_metadata_work(metadata_lake):
+    """A lake where assemble has never run has no stored JSON to migrate or diff.
+
+    Touching every member here would turn an unchanged re-run into a full
+    assembly, which S4.0 forbids — T-DEL-1's AC8 re-run is exactly this state,
+    because the deletion scenario reaches its idempotency check without ever
+    building the golden marts.
+    """
+    connection = metadata_lake
+    connection.execute("DROP TABLE lake.main.golden_records")
+    assert compute_touched_set(connection, "fresh") == {}
+    assert materialize_touched_entities(connection, "fresh", touched_only=True) == (0, 0)
+
+
+def test_pre_metadata_golden_table_is_migrated_whole(metadata_lake):
+    """A table from before the metadata column is touched whole, exactly once."""
+    connection = metadata_lake
+    connection.execute("DROP TABLE lake.main.golden_records")
+    connection.execute("CREATE TABLE lake.main.golden_records(entity_id VARCHAR)")
+    assert compute_touched_set(connection, "upgrade") == {
+        "e": "rebuild",
+        "empty": "rebuild",
+    }
+
+
 @pytest.mark.parametrize("failure_mode", ["raise", "return"])
 def test_metadata_only_assembly_retries_after_golden_records_commits(
     metadata_lake, tmp_path, failure_mode

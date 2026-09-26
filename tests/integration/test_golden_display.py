@@ -253,13 +253,17 @@ def test_display_transforms_are_pinned(display: Display) -> None:
     stamp = scalar(connection, f"SELECT max(assembled_at) FROM {probe}")
     connection.execute(
         f"""
-        INSERT INTO {probe} VALUES
+        INSERT INTO {probe}
+          (entity_id, given_name, family_name, email, phone_e164,
+           addr_number, addr_street, addr_unit, addr_city, addr_region, addr_postal,
+           birth_date, metadata, survivorship_version, assembled_at)
+        VALUES
           ('01M0DISPLAYPROBE000000001', 'robert', 'chen', 'Robert.Chen@Example.COM',
            '+14155550132', '742', 'Evergreen Terrace', 'Apt 3', 'Springfield', 'OR',
-           '97477', DATE '1980-01-15', '1', ?),
+           '97477', DATE '1980-01-15', '{{}}', '1', ?),
           ('01M0DISPLAYPROBE000000002', NULL, 'okonkwo', NULL,
            '+442071838750', NULL, NULL, NULL, 'London', NULL, NULL,
-           NULL, '1', ?)
+           NULL, '{{}}', '1', ?)
         """,
         [stamp, stamp],
     )
