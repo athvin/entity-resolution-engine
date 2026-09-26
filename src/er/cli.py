@@ -1350,27 +1350,24 @@ def _run_command(
     raise typer.Exit(outcome.exit_code)
 
 
-def _run_chain(
+def _execute_chain(
     stages: Sequence[Stage],
     options: GlobalOptions,
     *,
     mode: str,
     model_version: str | None = None,
     rebuild_reason: str | None = None,
-) -> None:
-    """Execute a chain, apply the S4.0 propagation rule, and exit with its code.
+) -> tuple[int, list[_Outcome]]:
+    """Execute a chain under one :class:`~er.obs.runctx.RunContext` (S4.0).
 
-    ``10`` never aborts: a stage with nothing to do leaves the downstream stages
-    to discover the same thing for themselves. The first exit that is neither
-    ``0`` nor ``10`` stops the chain and becomes the process's status.
-
-    Unlike :func:`_run_single`, this does NOT take the writer lock: its one caller
-    holds it already, because with ``--resume`` the chain itself is only knowable from
-    `run_stages`, and reading that ledger while another writer is midway through it
-    would plan a restart from a stage that is running.
+    The propagation rule lives here and only here: ``10`` never aborts — a stage
+    with nothing to do leaves the downstream stages to discover the same thing for
+    themselves — and the first exit that is neither ``0`` nor ``10`` stops the
+    chain and becomes the final status. :func:`_run_chain` is the CLI's rendering
+    of the result; :mod:`er.service` consumes the outcomes directly.
     """
     final = int(ExitCode.SUCCESS)
-    executed = 0
+    outcomes: list[_Outcome] = []
     with _run_context(
         options, mode=mode, model_version=model_version, rebuild_reason=rebuild_reason
     ) as run:
@@ -1381,12 +1378,34 @@ def _run_chain(
                     "survivorship_version_bump",
                 )
             outcome = _execute(stage, options, run)
-            executed += 1
+            outcomes.append(outcome)
             if isinstance(stage, (_StandardizeStage, NoOpStage, NotImplementedStage)):
                 _report(outcome, options)
             if outcome.exit_code not in (ExitCode.SUCCESS, ExitCode.NOTHING_TO_DO):
                 final = outcome.exit_code
                 break
+    return final, outcomes
+
+
+def _run_chain(
+    stages: Sequence[Stage],
+    options: GlobalOptions,
+    *,
+    mode: str,
+    model_version: str | None = None,
+    rebuild_reason: str | None = None,
+) -> None:
+    """Execute a chain, apply the S4.0 propagation rule, and exit with its code.
+
+    Unlike :func:`_run_single`, this does NOT take the writer lock: its one caller
+    holds it already, because with ``--resume`` the chain itself is only knowable from
+    `run_stages`, and reading that ledger while another writer is midway through it
+    would plan a restart from a stage that is running.
+    """
+    final, outcomes = _execute_chain(
+        stages, options, mode=mode, model_version=model_version, rebuild_reason=rebuild_reason
+    )
+    executed = len(outcomes)
     _write_stdout(
         {"run_id": options.run_id, "stages": executed, "exit_code": final},
         f"run {options.run_id}: {executed} stage(s), exit {final}",
