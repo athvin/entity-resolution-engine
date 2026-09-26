@@ -1,13 +1,41 @@
-import type { Metadata } from "next";
+"use client";
+
+import { Suspense, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { bffFetch, BffRequestError } from "@/lib/api/client";
 
-export const metadata: Metadata = { title: "Sign in" };
+function LoginForm() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
 
-export default function LoginPage() {
+  async function onSubmit(event: React.SyntheticEvent<HTMLFormElement, SubmitEvent>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setPending(true);
+    setError(null);
+    try {
+      const result = await bffFetch<{ ok: boolean; redirect: string }>("/api/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: form.get("email"), password: form.get("password") }),
+      });
+      router.push(searchParams.get("next") ?? result.redirect);
+      router.refresh();
+    } catch (cause) {
+      setError(
+        cause instanceof BffRequestError ? cause.message : "something went wrong — try again",
+      );
+      setPending(false);
+    }
+  }
+
   return (
     <main className="bg-muted/40 flex min-h-dvh items-center justify-center p-4">
       <Card className="w-full max-w-sm" data-testid="login-card">
@@ -16,8 +44,7 @@ export default function LoginPage() {
           <CardDescription>Sign in to your workspace</CardDescription>
         </CardHeader>
         <CardContent>
-          {/* Wired to /api/auth/login in M1; the form renders the final layout today. */}
-          <form action="/api/auth/login" method="post" className="grid gap-4">
+          <form onSubmit={(event) => void onSubmit(event)} className="grid gap-4">
             <div className="grid gap-2">
               <Label htmlFor="email">Email</Label>
               <Input
@@ -39,12 +66,25 @@ export default function LoginPage() {
                 required
               />
             </div>
-            <Button type="submit" className="w-full" data-testid="login-submit">
-              Sign in
+            {error && (
+              <p className="text-destructive text-sm" role="alert" data-testid="login-error">
+                {error}
+              </p>
+            )}
+            <Button type="submit" className="w-full" disabled={pending} data-testid="login-submit">
+              {pending ? "Signing in…" : "Sign in"}
             </Button>
           </form>
         </CardContent>
       </Card>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginForm />
+    </Suspense>
   );
 }

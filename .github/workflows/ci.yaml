@@ -96,7 +96,12 @@ jobs:
     # unit tests, then the mock-backed Playwright tier across one desktop and two
     # mobile device projects. The full-stack frontend E2E needs the seeded lake
     # substrate and stays local (make frontend-e2e), like the server lake E2E.
+    #
+    # Runs INSIDE the pinned Playwright image — the same one `make frontend-baselines`
+    # renders in — so visual comparison never fights host-vs-container font
+    # rasterization. The tag must match the @playwright/test pin (contract-tested).
     runs-on: ubuntu-latest
+    container: mcr.microsoft.com/playwright:v1.63.0-jammy
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -118,10 +123,8 @@ jobs:
         working-directory: frontend
       - run: pnpm test
         working-directory: frontend
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/pnpm-lock.yaml') }}
+      # Belt and braces: a no-op while the image tag matches the Playwright pin,
+      # and a loud version-skew signal the moment it does not.
       - run: pnpm exec playwright install --with-deps chromium webkit
         working-directory: frontend
       - run: pnpm build

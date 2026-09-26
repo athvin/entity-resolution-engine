@@ -16,6 +16,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Audit Global
+         * @description The cross-tenant audit feed (design §7.20); org-scoped reads live under the org.
+         */
+        get: operations["audit_global_v1_audit_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Jobs Global
+         * @description The cross-org queue view for the operator console (design §7.3).
+         */
+        get: operations["jobs_global_v1_jobs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/orgs": {
         parameters: {
             query?: never;
@@ -23,7 +63,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Orgs Index
+         * @description The tenant directory for the operator console (design §7.1).
+         */
+        get: operations["orgs_index_v1_orgs_get"];
         put?: never;
         /** Create Org */
         post: operations["create_org_v1_orgs_post"];
@@ -116,6 +160,23 @@ export interface paths {
         post?: never;
         /** Retract Assertion Endpoint */
         delete: operations["retract_assertion_endpoint_v1_orgs__org__assertions__assertion_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/orgs/{org}/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Audit Index */
+        get: operations["audit_index_v1_orgs__org__audit_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -646,11 +707,121 @@ export interface operations {
             };
         };
     };
+    audit_global_v1_audit_get: {
+        parameters: {
+            query?: {
+                org?: string | null;
+                action?: string | null;
+                before_id?: number | null;
+                limit?: number;
+            };
+            header?: {
+                Authorization?: string | null;
+                "X-Acting-User"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    jobs_global_v1_jobs_get: {
+        parameters: {
+            query?: {
+                org?: string | null;
+                state?: string | null;
+                limit?: number;
+            };
+            header?: {
+                Authorization?: string | null;
+                "X-Acting-User"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    orgs_index_v1_orgs_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                Authorization?: string | null;
+                "X-Acting-User"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     create_org_v1_orgs_post: {
         parameters: {
             query?: never;
             header?: {
                 Authorization?: string | null;
+                "X-Acting-User"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -688,6 +859,7 @@ export interface operations {
             query?: never;
             header?: {
                 Authorization?: string | null;
+                "X-Acting-User"?: string | null;
             };
             path: {
                 org: string;
@@ -723,6 +895,7 @@ export interface operations {
             query?: never;
             header?: {
                 Authorization?: string | null;
+                "X-Acting-User"?: string | null;
             };
             path: {
                 org: string;
@@ -762,6 +935,7 @@ export interface operations {
             query?: never;
             header?: {
                 Authorization?: string | null;
+                "X-Acting-User"?: string | null;
             };
             path: {
                 org: string;
@@ -798,6 +972,7 @@ export interface operations {
             query?: never;
             header?: {
                 Authorization?: string | null;
+                "X-Acting-User"?: string | null;
             };
             path: {
                 org: string;
@@ -837,6 +1012,7 @@ export interface operations {
             query?: never;
             header?: {
                 Authorization?: string | null;
+                "X-Acting-User"?: string | null;
             };
             path: {
                 org: string;
@@ -868,11 +1044,52 @@ export interface operations {
             };
         };
     };
+    audit_index_v1_orgs__org__audit_get: {
+        parameters: {
+            query?: {
+                action?: string | null;
+                before_id?: number | null;
+                limit?: number;
+            };
+            header?: {
+                Authorization?: string | null;
+                "X-Acting-User"?: string | null;
+            };
+            path: {
+                org: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     active_config_v1_orgs__org__config_get: {
         parameters: {
             query?: never;
             header?: {
                 Authorization?: string | null;
+                "X-Acting-User"?: string | null;
             };
             path: {
                 org: string;
@@ -908,6 +1125,7 @@ export interface operations {
             query?: never;
             header?: {
                 Authorization?: string | null;
+                "X-Acting-User"?: string | null;
             };
             path: {
                 org: string;
@@ -943,6 +1161,7 @@ export interface operations {
             query?: never;
             header?: {
                 Authorization?: string | null;
+                "X-Acting-User"?: string | null;
             };
             path: {
                 org: string;
@@ -982,6 +1201,7 @@ export interface operations {
             query?: never;
             header?: {
                 Authorization?: string | null;
+                "X-Acting-User"?: string | null;
             };
             path: {
                 org: string;
@@ -1021,6 +1241,7 @@ export interface operations {
             };
             header?: {
                 Authorization?: string | null;
+                "X-Acting-User"?: string | null;
             };
             path: {
                 org: string;
@@ -1060,6 +1281,7 @@ export interface operations {
             };
             header?: {
                 Authorization?: string | null;
+                "X-Acting-User"?: string | null;
             };
             path: {
                 org: string;
@@ -1095,6 +1317,7 @@ export interface operations {
             query?: never;
             header?: {
                 Authorization?: string | null;
+                "X-Acting-User"?: string | null;
             };
             path: {
                 org: string;
@@ -1133,6 +1356,7 @@ export interface operations {
             };
             header?: {
                 Authorization?: string | null;
+                "X-Acting-User"?: string | null;
             };
             path: {
                 org: string;
@@ -1175,6 +1399,7 @@ export interface operations {
             };
             header?: {
                 Authorization?: string | null;
+                "X-Acting-User"?: string | null;
             };
             path: {
                 org: string;
@@ -1209,6 +1434,7 @@ export interface operations {
             header?: {
                 "Idempotency-Key"?: string | null;
                 Authorization?: string | null;
+                "X-Acting-User"?: string | null;
             };
             path: {
                 org: string;
@@ -1246,6 +1472,7 @@ export interface operations {
             query?: never;
             header?: {
                 Authorization?: string | null;
+                "X-Acting-User"?: string | null;
             };
             path: {
                 org: string;
@@ -1280,6 +1507,7 @@ export interface operations {
             query?: never;
             header?: {
                 Authorization?: string | null;
+                "X-Acting-User"?: string | null;
             };
             path: {
                 org: string;
@@ -1316,6 +1544,7 @@ export interface operations {
             query?: never;
             header?: {
                 Authorization?: string | null;
+                "X-Acting-User"?: string | null;
             };
             path: {
                 org: string;
@@ -1355,6 +1584,7 @@ export interface operations {
             };
             header?: {
                 Authorization?: string | null;
+                "X-Acting-User"?: string | null;
             };
             path: {
                 org: string;
@@ -1388,6 +1618,7 @@ export interface operations {
             query?: never;
             header?: {
                 Authorization?: string | null;
+                "X-Acting-User"?: string | null;
             };
             path: {
                 org: string;
@@ -1425,6 +1656,7 @@ export interface operations {
             };
             header?: {
                 Authorization?: string | null;
+                "X-Acting-User"?: string | null;
             };
             path: {
                 org: string;
@@ -1460,6 +1692,7 @@ export interface operations {
             query?: never;
             header?: {
                 Authorization?: string | null;
+                "X-Acting-User"?: string | null;
             };
             path: {
                 org: string;
@@ -1500,6 +1733,7 @@ export interface operations {
             query?: never;
             header?: {
                 Authorization?: string | null;
+                "X-Acting-User"?: string | null;
             };
             path: {
                 org: string;
@@ -1535,6 +1769,7 @@ export interface operations {
             query?: never;
             header?: {
                 Authorization?: string | null;
+                "X-Acting-User"?: string | null;
             };
             path: {
                 org: string;
@@ -1570,6 +1805,7 @@ export interface operations {
             query?: never;
             header?: {
                 Authorization?: string | null;
+                "X-Acting-User"?: string | null;
             };
             path: {
                 org: string;
@@ -1609,6 +1845,7 @@ export interface operations {
             query?: never;
             header?: {
                 Authorization?: string | null;
+                "X-Acting-User"?: string | null;
             };
             path: {
                 org: string;
@@ -1645,6 +1882,7 @@ export interface operations {
             query?: never;
             header?: {
                 Authorization?: string | null;
+                "X-Acting-User"?: string | null;
             };
             path: {
                 org: string;
@@ -1680,6 +1918,7 @@ export interface operations {
             query?: never;
             header?: {
                 Authorization?: string | null;
+                "X-Acting-User"?: string | null;
             };
             path: {
                 org: string;
@@ -1719,6 +1958,7 @@ export interface operations {
             query?: never;
             header?: {
                 Authorization?: string | null;
+                "X-Acting-User"?: string | null;
             };
             path: {
                 org: string;

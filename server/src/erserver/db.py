@@ -175,8 +175,15 @@ def connect(dsn: str) -> psycopg.Connection:
 
 
 def ensure_schema(connection: psycopg.Connection) -> None:
-    """Apply the skeleton DDL; every statement is idempotent."""
+    """Apply the skeleton DDL; every statement is idempotent.
+
+    Serialized under an advisory lock: the API and the dispatcher both ensure
+    the schema at boot, and two sessions racing the drop-then-recreate index
+    idiom (or queueing DDL behind each other's locks) deadlock an otherwise
+    healthy first start. The xact-scoped lock releases at commit.
+    """
     with connection.cursor() as cursor:
+        cursor.execute("SELECT pg_advisory_xact_lock(hashtext('erserver.ensure_schema'), 0)")
         for statement in SCHEMA_STATEMENTS:
             cursor.execute(statement)
     connection.commit()

@@ -1,12 +1,13 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-export const SESSION_COOKIE = "er_session";
+import { SESSION_COOKIE } from "@/lib/auth/constants";
 
 const PUBLIC_PATHS = ["/login", "/api/auth/login"];
 
 /**
  * Cheap cookie-presence gate only: real session verification happens in route
  * handlers and server layouts (the middleware runtime has no database access).
+ * Pages redirect to /login; API routes answer with the JSON envelope.
  */
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -14,6 +15,12 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
   if (!request.cookies.has(SESSION_COOKIE)) {
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json(
+        { code: "unauthorized", message: "sign in to continue" },
+        { status: 401 },
+      );
+    }
     const login = request.nextUrl.clone();
     login.pathname = "/login";
     login.search = pathname === "/" ? "" : `?next=${encodeURIComponent(pathname)}`;

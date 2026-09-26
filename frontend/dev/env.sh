@@ -33,3 +33,4 @@ export ERSERVER_BASE_URL="http://localhost:8000"
 export ERWEB_DATABASE_URL="postgresql://postgres:er@localhost:5433/postgres"
 export ERWEB_SESSION_SECRET="dev-session-secret-dev-session-secret"
 export ERWEB_CREDENTIAL_KEY="3q2+7wEirykuXBXRO26AY9nbZAqAnDzws76jd2GxwkE="
+export ERWEB_INSECURE_COOKIES="1" # plain-HTTP localhost

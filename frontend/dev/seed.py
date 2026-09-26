@@ -216,6 +216,20 @@ def main() -> None:
         json.dumps({"org": ORG, "metrics": metrics, "truth": truth}, indent=2)
     )
 
+    print("==> creating BFF users (erweb schema)")
+    run_checked(
+        [
+            "corepack",
+            "pnpm",
+            "--dir",
+            str(REPO_ROOT / "frontend"),
+            "exec",
+            "node",
+            "dev/create-users.mjs",
+            str(STATE / "keys.json"),
+        ]
+    )
+
     print("==> seeded")
     print(f"    metrics:  {json.dumps(metrics)}")
     print(f"    truth:    {json.dumps(truth)}")

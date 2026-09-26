@@ -36,6 +36,10 @@ the two setups are mutually exclusive on one machine. `make frontend-dev-reset`
 tears everything down, volumes included. Dev-only keys land in
 `dev/.state/keys.json`; nothing under `dev/.state/` is ever committed.
 
+Seeded logins (dev stack and the mock tier alike; password `password-123!`):
+`root@er.dev` (super admin, no memberships — views tenants via the operator
+token), `admin@acme.dev`, `steward@acme.dev`, `viewer@acme.dev`.
+
 ## Tests
 
 Three escalating tiers, mirroring the server's bare / +Postgres / +lake prose:
