@@ -318,9 +318,7 @@ def _emit_stage(outcome: StageOutcome, duration_ms: int) -> None:
 def _step_create_database(params: dict[str, Any]) -> None:
     maint_dsn = os.environ.get(MAINT_DSN_VAR)
     if maint_dsn is None or not maint_dsn.strip():
-        raise ProvisioningNotConfigured(
-            f"{MAINT_DSN_VAR} is not set in the runner environment"
-        )
+        raise ProvisioningNotConfigured(f"{MAINT_DSN_VAR} is not set in the runner environment")
     create_tenant_database(maint_dsn, str(params["db_name"]))
 
 

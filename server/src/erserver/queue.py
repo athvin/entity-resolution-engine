@@ -235,9 +235,7 @@ def enqueue(
     if state is None:
         raise UnknownOrgError(f"unknown org: {org!r}")
     if kind != "provision" and state != "active":
-        raise OrgNotActiveError(
-            f"org {org!r} is {state}; jobs are accepted only when active"
-        )
+        raise OrgNotActiveError(f"org {org!r} is {state}; jobs are accepted only when active")
     job_id = str(ULID())
     with connection.cursor(row_factory=dict_row) as cursor:
         cursor.execute(

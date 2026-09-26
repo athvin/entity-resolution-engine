@@ -24,8 +24,6 @@ import os
 import time
 import uuid
 from collections.abc import Iterator
-from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -47,9 +45,7 @@ pytestmark = pytest.mark.skipif(
 
 OPERATOR_TOKEN = "op-" + uuid.uuid4().hex
 
-MAINT_DSN = os.environ.get(
-    "ER_E2E_MAINT_DSN", "postgresql://postgres:er@localhost:5434/ducklake"
-)
+MAINT_DSN = os.environ.get("ER_E2E_MAINT_DSN", "postgresql://postgres:er@localhost:5434/ducklake")
 TENANT_DSN_TEMPLATE = os.environ.get(
     "ER_E2E_TENANT_DSN_TEMPLATE", "postgresql://postgres:er@localhost:5434/{dbname}"
 )
@@ -208,7 +204,5 @@ def test_one_post_provisions_a_dedicated_database(
         headers={**admin, "Idempotency-Key": "after"},
     )
     assert accepted.status_code == 202
-    canceled = client.post(
-        f"/v1/orgs/{org}/jobs/{accepted.json()['job_id']}:cancel", headers=admin
-    )
+    canceled = client.post(f"/v1/orgs/{org}/jobs/{accepted.json()['job_id']}:cancel", headers=admin)
     assert canceled.status_code == 200
