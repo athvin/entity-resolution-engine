@@ -23,7 +23,7 @@ psycopg = pytest.importorskip("psycopg")
 from erserver import db, dispatcher, provision, queue, schedules  # noqa: E402
 from erserver.api import create_app  # noqa: E402
 from erserver.dispatcher import RunnerResult  # noqa: E402
-from erserver.policy import FAILED, SUCCEEDED, dispose  # noqa: E402
+from erserver.policy import FAILED, SUCCEEDED  # noqa: E402
 from erserver.settings import ServerSettings  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -253,9 +253,7 @@ def test_manual_mode_still_creates_an_active_org(
     assert queue.org_state(conn, "manual-org") == "active"
 
 
-def test_auto_mode_onboards_idempotently(
-    conn: psycopg.Connection, auto_client: TestClient
-) -> None:
+def test_auto_mode_onboards_idempotently(conn: psycopg.Connection, auto_client: TestClient) -> None:
     org = f"auto-{uuid.uuid4().hex[:8]}"
 
     first = auto_client.post("/v1/orgs", json={"name": org}, headers=operator())
@@ -274,9 +272,7 @@ def test_auto_mode_onboards_idempotently(
     assert Path(record["config_path"]).is_file()
     assert f"tenant: {body['tenant']}" in Path(record["config_path"]).read_text()
     # The seeded document's correction cadence became the system schedule.
-    assert any(
-        s.source == "config:correction_pass" for s in schedules.list_schedules(conn, org)
-    )
+    assert any(s.source == "config:correction_pass" for s in schedules.list_schedules(conn, org))
     job = queue.get_job(conn, org, body["job_id"])
     assert job is not None and job.kind == "provision"
     assert job.params["db_name"] == provision.tenant_db_name(org)

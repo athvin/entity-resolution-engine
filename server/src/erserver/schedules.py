@@ -54,9 +54,7 @@ def _schedule(row: dict[str, Any]) -> Schedule:
 
 def _validate(kind: str, cron: str) -> None:
     if kind not in SCHEDULABLE_KINDS:
-        raise ValueError(
-            f"kind {kind!r} is not schedulable; one of {list(SCHEDULABLE_KINDS)}"
-        )
+        raise ValueError(f"kind {kind!r} is not schedulable; one of {list(SCHEDULABLE_KINDS)}")
     if not croniter.is_valid(cron):
         raise ValueError(f"invalid cron expression: {cron!r}")
 
