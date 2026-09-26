@@ -76,14 +76,17 @@ def test_every_uses_is_sha_pinned(tmp_path: Path) -> None:
     for pin in pins:
         assert pin.is_sha_pinned, f"{pin.action} is not SHA-pinned: {pin.sha} # {pin.comment}"
 
-    tagged = tmp_path / "benchmark.yaml"
-    tagged.write_text(
-        WORKFLOW.read_text(encoding="utf-8").replace(
-            "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2",
-            "actions/checkout@v4.2.2 # v4.2.2",
-        ),
-        encoding="utf-8",
+    # Synthesize the tag-pinned violation from the live checkout pin, so the
+    # tripwire survives dependency bumps instead of silently not matching.
+    checkout = next(pin for pin in pins if pin.action == "actions/checkout")
+    source = WORKFLOW.read_text(encoding="utf-8")
+    tagged_text = source.replace(
+        f"actions/checkout@{checkout.sha} # {checkout.comment}",
+        f"actions/checkout@{checkout.comment} # {checkout.comment}",
     )
+    assert tagged_text != source, "the checkout pin was not found to rewrite"
+    tagged = tmp_path / "benchmark.yaml"
+    tagged.write_text(tagged_text, encoding="utf-8")
     tagged_pins = workflow.parse_benchmark_workflow(tagged).uses_pins
     assert any(not pin.is_sha_pinned and pin.action == "actions/checkout" for pin in tagged_pins), (
         "a tag-pinned action was not flagged"
