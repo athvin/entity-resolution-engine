@@ -25,3 +25,6 @@ README.md
 CONTRIBUTING.md
 DesignDoc.md
 .github
+
+# The web UI is its own deployable; keep it out of the pipeline image and its build cache.
+frontend
