@@ -142,10 +142,11 @@ All tenant-scoped routes under `/v1/orgs/{org}/…`.
 | `/config`, `/config/versions` | GET active; POST draft; `:publish`; diff | versioned in the control plane (yaml, `config_hash`, author); publish states its consequence (see below) |
 | `/jobs` | POST (Idempotency-Key required); GET list/detail; `/logs`; `:cancel`; `:resume` | detail embeds a `run_stages` projection from the heartbeat cache — the hot polling path never opens DuckDB |
 | `/duplicates` | GET list/detail | duplicate groups = multi-member entities + gray-band candidates; detail is the merge-grid data: members, side-by-side fields from lineage, score evidence |
-| `/reviews` | GET open; `:resolve` | wraps `open_reviews`/`resolve_review`; returns `pending_until_next_reconcile: true` |
-| `/assertions` | POST always/never; retract | the merge / not-duplicate / undo primitive; "undo this merge" resolves members from `entity_events` and posts never-assertions; optional `apply=now` enqueues a reconcile job |
+| `/reviews` | GET (status/reason filters, keyset cursor, `{items, next_cursor}`); GET `/{id}`; `:resolve`; `:bulk-resolve` | wraps `open_reviews`/`resolve_review`; bulk applies N resolutions under ONE writer-lock window + one reconcile job; `/staged` exposes the pending backlog count |
+| `/assertions` | GET list (+`include_retracted`, cursor); `:contradictions`; POST always/never; retract | the merge / not-duplicate / undo primitive; `golden-records/{id}:unmerge` resolves members from `entity_membership`, pre-checks CONTRADICTION-1, posts the never-assertions in one batch and enqueues the reconcile |
+| `/match-scores` | GET (probability band, snapshot-pinned cursor) | browse active scored pairs with evidence — near-threshold auto-merge audit |
 | `/golden-records` | GET search/list/{id}; `/lineage`; `/history`; `?as_of=` | snapshot-pinned pagination (§8); `/records/{source}/{id}` resolves a source record to its entity |
-| `/imports` | POST (presigned upload → delivery → job); GET receipt | receipts map to `ingest_batches` |
+| `/imports` | POST (multipart upload → delivery → job); GET receipts (source filter, cursor) | receipts map to `ingest_batches` (new/changed/unchanged/tombstone/resurrected counts) |
 | `/events`, `/webhooks` | GET feed; subscription CRUD | sourced from `entity_events` + job transitions; delivery with retries |
 | `/metrics` | GET | dashboard KPIs, cached per snapshot |
 

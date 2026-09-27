@@ -92,11 +92,15 @@ class Job:
     error_detail: str | None
     outcome: str | None
     progress: dict[str, Any]
+    # Attribution (design §7.12): who submitted, and which schedule fired it.
+    created_by: str | None = None
+    schedule_id: str | None = None
 
 
 _JOB_COLUMNS = (
     "job_id, org, kind, params, state, priority, idempotency_key, run_id, "
-    "attempt, max_attempts, exit_code, error_class, error_detail, outcome, progress"
+    "attempt, max_attempts, exit_code, error_class, error_detail, outcome, progress, "
+    "created_by, schedule_id"
 )
 
 
@@ -229,6 +233,8 @@ def enqueue(
     idempotency_key: str | None = None,
     priority: int = 0,
     max_attempts: int = 3,
+    created_by: str | None = None,
+    schedule_id: str | None = None,
 ) -> Job:
     """Queue one job, or return the job an identical idempotency key created.
 
@@ -249,10 +255,20 @@ def enqueue(
     with connection.cursor(row_factory=dict_row) as cursor:
         cursor.execute(
             f"INSERT INTO jobs (job_id, org, kind, params, idempotency_key, priority, "
-            f"max_attempts) VALUES (%s, %s, %s, %s, %s, %s, %s) "
+            f"max_attempts, created_by, schedule_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
             f"ON CONFLICT (org, idempotency_key) WHERE idempotency_key IS NOT NULL "
             f"DO NOTHING RETURNING {_JOB_COLUMNS}",
-            (job_id, org, kind, Jsonb(params or {}), idempotency_key, priority, max_attempts),
+            (
+                job_id,
+                org,
+                kind,
+                Jsonb(params or {}),
+                idempotency_key,
+                priority,
+                max_attempts,
+                created_by,
+                schedule_id,
+            ),
         )
         row = cursor.fetchone()
         if row is None:

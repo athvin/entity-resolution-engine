@@ -5,14 +5,7 @@ import { AlertTriangle, Inbox, Loader2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BffRequestError } from "@/lib/api/client";
-import {
-  useJobs,
-  useMetrics,
-  useOpenReviewCount,
-  useRuns,
-  type JobRow,
-  type RunRow,
-} from "@/lib/query/hooks";
+import { useJobs, useMetrics, useRuns, type JobRow, type RunRow } from "@/lib/query/hooks";
 
 const ACTIVE_STATES = new Set(["queued", "dispatching", "running", "retrying", "canceling"]);
 
@@ -80,7 +73,7 @@ export function DashboardContent({ org }: { org: string }) {
   const metrics = useMetrics(org);
   const runs = useRuns(org);
   const jobs = useJobs(org);
-  const reviewCount = useOpenReviewCount(org);
+  const reviewCount = metrics.data?.open_reviews;
 
   if (metrics.error instanceof BffRequestError && metrics.error.error.code === "lake_unavailable") {
     return (
@@ -96,7 +89,7 @@ export function DashboardContent({ org }: { org: string }) {
 
   const activeJob = (jobs.data ?? []).find((job) => ACTIVE_STATES.has(job.state));
   const lastRun = runs.data?.[0];
-  const attention = nudges(reviewCount.data, jobs.data);
+  const attention = nudges(reviewCount, jobs.data);
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-4 lg:gap-6" data-testid="dashboard">
@@ -122,7 +115,7 @@ export function DashboardContent({ org }: { org: string }) {
           value={metrics.data?.records_in_duplicate_groups}
           testId="tile-records-in-groups"
         />
-        <Tile label="Open reviews" value={reviewCount.data} testId="tile-open-reviews" />
+        <Tile label="Open reviews" value={reviewCount} testId="tile-open-reviews" />
       </div>
 
       {activeJob && (

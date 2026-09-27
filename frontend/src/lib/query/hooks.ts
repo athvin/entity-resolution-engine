@@ -10,6 +10,7 @@ export interface Metrics {
   entities: number;
   duplicate_groups: number;
   records_in_duplicate_groups: number;
+  open_reviews: number;
   snapshot?: number;
 }
 
@@ -142,15 +143,6 @@ export function useJobs(org: string) {
     // Poll fast while anything is in flight; settle down when quiet.
     refetchInterval: (query) =>
       (query.state.data ?? []).some((job) => ACTIVE_JOB_STATES.has(job.state)) ? 1_500 : 30_000,
-  });
-}
-
-export function useOpenReviewCount(org: string) {
-  return useQuery({
-    queryKey: queryKeys.reviews(org),
-    queryFn: () => bffFetch<unknown[]>(`/api/orgs/${org}/reviews?limit=500`),
-    refetchInterval: 60_000,
-    select: (rows) => rows.length,
   });
 }
 

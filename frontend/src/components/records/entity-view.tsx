@@ -1,17 +1,24 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, GitMerge } from "lucide-react";
+import { ArrowLeft, GitMerge, Split } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BffRequestError } from "@/lib/api/client";
 import {
+  effectiveRole,
   useEntityDetail,
+  useSession,
   type EntityEvent,
   type GoldenRecord,
   type LineageRow,
 } from "@/lib/query/hooks";
+import { useUnmerge } from "@/lib/query/reviews";
+
+const ROLE_RANK = { viewer: 0, steward: 1, admin: 2 } as const;
 
 const ATTRIBUTES: { key: keyof GoldenRecord; label: string }[] = [
   { key: "given_name", label: "Given name" },
@@ -38,6 +45,12 @@ function describeEvent(event: EntityEvent): string {
  */
 export function EntityView({ org, entityId }: { org: string; entityId: string }) {
   const query = useEntityDetail(org, entityId);
+  const session = useSession();
+  const unmerge = useUnmerge(org, entityId);
+  const [marked, setMarked] = useState<ReadonlySet<string>>(new Set());
+  const [unmergeMessage, setUnmergeMessage] = useState<string | null>(null);
+  const role = effectiveRole(session.data, org);
+  const isSteward = role !== null && ROLE_RANK[role] >= ROLE_RANK.steward;
 
   if (query.error instanceof BffRequestError && query.error.status === 404) {
     return (
@@ -121,15 +134,50 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
       </Card>
 
       <Card data-testid="entity-members">
-        <CardHeader className="p-4 pb-1 lg:p-6 lg:pb-2">
+        <CardHeader className="flex-row items-center justify-between space-y-0 p-4 pb-1 lg:p-6 lg:pb-2">
           <CardTitle className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
             Members
           </CardTitle>
+          {isSteward && members.length > 1 && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={marked.size === 0 || marked.size >= members.length || unmerge.isPending}
+              data-testid="unmerge-button"
+              onClick={() => {
+                setUnmergeMessage(null);
+                unmerge.mutate([...marked], {
+                  onSuccess: (result) => {
+                    setMarked(new Set());
+                    setUnmergeMessage(
+                      result.status === "applied"
+                        ? `unmerge applied — ${String(result.pairs)} never-rule${result.pairs === 1 ? "" : "s"} written; the split lands with the reconcile job`
+                        : "unmerge staged — it applies when the current run finishes",
+                    );
+                  },
+                  onError: (error) => {
+                    setUnmergeMessage(
+                      error instanceof BffRequestError ? error.message : "unmerge failed",
+                    );
+                  },
+                });
+              }}
+            >
+              <Split />
+              Unmerge {marked.size > 0 ? `${String(marked.size)} ` : ""}selected
+            </Button>
+          )}
         </CardHeader>
         <CardContent className="overflow-x-auto p-4 pt-2 lg:p-6 lg:pt-2">
+          {unmergeMessage && (
+            <p className="text-muted-foreground mb-2 text-xs" data-testid="unmerge-status">
+              {unmergeMessage}
+            </p>
+          )}
           <table className="w-full min-w-[28rem] text-sm">
             <thead>
               <tr className="text-muted-foreground border-b text-left text-xs uppercase">
+                {isSteward && members.length > 1 && <th className="w-8 py-1.5" />}
                 <th className="py-1.5 pr-4 font-medium">Source</th>
                 <th className="py-1.5 pr-4 font-medium">Record id</th>
                 <th className="py-1.5 pr-4 font-medium">Assigned</th>
@@ -139,6 +187,25 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
             <tbody>
               {members.map((member) => (
                 <tr key={member.record_key} className="border-b last:border-0">
+                  {isSteward && members.length > 1 && (
+                    <td className="py-2 pr-2">
+                      <input
+                        type="checkbox"
+                        checked={marked.has(member.record_key)}
+                        aria-label={`Split out ${member.record_key}`}
+                        data-testid={`mark-${member.record_key}`}
+                        onChange={() => {
+                          setMarked((current) => {
+                            const next = new Set(current);
+                            if (next.has(member.record_key)) next.delete(member.record_key);
+                            else next.add(member.record_key);
+                            return next;
+                          });
+                        }}
+                        className="size-4"
+                      />
+                    </td>
+                  )}
                   <td className="py-2 pr-4 font-medium">{member.source_system}</td>
                   <td className="py-2 pr-4 font-mono text-xs">{member.source_record_id}</td>
                   <td className="text-muted-foreground py-2 pr-4 text-xs">

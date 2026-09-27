@@ -16,6 +16,7 @@ table.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from typing import Any
 
 import psycopg
@@ -30,10 +31,12 @@ from er.lake.env import lake_environment
 
 __all__ = [
     "apply_action",
+    "apply_actions",
     "drain_org",
     "pending_count",
     "stage_action",
     "try_apply_or_stage",
+    "try_apply_or_stage_batch",
 ]
 
 ACTION_TYPES = ("resolve_review", "add_assertion", "retract_assertion")
@@ -107,6 +110,57 @@ def apply_action(
                         connection, resume_run_id=None, assertion_repair=True
                     )
                 return _perform(action, actor)
+
+
+def apply_actions(
+    env: dict[str, str], tenant: str, actions: Sequence[dict[str, Any]], actor: str
+) -> list[dict[str, Any]]:
+    """Apply many actions under ONE lock acquisition (design §7.6, bulk resolve).
+
+    Each action still commits independently inside the engine (``add_assertion``
+    owns its transaction and DuckDB refuses nesting), so partial application on
+    a mid-batch failure is the honest semantic — the same one the engine's own
+    CSV assertion import ships. Per-action failures are recorded in the result
+    (``{"error": ...}``) rather than aborting the remainder; a lock conflict
+    before the window opens raises ``PreconditionFailure`` untouched, so the
+    caller can stage the whole batch.
+    """
+    results: list[dict[str, Any]] = []
+    with lake_environment(env):
+        with tenant_lock(tenant, run_id=str(ULID())):
+            with invocation_session():
+                from er.matching.correction import assert_no_pending_correction
+
+                with connect() as connection:
+                    assert_no_pending_correction(
+                        connection, resume_run_id=None, assertion_repair=True
+                    )
+                for action in actions:
+                    try:
+                        results.append(_perform(action, actor))
+                    except (ErError, ValueError, KeyError) as exc:
+                        results.append({"action": action.get("type"), "error": str(exc)})
+    return results
+
+
+def try_apply_or_stage_batch(
+    connection: psycopg.Connection,
+    org: str,
+    env: dict[str, str],
+    tenant: str,
+    actions: Sequence[dict[str, Any]],
+    actor: str,
+) -> tuple[str, list[dict[str, Any]]]:
+    """The batch analogue of :func:`try_apply_or_stage`, same ordering rule."""
+    if pending_count(connection, org) == 0:
+        try:
+            return "applied", apply_actions(env, tenant, actions, actor)
+        except PreconditionFailure:
+            pass  # the writer lock is held: stage the whole batch, in order
+    staged = [
+        {"action_id": stage_action(connection, org, dict(action), actor)} for action in actions
+    ]
+    return "staged", staged
 
 
 def stage_action(

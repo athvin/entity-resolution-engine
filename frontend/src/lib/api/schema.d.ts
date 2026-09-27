@@ -138,7 +138,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Assertions Index
+         * @description The assertion library (design §7.9).
+         */
+        get: operations["assertions_index_v1_orgs__org__assertions_get"];
         put?: never;
         /** Add Assertion Endpoint */
         post: operations["add_assertion_endpoint_v1_orgs__org__assertions_post"];
@@ -160,6 +164,26 @@ export interface paths {
         post?: never;
         /** Retract Assertion Endpoint */
         delete: operations["retract_assertion_endpoint_v1_orgs__org__assertions__assertion_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/orgs/{org}/assertions:contradictions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Assertion Contradictions
+         * @description Unsatisfiable rule sets: a never inside an always-connected component.
+         */
+        get: operations["assertion_contradictions_v1_orgs__org__assertions_contradictions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -285,7 +309,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/orgs/{org}/imports": {
+    "/v1/orgs/{org}/golden-records/{entity_id}:unmerge": {
         parameters: {
             query?: never;
             header?: never;
@@ -293,6 +317,36 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
+        put?: never;
+        /**
+         * Unmerge Entity
+         * @description Undo a merge (design §7.5): resolve members from the entity, write the
+         *     never-assertions that force the split, and enqueue the reconcile.
+         *
+         *     The extracted records stay together; each gets a ``never`` against every
+         *     remaining member. Contradictions with active ``always`` assertions are
+         *     pre-checked so an unsatisfiable rule set is refused here, with the
+         *     conflicting assertion ids, instead of failing the next reconcile.
+         */
+        post: operations["unmerge_entity_v1_orgs__org__golden_records__entity_id__unmerge_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/orgs/{org}/imports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Import Receipts
+         * @description Delivery receipts from ingest_batches (design §7.15).
+         */
+        get: operations["import_receipts_v1_orgs__org__imports_get"];
         put?: never;
         /**
          * Create Import
@@ -374,6 +428,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/orgs/{org}/match-scores": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Match Scores Index
+         * @description Browse active scored pairs with evidence (design §7.8).
+         */
+        get: operations["match_scores_index_v1_orgs__org__match_scores_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/orgs/{org}/merge-plans": {
         parameters: {
             query?: never;
@@ -415,8 +489,28 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Reviews */
+        /**
+         * Reviews
+         * @description The steward inbox: filterable, keyset-paginated (design §7.4).
+         */
         get: operations["reviews_v1_orgs__org__reviews_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/orgs/{org}/reviews/{review_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Review Detail */
+        get: operations["review_detail_v1_orgs__org__reviews__review_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -436,6 +530,26 @@ export interface paths {
         put?: never;
         /** Resolve Review Endpoint */
         post: operations["resolve_review_endpoint_v1_orgs__org__reviews__review_id__resolve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/orgs/{org}/reviews:bulk-resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bulk Resolve Reviews
+         * @description Resolve many reviews in one lock window + one optional reconcile job.
+         */
+        post: operations["bulk_resolve_reviews_v1_orgs__org__reviews_bulk_resolve_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -489,6 +603,30 @@ export interface paths {
         post?: never;
         /** Delete Schedule */
         delete: operations["delete_schedule_v1_orgs__org__schedules__schedule_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Schedule
+         * @description Enable/disable a tenant schedule (design §7.10); config-owned rows refuse.
+         */
+        patch: operations["update_schedule_v1_orgs__org__schedules__schedule_id__patch"];
+        trace?: never;
+    };
+    "/v1/orgs/{org}/staged": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Staged Visibility
+         * @description How many steward decisions wait behind the current run (design §7.7).
+         */
+        get: operations["staged_visibility_v1_orgs__org__staged_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -554,6 +692,23 @@ export interface components {
             /** File */
             file: string;
         };
+        /** BulkResolveIn */
+        BulkResolveIn: {
+            /**
+             * Apply Now
+             * @default false
+             */
+            apply_now: boolean;
+            /** Items */
+            items: components["schemas"]["BulkResolveItem"][];
+        };
+        /** BulkResolveItem */
+        BulkResolveItem: {
+            /** Resolution */
+            resolution: string;
+            /** Review Id */
+            review_id: string;
+        };
         /** ConfigVersionIn */
         ConfigVersionIn: {
             /** Yaml */
@@ -587,6 +742,8 @@ export interface components {
         JobOut: {
             /** Attempt */
             attempt: number;
+            /** Created By */
+            created_by?: string | null;
             /** Error Class */
             error_class: string | null;
             /** Error Detail */
@@ -617,6 +774,8 @@ export interface components {
             };
             /** Run Id */
             run_id: string | null;
+            /** Schedule Id */
+            schedule_id?: string | null;
             /** State */
             state: string;
         };
@@ -653,6 +812,21 @@ export interface components {
             params?: {
                 [key: string]: unknown;
             };
+        };
+        /** ScheduleUpdateIn */
+        ScheduleUpdateIn: {
+            /** Enabled */
+            enabled: boolean;
+        };
+        /** UnmergeIn */
+        UnmergeIn: {
+            /**
+             * Apply Now
+             * @default true
+             */
+            apply_now: boolean;
+            /** Records */
+            records: string[];
         };
         /** ValidationError */
         ValidationError: {
@@ -967,6 +1141,46 @@ export interface operations {
             };
         };
     };
+    assertions_index_v1_orgs__org__assertions_get: {
+        parameters: {
+            query?: {
+                include_retracted?: boolean;
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: {
+                Authorization?: string | null;
+                "X-Acting-User"?: string | null;
+            };
+            path: {
+                org: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     add_assertion_endpoint_v1_orgs__org__assertions_post: {
         parameters: {
             query?: never;
@@ -1017,6 +1231,42 @@ export interface operations {
             path: {
                 org: string;
                 assertion_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    assertion_contradictions_v1_orgs__org__assertions_contradictions_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                Authorization?: string | null;
+                "X-Acting-User"?: string | null;
+            };
+            path: {
+                org: string;
             };
             cookie?: never;
         };
@@ -1349,6 +1599,87 @@ export interface operations {
             };
         };
     };
+    unmerge_entity_v1_orgs__org__golden_records__entity_id__unmerge_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                Authorization?: string | null;
+                "X-Acting-User"?: string | null;
+            };
+            path: {
+                org: string;
+                entity_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UnmergeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_receipts_v1_orgs__org__imports_get: {
+        parameters: {
+            query?: {
+                source?: string | null;
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: {
+                Authorization?: string | null;
+                "X-Acting-User"?: string | null;
+            };
+            path: {
+                org: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     create_import_v1_orgs__org__imports_post: {
         parameters: {
             query: {
@@ -1576,6 +1907,47 @@ export interface operations {
             };
         };
     };
+    match_scores_index_v1_orgs__org__match_scores_get: {
+        parameters: {
+            query?: {
+                band_low?: number | null;
+                band_high?: number | null;
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: {
+                Authorization?: string | null;
+                "X-Acting-User"?: string | null;
+            };
+            path: {
+                org: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     merge_plan_export_v1_orgs__org__merge_plans_get: {
         parameters: {
             query?: {
@@ -1652,6 +2024,9 @@ export interface operations {
     reviews_v1_orgs__org__reviews_get: {
         parameters: {
             query?: {
+                status?: string;
+                reason?: string | null;
+                cursor?: string | null;
                 limit?: number;
             };
             header?: {
@@ -1673,7 +2048,44 @@ export interface operations {
                 content: {
                     "application/json": {
                         [key: string]: unknown;
-                    }[];
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    review_detail_v1_orgs__org__reviews__review_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                Authorization?: string | null;
+                "X-Acting-User"?: string | null;
+            };
+            path: {
+                org: string;
+                review_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */
@@ -1703,6 +2115,46 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ReviewResolveIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bulk_resolve_reviews_v1_orgs__org__reviews_bulk_resolve_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                Authorization?: string | null;
+                "X-Acting-User"?: string | null;
+            };
+            path: {
+                org: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BulkResolveIn"];
             };
         };
         responses: {
@@ -1863,6 +2315,83 @@ export interface operations {
                 content: {
                     "application/json": {
                         [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_schedule_v1_orgs__org__schedules__schedule_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                Authorization?: string | null;
+                "X-Acting-User"?: string | null;
+            };
+            path: {
+                org: string;
+                schedule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleUpdateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    staged_visibility_v1_orgs__org__staged_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                Authorization?: string | null;
+                "X-Acting-User"?: string | null;
+            };
+            path: {
+                org: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
                     };
                 };
             };

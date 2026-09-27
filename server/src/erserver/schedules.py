@@ -91,6 +91,25 @@ def list_schedules(connection: psycopg.Connection, org: str) -> list[Schedule]:
     return [_schedule(row) for row in rows]
 
 
+def set_enabled(
+    connection: psycopg.Connection, org: str, schedule_id: str, *, enabled: bool
+) -> bool:
+    """Flip a tenant schedule's enabled flag (design §7.10).
+
+    Config-owned rows (the correction pass) refuse: their cadence is declared
+    in tenant config and synced at publish, so the config is the only writer.
+    """
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "UPDATE schedules SET enabled = %s "
+            "WHERE schedule_id = %s AND org = %s AND source = 'api'",
+            (enabled, schedule_id, org),
+        )
+        changed = cursor.rowcount == 1
+    connection.commit()
+    return changed
+
+
 def delete(connection: psycopg.Connection, org: str, schedule_id: str) -> bool:
     with connection.cursor() as cursor:
         cursor.execute(

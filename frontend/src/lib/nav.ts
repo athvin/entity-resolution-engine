@@ -42,24 +42,21 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Duplicates",
     icon: Copy,
     path: (org) => `/${org}/duplicates`,
-    enabled: false,
-    milestone: "M3",
+    enabled: true,
   },
   {
     id: "reviews",
     label: "Reviews",
     icon: Inbox,
     path: (org) => `/${org}/reviews`,
-    enabled: false,
-    milestone: "M3",
+    enabled: true,
   },
   {
     id: "sources",
     label: "Sources",
     icon: Database,
     path: (org) => `/${org}/sources`,
-    enabled: false,
-    milestone: "M3",
+    enabled: true,
   },
   {
     id: "runs",
@@ -90,7 +87,7 @@ export const NAV_ITEMS: NavItem[] = [
     icon: Settings,
     path: (org) => `/${org}/settings`,
     enabled: false,
-    milestone: "M3",
+    milestone: "M4",
   },
 ];
 

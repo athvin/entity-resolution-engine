@@ -452,9 +452,13 @@ def test_full_story_through_the_control_plane(
     for job_id in published["jobs_enqueued"]:
         assert job_state(client, steward, org, job_id)["state"] == "succeeded"
 
-    # ---- 9. reviews: the widened band must queue pairs; resolve one ---------
-    reviews = client.get(f"/v1/orgs/{org}/reviews", headers=steward).json()
+    # ---- 9. reviews: the widened band must queue pairs; browse + resolve ----
+    review_page = client.get(f"/v1/orgs/{org}/reviews", headers=steward).json()
+    reviews = review_page["items"]
     assert reviews, "gray band [0.60, 0.99) produced no reviews"
+    assert reviews[0]["waterfall"], "evidence waterfall must ride along"
+    single = client.get(f"/v1/orgs/{org}/reviews/{reviews[0]['review_id']}", headers=steward).json()
+    assert single["review_id"] == reviews[0]["review_id"]
     resolved = client.post(
         f"/v1/orgs/{org}/reviews/{reviews[0]['review_id']}:resolve",
         json={"resolution": "dismiss"},
@@ -462,6 +466,22 @@ def test_full_story_through_the_control_plane(
     )
     assert resolved.status_code == 200, resolved.text
     assert resolved.json()["status"] in ("applied", "staged")
+
+    # ---- 9b. M3 read models: assertions, match scores, import receipts ------
+    library = client.get(
+        f"/v1/orgs/{org}/assertions", params={"include_retracted": True}, headers=steward
+    ).json()
+    assert library["items"], "the never-assertion from step 7 must appear in the library"
+    contradictions = client.get(f"/v1/orgs/{org}/assertions:contradictions", headers=steward)
+    assert contradictions.status_code == 200
+    scores = client.get(f"/v1/orgs/{org}/match-scores", params={"limit": 5}, headers=steward).json()
+    assert scores["items"] and all("evidence" in row for row in scores["items"])
+    assert scores["snapshot"] > 0
+    receipts = client.get(f"/v1/orgs/{org}/imports", headers=steward).json()
+    assert receipts["items"], "three deliveries must have receipts"
+    assert all("new_count" in row for row in receipts["items"])
+    staged_view = client.get(f"/v1/orgs/{org}/staged", headers=steward).json()
+    assert staged_view["pending_count"] >= 0
 
     # ---- 10. merge-plan export ----------------------------------------------
     plans = client.get(f"/v1/orgs/{org}/merge-plans", headers=steward).json()["items"]
@@ -471,3 +491,24 @@ def test_full_story_through_the_control_plane(
     lines = exported.text.strip().splitlines()
     assert lines[0].startswith("entity_id,master_key")
     assert len(lines) == len(plans) + 1
+
+    # ---- 11. unmerge via the route (design §7.5): pick a merged entity ------
+    target = plans[0]
+    extracted_member = target["member_records"][0]
+    unmerged = client.post(
+        f"/v1/orgs/{org}/golden-records/{target['entity_id']}:unmerge",
+        json={"records": [extracted_member], "apply_now": True},
+        headers=steward,
+    )
+    assert unmerged.status_code == 200, unmerged.text
+    body = unmerged.json()
+    assert body["pairs"] == target["member_count"] - 1
+    assert body["status"] in ("applied", "staged")
+    assert "apply_job" in body
+    drive_until_quiet(conn, org)
+    assert job_state(client, steward, org, body["apply_job"])["state"] == "succeeded"
+    after = client.get(f"/v1/orgs/{org}/golden-records/{target['entity_id']}", headers=steward)
+    if after.status_code == 200:
+        remaining_members = {m["record_key"] for m in after.json()["members"]}
+        assert extracted_member not in remaining_members, "the extracted record must leave"
+    # (404 is also legitimate: the split can retire the old entity id entirely.)

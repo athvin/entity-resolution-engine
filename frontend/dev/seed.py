@@ -209,6 +209,25 @@ def main() -> None:
     if job["state"] != "succeeded":
         raise SystemExit(f"run_all_full failed: {job.get('error_class')} {job.get('error_detail')}")
 
+    print("==> publishing config v1 (tier C: retrain + rebuild — syncs the correction schedule)")
+    admin = {"Authorization": f"Bearer {keys['admin']['key']}"}
+    drafted = client.post(
+        f"/v1/orgs/{ORG}/config/versions",
+        json={"yaml": config_path.read_text()},
+        headers=admin,
+    )
+    if drafted.status_code != 201:
+        raise SystemExit(f"config draft failed: {drafted.status_code} {drafted.text}")
+    published = client.post(
+        f"/v1/orgs/{ORG}/config/versions/{drafted.json()['version']}:publish", headers=admin
+    )
+    if published.status_code != 200:
+        raise SystemExit(f"config publish failed: {published.status_code} {published.text}")
+    for job_id in published.json().get("jobs_enqueued", []):
+        job = wait_for_job(client, steward, job_id)
+        if job["state"] != "succeeded":
+            raise SystemExit(f"publish job failed: {job.get('error_class')}")
+
     metrics = client.get(f"/v1/orgs/{ORG}/metrics", headers=steward).json()
     truth = truth_summary(corpus)
     (STATE / "keys.json").write_text(json.dumps({"org": ORG, "keys": keys}, indent=2))

@@ -901,3 +901,175 @@ def test_boot_never_deadlocks_and_quiet_ticks_leave_no_open_transaction(
     assert conn.info.transaction_status == TransactionStatus.IDLE, (
         "a quiet tick left the leader idle-in-transaction; its locks block boot-time DDL"
     )
+
+
+# --------------------------------------------------------------------------- #
+# M3 batch: schedule toggle, job attribution, batch staging, route validation
+# --------------------------------------------------------------------------- #
+
+
+def test_schedule_enable_disable_via_api(
+    client: TestClient, conn: psycopg.Connection, org: str
+) -> None:
+    admin = key_headers(conn, org, "admin")
+    created = client.post(
+        f"/v1/orgs/{org}/schedules",
+        json={"kind": "run_all_incremental", "cron": "0 6 * * *"},
+        headers=admin,
+    ).json()
+
+    disabled = client.patch(
+        f"/v1/orgs/{org}/schedules/{created['schedule_id']}",
+        json={"enabled": False},
+        headers=admin,
+    )
+    assert disabled.status_code == 200 and disabled.json()["enabled"] is False
+    listed = client.get(f"/v1/orgs/{org}/schedules", headers=admin).json()
+    assert [s["enabled"] for s in listed if s["schedule_id"] == created["schedule_id"]] == [False]
+    # A disabled schedule never fires.
+    assert all(s.schedule_id != created["schedule_id"] for s, _ in schedules.due(conn))
+
+    assert (
+        client.patch(
+            f"/v1/orgs/{org}/schedules/does-not-exist", json={"enabled": True}, headers=admin
+        ).status_code
+        == 409
+    )
+    # Config-owned rows refuse: the correction pass follows tenant config.
+    schedules.sync_correction_schedule(conn, org, "0 3 * * *")
+    system_row = next(
+        s for s in schedules.list_schedules(conn, org) if s.source == "config:correction_pass"
+    )
+    refused = client.patch(
+        f"/v1/orgs/{org}/schedules/{system_row.schedule_id}",
+        json={"enabled": False},
+        headers=admin,
+    )
+    assert refused.status_code == 409
+
+
+def test_job_attribution_person_and_schedule(
+    client: TestClient, conn: psycopg.Connection, org: str
+) -> None:
+    """Runs can finally say "by jane" / "by the nightly schedule" (design §7.12)."""
+    steward_headers = key_headers(conn, org, "steward")
+    submitted = client.post(
+        f"/v1/orgs/{org}/jobs",
+        json={"kind": "train"},
+        headers={
+            **steward_headers,
+            "Idempotency-Key": "attr-1",
+            "X-Acting-User": "jane@acme.dev",
+        },
+    ).json()
+    detail = client.get(f"/v1/orgs/{org}/jobs/{submitted['job_id']}", headers=steward_headers)
+    created_by = detail.json()["created_by"]
+    assert created_by is not None and created_by.startswith("user:jane@acme.dev via key:")
+
+    admin = key_headers(conn, org, "admin")
+    schedule = client.post(
+        f"/v1/orgs/{org}/schedules",
+        json={"kind": "run_all_full", "cron": "* * * * *"},
+        headers=admin,
+    ).json()
+    # Backdate the anchor so the every-minute cron is already due.
+    with conn.cursor() as cursor:
+        cursor.execute(
+            "UPDATE schedules SET created_at = now() - interval '1 hour' WHERE schedule_id = %s",
+            (schedule["schedule_id"],),
+        )
+    conn.commit()
+    assert dispatcher.tick_schedules(conn) >= 1
+    fired = [
+        job
+        for job in queue.list_jobs(conn, org, limit=50)
+        if job.schedule_id == schedule["schedule_id"]
+    ]
+    assert fired and fired[0].created_by == f"schedule:{schedule['schedule_id']}"
+
+
+def test_read_route_validation_happens_before_the_lake(
+    client: TestClient, conn: psycopg.Connection, org: str
+) -> None:
+    """422s for bad enums/cursors must not require a reachable lake."""
+    viewer = key_headers(conn, org, "viewer")
+    assert (
+        client.get(f"/v1/orgs/{org}/reviews", params={"status": "bogus"}, headers=viewer)
+    ).status_code == 422
+    assert (
+        client.get(f"/v1/orgs/{org}/reviews", params={"reason": "bogus"}, headers=viewer)
+    ).status_code == 422
+    for path in ("reviews", "assertions", "match-scores", "imports"):
+        response = client.get(
+            f"/v1/orgs/{org}/{path}", params={"cursor": "not-a-cursor"}, headers=viewer
+        )
+        assert response.status_code == 422, path
+    staged_view = client.get(f"/v1/orgs/{org}/staged", headers=viewer).json()
+    assert staged_view == {"pending_count": 0}
+
+
+def test_bulk_resolve_stages_the_whole_batch_on_lock_conflict(
+    client: TestClient, conn: psycopg.Connection, org: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from er.errors import PreconditionFailure
+
+    def lock_held(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        raise PreconditionFailure("the writer lock is held")
+
+    monkeypatch.setattr(steward, "apply_actions", lock_held)
+    steward_headers = key_headers(conn, org, "steward")
+    items = [{"review_id": f"rev-{index}", "resolution": "dismiss"} for index in range(3)]
+    response = client.post(
+        f"/v1/orgs/{org}/reviews:bulk-resolve",
+        json={"items": items, "apply_now": False},
+        headers=steward_headers,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "staged" and len(body["results"]) == 3
+    assert steward.pending_count(conn, org) == 3
+
+    # A second batch stages behind the backlog without touching the lake at all.
+    def must_not_run(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        raise AssertionError("pending backlog must skip the inline attempt")
+
+    monkeypatch.setattr(steward, "apply_actions", must_not_run)
+    again = client.post(
+        f"/v1/orgs/{org}/reviews:bulk-resolve",
+        json={"items": items[:1]},
+        headers=steward_headers,
+    ).json()
+    assert again["status"] == "staged"
+    assert steward.pending_count(conn, org) == 4
+
+
+def test_bulk_resolve_applies_in_one_window_and_enqueues_once(
+    client: TestClient, conn: psycopg.Connection, org: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    windows: list[int] = []
+
+    def apply_all(
+        env: dict[str, str], tenant: str, actions: Any, actor: str
+    ) -> list[dict[str, Any]]:
+        windows.append(len(actions))
+        return [
+            {"applied": "resolve_review", "review_id": action["review_id"]} for action in actions
+        ]
+
+    monkeypatch.setattr(steward, "apply_actions", apply_all)
+    steward_headers = key_headers(conn, org, "steward")
+    response = client.post(
+        f"/v1/orgs/{org}/reviews:bulk-resolve",
+        json={
+            "items": [{"review_id": f"rev-{index}", "resolution": "match"} for index in range(5)],
+            "apply_now": True,
+        },
+        headers=steward_headers,
+    ).json()
+    assert windows == [5], "five actions must share one lock window"
+    assert response["status"] == "applied" and response["failed"] == 0
+    jobs = [
+        job for job in queue.list_jobs(conn, org, limit=10) if job.kind == "run_all_incremental"
+    ]
+    assert len(jobs) == 1, "bulk apply_now enqueues exactly one reconcile"
+    assert response["apply_job"] == jobs[0].job_id
