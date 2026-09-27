@@ -1,8 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
-import { Building2, ChevronsUpDown, LogOut, Moon, Search, Sun } from "lucide-react";
+import { Building2, ChevronsUpDown, LogOut, Moon, Search, ShieldCheck, Sun } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -20,10 +21,11 @@ interface TopBarProps {
   org: string;
   user: SessionUser;
   memberships: Membership[];
+  impersonating: boolean;
   onOpenPalette: () => void;
 }
 
-export function TopBar({ org, user, memberships, onOpenPalette }: TopBarProps) {
+export function TopBar({ org, user, memberships, impersonating, onOpenPalette }: TopBarProps) {
   const router = useRouter();
   const { resolvedTheme, setTheme } = useTheme();
 
@@ -119,6 +121,14 @@ export function TopBar({ org, user, memberships, onOpenPalette }: TopBarProps) {
             <div className="text-muted-foreground text-xs font-normal">{user.email}</div>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
+          {user.isSuperAdmin && !impersonating && (
+            <DropdownMenuItem asChild data-testid="open-console">
+              <Link href="/admin/tenants">
+                <ShieldCheck />
+                Operator console
+              </Link>
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem onSelect={() => void signOut()} data-testid="sign-out">
             <LogOut />
             Sign out

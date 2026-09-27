@@ -46,6 +46,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       .select({ org: schema.orgMembers.org })
       .from(schema.orgMembers)
       .where(eq(schema.orgMembers.userId, user.id))
+      .orderBy(schema.orgMembers.org)
       .limit(1);
     let target = memberships[0] ? `/${memberships[0].org}/dashboard` : null;
     if (!target && user.isSuperAdmin) {

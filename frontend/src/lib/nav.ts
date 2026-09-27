@@ -35,8 +35,7 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Records",
     icon: Users,
     path: (org) => `/${org}/records`,
-    enabled: false,
-    milestone: "M2",
+    enabled: true,
   },
   {
     id: "duplicates",
@@ -67,8 +66,7 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Runs",
     icon: Play,
     path: (org) => `/${org}/runs`,
-    enabled: false,
-    milestone: "M2",
+    enabled: true,
   },
   {
     id: "campaigns",
@@ -92,7 +90,7 @@ export const NAV_ITEMS: NavItem[] = [
     icon: Settings,
     path: (org) => `/${org}/settings`,
     enabled: false,
-    milestone: "M2",
+    milestone: "M3",
   },
 ];
 
