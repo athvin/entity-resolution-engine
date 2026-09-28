@@ -11,7 +11,7 @@
     "records": 10000
   },
   "sha256": "f9051b00384be3eff7790b690c842b9c19b40081f91203b2c11c9b364ab12c8d",
-  "splink_version": "5.0.0.dev5",
+  "splink_version": "5.0.0",
   "tf_rows": 5608,
   "tf_snapshot_id": "01JWMDTFSNAP00000000000001",
   "training": {

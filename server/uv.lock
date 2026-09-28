@@ -425,7 +425,7 @@ requires-dist = [
     { name = "pydantic", specifier = "==2.13.4" },
     { name = "python-ulid", specifier = "==4.0.1" },
     { name = "pyyaml", specifier = "==6.0.3" },
-    { name = "splink", specifier = "==5.0.0.dev5" },
+    { name = "splink", specifier = "==5.0.0" },
     { name = "typer", specifier = "==0.27.1" },
 ]
 
@@ -1212,15 +1212,16 @@ wheels = [
 
 [[package]]
 name = "splink"
-version = "5.0.0.dev5"
+version = "5.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "duckdb" },
+    { name = "pyarrow" },
     { name = "sqlglot" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/1a/bb/f04aed26eb5e78e3847b08c613cef0ccbe0696fad09e3abf4627581c935e/splink-5.0.0.dev5.tar.gz", hash = "sha256:c8c3fd6f84d52982e4092d11b10353c1af2622309d7d62eb5106aa55f3727eef", size = 2102896, upload-time = "2026-09-18T10:39:59.112Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/02/06/2d08a2091a559ff31d0ec36e194fbbeb84cadc934e3b35a3bf27ef2186d2/splink-5.0.0.tar.gz", hash = "sha256:389dfc2669b08889324571d5ef19a068bc8901e3a6ea1cc5c23af95fbe021177", size = 2102971, upload-time = "2026-09-28T14:24:19.446Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/27/b2/5f395ff5abbc1615f31e1ac1cf6fae63b665ea784acb568728dc8b8d4218/splink-5.0.0.dev5-py3-none-any.whl", hash = "sha256:6e66c69f065ddbc2d022307f23d959b2fe9b7e43820b0bbd0f12c78c59b65a70", size = 2192679, upload-time = "2026-09-18T10:39:57.021Z" },
+    { url = "https://files.pythonhosted.org/packages/bb/a3/65b2a7aeec049a4b5657c238d7e8e29e11e3803bb8ffae4a5ae538e6aa3e/splink-5.0.0-py3-none-any.whl", hash = "sha256:4b4b99a9d9d59f313a6bee766832d5632d33ff39083d153f5e9a5ab505325a1c", size = 2192907, upload-time = "2026-09-28T14:24:17.751Z" },
 ]
 
 [[package]]

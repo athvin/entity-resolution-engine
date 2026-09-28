@@ -273,7 +273,7 @@ _ROWS: Final[tuple[Pin, ...]] = (
     # No distribution backs the interpreter: `er doctor` compares
     # `sys.version_info[:2]` against this literal (S2.1, T-DOCTOR-1).
     Pin("python", "3.12", None, asserted_by_doctor=True),
-    Pin("splink", "5.0.0.dev5", "splink", asserted_by_doctor=True),
+    Pin("splink", "5.0.0", "splink", asserted_by_doctor=True),
     Pin("pyarrow", "25.0.1", "pyarrow", asserted_by_doctor=True),
     Pin("pandas", "3.0.5", "pandas", asserted_by_doctor=True),
     Pin("duckdb", "1.5.5", "duckdb", asserted_by_doctor=True),

@@ -12,7 +12,7 @@ license = { file = "LICENSE" }
 # their contract-enforcement machinery, so S2.1 pins them and they are declared
 # directly rather than left to the resolver.
 dependencies = [
-  "splink==5.0.0.dev5",
+  "splink==5.0.0",
   "pyarrow==25.0.1",
   "duckdb==1.5.5",
   "dbt-core==1.12.2",

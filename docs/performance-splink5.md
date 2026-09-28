@@ -1,6 +1,6 @@
 # Splink 5 pipeline performance
 
-This change applies the [Splink performance article](https://gist.github.com/RobinL/c6d56a27d8f83c40b6b09643c0fa5d14) to matching and training, then removes separate work in standardization and golden-record assembly. The tested dependency is exactly `splink==5.0.0.dev5`.
+This change applies the [Splink performance article](https://gist.github.com/RobinL/c6d56a27d8f83c40b6b09643c0fa5d14) to matching and training, then removes separate work in standardization and golden-record assembly. The measurements were taken against `splink==5.0.0.dev5`; the pin has since moved to the stable `splink==5.0.0`, whose only engine-relevant change over dev5 is an all-pairs blocking fallback this pipeline never takes (blocking rules are mandatory in S6).
 
 ## Million-record results
 
@@ -178,7 +178,7 @@ timing medians above.
 
 ## Operation
 
-Use the [migration runbook](runbook.md#migrating-an-existing-lake-to-splink-5) for existing lakes. The pin is a prerelease and the evidence format changes from Bayes factors to log2 weights. The runbook covers the required full resolution and rollback to a compatible image/model/TF snapshot.
+Use the [migration runbook](runbook.md#migrating-an-existing-lake-to-splink-5) for existing lakes. The evidence format changes from Bayes factors to log2 weights. The runbook covers the required full resolution and rollback to a compatible image/model/TF snapshot.
 
 Run an initial load and incremental delivery:
 
