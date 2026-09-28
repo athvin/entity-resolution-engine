@@ -38,6 +38,7 @@ from er.lake.maintain import (
     CLEANUP_OLD_FILES,
     EXPIRE_SNAPSHOTS,
     MERGE_ADJACENT_FILES,
+    RETIRED_RELATIONS,
     maintain,
 )
 from er.lake.model import SCHEMA_QUALIFIER
@@ -352,3 +353,33 @@ def test_second_invocation_is_a_zero_count_noop(
     assert second["snapshots_expired"] == 0, second
     assert second["files_deleted"] == 0, second
     assert between <= set(object_store.list_prefix(data_path))
+
+
+def test_retired_relations_are_dropped_once(
+    initialised_lake: duckdb.DuckDBPyConnection,
+) -> None:
+    """The pre-step: legacy staging tables an upgraded lake still holds are
+    dropped and counted; a lake without them reports zero and drops nothing.
+
+    The tables are planted rather than migrated into being: what the step must
+    handle is exactly "a relation with this name exists", however it got there,
+    and a planted one is that in one statement.
+    """
+    for relation in RETIRED_RELATIONS:
+        initialised_lake.execute(
+            f'CREATE TABLE {SCHEMA_QUALIFIER}."{relation}" (ingest_batch_id VARCHAR)'
+        )
+
+    _, counts = maintain_counts()
+    assert counts["retired_dropped"] == len(RETIRED_RELATIONS), counts
+    with connect() as connection:
+        remaining = connection.execute(
+            "SELECT count(*) FROM duckdb_tables() WHERE database_name = 'lake' "
+            "AND schema_name = 'main' AND table_name IN "
+            f"({', '.join('?' for _ in RETIRED_RELATIONS)})",
+            list(RETIRED_RELATIONS),
+        ).fetchone()
+    assert remaining == (0,), "every retired relation must be gone after maintenance"
+
+    _, second = maintain_counts()
+    assert second["retired_dropped"] == 0, second

@@ -4,10 +4,13 @@ MINOR-lake-maint is that a lake which commits a snapshot range per stage
 accumulates small files and snapshot history without bound, and a reused local
 volume grows forever. This module is the reclamation path, and S3 fixes its
 order: :data:`MERGE_ADJACENT_FILES` → :data:`EXPIRE_SNAPSHOTS` →
-:data:`CLEANUP_OLD_FILES`. The order is normative rather than tidy — cleaning
-before expiry deletes nothing, because a file is only unreferenced once the
-snapshot that referenced it is gone, and expiring before merging leaves behind
-exactly the small files compaction was meant to remove.
+:data:`CLEANUP_OLD_FILES`. One step precedes the three: relations the current
+registry has retired (:data:`RETIRED_RELATIONS`) are dropped, so the snapshots
+still referencing their files start aging toward expiry immediately. The order
+is normative rather than tidy — cleaning before expiry deletes nothing, because
+a file is only unreferenced once the snapshot that referenced it is gone, and
+expiring before merging leaves behind exactly the small files compaction was
+meant to remove.
 
 Three rules govern it, and each is a decision the spec makes:
 
@@ -54,6 +57,7 @@ __all__ = [
     "DEFAULT_RETAIN_DAYS",
     "EXPIRE_SNAPSHOTS",
     "MERGE_ADJACENT_FILES",
+    "RETIRED_RELATIONS",
     "MaintainResult",
     "ReferencedSnapshot",
     "maintain",
@@ -63,6 +67,14 @@ __all__ = [
 
 #: ``--retain-days`` when the operator supplies none (S4.0).
 DEFAULT_RETAIN_DAYS: Final[int] = 7
+
+#: Relations an earlier engine iteration owned that the current S5 registry no
+#: longer declares. The unified `stg_records` model replaced the three
+#: per-source staging tables; `preflight_schema` inspects DDL-owned relations
+#: only, so on an upgraded lake the old three sit inert until maintenance drops
+#: them. An explicit list, never "everything the registry does not name":
+#: maintenance must not guess about relations it does not recognise.
+RETIRED_RELATIONS: Final[tuple[str, ...]] = ("stg_crm", "stg_billing", "stg_webforms")
 
 #: S3's three calls, in S3's order. Spelled once each, so the sequence a lake sees
 #: is the sequence this module documents.
@@ -122,6 +134,7 @@ class MaintainResult:
     files_merged: int
     snapshots_expired: int
     files_deleted: int
+    retired_dropped: int
 
 
 def retention_cutoff(
@@ -209,6 +222,21 @@ def maintain(
     oldest = None if referenced is None else referenced[0]
     cutoff = window if oldest is None else min(window, _utc(oldest))
 
+    # Retired relations go first: the drop commits a snapshot, and the sooner it
+    # exists the sooner expiry ages out the snapshots still referencing the
+    # dropped tables' files. Storage returns on the maintenance run after the
+    # retention window passes, not this one — the same rule every file obeys.
+    dropped = 0
+    for relation in RETIRED_RELATIONS:
+        exists = connection.execute(
+            "SELECT count(*) FROM duckdb_tables() WHERE database_name = ? "
+            "AND schema_name = 'main' AND table_name = ?",
+            [LAKE_ALIAS, relation],
+        ).fetchone()
+        if exists and exists[0]:
+            connection.execute(f'DROP TABLE {SCHEMA_QUALIFIER}."{relation}"')
+            dropped += 1
+
     merged_cursor = connection.execute(MERGE_ADJACENT_FILES)
     merged = sum(
         int(row[_FILES_PROCESSED])
@@ -227,6 +255,7 @@ def maintain(
         # reading that cannot disagree with what the engine actually did.
         snapshots_expired=expired,
         files_deleted=deleted,
+        retired_dropped=dropped,
     )
 
 

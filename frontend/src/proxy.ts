@@ -6,10 +6,11 @@ const PUBLIC_PATHS = ["/login", "/api/auth/login"];
 
 /**
  * Cheap cookie-presence gate only: real session verification happens in route
- * handlers and server layouts (the middleware runtime has no database access).
+ * handlers and server layouts (the proxy runtime has no database access).
  * Pages redirect to /login; API routes answer with the JSON envelope.
+ * Next 16's `proxy` file convention — the renamed `middleware`.
  */
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   if (PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`))) {
     return NextResponse.next();
