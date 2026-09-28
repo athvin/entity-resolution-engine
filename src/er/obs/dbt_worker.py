@@ -46,17 +46,16 @@ def main() -> None:
                 )
 
             total = count(name)
-            if name.startswith("stg_"):
-                source = name.removeprefix("stg_")
-                predicate = f"source_system='{source}'"
+            if name == "stg_records":
+                predicate = "TRUE"
                 if total:
-                    predicate += (
-                        " AND ingest_batch_id NOT IN (SELECT DISTINCT ingest_batch_id "
+                    predicate = (
+                        "ingest_batch_id NOT IN (SELECT DISTINCT ingest_batch_id "
                         f'FROM lake.main."{name}")'
                     )
                 inputs = count("raw_records", predicate)
             elif name == "int_std_records":
-                inputs = sum(count(f"stg_{source}") for source in variables.get("sources", {}))
+                inputs = count("stg_records")
             elif name == "int_blocking_keys":
                 inputs = count("int_std_records")
             elif name in ("golden_records", "golden_lineage"):

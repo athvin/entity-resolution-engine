@@ -58,7 +58,6 @@ __all__ = [
     "RUN_STAGES",
     "RUN_STATUSES",
     "SCHEMA_QUALIFIER",
-    "STG_SOURCES",
     "Column",
     "LogicalKey",
     "Owner",
@@ -203,10 +202,7 @@ PAIR_RELATIONS: Final[frozenset[str]] = frozenset(
     {"match_scores", "assertions", "review_queue", "cut_edges"}
 )
 
-#: The three sources S5 names for the identically-shaped `stg_<source>` models.
-STG_SOURCES: Final[tuple[str, ...]] = ("crm", "billing", "webforms")
-
-# The standardized payload S5 declares once for `stg_<source>` and reuses verbatim
+# The standardized payload S5 declares once for `stg_records` and reuses verbatim
 # for `int_std_records`, which prefixes it with `record_key`. Declaring it twice is
 # how the staging contract and the intermediate contract would drift apart.
 _STD_PAYLOAD: Final[tuple[Column, ...]] = (
@@ -618,18 +614,16 @@ _DDL_SPECS: Final[tuple[TableSpec, ...]] = (
 )
 
 
-def _stg_spec(source: str) -> TableSpec:
-    """One `stg_<source>` model: S5 declares the three identical in shape."""
-    return TableSpec(
-        name=f"stg_{source}",
+_DBT_SPECS: Final[tuple[TableSpec, ...]] = (
+    TableSpec(
+        # The unified staging model: one relation for every S6 source, one union
+        # arm per `sources.<name>` entry, so adding a source is a config change
+        # alone (S4.2).
+        name="stg_records",
         owner=Owner.DBT,
         columns=_STD_PAYLOAD,
         keys=(LogicalKey(("source_system", "source_record_id", "content_hash")),),
-    )
-
-
-_DBT_SPECS: Final[tuple[TableSpec, ...]] = (
-    *(_stg_spec(source) for source in STG_SOURCES),
+    ),
     TableSpec(
         name="int_std_records",
         owner=Owner.DBT,

@@ -549,7 +549,7 @@ Phase letters refer to §9. Each item is small-to-medium API work unless marked 
 | 7.14 | Golden-records search/sort/filter beyond 3-column ILIKE (FTS later) | C |
 | 7.15 | Import receipts route over `ingest_batches` | B |
 | 7.16 | **Engine: score-only match mode** (no writes) — import preview (§5.5), future prevention API (design §11/§12 name it) | C |
-| 7.17 | **Engine: generated dbt staging models** — remove the crm/billing/webforms hardcoding so sources are self-serve | C |
+| 7.17 | **Engine: config-driven dbt staging** — ~~remove the crm/billing/webforms hardcoding so sources are self-serve~~ shipped: the unified `stg_records` model renders one union arm per configured source | done |
 | 7.18 | Config diff endpoint (client-side diff acceptable for v1) | C |
 | 7.19 | Saved segments table + parameterized export job (campaigns) | C |
 | 7.20 | Audit read route (org-scoped for tenants, global for super admins); add the missing `webhook.delete` audit write | A (super-admin), D (tenant-facing) |

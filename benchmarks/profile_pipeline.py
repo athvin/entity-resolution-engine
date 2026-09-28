@@ -147,9 +147,7 @@ def validate_coverage(
     expected_models = {
         f"model.er.{name}"
         for name in (
-            "stg_crm",
-            "stg_billing",
-            "stg_webforms",
+            "stg_records",
             "int_std_records",
             "int_blocking_keys",
             "golden_records",

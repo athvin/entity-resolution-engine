@@ -62,7 +62,7 @@ DESIGN_DOC = (REPO_ROOT / "DesignDoc.md").read_text(encoding="utf-8")
 # fourteen + eight, and a parser that silently found fewer would make every
 # comparison below vacuous.
 DDL_RELATION_COUNT = 15
-DBT_RELATION_COUNT = 8
+DBT_RELATION_COUNT = 6
 
 # The three `golden_records` columns survivorship does not produce (S5).
 GOLDEN_NON_SURVIVABLE = ("entity_id", "metadata", "survivorship_version", "assembled_at")
@@ -149,28 +149,18 @@ def spec_ddl_tables() -> dict[str, tuple[Column, ...]]:
 
 
 def spec_dbt_tables() -> dict[str, tuple[Column, ...]]:
-    """Every dbt-owned relation of S5, with `stg_<source>` expanded per source.
-
-    S5 declares the three staging models once, as one shape under a comment naming
-    them, so the sources are read from that comment rather than assumed.
-    """
+    """Every dbt-owned relation of S5, each declared directly as a typed column list."""
     tables: dict[str, tuple[Column, ...]] = {}
     for block in re.findall(r"^```sql\n(.*?)^```", S5, re.MULTILINE | re.DOTALL):
         if "CREATE TABLE" in block:
             continue
-        stg_names = re.findall(r"^-- (stg_\w+(?:, stg_\w+)*)", block, re.MULTILINE)
-        assert stg_names, "S5 no longer names the staging models it declares as one shape"
         for match in re.finditer(r"^([\w<>]+)\(", block, re.MULTILINE):
             depth = 0
             for index in range(match.end() - 1, len(block)):
                 depth += {"(": 1, ")": -1}.get(block[index], 0)
                 if depth == 0:
                     break
-            columns = parse_declarations(block[match.end() : index])
-            relation = match.group(1)
-            expanded = stg_names[0].split(", ") if relation == "stg_<source>" else [relation]
-            for name in expanded:
-                tables[name] = columns
+            tables[match.group(1)] = parse_declarations(block[match.end() : index])
     return tables
 
 
@@ -324,9 +314,8 @@ def test_only_not_null_constraints_are_emitted() -> None:
 
 def test_logical_keys_match_s5_0_table() -> None:
     rows = spec_ownership_rows()
-    # One row per relation, except that the three identically-keyed stg models
-    # share a row: 14 + 8 relations over 20 rows.
-    assert len(rows) == DDL_RELATION_COUNT + DBT_RELATION_COUNT - 2
+    # One row per relation.
+    assert len(rows) == DDL_RELATION_COUNT + DBT_RELATION_COUNT
 
     seen = set()
     for relations, _, keys in rows:

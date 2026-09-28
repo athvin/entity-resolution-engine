@@ -44,9 +44,9 @@ PROJECT_FILE = DBT_DIR / "dbt_project.yml"
 #: The models this ticket's milestone ships, so the scan below cannot pass by
 #: finding nothing. Later milestones add `int_*` and `golden_*`; each is held to the
 #: same rules by the same scan the moment its file lands.
-EXPECTED_INCREMENTAL_MODELS = frozenset({"stg_crm", "stg_billing", "stg_webforms"})
+EXPECTED_INCREMENTAL_MODELS = frozenset({"stg_records"})
 
-#: S4.2's `stg_<source>` family: `append`, because a staged row is a projection of an
+#: S4.2's staging family: `append`, because a staged row is a projection of an
 #: append-only `raw_records` version and is never updated in place (D7).
 STAGING_STRATEGY = "append"
 
@@ -54,8 +54,13 @@ STAGING_STRATEGY = "append"
 ON_SCHEMA_CHANGE = "append_new_columns"
 
 #: S4.2's predicate, verbatim. Whitespace-insensitive only between tokens: the shape
-#: is the contract, and `{{ this }}` is part of it.
-BATCH_PREDICATE = "ingest_batch_id not in (select distinct ingest_batch_id from {{ this }})"
+#: is the contract, and `{{ this }}` is part of it. The `source_system` filter is
+#: the unified model's spelling of what v1's per-source tables held structurally:
+#: one arm consults its own source's batches and no other's.
+BATCH_PREDICATE = (
+    "ingest_batch_id not in (select distinct ingest_batch_id "
+    "from {{ this }} where source_system = '{{ source_system }}')"
+)
 
 _CONFIG_BLOCK_RE = re.compile(r"\{\{\s*config\((?P<body>.*?)\)\s*\}\}", re.DOTALL)
 
@@ -121,12 +126,12 @@ def test_every_incremental_model_syncs_all_columns(name: str) -> None:
 
 @pytest.mark.parametrize("name", sorted(EXPECTED_INCREMENTAL_MODELS))
 def test_staging_uses_append_with_batch_predicate(name: str) -> None:
-    """AC6: the `stg_*` family is `append`, guarded by the not-in-distinct-batch predicate."""
+    """AC6: the staging model is `append`, guarded by the not-in-distinct-batch predicate."""
     source = incremental_models()[name]
     body = config_body(source)
 
     assert config_value(body, "incremental_strategy") == STAGING_STRATEGY, (
-        f"{name}: S4.2 gives the stg_<source> family incremental_strategy='{STAGING_STRATEGY}'"
+        f"{name}: S4.2 gives the staging family incremental_strategy='{STAGING_STRATEGY}'"
     )
     assert "is_incremental()" in source, (
         f"{name}: the predicate must be guarded by is_incremental()"

@@ -10,6 +10,11 @@ The row counts and object inventories below are a snapshot measured on
 inventory and validation results. Counts will change with input data,
 configuration and later runs; unexercised code paths are identified explicitly.
 
+> **Schema change since this snapshot:** the three per-source staging tables
+> (`stg_crm`, `stg_billing`, `stg_webforms`) were later unified into a single
+> `stg_records` relation with one union arm per configured source. The staging
+> rows and relationships below describe the audited v1 layout.
+
 The audit completed ingestion, cleaning and standardization, training, full pair scoring, entity
 reconciliation and golden assembly for all 100,000 input records.
 

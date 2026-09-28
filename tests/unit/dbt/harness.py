@@ -184,15 +184,23 @@ class MacroHarness:
 
     # -- rendering and execution -------------------------------------------
 
-    def render(self, source: str, vars: Mapping[str, Any] | None = None) -> str:
+    def render(
+        self,
+        source: str,
+        vars: Mapping[str, Any] | None = None,
+        context: Mapping[str, Any] | None = None,
+    ) -> str:
         """Render an ad-hoc Jinja fragment against the same globals a macro sees.
 
         The macros are reachable from it by name, which is how a model body would
         reach them, and so are `var()`, `ref()`, `source()` and `seed()` -- the
-        only way to exercise a stub that no shipped macro calls yet.
+        only way to exercise a stub that no shipped macro calls yet. ``context``
+        supplies the names dbt injects into a MODEL's namespace and a macro never
+        sees -- ``config``, ``is_incremental``, ``this``, ``exceptions`` -- so a
+        model body renders here exactly as a fragment does.
         """
         with self._overlay(vars):
-            return self._environment.from_string(source).render().strip()
+            return self._environment.from_string(source).render(**(context or {})).strip()
 
     def render_macro(self, name: str, *args: Any, vars: Mapping[str, Any] | None = None) -> str:
         """Render ``name(*args)`` and return the SQL fragment, stripped."""
@@ -255,6 +263,8 @@ class MacroHarness:
             undefined=StrictUndefined,
             autoescape=False,  # SQL, not HTML; escaping here would corrupt every literal.
             keep_trailing_newline=True,
+            # dbt enables `do` for every project template; a model body needs it.
+            extensions=["jinja2.ext.do"],
         )
         environment.globals.update(
             var=self._var,

@@ -248,9 +248,7 @@ def query_coverage(directory: Path, commands: list[dict[str, Any]]) -> dict[str,
         expected_models = {
             f"model.er.{name}"
             for name in (
-                "stg_crm",
-                "stg_billing",
-                "stg_webforms",
+                "stg_records",
                 "int_std_records",
                 "int_blocking_keys",
                 "golden_records",
