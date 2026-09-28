@@ -663,11 +663,34 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
         conn: Conn,
         caller: Caller,
     ) -> dict[str, Any]:
-        """The drop-dir connector's push seam: file in, incremental run enqueued."""
+        """The drop-dir connector's push seam: file in, incremental run enqueued.
+
+        The source name is validated against the org's active config FILE — the
+        same document the runner's ``adapter_for`` will read — before any byte
+        lands on disk. A draft-only source therefore 422s until it is published,
+        instead of surfacing later as the enqueued run's exit-2 failure; the
+        check also keeps an arbitrary ``source`` string out of the filesystem
+        path below.
+        """
         guard(caller, org, "steward")
         record = org_or_404(conn, org)
         if not record["drop_root"]:
             raise HTTPException(409, f"org {org!r} has no drop_root configured")
+        if not record["config_path"]:
+            raise HTTPException(409, f"org {org!r} has no config_path configured")
+        try:
+            config = load_config(Path(record["config_path"]))
+        except (ConfigValidationError, OSError) as exc:
+            raise HTTPException(
+                409, f"org config at {record['config_path']} is not loadable: {exc}"
+            ) from exc
+        if source not in config.sources:
+            known = ", ".join(sorted(config.sources))
+            raise HTTPException(
+                422,
+                f"source {source!r} is not in the active config (known: {known}); "
+                f"publish a config version containing sources.{source} first",
+            )
         delivery_id = str(ULID())
         suffix = Path(file.filename or "delivery.csv").suffix or ".csv"
         target_dir = Path(record["drop_root"]) / source
