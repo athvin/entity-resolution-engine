@@ -248,10 +248,13 @@ def entity_detail(connection: duckdb.DuckDBPyConnection, entity_id: str) -> dict
         f"FROM {SCHEMA_QUALIFIER}.golden_lineage WHERE entity_id = ? ORDER BY attribute",
         [entity_id],
     )
+    # `(occurred_at, seq)` is S4.5.3's replay order: `seq` is dense per emission
+    # batch, so on its own it interleaves runs (and collides as a React key).
     events = _rows(
         connection,
-        f"SELECT seq, run_id, event_type, details, occurred_at "
-        f"FROM {SCHEMA_QUALIFIER}.entity_events WHERE entity_id = ? ORDER BY seq",
+        f"SELECT event_id, seq, run_id, event_type, details, occurred_at "
+        f"FROM {SCHEMA_QUALIFIER}.entity_events WHERE entity_id = ? "
+        f"ORDER BY occurred_at, seq",
         [entity_id],
     )
     return {"golden": golden[0], "members": members, "lineage": lineage, "events": events}

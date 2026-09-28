@@ -637,6 +637,7 @@ function entityDetail(org, entityId) {
   ];
   const events = [
     {
+      event_id: `01jmevent1${entityId.slice(-8)}`,
       seq: 1,
       run_id: "01jm0000000000000000000001",
       event_type: "created",
@@ -646,6 +647,7 @@ function entityDetail(org, entityId) {
     ...(multi
       ? [
           {
+            event_id: `01jmevent2${entityId.slice(-8)}`,
             seq: 2,
             run_id: "01jm0000000000000000000002",
             event_type: "member_added",

@@ -233,7 +233,7 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
           ) : (
             <ol className="relative flex flex-col gap-3 border-l pl-4">
               {events.map((event) => (
-                <li key={event.seq} className="text-sm">
+                <li key={event.event_id} className="text-sm">
                   <span className="bg-border absolute -left-[3px] mt-1.5 size-1.5 rounded-full" />
                   <span className="font-medium">{describeEvent(event)}</span>
                   <span className="text-muted-foreground ml-2 text-xs">{event.occurred_at}</span>
