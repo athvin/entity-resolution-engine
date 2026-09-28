@@ -18,6 +18,8 @@ const envSchema = z.object({
     message: "ERWEB_CREDENTIAL_KEY must be 32 bytes of base64 (openssl rand -base64 32)",
   }),
   ANTHROPIC_API_KEY: z.string().optional(),
+  /** Test seam: the mock tier points this at a scripted /v1/messages. */
+  ANTHROPIC_BASE_URL: z.url().optional(),
   ERWEB_ASSISTANT_MODEL: z.string().default("claude-opus-5"),
 });
 

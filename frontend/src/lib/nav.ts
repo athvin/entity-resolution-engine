@@ -70,24 +70,21 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Campaigns",
     icon: Megaphone,
     path: (org) => `/${org}/campaigns`,
-    enabled: false,
-    milestone: "M4",
+    enabled: true,
   },
   {
     id: "assistant",
     label: "Assistant",
     icon: Sparkles,
     path: (org) => `/${org}/assistant`,
-    enabled: false,
-    milestone: "M4",
+    enabled: true,
   },
   {
     id: "settings",
     label: "Settings",
     icon: Settings,
     path: (org) => `/${org}/settings`,
-    enabled: false,
-    milestone: "M4",
+    enabled: true,
   },
 ];
 

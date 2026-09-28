@@ -65,6 +65,9 @@ export default defineConfig({
         ERWEB_SESSION_SECRET: "mock-session-secret-mock-session-secret",
         ERWEB_CREDENTIAL_KEY: "3q2+7wEirykuXBXRO26AY9nbZAqAnDzws76jd2GxwkE=",
         ERWEB_INSECURE_COOKIES: "1", // plain-HTTP localhost
+        // The scripted Anthropic endpoint: the REAL tool loop, deterministic frames.
+        ANTHROPIC_API_KEY: "mock-anthropic-key",
+        ANTHROPIC_BASE_URL: "http://localhost:8010/anthropic",
       },
     },
   ],

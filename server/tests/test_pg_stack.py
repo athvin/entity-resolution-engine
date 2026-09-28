@@ -1073,3 +1073,21 @@ def test_bulk_resolve_applies_in_one_window_and_enqueues_once(
     ]
     assert len(jobs) == 1, "bulk apply_now enqueues exactly one reconcile"
     assert response["apply_job"] == jobs[0].job_id
+
+
+def test_config_version_detail_serves_the_yaml_body(
+    client: TestClient, conn: psycopg.Connection, org: str
+) -> None:
+    """The diff's input (§7.18): full bodies per version, 404 for the unknown."""
+    admin = key_headers(conn, org, "admin")
+    created = client.post(
+        f"/v1/orgs/{org}/config/versions",
+        json={"yaml": TEST_CONFIG.read_text()},
+        headers=admin,
+    ).json()
+    detail = client.get(f"/v1/orgs/{org}/config/versions/{created['version']}", headers=admin)
+    assert detail.status_code == 200
+    body = detail.json()
+    assert body["yaml"].startswith("tenant:") or "tenant:" in body["yaml"]
+    assert body["state"] == "draft" and body["config_hash"] == created["config_hash"]
+    assert client.get(f"/v1/orgs/{org}/config/versions/999", headers=admin).status_code == 404

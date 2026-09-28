@@ -183,13 +183,20 @@ export function SourcesContent({ org }: { org: string }) {
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-4 lg:gap-6" data-testid="sources-page">
-      <div className="flex items-baseline justify-between">
+      <div className="flex items-center justify-between gap-3">
         <h1 className="text-xl font-semibold lg:text-2xl">Sources</h1>
-        {sources.data && (
-          <span className="text-muted-foreground text-xs">
-            config v{sources.data.config_version}
-          </span>
-        )}
+        <span className="flex items-center gap-3">
+          {sources.data && (
+            <span className="text-muted-foreground text-xs">
+              config v{sources.data.config_version}
+            </span>
+          )}
+          {role === "admin" && (
+            <Button size="sm" variant="outline" asChild data-testid="new-source">
+              <Link href={`/${org}/sources/new`}>New source</Link>
+            </Button>
+          )}
+        </span>
       </div>
 
       {sources.isPending ? (
