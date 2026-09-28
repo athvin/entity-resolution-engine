@@ -1,7 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, Eye, KeyRound } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, Eye, KeyRound, Pause, Play } from "lucide-react";
+
+import { bffFetch } from "@/lib/api/client";
+import { queryKeys } from "@/lib/query/keys";
 
 import { StateChip } from "@/components/runs/runs-content";
 import { Button } from "@/components/ui/button";
@@ -23,6 +27,19 @@ export function TenantDetail({ org }: { org: string }) {
   const detail = useAdminOrg(org, { poll: true });
   const register = useRegisterOrg(org);
   const { enter } = useImpersonation();
+  const queryClient = useQueryClient();
+  const lifecycle = useMutation({
+    mutationFn: (action: "suspend" | "resume") =>
+      bffFetch<{ state: string }>(`/api/admin/orgs/${org}/lifecycle`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action }),
+      }),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.adminOrg(org) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.adminOrgs() });
+    },
+  });
 
   if (detail.isPending || !detail.data) {
     return <Skeleton className="h-64 w-full" />;
@@ -121,13 +138,44 @@ export function TenantDetail({ org }: { org: string }) {
         </Card>
       )}
 
-      <Card>
-        <CardContent className="text-muted-foreground flex flex-wrap gap-3 p-4 text-xs">
-          <span>Suspend, resume and purge arrive with the lifecycle routes (M5) —</span>
-          <Button variant="outline" size="sm" disabled title="backend route pending (M5)">
-            Suspend
-          </Button>
-          <Button variant="outline" size="sm" disabled title="backend route pending (M5)">
+      <Card data-testid="lifecycle-card">
+        <CardContent className="flex flex-wrap items-center gap-3 p-4 text-sm">
+          <span className="text-muted-foreground text-xs">
+            Lifecycle — a suspended tenant refuses jobs, imports and steward actions until resumed;
+            its data is untouched.
+          </span>
+          {data.state === "active" && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={lifecycle.isPending}
+              data-testid="suspend-org"
+              onClick={() => {
+                lifecycle.mutate("suspend");
+              }}
+            >
+              <Pause /> Suspend
+            </Button>
+          )}
+          {data.state === "suspended" && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={lifecycle.isPending}
+              data-testid="resume-org"
+              onClick={() => {
+                lifecycle.mutate("resume");
+              }}
+            >
+              <Play /> Resume
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            disabled
+            title="purge (drop database + delete lake prefix) is deliberately unimplemented — roadmap"
+          >
             Purge
           </Button>
         </CardContent>

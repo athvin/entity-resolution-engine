@@ -203,7 +203,12 @@ export function AssistantChat({ org }: { org: string }) {
           disabled={busy}
           data-testid="assistant-input"
         />
-        <Button type="submit" disabled={busy || !input.trim()} data-testid="assistant-send">
+        <Button
+          type="submit"
+          disabled={busy || !input.trim()}
+          data-testid="assistant-send"
+          aria-label="Send message"
+        >
           <Send />
         </Button>
       </form>

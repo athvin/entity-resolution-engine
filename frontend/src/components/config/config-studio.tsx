@@ -50,7 +50,7 @@ function VersionHistory({ org }: { org: string }) {
               className={cn(
                 "rounded-full px-2 py-0.5 text-xs",
                 row.state === "published"
-                  ? "bg-emerald-500/15 text-emerald-600"
+                  ? "bg-emerald-500/15 text-emerald-700"
                   : "bg-muted text-muted-foreground",
               )}
             >

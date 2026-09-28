@@ -406,7 +406,7 @@ export function initialState() {
 
   // One private triage org per mobile device project, cloned from the
   // mutable-dev pattern, so parallel projects never race a shared queue.
-  for (const org of ["mutable-ios", "mutable-android"]) {
+  for (const org of ["mutable-ios", "mutable-android", "fresh-dev"]) {
     state.orgs[org] = {
       name: org,
       state: "active",
@@ -457,6 +457,81 @@ export function initialState() {
       published_at: "2026-09-21T12:00:00Z",
     };
   }
+  state.audit = {
+    "acme-dev": [
+      {
+        id: 42,
+        at: "2026-09-27T10:00:00Z",
+        actor: "user:steward@acme.dev via key:mock",
+        org: "acme-dev",
+        action: "steward.resolve_review",
+        detail: { review_id: "01jmrev00001", resolution: "match", status: "applied" },
+      },
+      {
+        id: 41,
+        at: "2026-09-27T09:00:00Z",
+        actor: "user:admin@acme.dev via key:mock",
+        org: "acme-dev",
+        action: "schedule.create",
+        detail: { schedule_id: "01jmsched00000000000000001" },
+      },
+      {
+        id: 40,
+        at: "2026-09-26T09:00:00Z",
+        actor: "operator",
+        org: "acme-dev",
+        action: "org.upsert",
+        detail: {},
+      },
+    ],
+  };
+
+  state.metrics["fresh-dev"] = {
+    records: 0,
+    entities: 0,
+    duplicate_groups: 0,
+    records_in_duplicate_groups: 0,
+    open_reviews: 0,
+    snapshot: 1,
+  };
+  state.reviews["fresh-dev"] = [];
+  state.jobs["fresh-dev"] = [
+    {
+      job_id: "01jmfresh000000000000000f1",
+      org: "fresh-dev",
+      kind: "run_all_incremental",
+      params: { source: "crm" },
+      state: "failed",
+      priority: 0,
+      idempotency_key: "import:fresh-1",
+      run_id: null,
+      attempt: 1,
+      max_attempts: 3,
+      exit_code: 3,
+      error_class: "precondition",
+      error_detail: "no model_registry row has status='active'",
+      outcome: null,
+      progress: { stages: [{ stage: "ingest" }, { stage: "standardize" }] },
+    },
+    {
+      job_id: "01jmfresh000000000000000f2",
+      org: "fresh-dev",
+      kind: "run_all_incremental",
+      params: { source: "billing" },
+      state: "failed",
+      priority: 0,
+      idempotency_key: "import:fresh-2",
+      run_id: null,
+      attempt: 1,
+      max_attempts: 3,
+      exit_code: 3,
+      error_class: "precondition",
+      error_detail: "no model_registry row has status='active'",
+      outcome: null,
+      progress: { stages: [{ stage: "ingest" }, { stage: "standardize" }] },
+    },
+  ];
+
   // The version ledger starts with each org's active config as published v1.
   state.configVersions = {};
   for (const [org, config] of Object.entries(state.configs)) {
@@ -740,6 +815,36 @@ const server = http.createServer((req, res) => {
       );
     }
 
+    if ((match = /^\/v1\/orgs\/([^/]+):suspend$/.exec(path)) && req.method === "POST") {
+      const org = state.orgs[match[1]];
+      if (!org) return send(res, 404, { detail: "not found" });
+      if (org.state !== "active") return send(res, 409, { detail: "only active orgs suspend" });
+      org.state = "suspended";
+      return send(res, 200, { name: org.name, state: "suspended" });
+    }
+    if ((match = /^\/v1\/orgs\/([^/]+):resume$/.exec(path)) && req.method === "POST") {
+      const org = state.orgs[match[1]];
+      if (!org) return send(res, 404, { detail: "not found" });
+      if (org.state !== "suspended") return send(res, 409, { detail: "nothing to resume" });
+      org.state = "active";
+      return send(res, 200, { name: org.name, state: "active" });
+    }
+    if (path === "/v1/audit" && req.method === "GET") {
+      const org = url.searchParams.get("org");
+      const all = Object.values(state.audit ?? {}).flat();
+      return send(
+        res,
+        200,
+        all.filter((row) => (org ? row.org === org : true)).sort((a, b) => b.id - a.id),
+      );
+    }
+    if ((match = /^\/v1\/orgs\/([^/]+)\/audit$/.exec(path)) && req.method === "GET") {
+      const action = url.searchParams.get("action");
+      const rows = (state.audit?.[match[1]] ?? []).filter((row) =>
+        action ? row.action === action : true,
+      );
+      return send(res, 200, rows);
+    }
     if ((match = /^\/v1\/orgs\/([^/]+)$/.exec(path)) && req.method === "GET") {
       const org = state.orgs[match[1]];
       if (!org) return send(res, 404, { detail: "not found" });
@@ -812,6 +917,37 @@ const server = http.createServer((req, res) => {
     }
     if ((match = /^\/v1\/orgs\/([^/]+)\/runs$/.exec(path)) && req.method === "GET") {
       return send(res, 200, state.runs[match[1]] ?? []);
+    }
+    if ((match = /^\/v1\/orgs\/([^/]+)\/jobs$/.exec(path)) && req.method === "POST") {
+      const org = state.orgs[match[1]];
+      if (!org) return send(res, 404, { detail: "not found" });
+      if (org.state !== "active") {
+        return send(res, 409, {
+          detail: `org is ${org.state}; jobs are accepted only when active`,
+        });
+      }
+      const body = await readBody(req);
+      const kind = String(body.kind ?? "");
+      const job = {
+        job_id: `01jmsubmit${String(Object.values(state.jobs).flat().length).padStart(4, "0")}`,
+        org: match[1],
+        kind,
+        params: body.params ?? {},
+        // Train completes instantly in the mock so onboarding advances on refetch.
+        state: kind === "train" ? "succeeded" : "queued",
+        priority: 0,
+        idempotency_key: req.headers["idempotency-key"] ?? null,
+        run_id: null,
+        attempt: kind === "train" ? 1 : 0,
+        max_attempts: 3,
+        exit_code: kind === "train" ? 0 : null,
+        error_class: null,
+        error_detail: null,
+        outcome: kind === "train" ? "model_activated" : null,
+        progress: { stages: kind === "train" ? [{ stage: "train" }] : [] },
+      };
+      (state.jobs[match[1]] ??= []).unshift(job);
+      return send(res, 202, job);
     }
     if ((match = /^\/v1\/orgs\/([^/]+)\/jobs$/.exec(path)) && req.method === "GET") {
       const limit = Number(url.searchParams.get("limit") ?? 50);

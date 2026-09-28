@@ -137,7 +137,7 @@ All tenant-scoped routes under `/v1/orgs/{org}/…`.
 
 | Resource | Verbs | Notes |
 |---|---|---|
-| `/orgs` | operator CRUD | tenant lifecycle (§7) |
+| `/orgs` | operator CRUD; `:suspend`; `:resume` | tenant lifecycle (§7); suspend/resume flip `active` ↔ `suspended` with a state precondition (409 otherwise) — the existing not-active guards enforce the freeze |
 | `/connections` | CRUD + `:test` | the connector seam. A connection = {type, credential ref, object→source mapping}. Contract with connectors: they (a) materialize deliveries into the tenant drop dir, (b) contribute a `sources` config entry, (c) submit jobs with idempotency keys, (d) consume `/events` webhooks. Nothing else is promised. |
 | `/config`, `/config/versions` | GET active; POST draft; `:publish`; diff | versioned in the control plane (yaml, `config_hash`, author); publish states its consequence (see below) |
 | `/jobs` | POST (Idempotency-Key required); GET list/detail; `/logs`; `:cancel`; `:resume` | detail embeds a `run_stages` projection from the heartbeat cache — the hot polling path never opens DuckDB |

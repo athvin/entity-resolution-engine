@@ -1091,3 +1091,39 @@ def test_config_version_detail_serves_the_yaml_body(
     assert body["yaml"].startswith("tenant:") or "tenant:" in body["yaml"]
     assert body["state"] == "draft" and body["config_hash"] == created["config_hash"]
     assert client.get(f"/v1/orgs/{org}/config/versions/999", headers=admin).status_code == 404
+
+
+def test_suspend_and_resume_lifecycle(
+    client: TestClient, conn: psycopg.Connection, org: str
+) -> None:
+    """§7.2's reversible half: freeze refuses all work, resume restores it."""
+    steward_headers = key_headers(conn, org, "steward")
+
+    suspended = client.post(f"/v1/orgs/{org}:suspend", headers=operator())
+    assert suspended.status_code == 200 and suspended.json()["state"] == "suspended"
+    # The existing guards enforce the freeze — no new enforcement paths.
+    refused = client.post(
+        f"/v1/orgs/{org}/jobs",
+        json={"kind": "train"},
+        headers={**steward_headers, "Idempotency-Key": "frozen-1"},
+    )
+    assert refused.status_code == 409
+    assert client.post(f"/v1/orgs/{org}:suspend", headers=operator()).status_code == 409
+
+    resumed = client.post(f"/v1/orgs/{org}:resume", headers=operator())
+    assert resumed.status_code == 200 and resumed.json()["state"] == "active"
+    accepted = client.post(
+        f"/v1/orgs/{org}/jobs",
+        json={"kind": "train"},
+        headers={**steward_headers, "Idempotency-Key": "thawed-1"},
+    )
+    assert accepted.status_code == 202
+    assert client.post(f"/v1/orgs/{org}:resume", headers=operator()).status_code == 409
+
+    # Lifecycle flips are operator-only and audited.
+    admin = key_headers(conn, org, "admin")
+    assert client.post(f"/v1/orgs/{org}:suspend", headers=admin).status_code == 403
+    trail = client.get(
+        f"/v1/orgs/{org}/audit", params={"action": "org.suspend"}, headers=admin
+    ).json()
+    assert len(trail) == 1
