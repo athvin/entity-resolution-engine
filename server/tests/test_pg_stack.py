@@ -502,6 +502,78 @@ def test_import_upload_lands_in_drop_dir_and_enqueues(
     assert job.params["source"] == "crm"
 
 
+#: A valid fourth-source block for configs/test.yaml, as the wizard would emit it.
+_PARTNER_BLOCK = """  partnerapp:
+    adapter: csv
+    priority_rank: 4
+    record_id_column: partner_id
+    updated_at_column: touched_at
+    date_format: "%Y-%m-%d"
+    columns:
+      given_name:   given
+      family_name:  surname
+      email:        mail
+      phone:        tel
+      address_line: street
+      addr_city:    town
+      addr_region:  province
+      addr_postal:  postal
+      birth_date:   born
+"""
+
+
+def test_import_validates_source_against_the_active_config(
+    client: TestClient, conn: psycopg.Connection, org: str
+) -> None:
+    """Unknown source → 422 with nothing written; a draft is not enough; a
+    published config is."""
+    steward_headers = key_headers(conn, org, "steward")
+    admin_headers = key_headers(conn, org, "admin")
+    record = queue.org_record(conn, org)
+    assert record is not None
+    drop_root = Path(record["drop_root"])
+
+    def upload() -> Any:
+        return client.post(
+            f"/v1/orgs/{org}/imports",
+            params={"source": "partnerapp"},
+            files={"file": ("partners.csv", b"partner_id,mail\nPA1,a@b.co\n", "text/csv")},
+            headers=steward_headers,
+        )
+
+    refused = upload()
+    assert refused.status_code == 422
+    detail = refused.json()["detail"]
+    assert "publish a config version containing sources.partnerapp" in detail
+    assert "crm" in detail  # the known sources are named, so the caller can self-serve
+    assert not (drop_root / "partnerapp").exists()
+    assert queue.list_jobs(conn, org) == []
+
+    # A DRAFT declaring the source is not enough: the config FILE is what the
+    # runner's adapter_for will read, and it changes only on publish.
+    draft_yaml = TEST_CONFIG.read_text().replace("\nblocking:", f"{_PARTNER_BLOCK}\nblocking:", 1)
+    version = client.post(
+        f"/v1/orgs/{org}/config/versions", json={"yaml": draft_yaml}, headers=admin_headers
+    ).json()["version"]
+    still_refused = upload()
+    assert still_refused.status_code == 422
+    assert queue.list_jobs(conn, org) == []
+
+    published = client.post(
+        f"/v1/orgs/{org}/config/versions/{version}:publish", headers=admin_headers
+    )
+    assert published.status_code == 200
+
+    accepted = upload()
+    assert accepted.status_code == 202
+    body = accepted.json()
+    assert Path(body["file"]).parent.name == "partnerapp"
+    job = queue.get_job(conn, org, body["job"]["job_id"])
+    assert job is not None
+    assert job.kind == "run_all_incremental"
+    assert job.params["source"] == "partnerapp"
+
+
 class _Receiver(http.server.BaseHTTPRequestHandler):
     received: list[dict[str, Any]] = []
 

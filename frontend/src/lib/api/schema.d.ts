@@ -371,6 +371,13 @@ export interface paths {
         /**
          * Create Import
          * @description The drop-dir connector's push seam: file in, incremental run enqueued.
+         *
+         *     The source name is validated against the org's active config FILE — the
+         *     same document the runner's ``adapter_for`` will read — before any byte
+         *     lands on disk. A draft-only source therefore 422s until it is published,
+         *     instead of surfacing later as the enqueued run's exit-2 failure; the
+         *     check also keeps an arbitrary ``source`` string out of the filesystem
+         *     path below.
          */
         post: operations["create_import_v1_orgs__org__imports_post"];
         delete?: never;

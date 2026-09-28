@@ -2530,7 +2530,7 @@
         "summary": "Import Receipts"
       },
       "post": {
-        "description": "The drop-dir connector's push seam: file in, incremental run enqueued.",
+        "description": "The drop-dir connector's push seam: file in, incremental run enqueued.\n\nThe source name is validated against the org's active config FILE \u2014 the\nsame document the runner's ``adapter_for`` will read \u2014 before any byte\nlands on disk. A draft-only source therefore 422s until it is published,\ninstead of surfacing later as the enqueued run's exit-2 failure; the\ncheck also keeps an arbitrary ``source`` string out of the filesystem\npath below.",
         "operationId": "create_import_v1_orgs__org__imports_post",
         "parameters": [
           {
