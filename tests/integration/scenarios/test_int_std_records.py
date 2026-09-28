@@ -512,7 +512,7 @@ def test_tombstoned_key_excluded_and_resurrected_key_returns(
         (tombstones_excluded,) = query(
             connection,
             f"SELECT count(*) FROM ("
-            f"  SELECT content_hash FROM {SCHEMA_QUALIFIER}.stg_crm"
+            f"  SELECT content_hash FROM {SCHEMA_QUALIFIER}.stg_records"
             f"  QUALIFY row_number() OVER ("
             f"    PARTITION BY source_system, source_record_id"
             f"    ORDER BY ingested_at DESC, ingest_batch_id DESC) = 1"
@@ -623,9 +623,10 @@ def test_colon_and_duplicate_key_fail_tag_keys(
     # would. `* REPLACE` keeps every other staged value, so the id is the only thing
     # dbt can be objecting to.
     initialised_lake.execute(
-        f"INSERT INTO {SCHEMA_QUALIFIER}.stg_crm "
+        f"INSERT INTO {SCHEMA_QUALIFIER}.stg_records "
         f"SELECT * REPLACE (? AS source_record_id) "
-        f"FROM {SCHEMA_QUALIFIER}.stg_crm ORDER BY source_record_id LIMIT 1",
+        f"FROM {SCHEMA_QUALIFIER}.stg_records "
+        f"WHERE source_system = 'crm' ORDER BY source_record_id LIMIT 1",
         [COLON_RECORD_ID],
     )
     standardized("run", select=INTERMEDIATE_SELECTOR)

@@ -17,14 +17,16 @@ def connection():
             "CREATE TABLE lake.main.raw_records (source_system VARCHAR, "
             "source_record_id VARCHAR, ingest_batch_id VARCHAR)"
         )
-        con.execute("CREATE TABLE lake.main.stg_crm (ingest_batch_id VARCHAR)")
+        con.execute(
+            "CREATE TABLE lake.main.stg_records (source_system VARCHAR, ingest_batch_id VARCHAR)"
+        )
         con.execute("CREATE TABLE lake.main.int_std_records (record_key VARCHAR)")
         con.execute("CREATE TABLE lake.main.int_blocking_keys (record_key VARCHAR)")
         con.execute(
             "INSERT INTO lake.main.raw_records VALUES "
             "('crm', 'a', 'old'), ('crm', 'a', 'new'), ('crm', 'b', 'new')"
         )
-        con.execute("INSERT INTO lake.main.stg_crm VALUES ('old')")
+        con.execute("INSERT INTO lake.main.stg_records VALUES ('crm', 'old')")
         yield con
 
 
@@ -35,7 +37,7 @@ def config():
 def test_partial_staging_is_recovered_in_same_and_new_run(connection):
     assert prepare_work(connection, config(), "first", full_refresh=False) == (2, True, False)
     # Staging succeeded; current records/blocking failed. Its journal must survive.
-    connection.execute("INSERT INTO lake.main.stg_crm VALUES ('new')")
+    connection.execute("INSERT INTO lake.main.stg_records VALUES ('crm', 'new')")
     assert prepare_work(connection, config(), "first", full_refresh=False) == (2, True, False)
     assert prepare_work(connection, config(), "retry", full_refresh=False) == (2, True, False)
     assert connection.execute(
@@ -47,18 +49,18 @@ def test_partial_staging_is_recovered_in_same_and_new_run(connection):
 
 def test_full_refresh_survives_retry_and_selects_history(connection):
     assert prepare_work(connection, config(), "first", full_refresh=True) == (3, False, True)
-    connection.execute("INSERT INTO lake.main.stg_crm VALUES ('new')")
+    connection.execute("INSERT INTO lake.main.stg_records VALUES ('crm', 'new')")
     assert prepare_work(connection, config(), "retry", full_refresh=False) == (3, False, True)
 
 
 def test_missing_derived_relation_cannot_skip_staged_batches(connection):
     connection.execute("DROP TABLE lake.main.int_blocking_keys")
-    connection.execute("INSERT INTO lake.main.stg_crm VALUES ('new')")
+    connection.execute("INSERT INTO lake.main.stg_records VALUES ('crm', 'new')")
     assert prepare_work(connection, config(), "repair", full_refresh=False) == (3, False, False)
 
 
 def test_full_scope_rebuilds_keys_even_without_a_new_delivery(connection):
-    connection.execute("INSERT INTO lake.main.stg_crm VALUES ('new')")
+    connection.execute("INSERT INTO lake.main.stg_records VALUES ('crm', 'new')")
     assert prepare_work(
         connection, config(), "rules_changed", full_refresh=False, changed_only=False
     ) == (3, False, False)

@@ -132,10 +132,9 @@ SELECTOR: Final[str] = "staging intermediate"
 TARGET: Final[str] = "lake"
 
 #: S12's "Relations first written" for M2, restricted to the dbt-owned half — the
-#: five nodes the selection above must build and no sixth.
+#: three nodes the selection above must build and no fourth.
 EXPECTED_MODEL_NODES: Final[frozenset[str]] = frozenset(
-    f"model.er.{name}"
-    for name in ("stg_crm", "stg_billing", "stg_webforms", STD_MODEL, BLOCKING_MODEL)
+    f"model.er.{name}" for name in ("stg_records", STD_MODEL, BLOCKING_MODEL)
 )
 
 #: What dbt reports for a node that did what it was asked: models and seeds succeed,

@@ -1,11 +1,11 @@
-# The S5 contract for the three staging relations.
+# The S5 contract for the unified staging relation.
 #
 # S5.0 gives every dbt-owned relation an ENFORCED contract so that a column or type
-# drift fails `dbt build` and S5 stays the review-time authority; the column lists
-# below are S5's `stg_<source>` listing, column for column, type for type and in its
-# order. The three are deliberately spelled out rather than anchored and re-used: an
-# anchor would make one source's shape editable from another source's block, and
-# S4.2's whole claim is that the three models have the SAME shape independently.
+# drift fails `dbt build` and S5 stays the review-time authority; the column list
+# below is S5's staging listing, column for column, type for type and in its order.
+# Every union arm `stg_records` renders emits this same projection, so one contract
+# covers every S6 source -- where v1 spelled the identical shape out three times,
+# once per hand-written model.
 #
 # Two spellings differ from S5's prose and neither is a different type:
 #   LIST(VARCHAR) is written `VARCHAR[]`, which is DuckDB's own name for it -- the
@@ -22,152 +22,8 @@
 version: 2
 
 models:
-  - name: stg_crm
-    description: "sources.crm projected into the S5 stg_<source> shape (S4.2)."
-    config:
-      contract:
-        enforced: true
-    columns:
-      - name: source_system
-        data_type: VARCHAR
-        constraints:
-          - type: not_null
-      - name: source_record_id
-        data_type: VARCHAR
-        constraints:
-          - type: not_null
-      - name: content_hash
-        data_type: VARCHAR
-        constraints:
-          - type: not_null
-      - name: std_version
-        data_type: VARCHAR
-        constraints:
-          - type: not_null
-      - name: given_name
-        data_type: VARCHAR
-      - name: family_name
-        data_type: VARCHAR
-      - name: name_variants
-        data_type: VARCHAR[]
-        constraints:
-          - type: not_null
-      - name: email
-        data_type: VARCHAR
-      - name: email_valid
-        data_type: BOOLEAN
-      - name: phone_e164
-        data_type: VARCHAR
-      - name: phone_valid
-        data_type: BOOLEAN
-      - name: addr_number
-        data_type: VARCHAR
-      - name: addr_street
-        data_type: VARCHAR
-      - name: addr_unit
-        data_type: VARCHAR
-      - name: addr_city
-        data_type: VARCHAR
-      - name: addr_region
-        data_type: VARCHAR
-      - name: addr_postal
-        data_type: VARCHAR
-      - name: birth_date
-        data_type: DATE
-      - name: metadata
-        description: "Unmapped client fields as JSON; excluded from matching and survivorship."
-        data_type: JSON
-      - name: updated_at_source
-        data_type: TIMESTAMP
-      - name: ingest_batch_id
-        data_type: VARCHAR
-        constraints:
-          - type: not_null
-      - name: ingested_at
-        data_type: TIMESTAMP
-        constraints:
-          - type: not_null
-    data_tests:
-      - dbt_utils.unique_combination_of_columns:
-          arguments:
-            combination_of_columns: ['source_system', 'source_record_id', 'content_hash']
-          config:
-            tags: ['keys']
-
-  - name: stg_billing
-    description: "sources.billing projected into the S5 stg_<source> shape (S4.2)."
-    config:
-      contract:
-        enforced: true
-    columns:
-      - name: source_system
-        data_type: VARCHAR
-        constraints:
-          - type: not_null
-      - name: source_record_id
-        data_type: VARCHAR
-        constraints:
-          - type: not_null
-      - name: content_hash
-        data_type: VARCHAR
-        constraints:
-          - type: not_null
-      - name: std_version
-        data_type: VARCHAR
-        constraints:
-          - type: not_null
-      - name: given_name
-        data_type: VARCHAR
-      - name: family_name
-        data_type: VARCHAR
-      - name: name_variants
-        data_type: VARCHAR[]
-        constraints:
-          - type: not_null
-      - name: email
-        data_type: VARCHAR
-      - name: email_valid
-        data_type: BOOLEAN
-      - name: phone_e164
-        data_type: VARCHAR
-      - name: phone_valid
-        data_type: BOOLEAN
-      - name: addr_number
-        data_type: VARCHAR
-      - name: addr_street
-        data_type: VARCHAR
-      - name: addr_unit
-        data_type: VARCHAR
-      - name: addr_city
-        data_type: VARCHAR
-      - name: addr_region
-        data_type: VARCHAR
-      - name: addr_postal
-        data_type: VARCHAR
-      - name: birth_date
-        data_type: DATE
-      - name: metadata
-        description: "Unmapped client fields as JSON; excluded from matching and survivorship."
-        data_type: JSON
-      - name: updated_at_source
-        data_type: TIMESTAMP
-      - name: ingest_batch_id
-        data_type: VARCHAR
-        constraints:
-          - type: not_null
-      - name: ingested_at
-        data_type: TIMESTAMP
-        constraints:
-          - type: not_null
-    data_tests:
-      - dbt_utils.unique_combination_of_columns:
-          arguments:
-            combination_of_columns: ['source_system', 'source_record_id', 'content_hash']
-          config:
-            tags: ['keys']
-
-  - name: stg_webforms
-    description: "sources.webforms projected into the S5 stg_<source> shape (S4.2)."
+  - name: stg_records
+    description: "Every sources.<name> projected into the S5 staging shape, one union arm per S6 source (S4.2)."
     config:
       contract:
         enforced: true

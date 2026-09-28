@@ -1,8 +1,8 @@
-"""`base_10` staged through the three S4.2 models (S4.2, S5, S5.0, S8.1, S8.3).
+"""`base_10` staged through the unified S4.2 model (S4.2, S5, S5.0, S8.1, S8.3).
 
 Everything here is asserted against a real `dbt build` on the namespaced lake, not
-against compiled SQL, because the claims S4.2 makes about `stg_<source>` are claims
-about rows: that the three relations hold exactly what `raw_records` delivered, in
+against compiled SQL, because the claims S4.2 makes about `stg_records` are claims
+about rows: that its per-source arms hold exactly what `raw_records` delivered, in
 the shape S5 declares, and that running the build twice over one `ingest_batch_id`
 appends nothing.
 
@@ -128,9 +128,19 @@ YEAR_ONLY_ROW: tuple[str, ...] = (
 )
 
 
-def relation_for(source: str) -> str:
-    """The `stg_<source>` relation S4.2 gives one source (S5)."""
-    return f"stg_{source}"
+#: The unified staging relation S4.2 gives every source one union arm of (S5).
+RELATION = "stg_records"
+
+
+def source_counts(connection: duckdb.DuckDBPyConnection) -> dict[str, int]:
+    """Rows per source in the unified staging relation, zero when absent."""
+    counts = dict.fromkeys(SOURCES, 0)
+    for source_system, count in query(
+        connection,
+        f"SELECT source_system, count(*) FROM {SCHEMA_QUALIFIER}.{RELATION} GROUP BY source_system",
+    ):
+        counts[source_system] = int(count)
+    return counts
 
 
 def stable_columns(relation: str) -> tuple[str, ...]:
@@ -282,30 +292,26 @@ def test_base_10_stages_23_rows_with_contract_shape(
 ) -> None:
     """AC1/AC2: the delivered rows, the S5 shape, and the contract that holds it."""
     with connect() as connection:
-        counts = {source: row_count(connection, relation_for(source)) for source in SOURCES}
-        shapes = {
-            relation_for(source): dict(live_columns(connection, relation_for(source)))
-            for source in SOURCES
-        }
+        counts = source_counts(connection)
+        shape = dict(live_columns(connection, RELATION))
 
     # AC1: one staged row per delivered record, and the three together are base_10.
     assert counts == {source: len(delivered_rows(base_10, source)) for source in SOURCES}
     assert sum(counts.values()) == TOTAL_ROWS
 
+    declared = [
+        (column.name, CATALOG_SPELLING.get(column.type, column.type))
+        for column in REGISTRY[RELATION].columns
+    ]
+    # AC2: names, ORDER and types, against the S5 registry rather than against a
+    # list retyped here -- S5 is the review-time authority for a dbt-owned
+    # relation and the contract is what makes it one (S5.0).
+    assert list(shape.items()) == declared, RELATION
     for source in SOURCES:
-        relation = relation_for(source)
-        declared = [
-            (column.name, CATALOG_SPELLING.get(column.type, column.type))
-            for column in REGISTRY[relation].columns
-        ]
-        # AC2: names, ORDER and types, against the S5 registry rather than against a
-        # list retyped here -- S5 is the review-time authority for a dbt-owned
-        # relation and the contract is what makes it one (S5.0).
-        assert list(shapes[relation].items()) == declared, relation
         # AC1: `persona_id` is fixture bookkeeping. No `columns:` entry maps it, so it
-        # cannot reach a staged relation however the models are rendered.
+        # cannot reach the staged relation however the arms are rendered.
         assert PERSONA_COLUMN in delivered_rows(base_10, source)[0]
-        assert PERSONA_COLUMN not in shapes[relation]
+    assert PERSONA_COLUMN not in shape
 
     # AC2's negative arm, on a scratch copy so the project under test is never
     # edited: retyping one contracted column makes `dbt build` fail, which is the
@@ -340,7 +346,9 @@ def test_name_variants_symmetry_and_date_formats(
             source: query(
                 connection,
                 f"SELECT source_record_id, given_name, name_variants "
-                f"FROM {SCHEMA_QUALIFIER}.{relation_for(source)} ORDER BY source_record_id",
+                f"FROM {SCHEMA_QUALIFIER}.{RELATION} WHERE source_system = ? "
+                f"ORDER BY source_record_id",
+                source,
             )
             for source in SOURCES
         }
@@ -349,7 +357,8 @@ def test_name_variants_symmetry_and_date_formats(
                 query(
                     connection,
                     f"SELECT source_record_id, birth_date "
-                    f"FROM {SCHEMA_QUALIFIER}.{relation_for(source)}",
+                    f"FROM {SCHEMA_QUALIFIER}.{RELATION} WHERE source_system = ?",
+                    source,
                 )
             )
             for source in SOURCES
@@ -419,8 +428,8 @@ def test_name_variants_symmetry_and_date_formats(
     with connect() as connection:
         rows = query(
             connection,
-            f"SELECT given_name, birth_date FROM {SCHEMA_QUALIFIER}.stg_crm "
-            f"WHERE source_record_id = ?",
+            f"SELECT given_name, birth_date FROM {SCHEMA_QUALIFIER}.{RELATION} "
+            f"WHERE source_system = 'crm' AND source_record_id = ?",
             YEAR_ONLY_ID,
         )
 
@@ -435,26 +444,23 @@ def test_name_variants_symmetry_and_date_formats(
 def test_restandardize_appends_no_rows(staged: Dbt) -> None:
     """AC5: a second build over the same batch appends nothing (M16)."""
 
-    def snapshot(connection: duckdb.DuckDBPyConnection) -> dict[str, list[Any]]:
-        return {
-            relation_for(source): query(
-                connection,
-                f"SELECT {', '.join(stable_columns(relation_for(source)))} "
-                f"FROM {SCHEMA_QUALIFIER}.{relation_for(source)} "
-                f"ORDER BY source_record_id, content_hash",
-            )
-            for source in SOURCES
-        }
+    def snapshot(connection: duckdb.DuckDBPyConnection) -> list[Any]:
+        return query(
+            connection,
+            f"SELECT {', '.join(stable_columns(RELATION))} "
+            f"FROM {SCHEMA_QUALIFIER}.{RELATION} "
+            f"ORDER BY source_system, source_record_id, content_hash",
+        )
 
     with connect() as connection:
         before = snapshot(connection)
-        counts_before = {source: row_count(connection, relation_for(source)) for source in SOURCES}
+        counts_before = source_counts(connection)
 
     staged("build", select=STAGING_SELECTOR)
 
     with connect() as connection:
         after = snapshot(connection)
-        counts_after = {source: row_count(connection, relation_for(source)) for source in SOURCES}
+        counts_after = source_counts(connection)
 
     assert counts_after == counts_before
     assert sum(counts_after.values()) == TOTAL_ROWS
@@ -462,39 +468,46 @@ def test_restandardize_appends_no_rows(staged: Dbt) -> None:
     # unchanged, which is what "logically unchanged" means in the S4 preamble.
     assert after == before
 
-    # The predicate is what did it. The compiled artifact is read from the run that
-    # just happened, so this asserts the SQL dbt actually executed -- on the first
-    # build `is_incremental()` is false and the predicate is legitimately absent.
+    # The predicate is what did it, once per union arm. The compiled artifact is
+    # read from the run that just happened, so this asserts the SQL dbt actually
+    # executed -- on the first build `is_incremental()` is false and the predicate
+    # is legitimately absent.
+    compiled = (COMPILED_ROOT / f"{RELATION}.sql").read_text(encoding="utf-8")
+    arms = compiled.split(COMPILED_PREDICATE)
+    assert len(arms) == len(SOURCES) + 1, (
+        f"{RELATION}: one batch predicate per union arm, {len(SOURCES)} arms"
+    )
+    for tail in arms[1:]:
+        assert RELATION in tail, (
+            f"{RELATION}: the predicate must read the model's own relation ({{ this }})"
+        )
     for source in SOURCES:
-        relation = relation_for(source)
-        compiled = (COMPILED_ROOT / f"{relation}.sql").read_text(encoding="utf-8")
-        assert COMPILED_PREDICATE in compiled, relation
-        assert relation in compiled.split(COMPILED_PREDICATE, 1)[1], (
-            f"{relation}: the predicate must read the model's own relation ({{ this }})"
+        assert f"where source_system = '{source}'" in compiled.lower(), (
+            f"{RELATION}: arm for {source!r} must consult only its own source's batches"
         )
 
 
 def test_duplicate_key_fails_tag_keys(
     initialised_lake: duckdb.DuckDBPyConnection, staged: Dbt
 ) -> None:
-    """AC7: the `stg_*` logical key is a dbt test or it is nothing (S5.0)."""
+    """AC7: the staging logical key is a dbt test or it is nothing (S5.0)."""
     # The `keys` tag covers `int_std_records` from ER-043 onwards, and a selector is
     # not an arm: `tag:keys` names every dbt-owned logical key there is, so the
     # relations behind them have to exist before it can report on any of them. The
     # intermediate build is setup for the selector, not a claim this test makes --
-    # what it asserts is still the `stg_*` key and nothing else.
+    # what it asserts is still the staging key and nothing else.
     staged("build", select=INTERMEDIATE_SELECTOR)
     staged("test", select=KEYS_SELECTOR)
 
     # DuckLake enforces no uniqueness, so this lands silently -- which is precisely
     # why `(source_system, source_record_id, content_hash)` has to be a test.
     initialised_lake.execute(
-        f"INSERT INTO {SCHEMA_QUALIFIER}.stg_crm "
-        f"SELECT * FROM {SCHEMA_QUALIFIER}.stg_crm ORDER BY source_record_id LIMIT 1"
+        f"INSERT INTO {SCHEMA_QUALIFIER}.{RELATION} "
+        f"SELECT * FROM {SCHEMA_QUALIFIER}.{RELATION} ORDER BY source_record_id LIMIT 1"
     )
 
     with pytest.raises(StageFailure):
         staged("test", select=KEYS_SELECTOR)
 
     output = staged.last_output()
-    assert "stg_crm" in output, output
+    assert RELATION in output, output

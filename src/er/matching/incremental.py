@@ -183,7 +183,7 @@ def unscored_record_keys(
        forever — `base_10`'s `crm:C008` is a persona with one source record and no pair
        at all — so every later run would re-score it and S4.0's ``10`` would be
        unreachable. Batch granularity is how `er standardize` answers the same question
-       (`dbt/models/staging/stg_*.sql` uses the not-in-distinct-batch predicate and
+       (`dbt/models/staging/stg_records.sql` uses the not-in-distinct-batch predicate and
        explicitly *not* a `>` watermark on `ingested_at`, so that a replayed batch
        contributes nothing), and a batch that produced any scored endpoint has been
        through a scoring run.

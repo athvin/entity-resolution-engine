@@ -347,7 +347,7 @@ are not metadata. Values retain the adapters' existing text/null representation.
 <a id="s4-2"></a>
 ### 4.2 Standardization (dbt staging + intermediate)
 
-One `stg_<source>` model per source maps source columns → the canonical schema. v1's three models (`stg_crm`, `stg_billing`, `stg_webforms`) are hand-written and read their column mapping from the `sources` var the CLI passes, so adding a source is a config change plus one model file. Macros applied, all in `dbt/macros/std/`:
+One unified `stg_records` model maps source columns → the canonical schema, rendering one union arm per entry in the `sources` var the CLI passes (arms in sorted source order, so the compiled SQL is deterministic). Neither the source names nor their column mappings are written in the model, so adding, renaming or removing a source is a config change alone — no model file accompanies it. Macros applied, all in `dbt/macros/std/`:
 
 | Macro | Contract |
 |---|---|
@@ -362,19 +362,23 @@ One `stg_<source>` model per source maps source columns → the canonical schema
 Standardization evaluates sentinel membership with scalar `list_contains` to avoid repeated MARK joins from nested normalizers. Before dbt starts, `er_standardize_work` journals pending source/batch identities for the run, inheriting any unfinished work (including full-refresh intent). Incremental current-record selection resolves only affected record keys across their complete staged history; blocking replaces all keys for those records, even when their new key set is empty. A successful stage acknowledges the journal after both derived models and counters finish. A retry must not skip work merely because staging already appended its batches. Missing derived relations and full refreshes rebuild the whole current corpus. Direct dbt invocations without the stage's `standardize_delta` var retain full-corpus behavior.
 
 
-`int_std_records` unions the staged sources and materializes `record_key`, `content_hash`, `std_version` (from the `--vars` override the CLI passes; `dbt_project.yml` holds only a fallback), and `updated_at_source`. `int_blocking_keys` materializes `(key_type, key_value, record_key, source_system, source_record_id)`.
+`int_std_records` reads `stg_records` (every source, already unioned) and materializes `record_key`, `content_hash`, `std_version` (from the `--vars` override the CLI passes; `dbt_project.yml` holds only a fallback), and `updated_at_source`. `int_blocking_keys` materializes `(key_type, key_value, record_key, source_system, source_record_id)`.
 
 **Supersession rule (normative).** `int_std_records` holds **exactly one current row per `(source_system, source_record_id)`**: the row derived from the `raw_records` version with the **greatest `ingested_at`** for that key (ties broken by `ingest_batch_id DESC` — the ULID is time-ordered, so `DESC` selects the *most recent* batch, which is what "current" means; `ASC` would let the older version win). Rows whose winning version has `is_deleted = true` are **excluded** from `int_std_records` entirely. A dbt `unique` test on `record_key` and a `dbt_utils.unique_combination_of_columns` test on `(source_system, source_record_id)` enforce this.
 
 **Incremental configuration (normative, one line per model family).**
 
 ```sql
--- stg_crm / stg_billing / stg_webforms
+-- stg_records (the predicate repeats per union arm; each arm consults only its
+-- own source's staged batches, which is what the per-source tables of v1 held
+-- structurally)
 {{ config(materialized='incremental', incremental_strategy='append',
           on_schema_change='append_new_columns') }}
 select ... from {{ source('lake','raw_records') }}
+where source_system = '<source>'
 {% if is_incremental() %}
-  where ingest_batch_id not in (select distinct ingest_batch_id from {{ this }})
+  and ingest_batch_id not in (select distinct ingest_batch_id from {{ this }}
+      where source_system = '<source>')
 {% endif %}
 ```
 
@@ -955,8 +959,8 @@ CREATE TABLE IF NOT EXISTS lake.main.er_touched_entities (
 **dbt-owned relations.** Declared here as typed column lists; the physical DDL is emitted by dbt and its `schema.yml` contract MUST match this listing column-for-column and type-for-type. Ownership — including what `ddl.py` may never touch — is normative in S5.0.
 
 ```sql
--- stg_crm, stg_billing, stg_webforms (one model per source in sources:, identical shape)
-stg_<source>(
+-- stg_records (one unified staging model; one union arm per source in sources:)
+stg_records(
   source_system VARCHAR NOT NULL, source_record_id VARCHAR NOT NULL,
   content_hash VARCHAR NOT NULL, std_version VARCHAR NOT NULL,
   given_name VARCHAR, family_name VARCHAR, name_variants LIST(VARCHAR) NOT NULL,
@@ -1038,7 +1042,7 @@ The **eleven** columns from `given_name` through `birth_date` are the **survivab
 | `ingest_batches` | ddl.py | `ingest_batch_id` | `unique` |
 | `er_standardize_work` | ddl.py | `(run_id, source_system, ingest_batch_id)` | `unique_combination_of_columns` |
 | `er_touched_entities` | ddl.py | `(run_id, entity_id)` | `unique_combination_of_columns` |
-| `stg_crm` / `stg_billing` / `stg_webforms` | dbt | `(source_system, source_record_id, content_hash)` | contract + `unique_combination_of_columns` |
+| `stg_records` | dbt | `(source_system, source_record_id, content_hash)` | contract + `unique_combination_of_columns` |
 | `int_std_records` | dbt | `record_key` | contract + `unique` |
 | `int_blocking_keys` | dbt | `(key_type, key_value, record_key)` | contract + `unique_combination_of_columns` |
 | `golden_records` | dbt | `entity_id` | contract + `unique` |

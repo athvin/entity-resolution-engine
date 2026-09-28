@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 
 import duckdb
@@ -62,12 +63,12 @@ def prepare_work(
             "AND current.ingest_batch_id=w.ingest_batch_id)",
             [run_id, full_refresh, run_id],
         )
+        staged = _exists(connection, "stg_records")
         for source in cfg.sources:
-            relation = f"stg_{source}"
             predicate = (
-                f"AND r.ingest_batch_id NOT IN (SELECT DISTINCT ingest_batch_id "
-                f'FROM lake.main."{relation}")'
-                if delta and _exists(connection, relation)
+                "AND r.ingest_batch_id NOT IN (SELECT DISTINCT ingest_batch_id "
+                "FROM lake.main.stg_records WHERE source_system=r.source_system)"
+                if delta and staged
                 else ""
             )
             connection.execute(
@@ -97,6 +98,22 @@ def prepare_work(
     return pending, delta, full_refresh
 
 
+def _stg_counts(connection: duckdb.DuckDBPyConnection, sources: Iterable[str]) -> dict[str, int]:
+    """Per-source row counts of `stg_records`, zero for a source not yet staged.
+
+    Restricted to the configured sources so `stg_rows_appended` never counts a
+    source S6 no longer declares.
+    """
+    if not _exists(connection, "stg_records"):
+        return dict.fromkeys(sources, 0)
+    rows = dict(
+        connection.execute(
+            "SELECT source_system, count(*) FROM lake.main.stg_records GROUP BY source_system"
+        ).fetchall()
+    )
+    return {source: int(rows.get(source, 0)) for source in sources}
+
+
 def _count(connection: duckdb.DuckDBPyConnection, relation: str) -> int:
     exists = connection.execute(
         "SELECT count(*) FROM duckdb_tables() WHERE database_name='lake' AND table_name=?",
@@ -116,7 +133,7 @@ def standardize(
     full_refresh: bool = False,
 ) -> tuple[int, DbtResult | None]:
     with span("standardize.input_counts", unit="records") as metrics, connect() as connection:
-        before = {f"stg_{source}": _count(connection, f"stg_{source}") for source in cfg.sources}
+        before = _stg_counts(connection, cfg.sources)
         pending, delta, full_refresh = prepare_work(
             connection, cfg, stage.run_id, full_refresh=full_refresh, changed_only=changed_only
         )
@@ -138,7 +155,7 @@ def standardize(
     with span("standardize.output_counts", unit="records") as metrics, connect() as connection:
         std = _count(connection, "int_std_records")
         blocking = _count(connection, "int_blocking_keys")
-        after = {name: _count(connection, name) for name in before}
+        after = _stg_counts(connection, cfg.sources)
         keys = dict(
             connection.execute(
                 "SELECT key_type, count(*) FROM lake.main.int_blocking_keys GROUP BY key_type"

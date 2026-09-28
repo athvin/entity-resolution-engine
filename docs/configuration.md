@@ -11,9 +11,9 @@ Deliver CSV or Parquet files in `<drop-root>/<source-name>/`. For example,
 the drop root, not a single file or the source subdirectory.
 
 Each source declares its adapter, ID column, update timestamp column, date format,
-priority and business-column mapping. The shipped dbt staging models cover
-`crm`, `billing` and `webforms`. Map their input headers in the YAML. Adding a new
-source name also requires a staging model and corresponding tests.
+priority and business-column mapping. The unified `stg_records` dbt model renders
+one union arm per declared source, so adding a new source name is a config change
+alone — no staging model file accompanies it.
 
 ```yaml
 sources:

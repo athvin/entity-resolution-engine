@@ -149,7 +149,7 @@ def render_dbt_vars(
         "std_version": cfg.versions.std_version,
         "survivorship_version": cfg.versions.survivorship_version,
         "run_id": run_id,
-        # The whole SourceSpec, not a projection: S4.2's `stg_<source>` models read
+        # The whole SourceSpec, not a projection: S4.2's `stg_records` arms read
         # the column mapping and S4.6's `source_priority` rule reads
         # `priority_rank`, and a projection here would be a second place to edit
         # every time a model starts reading another S6 source field.

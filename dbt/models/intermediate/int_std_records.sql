@@ -1,7 +1,7 @@
 {#
   S4.2 `int_std_records` -- the single current-state standardized relation.
 
-  It unions the three `stg_<source>` models, materializes `record_key`,
+  It reads `stg_records` (every S6 source, already unioned), materializes `record_key`,
   `content_hash`, `std_version` and `updated_at_source`, and applies the S4.2
   supersession rule: exactly ONE current row per `(source_system,
   source_record_id)`, taken from the `raw_records` version with the greatest
@@ -42,7 +42,7 @@
   is the test that fails if it ever stops running.
 #}
 
-{#- The S5 `int_std_records` payload: `stg_<source>`'s column list, in S5's order.
+{#- The S5 `int_std_records` payload: `stg_records`' column list, in S5's order.
     `record_key` is not in it -- the final projection computes it and puts it
     first, which is the order the contract in `schema.yml` enforces. -#}
 {%- set std_payload = [
@@ -92,15 +92,7 @@ where record_key in (
     from {{ this }} as current_row
     join (
         select source_system, source_record_id, ingested_at, ingest_batch_id
-        from {{ ref('stg_crm') }} as staged
-        where {{ standardize_key_filter('staged.source_system', 'staged.source_record_id') }}
-        union all
-        select source_system, source_record_id, ingested_at, ingest_batch_id
-        from {{ ref('stg_billing') }} as staged
-        where {{ standardize_key_filter('staged.source_system', 'staged.source_record_id') }}
-        union all
-        select source_system, source_record_id, ingested_at, ingest_batch_id
-        from {{ ref('stg_webforms') }} as staged
+        from {{ ref('stg_records') }} as staged
         where {{ standardize_key_filter('staged.source_system', 'staged.source_record_id') }}
     ) as version
       on version.source_system = current_row.source_system
@@ -120,19 +112,7 @@ where record_key in (
 with versions as (
 
     select{{ payload_projection }}
-    from {{ ref('stg_crm') }} as staged
-        where {{ standardize_key_filter('staged.source_system', 'staged.source_record_id') }}
-
-    union all
-
-    select{{ payload_projection }}
-    from {{ ref('stg_billing') }} as staged
-        where {{ standardize_key_filter('staged.source_system', 'staged.source_record_id') }}
-
-    union all
-
-    select{{ payload_projection }}
-    from {{ ref('stg_webforms') }} as staged
+    from {{ ref('stg_records') }} as staged
         where {{ standardize_key_filter('staged.source_system', 'staged.source_record_id') }}
 
 ),
