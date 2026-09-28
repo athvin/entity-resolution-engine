@@ -11,7 +11,6 @@ interface ConfigVersion {
 interface SourceInfo {
   name: string;
   priority_rank: number | null;
-  drop_subdir: string | null;
 }
 
 /** The org's configured sources, read from the active config's `sources:` block. */
@@ -34,7 +33,6 @@ export async function GET(
           return {
             name,
             priority_rank: typeof record.priority_rank === "number" ? record.priority_rank : null,
-            drop_subdir: typeof record.drop_subdir === "string" ? record.drop_subdir : null,
           };
         });
       }

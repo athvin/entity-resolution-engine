@@ -18,7 +18,6 @@ export interface ScheduleRow {
 export interface SourceInfo {
   name: string;
   priority_rank: number | null;
-  drop_subdir: string | null;
 }
 
 export interface SourcesPayload {

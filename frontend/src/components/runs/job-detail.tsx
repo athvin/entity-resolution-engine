@@ -12,6 +12,9 @@ import { StateChip } from "./runs-content";
 const ACTIVE = new Set(["queued", "dispatching", "running", "retrying", "canceling"]);
 const ROLE_RANK = { viewer: 0, steward: 1, admin: 2 } as const;
 
+/** Job kinds whose success means the corpus re-resolved — duplicates are fresh. */
+const RESOLVING_KINDS = new Set(["run_all_full", "run_all_incremental"]);
+
 export function JobDetail({ org, jobId }: { org: string; jobId: string }) {
   const job = useJob(org, jobId);
   const session = useSession();
@@ -120,6 +123,19 @@ export function JobDetail({ org, jobId }: { org: string; jobId: string }) {
           )}
         </CardContent>
       </Card>
+
+      {data.state === "succeeded" && RESOLVING_KINDS.has(data.kind) && (
+        <Card className="border-emerald-500/40" data-testid="job-success">
+          <CardContent className="flex flex-wrap items-center gap-3 p-4 text-sm lg:p-6">
+            <CheckCircle2 className="size-5 text-emerald-500" />
+            <span className="font-medium">Run complete — see how your data clusters.</span>
+            <span className="flex-1" />
+            <Button asChild size="sm" data-testid="job-success-cta">
+              <Link href={`/${org}/duplicates`}>View duplicate groups</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {data.error_class && (
         <Card data-testid="job-error">

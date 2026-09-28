@@ -63,6 +63,10 @@ export async function POST(
       if (response.status === 409) {
         throw new BffFailure(409, "org_not_active", detail || "org is not accepting imports");
       }
+      if (response.status === 422) {
+        // erserver names the declared sources and the publish step; pass it on.
+        throw new BffFailure(422, "validation", detail || "the source is not in the active config");
+      }
       throw new BffFailure(502, "internal", detail || "import failed upstream");
     }
     return NextResponse.json(payload, { status: 202 });

@@ -1,6 +1,6 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
-import { login, ORG, triageOrg, USERS } from "./helpers";
+import { login, ORG, triageOrg, USERS, wizardOrg } from "./helpers";
 
 test.describe("config studio", () => {
   test("renders thresholds over the histogram, survivorship, and locked tiers", async ({
@@ -55,46 +55,92 @@ test.describe("config studio", () => {
   });
 });
 
+/** Walk Sample → Profile → Map → Identity and stop on the Review step. */
+async function walkToReview(page: Page, org: string, sourceName: string): Promise<void> {
+  await page.goto(`/${org}/sources/new`);
+
+  await page.getByTestId("wizard-file").setInputFiles({
+    name: "erp_export.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from(
+      "erp_id,fname,lname,email_address,phone,street_address,city,state,zip,dob,last_modified\n" +
+        "1,Ada,Lovelace,ada@example.com,+14155550001,10 Main St,SF,CA,94103,1970-01-01,2026-01-01\n" +
+        "2,Grace,Hopper,grace@example.com,+14155550002,11 Main St,SF,CA,94104,1971-02-02,2026-01-02\n",
+    ),
+  });
+
+  // Step 2: profile shows fill rates and samples.
+  await expect(page.getByTestId("wizard-profile")).toContainText("2 sample rows, 11 columns");
+  await expect(page.getByTestId("wizard-profile")).toContainText("ada@example.com");
+  await page.getByTestId("wizard-next").click();
+
+  // Step 3: suggestions prefilled from the header names.
+  await expect(page.getByTestId("map-given_name")).toHaveValue("fname");
+  await expect(page.getByTestId("map-email")).toHaveValue("email_address");
+  await page.getByTestId("wizard-next").click();
+
+  // Step 4: identity suggestions; name it uniquely per test and project.
+  await expect(page.getByTestId("wizard-id-column")).toHaveValue("erp_id");
+  await expect(page.getByTestId("wizard-updated-column")).toHaveValue("last_modified");
+  await page.getByTestId("wizard-name").fill(sourceName);
+  await page.getByTestId("wizard-next").click();
+
+  await expect(page.getByTestId("wizard-review")).toContainText("record_id_column: erp_id");
+}
+
 test.describe("new-source wizard", () => {
-  test("profiles a sample in the browser and ends queued-for-activation", async ({
+  test("activate & run publishes, uploads the sample, and lands on the run", async ({
     page,
   }, testInfo) => {
-    const org = triageOrg(testInfo.project.name);
-    // Config drafts are admin-territory: the wizard's commit writes one.
+    const org = wizardOrg(testInfo.project.name);
+    // Publishing config is admin-territory, and the wizard's activate path does.
     await login(page, USERS.admin);
-    await page.goto(`/${org}/sources/new`);
+    await walkToReview(page, org, `erp_run_${testInfo.project.name.replaceAll("-", "_")}`);
 
-    await page.getByTestId("wizard-file").setInputFiles({
-      name: "erp_export.csv",
-      mimeType: "text/csv",
-      buffer: Buffer.from(
-        "erp_id,fname,lname,email_address,phone,street_address,city,state,zip,dob,last_modified\n" +
-          "1,Ada,Lovelace,ada@example.com,+14155550001,10 Main St,SF,CA,94103,1970-01-01,2026-01-01\n" +
-          "2,Grace,Hopper,grace@example.com,+14155550002,11 Main St,SF,CA,94104,1971-02-02,2026-01-02\n",
-      ),
-    });
+    await page.getByTestId("wizard-activate-run").click();
 
-    // Step 2: profile shows fill rates and samples.
-    await expect(page.getByTestId("wizard-profile")).toContainText("2 sample rows, 11 columns");
-    await expect(page.getByTestId("wizard-profile")).toContainText("ada@example.com");
-    await page.getByTestId("wizard-next").click();
+    // Draft → publish → upload, then straight onto the import job's page.
+    await page.waitForURL(/\/runs\//);
+    await expect(page.getByTestId("job-detail")).toContainText("run_all_incremental");
 
-    // Step 3: suggestions prefilled from the header names.
-    await expect(page.getByTestId("map-given_name")).toHaveValue("fname");
-    await expect(page.getByTestId("map-email")).toHaveValue("email_address");
-    await page.getByTestId("wizard-next").click();
+    // The mock's jobs succeed instantly, so the results CTA is already up.
+    await expect(page.getByTestId("job-success")).toContainText("see how your data clusters");
+    await page.getByTestId("job-success-cta").click();
+    await expect(page.getByTestId("duplicates-page")).toBeVisible();
+  });
 
-    // Step 4: identity suggestions; name it uniquely per project.
-    await expect(page.getByTestId("wizard-id-column")).toHaveValue("erp_id");
-    await expect(page.getByTestId("wizard-updated-column")).toHaveValue("last_modified");
-    await page.getByTestId("wizard-name").fill(`erp_${testInfo.project.name.replaceAll("-", "_")}`);
-    await page.getByTestId("wizard-next").click();
+  test("save draft only leaves the config for operator review", async ({ page }, testInfo) => {
+    const org = wizardOrg(testInfo.project.name);
+    await login(page, USERS.admin);
+    await walkToReview(page, org, `erp_draft_${testInfo.project.name.replaceAll("-", "_")}`);
 
-    // Step 5 (review) → commit creates the draft, honestly queued.
-    await expect(page.getByTestId("wizard-review")).toContainText("record_id_column: erp_id");
     await page.getByTestId("wizard-commit").click();
-    await expect(page.getByTestId("wizard-done")).toContainText("queued for activation");
-    await expect(page.getByTestId("wizard-done")).toContainText("Staging model");
+    await expect(page.getByTestId("wizard-done")).toContainText("draft saved for review");
+    await expect(page.getByTestId("wizard-done")).toContainText("Settings → Config");
+  });
+
+  test("a failed sample upload names both recovery paths", async ({ page, isMobile }, testInfo) => {
+    test.skip(isMobile, "identical error surface; keep the matrix lean");
+    const org = wizardOrg(testInfo.project.name);
+    await login(page, USERS.admin);
+    // Draft and publish go through; the upload is the hop that fails.
+    await page.route(`**/api/orgs/${org}/imports*`, (route) =>
+      route.fulfill({
+        status: 422,
+        json: { code: "validation", message: "the drop dir rejected the delivery" },
+      }),
+    );
+    await walkToReview(page, org, `erp_fail_${testInfo.project.name.replaceAll("-", "_")}`);
+
+    await page.getByTestId("wizard-activate-run").click();
+
+    await expect(page.getByTestId("wizard-activate")).toBeVisible();
+    await expect(page.getByTestId("activation-error")).toContainText(
+      "the drop dir rejected the delivery",
+    );
+    // The source is already live — the panel says so and offers the retry.
+    await expect(page.getByTestId("wizard-activate")).toContainText("only the sample upload");
+    await expect(page.getByTestId("activation-retry")).toContainText("Retry upload");
   });
 });
 
