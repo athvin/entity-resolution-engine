@@ -37,7 +37,7 @@ Build the entity resolution and golden record pipeline as a testable, benchmarka
 |---|---|---|
 | Language | Python 3.12 | Splink is Python-native; Rust ports of hot paths are a later optimization once benchmarks identify them |
 | Package/env manager | `uv` | Lockfile-based (`uv.lock` committed, `uv sync --frozen` everywhere), fast in CI |
-| Matching | Splink 5, DuckDB backend | Exact prerelease pin `splink==5.0.0.dev5` (S2.1). Registered SQL inputs, chunked prediction, log-space evidence, and two incremental passes (S4.3). |
+| Matching | Splink 5, DuckDB backend | Exact pin `splink==5.0.0` (S2.1). Registered SQL inputs, chunked prediction, log-space evidence, and two incremental passes (S4.3). |
 | Transformations | dbt-core + dbt-duckdb | Standardization, blocking keys, golden assembly as dbt models; dbt runs as a subprocess (S4.0b) |
 | Storage format | DuckLake | Catalog = Postgres in Compose; object store = S3-compatible (MinIO in Compose). DuckLake enforces `NOT NULL` only — see S5.0 for the key model this forces |
 | Query engine | DuckDB, one version by construction | dbt-duckdb executes **in-process against the installed `duckdb` wheel**, so `uv.lock` already guarantees a single engine version — there is no dbt-vs-Python skew axis to police. The pins that actually matter are (a) the `ducklake` / `postgres` / `httpfs` **extension binaries matched to that engine build**, baked at Docker build time into `/opt/duckdb_extensions` with `autoinstall_known_extensions=false` at runtime, and (b) a DuckDB version at or above dbt-duckdb's DuckLake floor, since dbt-duckdb branches on `duckdb_version` for ALTER/RENAME workarounds and MERGE availability. `er doctor` asserts both |
@@ -58,7 +58,7 @@ Every version below is a **literal pin**, not a floor. `er doctor` (S4.0) runs, 
 | Component | Pin | Why it is pinned | Asserted by |
 |---|---|---|---|
 | Python | `3.12` (`requires-python = ">=3.12,<3.13"`) | Splink 5 and dbt-core support matrix; the runtime image and CI runner MUST agree | `er doctor`: `sys.version_info[:2] == (3, 12)`; `pyproject.toml`; the `python:3.12-slim` base image tag in `docker/Dockerfile` (S7.3) |
-| Splink | `splink==5.0.0.dev5` | Tested prerelease; upgrades require fixed-model scoring parity, retraining quality and fixture reproducibility gates. Exact, not `>=` | `er doctor`: `splink.__version__`; `uv.lock` |
+| Splink | `splink==5.0.0` | Stable release (earlier iterations shipped `5.0.0.dev5`); upgrades require fixed-model scoring parity, retraining quality and fixture reproducibility gates. Exact, not `>=` | `er doctor`: `splink.__version__`; `uv.lock` |
 | PyArrow | `pyarrow==25.0.1` | Splink 5 uses Arrow when registering its u-estimation result | `er doctor`; `uv.lock` |
 | pandas (test helpers) | `pandas==3.0.5` | Explicit development dependency; Splink 5 no longer installs pandas | `er doctor`; `uv.lock` |
 | DuckDB (Python wheel) | `duckdb==1.5.5` | The single engine for both Python and dbt-duckdb; extension binaries are built per engine version | `er doctor`: `duckdb.__version__`; `uv.lock` |
@@ -2108,14 +2108,14 @@ Each row below is encoded into a table schema or into the identity of stored row
 | D12 | Run metadata tables | `runs`, `run_stages`, `ingest_batches`, `er_touched_entities` exist from M1 and are the referents for every `run_id`; each stage records the snapshot **range** it produced, per the range-not-count rule normative in the S4 preamble | **LOCKED** |
 | D13 | Clustering threshold | The clustering cut IS `thresholds.auto_merge`, passed explicitly as `cluster_pairwise_predictions_at_threshold(threshold_match_probability=auto_merge)`; threshold units and the half-open gray band are normative in S4.3 | **LOCKED** |
 | D14 | Relation ownership | Exactly two owners: `ddl.py` (Python `CREATE TABLE IF NOT EXISTS`) and dbt (`contract: {enforced: true}`), per the ownership rule normative in S5.0 | **LOCKED** |
-| D15 | Pinned versions (S2.1) | The S2.1 table carries literal versions for python, `splink==5.0.0.dev5`, duckdb, dbt-core, dbt-duckdb, the ducklake/postgres/httpfs extensions, and image **digests** for the catalog and object store; `er doctor` asserts every one | **LOCKED** |
+| D15 | Pinned versions (S2.1) | The S2.1 table carries literal versions for python, `splink==5.0.0`, duckdb, dbt-core, dbt-duckdb, the ducklake/postgres/httpfs extensions, and image **digests** for the catalog and object store; `er doctor` asserts every one | **LOCKED** |
 
 <a id="s13"></a>
 ## 13. Risks & Mitigations
 
 | Risk | Mitigation |
 |---|---|
-| Splink prerelease API churn | `splink==5.0.0.dev5` pinned in S2.1 and asserted by `er doctor`; every Splink call is wrapped behind `src/er/matching/`, so an upgrade touches one package |
+| Splink API churn | `splink==5.0.0` pinned exactly in S2.1 and asserted by `er doctor`; every Splink call is wrapped behind `src/er/matching/`, so an upgrade touches one package |
 | **Splink 5 migration.** The former `find_matches_to_new_records`, `use_cache`, `materialise_blocked_pairs` and salting APIs are removed | Migrated to `predict_between` + `predict_within`, registered inputs/TF, log-space evidence, and the v5 clustering adapter. Blast radius: `src/er/matching/`, `src/er/entities/cluster.py`, fixture models and profiling. T-INC-3 and T-BLK-1 passed on Splink 4 before the migration; both remain required on Splink 5. Also require fixed-model score tolerance 1e-10 with identical decisions, no measured precision/recall regression after retraining, and byte-reproducible fixture generation. |
 | **Incremental candidate generation cannot pair two pre-existing records.** Two records already in the corpus never become a candidate pair in an incremental run, no matter what changes around them | The periodic correction pass — `er correct` (S4.0) — rebuilds candidates over the full corpus under a new `tf_snapshot_id` and re-scores, at `correction_pass.cadence`; T-CORR-1 builds a link only the full pass can find and asserts the pass finds it. This is a **candidate-generation** limit, not a clustering limit |
 | **Corpus-dependent TF shifts move pre-existing pairs across `auto_merge`.** TF values are a property of the corpus, not of the pair | TF is frozen at training time and registered from `tf_lookup` (D4), so within one `tf_snapshot_id` INV-SCORE holds exactly. Drift accumulates only across `tf_snapshot_id` boundaries, is introduced only by the correction pass, and is bounded and measured by T-TF-1 rather than asserted away. T-INC-1b exercises the divergence and its repair |

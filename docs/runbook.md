@@ -154,9 +154,10 @@ new correction.
 
 ## Migrating an existing lake to Splink 5
 
-This release pins `splink==5.0.0.dev5`, a prerelease. Keep the previous image and
-model artifacts available. Validate a copy of your lake and its labeled examples
-before applying the migration to production.
+This release pins `splink==5.0.0` (the stable release; earlier iterations shipped
+against `5.0.0.dev5`, whose scoring it reproduces exactly). Keep the previous
+image and model artifacts available. Validate a copy of your lake and its labeled
+examples before applying the migration to production.
 
 ```sh
 erdev init
