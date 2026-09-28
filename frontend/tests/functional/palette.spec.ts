@@ -13,8 +13,8 @@ test.describe("command palette", () => {
     await page.keyboard.press("ControlOrMeta+k");
     const input = page.getByPlaceholder("Search records, pages, commands…");
     await expect(input).toBeVisible();
-    await input.fill("reviews");
-    await expect(page.getByRole("option", { name: /Reviews/ })).toContainText("M3");
+    await input.fill("campaigns");
+    await expect(page.getByRole("option", { name: /Campaigns/ })).toContainText("M4");
     await input.fill("records");
     await page.getByRole("option", { name: "Records", exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/${ORG}/records$`));

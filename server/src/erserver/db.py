@@ -71,6 +71,9 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
     CREATE INDEX IF NOT EXISTS jobs_claimable
       ON jobs (state, not_before, priority, job_id)
     """,
+    # Job attribution (design §7.12): the person or schedule behind every run.
+    "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS created_by text",
+    "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS schedule_id text",
     # Orgs grew columns after the skeleton; additive and idempotent.
     "ALTER TABLE orgs ADD COLUMN IF NOT EXISTS drop_root text",
     "ALTER TABLE orgs ADD COLUMN IF NOT EXISTS active_config_version integer",

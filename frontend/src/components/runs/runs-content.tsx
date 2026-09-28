@@ -46,7 +46,16 @@ export function RunsContent({ org }: { org: string }) {
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-4 lg:gap-6" data-testid="runs-page">
-      <h1 className="text-xl font-semibold lg:text-2xl">Runs</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-semibold lg:text-2xl">Runs</h1>
+        <Link
+          href={`/${org}/runs/schedules`}
+          className="text-muted-foreground text-sm underline-offset-2 hover:underline"
+          data-testid="schedules-link"
+        >
+          Schedules
+        </Link>
+      </div>
 
       {activeJob && (
         <Link href={`/${org}/runs/${activeJob.job_id}`} data-testid="active-job-link">

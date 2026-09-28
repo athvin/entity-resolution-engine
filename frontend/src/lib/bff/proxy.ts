@@ -1,10 +1,7 @@
 import "server-only";
-import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
 import { identityFromCookies, type Identity, type Membership } from "@/lib/auth/session";
-import { db, schema } from "@/lib/db";
-import { open } from "@/lib/db/crypto";
 import { env } from "@/lib/env";
 import type { BffError, BffErrorCode } from "./errors";
 
@@ -78,33 +75,6 @@ export async function requireOrgAccess(
   throw new BffFailure(404, "not_found", "not found");
 }
 
-/** Decrypt the org's stored service key for exactly the role a call needs. */
-async function credentialFor(
-  access: EffectiveOrgAccess,
-  role: Membership["role"],
-): Promise<string> {
-  if (access.viaOperator) return env().ERSERVER_OPERATOR_TOKEN;
-  const database = await db();
-  const rows = await database
-    .select()
-    .from(schema.orgCredentials)
-    .where(and(eq(schema.orgCredentials.org, access.org), eq(schema.orgCredentials.role, role)))
-    .limit(1);
-  const row = rows[0];
-  if (!row) {
-    throw new BffFailure(
-      503,
-      "internal",
-      `no stored ${role} credential for ${access.org} — re-register the org from the console`,
-    );
-  }
-  const key = Buffer.from(env().ERWEB_CREDENTIAL_KEY, "base64");
-  return open(key, access.org, role, {
-    ciphertext: Buffer.from(row.ciphertext),
-    nonce: Buffer.from(row.nonce),
-  });
-}
-
 function mapUpstreamError(status: number, detail: string): BffFailure {
   const table: Record<number, [BffErrorCode, number]> = {
     401: ["internal", 502], // our stored credential was rejected — a BFF fault, not the user's
@@ -138,7 +108,8 @@ export async function forward<T>(
   if (ROLE_RANK[access.role] < ROLE_RANK[role]) {
     throw new BffFailure(403, "forbidden", `requires the ${role} role in ${access.org}`);
   }
-  const bearer = await credentialFor(access, role);
+  const { credentialForAccess } = await import("./credentials");
+  const bearer = await credentialForAccess(access, role);
   const url = new URL(path, env().ERSERVER_BASE_URL);
   if (options.searchParams) url.search = options.searchParams.toString();
   const headers: Record<string, string> = {

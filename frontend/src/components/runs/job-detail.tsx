@@ -44,6 +44,16 @@ export function JobDetail({ org, jobId }: { org: string; jobId: string }) {
           <h1 className="text-xl font-semibold lg:text-2xl">{data.kind}</h1>
           <StateChip state={data.state} />
           <span className="text-muted-foreground font-mono text-xs">{jobId}</span>
+          {(data as { created_by?: string | null }).created_by && (
+            <span className="text-muted-foreground text-xs" data-testid="job-attribution">
+              by{" "}
+              {(data as { schedule_id?: string | null }).schedule_id
+                ? "schedule"
+                : ((data as { created_by?: string }).created_by ?? "")
+                    .replace(/^user:/, "")
+                    .replace(/ via key:.*$/, "")}
+            </span>
+          )}
           <span className="flex-1" />
           {isSteward && ACTIVE.has(data.state) && data.state !== "canceling" && (
             <Button

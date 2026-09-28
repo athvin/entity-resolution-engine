@@ -13,6 +13,18 @@ export const ORG = "acme-dev";
 /** Reserved for tests that mutate mock state; never pixel-compared. */
 export const ORG_MUTABLE = "mutable-dev";
 
+/** One private triage org per device project, so parallel projects never race. */
+export function triageOrg(projectName: string): string {
+  const byProject: Record<string, string> = {
+    "desktop-chromium": "mutable-dev",
+    "mobile-safari": "mutable-ios",
+    "mobile-chrome": "mutable-android",
+  };
+  const org = byProject[projectName];
+  if (!org) throw new Error(`no triage org for project ${projectName}`);
+  return org;
+}
+
 /** Sign in through the real BFF; page.request shares the page's cookie jar. */
 export async function login(page: Page, email: string): Promise<void> {
   const response = await page.request.post("/api/auth/login", {

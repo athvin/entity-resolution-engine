@@ -22,9 +22,11 @@ export const TEST_USERS = {
 } as const;
 
 export const TEST_ORG = "acme-dev";
-/** A second org reserved for tests that MUTATE state (job cancel/resume), so the
- * pixel-compared acme-dev fixtures stay byte-stable under parallel projects. */
-export const TEST_ORG_MUTABLE = "mutable-dev";
+/** Orgs reserved for tests that MUTATE state, one per Playwright device project,
+ * so parallel projects never race each other and the pixel-compared acme-dev
+ * fixtures stay byte-stable. */
+export const TEST_ORG_MUTABLE = "mutable-dev"; // desktop-chromium
+export const TRIAGE_ORGS = ["mutable-dev", "mutable-ios", "mutable-android"] as const;
 
 export async function installTestFixtures(db: Db): Promise<void> {
   const passwordHash = await hashPassword(TEST_PASSWORD);
@@ -36,10 +38,12 @@ export async function installTestFixtures(db: Db): Promise<void> {
   ].map((user) => ({ ...user, id: ulid().toLowerCase(), passwordHash }));
   await db.insert(schema.users).values(users);
 
-  await db.insert(schema.orgsRegistry).values([
-    { org: TEST_ORG, displayName: "Acme (dev)" },
-    { org: TEST_ORG_MUTABLE, displayName: "Mutable (dev)" },
-  ]);
+  await db
+    .insert(schema.orgsRegistry)
+    .values([
+      { org: TEST_ORG, displayName: "Acme (dev)" },
+      ...TRIAGE_ORGS.map((org) => ({ org, displayName: `Mutable (${org})` })),
+    ]);
 
   const byEmail = new Map<string, string>(users.map((user) => [user.email, user.id]));
   const idOf = (email: string): string => {
@@ -51,13 +55,15 @@ export async function installTestFixtures(db: Db): Promise<void> {
     { userId: idOf(TEST_USERS.admin), org: TEST_ORG, role: "admin" },
     { userId: idOf(TEST_USERS.steward), org: TEST_ORG, role: "steward" },
     { userId: idOf(TEST_USERS.viewer), org: TEST_ORG, role: "viewer" },
-    { userId: idOf(TEST_USERS.admin), org: TEST_ORG_MUTABLE, role: "admin" },
-    { userId: idOf(TEST_USERS.steward), org: TEST_ORG_MUTABLE, role: "steward" },
+    ...TRIAGE_ORGS.flatMap((org) => [
+      { userId: idOf(TEST_USERS.admin), org, role: "admin" as const },
+      { userId: idOf(TEST_USERS.steward), org, role: "steward" as const },
+    ]),
   ]);
 
   const key = Buffer.from(env().ERWEB_CREDENTIAL_KEY, "base64");
   await db.insert(schema.orgCredentials).values(
-    [TEST_ORG, TEST_ORG_MUTABLE].flatMap((org) =>
+    [TEST_ORG, ...TRIAGE_ORGS].flatMap((org) =>
       (["viewer", "steward", "admin"] as const).map((role) => {
         const sealed = seal(key, org, role, `erk_mock_${role}_secret_${org}`);
         return {

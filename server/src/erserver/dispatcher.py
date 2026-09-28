@@ -304,6 +304,8 @@ def tick_schedules(connection: psycopg.Connection) -> int:
                 schedule.kind,
                 params=schedule.params,
                 idempotency_key=f"sched:{schedule.schedule_id}:{fire.isoformat()}",
+                created_by=f"schedule:{schedule.schedule_id}",
+                schedule_id=schedule.schedule_id,
             )
             enqueued += 1
         except (queue.UnknownOrgError, queue.OrgNotActiveError):

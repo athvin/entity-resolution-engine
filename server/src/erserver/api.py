@@ -20,7 +20,7 @@ import csv
 import io
 from collections.abc import Iterator
 from contextlib import asynccontextmanager, contextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -98,6 +98,8 @@ class JobOut(BaseModel):
     error_detail: str | None
     outcome: str | None
     progress: dict[str, Any]
+    created_by: str | None = None
+    schedule_id: str | None = None
 
     @classmethod
     def of(cls, job: queue.Job) -> "JobOut":
@@ -108,6 +110,27 @@ class ScheduleIn(BaseModel):
     kind: str
     cron: str
     params: dict[str, Any] = Field(default_factory=dict)
+
+
+class ScheduleUpdateIn(BaseModel):
+    enabled: bool
+
+
+class BulkResolveItem(BaseModel):
+    review_id: str
+    resolution: str  # match | no_match | dismiss
+
+
+class BulkResolveIn(BaseModel):
+    items: list[BulkResolveItem] = Field(min_length=1, max_length=200)
+    apply_now: bool = False
+
+
+class UnmergeIn(BaseModel):
+    #: The member record_keys to split OUT of the entity. They stay together;
+    #: never-assertions are written between each of them and every remaining member.
+    records: list[str] = Field(min_length=1, max_length=100)
+    apply_now: bool = True
 
 
 class ConfigVersionIn(BaseModel):
@@ -398,6 +421,7 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
                 idempotency_key=idempotency_key.strip(),
                 priority=body.priority,
                 max_attempts=body.max_attempts,
+                created_by=caller.effective_actor,
             )
         except queue.UnknownOrgError as exc:
             raise HTTPException(404, str(exc)) from exc
@@ -492,6 +516,28 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
         deleted = schedules.delete(conn, org, schedule_id)
         audit(conn, caller.effective_actor, org, "schedule.delete", {"schedule_id": schedule_id})
         return {"deleted": deleted}
+
+    @app.patch("/v1/orgs/{org}/schedules/{schedule_id}")
+    def update_schedule(
+        org: str, schedule_id: str, body: ScheduleUpdateIn, conn: Conn, caller: Caller
+    ) -> dict[str, Any]:
+        """Enable/disable a tenant schedule (design §7.10); config-owned rows refuse."""
+        guard(caller, org, "admin")
+        changed = schedules.set_enabled(conn, org, schedule_id, enabled=body.enabled)
+        if not changed:
+            raise HTTPException(
+                409,
+                "schedule is unknown, belongs to another org, or is config-owned "
+                "(the correction pass follows tenant config, not this route)",
+            )
+        audit(
+            conn,
+            caller.effective_actor,
+            org,
+            "schedule.update",
+            {"schedule_id": schedule_id, "enabled": body.enabled},
+        )
+        return {"schedule_id": schedule_id, "enabled": body.enabled}
 
     # --------------------------------------------------------------- config
 
@@ -613,6 +659,7 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
                 "run_all_incremental",
                 params={"source": source, "path": record["drop_root"]},
                 idempotency_key=f"import:{delivery_id}",
+                created_by=caller.effective_actor,
             )
         except queue.OrgNotActiveError as exc:
             target.unlink(missing_ok=True)
@@ -790,15 +837,150 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
         org: str,
         conn: Conn,
         caller: Caller,
-        limit: Annotated[int, Query(ge=1, le=500)] = 100,
-    ) -> list[dict[str, Any]]:
+        status: Annotated[str, Query()] = "open",
+        reason: Annotated[str | None, Query()] = None,
+        cursor: Annotated[str | None, Query()] = None,
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    ) -> dict[str, Any]:
+        """The steward inbox: filterable, keyset-paginated (design §7.4)."""
+        guard(caller, org, "viewer")
+        if status not in readapi.REVIEW_STATUSES:
+            raise HTTPException(422, f"unknown status; one of {list(readapi.REVIEW_STATUSES)}")
+        if reason is not None and reason not in readapi.REVIEW_REASONS:
+            raise HTTPException(422, f"unknown reason; one of {list(readapi.REVIEW_REASONS)}")
+        after_key = None
+        if cursor is not None:
+            try:
+                _, after_key = readapi.decode_cursor(cursor)
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from exc
+        env = org_env(conn, org)
+        with lake_read(env) as lake:
+            rows, next_key = readapi.reviews_list(
+                lake, status=status, reason=reason, after_key=after_key, limit=limit
+            )
+        next_cursor = readapi.encode_cursor(0, next_key) if next_key is not None else None
+        return {"items": rows, "next_cursor": next_cursor}
+
+    @app.get("/v1/orgs/{org}/reviews/{review_id}")
+    def review_detail(org: str, review_id: str, conn: Conn, caller: Caller) -> dict[str, Any]:
         guard(caller, org, "viewer")
         env = org_env(conn, org)
         with lake_read(env) as lake:
-            from er.review.queue import open_reviews
+            row = readapi.review_get(lake, review_id)
+        if row is None:
+            raise HTTPException(404, f"no review {review_id!r}")
+        return row
 
-            rows = open_reviews(lake, limit=limit)
-        return [vars(row) for row in rows]
+    @app.get("/v1/orgs/{org}/assertions")
+    def assertions_index(
+        org: str,
+        conn: Conn,
+        caller: Caller,
+        include_retracted: Annotated[bool, Query()] = False,
+        cursor: Annotated[str | None, Query()] = None,
+        limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    ) -> dict[str, Any]:
+        """The assertion library (design §7.9)."""
+        guard(caller, org, "viewer")
+        after_key = None
+        if cursor is not None:
+            try:
+                _, after_key = readapi.decode_cursor(cursor)
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from exc
+        env = org_env(conn, org)
+        with lake_read(env) as lake:
+            rows, next_key = readapi.assertions_list(
+                lake, include_retracted=include_retracted, after_key=after_key, limit=limit
+            )
+        next_cursor = readapi.encode_cursor(0, next_key) if next_key is not None else None
+        return {"items": rows, "next_cursor": next_cursor}
+
+    @app.get("/v1/orgs/{org}/assertions:contradictions")
+    def assertion_contradictions(org: str, conn: Conn, caller: Caller) -> dict[str, Any]:
+        """Unsatisfiable rule sets: a never inside an always-connected component."""
+        guard(caller, org, "viewer")
+        from er.review.assertions import active_assertions, check_contradiction_1
+
+        env = org_env(conn, org)
+        with lake_read(env) as lake:
+            findings = check_contradiction_1(active_assertions(lake))
+        return {
+            "contradictions": [
+                {
+                    "rec_a_key": finding.rec_a_key,
+                    "rec_b_key": finding.rec_b_key,
+                    "never_assertion_id": finding.never_assertion_id,
+                    "always_assertion_ids": list(finding.always_assertion_ids),
+                    "component": sorted(finding.component),
+                }
+                for finding in findings
+            ]
+        }
+
+    @app.get("/v1/orgs/{org}/match-scores")
+    def match_scores_index(
+        org: str,
+        conn: Conn,
+        caller: Caller,
+        band_low: Annotated[float | None, Query(ge=0.0, le=1.0)] = None,
+        band_high: Annotated[float | None, Query(ge=0.0, le=1.0)] = None,
+        cursor: Annotated[str | None, Query()] = None,
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    ) -> dict[str, Any]:
+        """Browse active scored pairs with evidence (design §7.8)."""
+        guard(caller, org, "viewer")
+        snapshot = None
+        after_key = None
+        if cursor is not None:
+            try:
+                snapshot, after_key = readapi.decode_cursor(cursor)
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from exc
+        env = org_env(conn, org)
+        with lake_read(env) as lake:
+            rows, snap, next_cursor = readapi.match_scores_list(
+                lake,
+                snapshot=snapshot,
+                band_low=band_low,
+                band_high=band_high,
+                after_key=after_key,
+                limit=limit,
+            )
+        return {"items": rows, "snapshot": snap, "next_cursor": next_cursor}
+
+    @app.get("/v1/orgs/{org}/imports")
+    def import_receipts(
+        org: str,
+        conn: Conn,
+        caller: Caller,
+        source: Annotated[str | None, Query()] = None,
+        cursor: Annotated[str | None, Query()] = None,
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    ) -> dict[str, Any]:
+        """Delivery receipts from ingest_batches (design §7.15)."""
+        guard(caller, org, "viewer")
+        after_key = None
+        if cursor is not None:
+            try:
+                _, after_key = readapi.decode_cursor(cursor)
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from exc
+        env = org_env(conn, org)
+        with lake_read(env) as lake:
+            rows, next_key = readapi.ingest_batches_list(
+                lake, source=source, after_key=after_key, limit=limit
+            )
+        next_cursor = readapi.encode_cursor(0, next_key) if next_key is not None else None
+        return {"items": rows, "next_cursor": next_cursor}
+
+    @app.get("/v1/orgs/{org}/staged")
+    def staged_visibility(org: str, conn: Conn, caller: Caller) -> dict[str, Any]:
+        """How many steward decisions wait behind the current run (design §7.7)."""
+        guard(caller, org, "viewer")
+        org_or_404(conn, org)
+        return {"pending_count": steward.pending_count(conn, org)}
 
     def _steward_action(
         conn: psycopg.Connection, org: str, caller: Principal, action: dict[str, Any]
@@ -829,6 +1011,170 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
             {**result, "status": status},
         )
         return {"status": status, **result, "pending_until_next_reconcile": status == "applied"}
+
+    def _steward_batch(
+        conn: psycopg.Connection,
+        org: str,
+        caller: Principal,
+        actions: list[dict[str, Any]],
+        audit_action: str,
+    ) -> dict[str, Any]:
+        """N actions under ONE writer-lock acquisition (design §7.6)."""
+        record = org_or_404(conn, org)
+        if record["state"] != "active":
+            raise HTTPException(
+                409,
+                f"org {org!r} is {record['state']}; steward actions are accepted only when active",
+            )
+        env = dict(record["env"] or {})
+        tenant = org_tenant(record)
+        try:
+            status, results = steward.try_apply_or_stage_batch(
+                conn, org, env, tenant, actions, caller.effective_actor
+            )
+        except EnvError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except (ErError, KeyError, ValueError) as exc:
+            raise HTTPException(409 if exit_code_for(exc) == 3 else 422, str(exc)) from exc
+        failed = sum(1 for result in results if "error" in result)
+        audit(
+            conn,
+            caller.effective_actor,
+            org,
+            audit_action,
+            {"status": status, "count": len(actions), "failed": failed},
+        )
+        return {"status": status, "results": results, "failed": failed}
+
+    @app.post("/v1/orgs/{org}/reviews:bulk-resolve")
+    def bulk_resolve_reviews(
+        org: str, body: BulkResolveIn, conn: Conn, caller: Caller
+    ) -> dict[str, Any]:
+        """Resolve many reviews in one lock window + one optional reconcile job."""
+        guard(caller, org, "steward")
+        for item in body.items:
+            if item.resolution not in ("match", "no_match", "dismiss"):
+                raise HTTPException(422, "resolution must be match | no_match | dismiss")
+        actions = [
+            {"type": "resolve_review", "review_id": item.review_id, "resolution": item.resolution}
+            for item in body.items
+        ]
+        result = _steward_batch(conn, org, caller, actions, "steward.bulk_resolve")
+        if body.apply_now:
+            try:
+                job = queue.enqueue(
+                    conn,
+                    org,
+                    "run_all_incremental",
+                    params={"skip_ingest": True},
+                    idempotency_key=f"bulk-resolve-apply:{ULID()}",
+                    created_by=caller.effective_actor,
+                )
+            except queue.OrgNotActiveError as exc:
+                raise HTTPException(409, str(exc)) from exc
+            result["apply_job"] = job.job_id
+        return result
+
+    @app.post("/v1/orgs/{org}/golden-records/{entity_id}:unmerge")
+    def unmerge_entity(
+        org: str, entity_id: str, body: UnmergeIn, conn: Conn, caller: Caller
+    ) -> dict[str, Any]:
+        """Undo a merge (design §7.5): resolve members from the entity, write the
+        never-assertions that force the split, and enqueue the reconcile.
+
+        The extracted records stay together; each gets a ``never`` against every
+        remaining member. Contradictions with active ``always`` assertions are
+        pre-checked so an unsatisfiable rule set is refused here, with the
+        conflicting assertion ids, instead of failing the next reconcile.
+        """
+        guard(caller, org, "steward")
+        record = org_or_404(conn, org)
+        if record["state"] != "active":
+            raise HTTPException(409, f"org {org!r} is {record['state']}")
+        env = org_env(conn, org)
+        with lake_read(env) as lake:
+            detail = readapi.entity_detail(lake, entity_id)
+            if detail is None:
+                raise HTTPException(404, f"no entity {entity_id!r}")
+            member_keys = {str(member["record_key"]) for member in detail["members"]}
+            extracted = set(body.records)
+            unknown = sorted(extracted - member_keys)
+            if unknown:
+                raise HTTPException(422, f"not members of {entity_id!r}: {unknown}")
+            remaining = sorted(member_keys - extracted)
+            if not remaining:
+                raise HTTPException(
+                    422, "cannot extract every member; leave at least one record behind"
+                )
+
+            from er.review.assertions import Assertion, active_assertions, check_contradiction_1
+
+            pairs = [(a, b) for a in sorted(extracted) for b in remaining]
+            hypothetical = [
+                Assertion(
+                    assertion_id=f"hypothetical:{index}",
+                    rec_a_key=min(a, b),
+                    rec_b_key=max(a, b),
+                    kind="never",
+                    active=True,
+                    created_by=caller.effective_actor,
+                    created_at=datetime.now(UTC),
+                    retracted_by=None,
+                    retracted_at=None,
+                    note=None,
+                )
+                for index, (a, b) in enumerate(pairs)
+            ]
+            contradictions = check_contradiction_1(list(active_assertions(lake)) + hypothetical)
+        real_conflicts = [
+            finding
+            for finding in contradictions
+            if not str(finding.never_assertion_id).startswith("hypothetical:")
+            or finding.always_assertion_ids
+        ]
+        if real_conflicts:
+            raise HTTPException(
+                409,
+                {
+                    "message": "unmerge contradicts active always-assertions; retract them first",
+                    "conflicts": [
+                        {
+                            "rec_a_key": finding.rec_a_key,
+                            "rec_b_key": finding.rec_b_key,
+                            "always_assertion_ids": list(finding.always_assertion_ids),
+                        }
+                        for finding in real_conflicts
+                    ],
+                },
+            )
+
+        actions = [
+            {
+                "type": "add_assertion",
+                "kind": "never",
+                "a": a,
+                "b": b,
+                "note": f"unmerge:{entity_id}",
+            }
+            for a, b in pairs
+        ]
+        result = _steward_batch(conn, org, caller, actions, "steward.unmerge")
+        if body.apply_now:
+            try:
+                job = queue.enqueue(
+                    conn,
+                    org,
+                    "run_all_incremental",
+                    params={"skip_ingest": True},
+                    idempotency_key=f"unmerge-apply:{ULID()}",
+                    created_by=caller.effective_actor,
+                )
+            except queue.OrgNotActiveError as exc:
+                raise HTTPException(409, str(exc)) from exc
+            result["apply_job"] = job.job_id
+        result["entity_id"] = entity_id
+        result["pairs"] = len(pairs)
+        return result
 
     @app.post("/v1/orgs/{org}/reviews/{review_id}:resolve")
     def resolve_review_endpoint(
@@ -871,6 +1217,7 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
                     "run_all_incremental",
                     params={"skip_ingest": True},
                     idempotency_key=f"assert-apply:{ULID()}",
+                    created_by=caller.effective_actor,
                 )
             except queue.OrgNotActiveError as exc:
                 raise HTTPException(409, str(exc)) from exc

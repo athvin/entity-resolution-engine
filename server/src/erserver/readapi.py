@@ -30,15 +30,22 @@ from er.lake.env import lake_environment
 from er.lake.model import SCHEMA_QUALIFIER
 
 __all__ = [
+    "REVIEW_REASONS",
+    "REVIEW_STATUSES",
+    "assertions_list",
     "close_pool",
     "decode_cursor",
     "duplicate_groups",
     "encode_cursor",
     "entity_detail",
     "golden_list",
+    "ingest_batches_list",
+    "match_scores_list",
     "merge_plans",
     "metrics",
     "open_lake",
+    "review_get",
+    "reviews_list",
     "runs_list",
 ]
 
@@ -285,6 +292,165 @@ def duplicate_groups(
         rows = rows[:limit]
         next_cursor = encode_cursor(snap, str(rows[-1]["entity_id"]))
     return rows, snap, next_cursor
+
+
+_REVIEW_COLUMNS = (
+    "review_id, subject_type, rec_a_key, rec_b_key, entity_id, reason, "
+    "match_probability, waterfall, status, first_seen_run_id, last_seen_run_id, "
+    "resolved_by, resolved_at"
+)
+
+REVIEW_STATUSES = ("open", "resolved_match", "resolved_no_match", "dismissed")
+REVIEW_REASONS = ("gray_band", "never_unsatisfiable", "coherence")
+
+
+def _load_waterfall(row: dict[str, Any]) -> dict[str, Any]:
+    if isinstance(row.get("waterfall"), str):
+        row["waterfall"] = json.loads(row["waterfall"])
+    return row
+
+
+def reviews_list(
+    connection: duckdb.DuckDBPyConnection,
+    *,
+    status: str = "open",
+    reason: str | None = None,
+    after_key: str | None = None,
+    limit: int = 50,
+) -> tuple[list[dict[str, Any]], str | None]:
+    """One inbox page, oldest first (FIFO triage): ``(rows, next_cursor_key)``.
+
+    No snapshot pinning: the queue is current state, and rows leaving it as
+    they are resolved is exactly what the inbox wants to observe.
+    """
+    clauses = ["status = ?"]
+    params: list[Any] = [status]
+    if reason is not None:
+        clauses.append("reason = ?")
+        params.append(reason)
+    if after_key is not None:
+        clauses.append("review_id > ?")
+        params.append(after_key)
+    sql = (
+        f"SELECT {_REVIEW_COLUMNS} FROM {SCHEMA_QUALIFIER}.review_queue "
+        f"WHERE {' AND '.join(clauses)} ORDER BY review_id LIMIT {int(limit) + 1}"
+    )
+    rows = [_load_waterfall(row) for row in _rows(connection, sql, params)]
+    next_key = None
+    if len(rows) > limit:
+        rows = rows[:limit]
+        next_key = str(rows[-1]["review_id"])
+    return rows, next_key
+
+
+def review_get(connection: duckdb.DuckDBPyConnection, review_id: str) -> dict[str, Any] | None:
+    rows = _rows(
+        connection,
+        f"SELECT {_REVIEW_COLUMNS} FROM {SCHEMA_QUALIFIER}.review_queue WHERE review_id = ?",
+        [review_id],
+    )
+    return _load_waterfall(rows[0]) if rows else None
+
+
+def assertions_list(
+    connection: duckdb.DuckDBPyConnection,
+    *,
+    include_retracted: bool = False,
+    after_key: str | None = None,
+    limit: int = 100,
+) -> tuple[list[dict[str, Any]], str | None]:
+    """The assertion library, newest first: ``(rows, next_cursor_key)``."""
+    clauses = ["TRUE"] if include_retracted else ["active"]
+    params: list[Any] = []
+    if after_key is not None:
+        clauses.append("assertion_id < ?")
+        params.append(after_key)
+    sql = (
+        f"SELECT assertion_id, rec_a_key, rec_b_key, kind, active, created_by, created_at, "
+        f"retracted_by, retracted_at, note FROM {SCHEMA_QUALIFIER}.assertions "
+        f"WHERE {' AND '.join(clauses)} ORDER BY assertion_id DESC LIMIT {int(limit) + 1}"
+    )
+    rows = _rows(connection, sql, params)
+    next_key = None
+    if len(rows) > limit:
+        rows = rows[:limit]
+        next_key = str(rows[-1]["assertion_id"])
+    return rows, next_key
+
+
+# Composite (rec_a_key, rec_b_key) cursors join on the unit separator — record
+# keys are "source:record_id" and sources cannot contain control characters.
+_PAIR_SEP = "\x1f"
+
+
+def match_scores_list(
+    connection: duckdb.DuckDBPyConnection,
+    *,
+    snapshot: int | None = None,
+    band_low: float | None = None,
+    band_high: float | None = None,
+    after_key: str | None = None,
+    limit: int = 50,
+) -> tuple[list[dict[str, Any]], int, str | None]:
+    """Browse active scored pairs by probability band (design §7.8)."""
+    snap = snapshot if snapshot is not None else current_snapshot(connection)
+    clauses = ["is_active"]
+    params: list[Any] = []
+    if band_low is not None:
+        clauses.append("match_probability >= ?")
+        params.append(band_low)
+    if band_high is not None:
+        clauses.append("match_probability < ?")
+        params.append(band_high)
+    if after_key is not None:
+        a_key, _, b_key = after_key.partition(_PAIR_SEP)
+        clauses.append("(rec_a_key, rec_b_key) > (?, ?)")
+        params += [a_key, b_key]
+    sql = (
+        f"SELECT rec_a_key, rec_b_key, match_probability, model_version, evidence, "
+        f"run_id, scored_at FROM {_at('match_scores', snap)} "
+        f"WHERE {' AND '.join(clauses)} ORDER BY rec_a_key, rec_b_key LIMIT {int(limit) + 1}"
+    )
+    rows = _rows(connection, sql, params)
+    for row in rows:
+        if isinstance(row.get("evidence"), str):
+            row["evidence"] = json.loads(row["evidence"])
+    next_cursor = None
+    if len(rows) > limit:
+        rows = rows[:limit]
+        last = rows[-1]
+        next_cursor = encode_cursor(snap, f"{last['rec_a_key']}{_PAIR_SEP}{last['rec_b_key']}")
+    return rows, snap, next_cursor
+
+
+def ingest_batches_list(
+    connection: duckdb.DuckDBPyConnection,
+    *,
+    source: str | None = None,
+    after_key: str | None = None,
+    limit: int = 50,
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Import receipts, newest delivery first (design §7.15)."""
+    clauses = ["TRUE"]
+    params: list[Any] = []
+    if source is not None:
+        clauses.append("source_system = ?")
+        params.append(source)
+    if after_key is not None:
+        clauses.append("ingest_batch_id < ?")
+        params.append(after_key)
+    sql = (
+        f"SELECT ingest_batch_id, run_id, source_system, path, new_count, changed_count, "
+        f"unchanged_count, tombstone_count, resurrected_count, full_refresh_keys, created_at "
+        f"FROM {SCHEMA_QUALIFIER}.ingest_batches "
+        f"WHERE {' AND '.join(clauses)} ORDER BY ingest_batch_id DESC LIMIT {int(limit) + 1}"
+    )
+    rows = _rows(connection, sql, params)
+    next_key = None
+    if len(rows) > limit:
+        rows = rows[:limit]
+        next_key = str(rows[-1]["ingest_batch_id"])
+    return rows, next_key
 
 
 def runs_list(connection: duckdb.DuckDBPyConnection, *, limit: int = 20) -> list[dict[str, Any]]:
