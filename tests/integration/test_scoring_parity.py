@@ -97,7 +97,7 @@ from er.errors import ExitCode
 from er.lake.columns import STD_RECORD_COLUMNS
 from er.lake.ducklake import attach_statements, detach
 from er.lake.model import SCHEMA_QUALIFIER
-from er.matching.api import splink_api
+from er.matching.api import cleanup_splink, splink_api
 from er.matching.full import MATCH_SCORES_RELATION, score_full
 from er.matching.incremental import score_incremental
 from er.matching.model import BLOCKING_DBT_VAR, BlockingPayload, blocking_rules_from_config
@@ -498,8 +498,11 @@ def symmetry(
 ) -> Iterator[SymmetryCorpus]:
     """`base_10` ingested and standardized, with the committed model registered.
 
-    The teardown restores the connection's default schema: `splink_api` repoints the
-    shared session handle at the scratch schema.
+    The teardown restores the connection's default schema (`splink_api` repoints the
+    shared session handle at the scratch schema) and releases Splink's scratch
+    relations, exactly as `score_full`'s own `finally` does: every `score_pair`
+    materializes `__splink__` frames on the session handle, and a later suite's
+    hygiene assertion counts whatever a fixture here left behind.
     """
     dbt = Dbt(initialised_lake, tmp_path / "artifacts_sym", cfg)
     dbt("seed")
@@ -508,6 +511,7 @@ def symmetry(
 
     database = str(scalar(initialised_lake, "SELECT current_database()"))
     schema = str(scalar(initialised_lake, "SELECT current_schema()"))
+    api = None
     try:
         model_version, tf_snapshot_id, settings = load_fixture_model(initialised_lake)
         api = splink_api(initialised_lake)
@@ -531,6 +535,9 @@ def symmetry(
             blocked=canonical_pairs_from_blocking_keys(initialised_lake),
         )
     finally:
+        if api is not None:
+            cleanup_splink(api)
+            initialised_lake.execute(f"DROP TABLE IF EXISTS {SYMMETRY_CORPUS_RELATION}")
         initialised_lake.execute(f'USE "{database}".{schema}')
 
 
