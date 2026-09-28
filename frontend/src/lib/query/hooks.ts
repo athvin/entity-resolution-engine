@@ -67,6 +67,7 @@ export interface LineageRow {
 }
 
 export interface EntityEvent {
+  event_id: string;
   seq: number;
   run_id: string;
   event_type: string;
