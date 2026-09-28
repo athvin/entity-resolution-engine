@@ -196,7 +196,7 @@ class SourceSpec(_Block):
             raise ValueError(f"sources.columns.incomplete: columns does not map {missing}")
         if self.priority_rank < 1:
             raise ValueError(
-                f"sources.columns.incomplete: priority_rank must be a positive integer, "
+                f"sources.priority_rank.invalid: priority_rank must be a positive integer, "
                 f"got {self.priority_rank}"
             )
         return self
@@ -389,9 +389,16 @@ class Config(_Block):
         ranks = [source.priority_rank for source in self.sources.values()]
         duplicated = sorted({rank for rank in ranks if ranks.count(rank) > 1})
         if duplicated:
+            holders = "; ".join(
+                f"rank {rank} is held by "
+                + ", ".join(
+                    name for name, source in self.sources.items() if source.priority_rank == rank
+                )
+                for rank in duplicated
+            )
             raise ValueError(
-                f"sources.columns.incomplete: priority_rank values must be unique across "
-                f"sources, {duplicated} repeat"
+                f"sources.priority_rank.duplicate: priority_rank values must be unique "
+                f"across sources — {holders}"
             )
         return self
 

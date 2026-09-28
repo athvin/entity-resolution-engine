@@ -143,6 +143,18 @@ def test_u_seed_is_required_with_error_path(tmp_path: Path) -> None:
             lambda d: d["sources"]["crm"]["columns"].pop("email"),
             "sources.columns.incomplete",
         ),
+        (
+            "V11",
+            lambda d: d["sources"]["crm"].update(priority_rank=0),
+            "sources.priority_rank.invalid",
+        ),
+        (
+            "V11",
+            lambda d: d["sources"]["billing"].update(
+                priority_rank=d["sources"]["crm"]["priority_rank"]
+            ),
+            "sources.priority_rank.duplicate",
+        ),
         ("V12", lambda d: d["clustering"].update(max_iterations=0), "clustering.bounds"),
         ("V13", lambda d: d["versions"].update(std_version=""), "versions.required"),
         ("V14", lambda d: d["storage"].update(data_path="s3://lake/er"), "storage.uri"),
