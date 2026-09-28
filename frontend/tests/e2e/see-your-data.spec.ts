@@ -47,7 +47,10 @@ test("a steward browses real golden records with provenance and history", async 
   await snap(page, "entity-real");
 
   await page.goto(`/${org}/runs`);
-  await expect(page.getByTestId("jobs-table")).toContainText("train");
+  // Assert on the job kind every journey keeps producing, not the seed's
+  // one-time train — the tenant is long-lived and each e2e pass appends jobs,
+  // so train eventually scrolls out of the table's window.
+  await expect(page.getByTestId("jobs-table")).toContainText("run_all");
   await expect(page.getByTestId("runs-table")).toContainText("succeeded");
   await snap(page, "runs-real");
 });

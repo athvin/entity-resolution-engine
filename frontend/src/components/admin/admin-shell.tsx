@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 const TABS = [
   { href: "/admin/tenants", label: "Tenants" },
   { href: "/admin/queue", label: "Global queue" },
+  { href: "/admin/audit", label: "Audit" },
 ];
 
 /** The operator console's own shell — deliberately distinct from tenant space. */

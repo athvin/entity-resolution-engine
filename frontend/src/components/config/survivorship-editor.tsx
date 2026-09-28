@@ -52,7 +52,9 @@ export function SurvivorshipEditor({ chains, onChange, disabled }: SurvivorshipE
                   key={rule}
                   className={cn(
                     "bg-secondary text-secondary-foreground inline-flex items-center gap-0.5 rounded-full py-0.5 pr-1 pl-2.5 text-xs font-medium",
-                    disabled && "opacity-60",
+                    // Read-only cue via color, not opacity — a faded pill drops
+                    // below the AA contrast floor.
+                    disabled && "text-muted-foreground",
                   )}
                   data-testid={`pill-${attribute}-${rule}`}
                 >

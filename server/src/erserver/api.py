@@ -375,6 +375,31 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
             "drop_root": record["drop_root"],
         }
 
+    @app.post("/v1/orgs/{org}:suspend")
+    def suspend_org(org: str, conn: Conn, caller: Caller) -> dict[str, str]:
+        """Freeze a tenant (design §7.2, the reversible half): active → suspended.
+
+        The guards already exist and do the enforcement: job submission,
+        imports and steward actions refuse any non-active org, and the
+        dispatcher's schedule tick swallows fires for it. Purge — the
+        destructive half — stays deliberately unimplemented.
+        """
+        guard(caller, org, "operator")
+        org_or_404(conn, org)
+        if not queue.set_org_state(conn, org, "suspended", expected="active"):
+            raise HTTPException(409, f"org {org!r} is not active; only active orgs suspend")
+        audit(conn, caller.effective_actor, org, "org.suspend", {})
+        return {"name": org, "state": "suspended"}
+
+    @app.post("/v1/orgs/{org}:resume")
+    def resume_org(org: str, conn: Conn, caller: Caller) -> dict[str, str]:
+        guard(caller, org, "operator")
+        org_or_404(conn, org)
+        if not queue.set_org_state(conn, org, "active", expected="suspended"):
+            raise HTTPException(409, f"org {org!r} is not suspended; nothing to resume")
+        audit(conn, caller.effective_actor, org, "org.resume", {})
+        return {"name": org, "state": "active"}
+
     @app.post("/v1/orgs/{org}/api-keys", status_code=201)
     def create_key(org: str, body: KeyIn, conn: Conn, caller: Caller) -> dict[str, str]:
         guard(caller, org, "operator")

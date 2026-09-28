@@ -14,7 +14,9 @@
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
+  /* 0.50, not shadcn's 0.556: muted text must clear WCAG AA (4.5:1) even on
+   * the 0.97 surfaces (bg-muted kbd chips, bg-accent cursor rows). */
+  --muted-foreground: oklch(0.5 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);

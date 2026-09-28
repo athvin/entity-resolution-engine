@@ -98,7 +98,7 @@ export function AssertionLibrary({ org, isSteward }: { org: string; isSteward: b
                         className={cn(
                           "rounded-full px-2 py-0.5 text-xs font-medium",
                           assertion.kind === "always"
-                            ? "bg-emerald-500/15 text-emerald-600"
+                            ? "bg-emerald-500/15 text-emerald-700"
                             : "bg-red-500/15 text-red-600",
                         )}
                       >

@@ -1,13 +1,115 @@
 "use client";
 
-import { AlertTriangle, Inbox, Loader2 } from "lucide-react";
+import Link from "next/link";
+import { AlertTriangle, CheckCircle2, Circle, Inbox, Loader2 } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BffRequestError } from "@/lib/api/client";
 import { useJobs, useMetrics, useRuns, type JobRow, type RunRow } from "@/lib/query/hooks";
+import { useSubmitJob } from "@/lib/query/steward";
 
 const ACTIVE_STATES = new Set(["queued", "dispatching", "running", "retrying", "canceling"]);
+
+/** The fresh-tenant path (design §5.5's precondition, made a checklist instead
+ * of a surprise): deliver files → train → resolve. Renders only while the
+ * corpus is empty, and reads progress from real job history. */
+function OnboardingChecklist({ org, jobs }: { org: string; jobs: JobRow[] }) {
+  const submit = useSubmitJob(org);
+  const delivered = jobs.some((job) => job.kind === "run_all_incremental");
+  const trained = jobs.some((job) => job.kind === "train" && job.state === "succeeded");
+  const preconditionFailures = jobs.filter((job) => job.error_class === "precondition").length;
+
+  const steps = [
+    {
+      done: delivered,
+      label: "Deliver your first files",
+      body: (
+        <>
+          Drop a CSV on each source in{" "}
+          <Link href={`/${org}/sources`} className="underline underline-offset-2">
+            Sources
+          </Link>
+          . First deliveries land, then matching waits for a model — that&apos;s the plan, not a
+          failure.
+        </>
+      ),
+    },
+    {
+      done: trained,
+      label: "Train the matching model",
+      body: (
+        <span className="inline-flex flex-wrap items-center gap-2">
+          One-time, a couple of minutes on a fresh corpus.
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!delivered || trained || submit.isPending}
+            data-testid="onboarding-train"
+            onClick={() => {
+              submit.mutate({ kind: "train" });
+            }}
+          >
+            Train now
+          </Button>
+        </span>
+      ),
+    },
+    {
+      done: false,
+      label: "Run the first resolution",
+      body: (
+        <span className="inline-flex flex-wrap items-center gap-2">
+          Builds your golden records end to end.
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!trained || submit.isPending}
+            data-testid="onboarding-run"
+            onClick={() => {
+              submit.mutate({ kind: "run_all_full" });
+            }}
+          >
+            Run full resolution
+          </Button>
+        </span>
+      ),
+    },
+  ];
+
+  return (
+    <Card className="border-primary/40" data-testid="onboarding-checklist">
+      <CardHeader className="p-4 pb-1 lg:p-6 lg:pb-2">
+        <CardTitle className="text-base">Three steps to your first golden records</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3 p-4 pt-2 text-sm lg:p-6 lg:pt-2">
+        {steps.map((step) => (
+          <div key={step.label} className="flex items-start gap-2">
+            {step.done ? (
+              <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-600" />
+            ) : (
+              <Circle className="text-muted-foreground mt-0.5 size-4 shrink-0" />
+            )}
+            <div>
+              <span className="font-medium">{step.label}</span>
+              <p className="text-muted-foreground mt-0.5">{step.body}</p>
+            </div>
+          </div>
+        ))}
+        {preconditionFailures > 0 && !trained && (
+          <p
+            className="text-muted-foreground border-t pt-2 text-xs"
+            data-testid="precondition-note"
+          >
+            {preconditionFailures} import{preconditionFailures === 1 ? "" : "s"} delivered and
+            waiting on the model — they were not lost.
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 function Tile({
   label,
@@ -117,6 +219,8 @@ export function DashboardContent({ org }: { org: string }) {
         />
         <Tile label="Open reviews" value={reviewCount} testId="tile-open-reviews" />
       </div>
+
+      {metrics.data?.records === 0 && <OnboardingChecklist org={org} jobs={jobs.data ?? []} />}
 
       {activeJob && (
         <Card data-testid="active-job-strip">

@@ -26,7 +26,7 @@ export const TEST_ORG = "acme-dev";
  * so parallel projects never race each other and the pixel-compared acme-dev
  * fixtures stay byte-stable. */
 export const TEST_ORG_MUTABLE = "mutable-dev"; // desktop-chromium
-export const TRIAGE_ORGS = ["mutable-dev", "mutable-ios", "mutable-android"] as const;
+export const TRIAGE_ORGS = ["mutable-dev", "mutable-ios", "mutable-android", "fresh-dev"] as const;
 
 export async function installTestFixtures(db: Db): Promise<void> {
   const passwordHash = await hashPassword(TEST_PASSWORD);
