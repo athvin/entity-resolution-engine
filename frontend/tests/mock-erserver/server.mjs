@@ -405,8 +405,17 @@ export function initialState() {
   };
 
   // One private triage org per mobile device project, cloned from the
-  // mutable-dev pattern, so parallel projects never race a shared queue.
-  for (const org of ["mutable-ios", "mutable-android", "fresh-dev"]) {
+  // mutable-dev pattern, so parallel projects never race a shared queue. The
+  // wizard-* orgs isolate the activate-and-run journey, whose publish flips
+  // the active config's sources block.
+  for (const org of [
+    "mutable-ios",
+    "mutable-android",
+    "fresh-dev",
+    "wizard-dev",
+    "wizard-ios",
+    "wizard-android",
+  ]) {
     state.orgs[org] = {
       name: org,
       state: "active",
@@ -563,6 +572,25 @@ function readBody(req) {
       }
     });
   });
+}
+
+/** The indented body of a yaml document's top-level `sources:` block, or "". */
+function sourcesBlock(yaml) {
+  const lines = String(yaml ?? "").split("\n");
+  const start = lines.findIndex((line) => line === "sources:");
+  if (start < 0) return "";
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((line) => line !== "" && !line.startsWith(" "));
+  // trimEnd: a serializer's trailing newline is not a sources change.
+  return rest
+    .slice(0, end < 0 ? undefined : end)
+    .join("\n")
+    .trimEnd();
+}
+
+/** The source names a config yaml declares, mirroring erserver's import check. */
+function sourceNames(yaml) {
+  return [...sourcesBlock(yaml).matchAll(/^ {2}(\w+):/gm)].map((found) => found[1]);
 }
 
 function entityDetail(org, entityId) {
@@ -1121,6 +1149,22 @@ const server = http.createServer((req, res) => {
         pending_until_next_reconcile: true,
       });
     }
+    if ((match = /^\/v1\/orgs\/([^/]+)\/duplicates$/.exec(path)) && req.method === "GET") {
+      // Every third golden entity is a two-member group, matching entityDetail.
+      const rows = (state.golden[match[1]] ?? []).filter((_, index) => index % 3 === 0);
+      return send(res, 200, {
+        items: rows.slice(0, Number(url.searchParams.get("limit") ?? 50)).map((row, index) => ({
+          entity_id: row.entity_id,
+          member_count: 2,
+          members: [`crm:C-${String(5000 + index * 3)}`, `webforms:W-${String(7000 + index * 3)}`],
+          given_name: row.given_name,
+          family_name: row.family_name,
+          email: row.email,
+        })),
+        snapshot: 42,
+        next_cursor: null,
+      });
+    }
     if ((match = /^\/v1\/orgs\/([^/]+)\/match-scores$/.exec(path)) && req.method === "GET") {
       const limit = Number(url.searchParams.get("limit") ?? 50);
       const bandLow = url.searchParams.get("band_low");
@@ -1141,22 +1185,41 @@ const server = http.createServer((req, res) => {
       const source = url.searchParams.get("source") ?? "unknown";
       req.resume(); // drain the multipart body; the mock never parses it
       await new Promise((resolve) => req.on("end", resolve));
+      // Mirror erserver: the source must be in the ACTIVE config, drafts don't count.
+      const known = sourceNames(state.configs[org]?.yaml);
+      if (!known.includes(source)) {
+        return send(res, 422, {
+          detail:
+            `source '${source}' is not in the active config (known: ${known.join(", ")}); ` +
+            `publish a config version containing sources.${source} first`,
+        });
+      }
+      // Succeeds instantly, like mock train, so job-detail's success CTA renders
+      // on the first refetch instead of the suite simulating a dispatcher.
       const job = {
         job_id: `01jmimport${String(Object.values(state.jobs).flat().length).padStart(4, "0")}`,
         org,
         kind: "run_all_incremental",
         params: { source },
-        state: "queued",
+        state: "succeeded",
         priority: 0,
         idempotency_key: `import:${source}`,
         run_id: null,
-        attempt: 0,
+        attempt: 1,
         max_attempts: 3,
-        exit_code: null,
+        exit_code: 0,
         error_class: null,
         error_detail: null,
-        outcome: null,
-        progress: { stages: [] },
+        outcome: "resolved",
+        progress: {
+          stages: [
+            { stage: "ingest" },
+            { stage: "standardize" },
+            { stage: "match" },
+            { stage: "reconcile" },
+            { stage: "assemble" },
+          ],
+        },
       };
       (state.jobs[org] ??= []).unshift(job);
       return send(res, 202, { delivery_id: `mockdelivery-${source}`, job });
@@ -1249,10 +1312,46 @@ const server = http.createServer((req, res) => {
         (candidate) => candidate.version === Number(match[2]),
       );
       if (!row) return send(res, 404, { detail: "no such version" });
+      // Mirror configsvc.classify_tier for the one block the wizard changes: a
+      // sources: change is tier C and enqueues train + full rebuild; anything
+      // else keeps the tier-A single-job shape the config-studio specs pin.
+      const sourcesChanged = sourcesBlock(row.yaml) !== sourcesBlock(state.configs[org]?.yaml);
       row.state = "published";
-      row.tier = "A";
+      row.tier = sourcesChanged ? "C" : "A";
       row.published_at = "2026-09-27T12:05:00Z";
       state.configs[org] = { ...row };
+      if (sourcesChanged) {
+        const enqueued = ["train", "run_all_full"].map((kind, index) => ({
+          job_id: `01jmpublish${kind.replace(/_/g, "")}${String(
+            Object.values(state.jobs).flat().length + index,
+          ).padStart(3, "0")}`,
+          org,
+          kind,
+          params: kind === "run_all_full" ? { skip_ingest: true } : {},
+          // Instantly succeeded, like mock train: the queue's serialization is
+          // the real stack's concern, not this suite's.
+          state: "succeeded",
+          priority: 0,
+          idempotency_key: `publish:${String(row.version)}:${kind}`,
+          run_id: null,
+          attempt: 1,
+          max_attempts: 3,
+          exit_code: 0,
+          error_class: null,
+          error_detail: null,
+          outcome: kind === "train" ? "model_activated" : "resolved",
+          progress: { stages: [{ stage: kind === "train" ? "train" : "assemble" }] },
+        }));
+        for (const job of enqueued) (state.jobs[org] ??= []).unshift(job);
+        return send(res, 200, {
+          org,
+          version: row.version,
+          tier: "C",
+          changed_blocks: ["sources"],
+          jobs_enqueued: enqueued.map((job) => job.job_id),
+          published_by: "user:mock via key:mock",
+        });
+      }
       return send(res, 200, {
         org,
         version: row.version,

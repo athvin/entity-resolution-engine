@@ -67,7 +67,7 @@ describe("applying studio edits", () => {
   });
 
   it("adds a wizard source block and refuses duplicates", () => {
-    const next = addSourceBlock(CONFIG, "erp", { priority_rank: 2, drop_subdir: "erp" });
+    const next = addSourceBlock(CONFIG, "erp", { adapter: "csv", priority_rank: 2 });
     expect(parseConfig(next).sources).toEqual(["crm", "erp"]);
     expect(() => addSourceBlock(next, "erp", {})).toThrow(/already exists/);
   });

@@ -2,7 +2,16 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, ArrowRight, CheckCircle2, FileUp, Hourglass } from "lucide-react";
+import { useRouter } from "next/navigation";
+import {
+  ArrowLeft,
+  ArrowRight,
+  CheckCircle2,
+  Circle,
+  CircleAlert,
+  FileUp,
+  Loader2,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,14 +27,28 @@ import {
   type CanonicalAttribute,
   type ColumnProfile,
 } from "@/lib/domain/csv-profile";
-import { useActiveConfig, useCreateDraft } from "@/lib/query/config";
-import { useSources } from "@/lib/query/steward";
+import { useActiveConfig, useCreateDraft, usePublish } from "@/lib/query/config";
+import { useImportFile, useSources } from "@/lib/query/steward";
 import { cn } from "@/lib/utils";
 
 const STEPS = ["Sample", "Profile", "Map", "Identity", "Review"] as const;
 
+/** 256 MiB — the BFF's own cap, mirrored so the guard fires before any POST. */
+const MAX_IMPORT_BYTES = 256 * 1024 * 1024;
+
+/** The activation pipeline's phases, in order; retries re-enter at the failed one. */
+type ActivationPhase = "draft" | "publish" | "upload";
+const ACTIVATION_PHASES: ActivationPhase[] = ["draft", "publish", "upload"];
+
+interface Activation {
+  phase: ActivationPhase;
+  running: boolean;
+  error: string | null;
+}
+
 interface WizardState {
   fileName: string;
+  file: File | null;
   columns: ColumnProfile[];
   rowCount: number;
   name: string;
@@ -36,23 +59,37 @@ interface WizardState {
   priorityRank: number;
 }
 
+function describeError(cause: unknown, fallback: string): string {
+  if (cause instanceof BffRequestError) {
+    return `${cause.message}${cause.error.pointer ? ` (at ${cause.error.pointer})` : ""}`;
+  }
+  return cause instanceof Error ? cause.message : fallback;
+}
+
 /**
  * The guided new-source workthrough (design §5.5), steps 1–4 + 6. The sample
- * file is profiled in the browser and never uploaded; the outcome is a DRAFT
- * config version with the new `sources.<name>` block. Step 5 (match preview)
- * needs the engine's score-only mode, and activation needs generated dbt
- * staging — both named honestly on the final screen instead of pretended.
+ * file is profiled in the browser and retained; "Activate & run" then chains
+ * draft → publish (tier C: retrain + full rebuild enqueued) → upload of the
+ * retained sample (incremental run enqueued behind them) and lands on the
+ * import job so the user can watch their file cluster. "Save draft only"
+ * remains the operator-review path. Step 5 (match preview) still needs the
+ * engine's score-only mode and stays on the roadmap.
  */
 export function NewSourceWizard({ org }: { org: string }) {
+  const router = useRouter();
   const activeConfig = useActiveConfig(org);
   const sources = useSources(org);
   const createDraft = useCreateDraft(org);
+  const publish = usePublish(org);
+  const importFile = useImportFile(org);
   const [step, setStep] = useState(0);
   const [rankTouched, setRankTouched] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [draftVersion, setDraftVersion] = useState<number | null>(null);
+  const [activation, setActivation] = useState<Activation | null>(null);
   const [state, setState] = useState<WizardState>({
     fileName: "",
+    file: null,
     columns: [],
     rowCount: 0,
     name: "",
@@ -107,6 +144,7 @@ export function NewSourceWizard({ org }: { org: string }) {
     setState((current) => ({
       ...current,
       fileName: file.name,
+      file,
       columns,
       rowCount,
       name: file.name
@@ -136,7 +174,7 @@ export function NewSourceWizard({ org }: { org: string }) {
     };
   }
 
-  async function commit() {
+  async function saveDraft() {
     setError(null);
     if (!activeConfig.data) return;
     try {
@@ -144,43 +182,185 @@ export function NewSourceWizard({ org }: { org: string }) {
       const draft = await createDraft.mutateAsync(yaml);
       setDraftVersion(draft.version);
     } catch (cause) {
-      setError(
-        cause instanceof BffRequestError
-          ? `${cause.message}${cause.error.pointer ? ` (at ${cause.error.pointer})` : ""}`
-          : cause instanceof Error
-            ? cause.message
-            : "draft creation failed",
-      );
+      setError(describeError(cause, "draft creation failed"));
     }
+  }
+
+  /** The activate pipeline, re-enterable at the phase a retry names. */
+  async function activate(from: ActivationPhase = "draft") {
+    setError(null);
+    let version = draftVersion;
+    if (from === "draft") {
+      setActivation({ phase: "draft", running: true, error: null });
+      if (!activeConfig.data) return;
+      try {
+        const yaml = addSourceBlock(activeConfig.data.yaml, state.name, sourceBlock());
+        version = (await createDraft.mutateAsync(yaml)).version;
+        setDraftVersion(version);
+      } catch (cause) {
+        setActivation({
+          phase: "draft",
+          running: false,
+          error: describeError(cause, "draft creation failed"),
+        });
+        return;
+      }
+    }
+    if (from === "draft" || from === "publish") {
+      setActivation({ phase: "publish", running: true, error: null });
+      if (version === null) return;
+      try {
+        await publish.mutateAsync(version);
+      } catch (cause) {
+        setActivation({
+          phase: "publish",
+          running: false,
+          error: describeError(cause, "publish failed"),
+        });
+        return;
+      }
+    }
+    setActivation({ phase: "upload", running: true, error: null });
+    if (!state.file) return;
+    try {
+      const result = await importFile.mutateAsync({ source: state.name, file: state.file });
+      router.push(`/${org}/runs/${result.job.job_id}`);
+    } catch (cause) {
+      setActivation({
+        phase: "upload",
+        running: false,
+        error: describeError(cause, "the sample upload failed"),
+      });
+    }
+  }
+
+  if (activation !== null) {
+    const phaseIndex = ACTIVATION_PHASES.indexOf(activation.phase);
+    const rows: { key: ActivationPhase; label: string }[] = [
+      {
+        key: "draft",
+        label:
+          draftVersion !== null ? `Draft config v${String(draftVersion)} created` : "Create draft",
+      },
+      { key: "publish", label: "Publish — retrain + full rebuild queued" },
+      { key: "upload", label: `Upload ${state.fileName} — incremental run queued behind them` },
+    ];
+    return (
+      <div className="mx-auto flex max-w-xl flex-col gap-4" data-testid="wizard-activate">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Activating {state.name}</CardTitle>
+            <CardDescription>
+              The queue runs these in order: retrain, full rebuild, then your sample file's own run
+              — you land on that run to watch it.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3 text-sm">
+            {rows.map((row, index) => (
+              <div key={row.key} className="flex items-center gap-2">
+                {index < phaseIndex ? (
+                  <CheckCircle2 className="size-4 text-emerald-500" />
+                ) : index === phaseIndex && activation.running ? (
+                  <Loader2 className="text-primary size-4 animate-spin" />
+                ) : index === phaseIndex && activation.error ? (
+                  <CircleAlert className="text-destructive size-4" />
+                ) : (
+                  <Circle className="text-muted-foreground size-4" />
+                )}
+                <span className={index === phaseIndex ? "font-medium" : ""}>{row.label}</span>
+              </div>
+            ))}
+            {activation.error && (
+              <div className="flex flex-col gap-2 pt-1" role="alert" data-testid="activation-error">
+                <p className="text-destructive">{activation.error}</p>
+                {activation.phase === "publish" ? (
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => void activate("publish")}
+                      data-testid="activation-retry"
+                    >
+                      Retry publish
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setActivation(null);
+                      }}
+                    >
+                      Keep as draft
+                    </Button>
+                  </div>
+                ) : activation.phase === "upload" ? (
+                  <>
+                    <p className="text-muted-foreground text-xs">
+                      {state.name} is live and the rebuild is queued — only the sample upload
+                      failed. Retry it, or import the file any time from the Sources page.
+                    </p>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        onClick={() => void activate("upload")}
+                        data-testid="activation-retry"
+                      >
+                        Retry upload
+                      </Button>
+                      <Button size="sm" variant="outline" asChild>
+                        <Link href={`/${org}/sources`}>Go to sources</Link>
+                      </Button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => void activate("draft")}
+                      data-testid="activation-retry"
+                    >
+                      Retry
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setActivation(null);
+                      }}
+                    >
+                      Back to review
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    );
   }
 
   if (draftVersion !== null) {
     return (
       <div className="mx-auto flex max-w-xl flex-col gap-4" data-testid="wizard-done">
-        <Card className="border-amber-500/40">
+        <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-lg">
-              <Hourglass className="size-5 text-amber-500" />
-              {state.name} — queued for activation
+              <CheckCircle2 className="size-5 text-emerald-500" />
+              {state.name} — draft saved for review
             </CardTitle>
             <CardDescription>
-              Draft config v{draftVersion} holds the new source. Two engine steps remain before it
-              can go live, and pretending otherwise would break your pipeline:
+              Draft config v{draftVersion} holds the new source. Publishing it activates the source
+              — the staging layer picks up any published source automatically.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-2 text-sm">
             <p>
-              1. <strong>Staging model</strong> — the transformation layer currently ships models
-              for the three built-in sources; a generated model for {state.name} is engine work on
-              the roadmap.
-            </p>
-            <p>
-              2. <strong>Match preview</strong> — "would merge / would review" before commit needs
-              the engine's score-only mode, also on the roadmap.
+              Publish from <strong>Settings → Config</strong> when ready, then import a file from
+              the Sources page to run the pipeline over it.
             </p>
             <p className="text-muted-foreground">
-              An operator will publish the draft once activation lands. Your mapping is saved —
-              nothing to redo.
+              Match preview before commit ("would merge / would review") still needs the engine's
+              score-only mode and remains on the roadmap. Your mapping is saved — nothing to redo.
             </p>
           </CardContent>
         </Card>
@@ -413,10 +593,11 @@ export function NewSourceWizard({ org }: { org: string }) {
       {step === 4 && (
         <Card data-testid="wizard-review">
           <CardHeader className="p-4 pb-1">
-            <CardTitle className="text-base">Review — this becomes config draft YAML</CardTitle>
+            <CardTitle className="text-base">Review — this becomes config YAML</CardTitle>
             <CardDescription>
-              Committing creates a draft config version. Activation stays an operator step until
-              generated staging models land (named on the next screen, not hidden).
+              "Activate & run" publishes this config, uploads {state.fileName || "your sample"}, and
+              queues the pipeline so you can watch the data cluster. "Save draft only" leaves a
+              draft for operator review instead.
             </CardDescription>
           </CardHeader>
           <CardContent className="p-4 pt-2">
@@ -462,13 +643,33 @@ export function NewSourceWizard({ org }: { org: string }) {
             Next <ArrowRight />
           </Button>
         ) : (
-          <Button
-            disabled={createDraft.isPending}
-            data-testid="wizard-commit"
-            onClick={() => void commit()}
-          >
-            {createDraft.isPending ? "Creating draft…" : "Create config draft"}
-          </Button>
+          <div className="flex flex-col items-end gap-1.5">
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                disabled={createDraft.isPending}
+                data-testid="wizard-commit"
+                onClick={() => void saveDraft()}
+              >
+                {createDraft.isPending ? "Saving…" : "Save draft only"}
+              </Button>
+              <Button
+                disabled={
+                  createDraft.isPending || state.file === null || state.file.size > MAX_IMPORT_BYTES
+                }
+                data-testid="wizard-activate-run"
+                onClick={() => void activate()}
+              >
+                Activate & run
+              </Button>
+            </div>
+            {state.file !== null && state.file.size > MAX_IMPORT_BYTES && (
+              <p className="text-muted-foreground text-xs">
+                {state.fileName} is over the 256 MiB import cap — save the draft and sync the file
+                into the drop dir instead.
+              </p>
+            )}
+          </div>
         )}
       </div>
     </div>

@@ -26,7 +26,18 @@ export const TEST_ORG = "acme-dev";
  * so parallel projects never race each other and the pixel-compared acme-dev
  * fixtures stay byte-stable. */
 export const TEST_ORG_MUTABLE = "mutable-dev"; // desktop-chromium
-export const TRIAGE_ORGS = ["mutable-dev", "mutable-ios", "mutable-android", "fresh-dev"] as const;
+/** The wizard journey publishes config, so it gets its own org per project —
+ * a published sources change on a shared triage org would race the config
+ * studio's tier assertions. */
+export const TRIAGE_ORGS = [
+  "mutable-dev",
+  "mutable-ios",
+  "mutable-android",
+  "fresh-dev",
+  "wizard-dev",
+  "wizard-ios",
+  "wizard-android",
+] as const;
 
 export async function installTestFixtures(db: Db): Promise<void> {
   const passwordHash = await hashPassword(TEST_PASSWORD);
