@@ -80,6 +80,10 @@ COPY configs/ configs/
 COPY benchmarks/ benchmarks/
 COPY fixtures/ fixtures/
 COPY tests/ tests/
+# pytest reads [tool.pytest.ini_options] from here: without it the in-container
+# suite runs with unregistered markers ("slow" filtering by luck, not contract)
+# and without the pythonpath the helpers import relies on locally.
+COPY pyproject.toml ./
 # The S7.3 listing omits scripts/, but the image is where check_extensions.py runs
 # under `--network none` and where the S9.2 preflight calls benchmarks-adjacent
 # helpers, so the runtime stage MUST carry it.

@@ -450,6 +450,7 @@ class _MaintainStage:
             "files_merged": result.files_merged,
             "snapshots_expired": result.snapshots_expired,
             "files_deleted": result.files_deleted,
+            "retired_dropped": result.retired_dropped,
         }
         if self.stage_run is not None:
             # S4 declares no counter list for `maintain`, so these are free-form
