@@ -364,6 +364,18 @@ export function initialState() {
         version: 1,
         yaml: [
           "tenant: acme",
+          "thresholds:",
+          "  auto_merge: 0.95",
+          "  review_low: 0.60",
+          "blocking:",
+          '  - { key_type: email_exact, expr: "email" }',
+          '  - { key_type: phone_exact, expr: "phone_e164" }',
+          "comparisons:",
+          "  email: { levels: [exact, username_exact, null], tf: true }",
+          "  family_name: { levels: [exact, null], tf: true }",
+          "survivorship:",
+          "  email: [validated, source_priority, recency]",
+          "  given_name: [source_priority, frequency, completeness]",
           "sources:",
           "  crm:",
           "    priority_rank: 1",
@@ -381,7 +393,7 @@ export function initialState() {
       },
       "mutable-dev": {
         version: 1,
-        yaml: "tenant: mutable\nsources:\n  crm:\n    priority_rank: 1",
+        yaml: "tenant: mutable\nthresholds:\n  auto_merge: 0.95\n  review_low: 0.60\nsurvivorship:\n  email: [validated, recency]\nsources:\n  crm:\n    priority_rank: 1",
         config_hash: "mockhash2",
         state: "published",
         tier: null,
@@ -436,7 +448,7 @@ export function initialState() {
     state.schedules[org] = [];
     state.configs[org] = {
       version: 1,
-      yaml: "tenant: mutable\nsources:\n  crm:\n    priority_rank: 1",
+      yaml: "tenant: mutable\nthresholds:\n  auto_merge: 0.95\n  review_low: 0.60\nsurvivorship:\n  email: [validated, recency]\nsources:\n  crm:\n    priority_rank: 1",
       config_hash: "mockhash3",
       state: "published",
       tier: null,
@@ -444,6 +456,11 @@ export function initialState() {
       created_at: "2026-09-21T12:00:00Z",
       published_at: "2026-09-21T12:00:00Z",
     };
+  }
+  // The version ledger starts with each org's active config as published v1.
+  state.configVersions = {};
+  for (const [org, config] of Object.entries(state.configs)) {
+    state.configVersions[org] = [{ ...config }];
   }
   return state;
 }
@@ -548,6 +565,97 @@ const server = http.createServer((req, res) => {
     const path = url.pathname;
 
     if (path === "/healthz") return send(res, 200, { status: "ok" });
+
+    // ---- scripted Anthropic endpoint (ANTHROPIC_BASE_URL points here) ------
+    // Turn 1 (no tool_result yet): a get_metrics tool_use. Turn 2: the answer.
+    // Emits the SDK's expected SSE frames so the REAL tool loop runs in tests.
+    if (path === "/anthropic/v1/messages" && req.method === "POST") {
+      const body = await readBody(req);
+      const messages = Array.isArray(body.messages) ? body.messages : [];
+      const hasToolResult = messages.some(
+        (message) =>
+          Array.isArray(message.content) &&
+          message.content.some((block) => block?.type === "tool_result"),
+      );
+      res.writeHead(200, {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache",
+      });
+      const frame = (event, data) =>
+        res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      const messageStart = (id) =>
+        frame("message_start", {
+          type: "message_start",
+          message: {
+            id,
+            type: "message",
+            role: "assistant",
+            content: [],
+            model: String(body.model ?? "mock"),
+            stop_reason: null,
+            stop_sequence: null,
+            usage: { input_tokens: 10, output_tokens: 1 },
+          },
+        });
+      if (!hasToolResult) {
+        messageStart("msg_mock_tool_turn");
+        frame("content_block_start", {
+          type: "content_block_start",
+          index: 0,
+          content_block: { type: "tool_use", id: "toolu_mock_1", name: "get_metrics", input: {} },
+        });
+        frame("content_block_delta", {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "input_json_delta", partial_json: "{}" },
+        });
+        frame("content_block_stop", { type: "content_block_stop", index: 0 });
+        frame("message_delta", {
+          type: "message_delta",
+          delta: { stop_reason: "tool_use", stop_sequence: null },
+          usage: { output_tokens: 5 },
+        });
+        frame("message_stop", { type: "message_stop" });
+      } else {
+        let metricsText = "the metrics lookup failed";
+        outer: for (const message of messages) {
+          if (!Array.isArray(message.content)) continue;
+          for (const block of message.content) {
+            if (block?.type === "tool_result") {
+              try {
+                const parsed = JSON.parse(String(block.content));
+                metricsText = `Your workspace holds ${parsed.entities} golden entities resolved from ${parsed.records} records, with ${parsed.open_reviews} open reviews.`;
+              } catch {
+                /* keep fallback */
+              }
+              break outer;
+            }
+          }
+        }
+        messageStart("msg_mock_answer_turn");
+        frame("content_block_start", {
+          type: "content_block_start",
+          index: 0,
+          content_block: { type: "text", text: "" },
+        });
+        for (const chunk of metricsText.match(/.{1,24}/g) ?? []) {
+          frame("content_block_delta", {
+            type: "content_block_delta",
+            index: 0,
+            delta: { type: "text_delta", text: chunk },
+          });
+        }
+        frame("content_block_stop", { type: "content_block_stop", index: 0 });
+        frame("message_delta", {
+          type: "message_delta",
+          delta: { stop_reason: "end_turn", stop_sequence: null },
+          usage: { output_tokens: 30 },
+        });
+        frame("message_stop", { type: "message_stop" });
+      }
+      res.end();
+      return;
+    }
     if (path === "/__reset" && req.method === "POST") {
       state = initialState();
       return send(res, 200, { reset: true });
@@ -957,6 +1065,66 @@ const server = http.createServer((req, res) => {
     if ((match = /^\/v1\/orgs\/([^/]+)\/config$/.exec(path)) && req.method === "GET") {
       const config = state.configs[match[1]];
       return config ? send(res, 200, config) : send(res, 404, { detail: "no active config" });
+    }
+    if ((match = /^\/v1\/orgs\/([^/]+)\/config\/versions$/.exec(path)) && req.method === "GET") {
+      const rows = state.configVersions[match[1]] ?? [];
+      return send(
+        res,
+        200,
+        rows.map(({ yaml: _yaml, ...row }) => row).sort((a, b) => b.version - a.version),
+      );
+    }
+    if ((match = /^\/v1\/orgs\/([^/]+)\/config\/versions$/.exec(path)) && req.method === "POST") {
+      const org = match[1];
+      const body = await readBody(req);
+      const yamlText = String(body.yaml ?? "");
+      if (!yamlText.includes("tenant:")) {
+        return send(res, 422, { detail: "invalid config: tenant is required", pointer: "/tenant" });
+      }
+      const rows = (state.configVersions[org] ??= []);
+      const version = rows.length + 1;
+      rows.push({
+        version,
+        yaml: yamlText,
+        config_hash: `mockhash-v${version}`,
+        state: "draft",
+        tier: null,
+        created_by: "user:mock via key:mock",
+        created_at: "2026-09-27T12:00:00Z",
+        published_at: null,
+      });
+      return send(res, 201, { org, version, config_hash: `mockhash-v${version}`, state: "draft" });
+    }
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/config\/versions\/(\d+)$/.exec(path)) &&
+      req.method === "GET"
+    ) {
+      const row = (state.configVersions[match[1]] ?? []).find(
+        (candidate) => candidate.version === Number(match[2]),
+      );
+      return row ? send(res, 200, row) : send(res, 404, { detail: "no such version" });
+    }
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/config\/versions\/(\d+):publish$/.exec(path)) &&
+      req.method === "POST"
+    ) {
+      const org = match[1];
+      const row = (state.configVersions[org] ?? []).find(
+        (candidate) => candidate.version === Number(match[2]),
+      );
+      if (!row) return send(res, 404, { detail: "no such version" });
+      row.state = "published";
+      row.tier = "A";
+      row.published_at = "2026-09-27T12:05:00Z";
+      state.configs[org] = { ...row };
+      return send(res, 200, {
+        org,
+        version: row.version,
+        tier: "A",
+        changed_blocks: ["thresholds"],
+        jobs_enqueued: ["01jmpublishjob0000000000j1"],
+        published_by: "user:mock via key:mock",
+      });
     }
     if (
       (match = /^\/v1\/orgs\/([^/]+)\/golden-records\/([^/:]+):unmerge$/.exec(path)) &&

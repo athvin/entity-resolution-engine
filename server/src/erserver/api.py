@@ -559,6 +559,15 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
         guard(caller, org, "viewer")
         return configsvc.list_versions(conn, org)
 
+    @app.get("/v1/orgs/{org}/config/versions/{version}")
+    def config_version_detail(org: str, version: int, conn: Conn, caller: Caller) -> dict[str, Any]:
+        """One version with its YAML body — the client-side diff's input (§7.18)."""
+        guard(caller, org, "viewer")
+        row = configsvc.get_version(conn, org, version)
+        if row is None:
+            raise HTTPException(404, f"no config version {version} for org {org!r}")
+        return row
+
     @app.get("/v1/orgs/{org}/config")
     def active_config(org: str, conn: Conn, caller: Caller) -> dict[str, Any]:
         guard(caller, org, "viewer")

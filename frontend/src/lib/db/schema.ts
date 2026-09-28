@@ -106,6 +106,23 @@ export const orgCredentials = erweb.table(
   (table) => [primaryKey({ columns: [table.org, table.role] })],
 );
 
+/** Saved segments over golden records (design §5.7). The definition is always
+ * the inspectable structured filter — never a prompt — and deliberately limited
+ * to what the read API can evaluate today (search + client conditions). */
+export const segments = erweb.table(
+  "segments",
+  {
+    id: text("id").primaryKey(),
+    org: text("org").notNull(),
+    name: text("name").notNull(),
+    definition: jsonb("definition").notNull(),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("segments_org_idx").on(table.org)],
+);
+
 /** Person-level audit, including dual-identity rows while impersonating.
  * Complements (does not replace) erserver's audit_log. */
 export const audit = erweb.table(
