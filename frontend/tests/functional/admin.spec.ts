@@ -51,6 +51,42 @@ test.describe("operator console", () => {
     await expect(page.getByTestId("global-queue")).toContainText("train");
   });
 
+  test("operator raises a tenant's DuckDB threads for a faster pipeline", async ({
+    page,
+    browserName,
+    isMobile,
+  }) => {
+    // A per-project org: the three projects run this mutation concurrently against
+    // one shared mock, so a fixed org would race (and the seeded orgs feed the
+    // @visual baseline). This one is provisioned fresh at the seeded 2 threads / 4GB.
+    const org = `res-${browserName}${isMobile ? "-m" : ""}`;
+    await login(page, USERS.superAdmin);
+    await page.goto("/admin/tenants/new");
+    await page.getByTestId("tenant-name").fill(org);
+    await page.getByTestId("provision-submit").click();
+    await expect(page.getByTestId("provision-progress")).toContainText("active", {
+      timeout: 15_000,
+    });
+    await page.goto(`/admin/tenants/${org}`);
+
+    const card = page.getByTestId("resources-card");
+    await expect(card.getByTestId("duckdb-threads")).toHaveValue("2");
+
+    await card.getByTestId("duckdb-threads").fill("6");
+    await card.getByTestId("duckdb-memory").fill("6GB");
+    await card.getByTestId("save-resources").click();
+
+    // The control-plane echo drives the cache; the inputs reflect the persisted values.
+    await expect(card.getByTestId("save-resources")).toBeDisabled();
+    await expect(card.getByTestId("duckdb-threads")).toHaveValue("6");
+    await expect(card.getByTestId("duckdb-memory")).toHaveValue("6GB");
+
+    // Client-side validation blocks an out-of-range value before any request.
+    await card.getByTestId("duckdb-threads").fill("99");
+    await expect(card.getByTestId("save-resources")).toBeDisabled();
+    await expect(card).toContainText("whole number 1–32");
+  });
+
   test("tenant detail visual baseline @visual", async ({ page }) => {
     await login(page, USERS.superAdmin);
     await page.goto(`/admin/tenants/${ORG}`);

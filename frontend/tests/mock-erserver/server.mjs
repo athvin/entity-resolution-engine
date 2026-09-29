@@ -51,6 +51,7 @@ export function initialState() {
         active_config_version: 1,
         drop_root: "/dev/drop/acme-dev",
         created_at: "2026-09-20T12:00:00Z",
+        resources: { duckdb_threads: 2, duckdb_memory_limit: "4GB" },
       },
       "mutable-dev": {
         name: "mutable-dev",
@@ -58,6 +59,7 @@ export function initialState() {
         active_config_version: 1,
         drop_root: "/dev/drop/mutable-dev",
         created_at: "2026-09-21T12:00:00Z",
+        resources: { duckdb_threads: 2, duckdb_memory_limit: "4GB" },
       },
     },
     pollsUntilActive: {},
@@ -788,6 +790,7 @@ const server = http.createServer((req, res) => {
           active_config_version: 1,
           drop_root: `/dev/drop/${name}`,
           created_at: "2026-09-26T09:00:00Z",
+          resources: { duckdb_threads: 2, duckdb_memory_limit: "4GB" },
         };
         state.pollsUntilActive[name] = 2;
         state.metrics[name] = {
@@ -858,6 +861,20 @@ const server = http.createServer((req, res) => {
       if (org.state !== "suspended") return send(res, 409, { detail: "nothing to resume" });
       org.state = "active";
       return send(res, 200, { name: org.name, state: "active" });
+    }
+    if ((match = /^\/v1\/orgs\/([^/]+)\/resources$/.exec(path)) && req.method === "PATCH") {
+      const org = state.orgs[match[1]];
+      if (!org) return send(res, 404, { detail: "not found" });
+      const body = await readBody(req);
+      const next = { ...(org.resources ?? { duckdb_threads: null, duckdb_memory_limit: null }) };
+      if (body.duckdb_threads !== undefined) next.duckdb_threads = body.duckdb_threads;
+      if (body.duckdb_memory_limit !== undefined)
+        next.duckdb_memory_limit = body.duckdb_memory_limit;
+      if (body.duckdb_threads === undefined && body.duckdb_memory_limit === undefined) {
+        return send(res, 422, { detail: "provide duckdb_threads and/or duckdb_memory_limit" });
+      }
+      org.resources = next;
+      return send(res, 200, next);
     }
     if (path === "/v1/audit" && req.method === "GET") {
       const org = url.searchParams.get("org");

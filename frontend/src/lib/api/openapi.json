@@ -358,6 +358,38 @@
         "title": "OrgIn",
         "type": "object"
       },
+      "ResourcesIn": {
+        "description": "Execution-only parallelism knobs; neither changes scoring results.",
+        "properties": {
+          "duckdb_memory_limit": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]*[MG]B$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duckdb Memory Limit"
+          },
+          "duckdb_threads": {
+            "anyOf": [
+              {
+                "maximum": 32.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duckdb Threads"
+          }
+        },
+        "title": "ResourcesIn",
+        "type": "object"
+      },
       "ReviewResolveIn": {
         "properties": {
           "resolution": {
@@ -3369,6 +3401,90 @@
           }
         },
         "summary": "Org Metrics"
+      }
+    },
+    "/v1/orgs/{org}/resources": {
+      "patch": {
+        "description": "Per-tenant pipeline parallelism: DuckDB threads and memory limit.\n\nThese are execution-only knobs \u2014 scoring is deterministic across thread\ncounts, so no retrain or rebuild follows a change. The dispatcher reads\nthe org environment when it claims a job, so the next job the tenant\nruns picks the new values up; a job already running is unaffected.",
+        "operationId": "update_resources_v1_orgs__org__resources_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org",
+            "required": true,
+            "schema": {
+              "title": "Org",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Acting-User",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Acting-User"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResourcesIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Update Resources V1 Orgs  Org  Resources Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Resources"
       }
     },
     "/v1/orgs/{org}/reviews": {

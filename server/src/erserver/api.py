@@ -75,6 +75,13 @@ class KeyIn(BaseModel):
     role: str
 
 
+class ResourcesIn(BaseModel):
+    """Execution-only parallelism knobs; neither changes scoring results."""
+
+    duckdb_threads: int | None = Field(default=None, ge=1, le=32)
+    duckdb_memory_limit: str | None = Field(default=None, pattern=r"^[1-9][0-9]*[MG]B$")
+
+
 class JobIn(BaseModel):
     kind: str
     params: dict[str, Any] = Field(default_factory=dict)
@@ -213,6 +220,15 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
         if record is None:
             raise HTTPException(404, f"no org {org!r}")
         return record
+
+    def org_resources(record: dict[str, Any]) -> dict[str, Any]:
+        """The launch environment's parallelism knobs, typed for the console."""
+        env = dict(record["env"] or {})
+        threads = env.get("ER_DUCKDB_THREADS")
+        return {
+            "duckdb_threads": int(threads) if threads is not None and threads.isdigit() else None,
+            "duckdb_memory_limit": env.get("ER_DUCKDB_MEMORY_LIMIT"),
+        }
 
     def org_tenant(record: dict[str, Any]) -> str:
         try:
@@ -373,6 +389,7 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
             "state": record["state"],
             "active_config_version": record["active_config_version"],
             "drop_root": record["drop_root"],
+            "resources": org_resources(record),
         }
 
     @app.post("/v1/orgs/{org}:suspend")
@@ -399,6 +416,28 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
             raise HTTPException(409, f"org {org!r} is not suspended; nothing to resume")
         audit(conn, caller.effective_actor, org, "org.resume", {})
         return {"name": org, "state": "active"}
+
+    @app.patch("/v1/orgs/{org}/resources")
+    def update_resources(org: str, body: ResourcesIn, conn: Conn, caller: Caller) -> dict[str, Any]:
+        """Per-tenant pipeline parallelism: DuckDB threads and memory limit.
+
+        These are execution-only knobs — scoring is deterministic across thread
+        counts, so no retrain or rebuild follows a change. The dispatcher reads
+        the org environment when it claims a job, so the next job the tenant
+        runs picks the new values up; a job already running is unaffected.
+        """
+        guard(caller, org, "operator")
+        org_or_404(conn, org)
+        updates: dict[str, str] = {}
+        if body.duckdb_threads is not None:
+            updates["ER_DUCKDB_THREADS"] = str(body.duckdb_threads)
+        if body.duckdb_memory_limit is not None:
+            updates["ER_DUCKDB_MEMORY_LIMIT"] = body.duckdb_memory_limit
+        if not updates:
+            raise HTTPException(422, "provide duckdb_threads and/or duckdb_memory_limit")
+        queue.merge_org_env(conn, org, updates)
+        audit(conn, caller.effective_actor, org, "org.resources", updates)
+        return org_resources(org_or_404(conn, org))
 
     @app.post("/v1/orgs/{org}/api-keys", status_code=201)
     def create_key(org: str, body: KeyIn, conn: Conn, caller: Caller) -> dict[str, str]:

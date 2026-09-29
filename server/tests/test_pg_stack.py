@@ -1165,6 +1165,66 @@ def test_config_version_detail_serves_the_yaml_body(
     assert client.get(f"/v1/orgs/{org}/config/versions/999", headers=admin).status_code == 404
 
 
+def test_org_resources_merge_into_launch_env(
+    client: TestClient, conn: psycopg.Connection, org: str
+) -> None:
+    """Parallelism knobs land in the env the dispatcher injects at claim time."""
+    admin = key_headers(conn, org, "admin")
+    detail = client.get(f"/v1/orgs/{org}", headers=admin)
+    assert detail.status_code == 200 and "resources" in detail.json()
+
+    updated = client.patch(
+        f"/v1/orgs/{org}/resources",
+        json={"duckdb_threads": 6, "duckdb_memory_limit": "6GB"},
+        headers=operator(),
+    )
+    assert updated.status_code == 200
+    assert updated.json() == {"duckdb_threads": 6, "duckdb_memory_limit": "6GB"}
+    row = queue.org_row(conn, org)
+    assert row is not None
+    assert row[1]["ER_DUCKDB_THREADS"] == "6" and row[1]["ER_DUCKDB_MEMORY_LIMIT"] == "6GB"
+
+    # A partial update merges; the untouched knob survives.
+    partial = client.patch(
+        f"/v1/orgs/{org}/resources", json={"duckdb_threads": 4}, headers=operator()
+    )
+    assert partial.status_code == 200
+    assert partial.json() == {"duckdb_threads": 4, "duckdb_memory_limit": "6GB"}
+    assert client.get(f"/v1/orgs/{org}", headers=admin).json()["resources"] == partial.json()
+
+    # Validation, auth and the audit trail.
+    assert client.patch(f"/v1/orgs/{org}/resources", json={}, headers=operator()).status_code == 422
+    assert (
+        client.patch(
+            f"/v1/orgs/{org}/resources", json={"duckdb_threads": 0}, headers=operator()
+        ).status_code
+        == 422
+    )
+    assert (
+        client.patch(
+            f"/v1/orgs/{org}/resources", json={"duckdb_memory_limit": "lots"}, headers=operator()
+        ).status_code
+        == 422
+    )
+    assert (
+        client.patch(
+            f"/v1/orgs/{org}/resources", json={"duckdb_threads": 2}, headers=admin
+        ).status_code
+        == 403
+    )
+    assert (
+        client.patch(
+            "/v1/orgs/absent/resources", json={"duckdb_threads": 2}, headers=operator()
+        ).status_code
+        == 404
+    )
+    trail = client.get(
+        f"/v1/orgs/{org}/audit", params={"action": "org.resources"}, headers=admin
+    ).json()
+    assert len(trail) == 2
+    assert trail[0]["detail"] == {"ER_DUCKDB_THREADS": "4"}
+
+
 def test_suspend_and_resume_lifecycle(
     client: TestClient, conn: psycopg.Connection, org: str
 ) -> None:

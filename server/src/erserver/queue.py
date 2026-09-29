@@ -224,6 +224,27 @@ def set_org_state(
     return changed
 
 
+def merge_org_env(
+    connection: psycopg.Connection,
+    org: str,
+    updates: dict[str, str],
+) -> bool:
+    """Merge ``updates`` into the environment the dispatcher injects at launch.
+
+    The dispatcher resolves ``env`` when it claims a job, so a merged value
+    applies from the next job onward; a job already running keeps the
+    environment it was spawned with.
+    """
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "UPDATE orgs SET env = env || %s WHERE name = %s",
+            (Jsonb(updates), org),
+        )
+        changed = cursor.rowcount == 1
+    connection.commit()
+    return changed
+
+
 def enqueue(
     connection: psycopg.Connection,
     org: str,
