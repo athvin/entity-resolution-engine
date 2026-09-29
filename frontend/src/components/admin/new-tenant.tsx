@@ -84,7 +84,10 @@ export function NewTenant() {
   if (provision.data) return <ProvisionProgress result={provision.data} />;
 
   return (
-    <div className="mx-auto flex max-w-lg flex-col gap-4" data-testid="new-tenant-form">
+    <div
+      className="mx-auto flex w-full max-w-lg min-w-0 flex-col gap-4"
+      data-testid="new-tenant-form"
+    >
       <div>
         <Link
           href="/admin/tenants"

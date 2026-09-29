@@ -45,7 +45,10 @@ export function DuplicatesContent({ org }: { org: string }) {
   const snapshot = query.data?.pages[0]?.snapshot;
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-4 lg:gap-6" data-testid="duplicates-page">
+    <div
+      className="mx-auto flex w-full max-w-5xl min-w-0 flex-col gap-4 lg:gap-6"
+      data-testid="duplicates-page"
+    >
       <div className="flex items-baseline justify-between">
         <h1 className="text-xl font-semibold lg:text-2xl">Duplicates</h1>
         {snapshot !== undefined && (

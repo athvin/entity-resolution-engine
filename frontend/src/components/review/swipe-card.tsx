@@ -29,8 +29,8 @@ export function SwipeCard({ review, onResolve }: SwipeCardProps) {
   return (
     <motion.div
       ref={scope}
-      className="bg-card relative flex max-h-[60dvh] flex-col gap-3 overflow-hidden rounded-xl border p-4 shadow-sm"
-      style={{ x, rotate, touchAction: "pan-y" }}
+      className="bg-card relative flex max-h-[60dvh] touch-pan-y flex-col gap-3 overflow-hidden rounded-xl border p-4 shadow-sm"
+      style={{ x, rotate }}
       drag="x"
       dragConstraints={{ left: 0, right: 0 }}
       dragElastic={0.7}

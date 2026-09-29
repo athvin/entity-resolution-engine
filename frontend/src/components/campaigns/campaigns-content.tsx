@@ -97,7 +97,10 @@ export function CampaignsContent({ org }: { org: string }) {
   });
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-4 lg:gap-6" data-testid="campaigns-page">
+    <div
+      className="mx-auto flex w-full max-w-4xl min-w-0 flex-col gap-4 lg:gap-6"
+      data-testid="campaigns-page"
+    >
       <div>
         <h1 className="flex items-center gap-2 text-xl font-semibold lg:text-2xl">
           <Megaphone className="size-5" />
@@ -119,7 +122,7 @@ export function CampaignsContent({ org }: { org: string }) {
           </CardHeader>
           <CardContent className="flex flex-col gap-3 p-4 pt-2 lg:p-6 lg:pt-2">
             <div className="flex flex-wrap items-end gap-3">
-              <div className="grid gap-1.5">
+              <div className="grid w-full gap-1.5 sm:w-auto">
                 <Label htmlFor="segment-name">Name</Label>
                 <Input
                   id="segment-name"
@@ -128,11 +131,11 @@ export function CampaignsContent({ org }: { org: string }) {
                     setName(event.target.value);
                   }}
                   placeholder="Newsletter — bay area"
-                  className="w-56"
+                  className="w-full sm:w-56"
                   data-testid="segment-name"
                 />
               </div>
-              <div className="grid gap-1.5">
+              <div className="grid w-full gap-1.5 sm:w-auto">
                 <Label htmlFor="segment-q">Search filter (name / email)</Label>
                 <Input
                   id="segment-q"
@@ -141,7 +144,7 @@ export function CampaignsContent({ org }: { org: string }) {
                     setQ(event.target.value);
                   }}
                   placeholder="empty = every golden record"
-                  className="w-64"
+                  className="w-full sm:w-64"
                   data-testid="segment-q"
                 />
               </div>

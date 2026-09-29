@@ -45,7 +45,10 @@ export function RunsContent({ org }: { org: string }) {
   const activeJob = (jobs.data ?? []).find((job) => ACTIVE.has(job.state));
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-4 lg:gap-6" data-testid="runs-page">
+    <div
+      className="mx-auto flex w-full max-w-6xl min-w-0 flex-col gap-4 lg:gap-6"
+      data-testid="runs-page"
+    >
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold lg:text-2xl">Runs</h1>
         <Link
@@ -60,7 +63,7 @@ export function RunsContent({ org }: { org: string }) {
       {activeJob && (
         <Link href={`/${org}/runs/${activeJob.job_id}`} data-testid="active-job-link">
           <Card className="border-primary/40">
-            <CardContent className="flex items-center gap-3 p-4 text-sm">
+            <CardContent className="flex flex-wrap items-center gap-3 p-4 text-sm">
               <Loader2 className="size-4 animate-spin" />
               <span className="font-medium">{activeJob.kind}</span>
               <StateChip state={activeJob.state} />

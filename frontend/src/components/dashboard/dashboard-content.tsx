@@ -194,7 +194,10 @@ export function DashboardContent({ org }: { org: string }) {
   const attention = nudges(reviewCount, jobs.data);
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-4 lg:gap-6" data-testid="dashboard">
+    <div
+      className="mx-auto flex w-full max-w-6xl min-w-0 flex-col gap-4 lg:gap-6"
+      data-testid="dashboard"
+    >
       <div className="flex items-baseline justify-between">
         <h1 className="text-xl font-semibold lg:text-2xl">Dashboard</h1>
         {metrics.data?.snapshot !== undefined && (

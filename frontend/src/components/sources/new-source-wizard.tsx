@@ -246,7 +246,10 @@ export function NewSourceWizard({ org }: { org: string }) {
       { key: "upload", label: `Upload ${state.fileName} — incremental run queued behind them` },
     ];
     return (
-      <div className="mx-auto flex max-w-xl flex-col gap-4" data-testid="wizard-activate">
+      <div
+        className="mx-auto flex w-full max-w-xl min-w-0 flex-col gap-4"
+        data-testid="wizard-activate"
+      >
         <Card>
           <CardHeader>
             <CardTitle className="text-lg">Activating {state.name}</CardTitle>
@@ -341,7 +344,10 @@ export function NewSourceWizard({ org }: { org: string }) {
 
   if (draftVersion !== null) {
     return (
-      <div className="mx-auto flex max-w-xl flex-col gap-4" data-testid="wizard-done">
+      <div
+        className="mx-auto flex w-full max-w-xl min-w-0 flex-col gap-4"
+        data-testid="wizard-done"
+      >
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-lg">
@@ -372,7 +378,10 @@ export function NewSourceWizard({ org }: { org: string }) {
   }
 
   return (
-    <div className="mx-auto flex max-w-2xl flex-col gap-4" data-testid="new-source-wizard">
+    <div
+      className="mx-auto flex w-full max-w-2xl min-w-0 flex-col gap-4"
+      data-testid="new-source-wizard"
+    >
       <div>
         <Link
           href={`/${org}/sources`}

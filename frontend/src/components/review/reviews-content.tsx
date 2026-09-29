@@ -20,7 +20,10 @@ export function ReviewsContent({ org }: { org: string }) {
   const isSteward = role !== null && ROLE_RANK[role] >= ROLE_RANK.steward;
 
   return (
-    <div className="mx-auto flex h-full max-w-6xl flex-col gap-4" data-testid="reviews-page">
+    <div
+      className="mx-auto flex h-full w-full max-w-6xl min-w-0 flex-col gap-4"
+      data-testid="reviews-page"
+    >
       <div className="flex items-center gap-4">
         <h1 className="text-xl font-semibold lg:text-2xl">Reviews</h1>
         <div className="flex gap-1" role="tablist" aria-label="Review tabs">
