@@ -5,6 +5,8 @@
  *
  * Dev logins (password for all: password-123!):
  *   root@er.dev (super admin) · admin@ / steward@ / viewer@acme.dev
+ * Plus a basic memorable convenience login for manual use:
+ *   admin@dupezone.com / asdfasdf (org admin on the seeded tenant)
  */
 import { createCipheriv, randomBytes, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -18,6 +20,10 @@ const CREDENTIAL_KEY = Buffer.from(
   "base64",
 );
 const PASSWORD = "password-123!";
+// A deliberately trivial login for manually poking at the dev stack. Kept
+// alongside the persona logins so the E2E specs (which use the acme.dev
+// personas) keep working.
+const CONVENIENCE_LOGIN = { email: "admin@dupezone.com", password: "asdfasdf" };
 
 const keysPath = process.argv[2];
 if (!keysPath) {
@@ -38,34 +44,32 @@ function seal(orgName, role, plaintext) {
 
 const sql = postgres(DATABASE_URL, { max: 1, onnotice: () => {} });
 try {
-  const passwordHash = await hash(PASSWORD, { memoryCost: 19456, timeCost: 2, parallelism: 1 });
+  const domain = `${org.replace(/-dev$/, "")}.dev`;
   const users = [
     { email: "root@er.dev", name: "Root Operator", superAdmin: true, role: null },
+    { email: `admin@${domain}`, name: "Ada Admin", superAdmin: false, role: "admin" },
+    { email: `steward@${domain}`, name: "Sam Steward", superAdmin: false, role: "steward" },
+    { email: `viewer@${domain}`, name: "Vic Viewer", superAdmin: false, role: "viewer" },
     {
-      email: `admin@${org.replace(/-dev$/, "")}.dev`,
-      name: "Ada Admin",
+      email: CONVENIENCE_LOGIN.email,
+      name: "DupeZone Admin",
       superAdmin: false,
       role: "admin",
-    },
-    {
-      email: `steward@${org.replace(/-dev$/, "")}.dev`,
-      name: "Sam Steward",
-      superAdmin: false,
-      role: "steward",
-    },
-    {
-      email: `viewer@${org.replace(/-dev$/, "")}.dev`,
-      name: "Vic Viewer",
-      superAdmin: false,
-      role: "viewer",
+      password: CONVENIENCE_LOGIN.password,
     },
   ];
 
   for (const user of users) {
+    const passwordHash = await hash(user.password ?? PASSWORD, {
+      memoryCost: 19456,
+      timeCost: 2,
+      parallelism: 1,
+    });
     const [row] = await sql`
       INSERT INTO erweb.users (id, email, password_hash, display_name, is_super_admin)
       VALUES (${randomUUID()}, ${user.email}, ${passwordHash}, ${user.name}, ${user.superAdmin})
-      ON CONFLICT (email) DO UPDATE SET display_name = EXCLUDED.display_name
+      ON CONFLICT (email) DO UPDATE
+        SET display_name = EXCLUDED.display_name, password_hash = EXCLUDED.password_hash
       RETURNING id`;
     if (user.role) {
       await sql`
@@ -91,7 +95,10 @@ try {
   }
 
   console.log(`erweb identities ready for ${org}: ${users.map((u) => u.email).join(", ")}`);
-  console.log(`password for all dev users: ${PASSWORD}`);
+  console.log(`password for the persona logins: ${PASSWORD}`);
+  console.log(
+    `basic convenience login: ${CONVENIENCE_LOGIN.email} / ${CONVENIENCE_LOGIN.password}`,
+  );
 } finally {
   await sql.end();
 }

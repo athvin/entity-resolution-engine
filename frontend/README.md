@@ -38,7 +38,9 @@ tears everything down, volumes included. Dev-only keys land in
 
 Seeded logins (dev stack and the mock tier alike; password `password-123!`):
 `root@er.dev` (super admin, no memberships — views tenants via the operator
-token), `admin@acme.dev`, `steward@acme.dev`, `viewer@acme.dev`.
+token), `admin@acme.dev`, `steward@acme.dev`, `viewer@acme.dev`. The dev stack
+also seeds a basic convenience login for manual poking — `admin@dupezone.com` /
+`asdfasdf` (org admin on the seeded tenant); the E2E specs still use the personas.
 
 ## Tests
 
