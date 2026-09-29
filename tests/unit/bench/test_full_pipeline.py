@@ -49,6 +49,30 @@ def test_million_record_capacity_checks_docker_not_host_cpu_count() -> None:
     )  # The substrate needs memory beyond the pipeline container's limit.
 
 
+def test_override_scale_raises_only_requested_knobs_over_the_local_envelope() -> None:
+    """`--local` fits the host; `--cpu-limit` then raises just that knob for parallelism."""
+    local = benchmark.local_scale(
+        benchmark.get_scale("1m"), cpus=8, memory=int(11.65 * benchmark.GIB)
+    )
+    assert local.cpu_limit == 2  # host-fitted starting point
+
+    raised = benchmark.override_scale(local, cpu_limit=6, mem_limit=None, duckdb_memory_limit="6GB")
+    assert raised.cpu_limit == 6  # == ER_DUCKDB_THREADS at launch
+    assert raised.duckdb_memory_limit == "6GB"
+    assert raised.mem_limit == local.mem_limit  # untouched knob survives
+    assert raised.records == 1_000_000
+
+    # No flags is a pure no-op, and a malformed size is a ValueError main() reports cleanly.
+    assert (
+        benchmark.override_scale(local, cpu_limit=None, mem_limit=None, duckdb_memory_limit=None)
+        is local
+    )
+    with pytest.raises(ValueError):
+        benchmark.override_scale(local, cpu_limit=None, mem_limit="lots", duckdb_memory_limit=None)
+    with pytest.raises(ValueError):
+        benchmark.override_scale(local, cpu_limit=0, mem_limit=None, duckdb_memory_limit=None)
+
+
 def test_local_mode_keeps_million_records_and_uses_available_resources() -> None:
     preset = benchmark.get_scale("1m")
     local = benchmark.local_scale(preset, cpus=8, memory=int(7.65 * benchmark.GIB))

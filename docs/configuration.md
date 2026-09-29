@@ -126,6 +126,15 @@ Compose derives DuckDB's thread count from the CPU limit. The image includes the
 pinned DuckDB extensions. The supplied Compose stack is a development/test setup
 with local credentials and ephemeral service storage.
 
+`ER_DUCKDB_THREADS` is the pipeline's parallelism control: matching, training and
+standardization are DuckDB queries that scale across the thread count, so raising
+it (with enough `ER_DUCKDB_MEMORY_LIMIT` headroom for each worker's buffers) speeds
+those stages without changing results — scoring is deterministic across thread
+counts. Under the control plane, an operator sets it per tenant with
+`PATCH /v1/orgs/{org}/resources` (Admin → tenant detail → **Pipeline resources**);
+the value lands in the environment the dispatcher injects into that tenant's next
+job. Reconciliation is a Python graph step and does not parallelize with threads.
+
 For separate tenants, use separate metadata schemas and object prefixes as well
 as distinct configs. Changing `tenant` alone does not provision another lake.
 

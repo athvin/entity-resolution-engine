@@ -23,6 +23,7 @@ from build_performance_image import EXCLUDED, PATHS
 from performance import capture_services, processing_resources
 from scales import Scale, _memory_bytes, load_scales
 from scales import get_scale as standard_scale
+from schema import BenchResultError
 
 ROOT = Path(__file__).resolve().parents[1]
 GIB = 1024**3
@@ -95,7 +96,44 @@ def measured_scale(scale: Scale, manifest: dict[str, Any]) -> Scale:
     return replace(scale, **{field: manifest[field] for field in fields if field in manifest})
 
 
-def preflight(scale: Scale, out: Path, *, local: bool = False) -> dict[str, Any]:
+def override_scale(
+    scale: Scale,
+    *,
+    cpu_limit: int | None,
+    mem_limit: str | None,
+    duckdb_memory_limit: str | None,
+) -> Scale:
+    """Replace only the envelope fields the caller set on the command line.
+
+    Applied after `local_scale` so `--local --cpu-limit N` starts from the
+    host-fitted envelope and then raises exactly the knob asked for.
+    `capacity_errors` still runs against the result, so an override that
+    exceeds the host is refused before any build.
+    """
+    changes: dict[str, Any] = {}
+    if cpu_limit is not None:
+        if cpu_limit < 1:
+            raise ValueError("--cpu-limit must be a positive integer")
+        changes["cpu_limit"] = cpu_limit
+    try:
+        if mem_limit is not None:
+            _memory_bytes(mem_limit, scale.name, "mem_limit")  # reject a malformed size early
+            changes["mem_limit"] = mem_limit
+        if duckdb_memory_limit is not None:
+            _memory_bytes(duckdb_memory_limit, scale.name, "duckdb_memory_limit")
+            changes["duckdb_memory_limit"] = duckdb_memory_limit
+    except BenchResultError as exc:
+        raise ValueError(str(exc)) from exc
+    return replace(scale, **changes) if changes else scale
+
+
+def preflight(
+    scale: Scale,
+    out: Path,
+    *,
+    local: bool = False,
+    overrides: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     directory = out
     while not directory.exists():
         directory = directory.parent
@@ -107,6 +145,8 @@ def preflight(scale: Scale, out: Path, *, local: bool = False) -> dict[str, Any]
     }
     if local:
         scale = local_scale(scale, cpus=available["cpus"], memory=available["memory"])
+    if overrides:
+        scale = override_scale(scale, **overrides)
     return {
         "resource_profile": "local" if local else "preset",
         "scale": scale.name,
@@ -724,6 +764,15 @@ def main() -> int:
         help="fit resources to this Docker host instead of the preset",
     )
     parser.add_argument(
+        "--cpu-limit",
+        type=int,
+        help="override the envelope CPU quota (also DuckDB threads); host capacity still checked",
+    )
+    parser.add_argument("--mem-limit", help="override the container memory limit, e.g. 10g")
+    parser.add_argument(
+        "--duckdb-memory-limit", help="override the DuckDB buffer-manager limit, e.g. 6GB"
+    )
+    parser.add_argument(
         "--keep-failed", action="store_true", help="retain a failed lake for debugging or recovery"
     )
     parser.add_argument(
@@ -777,7 +826,16 @@ def main() -> int:
         if args.worker:
             worker(args)
             return 0
-        checked = preflight(get_scale(args.scale), args.out, local=args.local)
+        checked = preflight(
+            get_scale(args.scale),
+            args.out,
+            local=args.local,
+            overrides={
+                "cpu_limit": args.cpu_limit,
+                "mem_limit": args.mem_limit,
+                "duckdb_memory_limit": args.duckdb_memory_limit,
+            },
+        )
         print(json.dumps(checked, indent=2), flush=True)
         if checked["errors"]:
             print("Preflight failed; no image build or pipeline run started.", file=sys.stderr)

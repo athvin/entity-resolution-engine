@@ -509,6 +509,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/orgs/{org}/resources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Resources
+         * @description Per-tenant pipeline parallelism: DuckDB threads and memory limit.
+         *
+         *     These are execution-only knobs — scoring is deterministic across thread
+         *     counts, so no retrain or rebuild follows a change. The dispatcher reads
+         *     the org environment when it claims a job, so the next job the tenant
+         *     runs picks the new values up; a job already running is unaffected.
+         */
+        patch: operations["update_resources_v1_orgs__org__resources_patch"];
+        trace?: never;
+    };
     "/v1/orgs/{org}/reviews": {
         parameters: {
             query?: never;
@@ -865,6 +890,16 @@ export interface components {
             };
             /** Name */
             name: string;
+        };
+        /**
+         * ResourcesIn
+         * @description Execution-only parallelism knobs; neither changes scoring results.
+         */
+        ResourcesIn: {
+            /** Duckdb Memory Limit */
+            duckdb_memory_limit?: string | null;
+            /** Duckdb Threads */
+            duckdb_threads?: number | null;
         };
         /** ReviewResolveIn */
         ReviewResolveIn: {
@@ -2104,6 +2139,46 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_resources_v1_orgs__org__resources_patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                Authorization?: string | null;
+                "X-Acting-User"?: string | null;
+            };
+            path: {
+                org: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResourcesIn"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

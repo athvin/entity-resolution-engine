@@ -18,6 +18,11 @@ export interface AdminOrgRow {
   has_credentials: boolean;
 }
 
+export interface OrgResources {
+  duckdb_threads: number | null;
+  duckdb_memory_limit: string | null;
+}
+
 export interface AdminOrgDetail extends Record<string, unknown> {
   name: string;
   state: string;
@@ -25,6 +30,7 @@ export interface AdminOrgDetail extends Record<string, unknown> {
   registered: boolean;
   display_name: string;
   has_credentials: boolean;
+  resources: OrgResources;
 }
 
 export interface ProvisionResult {
@@ -81,6 +87,20 @@ export function useRegisterOrg(org: string) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.adminOrgs() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.adminOrg(org) });
     },
+  });
+}
+
+/** Per-tenant pipeline parallelism (DuckDB threads + memory). Operator-only, no rebuild. */
+export function useUpdateResources(org: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { duckdb_threads?: number; duckdb_memory_limit?: string }) =>
+      bffFetch<OrgResources>(`/api/admin/orgs/${org}/resources`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: queryKeys.adminOrg(org) }),
   });
 }
 
