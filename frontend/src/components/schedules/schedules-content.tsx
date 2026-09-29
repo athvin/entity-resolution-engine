@@ -29,7 +29,10 @@ export function SchedulesContent({ org }: { org: string }) {
   const [error, setError] = useState<string | null>(null);
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-4 lg:gap-6" data-testid="schedules-page">
+    <div
+      className="mx-auto flex w-full max-w-4xl min-w-0 flex-col gap-4 lg:gap-6"
+      data-testid="schedules-page"
+    >
       <h1 className="text-xl font-semibold lg:text-2xl">Schedules</h1>
 
       {schedules.isPending ? (
@@ -68,7 +71,9 @@ export function SchedulesContent({ org }: { org: string }) {
                             {schedule.kind}
                           </span>
                         </td>
-                        <td className="px-4 py-2.5 font-mono text-xs">{schedule.cron}</td>
+                        <td className="px-4 py-2.5 font-mono text-xs whitespace-nowrap">
+                          {schedule.cron}
+                        </td>
                         <td className="text-muted-foreground px-4 py-2.5 text-xs">
                           {system ? "config (correction pass)" : "manual"}
                         </td>

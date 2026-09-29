@@ -23,7 +23,7 @@ export function JobDetail({ org, jobId }: { org: string; jobId: string }) {
 
   if (job.isPending || !job.data) {
     return (
-      <div className="mx-auto flex max-w-3xl flex-col gap-4">
+      <div className="mx-auto flex w-full max-w-3xl min-w-0 flex-col gap-4">
         <Skeleton className="h-8 w-56" />
         <Skeleton className="h-48 w-full" />
       </div>
@@ -35,7 +35,10 @@ export function JobDetail({ org, jobId }: { org: string; jobId: string }) {
   const isSteward = role !== null && ROLE_RANK[role] >= ROLE_RANK.steward;
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-4 lg:gap-6" data-testid="job-detail">
+    <div
+      className="mx-auto flex w-full max-w-3xl min-w-0 flex-col gap-4 lg:gap-6"
+      data-testid="job-detail"
+    >
       <div>
         <Link
           href={`/${org}/runs`}

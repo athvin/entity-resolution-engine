@@ -182,7 +182,10 @@ export function SourcesContent({ org }: { org: string }) {
   const isSteward = role !== null && ROLE_RANK[role] >= ROLE_RANK.steward;
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-4 lg:gap-6" data-testid="sources-page">
+    <div
+      className="mx-auto flex w-full max-w-4xl min-w-0 flex-col gap-4 lg:gap-6"
+      data-testid="sources-page"
+    >
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-xl font-semibold lg:text-2xl">Sources</h1>
         <span className="flex items-center gap-3">

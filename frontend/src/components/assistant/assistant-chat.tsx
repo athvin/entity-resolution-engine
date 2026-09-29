@@ -105,7 +105,10 @@ export function AssistantChat({ org }: { org: string }) {
   }
 
   return (
-    <div className="mx-auto flex h-full max-w-3xl flex-col gap-4" data-testid="assistant-page">
+    <div
+      className="mx-auto flex h-full w-full max-w-3xl min-w-0 flex-col gap-4"
+      data-testid="assistant-page"
+    >
       <div>
         <h1 className="flex items-center gap-2 text-xl font-semibold lg:text-2xl">
           <Sparkles className="size-5" />

@@ -24,7 +24,10 @@ export function TenantAuditFeed({ org }: { org: string }) {
   }
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-4" data-testid="tenant-audit">
+    <div
+      className="mx-auto flex w-full max-w-5xl min-w-0 flex-col gap-4"
+      data-testid="tenant-audit"
+    >
       <div>
         <h1 className="text-xl font-semibold lg:text-2xl">Audit</h1>
         <p className="text-muted-foreground mt-1 text-sm">

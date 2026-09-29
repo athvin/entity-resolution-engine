@@ -64,7 +64,7 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
   }
   if (query.isPending || !query.data) {
     return (
-      <div className="mx-auto flex max-w-5xl flex-col gap-4">
+      <div className="mx-auto flex w-full max-w-5xl min-w-0 flex-col gap-4">
         <Skeleton className="h-8 w-64" />
         <Skeleton className="h-40 w-full" />
         <Skeleton className="h-64 w-full" />
@@ -79,7 +79,10 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
   const name = [golden.given_name, golden.family_name].filter(Boolean).join(" ") || entityId;
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-4 lg:gap-6" data-testid="entity-view">
+    <div
+      className="mx-auto flex w-full max-w-5xl min-w-0 flex-col gap-4 lg:gap-6"
+      data-testid="entity-view"
+    >
       <div>
         <Link
           href={`/${org}/records`}
@@ -233,10 +236,12 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
           ) : (
             <ol className="relative flex flex-col gap-3 border-l pl-4">
               {events.map((event) => (
-                <li key={event.event_id} className="text-sm">
+                <li key={event.event_id} className="text-sm wrap-anywhere">
                   <span className="bg-border absolute -left-[3px] mt-1.5 size-1.5 rounded-full" />
                   <span className="font-medium">{describeEvent(event)}</span>
-                  <span className="text-muted-foreground ml-2 text-xs">{event.occurred_at}</span>
+                  <span className="text-muted-foreground block text-xs sm:ml-2 sm:inline">
+                    {event.occurred_at}
+                  </span>
                 </li>
               ))}
             </ol>

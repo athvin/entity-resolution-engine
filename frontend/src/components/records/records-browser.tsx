@@ -60,7 +60,10 @@ export function RecordsBrowser({ org }: { org: string }) {
   }, [virtualItems, rows.length, query]);
 
   return (
-    <div className="mx-auto flex h-full max-w-6xl flex-col gap-4" data-testid="records-browser">
+    <div
+      className="mx-auto flex h-full w-full max-w-6xl min-w-0 flex-col gap-4"
+      data-testid="records-browser"
+    >
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-xl font-semibold lg:text-2xl">Records</h1>
         {snapshot !== undefined && (
@@ -112,7 +115,10 @@ export function RecordsBrowser({ org }: { org: string }) {
         </p>
       ) : (
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto" data-testid="records-list">
-          <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
+          <div
+            className="relative h-(--list-h)"
+            style={{ "--list-h": `${String(virtualizer.getTotalSize())}px` } as React.CSSProperties}
+          >
             {virtualItems.map((item) => {
               const record = rows[item.index];
               if (!record) return null;
@@ -122,8 +128,8 @@ export function RecordsBrowser({ org }: { org: string }) {
                   href={`/${org}/records/${record.entity_id}`}
                   data-index={item.index}
                   ref={virtualizer.measureElement}
-                  className="hover:bg-accent/50 absolute top-0 left-0 block w-full border-b px-3 py-3"
-                  style={{ transform: `translateY(${String(item.start)}px)` }}
+                  className="hover:bg-accent/50 absolute top-0 left-0 block w-full translate-y-(--row-y) border-b px-3 py-3"
+                  style={{ "--row-y": `${String(item.start)}px` } as React.CSSProperties}
                 >
                   <div className="lg:grid lg:grid-cols-[1.2fr_1.6fr_1fr_1.4fr] lg:items-center lg:gap-3">
                     <div className="font-medium">

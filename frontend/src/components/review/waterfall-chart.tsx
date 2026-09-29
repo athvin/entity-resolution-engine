@@ -21,21 +21,29 @@ export function WaterfallChart({ blob }: { blob: Record<string, unknown> | null 
       {evidence.rows.map((row) => {
         const share = Math.abs(row.weight) / maxMagnitude;
         return (
-          <div key={row.column} className="grid grid-cols-[1fr_auto] items-center gap-3 text-sm">
-            <div className="relative h-6">
-              {/* centre axis */}
-              <span className="bg-border absolute inset-y-0 left-1/2 w-px" />
-              <span
-                className={cn(
-                  "absolute inset-y-1 rounded-sm",
-                  row.supports ? "left-1/2 bg-emerald-500/70" : "right-1/2 bg-red-500/70",
-                )}
-                style={{ width: `${String(Math.max(share * 50, 1.5))}%` }}
-                data-testid={`waterfall-bar-${row.column}`}
-              />
-              <span className="text-muted-foreground absolute inset-y-0 left-0 flex items-center text-xs">
+          <div
+            key={row.column}
+            className="grid grid-cols-[1fr_auto] items-end gap-3 text-sm sm:items-center"
+          >
+            {/* Below sm the label sits above its bar; wider, it overlays the bar's left half. */}
+            <div className="relative min-w-0">
+              <span className="text-muted-foreground mb-0.5 block text-xs sm:absolute sm:inset-y-0 sm:left-0 sm:z-10 sm:mb-0 sm:flex sm:items-center">
                 {describeRow(row)}
               </span>
+              <div className="relative h-6">
+                {/* centre axis */}
+                <span className="bg-border absolute inset-y-0 left-1/2 w-px" />
+                <span
+                  className={cn(
+                    "absolute inset-y-1 w-(--bar-w) rounded-sm",
+                    row.supports ? "left-1/2 bg-emerald-500/70" : "right-1/2 bg-red-500/70",
+                  )}
+                  style={
+                    { "--bar-w": `${String(Math.max(share * 50, 1.5))}%` } as React.CSSProperties
+                  }
+                  data-testid={`waterfall-bar-${row.column}`}
+                />
+              </div>
             </div>
             <span
               className={cn(

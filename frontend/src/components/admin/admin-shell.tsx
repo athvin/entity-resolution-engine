@@ -29,18 +29,22 @@ export function AdminShell({ user, children }: { user: SessionUser; children: Re
   return (
     <div className="flex min-h-dvh flex-col">
       <header className="bg-background/95 sticky top-0 z-40 border-b backdrop-blur">
-        <div className="flex h-14 items-center gap-4 px-4">
-          <span className="flex items-center gap-2 text-sm font-semibold">
+        {/* Below sm the console tabs drop to their own scrollable row. */}
+        <div className="flex flex-wrap items-center gap-x-4 px-4 sm:h-14 sm:flex-nowrap">
+          <span className="flex h-14 items-center gap-2 text-sm font-semibold sm:h-auto">
             <ShieldCheck className="size-4" />
             Operator console
           </span>
-          <nav className="flex gap-1" aria-label="Console">
+          <nav
+            className="order-last -mx-4 flex w-[calc(100%+2rem)] gap-1 overflow-x-auto px-4 pb-2 sm:order-none sm:mx-0 sm:w-auto sm:p-0"
+            aria-label="Console"
+          >
             {TABS.map((tab) => (
               <Link
                 key={tab.href}
                 href={tab.href}
                 className={cn(
-                  "rounded-md px-3 py-1.5 text-sm font-medium",
+                  "shrink-0 rounded-md px-3 py-1.5 text-sm font-medium whitespace-nowrap",
                   pathname.startsWith(tab.href)
                     ? "bg-accent text-accent-foreground"
                     : "text-muted-foreground hover:bg-accent/50",

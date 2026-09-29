@@ -181,7 +181,10 @@ export function ConfigStudio({ org }: { org: string }) {
   }
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-4 lg:gap-6" data-testid="config-studio">
+    <div
+      className="mx-auto flex w-full max-w-4xl min-w-0 flex-col gap-4 lg:gap-6"
+      data-testid="config-studio"
+    >
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-semibold lg:text-2xl">Config studio</h1>
         <span className="text-muted-foreground text-xs">
@@ -192,6 +195,7 @@ export function ConfigStudio({ org }: { org: string }) {
           <Button
             disabled={!dirty || createDraft.isPending || publish.isPending}
             onClick={() => void publishEdits()}
+            className="h-auto min-h-11 w-full whitespace-normal sm:w-auto lg:min-h-9"
             data-testid="publish-button"
           >
             <Rocket />
