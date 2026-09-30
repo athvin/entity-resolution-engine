@@ -17,16 +17,10 @@ import {
   type RunRow,
 } from "@/lib/query/hooks";
 import { useSubmitJob } from "@/lib/query/steward";
+import { RUN_KINDS } from "@/lib/domain/run-kinds";
 import { cn } from "@/lib/utils";
 
 const ROLE_RANK = { viewer: 0, steward: 1, admin: 2 } as const;
-
-/** What "Run now" can start, incremental first — the everyday choice. */
-const RUN_KINDS = [
-  { kind: "run_all_incremental", label: "Incremental run", params: {} as Record<string, unknown> },
-  { kind: "run_all_full", label: "Full re-resolution", params: { skip_ingest: true } },
-  { kind: "correct", label: "Correction pass", params: {} as Record<string, unknown> },
-] as const;
 
 const ACTIVE = new Set(["queued", "dispatching", "running", "retrying", "canceling"]);
 

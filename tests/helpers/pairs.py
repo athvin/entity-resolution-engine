@@ -54,7 +54,7 @@ from er.config.schema import Config
 from er.entities.ids import canonicalize_pair
 from er.lake.columns import STD_RECORD_COLUMNS
 from er.lake.model import SCHEMA_QUALIFIER
-from er.matching.api import splink_api
+from er.matching.api import SPLINK_RELATION_PREFIX, cleanup_splink, splink_api
 from er.matching.model import UNIQUE_ID_COLUMN, blocking_rules_from_config
 from er.matching.tf import STD_RECORDS_RELATION
 
@@ -102,6 +102,15 @@ _STD_RECORDS: Final = f"{SCHEMA_QUALIFIER}.{STD_RECORDS_RELATION}"
 
 _LEFT: Final = f"{UNIQUE_ID_COLUMN}_l"
 _RIGHT: Final = f"{UNIQUE_ID_COLUMN}_r"
+
+#: Splink's scratch in the connection's PRIMARY database — the in-memory one, not the
+#: lake. `current_database()` rather than a literal because S4.0b only fixes what the
+#: primary database is *not* (the lake); the harness is free to name it anything.
+_SCRATCH_COUNT_SQL: Final = (
+    "SELECT count(*) FROM duckdb_tables() "
+    "WHERE database_name = current_database() AND table_name LIKE ?"
+)
+_SCRATCH_PATTERN: Final = f"{SPLINK_RELATION_PREFIX}%"
 
 #: S4.2's NULL/empty policy, as the self-join's own predicate. `is not null` is
 #: redundant against the equality above it and is stated anyway: this module is where
@@ -244,29 +253,57 @@ def splink_blocked_pairs(
     """
     _, rules = blocking_rules_from_config(cfg)
     api = splink_api(connection)
-    connection.execute(_CORPUS_SQL)
-    blocking_settings: dict[str, Any] = {**settings, BLOCKING_RULES_KEY: list(rules)}
-    linker = Linker(api.register(PARITY_CORPUS_RELATION), settings=blocking_settings)
+    try:
+        connection.execute(_CORPUS_SQL)
+        blocking_settings: dict[str, Any] = {**settings, BLOCKING_RULES_KEY: list(rules)}
+        linker = Linker(api.register(PARITY_CORPUS_RELATION), settings=blocking_settings)
 
-    blocked = linker.inference.deterministic_link()
-    relation = str(blocked.physical_name)
-    columns = {
-        str(row[0]) for row in connection.execute(f"DESCRIBE SELECT * FROM {relation}").fetchall()
-    }
-    missing = sorted({_LEFT, _RIGHT} - columns)
-    assert not missing, (
-        f"{relation} carries no {missing}; Splink names the blocked endpoints after "
-        f"unique_id_column_name ({UNIQUE_ID_COLUMN!r}, S5.0) and the pair set cannot be "
-        f"projected without them. Columns: {sorted(columns)}"
+        blocked = linker.inference.deterministic_link()
+        relation = str(blocked.physical_name)
+        columns = {
+            str(row[0])
+            for row in connection.execute(f"DESCRIBE SELECT * FROM {relation}").fetchall()
+        }
+        missing = sorted({_LEFT, _RIGHT} - columns)
+        assert not missing, (
+            f"{relation} carries no {missing}; Splink names the blocked endpoints after "
+            f"unique_id_column_name ({UNIQUE_ID_COLUMN!r}, S5.0) and the pair set cannot be "
+            f"projected without them. Columns: {sorted(columns)}"
+        )
+
+        # The self-pair guard is stated even though `dedupe_only` blocking already emits
+        # `l < r`: `canonicalize_pair` raises on two equal keys, and a Splink release that
+        # started emitting one should fail as a parity difference, not as a helper crash.
+        rows = connection.execute(
+            f"SELECT DISTINCT {_LEFT}, {_RIGHT} FROM {relation} WHERE {_LEFT} <> {_RIGHT}"
+        ).fetchall()
+        pairs = {canonicalize_pair(str(rec_a_key), str(rec_b_key)) for rec_a_key, rec_b_key in rows}
+        # Counted before the release below, because the release is what makes it
+        # unobservable: afterwards the count is zero whether Splink did real work or
+        # none at all, so a caller asserting on it would assert nothing. T-BLK-1's AC6
+        # leak check needs Splink to have actually materialized intermediates for
+        # "nothing reached the lake" to mean anything, and this is the only point in
+        # the call where that is visible.
+        scratch = connection.execute(_SCRATCH_COUNT_SQL, [_SCRATCH_PATTERN]).fetchone()
+        materialized = 0 if scratch is None else int(scratch[0])
+    finally:
+        # Released here, not left to the caller: this helper runs on the SESSION
+        # connection, whose in-memory primary database outlives the test. The lake is
+        # covered either way -- M17 keeps scratch out of it and the S8.1 fixture cleans
+        # it -- but `__splink__` relations in the memory database are cleaned by
+        # nothing, so an unreleased api hands the next module this one's scratch. That
+        # is not hypothetical: `test_full_match::test_no_splink_relations_in_lake`
+        # counts scratch across the whole primary database, so before this `finally`
+        # existed it failed with 16 leaked relations whenever T-BLK-1 preceded it in
+        # one session -- invisible in CI, which shards the two modules apart.
+        cleanup_splink(api)
+
+    assert materialized > 0, (
+        "Splink materialized no scratch relation while blocking this corpus, so a "
+        "caller's leak check would be vacuous: 'nothing reached the lake' is trivially "
+        "true of a Splink that did nothing."
     )
-
-    # The self-pair guard is stated even though `dedupe_only` blocking already emits
-    # `l < r`: `canonicalize_pair` raises on two equal keys, and a Splink release that
-    # started emitting one should fail as a parity difference, not as a helper crash.
-    rows = connection.execute(
-        f"SELECT DISTINCT {_LEFT}, {_RIGHT} FROM {relation} WHERE {_LEFT} <> {_RIGHT}"
-    ).fetchall()
-    return {canonicalize_pair(str(rec_a_key), str(rec_b_key)) for rec_a_key, rec_b_key in rows}
+    return pairs
 
 
 def _pair_lines(pairs: Set[Pair], key_types: Mapping[Pair, Sequence[str]] | None) -> list[str]:

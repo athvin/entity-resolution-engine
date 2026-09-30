@@ -24,6 +24,52 @@ test.describe("duplicates", () => {
     await expect(chip).toHaveAttribute("aria-pressed", "false");
   });
 
+  test("the pre-merge report carries the chosen master-election policy", async ({ page }) => {
+    await login(page, USERS.viewer);
+    await page.goto(`/${ORG}/duplicates`);
+    const card = page.getByTestId("pre-merge-report");
+    await expect(card).toBeVisible();
+
+    // The default is the engine's, and the copy explains it in the steward's
+    // terms rather than echoing the token.
+    await expect(page.getByTestId("master-policy")).toHaveValue("most_attributes");
+    await expect(page.getByTestId("master-policy-copy")).toContainText(
+      "the member contributing the most winning field values",
+    );
+
+    // A viewer may run it: electing a master for a report writes nothing.
+    await expect(page.getByTestId("download-pre-merge")).toBeEnabled();
+
+    // The policy must survive the trip. Read the CSV the browser downloads
+    // under two policies: the mock elects a different member for `most_recent`,
+    // so identical files would mean the parameter was dropped in the BFF.
+    async function downloadedCsv(): Promise<string> {
+      const download = await Promise.all([
+        page.waitForEvent("download"),
+        page.getByTestId("download-pre-merge").click(),
+      ]).then(([event]) => event);
+      const stream = await download.createReadStream();
+      const chunks: Buffer[] = [];
+      for await (const chunk of stream) chunks.push(chunk as Buffer);
+      return Buffer.concat(chunks).toString("utf8");
+    }
+
+    const byAttributes = await downloadedCsv();
+    expect(byAttributes.split("\n")[0]).toBe(
+      "entity_id,master_key,member_count,member_records,golden_given_name,golden_family_name,golden_email,golden_phone_e164",
+    );
+    expect(byAttributes).toContain("crm:C-5000");
+
+    await page.getByTestId("master-policy").selectOption("most_recent");
+    await expect(page.getByTestId("master-policy-copy")).toContainText("most recently updated");
+    const byRecency = await downloadedCsv();
+    expect(byRecency).toContain("webforms:W-7000");
+    expect(byRecency).not.toBe(byAttributes);
+
+    // `member_records` is a list in JSON and must not break the CSV's columns.
+    expect(byRecency).toContain("crm:C-5000;webforms:W-7000");
+  });
+
   test("by-score tab narrows the band and shows the evidence", async ({ page }) => {
     await login(page, USERS.viewer);
     await page.goto(`/${ORG}/duplicates`);

@@ -454,6 +454,9 @@ export function initialState() {
     "wizard-ios",
     "wizard-android",
     "selectall-dev",
+    // Starting a run takes the org's one writer slot; sharing an org with the
+    // Runs page's Run-now test would disable whichever button ran second.
+    "palette-dev",
   ]) {
     state.orgs[org] = {
       name: org,
@@ -1270,6 +1273,45 @@ const server = http.createServer((req, res) => {
         snapshot: 42,
         next_cursor: null,
       });
+    }
+    if ((match = /^\/v1\/orgs\/([^/]+)\/merge-plans$/.exec(path)) && req.method === "GET") {
+      const policy = url.searchParams.get("policy") ?? "most_attributes";
+      const policies = [
+        "most_attributes",
+        "source_priority",
+        "most_recent",
+        "oldest",
+        "most_complete",
+      ];
+      if (!policies.includes(policy)) {
+        return send(res, 422, { detail: `policy must be one of ${policies.join(", ")}` });
+      }
+      // The same groups /duplicates reports, with a master elected from them.
+      // Which member wins is what the policy decides, so the mock differs by
+      // policy too -- a test that never sees the master change could not tell
+      // the parameter was dropped on the way through.
+      const rows = (state.golden[match[1]] ?? []).filter((_, index) => index % 3 === 0);
+      const items = rows.map((row, index) => {
+        const members = [
+          `crm:C-${String(5000 + index * 3)}`,
+          `webforms:W-${String(7000 + index * 3)}`,
+        ];
+        return {
+          entity_id: row.entity_id,
+          master_key: policy === "most_recent" ? members[1] : members[0],
+          member_count: members.length,
+          member_records: members,
+          golden_given_name: row.given_name,
+          golden_family_name: row.family_name,
+          golden_email: row.email,
+          golden_phone_e164: row.phone_e164 ?? null,
+        };
+      });
+      if ((url.searchParams.get("format") ?? "json") === "json") {
+        return send(res, 200, { items });
+      }
+      res.writeHead(200, { "content-type": "text/csv" });
+      return res.end("entity_id,master_key\n");
     }
     if ((match = /^\/v1\/orgs\/([^/]+)\/match-scores$/.exec(path)) && req.method === "GET") {
       const limit = Number(url.searchParams.get("limit") ?? 50);

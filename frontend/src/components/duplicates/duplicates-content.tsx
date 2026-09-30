@@ -11,6 +11,7 @@ import { displayName } from "@/lib/domain/attributes";
 import { effectiveRole, useSession } from "@/lib/query/hooks";
 import { useDuplicates, type DuplicateGroup } from "@/lib/query/duplicates";
 import { cn } from "@/lib/utils";
+import { PreMergeReport } from "./pre-merge-report";
 import { ScoreBandBrowser } from "./score-band-browser";
 
 const ROLE_RANK = { viewer: 0, steward: 1, admin: 2 } as const;
@@ -204,7 +205,10 @@ export function DuplicatesContent({ org }: { org: string }) {
       </p>
 
       {tab === "groups" ? (
-        <GroupsTab org={org} />
+        <div className="flex flex-col gap-4">
+          <PreMergeReport org={org} />
+          <GroupsTab org={org} />
+        </div>
       ) : (
         <ScoreBandBrowser org={org} isSteward={isSteward} />
       )}

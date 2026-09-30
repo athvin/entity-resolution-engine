@@ -48,7 +48,7 @@ from er.dbt_runner import DBT_PROFILES_DIR, DBT_PROJECT_DIR, DbtResult, render_d
 from er.errors import ExitCode, exit_code_for
 from er.lake.ducklake import attach_statements, detach
 from er.lake.model import SCHEMA_QUALIFIER
-from er.matching.api import assert_no_splink_relations_in_lake, splink_api
+from er.matching.api import assert_no_splink_relations_in_lake, cleanup_splink, splink_api
 from er.matching.model import build_settings
 from er.matching.tf import (
     MissingTfLookupError,
@@ -381,10 +381,14 @@ def test_registered_tf_scores_without_leaking_into_the_lake(
     )
     # `splink_api` issues `SET schema`, and this suite runs on the SESSION connection
     # every other suite shares. Restored rather than left pointing at the scratch
-    # schema, so a later module cannot fail for a reason this one caused.
+    # schema, so a later module cannot fail for a reason this one caused. The scratch
+    # relations themselves are released for that same reason: nothing else cleans the
+    # in-memory primary database, so an unreleased api would hand the next module this
+    # suite's `__splink__` tables.
     search_path = scalar(standardized, "SELECT current_schema()")
+    api = splink_api(standardized)
     try:
-        linker = Linker(splink_api(standardized).register(FRAME), settings=build_settings(cfg))
+        linker = Linker(api.register(FRAME), settings=build_settings(cfg))
         registered = register_tf(linker, standardized, cfg, MODEL_VERSION, frozen)
         predictions = linker.inference.predict(
             threshold_match_probability=cfg.thresholds.review_low
@@ -393,6 +397,7 @@ def test_registered_tf_scores_without_leaking_into_the_lake(
             f"SELECT count(*) FROM {predictions.physical_name}"
         ).fetchone()
     finally:
+        cleanup_splink(api)
         standardized.execute(f"SET schema = '{search_path}'")
 
     assert registered == TF

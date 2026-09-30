@@ -40,6 +40,8 @@ import pytest
 from _pytest.reports import TestReport
 from helpers.invariants import assert_membership_equals_components
 
+from er.matching.api import SPLINK_RELATION_PREFIX
+
 #: Modules whose subject is the HARNESS rather than the pipeline, and which T-INV-1
 #: therefore does not run after.
 #:
@@ -116,6 +118,74 @@ def _check_invariant(config: pytest.Config, scope: str) -> None:
     except AssertionError as failure:
         _emit_t_inv_1_failure(config, f"T-INV-1 failed after the {scope} scope:\n{failure}")
         raise
+
+
+#: Splink scratch lives in the primary (`:memory:`) database of the session connection,
+#: which the S8.1 function-isolation fixture does not touch: that fixture's subject is
+#: the lake, and it `DELETE`s `ddl.py`-owned relations and drops dbt-owned ones. Nothing
+#: cleans the memory database, so a test that builds a Splink api and never releases it
+#: hands its `__splink__` relations to every later test in the session.
+#:
+#: That is not a theoretical hazard. `test_full_match::test_no_splink_relations_in_lake`
+#: counts scratch across the whole primary database, so it failed with 16 leaked
+#: relations whenever T-BLK-1 ran before it -- and CI never saw it, because the workflow
+#: shards integration across 32 jobs and the two modules never share a process. The
+#: failure was reported against the module that *observed* the leak rather than the one
+#: that caused it, which is the expensive half of the bug.
+#:
+#: So the leak is detected where it happens. The check runs on the session connection
+#: only; `sub_namespace` universes own their connections and discard them at teardown,
+#: and `test_splink_isolation` deliberately leaves scratch on those.
+#: A leak is as real through a view as through a table, and `duckdb_tables()` does not
+#: report views -- the same reason `leaked_splink_relations` queries both catalogs. The
+#: kind is selected alongside the name because DuckDB refuses `DROP VIEW` on a table.
+_SCRATCH_SQL: Final[str] = """
+SELECT 'TABLE', schema_name, table_name FROM duckdb_tables()
+ WHERE database_name = current_database() AND table_name LIKE ?
+UNION ALL
+SELECT 'VIEW', schema_name, view_name FROM duckdb_views()
+ WHERE database_name = current_database() AND view_name LIKE ?
+"""
+
+
+def _sweep_splink_scratch(connection: duckdb.DuckDBPyConnection) -> tuple[str, ...]:
+    """Drop every `__splink__` relation in the primary database; name what was there.
+
+    Cleaning as well as reporting is deliberate. An assertion that only raised would
+    leave the scratch in place, so every subsequent test in the session would fail the
+    same way and the run would say nothing about which one leaked. Sweeping means
+    exactly one test fails: the one that left something behind.
+    """
+    pattern = f"{SPLINK_RELATION_PREFIX}%"
+    rows = connection.execute(_SCRATCH_SQL, [pattern, pattern]).fetchall()
+    found = sorted((str(kind), str(schema), str(name)) for kind, schema, name in rows)
+    for kind, schema, name in found:
+        connection.execute(f'DROP {kind} IF EXISTS "{schema}"."{name}"')
+    return tuple(f"{schema}.{name}" for _, schema, name in found)
+
+
+@pytest.fixture(autouse=True)
+def no_splink_scratch_after_each_test(pytestconfig: pytest.Config) -> Iterator[None]:
+    """Fail the test that leaves Splink scratch in the session's memory database.
+
+    Every `splink_api` in `src/er` is paired with a `cleanup_splink`; this holds test
+    helpers to the same rule, and attributes a breach to the test that committed it
+    rather than to whichever later module happens to count scratch.
+    """
+    yield
+    # Through the plugin manager, for the reason :func:`_lake_connection` gives: three
+    # files in this tree are importable as `conftest`, and requesting `lake_conn` would
+    # ATTACH a lake for a test whose own setup declined to.
+    connection = _lake_connection(pytestconfig)
+    if connection is None:
+        return
+    leaked = _sweep_splink_scratch(connection)
+    assert not leaked, (
+        f"{len(leaked)} Splink scratch relation(s) survived this test in the session's "
+        f"primary database: {', '.join(leaked)}. Every splink_api() needs a paired "
+        f"cleanup_splink() in a finally -- nothing else cleans the memory database, so "
+        f"these would have been inherited by every later test in this session."
+    )
 
 
 @pytest.fixture(autouse=True)
