@@ -128,12 +128,12 @@ export function ScoreBandBrowser({ org, isSteward }: { org: string; isSteward: b
                     {row.rec_a_key} · {row.rec_b_key}
                   </span>
                   <span className="text-muted-foreground text-xs">{row.model_version}</span>
-                  <span className="tabular-nums text-xs font-medium">
+                  <span className="text-xs font-medium tabular-nums">
                     {probabilityLabel(row.match_probability)}
                   </span>
                 </div>
                 {open && (
-                  <div className="bg-accent/20 flex flex-col gap-3 px-4 pb-4 pt-1">
+                  <div className="bg-accent/20 flex flex-col gap-3 px-4 pt-1 pb-4">
                     <WaterfallChart blob={row.evidence} />
                     <div>
                       <Button

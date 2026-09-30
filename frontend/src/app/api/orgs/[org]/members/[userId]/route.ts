@@ -22,11 +22,7 @@ export async function PATCH(
     // needed to undo it, and the last-admin guard would not catch a workspace
     // with two admins where one locks the other out of their own account.
     if (userId === access.identity.user.id && parsed.data.role !== "admin") {
-      throw new BffFailure(
-        409,
-        "conflict",
-        "you cannot change your own role — ask another admin",
-      );
+      throw new BffFailure(409, "conflict", "you cannot change your own role — ask another admin");
     }
     await changeRole(org, userId, parsed.data.role);
     await writeAudit(access.identity, "member.role", { userId, role: parsed.data.role }, org);

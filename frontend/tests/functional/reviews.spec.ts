@@ -49,10 +49,7 @@ test.describe("review inbox — rendering", () => {
     }
   });
 
-  test("the decision panel compares the two records field by field", async ({
-    page,
-    isMobile,
-  }) => {
+  test("the decision panel compares the two records field by field", async ({ page, isMobile }) => {
     // Both layouts are in the DOM (one CSS-hidden), so scope to the live one.
     const host = page.getByTestId(isMobile ? "swipe-card" : "decision-panel");
     const grid = host.getByTestId("field-compare-grid");

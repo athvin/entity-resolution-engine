@@ -44,7 +44,10 @@ export async function POST(request: Request): Promise<NextResponse> {
     await database
       .delete(schema.sessions)
       .where(
-        and(eq(schema.sessions.userId, identity.user.id), ne(schema.sessions.id, identity.sessionId)),
+        and(
+          eq(schema.sessions.userId, identity.user.id),
+          ne(schema.sessions.id, identity.sessionId),
+        ),
       );
     await writeAudit(identity, "auth.password_change", {});
     return NextResponse.json({ changed: true });

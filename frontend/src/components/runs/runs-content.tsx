@@ -8,7 +8,14 @@ import { Loader2, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { effectiveRole, useJobs, useRuns, useSession, type JobRow, type RunRow } from "@/lib/query/hooks";
+import {
+  effectiveRole,
+  useJobs,
+  useRuns,
+  useSession,
+  type JobRow,
+  type RunRow,
+} from "@/lib/query/hooks";
 import { useSubmitJob } from "@/lib/query/steward";
 import { cn } from "@/lib/utils";
 
@@ -114,14 +121,14 @@ export function RunsContent({ org }: { org: string }) {
               onClick={() => {
                 setKindOpen((open) => !open);
               }}
-              className="rounded-l-none border-l border-primary-foreground/20 px-2"
+              className="border-primary-foreground/20 rounded-l-none border-l px-2"
               data-testid="run-now-more"
             >
               ▾
             </Button>
             {kindOpen && (
               <div
-                className="absolute top-full right-0 z-20 mt-1 w-52 overflow-hidden rounded-md border bg-background shadow-lg"
+                className="bg-background absolute top-full right-0 z-20 mt-1 w-52 overflow-hidden rounded-md border shadow-lg"
                 data-testid="run-now-menu"
               >
                 {RUN_KINDS.map((entry) => (

@@ -115,7 +115,7 @@ export function MergeRecordsDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby={headingId}
-        className="flex max-h-[85vh] w-full max-w-2xl flex-col gap-3 overflow-y-auto rounded-lg border bg-background p-5 shadow-xl"
+        className="bg-background flex max-h-[85vh] w-full max-w-2xl flex-col gap-3 overflow-y-auto rounded-lg border p-5 shadow-xl"
         data-testid="merge-dialog"
       >
         <h2 id={headingId} className="flex items-center gap-2 text-base font-semibold">
@@ -126,7 +126,7 @@ export function MergeRecordsDialog({
         {targetId === null ? (
           <>
             <label className="relative block">
-              <Search className="text-muted-foreground absolute left-2.5 top-1/2 size-4 -translate-y-1/2" />
+              <Search className="text-muted-foreground absolute top-1/2 left-2.5 size-4 -translate-y-1/2" />
               <Input
                 autoFocus
                 value={q}

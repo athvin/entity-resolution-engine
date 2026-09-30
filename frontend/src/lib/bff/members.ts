@@ -326,7 +326,10 @@ export async function confirmPasswordReset(
     .select()
     .from(schema.passwordResets)
     .where(
-      and(eq(schema.passwordResets.tokenHash, hashToken(token)), isNull(schema.passwordResets.usedAt)),
+      and(
+        eq(schema.passwordResets.tokenHash, hashToken(token)),
+        isNull(schema.passwordResets.usedAt),
+      ),
     )
     .limit(1);
   const reset = rows[0];

@@ -115,8 +115,7 @@ export default function AcceptInvitePage({ params }: { params: Promise<{ token: 
               {!preview.needs_account && (
                 <p className="text-muted-foreground text-sm">
                   You already have an account for this address. Sign in as {preview.email} first,
-                  then open this link again — a link alone can&apos;t speak for an existing
-                  account.
+                  then open this link again — a link alone can&apos;t speak for an existing account.
                 </p>
               )}
               <Button

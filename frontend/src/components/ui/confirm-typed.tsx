@@ -64,17 +64,17 @@ export function ConfirmTyped({
         aria-modal="true"
         aria-labelledby={headingId}
         aria-describedby={bodyId}
-        className="w-full max-w-md rounded-lg border bg-background p-5 shadow-xl"
+        className="bg-background w-full max-w-md rounded-lg border p-5 shadow-xl"
       >
         <h2 id={headingId} className="text-base font-semibold">
           {title}
         </h2>
-        <p id={bodyId} className="mt-2 text-sm text-muted-foreground">
+        <p id={bodyId} className="text-muted-foreground mt-2 text-sm">
           {description}
         </p>
         <label className="mt-4 block text-sm">
           <span className="text-muted-foreground">
-            Type <span className="font-mono font-semibold text-foreground">{expected}</span> to
+            Type <span className="text-foreground font-mono font-semibold">{expected}</span> to
             confirm
           </span>
           <Input

@@ -79,7 +79,9 @@ export function FieldCompareGrid({
         <div
           className={cn(
             "bg-muted/50 border-b px-3 py-1.5 text-xs font-medium",
-            layout === "grid" ? "grid grid-cols-[7rem_1fr_1fr] gap-2" : "flex justify-between gap-2",
+            layout === "grid"
+              ? "grid grid-cols-[7rem_1fr_1fr] gap-2"
+              : "flex justify-between gap-2",
           )}
         >
           {layout === "grid" && <span>Field</span>}

@@ -203,7 +203,11 @@ export function DuplicatesContent({ org }: { org: string }) {
           : "Every scored pair in a probability band, with the evidence behind it."}
       </p>
 
-      {tab === "groups" ? <GroupsTab org={org} /> : <ScoreBandBrowser org={org} isSteward={isSteward} />}
+      {tab === "groups" ? (
+        <GroupsTab org={org} />
+      ) : (
+        <ScoreBandBrowser org={org} isSteward={isSteward} />
+      )}
     </div>
   );
 }

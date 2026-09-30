@@ -123,12 +123,8 @@ export function blockingWarnings(rule: BlockingRule): string[] {
     if (depth < 0) break;
   }
   if (depth !== 0) warnings.push("parentheses are unbalanced");
-  const identifiers = rule.expr
-    .replaceAll(/'[^']*'/g, " ")
-    .match(/[A-Za-z_][A-Za-z0-9_]*/g);
-  const columns = (identifiers ?? []).filter(
-    (word) => !SQL_WORDS.has(word.toLowerCase()),
-  );
+  const identifiers = rule.expr.replaceAll(/'[^']*'/g, " ").match(/[A-Za-z_][A-Za-z0-9_]*/g);
+  const columns = (identifiers ?? []).filter((word) => !SQL_WORDS.has(word.toLowerCase()));
   if (
     columns.length > 0 &&
     !columns.some((word) => (MATCHING_COLUMNS as readonly string[]).includes(word))
@@ -229,9 +225,7 @@ export function applyEdits(yamlText: string, edits: StudioEdits): string {
   if (edits.blocking) {
     doc.setIn(
       ["blocking"],
-      doc.createNode(
-        edits.blocking.map((rule) => ({ key_type: rule.key_type, expr: rule.expr })),
-      ),
+      doc.createNode(edits.blocking.map((rule) => ({ key_type: rule.key_type, expr: rule.expr }))),
     );
   }
   if (edits.comparisons) {

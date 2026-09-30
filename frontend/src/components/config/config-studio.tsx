@@ -353,8 +353,8 @@ export function ConfigStudio({ org }: { org: string }) {
             </div>
           ))}
           <p className="text-muted-foreground text-xs lg:col-span-3">
-            Staging fills the editors above — nothing publishes until you do, and the diff is
-            yours to read first.
+            Staging fills the editors above — nothing publishes until you do, and the diff is yours
+            to read first.
           </p>
         </CardContent>
       </Card>

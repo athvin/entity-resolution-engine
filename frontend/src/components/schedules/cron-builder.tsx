@@ -139,7 +139,9 @@ export function CronBuilder({
             />
           </span>
         )}
-        {preset === "daily" && <span className="inline-flex items-center gap-2">at {timeInputs}</span>}
+        {preset === "daily" && (
+          <span className="inline-flex items-center gap-2">at {timeInputs}</span>
+        )}
         {preset === "weekly" && (
           <span className="inline-flex flex-wrap items-center gap-2">
             every

@@ -56,7 +56,7 @@ export function BlockingEditor({ rules, onChange, disabled, errorIndex }: Blocki
             key={index}
             className={
               errorIndex === index
-                ? "rounded-md border border-destructive/60 p-2"
+                ? "border-destructive/60 rounded-md border p-2"
                 : "rounded-md border p-2"
             }
             data-testid={`blocking-rule-${String(index)}`}
@@ -121,7 +121,10 @@ export function BlockingEditor({ rules, onChange, disabled, errorIndex }: Blocki
               )}
             </div>
             {warnings.length > 0 && (
-              <p className="text-destructive mt-1 text-xs" data-testid={`blocking-warning-${String(index)}`}>
+              <p
+                className="text-destructive mt-1 text-xs"
+                data-testid={`blocking-warning-${String(index)}`}
+              >
                 {warnings.join("; ")}
               </p>
             )}
@@ -142,8 +145,8 @@ export function BlockingEditor({ rules, onChange, disabled, errorIndex }: Blocki
         </Button>
       )}
       <p className="text-muted-foreground text-xs">
-        Each rule materializes one candidate key; records pair only when a key agrees. Order is
-        the config&apos;s order. Tier B — publish rebuilds matching.
+        Each rule materializes one candidate key; records pair only when a key agrees. Order is the
+        config&apos;s order. Tier B — publish rebuilds matching.
       </p>
     </div>
   );

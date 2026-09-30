@@ -299,9 +299,7 @@ export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolea
       {isSteward && allLoadedSelected && inbox.hasNextPage && (
         <Card className="border-primary/30" data-testid="select-all-banner">
           <CardContent className="flex flex-wrap items-center gap-2 p-3 text-sm">
-            <span>
-              All {rows.length} loaded reviews are selected — more match this filter.
-            </span>
+            <span>All {rows.length} loaded reviews are selected — more match this filter.</span>
             <Button
               size="sm"
               variant="outline"

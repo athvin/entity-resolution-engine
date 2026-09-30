@@ -71,14 +71,14 @@ export function ToasterProvider({ children }: { children: React.ReactNode }) {
           <div
             key={toast.id}
             className={cn(
-              "pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-md border bg-background p-3 text-sm shadow-lg",
+              "bg-background pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-md border p-3 text-sm shadow-lg",
               toast.tone === "destructive" && "border-destructive/50 text-destructive",
             )}
           >
             <div className="flex-1">
               <p className="font-medium">{toast.title}</p>
               {toast.description ? (
-                <p className="mt-0.5 text-muted-foreground">{toast.description}</p>
+                <p className="text-muted-foreground mt-0.5">{toast.description}</p>
               ) : null}
             </div>
             <button
@@ -87,7 +87,7 @@ export function ToasterProvider({ children }: { children: React.ReactNode }) {
               onClick={() => {
                 dismiss(toast.id);
               }}
-              className="rounded p-1 hover:bg-accent"
+              className="hover:bg-accent rounded p-1"
             >
               <X className="size-4" aria-hidden />
             </button>

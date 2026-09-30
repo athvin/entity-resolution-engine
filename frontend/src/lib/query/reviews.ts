@@ -158,9 +158,7 @@ export function useBulkResolve(org: string) {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ items: chunk, apply_now: true }),
         });
-        combined = combined
-          ? { ...result, failed: combined.failed + result.failed }
-          : result;
+        combined = combined ? { ...result, failed: combined.failed + result.failed } : result;
       }
       if (combined === null) throw new Error("bulk resolve needs at least one item");
       return combined;

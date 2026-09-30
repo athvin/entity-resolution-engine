@@ -48,10 +48,7 @@ describe("nextFires", () => {
 
   it("applies the OR rule when both day fields are restricted", () => {
     // dom=1 OR dow=Wednesday(3): Wed 2026-09-30 beats Oct 1.
-    expect(fires("0 0 1 * 3", 2)).toEqual([
-      "2026-09-30T00:00:00.000Z",
-      "2026-10-01T00:00:00.000Z",
-    ]);
+    expect(fires("0 0 1 * 3", 2)).toEqual(["2026-09-30T00:00:00.000Z", "2026-10-01T00:00:00.000Z"]);
   });
 
   it("returns [] for an invalid expression", () => {

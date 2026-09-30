@@ -7,7 +7,10 @@ import { relayEmail } from "@/lib/bff/relay";
 import { BffFailure, respond } from "@/lib/bff/proxy";
 
 const requestSchema = z.object({ email: z.email().max(200) });
-const confirmSchema = z.object({ token: z.string().min(1), new_password: z.string().min(12).max(200) });
+const confirmSchema = z.object({
+  token: z.string().min(1),
+  new_password: z.string().min(12).max(200),
+});
 
 /**
  * Request a reset link, or confirm one with `token`.
