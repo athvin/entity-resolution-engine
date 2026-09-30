@@ -108,6 +108,38 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS org_events (
+      id         bigserial PRIMARY KEY,
+      -- CASCADE, unlike the ledgers above: events are announcements, and an
+      -- org's removal has nothing left to announce to.
+      org        text NOT NULL REFERENCES orgs(name) ON DELETE CASCADE,
+      event_type text NOT NULL,
+      payload    jsonb NOT NULL DEFAULT '{}'::jsonb,
+      created_at timestamptz NOT NULL DEFAULT now()
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS org_events_feed ON org_events (org, id DESC)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS email_outbox (
+      id          bigserial PRIMARY KEY,
+      org         text,
+      to_addr     text NOT NULL,
+      template    text NOT NULL,
+      params      jsonb NOT NULL DEFAULT '{}'::jsonb,
+      state       text NOT NULL DEFAULT 'queued' CHECK (state IN ('queued', 'sent', 'failed')),
+      attempts    integer NOT NULL DEFAULT 0,
+      not_before  timestamptz,
+      last_error  text,
+      created_at  timestamptz NOT NULL DEFAULT now(),
+      sent_at     timestamptz
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS email_outbox_due ON email_outbox (state, not_before)
+    """,
+    """
     CREATE TABLE IF NOT EXISTS schedules (
       schedule_id      text PRIMARY KEY,
       org              text NOT NULL REFERENCES orgs(name),
@@ -124,6 +156,11 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
     """
     CREATE UNIQUE INDEX IF NOT EXISTS schedules_one_correction_per_org
       ON schedules (org) WHERE source = 'config:correction_pass'
+    """,
+    # One system-managed weekly maintenance schedule per org, seeded at provision.
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS schedules_one_maintenance_per_org
+      ON schedules (org) WHERE source = 'system:lake_maintain'
     """,
     """
     CREATE TABLE IF NOT EXISTS config_versions (

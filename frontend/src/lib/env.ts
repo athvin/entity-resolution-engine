@@ -21,6 +21,9 @@ const envSchema = z.object({
   /** Test seam: the mock tier points this at a scripted /v1/messages. */
   ANTHROPIC_BASE_URL: z.url().optional(),
   ERWEB_ASSISTANT_MODEL: z.string().default("claude-opus-5"),
+  /** Where this app is reachable, for the links invite and reset emails carry.
+   * Server-side only: emails are composed by the server, never the browser. */
+  ERWEB_PUBLIC_BASE_URL: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

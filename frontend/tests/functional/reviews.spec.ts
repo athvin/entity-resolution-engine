@@ -49,6 +49,27 @@ test.describe("review inbox — rendering", () => {
     }
   });
 
+  test("the decision panel compares the two records field by field", async ({ page, isMobile }) => {
+    // Both layouts are in the DOM (one CSS-hidden), so scope to the live one.
+    const host = page.getByTestId(isMobile ? "swipe-card" : "decision-panel");
+    const grid = host.getByTestId("field-compare-grid");
+    await expect(grid).toBeVisible();
+
+    // Both sides' values, and a headline counting the IDENTITY fields only —
+    // `updated_at_source` differs for nearly every pair and must not inflate it.
+    await expect(grid).toContainText("Bob");
+    await expect(grid).toContainText("Robert");
+    await expect(grid).toContainText("4 identifying fields differ");
+    await expect(grid).toContainText("Updated at source");
+
+    // A differing field is marked, an agreeing one is not — and difference is
+    // never carried by colour alone (the icon's label is the second signal).
+    await expect(host.getByTestId("compare-given_name")).toContainText("differs");
+    await expect(host.getByTestId("compare-addr_city")).not.toContainText("differs");
+    // The evidence waterfall still answers the other half of the question.
+    await expect(host.getByTestId("waterfall-chart")).toBeVisible();
+  });
+
   test("assertion library lists rules and the contradiction inspector names the cycle", async ({
     page,
   }) => {

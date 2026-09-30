@@ -38,7 +38,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 #: The seed S3 places at `dbt/seeds/`, from `tests/unit/dbt/test_name_variants.py`.
-SEED_PATH = Path(__file__).resolve().parents[3] / "dbt" / "seeds" / "nickname_variants.csv"
+SEED_PATH = Path(__file__).resolve().parents[3] / "src" / "er" / "std" / "nickname_variants.csv"
 
 SEED_NAME = "nickname_variants"
 
@@ -70,11 +70,18 @@ def seed_members() -> list[str]:
 
 @pytest.fixture(scope="module")
 def seeded(dbt_vars: dict[str, Any]) -> Iterator[MacroHarness]:
-    """A harness whose `nickname_variants` seed is the committed CSV."""
+    """A harness whose `nickname_variants` lexicon is the packaged CSV.
+
+    The relation carries the S5 retractable shape's ``active`` flag — TRUE on
+    every packaged row, exactly as `er init` seeds it — and is registered under
+    the `source('lake', …)` key the macro now resolves.
+    """
     harness = MacroHarness(vars=dbt_vars)
-    harness.register_seed(
-        SEED_NAME, [dict(zip(SEED_HEADER, pair, strict=True)) for pair in seed_pairs()]
+    table = harness.register_seed(
+        SEED_NAME,
+        [{**dict(zip(SEED_HEADER, pair, strict=True)), "active": True} for pair in seed_pairs()],
     )
+    harness.register_relation(f"lake.{SEED_NAME}", table)
     try:
         yield harness
     finally:

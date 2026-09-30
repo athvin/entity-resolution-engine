@@ -37,6 +37,9 @@ export const TRIAGE_ORGS = [
   "wizard-dev",
   "wizard-ios",
   "wizard-android",
+  // The select-all journey resolves its whole 130-review queue in one action,
+  // so it gets a private org like every other mutating flow.
+  "selectall-dev",
 ] as const;
 
 export async function installTestFixtures(db: Db): Promise<void> {

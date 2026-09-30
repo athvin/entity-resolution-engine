@@ -43,6 +43,97 @@ export const SURVIVORSHIP_RULES = [
   "completeness",
 ] as const;
 
+/** The engine's non-parametric comparison level tokens (S4.3.1). */
+export const COMPARISON_LEVELS = [
+  "exact",
+  "username_exact",
+  "variant_match",
+  "dob_same_year_month",
+] as const;
+
+/** The one parameterized level: `jaro_winkler:<T>` with 0 < T <= 1. */
+export const JARO_PREFIX = "jaro_winkler:";
+
+/** The implicit-null level token; always rendered last, never reordered. */
+export const NULL_LEVEL = "null";
+
+/** Whether one level token is in the engine's S4.3.1 vocabulary. */
+export function isComparisonLevel(token: string): boolean {
+  if (token === NULL_LEVEL) return true;
+  if ((COMPARISON_LEVELS as readonly string[]).includes(token)) return true;
+  if (!token.startsWith(JARO_PREFIX)) return false;
+  const threshold = Number(token.slice(JARO_PREFIX.length));
+  return Number.isFinite(threshold) && threshold > 0 && threshold <= 1;
+}
+
+/** The standardized columns a blocking expr or comparison may reference. */
+export const MATCHING_COLUMNS = [
+  "given_name",
+  "family_name",
+  "name_variants",
+  "email",
+  "email_valid",
+  "phone_e164",
+  "phone_valid",
+  "addr_number",
+  "addr_street",
+  "addr_unit",
+  "addr_city",
+  "addr_region",
+  "addr_postal",
+  "birth_date",
+] as const;
+
+const SQL_WORDS = new Set([
+  "and",
+  "as",
+  "between",
+  "case",
+  "distinct",
+  "else",
+  "end",
+  "false",
+  "in",
+  "is",
+  "like",
+  "not",
+  "null",
+  "or",
+  "then",
+  "true",
+  "when",
+]);
+
+/**
+ * Advisory client-side checks on one blocking rule. The server's 422 with a
+ * JSON pointer stays authoritative; these exist so the obvious mistakes never
+ * leave the editor.
+ */
+export function blockingWarnings(rule: BlockingRule): string[] {
+  const warnings: string[] = [];
+  if (!rule.key_type.trim()) warnings.push("key_type is empty");
+  if (!rule.expr.trim()) {
+    warnings.push("expr is empty");
+    return warnings;
+  }
+  let depth = 0;
+  for (const char of rule.expr) {
+    if (char === "(") depth += 1;
+    if (char === ")") depth -= 1;
+    if (depth < 0) break;
+  }
+  if (depth !== 0) warnings.push("parentheses are unbalanced");
+  const identifiers = rule.expr.replaceAll(/'[^']*'/g, " ").match(/[A-Za-z_][A-Za-z0-9_]*/g);
+  const columns = (identifiers ?? []).filter((word) => !SQL_WORDS.has(word.toLowerCase()));
+  if (
+    columns.length > 0 &&
+    !columns.some((word) => (MATCHING_COLUMNS as readonly string[]).includes(word))
+  ) {
+    warnings.push("expr references no known standardized column");
+  }
+  return warnings;
+}
+
 export function parseConfig(yamlText: string): ConfigView {
   const doc = parseDocument(yamlText);
   const json: unknown = doc.toJS();
@@ -110,9 +201,13 @@ export function parseConfig(yamlText: string): ConfigView {
 export interface StudioEdits {
   thresholds?: Thresholds;
   survivorship?: Record<string, string[]>;
+  blocking?: BlockingRule[];
+  comparisons?: Record<string, ComparisonSpec>;
 }
 
-/** Apply the studio's edits onto the document, byte-preserving everything else. */
+/** Apply the studio's edits onto the document, byte-preserving everything else.
+ * A section absent from `edits` is never touched — the studio passes only what
+ * actually changed, so an untouched block cannot cost its rebuild tier. */
 export function applyEdits(yamlText: string, edits: StudioEdits): string {
   const doc: Document = parseDocument(yamlText);
   if (edits.thresholds) {
@@ -125,6 +220,23 @@ export function applyEdits(yamlText: string, edits: StudioEdits): string {
       // Keep the config's one-line list style for survivorship chains.
       (node as { flow?: boolean }).flow = true;
       doc.setIn(["survivorship", attribute], node);
+    }
+  }
+  if (edits.blocking) {
+    doc.setIn(
+      ["blocking"],
+      doc.createNode(edits.blocking.map((rule) => ({ key_type: rule.key_type, expr: rule.expr }))),
+    );
+  }
+  if (edits.comparisons) {
+    for (const [column, spec] of Object.entries(edits.comparisons)) {
+      const levels = doc.createNode(
+        // "null" is the editor's spelling of the YAML null token.
+        spec.levels.map((level) => (level === NULL_LEVEL ? null : level)),
+      );
+      (levels as { flow?: boolean }).flow = true;
+      doc.setIn(["comparisons", column, "levels"], levels);
+      doc.setIn(["comparisons", column, "tf"], spec.tf);
     }
   }
   return doc.toString();
@@ -145,10 +257,19 @@ export function addSourceBlock(
 }
 
 /** Client-side mirror of the server's tier table — display only, never enforced. */
-export function tierForEdits(edits: StudioEdits): "A" | null {
+export function tierForEdits(edits: StudioEdits): "A" | "B" | "C" | null {
+  if (edits.comparisons && Object.keys(edits.comparisons).length > 0) return "C";
+  if (edits.blocking) return "B";
   if (edits.thresholds || edits.survivorship) return "A";
   return null;
 }
+
+/** The publish button's cost copy per tier — one spelling, tests pin it. */
+export const TIER_COST_COPY: Record<"A" | "B" | "C", string> = {
+  A: "tier A (re-band + re-assemble)",
+  B: "tier B (match rebuild)",
+  C: "tier C (retrain + full rebuild)",
+};
 
 export interface DiffLine {
   kind: "same" | "added" | "removed";

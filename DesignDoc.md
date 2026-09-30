@@ -189,10 +189,11 @@ Exit codes are uniform across all commands:
 | `er correct` | `--resume RUN_ID` | `ER_CONFIG`, lake env | `0`; `3` no active model or incomplete correction; `1` scoring, clustering or assembly failure | stage manifests followed by `run_id, stages, exit_code` |
 | `er assert` | `add --a KEY --b KEY --kind always\|never --by USER [--note TEXT]` \| `remove --assertion-id ID --by USER` \| `load --path FILE` | `ER_CONFIG`, lake env | `0`; `2` malformed key or unknown kind; `1` rejected conflicting insert | `assertion_id, rec_a_key, rec_b_key, kind, active` |
 | `er review` | `list [--status open] [--limit 100]` \| `resolve --review-id ID --as match\|no_match\|dismiss --by USER` | `ER_CONFIG`, lake env | `0`; `10` empty list; `2` unknown `review_id` | Rows of `review_id, subject_type, keys, match_probability, status` |
+| `er lexicon` | `add --a NAME --b NAME --by USER` \| `remove --a NAME --b NAME --by USER` \| `load --path FILE --by USER` | `ER_CONFIG`, lake env | `0`; `2` malformed or identical names; `10` a pair already in (or already out of) the active set, and from `load` when every pair of the file is already active | `variant_id, variant_a, variant_b, active` |
 | `er lake maintain` | `--retain-days N` (7) | lake env | `0`; `3` lock not acquired; `1` maintenance failure | `files_merged, snapshots_expired, files_deleted, retired_dropped` |
 | `er lake reset` | `--confirm-tenant NAME` (required) | lake env | `0`; `2` tenant mismatch; `3` lock not acquired | `dropped_schema, deleted_prefix` |
 
-**`er init`** installs/loads extensions, creates the S3 secret, ATTACHes the lake, issues `CREATE TABLE IF NOT EXISTS` for the **`ddl.py`-owned relations only** — the owner split it obeys is normative in S5.0 — and DETACHes. It is idempotent and single-writer. If the catalog's recorded `DATA_PATH` differs from `$ER_LAKE_DATA_PATH`, `er init` exits `3` with the literal message `lake DATA_PATH immutable: catalog=<a> env=<b>; use 'er lake reset --confirm-tenant <tenant>' to destroy and recreate this namespace`.
+**`er init`** installs/loads extensions, creates the S3 secret, ATTACHes the lake, issues `CREATE TABLE IF NOT EXISTS` for the **`ddl.py`-owned relations only** — the owner split it obeys is normative in S5.0 — and DETACHes. It creates relations and never writes rows, which is what lets S5.1 treat a second `er init` as a no-op and lets the S8.1 harness assert an initialised namespace is empty. It is idempotent and single-writer. If the catalog's recorded `DATA_PATH` differs from `$ER_LAKE_DATA_PATH`, `er init` exits `3` with the literal message `lake DATA_PATH immutable: catalog=<a> env=<b>; use 'er lake reset --confirm-tenant <tenant>' to destroy and recreate this namespace`.
 
 **`er lake reset`** destroys the namespace: it takes the same advisory lock every other writer takes (S4.0b), drops the catalog metadata schema and deletes the `DATA_PATH` prefix. It is a writer like any other and is recorded like one — `runs.mode='reset'` and one `run_stages` row with `stage='reset'` (both enum values are declared in S5's DDL). It exits `2` when `--confirm-tenant` does not match `tenant` in the config, so the destructive path cannot be reached by a typo.
 
@@ -355,7 +356,7 @@ One unified `stg_records` model maps source columns → the canonical schema, re
 | `email_norm(col)` | `lowercase_trim`, strip plus-addressing when `standardization.email_strip_plus_addressing`, then **null every address in `standardization.email_placeholders`** (e.g. `test@test.com`); emits `email` and `email_valid BOOL`. Placeholder nulling belongs to `email_norm` and to no other macro — `null_semantics` handles only the sentinel vocabulary below, which contains no email addresses. |
 | `phone_e164(col)` | Digits-only extraction, default region `standardization.phone_default_region`, E.164 render; emits `phone_e164` and `phone_valid BOOL`. |
 | `null_semantics(col)` | Maps the sentinel vocabulary (`''`, `'NULL'`, `'N/A'`, `'-'`, `'unknown'`) to NULL. |
-| `name_norm(col)` | `lowercase_trim`, punctuation strip, diacritic fold; emits `given_name` / `family_name` and `name_variants LIST(VARCHAR)` joined from the `nickname_variants` seed. **The normalized `given_name` is ALWAYS element 0 of its own `name_variants` array on every record** — the symmetry guarantee that makes `variant_match` orientation-independent. |
+| `name_norm(col)` | `lowercase_trim`, punctuation strip, diacritic fold; emits `given_name` / `family_name` and `name_variants LIST(VARCHAR)` joined from the active rows of the `nickname_variants` lexicon relation (S5; seeded from the packaged CSV inside the S4.0b writer window of any mutating command whenever the relation is empty — so an emptied lexicon self-heals, and it is settled *before* the run's fingerprint is taken — edited by `er lexicon`, hashed into `runs.lexicon_hash` for the S4.0 drift guard). **The normalized `given_name` is ALWAYS element 0 of its own `name_variants` array on every record** — the symmetry guarantee that makes `variant_match` orientation-independent. |
 | `address_parse(cols)` | Regex/`usaddress`-based componentizer behind the `AddressParser` interface, versioned by `versions.address_parser_version`; emits `addr_number, addr_street, addr_unit, addr_city, addr_region, addr_postal`. The fixture generator emits only patterns the v1 parser handles; a libpostal container can replace it later without a model change. |
 | `parse_date(col, fmt)` | Emits exactly one column, `birth_date`. It computes a precision (`day`, `month` or `year`) **internally** to decide the value — a `year`-precision parse yields NULL, because a year-only DOB is not usable matching evidence — and does not persist that precision. v1 has no consumer for a precision column: no comparison level, no blocking key, no survivorship rule and no `golden_records` column reads it, and a stored column no rule consumes is a column that silently drifts. Should review display need it later, it is an additive column under S5.1. |
 
@@ -896,8 +897,10 @@ CREATE TABLE IF NOT EXISTS lake.main.runs (
   tf_snapshot_id       VARCHAR,
   std_version          VARCHAR   NOT NULL,
   survivorship_version VARCHAR   NOT NULL,
+  lexicon_hash         VARCHAR,              -- SHA-256 over the active nickname_variants pairs; NULL on rows
+                                             -- written before the lexicon joined the fingerprint
   code_version         VARCHAR   NOT NULL,   -- git describe --always --dirty
-  rebuild_reason       VARCHAR,              -- {std_version_bump, survivorship_version_bump, correction_pass, operator}
+  rebuild_reason       VARCHAR,              -- {std_version_bump, survivorship_version_bump, correction_pass, operator, lexicon_change}
   snapshot_start       BIGINT,
   snapshot_end         BIGINT
 );
@@ -953,6 +956,17 @@ CREATE TABLE IF NOT EXISTS lake.main.er_touched_entities (
   entity_id    VARCHAR   NOT NULL,
   disposition  VARCHAR   NOT NULL,   -- {rebuild, retire}
   created_at   TIMESTAMP NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS lake.main.nickname_variants (
+  variant_id   VARCHAR   NOT NULL,   -- ULID
+  variant_a    VARCHAR   NOT NULL,   -- lowercase normalized name
+  variant_b    VARCHAR   NOT NULL,
+  active       BOOLEAN   NOT NULL,   -- retract flips this; rows are never deleted
+  created_by   VARCHAR   NOT NULL,   -- 'seed' for the packaged rows
+  created_at   TIMESTAMP NOT NULL,
+  retracted_by VARCHAR,
+  retracted_at TIMESTAMP
 );
 ```
 
@@ -1042,6 +1056,7 @@ The **eleven** columns from `given_name` through `birth_date` are the **survivab
 | `ingest_batches` | ddl.py | `ingest_batch_id` | `unique` |
 | `er_standardize_work` | ddl.py | `(run_id, source_system, ingest_batch_id)` | `unique_combination_of_columns` |
 | `er_touched_entities` | ddl.py | `(run_id, entity_id)` | `unique_combination_of_columns` |
+| `nickname_variants` | ddl.py | `variant_id`; `(variant_a, variant_b)` where `active` | `unique` + filtered `unique_combination_of_columns` |
 | `stg_records` | dbt | `(source_system, source_record_id, content_hash)` | contract + `unique_combination_of_columns` |
 | `int_std_records` | dbt | `record_key` | contract + `unique` |
 | `int_blocking_keys` | dbt | `(key_type, key_value, record_key)` | contract + `unique_combination_of_columns` |
@@ -1274,7 +1289,7 @@ Pydantic rejects the document — exit code `2`, no lake connection opened — u
 | V8 | Every level token in `comparisons[*].levels` is one of `exact`, `jaro_winkler:<T>` with `0 < T <= 1`, `null`, `username_exact`, `variant_match`, `dob_same_year_month` | `comparisons.unknown_level` |
 | V9 | `training.em_blocking_rules` has **at least 2** entries; `training.deterministic_rules` has at least 1 | `training.em_blocking_rules.min_items` |
 | V10 | `training.u_seed` is **REQUIRED** and has no default; `training.u_max_pairs >= 1`; `0 < training.recall <= 1` | `training.u_seed.required` |
-| V11 | Every `sources.<name>.columns` maps every canonical attribute the standardization macros consume (`given_name`, `family_name`, `email`, `phone`, `address_line`, `addr_city`, `addr_region`, `addr_postal`, `birth_date`); `priority_rank` values are unique across sources and are positive integers | `sources.columns.incomplete` (columns); `sources.priority_rank.invalid` (non-positive); `sources.priority_rank.duplicate` (repeated across sources, naming the holders) |
+| V11 | Every `sources.<name>.columns` maps every canonical attribute the standardization macros consume (`given_name`, `family_name`, `email`, `phone`, `address_line`, `addr_city`, `addr_region`, `addr_postal`, `birth_date`); `priority_rank` values are unique across sources and are positive integers; source names beginning with `_` are reserved for engine-synthesized sources (the steward-edit overlay is the first) and rejected in a user document | `sources.columns.incomplete` (columns); `sources.priority_rank.invalid` (non-positive); `sources.priority_rank.duplicate` (repeated across sources, naming the holders); `sources.name.reserved` (underscore-prefixed name) |
 | V12 | `clustering.max_iterations >= 1`; `0 < clustering.cut_protect_probability <= 1` | `clustering.bounds` |
 | V13 | `versions.std_version`, `versions.survivorship_version`, `versions.address_parser_version` are non-empty strings | `versions.required` |
 | V14 | `storage.data_path` is an `s3://` URI ending in `/`; `storage.model_uri_prefix` is an `s3://` URI ending in `/`; `storage.drop_dir` is an absolute path | `storage.uri` |
@@ -1522,7 +1537,7 @@ A session-scoped `pytest` fixture in `tests/conftest.py` implements the followin
 3. Run `er init` against that namespace. `er init` creates only `ddl.py`-owned relations; the dbt-owned relations are created by the first `dbt run` in the session.
 4. On teardown: `CALL lake.expire_snapshots(older_than => now())`, `CALL lake.cleanup_old_files(cleanup_all => true)`, delete the `s3://lake/test/<ns>/` prefix, `DETACH lake`, and `DROP SCHEMA er_test_<ns> CASCADE` in the catalog. Teardown MUST run under `try/finally` so a failing test still reclaims the namespace.
 
-Individual tests are function-isolated by a function-scoped fixture that `DELETE`s from every `ddl.py`-owned relation (`raw_records`, `match_scores`, `entity_membership`, `entities`, `entity_events`, `assertions`, `review_queue`, `model_registry`, `tf_lookup`, `cut_edges`, `runs`, `run_stages`, `ingest_batches`, `er_standardize_work`, `er_touched_entities`), drops the dbt-owned relations, and reloads the scenario fixture. A test that needs a second, independent universe inside one session (T-INC-1) requests the `sub_namespace` fixture, which repeats steps 1–4 under `er_test_<ns>_a` / `er_test_<ns>_b`.
+Individual tests are function-isolated by a function-scoped fixture that `DELETE`s from every `ddl.py`-owned relation (`raw_records`, `match_scores`, `entity_membership`, `entities`, `entity_events`, `assertions`, `review_queue`, `model_registry`, `tf_lookup`, `cut_edges`, `runs`, `run_stages`, `ingest_batches`, `er_standardize_work`, `er_touched_entities`, `nickname_variants`), drops the dbt-owned relations, and reloads the scenario fixture. A test that needs a second, independent universe inside one session (T-INC-1) requests the `sub_namespace` fixture, which repeats steps 1–4 under `er_test_<ns>_a` / `er_test_<ns>_b`.
 
 Integration tests run single-process. `-n auto` applies to the unit layer only. v1 is a single-writer batch model: concurrent writers against one namespace are an explicit non-guarantee and are not tested, except by T-CONC-1, which asserts that the second writer is *refused* (exit code 3) rather than admitted.
 

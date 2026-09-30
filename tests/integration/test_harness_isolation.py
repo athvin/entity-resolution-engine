@@ -71,7 +71,7 @@ KEEP_LAKE_OPTION = "--keep-lake"
 
 # S8.1's parenthetical list of the relations function isolation empties, transcribed
 # as literals. The *fixture* must derive its list from the registry -- a hard-coded
-# fourteen rots the first time S5 grows -- and this is the one place that checks the
+# hard-coded count rots the first time S5 grows -- and this is the one place that checks the
 # registry still says what S8.1 says. A count derived from `DDL_OWNED` would agree
 # with the registry no matter what the registry said.
 S8_1_DDL_OWNED = (
@@ -90,6 +90,7 @@ S8_1_DDL_OWNED = (
     "ingest_batches",
     "er_standardize_work",
     "er_touched_entities",
+    "nickname_variants",
 )
 
 #: One dbt-owned relation standing for the set. Created by hand rather than by a
@@ -166,7 +167,7 @@ def restored_namespace(lake_conn: duckdb.DuckDBPyConnection) -> Iterator[None]:
     """An empty namespace before this module and an empty one after it.
 
     Function isolation *empties* the `ddl.py`-owned relations rather than dropping
-    them, which is the contract -- and which means the tests below leave fourteen
+    them, which is the contract -- and which means the tests below leave the
     relations standing. `test_harness_namespace.py` asserts the harness yields a
     namespace with zero relations, so this module restores that precondition itself
     rather than making the two files order-dependent.
@@ -367,9 +368,12 @@ def test_delete_list_is_derived_from_registry(
     # would recreate a relation dbt owns.
     assert set(delete_relations).isdisjoint(drop_relations)
 
-    # ... and the registry still agrees with S8.1's own list.
+    # ... and the registry still agrees with S8.1's own list. The set equality
+    # above is what pins the content; this only catches a name transcribed twice,
+    # which set equality would hide. No literal count: that is the drift this
+    # whole file exists to keep out.
+    assert len(S8_1_DDL_OWNED) == len(set(S8_1_DDL_OWNED))
     assert set(delete_relations) == set(S8_1_DDL_OWNED)
-    assert len(S8_1_DDL_OWNED) == len(set(S8_1_DDL_OWNED)) == 15
 
 
 def test_a_dbt_owned_relation_is_created(lake_conn: duckdb.DuckDBPyConnection) -> None:

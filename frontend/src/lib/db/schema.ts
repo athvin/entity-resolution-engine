@@ -79,6 +79,45 @@ export const orgMembers = erweb.table(
   ],
 );
 
+/** Pending membership invitations. The user row is created at ACCEPT, not here:
+ * a pre-created disabled user would occupy the unique email slot with an
+ * unusable password hash and complicate re-invites. Only the token's sha256 is
+ * stored — the raw token exists solely inside the emailed link. */
+export const invites = erweb.table(
+  "invites",
+  {
+    id: text("id").primaryKey(),
+    org: text("org").notNull(),
+    email: text("email").notNull(),
+    role: roleEnum("role").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    invitedBy: text("invited_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("invites_token_hash_idx").on(table.tokenHash),
+    index("invites_org_idx").on(table.org),
+  ],
+);
+
+/** Single-use password-reset tokens; same hash-at-rest discipline as sessions. */
+export const passwordResets = erweb.table(
+  "password_resets",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+  },
+  (table) => [uniqueIndex("password_resets_token_hash_idx").on(table.tokenHash)],
+);
+
 /** Every org provisioned or registered through the UI; the super-admin directory joins
  * this with erserver's GET /v1/orgs. */
 export const orgsRegistry = erweb.table("orgs_registry", {

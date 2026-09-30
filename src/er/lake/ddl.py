@@ -3,7 +3,7 @@
 `er init` and every stage preflight reach the lake through this module. It does
 three things and refuses to do a fourth:
 
-* **Create.** `CREATE TABLE IF NOT EXISTS` for the fourteen `ddl.py`-owned
+* **Create.** `CREATE TABLE IF NOT EXISTS` for the `ddl.py`-owned
   relations, in registry order. Running it against an initialised lake is a no-op
   that reports `exists` and executes nothing (S5.1).
 * **Reconcile, additively.** The only change S5.1 permits against an existing
@@ -463,7 +463,7 @@ def diff(connection: duckdb.DuckDBPyConnection) -> tuple[ColumnDiff, ...]:
     """Every difference between the registry and the live `ddl.py`-owned relations.
 
     Relations that do not exist yet are not differences: :func:`apply` creates them
-    whole, and reporting fourteen absent tables as fourteen-times-N additive
+    whole, and reporting every absent table as N additive
     differences would make an uninitialised lake indistinguishable from a drifted
     one.
     """

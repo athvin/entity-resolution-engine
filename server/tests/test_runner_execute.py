@@ -76,6 +76,44 @@ def test_unknown_kind_is_a_caller_bug() -> None:
         runner.execute(payload(kind="sideways"))
 
 
+def test_lake_maintain_dispatches_to_the_service_facade(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from er import service as service_module
+    from er.service import RunOutcome
+
+    seen: dict[str, object] = {}
+
+    def fake_maintenance(*, config_path: Path, run_id: str | None, **kwargs: object) -> RunOutcome:
+        seen["config_path"], seen["run_id"], seen["kwargs"] = config_path, run_id, kwargs
+        return RunOutcome(
+            run_id=run_id or "",
+            mode="maintain",
+            exit_code=10,
+            error_class=None,
+            error_detail=None,
+            stages=(),
+        )
+
+    monkeypatch.setattr(service_module, "run_maintenance", fake_maintenance)
+    record = runner.execute(
+        {
+            "job_id": "job-m",
+            "kind": "lake_maintain",
+            "params": {"retain_days": 14},
+            "config_path": str(TEST_CONFIG),
+            "run_id": RUN_ID,
+        }
+    )
+    assert (record["mode"], record["exit_code"], record["job_id"]) == ("maintain", 10, "job-m")
+    assert seen["run_id"] == RUN_ID
+    assert seen["kwargs"] == {"retain_days": 14}
+
+    # Absent params defer to the engine's own retention default.
+    runner.execute(payload(kind="lake_maintain"))
+    assert seen["kwargs"] == {}
+
+
 def test_provision_dispatches_to_the_provision_module(monkeypatch: pytest.MonkeyPatch) -> None:
     from erserver import provision as provision_module
 

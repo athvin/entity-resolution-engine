@@ -26,6 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 __all__ = [
     "CANONICAL_ATTRIBUTES",
     "CONFIG_BLOCKS",
+    "RESERVED_SOURCE_PREFIX",
     "TERMINAL_SURVIVORSHIP_RULE",
     "BlockingRule",
     "Clustering",
@@ -81,6 +82,11 @@ CANONICAL_ATTRIBUTES: tuple[str, ...] = (
 #: S6.1 appends this as the terminal element of every survivorship chain, which is
 #: what makes each chain a total order over the records of an entity.
 TERMINAL_SURVIVORSHIP_RULE = "record_key ASC"
+
+#: Source names beginning with this prefix are reserved for engine-synthesized
+#: sources and rejected in a user document (S6.1 V11). The steward-edit overlay
+#: source is the first occupant of the namespace.
+RESERVED_SOURCE_PREFIX = "_"
 
 # Syntactic only, deliberately: V16 asks whether a placeholder could be an address
 # `email_norm` will see, not whether it is deliverable.
@@ -380,6 +386,19 @@ class Config(_Block):
     clustering: Clustering
     coherence: Coherence
     correction_pass: CorrectionPass
+
+    @model_validator(mode="after")
+    def _v11_source_names_unreserved(self) -> Self:
+        # Cross-source like the rank check below: a SourceSpec never sees its own
+        # name, so the dict keys can only be validated here.
+        for name in self.sources:
+            if name.startswith(RESERVED_SOURCE_PREFIX):
+                raise ValueError(
+                    f"sources.name.reserved: source name {name!r} begins with "
+                    f"{RESERVED_SOURCE_PREFIX!r}, which is reserved for "
+                    f"engine-synthesized sources"
+                )
+        return self
 
     @model_validator(mode="after")
     def _v11_priority_ranks_unique(self) -> Self:

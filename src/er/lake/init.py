@@ -2,7 +2,7 @@
 
 M19 is that nothing anywhere invoked `ddl.py`: the registry existed, the apply
 function existed, and no verb called either, so M1's exit criterion — a lake with
-the fourteen `ddl.py`-owned relations in it — was unreachable. This module is the
+the `ddl.py`-owned relations in it — was unreachable. This module is the
 call site, and it is the only one: `er init` is "the only thing that ever creates
 `ddl.py`-owned tables" (S7.1).
 

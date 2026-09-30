@@ -24,7 +24,7 @@ clauses need "a namespace with no schema", which by construction the S8.1 sessio
 namespace is not — so they mint one of their own and reclaim it, exactly as
 `tests/integration/test_init.py` does for the destructive verbs. The `er run-all`
 clauses need "an empty lake", which is exactly what `initialised_lake` plus S8.1's
-function isolation yields: the fourteen `ddl.py`-owned relations, created and empty.
+function isolation yields: the `ddl.py`-owned relations, created and empty.
 
 Every invocation is a real subprocess. "`er run-all` exits **0**" is a claim about the
 process, and S12 says so itself — "Stage commands that only print to stdout do not

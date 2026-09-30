@@ -34,7 +34,7 @@ S8.1's isolation contract has a second half, and it is here too: the session
 namespace keeps one *suite* from feeding the next, and :func:`clean_lake` keeps
 one *test* from feeding the next. It `DELETE`s from every `ddl.py`-owned relation
 and drops every dbt-owned one between tests, with both lists read straight off
-the S5 registry -- a hard-coded fourteen would silently rot the first time S5
+the S5 registry -- a hard-coded count would silently rot the first time S5
 grows, and the relation set is exactly what "function-isolated" means.
 :func:`sub_namespace` is the only sanctioned way to build a *second* universe
 inside one session (T-INC-1): two universes sharing a namespace would share
@@ -148,7 +148,7 @@ _CLEANUP_OLD_FILES: Final[str] = (
 )
 
 # The relations function isolation acts on, read off the S5 registry rather than
-# transcribed from S8.1's parenthetical fourteen. The parenthetical is a summary of
+# transcribed from S8.1's parenthetical list. The parenthetical is a summary of
 # the ownership table, not a second declaration of it: a list spelled here would
 # agree with S8.1 and disagree with the lake the first time S5 gains a relation, and
 # the divergence would surface as one test seeing another test's rows.
@@ -420,7 +420,7 @@ def isolate_namespace(connection: duckdb.DuckDBPyConnection) -> IsolationResult:
     """S8.1's per-test isolation: empty the `ddl.py`-owned relations, drop the dbt ones.
 
     The asymmetry is ownership, not taste. `er init` creates the `ddl.py`-owned
-    fourteen and S5.1 makes re-creating them a no-op, so emptying them leaves the
+    relations and S5.1 makes re-creating them a no-op, so emptying them leaves the
     namespace in exactly the state the next test's `er init` would produce -- while
     *dropping* them would make the next test unable to tell `created` from `exists`.
     The dbt-owned relations have the opposite contract: the first `dbt run` of a

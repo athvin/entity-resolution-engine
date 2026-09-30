@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BffRequestError } from "@/lib/api/client";
+import { GOLDEN_ATTRIBUTES } from "@/lib/domain/attributes";
 import {
   effectiveRole,
   useEntityDetail,
@@ -17,22 +18,15 @@ import {
   type LineageRow,
 } from "@/lib/query/hooks";
 import { useUnmerge } from "@/lib/query/reviews";
+import { MergeRecordsDialog } from "./merge-records-dialog";
 
 const ROLE_RANK = { viewer: 0, steward: 1, admin: 2 } as const;
 
-const ATTRIBUTES: { key: keyof GoldenRecord; label: string }[] = [
-  { key: "given_name", label: "Given name" },
-  { key: "family_name", label: "Family name" },
-  { key: "email", label: "Email" },
-  { key: "phone_e164", label: "Phone" },
-  { key: "addr_number", label: "Street no." },
-  { key: "addr_street", label: "Street" },
-  { key: "addr_unit", label: "Unit" },
-  { key: "addr_city", label: "City" },
-  { key: "addr_region", label: "Region" },
-  { key: "addr_postal", label: "Postal" },
-  { key: "birth_date", label: "Birth date" },
-];
+// The shared descriptor list, narrowed to this screen's record type: the seam
+// entity-type generalization parameterizes without this file changing shape.
+const ATTRIBUTES: { key: keyof GoldenRecord; label: string }[] = GOLDEN_ATTRIBUTES.map(
+  ({ key, label }) => ({ key, label }),
+);
 
 function describeEvent(event: EntityEvent): string {
   const type = event.event_type.replaceAll("_", " ");
@@ -49,6 +43,8 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
   const unmerge = useUnmerge(org, entityId);
   const [marked, setMarked] = useState<ReadonlySet<string>>(new Set());
   const [unmergeMessage, setUnmergeMessage] = useState<string | null>(null);
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [mergeMessage, setMergeMessage] = useState<string | null>(null);
   const role = effectiveRole(session.data, org);
   const isSteward = role !== null && ROLE_RANK[role] >= ROLE_RANK.steward;
 
@@ -101,8 +97,36 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
               {members.length} source records
             </span>
           )}
+          <span className="flex-1" />
+          {isSteward && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setMergeOpen(true);
+              }}
+              data-testid="merge-with-button"
+            >
+              <GitMerge /> Merge with…
+            </Button>
+          )}
         </div>
+        {mergeMessage && (
+          <p className="text-muted-foreground mt-1 text-xs" data-testid="merge-note">
+            {mergeMessage}
+          </p>
+        )}
       </div>
+
+      <MergeRecordsDialog
+        org={org}
+        source={query.data}
+        open={mergeOpen}
+        onClose={() => {
+          setMergeOpen(false);
+        }}
+        onDone={setMergeMessage}
+      />
 
       <Card data-testid="entity-golden">
         <CardHeader className="p-4 pb-1 lg:p-6 lg:pb-2">

@@ -3,8 +3,8 @@
 DuckLake enforces `NOT NULL` and nothing else — no `PRIMARY KEY`, `UNIQUE`,
 `FOREIGN KEY`, `CHECK`, index or `ENUM` (S5.0). So every logical key of S5.0's
 ownership table is a dbt test or it is nothing, and this module is where the
-registry becomes those tests: one source named ``lake`` declaring the fourteen
-`ddl.py`-owned relations, `not_null` for every `NOT NULL` column,
+registry becomes those tests: one source named ``lake`` declaring every
+`ddl.py`-owned relation, `not_null` for every `NOT NULL` column,
 `accepted_values` for every ``∈ {…}`` domain, and `unique` /
 `dbt_utils.unique_combination_of_columns` — with S5.0's ``where`` filter where the
 key is partial — for every logical key.
@@ -64,7 +64,7 @@ __all__ = [
 ]
 
 #: The dbt source every `ddl.py`-owned relation is declared under. One source, not
-#: fourteen: `source('lake', <relation>)` then reads exactly like the `lake.main.…`
+#: one per relation: `source('lake', <relation>)` then reads exactly like the `lake.main.…`
 #: qualification S5 uses everywhere else.
 SOURCE_NAME: Final[str] = "lake"
 

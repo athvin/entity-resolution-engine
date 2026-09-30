@@ -1,12 +1,32 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
-import { Loader2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Loader2, Play } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useJobs, useRuns, type JobRow, type RunRow } from "@/lib/query/hooks";
+import {
+  effectiveRole,
+  useJobs,
+  useRuns,
+  useSession,
+  type JobRow,
+  type RunRow,
+} from "@/lib/query/hooks";
+import { useSubmitJob } from "@/lib/query/steward";
 import { cn } from "@/lib/utils";
+
+const ROLE_RANK = { viewer: 0, steward: 1, admin: 2 } as const;
+
+/** What "Run now" can start, incremental first — the everyday choice. */
+const RUN_KINDS = [
+  { kind: "run_all_incremental", label: "Incremental run", params: {} as Record<string, unknown> },
+  { kind: "run_all_full", label: "Full re-resolution", params: { skip_ingest: true } },
+  { kind: "correct", label: "Correction pass", params: {} as Record<string, unknown> },
+] as const;
 
 const ACTIVE = new Set(["queued", "dispatching", "running", "retrying", "canceling"]);
 
@@ -42,15 +62,92 @@ function lastStage(job: JobRow): string {
 export function RunsContent({ org }: { org: string }) {
   const jobs = useJobs(org);
   const runs = useRuns(org);
+  const session = useSession();
+  const submit = useSubmitJob(org);
+  const router = useRouter();
+  const [kindOpen, setKindOpen] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const activeJob = (jobs.data ?? []).find((job) => ACTIVE.has(job.state));
+  const role = effectiveRole(session.data, org);
+  const isSteward = role !== null && ROLE_RANK[role] >= ROLE_RANK.steward;
+
+  function startRun(kind: string, params: Record<string, unknown>) {
+    setKindOpen(false);
+    setSubmitError(null);
+    submit.mutate(
+      { kind, params },
+      {
+        onSuccess: (result) => {
+          router.push(`/${org}/runs/${result.job_id}`);
+        },
+        onError: () => {
+          setSubmitError("could not start the run — the org may already have one in flight");
+        },
+      },
+    );
+  }
 
   return (
     <div
       className="mx-auto flex w-full max-w-6xl min-w-0 flex-col gap-4 lg:gap-6"
       data-testid="runs-page"
     >
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-xl font-semibold lg:text-2xl">Runs</h1>
+        <span className="flex-1" />
+        {isSteward && (
+          <span className="relative inline-flex">
+            {/* Split button: the common kind on the left, the rest behind the caret. */}
+            <Button
+              size="sm"
+              disabled={submit.isPending || activeJob !== undefined}
+              title={
+                activeJob ? "a job is already in flight for this workspace" : "start a run now"
+              }
+              onClick={() => {
+                startRun("run_all_incremental", {});
+              }}
+              className="rounded-r-none"
+              data-testid="run-now"
+            >
+              <Play /> {submit.isPending ? "Starting…" : "Run now"}
+            </Button>
+            <Button
+              size="sm"
+              variant="default"
+              aria-label="Choose what to run"
+              aria-expanded={kindOpen}
+              disabled={submit.isPending || activeJob !== undefined}
+              onClick={() => {
+                setKindOpen((open) => !open);
+              }}
+              className="border-primary-foreground/20 rounded-l-none border-l px-2"
+              data-testid="run-now-more"
+            >
+              ▾
+            </Button>
+            {kindOpen && (
+              <div
+                className="bg-background absolute top-full right-0 z-20 mt-1 w-52 overflow-hidden rounded-md border shadow-lg"
+                data-testid="run-now-menu"
+              >
+                {RUN_KINDS.map((entry) => (
+                  <button
+                    key={entry.kind}
+                    type="button"
+                    className="hover:bg-accent block w-full px-3 py-2 text-left text-sm"
+                    onClick={() => {
+                      startRun(entry.kind, entry.params);
+                    }}
+                    data-testid={`run-kind-${entry.kind}`}
+                  >
+                    {entry.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </span>
+        )}
         <Link
           href={`/${org}/runs/schedules`}
           className="text-muted-foreground text-sm underline-offset-2 hover:underline"
@@ -59,6 +156,12 @@ export function RunsContent({ org }: { org: string }) {
           Schedules
         </Link>
       </div>
+
+      {submitError && (
+        <p className="text-destructive text-sm" role="alert" data-testid="run-now-error">
+          {submitError}
+        </p>
+      )}
 
       {activeJob && (
         <Link href={`/${org}/runs/${activeJob.job_id}`} data-testid="active-job-link">

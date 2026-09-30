@@ -293,8 +293,17 @@ RUN_STAGES: Final[frozenset[str]] = frozenset(
 RUN_STATUSES: Final[frozenset[str]] = frozenset({"running", "succeeded", "failed"})
 
 #: A non-NULL `rebuild_reason` puts the run outside T-INC-2's accounting (S5.1).
+#: `lexicon_change` is an edit to the `nickname_variants` lexicon: it changes
+#: standardized output without changing any `content_hash`, which is exactly the
+#: drift class a version bump names, so its rebuild is recorded the same way.
 REBUILD_REASONS: Final[frozenset[str]] = frozenset(
-    {"std_version_bump", "survivorship_version_bump", "correction_pass", "operator"}
+    {
+        "std_version_bump",
+        "survivorship_version_bump",
+        "correction_pass",
+        "operator",
+        "lexicon_change",
+    }
 )
 
 #: `rebuild` entities are re-assembled by the marts; `retire` entities are deleted
@@ -535,6 +544,10 @@ _DDL_SPECS: Final[tuple[TableSpec, ...]] = (
             Column("tf_snapshot_id", VARCHAR),
             _nn("std_version", VARCHAR),
             _nn("survivorship_version", VARCHAR),
+            # Nullable, unlike the version columns beside it: rows written before
+            # the lexicon joined the fingerprint carry NULL, and the drift guard
+            # reads that as "unrecorded" (S4.0, S5.1).
+            Column("lexicon_hash", VARCHAR),
             _nn("code_version", VARCHAR),
             Column("rebuild_reason", VARCHAR),
             Column("snapshot_start", BIGINT),
@@ -610,6 +623,29 @@ _DDL_SPECS: Final[tuple[TableSpec, ...]] = (
         # touched set would exceed the argv limit (S5.2, M10).
         keys=(LogicalKey(("run_id", "entity_id")),),
         enums=MappingProxyType({"disposition": DISPOSITIONS}),
+    ),
+    TableSpec(
+        # The nickname lexicon `name_variants(col)` expands (S4.2). Retractable
+        # rows in the `assertions` shape — retract flips `active`, never DELETE —
+        # so lexicon history is auditable and the S4.0 drift guard can hash the
+        # active set. Seeded from the packaged CSV by `er init`; edited by
+        # `er lexicon`.
+        name="nickname_variants",
+        owner=Owner.DDL,
+        columns=(
+            _nn("variant_id", VARCHAR),
+            _nn("variant_a", VARCHAR),
+            _nn("variant_b", VARCHAR),
+            _nn("active", BOOLEAN),
+            _nn("created_by", VARCHAR),
+            _nn("created_at", TIMESTAMP),
+            Column("retracted_by", VARCHAR),
+            Column("retracted_at", TIMESTAMP),
+        ),
+        keys=(
+            LogicalKey(("variant_id",)),
+            LogicalKey(("variant_a", "variant_b"), where="active"),
+        ),
     ),
 )
 

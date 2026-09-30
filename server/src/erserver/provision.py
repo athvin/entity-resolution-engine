@@ -235,6 +235,9 @@ def seed_config(
             existing = cursor.fetchone()
         if existing is not None:
             _write_config_file(config_path, str(existing["yaml"]))
+            # Converge on replay: a first attempt that died between the publish
+            # commit and schedule seeding must still end with the schedule.
+            schedules.ensure_maintenance_schedule(connection, org)
             return {"org": org, "version": int(existing["version"]), "replayed": True}
 
         config, _ = configsvc.validate_yaml(yaml_text)
@@ -255,6 +258,7 @@ def seed_config(
         connection.commit()
 
         schedules.sync_correction_schedule(connection, org, config.correction_pass.cadence)
+        schedules.ensure_maintenance_schedule(connection, org)
         return {"org": org, "version": version, "replayed": False}
     finally:
         # An aborted transaction would refuse the unlock statement; the lock

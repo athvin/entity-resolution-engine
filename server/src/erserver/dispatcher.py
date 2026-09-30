@@ -33,42 +33,22 @@ from typing import Any
 import psycopg
 from ulid import ULID
 
-from erserver import db, queue, schedules, steward, webhooks
-from erserver.policy import CANCELING, SUCCEEDED, dispose
+from er.lake.model import PROMOTED_COUNTERS
+from erserver import db, events, notify, queue, schedules, steward
+from erserver.policy import CANCELING, FAILED, SUCCEEDED, dispose
 from erserver.secrets import UnresolvedSecretError, resolve_env
 from erserver.settings import ServerSettings
 
 __all__ = ["RunnerResult", "flush_webhooks", "launch_runner", "run_once", "serve", "tick"]
 
-#: Live webhook delivery threads. Fire-and-forget in production; tests call
-#: :func:`flush_webhooks` to make delivery deterministic.
-_DELIVERIES: list[threading.Thread] = []
+#: Webhook delivery moved to the event spine with the spine itself; this alias
+#: keeps the dispatcher's public name (tests and shutdown call it here).
+flush_webhooks = events.flush_deliveries
 
-
-def _deliver_async(
-    connection: psycopg.Connection, org: str, event: str, payload: dict[str, Any]
-) -> None:
-    """Deliver off the job path: targets read here, HTTP happens on a thread.
-
-    A slow or hostile subscriber must never delay the queue — the DB read uses
-    the caller's connection synchronously (cheap), and everything network-bound
-    runs detached.
-    """
-    subscriptions = webhooks.targets(connection, org, event)
-    if not subscriptions:
-        return
-    thread = threading.Thread(
-        target=webhooks.post_all, args=(subscriptions, org, event, payload), daemon=True
-    )
-    thread.start()
-    _DELIVERIES.append(thread)
-
-
-def flush_webhooks(timeout: float = 10.0) -> None:
-    """Join outstanding deliveries; for tests and orderly shutdown."""
-    for thread in list(_DELIVERIES):
-        thread.join(timeout)
-    _DELIVERIES[:] = [thread for thread in _DELIVERIES if thread.is_alive()]
+#: The stage-record fields kept in ``jobs.progress``: identity and status plus
+#: every S5.2 promoted counter — `review_queue_added` is what the post-run
+#: `review.created` event is summed from, and the rest cost nothing to keep.
+_STAGE_RECORD_FIELDS: tuple[str, ...] = ("stage", "status", "exit_code", *PROMOTED_COUNTERS)
 
 
 #: How often the wait loop samples the runner and the job's state, seconds.
@@ -179,6 +159,8 @@ def run_once(connection: psycopg.Connection, *, launch: LaunchFn = launch_runner
         return False
     org = queue.org_row(connection, job.org)
     if org is None:
+        # No org row means no event stream to record under (org_events references
+        # orgs) and no subscriptions to notify; the job ledger is the record.
         queue.finish(
             connection,
             job.job_id,
@@ -202,6 +184,16 @@ def run_once(connection: psycopg.Connection, *, launch: LaunchFn = launch_runner
             error_class="config",
             error_detail=str(exc),
         )
+        failure = {
+            "job_id": job.job_id,
+            "kind": job.kind,
+            "state": FAILED,
+            "exit_code": 2,
+            "error_class": "config",
+            "run_id": job.run_id,
+        }
+        events.emit(connection, job.org, "job.completed", failure)
+        events.emit(connection, job.org, "job.failed", failure)
         return True
     run_id = job.run_id or str(ULID())
     queue.mark_running(connection, job.job_id, run_id=run_id)
@@ -217,7 +209,7 @@ def run_once(connection: psycopg.Connection, *, launch: LaunchFn = launch_runner
 
     def on_stage(record: dict[str, Any]) -> None:
         stage_records.append(
-            {key: record.get(key) for key in ("stage", "status", "exit_code", "duration_ms")}
+            {key: record.get(key) for key in _STAGE_RECORD_FIELDS if key in record}
         )
         queue.heartbeat(connection, job.job_id, {"stages": stage_records})
 
@@ -233,7 +225,7 @@ def run_once(connection: psycopg.Connection, *, launch: LaunchFn = launch_runner
 
     if result.canceled:
         queue.mark_canceled(connection, job.job_id)
-        _deliver_async(
+        events.emit(
             connection,
             job.org,
             "job.completed",
@@ -276,20 +268,39 @@ def run_once(connection: psycopg.Connection, *, launch: LaunchFn = launch_runner
         # The org's lake exists: onboarding is complete and jobs may flow.
         # ``expected`` makes an operator's re-provision of an active org a no-op.
         queue.set_org_state(connection, job.org, "active", expected="provisioning")
-    _deliver_async(
-        connection,
-        job.org,
-        "job.completed",
-        {
-            "job_id": job.job_id,
-            "kind": job.kind,
-            "state": disposition.state,
-            "outcome": disposition.outcome,
-            "exit_code": exit_code,
-            "error_class": error_class,
-            "run_id": run_id,
-        },
-    )
+    terminal = {
+        "job_id": job.job_id,
+        "kind": job.kind,
+        "state": disposition.state,
+        "outcome": disposition.outcome,
+        "exit_code": exit_code,
+        "error_class": error_class,
+        "run_id": run_id,
+        "schedule_id": job.schedule_id,
+        "attempt": job.attempt,
+    }
+    # `job.completed` on every disposition, states distinguished in the payload —
+    # the original wire contract. `job.failed` is additive: the alarm channel a
+    # subscriber (and the default email recipient list) watches without parsing
+    # states.
+    events.emit(connection, job.org, "job.completed", terminal)
+    if disposition.state == FAILED:
+        events.emit(connection, job.org, "job.failed", terminal)
+    if disposition.state == SUCCEEDED and job.kind in (
+        "run_all_full",
+        "run_all_incremental",
+        "correct",
+    ):
+        opened = sum(int(record.get("review_queue_added") or 0) for record in stage_records)
+        if opened > 0:
+            # One aggregate event per run, never one per review: the count comes
+            # from the streamed S5.2 stage records already in hand — no lake read.
+            events.emit(
+                connection,
+                job.org,
+                "review.created",
+                {"run_id": run_id, "job_id": job.job_id, "count": opened},
+            )
     return True
 
 
@@ -385,10 +396,24 @@ def serve(settings: ServerSettings | None = None) -> None:
     ]
     for thread in workers:
         thread.start()
+
+    def leader_pass(name: str, pass_fn: Callable[[], object]) -> None:
+        # Crash isolation: one failing periodic duty must not starve the others
+        # or kill the loop; the rollback clears any aborted transaction.
+        try:
+            pass_fn()
+        except Exception as exc:  # noqa: BLE001 - the leader loop must survive
+            sys.stderr.write(f"dispatcher: {name} pass failed: {exc}\n")
+            try:
+                leader.rollback()
+            except psycopg.Error:
+                pass
+
     try:
         while True:
-            tick_schedules(leader)
-            drain_staged(leader)
+            leader_pass("schedules", lambda: tick_schedules(leader))
+            leader_pass("staged", lambda: drain_staged(leader))
+            leader_pass("outbox", lambda: notify.drain_outbox(leader, resolved))
             time.sleep(resolved.poll_seconds)
     finally:
         stop.set()

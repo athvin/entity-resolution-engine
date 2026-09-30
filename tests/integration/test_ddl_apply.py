@@ -7,7 +7,7 @@ different claims, and only the second one closes B2.
 
 Each test starts from an empty namespace and leaves one behind (`empty_lake`).
 That is not tidiness -- `lake_conn` is session-scoped by S8.1, `apply` is
-idempotent, and a test that inherited the previous test's fourteen relations
+idempotent, and a test that inherited the previous test's relations
 could not tell `created` from `exists`. It also restores the precondition
 `tests/integration/test_harness_namespace.py` asserts, that the harness yields a
 namespace with zero relations.
@@ -44,7 +44,7 @@ from er.lake.model import DBT_OWNED, DDL_OWNED, REGISTRY, SCHEMA_QUALIFIER
 # S4.0 makes `er init` print one line per relation. Spelled as a literal because a
 # count derived from `DDL_OWNED` would agree with the registry no matter what the
 # registry said.
-DDL_OWNED_COUNT = 15
+DDL_OWNED_COUNT = 16
 
 # The constraints DuckLake supports none of (S5.0). `NOT NULL` is deliberately
 # absent: it is the one constraint a generated statement may carry.
@@ -114,7 +114,7 @@ def _columns(connection: duckdb.DuckDBPyConnection, relation: str) -> dict[str, 
     return dict(live_columns(connection, relation))
 
 
-def test_apply_creates_the_fourteen_ddl_owned_relations(
+def test_apply_creates_every_ddl_owned_relation(
     lake_conn: duckdb.DuckDBPyConnection,
 ) -> None:
     results = apply(lake_conn)

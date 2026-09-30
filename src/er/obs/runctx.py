@@ -303,6 +303,7 @@ class RunContext:
     config_hash: str | None = None
     std_version: str | None = None
     survivorship_version: str | None = None
+    lexicon_hash: str | None = None
     code_version: str = field(default_factory=code_version)
     model_version: str | None = None
     tf_snapshot_id: str | None = None
@@ -472,6 +473,7 @@ class RunContext:
                         "tf_snapshot_id": self.tf_snapshot_id,
                         "std_version": self.std_version,
                         "survivorship_version": self.survivorship_version,
+                        "lexicon_hash": self.lexicon_hash,
                         "code_version": self.code_version,
                         "rebuild_reason": self.rebuild_reason,
                         "snapshot_start": None,

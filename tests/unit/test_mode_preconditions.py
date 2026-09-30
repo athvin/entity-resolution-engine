@@ -43,6 +43,7 @@ BASELINE = RunFingerprint(
     model_version="v0001",
     std_version="1",
     survivorship_version="1",
+    lexicon_hash="c" * 64,
 )
 
 #: What each field becomes when it is the one that drifted.
@@ -51,37 +52,40 @@ DRIFTED: dict[str, str] = {
     "model_version": "v0002",
     "std_version": "2",
     "survivorship_version": "2",
+    "lexicon_hash": "d" * 64,
 }
 
 
 def drift(**changes: str | None) -> RunFingerprint:
     """:data:`BASELINE` with ``changes`` applied — the current run's fingerprint.
 
-    Constructed field by field rather than splatted: `model_version` is the only
-    nullable one (S5), so a `None` anywhere else is a typo in the case rather than a
-    fingerprint worth comparing.
+    Constructed field by field rather than splatted: `model_version` and
+    `lexicon_hash` are the only nullable ones (S5), so a `None` anywhere else is a
+    typo in the case rather than a fingerprint worth comparing.
     """
     values: dict[str, str | None] = {name: BASELINE.value(name) for name in FINGERPRINT_FIELDS}
     values.update(changes)
     config_hash, std_version = values["config_hash"], values["std_version"]
     survivorship_version = values["survivorship_version"]
     if config_hash is None or std_version is None or survivorship_version is None:
-        raise ValueError("only model_version is nullable in a RunFingerprint")
+        raise ValueError("only model_version and lexicon_hash are nullable")
     return RunFingerprint(
         config_hash=config_hash,
         model_version=values["model_version"],
         std_version=std_version,
         survivorship_version=survivorship_version,
+        lexicon_hash=values["lexicon_hash"],
     )
 
 
-def test_the_fingerprint_is_the_four_runs_columns() -> None:
-    """S4.0's three fields plus S5.1's fourth, and nothing else."""
+def test_the_fingerprint_is_the_five_runs_columns() -> None:
+    """S4.0's three fields, S5.1's fourth, the lexicon's fifth — and nothing else."""
     assert FINGERPRINT_FIELDS == (
         "config_hash",
         "model_version",
         "std_version",
         "survivorship_version",
+        "lexicon_hash",
     )
     # The vocabulary this module spells for itself rather than importing back from
     # `er.obs.runctx`, which imports `code_version` from `er.versions` (see the

@@ -5,6 +5,7 @@ import { Check, SkipForward, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { Resolution, ReviewRow } from "@/lib/query/reviews";
+import { FieldCompareGrid } from "./field-compare-grid";
 import { WaterfallChart } from "./waterfall-chart";
 
 export function probabilityLabel(probability: number | null): string {
@@ -19,15 +20,24 @@ export const REASON_COPY: Record<string, string> = {
 };
 
 interface DecisionPanelProps {
+  org: string;
   review: ReviewRow;
   disabled: boolean;
   onResolve: (resolution: Resolution) => void;
   showKeyHints: boolean;
 }
 
-/** The right-hand decision panel (design §5.3): the pair, why it's here, and
- * the evidence waterfall — with the three verdicts. */
-export function DecisionPanel({ review, disabled, onResolve, showKeyHints }: DecisionPanelProps) {
+/** The right-hand decision panel (design §5.3): the pair, why it's here, the
+ * two records field by field, and the evidence waterfall — with the three
+ * verdicts. The grid answers "are these the same person?"; the waterfall
+ * answers "why does the engine think so?". A steward needs both. */
+export function DecisionPanel({
+  org,
+  review,
+  disabled,
+  onResolve,
+  showKeyHints,
+}: DecisionPanelProps) {
   return (
     <Card className="flex h-full flex-col" data-testid="decision-panel">
       <CardHeader className="p-4 pb-2 lg:p-6 lg:pb-2">
@@ -47,7 +57,8 @@ export function DecisionPanel({ review, disabled, onResolve, showKeyHints }: Dec
         </p>
       </CardHeader>
       <CardContent className="flex min-h-0 flex-1 flex-col gap-4 p-4 pt-2 lg:p-6 lg:pt-2">
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
+          <FieldCompareGrid org={org} keyA={review.rec_a_key} keyB={review.rec_b_key} />
           <WaterfallChart blob={review.waterfall} />
         </div>
         <div className="grid grid-cols-3 gap-2">

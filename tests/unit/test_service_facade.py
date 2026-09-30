@@ -146,3 +146,24 @@ def test_correction_on_a_bare_runner_refuses_rather_than_raises() -> None:
     assert outcome.mode == "correction_pass"
     assert outcome.exit_code in (int(ExitCode.CONFIG), int(ExitCode.PRECONDITION))
     assert outcome.stages == ()
+
+
+def test_maintenance_below_the_retention_floor_refuses_as_config() -> None:
+    outcome = service.run_maintenance(
+        config_path=TEST_CONFIG, run_id=SUPPLIED_RUN_ID, retain_days=0
+    )
+
+    assert outcome.run_id == SUPPLIED_RUN_ID
+    assert outcome.mode == "maintain"
+    assert outcome.exit_code == int(ExitCode.CONFIG)
+    assert outcome.stages == ()
+    assert "retain_days" in (outcome.error_detail or "")
+
+
+def test_maintenance_on_a_bare_runner_refuses_rather_than_raises() -> None:
+    outcome = service.run_maintenance(config_path=TEST_CONFIG, run_id=SUPPLIED_RUN_ID)
+
+    assert outcome.run_id == SUPPLIED_RUN_ID
+    assert outcome.mode == "maintain"
+    assert outcome.exit_code == int(ExitCode.CONFIG)
+    assert "ERR_ENV_MISSING" in (outcome.error_detail or "")

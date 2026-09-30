@@ -9,6 +9,8 @@ export function SettingsNav({ org }: { org: string }) {
   const pathname = usePathname();
   const tabs = [
     { href: `/${org}/settings/config`, label: "Config studio" },
+    { href: `/${org}/settings/members`, label: "Members" },
+    { href: `/${org}/settings/profile`, label: "Profile" },
     { href: `/${org}/settings/audit`, label: "Audit" },
   ];
   return (

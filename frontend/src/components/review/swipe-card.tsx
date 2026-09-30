@@ -4,12 +4,14 @@ import { useAnimate } from "motion/react";
 import { motion, useMotionValue, useTransform } from "motion/react";
 
 import type { Resolution, ReviewRow } from "@/lib/query/reviews";
+import { FieldCompareGrid } from "./field-compare-grid";
 import { WaterfallChart } from "./waterfall-chart";
 import { probabilityLabel, REASON_COPY } from "./decision-panel";
 
 const SWIPE_THRESHOLD = 96;
 
 interface SwipeCardProps {
+  org: string;
   review: ReviewRow;
   onResolve: (resolution: Resolution) => void;
 }
@@ -19,7 +21,7 @@ interface SwipeCardProps {
  * persistent button bar below the card stays the accessible non-gesture path;
  * this is the fast lane for thumbs.
  */
-export function SwipeCard({ review, onResolve }: SwipeCardProps) {
+export function SwipeCard({ org, review, onResolve }: SwipeCardProps) {
   const x = useMotionValue(0);
   const rotate = useTransform(x, [-200, 200], [-6, 6]);
   const matchOpacity = useTransform(x, [24, SWIPE_THRESHOLD], [0, 1]);
@@ -73,7 +75,14 @@ export function SwipeCard({ review, onResolve }: SwipeCardProps) {
           {REASON_COPY[review.reason] ?? review.reason}
         </span>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
+        {/* Stacked, not the desktop table: three columns do not fit a thumb. */}
+        <FieldCompareGrid
+          org={org}
+          keyA={review.rec_a_key}
+          keyB={review.rec_b_key}
+          layout="stacked"
+        />
         <WaterfallChart blob={review.waterfall} />
       </div>
     </motion.div>

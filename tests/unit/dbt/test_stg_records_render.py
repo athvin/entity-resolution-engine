@@ -70,7 +70,7 @@ def render(sources: dict[str, object], *, incremental: bool = True) -> str:
     )
     try:
         harness.register_relation("lake.raw_records", "lake.main.raw_records")
-        harness.register_relation("nickname_variants", "nickname_variants")
+        harness.register_relation("lake.nickname_variants", "lake.main.nickname_variants")
         return harness.render(
             MODEL,
             context={

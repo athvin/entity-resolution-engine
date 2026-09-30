@@ -112,7 +112,7 @@ RUNTIME_CHECK_NAMES: Final[tuple[str, ...]] = (
 )
 
 #: What a schema-drift row is called, one per `ddl.py`-owned relation. A prefix and
-#: not a bare relation name, so the fourteen rows read as one family in the table and
+#: not a bare relation name, so the rows read as one family in the table and
 #: cannot collide with an S2.1 component name.
 SCHEMA_DRIFT_PREFIX: Final[str] = "schema drift: "
 

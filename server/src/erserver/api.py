@@ -27,13 +27,25 @@ from typing import Annotated, Any
 import duckdb
 import psycopg
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from ulid import ULID
 
 from er.config.loader import ConfigValidationError, load_config
 from er.errors import ErError, exit_code_for
+from er.golden.master import DEFAULT_MASTER_ELECTION_POLICY, MASTER_ELECTION_POLICIES
 from er.lake.env import EnvError
-from erserver import configsvc, db, provision, queue, readapi, schedules, steward, webhooks
+from erserver import (
+    configsvc,
+    db,
+    events,
+    notify,
+    provision,
+    queue,
+    readapi,
+    schedules,
+    steward,
+    webhooks,
+)
 from erserver.auth import (
     AuthError,
     Principal,
@@ -44,6 +56,7 @@ from erserver.auth import (
     revoke_key,
     with_acting_user,
 )
+from erserver.events import EVENT_TYPES
 from erserver.policy import JOB_KINDS, STATES
 from erserver.secrets import UnresolvedSecretError, resolve_env
 from erserver.settings import ServerSettings
@@ -144,10 +157,28 @@ class ConfigVersionIn(BaseModel):
     yaml: str
 
 
+class EmailIn(BaseModel):
+    to: str = Field(min_length=3)
+    template: str
+    params: dict[str, Any] = Field(default_factory=dict)
+    org: str | None = None
+
+
 class WebhookIn(BaseModel):
     url: str
     events: list[str] = Field(default_factory=lambda: ["job.completed"])
     secret: str | None = None
+
+    @model_validator(mode="after")
+    def _events_in_vocabulary(self) -> "WebhookIn":
+        # A typo'd event name is a subscription that silently matches nothing
+        # forever; the closed vocabulary makes it a 422 instead.
+        unknown = [event for event in self.events if event not in EVENT_TYPES]
+        if unknown:
+            raise ValueError(
+                f"unknown event type(s) {unknown}; the vocabulary is {list(EVENT_TYPES)}"
+            )
+        return self
 
 
 class ReviewResolveIn(BaseModel):
@@ -659,7 +690,27 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
         except queue.OrgNotActiveError as exc:
             raise HTTPException(409, str(exc)) from exc
         audit(conn, caller.effective_actor, org, "config.publish", result)
+        events.emit(conn, org, "config.published", result)
         return result
+
+    # ----------------------------------------------------------------- email
+
+    @app.post("/v1/email", status_code=202)
+    def relay_email(body: EmailIn, conn: Conn, caller: Caller) -> dict[str, Any]:
+        """Queue one platform email (operator relay; docs/backend-design.md §6).
+
+        The BFF's invite and password-reset flows post here so the platform has
+        ONE SMTP stack, one outbox and one retry policy. Durable acceptance,
+        not delivery: an unconfigured relay parks the row as ``queued``.
+        """
+        operator_only(caller)
+        try:
+            outbox_id = notify.queue_email(
+                conn, to=body.to, template=body.template, params=body.params, org=body.org
+            )
+        except (KeyError, ValueError) as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return {"id": outbox_id, "state": "queued"}
 
     # -------------------------------------------------------------- webhooks
 
@@ -678,6 +729,38 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
             {"webhook_id": h.webhook_id, "url": h.url, "events": h.events, "enabled": h.enabled}
             for h in webhooks.list_webhooks(conn, org)
         ]
+
+    @app.get("/v1/orgs/{org}/events")
+    def events_feed(
+        org: str,
+        conn: Conn,
+        caller: Caller,
+        after_id: Annotated[int | None, Query(ge=0)] = None,
+        types: Annotated[str | None, Query()] = None,
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    ) -> dict[str, Any]:
+        """The org event stream, ascending from ``after_id`` (design §6 `/events`).
+
+        The notification feed's read: a consumer keeps its high-water mark and
+        polls "what happened since", so a quiet poll returns an empty page.
+        ``types`` is a comma-separated subset of the event vocabulary.
+        """
+        guard(caller, org, "viewer")
+        org_or_404(conn, org)
+        wanted: list[str] | None = None
+        if types is not None:
+            wanted = [entry.strip() for entry in types.split(",") if entry.strip()]
+            unknown = [entry for entry in wanted if entry not in EVENT_TYPES]
+            if unknown:
+                raise HTTPException(
+                    422,
+                    f"unknown event type(s) {unknown}; the vocabulary is {list(EVENT_TYPES)}",
+                )
+        items = events.list_events(conn, org, after_id=after_id, types=wanted, limit=limit)
+        return {
+            "items": items,
+            "last_id": items[-1]["id"] if items else after_id,
+        }
 
     @app.delete("/v1/orgs/{org}/webhooks/{webhook_id}")
     def delete_webhook(org: str, webhook_id: str, conn: Conn, caller: Caller) -> dict[str, bool]:
@@ -767,6 +850,17 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
             "import.create",
             {"delivery_id": delivery_id, "source": source, "job_id": job.job_id},
         )
+        events.emit(
+            conn,
+            org,
+            "import.received",
+            {
+                "delivery_id": delivery_id,
+                "source": source,
+                "job_id": job.job_id,
+                "bytes": written,
+            },
+        )
         return {"delivery_id": delivery_id, "file": str(target), "job": JobOut.of(job)}
 
     # -------------------------------------------------------------- read path
@@ -795,6 +889,24 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
             raise HTTPException(503, f"tenant lake unavailable: {exc}") from exc
         except duckdb.Error as exc:
             raise HTTPException(503, f"tenant lake query failed: {type(exc).__name__}") from exc
+
+    @app.get("/v1/orgs/{org}/records")
+    def records_lookup(
+        org: str,
+        conn: Conn,
+        caller: Caller,
+        key: Annotated[list[str], Query(min_length=1, max_length=50)],
+    ) -> dict[str, Any]:
+        """Standardized source records by record_key (design §5.3's compare grid).
+
+        Review rows carry pair keys and weight evidence only; this small lookup
+        turns them into field-by-field values. Repeat ``key`` per record, up to
+        50 per call.
+        """
+        guard(caller, org, "viewer")
+        env = org_env(conn, org)
+        with lake_read(env) as lake:
+            return readapi.records_by_key(lake, keys=key)
 
     @app.get("/v1/orgs/{org}/golden-records")
     def golden_records(
@@ -874,6 +986,7 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
         caller: Caller,
         since: Annotated[str | None, Query()] = None,
         format: Annotated[str, Query(pattern="^(json|csv)$")] = "json",
+        policy: Annotated[str, Query()] = DEFAULT_MASTER_ELECTION_POLICY,
     ) -> Response:
         guard(caller, org, "viewer")
         if since is not None:
@@ -883,9 +996,23 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
                 raise HTTPException(
                     422, "since must be an ISO 8601 timestamp, e.g. 2026-09-25T00:00:00"
                 ) from exc
+        if policy not in MASTER_ELECTION_POLICIES:
+            raise HTTPException(
+                422,
+                f"policy must be one of {list(MASTER_ELECTION_POLICIES)}, got {policy!r}",
+            )
+        source_ranks: dict[str, int] | None = None
+        if policy == "source_priority":
+            # The rank order lives in the tenant's published document, not the
+            # lake; parse it through the same loader the engine trusts.
+            active = configsvc.active_config(conn, org)
+            if active is None:
+                raise HTTPException(409, "the org has no published config to read ranks from")
+            document, _ = configsvc.validate_yaml(active["yaml"])
+            source_ranks = {name: spec.priority_rank for name, spec in document.sources.items()}
         env = org_env(conn, org)
         with lake_read(env) as lake:
-            plans = readapi.merge_plans(lake, since=since)
+            plans = readapi.merge_plans(lake, since=since, policy=policy, source_ranks=source_ranks)
         if format == "json":
             import json as json_module
 

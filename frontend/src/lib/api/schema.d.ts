@@ -36,6 +36,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Relay Email
+         * @description Queue one platform email (operator relay; docs/backend-design.md §6).
+         *
+         *     The BFF's invite and password-reset flows post here so the platform has
+         *     ONE SMTP stack, one outbox and one retry policy. Durable acceptance,
+         *     not delivery: an unconfigured relay parks the row as ``queued``.
+         */
+        post: operations["relay_email_v1_email_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/jobs": {
         parameters: {
             query?: never;
@@ -295,6 +319,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/orgs/{org}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Events Feed
+         * @description The org event stream, ascending from ``after_id`` (design §6 `/events`).
+         *
+         *     The notification feed's read: a consumer keeps its high-water mark and
+         *     polls "what happened since", so a quiet poll returns an empty page.
+         *     ``types`` is a comma-separated subset of the event vocabulary.
+         */
+        get: operations["events_feed_v1_orgs__org__events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/orgs/{org}/golden-records": {
         parameters: {
             query?: never;
@@ -501,6 +549,30 @@ export interface paths {
         };
         /** Org Metrics */
         get: operations["org_metrics_v1_orgs__org__metrics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/orgs/{org}/records": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Records Lookup
+         * @description Standardized source records by record_key (design §5.3's compare grid).
+         *
+         *     Review rows carry pair keys and weight evidence only; this small lookup
+         *     turns them into field-by-field values. Repeat ``key`` per record, up to
+         *     50 per call.
+         */
+        get: operations["records_lookup_v1_orgs__org__records_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -808,6 +880,19 @@ export interface components {
             /** Yaml */
             yaml: string;
         };
+        /** EmailIn */
+        EmailIn: {
+            /** Org */
+            org?: string | null;
+            /** Params */
+            params?: {
+                [key: string]: unknown;
+            };
+            /** Template */
+            template: string;
+            /** To */
+            to: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -1011,6 +1096,44 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    relay_email_v1_email_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                Authorization?: string | null;
+                "X-Acting-User"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */
@@ -1663,6 +1786,46 @@ export interface operations {
             };
         };
     };
+    events_feed_v1_orgs__org__events_get: {
+        parameters: {
+            query?: {
+                after_id?: number | null;
+                types?: string | null;
+                limit?: number;
+            };
+            header?: {
+                Authorization?: string | null;
+                "X-Acting-User"?: string | null;
+            };
+            path: {
+                org: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     golden_records_v1_orgs__org__golden_records_get: {
         parameters: {
             query?: {
@@ -2094,6 +2257,7 @@ export interface operations {
             query?: {
                 since?: string | null;
                 format?: string;
+                policy?: string;
             };
             header?: {
                 Authorization?: string | null;
@@ -2129,6 +2293,44 @@ export interface operations {
     org_metrics_v1_orgs__org__metrics_get: {
         parameters: {
             query?: never;
+            header?: {
+                Authorization?: string | null;
+                "X-Acting-User"?: string | null;
+            };
+            path: {
+                org: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    records_lookup_v1_orgs__org__records_get: {
+        parameters: {
+            query: {
+                key: string[];
+            };
             header?: {
                 Authorization?: string | null;
                 "X-Acting-User"?: string | null;

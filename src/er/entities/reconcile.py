@@ -153,6 +153,7 @@ class RebuildReason(StrEnum):
     SURVIVORSHIP_VERSION_BUMP = "survivorship_version_bump"
     CORRECTION_PASS = "correction_pass"
     OPERATOR = "operator"
+    LEXICON_CHANGE = "lexicon_change"
 
 
 #: The order planned events are returned in, and therefore the order ER-074 hands

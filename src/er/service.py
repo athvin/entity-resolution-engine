@@ -34,6 +34,7 @@ from pathlib import Path
 from er.cli import (
     GlobalOptions,
     _execute_chain,
+    _MaintainStage,
     _Outcome,
     _resume_chain,
     _TrainStage,
@@ -55,9 +56,11 @@ from er.lake.catalog import tenant_lock
 from er.lake.ddl import preflight_schema
 from er.lake.ducklake import connect, invocation_session
 from er.lake.env import EnvError, MissingEnvError
+from er.lake.maintain import DEFAULT_RETAIN_DAYS
 from er.lake.model import REBUILD_REASONS, SCHEMA_QUALIFIER
 from er.lake.model_registry import active_model, find_active_model
 from er.resume import ResumePlan, read_resume_rows, resume_plan
+from er.std.lexicon import lexicon_hash, seed_lexicon
 from er.versions import (
     MODE_CORRECTION_PASS,
     MODE_FULL,
@@ -69,12 +72,21 @@ from er.versions import (
 )
 
 __all__ = [
+    "MIN_SERVICE_RETAIN_DAYS",
     "RunOutcome",
     "StageOutcome",
     "run_correction",
+    "run_maintenance",
     "run_pipeline",
     "run_training",
 ]
+
+#: The retention floor a hosted maintenance run may not go under. The read path
+#: pins snapshots per pagination cursor and pools attaches (design §8); both
+#: live minutes, not days, so one day of slack is already generous — but
+#: ``--retain-days 0`` (retain only what runs reference) stays a CLI-only
+#: operator escape hatch, never a value a job queue passes on a tenant's behalf.
+MIN_SERVICE_RETAIN_DAYS = 1
 
 #: The exceptions a refusal is built from: the classified taxonomy plus the two
 #: pre-taxonomy families that carry a bare ``code`` attribute instead
@@ -199,6 +211,14 @@ def _writer_window(options: GlobalOptions, *, resume_run_id: str | None) -> Iter
                 preflight_schema(connection)
         except MissingEnvError:
             pass
+        # Settle reference data before the fingerprint is taken, for the reason
+        # :func:`er.cli._writer_lock` states: a lexicon seeded mid-run would make
+        # this run record an empty-lexicon hash and refuse the next as drift.
+        try:
+            with connect() as connection:
+                seed_lexicon(connection)
+        except MissingEnvError:
+            pass
         yield
 
 
@@ -213,9 +233,11 @@ def _guard(options: GlobalOptions, mode: str, allow_escalate: bool) -> tuple[str
     if document is None or options.config_hash is None:
         return mode, None
     model_version = None
+    current_lexicon = None
     try:
         with connect() as connection:
             active = find_active_model(connection)
+            current_lexicon = lexicon_hash(connection)
         if active is not None:
             model_version = active.model_version
     except MissingEnvError:
@@ -225,6 +247,7 @@ def _guard(options: GlobalOptions, mode: str, allow_escalate: bool) -> tuple[str
         model_version=model_version,
         std_version=document.versions.std_version,
         survivorship_version=document.versions.survivorship_version,
+        lexicon_hash=current_lexicon,
     )
     try:
         with connect() as connection:
@@ -343,6 +366,43 @@ def run_training(
             return _completed(options.run_id, "train", final, outcomes)
     except _REFUSABLE as exc:
         return _refusal(options.run_id, "train", exc)
+
+
+def run_maintenance(
+    *,
+    config_path: Path | None = None,
+    run_id: str | None = None,
+    retain_days: int = DEFAULT_RETAIN_DAYS,
+    id_factory: IdFactory | None = None,
+) -> RunOutcome:
+    """``er lake maintain`` as a call: merge files, expire snapshots, reap retired relations.
+
+    Maintenance is an ordinary writer (the CLI's own judgement): it takes the
+    S4.0b lock window like every mutating command and persists its `runs` /
+    `run_stages` rows, so a scheduled maintenance job is auditable exactly like
+    a pipeline run. A second invocation inside the retention window returns the
+    zero counts :func:`er.lake.maintain.maintain` promises — idempotence is the
+    engine's, not this facade's.
+    """
+    try:
+        options = _options(config_path, run_id, id_factory)
+    except _REFUSABLE as exc:
+        return _refusal(run_id or "", "maintain", exc)
+    try:
+        if retain_days < MIN_SERVICE_RETAIN_DAYS:
+            raise ConfigError(
+                f"retain_days must be >= {MIN_SERVICE_RETAIN_DAYS} for a hosted "
+                f"maintenance run, got {retain_days}; retaining less is the CLI "
+                f"operator's escape hatch, not a schedulable value"
+            )
+        with _writer_window(options, resume_run_id=None):
+            stage = _MaintainStage(
+                retain_days=retain_days, args=("--retain-days", str(retain_days))
+            )
+            final, outcomes = _execute_chain([stage], options, mode="maintain")
+            return _completed(options.run_id, "maintain", final, outcomes)
+    except _REFUSABLE as exc:
+        return _refusal(options.run_id, "maintain", exc)
 
 
 def run_correction(

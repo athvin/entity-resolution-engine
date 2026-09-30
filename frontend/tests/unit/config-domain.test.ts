@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   addSourceBlock,
   applyEdits,
+  blockingWarnings,
   diffLines,
+  isComparisonLevel,
   parseConfig,
   tierForEdits,
 } from "@/lib/domain/config";
@@ -75,6 +77,72 @@ describe("applying studio edits", () => {
   it("labels threshold/survivorship edits tier A", () => {
     expect(tierForEdits({ thresholds: { auto_merge: 0.9, review_low: 0.6 } })).toBe("A");
     expect(tierForEdits({})).toBeNull();
+  });
+
+  it("mirrors the server's tier table: blocking B, comparisons C, C wins", () => {
+    expect(tierForEdits({ blocking: [{ key_type: "k", expr: "email" }] })).toBe("B");
+    expect(tierForEdits({ comparisons: { email: { levels: ["exact"], tf: false } } })).toBe("C");
+    expect(
+      tierForEdits({
+        blocking: [{ key_type: "k", expr: "email" }],
+        comparisons: { email: { levels: ["exact"], tf: false } },
+      }),
+    ).toBe("C");
+  });
+
+  it("rewrites blocking rules while preserving every untouched block", () => {
+    const next = applyEdits(CONFIG, {
+      blocking: [
+        { key_type: "email_exact", expr: "email" },
+        { key_type: "name_dob", expr: "family_name || '|' || birth_date" },
+      ],
+    });
+    expect(parseConfig(next).blocking).toEqual([
+      { key_type: "email_exact", expr: "email" },
+      { key_type: "name_dob", expr: "family_name || '|' || birth_date" },
+    ]);
+    expect(next).toContain("# a load-bearing comment that must survive edits");
+    // The serializer may re-space a flow list; the untouched levels survive.
+    expect(next).toMatch(/levels: \[ ?exact, username_exact, null ?\]/);
+    expect(parseConfig(next).thresholds).toEqual({ auto_merge: 0.95, review_low: 0.6 });
+  });
+
+  it("rewrites one comparison in flow style, null token round-tripping", () => {
+    const next = applyEdits(CONFIG, {
+      comparisons: { email: { levels: ["exact", "jaro_winkler:0.92", "null"], tf: false } },
+    });
+    const view = parseConfig(next);
+    expect(view.comparisons.email).toEqual({
+      levels: ["exact", "jaro_winkler:0.92", "null"],
+      tf: false,
+    });
+    // The rewritten levels stay a one-line flow list, and yaml null is a real null.
+    expect(next).toMatch(/levels: \[.*exact.*jaro_winkler:0\.92.*null.*\]/);
+    expect(next).toContain("# a load-bearing comment that must survive edits");
+  });
+
+  it("warns on the obvious blocking mistakes without pretending to validate", () => {
+    expect(blockingWarnings({ key_type: "k", expr: "email" })).toEqual([]);
+    expect(blockingWarnings({ key_type: "", expr: "" })).toEqual([
+      "key_type is empty",
+      "expr is empty",
+    ]);
+    expect(blockingWarnings({ key_type: "k", expr: "substr(email, 1" })).toContain(
+      "parentheses are unbalanced",
+    );
+    expect(blockingWarnings({ key_type: "k", expr: "mystery_column" })).toContain(
+      "expr references no known standardized column",
+    );
+  });
+
+  it("accepts every engine level token and refuses strangers", () => {
+    for (const token of ["exact", "username_exact", "variant_match", "dob_same_year_month"]) {
+      expect(isComparisonLevel(token)).toBe(true);
+    }
+    expect(isComparisonLevel("null")).toBe(true);
+    expect(isComparisonLevel("jaro_winkler:0.9")).toBe(true);
+    expect(isComparisonLevel("jaro_winkler:1.5")).toBe(false);
+    expect(isComparisonLevel("phonetic")).toBe(false);
   });
 });
 

@@ -119,6 +119,26 @@ def _provision_result(payload: dict[str, Any], exit_code: int) -> RunnerResult:
 # --------------------------------------------------------------------------- #
 
 
+def test_maintenance_schedule_seeding_is_idempotent(conn: psycopg.Connection) -> None:
+    org = f"tenant-{uuid.uuid4().hex[:8]}"
+    queue.ensure_org(conn, org, config_path="/tmp/unused.yaml", env={}, state="active")
+
+    schedules.ensure_maintenance_schedule(conn, org)
+    schedules.ensure_maintenance_schedule(conn, org)
+
+    with conn.cursor() as cursor:
+        cursor.execute(
+            "SELECT kind, cron, enabled FROM schedules WHERE org = %s AND source = %s",
+            (org, schedules.MAINTENANCE_SOURCE),
+        )
+        rows = cursor.fetchall()
+    assert rows == [("lake_maintain", schedules.MAINTENANCE_CRON, True)]
+
+    # System rows are not editable through the api-source guards.
+    row_id = schedules.list_schedules(conn, org)[0].schedule_id
+    assert schedules.set_enabled(conn, org, row_id, enabled=False) is False
+
+
 def test_enqueue_refuses_everything_but_provision_until_active(
     conn: psycopg.Connection, provisioning_org: str
 ) -> None:

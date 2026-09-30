@@ -76,6 +76,7 @@ __all__ = [
     "MODE_INCREMENTAL",
     "PINS",
     "REBUILD_CORRECTION_PASS",
+    "REBUILD_LEXICON_CHANGE",
     "REBUILD_OPERATOR",
     "REBUILD_STD_VERSION_BUMP",
     "REBUILD_SURVIVORSHIP_VERSION_BUMP",
@@ -418,8 +419,9 @@ REBUILD_STD_VERSION_BUMP: Final[str] = "std_version_bump"
 REBUILD_SURVIVORSHIP_VERSION_BUMP: Final[str] = "survivorship_version_bump"
 REBUILD_CORRECTION_PASS: Final[str] = "correction_pass"
 REBUILD_OPERATOR: Final[str] = "operator"
+REBUILD_LEXICON_CHANGE: Final[str] = "lexicon_change"
 
-#: The four `runs` columns the guard compares, in the order S5's DDL declares them —
+#: The five `runs` columns the guard compares, in the order S5's DDL declares them —
 #: which is also the order :class:`RunFingerprint` declares its fields and the order
 #: :func:`last_successful_run` selects them, so the SELECT list is this tuple rather
 #: than a second transcription of it. A field added to the dataclass and not here
@@ -429,10 +431,12 @@ FINGERPRINT_FIELDS: Final[tuple[str, ...]] = (
     "model_version",
     "std_version",
     "survivorship_version",
+    "lexicon_hash",
 )
 
-#: How a NULL renders in a refusal. `model_version` is the one nullable field of the
-#: four (S5), and an empty string beside ``last=`` would read as a value.
+#: How a NULL renders in a refusal. `model_version` and `lexicon_hash` are the two
+#: nullable fields of the five (S5), and an empty string beside ``last=`` would read
+#: as a value.
 UNSET_VALUE: Final[str] = "(unset)"
 
 #: The refusal S4.0 gives exit `3`. It names every field that drifted and both of its
@@ -455,27 +459,33 @@ ESCALATION_MESSAGE: Final[str] = (
 
 @dataclass(frozen=True, slots=True)
 class RunFingerprint:
-    """The four `runs` columns that decide whether an incremental run may proceed.
+    """The five `runs` columns that decide whether an incremental run may proceed.
 
-    S4.0 names three of them and S5.1 adds ``survivorship_version`` by making a bump
+    S4.0 names three of them, S5.1 adds ``survivorship_version`` by making a bump
     of either derived-corpus version "exactly the drift the S4.0 config-drift guard
-    catches". All four are columns of `runs` (S5), which is what lets the prior half
-    of the comparison be *read* rather than reconstructed.
+    catches", and ``lexicon_hash`` joins for the same reason: a lexicon edit changes
+    standardized output while every `content_hash` stays put (S4.2). All five are
+    columns of `runs` (S5), which is what lets the prior half of the comparison be
+    *read* rather than reconstructed.
 
-    ``model_version`` is the one nullable field: a run that never resolved the
-    ``status='active'`` row records NULL, and S5 declares the column nullable for it.
+    Two fields are nullable. ``model_version``: a run that never resolved the
+    ``status='active'`` row records NULL. ``lexicon_hash``: rows written before the
+    lexicon joined the fingerprint carry NULL, and the first post-upgrade
+    incremental therefore refuses with ``lexicon_hash last=(unset)`` — the
+    sanctioned one-time escalation to full, recorded as ``lexicon_change``.
     """
 
     config_hash: str
     model_version: str | None
     std_version: str
     survivorship_version: str
+    lexicon_hash: str | None = None
 
     def value(self, field_name: str) -> str | None:
         """The value of one :data:`FINGERPRINT_FIELDS` entry.
 
         Raises:
-            ValueError: ``field_name`` is not one of the four. A typo would otherwise
+            ValueError: ``field_name`` is not one of the five. A typo would otherwise
                 reach :func:`getattr` and compare two ``None``s as equal, which is the
                 shape of a guard that silently stops guarding.
         """
@@ -654,6 +664,13 @@ def rebuild_reason_for(
         return REBUILD_STD_VERSION_BUMP
     if prior.survivorship_version != current.survivorship_version:
         return REBUILD_SURVIVORSHIP_VERSION_BUMP
+    # After the version bumps: a lexicon edit is the same drift class one bump
+    # names, expressed as data instead of a version string. A prior NULL — a run
+    # recorded before the lexicon joined the fingerprint — is a change too, and
+    # recording its adoption rebuild as `lexicon_change` is what keeps T-INC-2's
+    # accounting honest about why the corpus was rebuilt.
+    if prior.lexicon_hash != current.lexicon_hash:
+        return REBUILD_LEXICON_CHANGE
     return None
 
 
@@ -714,6 +731,7 @@ def last_successful_run(
         model_version=None if row[1] is None else str(row[1]),
         std_version=str(row[2]),
         survivorship_version=str(row[3]),
+        lexicon_hash=None if row[4] is None else str(row[4]),
     )
 
 

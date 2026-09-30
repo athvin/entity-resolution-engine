@@ -18,13 +18,15 @@ import base64
 import json
 import threading
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Final
 
 import duckdb
 
+from er.golden.master import DEFAULT_MASTER_ELECTION_POLICY, masters_cte_sql
+from er.lake.columns import GOLDEN_SURVIVABLE_COLUMNS
 from er.lake.ducklake import connect, current_snapshot
 from er.lake.env import lake_environment
 from er.lake.model import SCHEMA_QUALIFIER
@@ -44,6 +46,7 @@ __all__ = [
     "merge_plans",
     "metrics",
     "open_lake",
+    "records_by_key",
     "review_get",
     "reviews_list",
     "runs_list",
@@ -225,6 +228,54 @@ def golden_list(
         rows = rows[:limit]
         next_cursor = encode_cursor(snap, str(rows[-1]["entity_id"]))
     return rows, snap, next_cursor
+
+
+#: What `records_by_key` returns per record beside its identity: the survivable
+#: attributes plus the validity flags and source timestamp a reviewer weighs.
+_RECORD_ATTRIBUTES: Final[tuple[str, ...]] = (
+    *GOLDEN_SURVIVABLE_COLUMNS,
+    "email_valid",
+    "phone_valid",
+    "updated_at_source",
+)
+
+
+def records_by_key(
+    connection: duckdb.DuckDBPyConnection,
+    *,
+    keys: Sequence[str],
+    snapshot: int | None = None,
+) -> dict[str, Any]:
+    """Standardized source records by ``record_key`` — the compare grid's read.
+
+    Review rows carry pair *keys* and weight evidence only; this is the small
+    lookup that turns them into the field-by-field values a steward compares.
+    Keys that resolve to nothing are simply absent from ``items`` — a retired
+    record is not an error, and the caller renders the absence.
+    """
+    snap = snapshot if snapshot is not None else current_snapshot(connection)
+    if not keys:
+        return {"items": [], "snapshot": snap}
+    placeholders = ", ".join("?" for _ in keys)
+    columns = ", ".join(("record_key", "source_system", "source_record_id", *_RECORD_ATTRIBUTES))
+    rows = _rows(
+        connection,
+        f"SELECT {columns} FROM {_at('int_std_records', snap)} "
+        f"WHERE record_key IN ({placeholders}) ORDER BY record_key",
+        list(keys),
+    )
+    return {
+        "items": [
+            {
+                "record_key": row["record_key"],
+                "source_system": row["source_system"],
+                "source_record_id": row["source_record_id"],
+                "attributes": {name: row[name] for name in _RECORD_ATTRIBUTES},
+            }
+            for row in rows
+        ],
+        "snapshot": snap,
+    }
 
 
 def entity_detail(connection: duckdb.DuckDBPyConnection, entity_id: str) -> dict[str, Any] | None:
@@ -493,45 +544,38 @@ def metrics(connection: duckdb.DuckDBPyConnection) -> dict[str, Any]:
 
 
 def merge_plans(
-    connection: duckdb.DuckDBPyConnection, *, since: str | None = None, limit: int = 500
+    connection: duckdb.DuckDBPyConnection,
+    *,
+    since: str | None = None,
+    limit: int = 500,
+    policy: str = DEFAULT_MASTER_ELECTION_POLICY,
+    source_ranks: Mapping[str, int] | None = None,
 ) -> list[dict[str, Any]]:
     """Actionable merge plans from the event ledger (docs/backend-design.md §10).
 
     One plan per entity that gained members (``merged`` / ``member_added``
-    events, optionally since a watermark): the elected master is the member
-    record contributing the most golden attributes per ``golden_lineage``
-    (tie: lowest record_key — deterministic), the victims are the rest, and
-    the field updates are the golden values themselves. This is the insights-
-    mode export a buyer can act on before writeback exists.
+    events, optionally since a watermark): the elected master is chosen by the
+    named :mod:`er.golden.master` policy (default: the member record
+    contributing the most golden attributes per ``golden_lineage``, tie:
+    lowest record_key — deterministic), the victims are the rest, and the
+    field updates are the golden values themselves. This is the insights-mode
+    export a buyer can act on before writeback exists.
     """
     params: list[Any] = []
     since_clause = ""
     if since is not None:
         since_clause = "AND e.occurred_at >= ?"
         params.append(since)
+    masters_cte = masters_cte_sql(
+        policy, schema_qualifier=SCHEMA_QUALIFIER, source_ranks=source_ranks
+    )
     sql = f"""
         WITH affected AS (
           SELECT DISTINCT e.entity_id
           FROM {SCHEMA_QUALIFIER}.entity_events e
           WHERE e.event_type IN ('merged', 'member_added') {since_clause}
         ),
-        contributions AS (
-          SELECT l.entity_id, l.record_key, count(*) AS won_attributes
-          FROM {SCHEMA_QUALIFIER}.golden_lineage l
-          JOIN affected a ON a.entity_id = l.entity_id
-          GROUP BY l.entity_id, l.record_key
-        ),
-        masters AS (
-          SELECT entity_id, record_key AS master_key
-          FROM (
-            SELECT entity_id, record_key,
-                   row_number() OVER (
-                     PARTITION BY entity_id
-                     ORDER BY won_attributes DESC, record_key
-                   ) AS rank
-            FROM contributions
-          ) WHERE rank = 1
-        )
+        masters AS ({masters_cte})
         SELECT m.entity_id,
                ms.master_key,
                list(m.source_system || ':' || m.source_record_id ORDER BY m.record_key)

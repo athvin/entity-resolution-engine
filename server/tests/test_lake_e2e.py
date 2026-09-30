@@ -348,6 +348,14 @@ def test_full_story_through_the_control_plane(
     assert len(detail["members"]) == group["member_count"] >= 2
     assert detail["lineage"] and detail["events"]
 
+    # The compare-grid lookup: member keys in, standardized values out.
+    member_keys = [member["record_key"] for member in detail["members"][:2]]
+    looked_up = client.get(
+        f"/v1/orgs/{org}/records", params=[("key", key) for key in member_keys], headers=steward
+    ).json()
+    assert [item["record_key"] for item in looked_up["items"]] == sorted(member_keys)
+    assert all("given_name" in item["attributes"] for item in looked_up["items"])
+
     searched = client.get(
         f"/v1/orgs/{org}/golden-records",
         params={"q": detail["golden"]["family_name"], "limit": 10},
