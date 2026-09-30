@@ -58,10 +58,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 MODEL_SOURCE = REPO_ROOT / "src" / "er" / "lake" / "model.py"
 DESIGN_DOC = (REPO_ROOT / "DesignDoc.md").read_text(encoding="utf-8")
 
-# S5's own count of each owner's relations; the ticket and S5.0's table agree on
-# fourteen + eight, and a parser that silently found fewer would make every
-# comparison below vacuous.
-DDL_RELATION_COUNT = 15
+# S5's own count of each owner's relations, kept as literals so a parser that
+# silently found fewer would not make every comparison below vacuous. Bump them
+# with the registry; S5.0's ownership table is the authority they mirror.
+DDL_RELATION_COUNT = 16
 DBT_RELATION_COUNT = 6
 
 # The three `golden_records` columns survivorship does not produce (S5).

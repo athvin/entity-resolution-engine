@@ -45,6 +45,7 @@ MUTATING_INVOCATIONS: dict[str, tuple[str, ...]] = {
     "correct": ("correct",),
     "assert": ("assert", "add", "--a", "crm:1", "--b", "crm:2", "--kind", "always", "--by", "t"),
     "review resolve": ("review", "resolve", "--review-id", "r1", "--as", "match", "--by", "t"),
+    "lexicon": ("lexicon", "add", "--a", "bob", "--b", "robert", "--by", "t"),
     "lake maintain": ("lake", "maintain"),
     "lake reset": ("lake", "reset", "--confirm-tenant", TENANT),
 }

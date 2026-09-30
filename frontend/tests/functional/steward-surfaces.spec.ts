@@ -70,7 +70,10 @@ test.describe("schedules", () => {
     await login(page, USERS.admin);
     await page.goto(`/${ORG_MUTABLE}/runs/schedules`);
     await page.getByTestId("schedule-kind").selectOption("run_all_full");
-    await page.getByTestId("schedule-cron").fill("30 4 * * *");
+    // The raw escape hatch: whatever the API accepts stays reachable.
+    await page.getByTestId("cron-preset-custom").click();
+    await page.getByTestId("cron-custom").fill("30 4 * * *");
+    await expect(page.getByTestId("cron-preview")).toContainText("runs next:");
     await page.getByTestId("schedule-create").click();
     const row = page.getByTestId("schedule-run_all_full");
     await expect(row).toContainText("30 4 * * *");
@@ -82,6 +85,27 @@ test.describe("schedules", () => {
 
     await row.getByRole("button", { name: /Delete/ }).click();
     await expect(page.getByTestId("schedule-run_all_full")).toHaveCount(0);
+  });
+
+  test("the cron builder composes presets and previews the next fires", async ({ page }) => {
+    await login(page, USERS.admin);
+    await page.goto(`/${ORG_MUTABLE}/runs/schedules`);
+    // Daily is the default shape, and the composed expression is always visible.
+    await expect(page.getByTestId("cron-value")).toHaveText("0 6 * * *");
+    await expect(page.getByTestId("cron-preview")).toContainText("UTC");
+
+    await page.getByTestId("cron-preset-weekly").click();
+    await expect(page.getByTestId("cron-value")).toHaveText("0 6 * * 0");
+    await page.getByLabel("Day of week").selectOption("3");
+    await expect(page.getByTestId("cron-value")).toHaveText("0 6 * * 3");
+
+    await page.getByTestId("cron-preset-hourly").click();
+    await expect(page.getByTestId("cron-value")).toHaveText("0 * * * *");
+
+    // An unparseable expression says so instead of pretending to schedule.
+    await page.getByTestId("cron-preset-custom").click();
+    await page.getByTestId("cron-custom").fill("not cron");
+    await expect(page.getByTestId("cron-preview")).toContainText("not a valid 5-field cron");
   });
 
   test("stewards see schedules but cannot edit", async ({ page }) => {

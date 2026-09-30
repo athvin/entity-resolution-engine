@@ -32,6 +32,20 @@ const SCREENS: { name: string; path: string; ready: (page: Page) => Promise<void
     },
   },
   {
+    name: "duplicates",
+    path: `/${ORG}/duplicates`,
+    ready: async (page) => {
+      await expect(page.getByTestId("duplicate-groups")).toBeVisible();
+    },
+  },
+  {
+    name: "members",
+    path: `/${ORG}/settings/members`,
+    ready: async (page) => {
+      await expect(page.getByTestId("members-table")).toBeVisible();
+    },
+  },
+  {
     name: "runs",
     path: `/${ORG}/runs`,
     ready: async (page) => {

@@ -2,7 +2,16 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { SESSION_COOKIE } from "@/lib/auth/constants";
 
-const PUBLIC_PATHS = ["/login", "/api/auth/login"];
+// Reachable without a session. The invite and reset flows are how someone
+// GETS one, and in both the token in the URL is the credential — a redirect to
+// /login would strand the very person the link was sent to.
+const PUBLIC_PATHS = [
+  "/login",
+  "/api/auth/login",
+  "/invite",
+  "/api/invites",
+  "/api/auth/password-reset",
+];
 
 /**
  * Cheap cookie-presence gate only: real session verification happens in route

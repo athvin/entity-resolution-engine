@@ -161,10 +161,11 @@ export function useGoldenRecords(org: string, q: string) {
   });
 }
 
-export function useEntityDetail(org: string, entityId: string) {
+export function useEntityDetail(org: string, entityId: string, enabled = true) {
   return useQuery({
     queryKey: queryKeys.entity(org, entityId),
     queryFn: () => bffFetch<EntityDetail>(`/api/orgs/${org}/golden-records/${entityId}`),
+    enabled: enabled && entityId !== "",
   });
 }
 

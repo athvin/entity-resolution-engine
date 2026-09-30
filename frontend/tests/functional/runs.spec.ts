@@ -30,11 +30,42 @@ test.describe("runs monitor", () => {
 
   test("viewers see runs but no steward controls", async ({ page }) => {
     await login(page, USERS.viewer);
+    await page.goto(`/${ORG}/runs`);
+    // Run-now is a steward action: absent for viewers, never a dead button.
+    await expect(page.getByTestId("run-now")).toHaveCount(0);
     await page.goto(`/${ORG}/runs/${FAILED_JOB}`);
     await expect(page.getByTestId("job-error")).toBeVisible();
     await expect(page.getByTestId("job-resume")).toHaveCount(0);
     await page.goto(`/${ORG}/runs/${RUNNING_JOB}`);
     await expect(page.getByTestId("job-cancel")).toHaveCount(0);
+  });
+
+  test("a steward starts a run now and lands on its job", async ({ page, isMobile }) => {
+    test.skip(isMobile, "state-mutating flow runs once, on the desktop project");
+    await login(page, USERS.steward);
+    // selectall-dev has no job in flight, so the button is live.
+    await page.goto("/selectall-dev/runs");
+    await expect(page.getByTestId("run-now")).toBeEnabled();
+
+    // The caret exposes the other kinds; incremental is the default click.
+    await page.getByTestId("run-now-more").click();
+    await expect(page.getByTestId("run-now-menu")).toContainText("Full re-resolution");
+    await page.getByTestId("run-kind-run_all_full").click();
+
+    await page.waitForURL(/\/runs\/[^/]+$/);
+    await expect(page.getByTestId("job-detail")).toContainText("run_all_full");
+  });
+
+  test("run-now is blocked while a job is already in flight", async ({ page }) => {
+    await login(page, USERS.steward);
+    // acme-dev's fixture holds a running job — one writer per org, so the
+    // button says so instead of queueing a second.
+    await page.goto(`/${ORG}/runs`);
+    await expect(page.getByTestId("run-now")).toBeDisabled();
+    await expect(page.getByTestId("run-now")).toHaveAttribute(
+      "title",
+      /already has one in flight|already in flight/,
+    );
   });
 
   test("a steward cancels and resumes jobs", async ({ page, isMobile }) => {

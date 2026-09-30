@@ -5,7 +5,6 @@ import { CalendarClock, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BffRequestError } from "@/lib/api/client";
@@ -16,8 +15,16 @@ import {
   useSchedules,
   useToggleSchedule,
 } from "@/lib/query/steward";
+import { CronBuilder } from "./cron-builder";
 
-const KINDS = ["run_all_incremental", "run_all_full", "correct"] as const;
+const KINDS = ["run_all_incremental", "run_all_full", "correct", "lake_maintain"] as const;
+
+/** The origin label per schedule source; system rows are never editable. */
+function originLabel(source: string): string {
+  if (source === "config:correction_pass") return "config (correction pass)";
+  if (source === "system:lake_maintain") return "system (weekly maintenance)";
+  return source === "api" ? "manual" : source;
+}
 
 export function SchedulesContent({ org }: { org: string }) {
   const schedules = useSchedules(org);
@@ -27,6 +34,7 @@ export function SchedulesContent({ org }: { org: string }) {
   const session = useSession();
   const isAdmin = effectiveRole(session.data, org) === "admin";
   const [error, setError] = useState<string | null>(null);
+  const [cron, setCron] = useState("0 6 * * *");
 
   return (
     <div
@@ -75,7 +83,7 @@ export function SchedulesContent({ org }: { org: string }) {
                           {schedule.cron}
                         </td>
                         <td className="text-muted-foreground px-4 py-2.5 text-xs">
-                          {system ? "config (correction pass)" : "manual"}
+                          {originLabel(schedule.source)}
                         </td>
                         <td className="text-muted-foreground px-4 py-2.5 text-xs">
                           {schedule.last_enqueued_at ?? "never"}
@@ -136,18 +144,14 @@ export function SchedulesContent({ org }: { org: string }) {
           </CardHeader>
           <CardContent className="p-4 pt-2 lg:p-6 lg:pt-2">
             <form
-              className="flex flex-wrap items-end gap-3"
+              className="flex flex-col gap-3"
               onSubmit={(event) => {
                 event.preventDefault();
                 setError(null);
                 const form = new FormData(event.currentTarget);
                 const kind = form.get("kind");
-                const cron = form.get("cron");
                 create.mutate(
-                  {
-                    kind: typeof kind === "string" ? kind : "",
-                    cron: typeof cron === "string" ? cron : "",
-                  },
+                  { kind: typeof kind === "string" ? kind : "", cron },
                   {
                     onError: (cause) => {
                       setError(
@@ -158,40 +162,33 @@ export function SchedulesContent({ org }: { org: string }) {
                 );
               }}
             >
-              <div className="grid gap-1.5">
-                <Label htmlFor="kind">Kind</Label>
-                <select
-                  id="kind"
-                  name="kind"
-                  className="border-input bg-background h-11 rounded-md border px-3 text-sm lg:h-9"
-                  data-testid="schedule-kind"
-                >
-                  {KINDS.map((kind) => (
-                    <option key={kind} value={kind}>
-                      {kind}
-                    </option>
-                  ))}
-                </select>
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="kind">Kind</Label>
+                  <select
+                    id="kind"
+                    name="kind"
+                    className="border-input bg-background h-11 rounded-md border px-3 text-sm lg:h-9"
+                    data-testid="schedule-kind"
+                  >
+                    {KINDS.map((kind) => (
+                      <option key={kind} value={kind}>
+                        {kind}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <Button type="submit" disabled={create.isPending} data-testid="schedule-create">
+                  Create
+                </Button>
+                {error && (
+                  <p className="text-destructive text-sm" role="alert">
+                    {error}
+                  </p>
+                )}
               </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="cron">Cron (UTC)</Label>
-                <Input
-                  id="cron"
-                  name="cron"
-                  placeholder="0 6 * * *"
-                  required
-                  className="w-40 font-mono"
-                  data-testid="schedule-cron"
-                />
-              </div>
-              <Button type="submit" disabled={create.isPending} data-testid="schedule-create">
-                Create
-              </Button>
-              {error && (
-                <p className="text-destructive text-sm" role="alert">
-                  {error}
-                </p>
-              )}
+              {/* The cron is composed, shown raw, and previewed before it exists. */}
+              <CronBuilder value={cron} onChange={setCron} />
             </form>
           </CardContent>
         </Card>

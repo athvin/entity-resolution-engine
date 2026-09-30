@@ -115,7 +115,9 @@ _REPO_ROOT: Final = Path(__file__).resolve().parents[2]
 
 #: ER-039's seed, and the single vocabulary `variant_match` (S4.2) can compare
 #: through. Read, never written: it is a `protected_paths` entry of this ticket.
-NICKNAME_SEED_PATH: Final = _REPO_ROOT / "dbt" / "seeds" / "nickname_variants.csv"
+# The packaged lexicon CSV `er init` seeds `nickname_variants` from (S5): the
+# generator corrupts with exactly the pairs the pipeline can expand.
+NICKNAME_SEED_PATH: Final = _REPO_ROOT / "src" / "er" / "std" / "nickname_variants.csv"
 
 #: The committed profile document, beside the code that validates it.
 PROFILES_PATH: Final = Path(__file__).resolve().parent / "profiles.yaml"

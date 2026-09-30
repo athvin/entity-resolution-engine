@@ -427,6 +427,7 @@ sources:
           - name: survivorship_version
             data_tests:
               - not_null
+          - name: lexicon_hash
           - name: code_version
             data_tests:
               - not_null
@@ -434,7 +435,7 @@ sources:
             data_tests:
               - accepted_values:
                   arguments:
-                    values: ['correction_pass', 'operator', 'std_version_bump', 'survivorship_version_bump']
+                    values: ['correction_pass', 'lexicon_change', 'operator', 'std_version_bump', 'survivorship_version_bump']
                   config:
                     tags: ['keys']
           - name: snapshot_start
@@ -577,3 +578,35 @@ sources:
                 combination_of_columns: ['run_id', 'entity_id']
               config:
                 tags: ['keys']
+      - name: nickname_variants
+        columns:
+          - name: variant_id
+            data_tests:
+              - not_null
+              - unique:
+                  config:
+                    tags: ['keys']
+          - name: variant_a
+            data_tests:
+              - not_null
+          - name: variant_b
+            data_tests:
+              - not_null
+          - name: active
+            data_tests:
+              - not_null
+          - name: created_by
+            data_tests:
+              - not_null
+          - name: created_at
+            data_tests:
+              - not_null
+          - name: retracted_by
+          - name: retracted_at
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: ['variant_a', 'variant_b']
+              config:
+                tags: ['keys']
+                where: "active"

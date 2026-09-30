@@ -55,16 +55,27 @@ ACTIVE_STATES: tuple[str, ...] = (DISPATCHING, RUNNING, CANCELING)
 #: ``provision`` is tenant lifecycle work (§7): create the tenant's dedicated
 #: catalog database and run ``er init`` — the one kind an org may run before it
 #: is active.
+#: ``lake_maintain`` is the S4.0 maintenance command as a job: merge files,
+#: expire snapshots, reap retired relations — an ordinary writer under the
+#: tenant lock, so a busy tenant answers ``lock_conflict`` and the no-attempt
+#: requeue row below handles it.
 JOB_KINDS: tuple[str, ...] = (
     "run_all_full",
     "run_all_incremental",
     "correct",
     "train",
     "provision",
+    "lake_maintain",
 )
 
 #: Kinds a tenant may put on a cron; provision is lifecycle work, not a cadence.
-SCHEDULABLE_KINDS: tuple[str, ...] = ("run_all_full", "run_all_incremental", "correct", "train")
+SCHEDULABLE_KINDS: tuple[str, ...] = (
+    "run_all_full",
+    "run_all_incremental",
+    "correct",
+    "train",
+    "lake_maintain",
+)
 
 #: Fixed backoff for a lock conflict: the dispatcher serializes per org, so a
 #: conflict means an out-of-band writer (an operator's CLI run) holds the lock.

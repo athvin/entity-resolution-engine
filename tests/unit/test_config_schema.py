@@ -155,6 +155,13 @@ def test_u_seed_is_required_with_error_path(tmp_path: Path) -> None:
             ),
             "sources.priority_rank.duplicate",
         ),
+        (
+            "V11",
+            lambda d: d["sources"].update(
+                _steward={**copy.deepcopy(d["sources"]["crm"]), "priority_rank": 99}
+            ),
+            "sources.name.reserved",
+        ),
         ("V12", lambda d: d["clustering"].update(max_iterations=0), "clustering.bounds"),
         ("V13", lambda d: d["versions"].update(std_version=""), "versions.required"),
         ("V14", lambda d: d["storage"].update(data_path="s3://lake/er"), "storage.uri"),

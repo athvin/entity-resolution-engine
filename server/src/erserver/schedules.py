@@ -23,10 +23,13 @@ from ulid import ULID
 from erserver.policy import SCHEDULABLE_KINDS
 
 __all__ = [
+    "MAINTENANCE_CRON",
+    "MAINTENANCE_SOURCE",
     "Schedule",
     "create",
     "delete",
     "due",
+    "ensure_maintenance_schedule",
     "list_schedules",
     "record_enqueued",
     "sync_correction_schedule",
@@ -158,6 +161,32 @@ def record_enqueued(connection: psycopg.Connection, schedule_id: str, fire_time:
         cursor.execute(
             "UPDATE schedules SET last_enqueued_at = %s WHERE schedule_id = %s",
             (fire_time, schedule_id),
+        )
+    connection.commit()
+
+
+#: The origin string of the system-owned weekly maintenance schedule; like the
+#: correction schedule's ``config:correction_pass``, rows with this source are
+#: never editable through the schedules API (its UPDATE/DELETE guards on 'api').
+MAINTENANCE_SOURCE = "system:lake_maintain"
+
+#: Sundays 04:00 UTC — docs/backend-design.md §14's "weekly `er lake maintain`".
+MAINTENANCE_CRON = "0 4 * * 0"
+
+
+def ensure_maintenance_schedule(connection: psycopg.Connection, org: str) -> None:
+    """Seed the org's weekly lake-maintenance schedule if it has none.
+
+    Idempotent by the ``schedules_one_maintenance_per_org`` partial index: a
+    replayed provision (or a second seeding pass) inserts nothing. Params stay
+    empty so the engine's own retention default applies.
+    """
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO schedules (schedule_id, org, kind, params, cron, source) "
+            "VALUES (%s, %s, 'lake_maintain', '{}'::jsonb, %s, %s) "
+            "ON CONFLICT DO NOTHING",
+            (str(ULID()), org, MAINTENANCE_CRON, MAINTENANCE_SOURCE),
         )
     connection.commit()
 

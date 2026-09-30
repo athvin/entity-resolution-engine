@@ -2,13 +2,24 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { History, Lock, Rocket } from "lucide-react";
+import { History, LayoutTemplate, Rocket } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BffRequestError } from "@/lib/api/client";
-import { applyEdits, diffLines, parseConfig, type Thresholds } from "@/lib/domain/config";
+import {
+  applyEdits,
+  diffLines,
+  parseConfig,
+  TIER_COST_COPY,
+  tierForEdits,
+  type BlockingRule,
+  type ComparisonSpec,
+  type StudioEdits,
+  type Thresholds,
+} from "@/lib/domain/config";
+import { CONFIG_TEMPLATES } from "@/lib/domain/config-templates";
 import {
   useActiveConfig,
   useConfigVersion,
@@ -19,6 +30,8 @@ import {
 } from "@/lib/query/config";
 import { effectiveRole, useSession } from "@/lib/query/hooks";
 import { cn } from "@/lib/utils";
+import { BlockingEditor } from "./blocking-editor";
+import { ComparisonEditor } from "./comparison-editor";
 import { SurvivorshipEditor } from "./survivorship-editor";
 import { ThresholdEditor } from "./threshold-editor";
 
@@ -127,6 +140,9 @@ export function ConfigStudio({ org }: { org: string }) {
 
   const [thresholds, setThresholds] = useState<Thresholds | null>(null);
   const [survivorship, setSurvivorship] = useState<Record<string, string[]> | null>(null);
+  const [blocking, setBlocking] = useState<BlockingRule[] | null>(null);
+  const [comparisons, setComparisons] = useState<Record<string, ComparisonSpec> | null>(null);
+  const [blockingErrorIndex, setBlockingErrorIndex] = useState<number | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
   const [published, setPublished] = useState<{
     version: number;
@@ -140,6 +156,8 @@ export function ConfigStudio({ org }: { org: string }) {
       const view = parseConfig(active.data.yaml);
       if (view.thresholds) setThresholds(view.thresholds);
       setSurvivorship(view.survivorship);
+      setBlocking(view.blocking);
+      setComparisons(view.comparisons);
     }
   }, [active.data, survivorship]);
 
@@ -155,28 +173,49 @@ export function ConfigStudio({ org }: { org: string }) {
   }
 
   const view = parseConfig(active.data.yaml);
-  const dirty =
-    JSON.stringify({ t: view.thresholds, s: view.survivorship }) !==
-    JSON.stringify({ t: thresholds, s: survivorship });
+  // Only sections that actually changed ride the edit — an untouched block
+  // must never cost its rebuild tier.
+  const changed = (a: unknown, b: unknown) => JSON.stringify(a) !== JSON.stringify(b);
+  const edits: StudioEdits = {
+    ...(thresholds && changed(view.thresholds, thresholds) ? { thresholds } : {}),
+    ...(changed(view.survivorship, survivorship) ? { survivorship } : {}),
+    ...(blocking && changed(view.blocking, blocking) ? { blocking } : {}),
+    ...(comparisons && changed(view.comparisons, comparisons) ? { comparisons } : {}),
+  };
+  const tier = tierForEdits(edits);
+  const dirty = tier !== null;
 
   async function publishEdits() {
     setPublishError(null);
     setPublished(null);
-    if (!active.data || !survivorship) return;
-    const yaml = applyEdits(active.data.yaml, {
-      ...(thresholds ? { thresholds } : {}),
-      survivorship,
-    });
+    setBlockingErrorIndex(null);
+    if (!active.data) return;
+    const yaml = applyEdits(active.data.yaml, edits);
     try {
       const draft = await createDraft.mutateAsync(yaml);
       const result = await publish.mutateAsync(draft.version);
       setPublished({ version: result.version, tier: result.tier, jobs: result.jobs_enqueued });
     } catch (error) {
-      setPublishError(
-        error instanceof BffRequestError
-          ? `${error.message}${error.error.pointer ? ` (at ${error.error.pointer})` : ""}`
-          : "publish failed",
-      );
+      if (error instanceof BffRequestError) {
+        // A validation pointer like /blocking/2/expr lands on the row it names.
+        const pointer = error.error.pointer ?? "";
+        const rowMatch = /^\/blocking\/(\d+)/.exec(pointer);
+        if (rowMatch?.[1] !== undefined) setBlockingErrorIndex(Number(rowMatch[1]));
+        setPublishError(`${error.message}${pointer ? ` (at ${pointer})` : ""}`);
+      } else {
+        setPublishError("publish failed");
+      }
+    }
+  }
+
+  function stageTemplate(templateEdits: StudioEdits) {
+    if (templateEdits.thresholds) setThresholds(templateEdits.thresholds);
+    if (templateEdits.survivorship) {
+      setSurvivorship((current) => ({ ...(current ?? {}), ...templateEdits.survivorship }));
+    }
+    if (templateEdits.blocking) setBlocking(templateEdits.blocking);
+    if (templateEdits.comparisons) {
+      setComparisons((current) => ({ ...(current ?? {}), ...templateEdits.comparisons }));
     }
   }
 
@@ -201,7 +240,7 @@ export function ConfigStudio({ org }: { org: string }) {
             <Rocket />
             {createDraft.isPending || publish.isPending
               ? "Publishing…"
-              : "Publish changes · tier A (re-band + re-assemble)"}
+              : `Publish changes · ${TIER_COST_COPY[tier ?? "A"]}`}
           </Button>
         )}
       </div>
@@ -255,49 +294,70 @@ export function ConfigStudio({ org }: { org: string }) {
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card data-testid="blocking-card">
-          <CardHeader className="p-4 pb-1 lg:p-6 lg:pb-2">
-            <SectionTitle>
-              Blocking · tier B <Lock className="ml-1 inline size-3" />
-            </SectionTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-1.5 p-4 pt-2 text-sm lg:p-6 lg:pt-2">
-            {view.blocking.map((rule) => (
-              <div key={rule.key_type} className="flex items-baseline gap-2">
-                <span className="font-medium">{rule.key_type}</span>
-                <code className="text-muted-foreground truncate text-xs">{rule.expr}</code>
-              </div>
-            ))}
-            <p className="text-muted-foreground mt-1 text-xs">
-              Changes matching — costs a match rebuild. Structured editing arrives with the M5
-              hardening pass; read-only here so nothing is a dead end.
-            </p>
-          </CardContent>
-        </Card>
+      <Card data-testid="blocking-card">
+        <CardHeader className="p-4 pb-1 lg:p-6 lg:pb-2">
+          <SectionTitle>Blocking — which records even get compared</SectionTitle>
+        </CardHeader>
+        <CardContent className="p-4 pt-2 lg:p-6 lg:pt-2">
+          {blocking && (
+            <BlockingEditor
+              rules={blocking}
+              onChange={setBlocking}
+              disabled={!isAdmin}
+              errorIndex={blockingErrorIndex}
+            />
+          )}
+        </CardContent>
+      </Card>
 
-        <Card data-testid="comparisons-card">
-          <CardHeader className="p-4 pb-1 lg:p-6 lg:pb-2">
-            <SectionTitle>
-              Comparisons · tier C <Lock className="ml-1 inline size-3" />
-            </SectionTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-1.5 p-4 pt-2 text-sm lg:p-6 lg:pt-2">
-            {Object.entries(view.comparisons).map(([column, spec]) => (
-              <div key={column} className="flex flex-wrap items-baseline gap-2">
-                <span className="font-medium">{column}</span>
-                <span className="text-muted-foreground text-xs">
-                  {spec.levels.join(" → ")}
-                  {spec.tf && " · tf"}
-                </span>
+      <Card data-testid="comparisons-card">
+        <CardHeader className="p-4 pb-1 lg:p-6 lg:pb-2">
+          <SectionTitle>Comparisons — how each field is scored</SectionTitle>
+        </CardHeader>
+        <CardContent className="p-4 pt-2 lg:p-6 lg:pt-2">
+          {comparisons && (
+            <ComparisonEditor
+              comparisons={comparisons}
+              onChange={(column, spec) => {
+                setComparisons((current) => ({ ...(current ?? {}), [column]: spec }));
+              }}
+              disabled={!isAdmin}
+            />
+          )}
+        </CardContent>
+      </Card>
+
+      <Card data-testid="templates-card">
+        <CardHeader className="p-4 pb-1 lg:p-6 lg:pb-2">
+          <SectionTitle>Templates — curated starting points</SectionTitle>
+        </CardHeader>
+        <CardContent className="grid gap-3 p-4 pt-2 lg:grid-cols-3 lg:p-6 lg:pt-2">
+          {CONFIG_TEMPLATES.map((template) => (
+            <div key={template.id} className="flex flex-col gap-2 rounded-md border p-3">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <LayoutTemplate className="text-muted-foreground size-4" />
+                {template.name}
               </div>
-            ))}
-            <p className="text-muted-foreground mt-1 text-xs">
-              Changes scoring — costs a retrain and full rebuild.
-            </p>
-          </CardContent>
-        </Card>
-      </div>
+              <p className="text-muted-foreground flex-1 text-xs">{template.description}</p>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!isAdmin}
+                onClick={() => {
+                  stageTemplate(template.edits);
+                }}
+                data-testid={`stage-template-${template.id}`}
+              >
+                Stage in editor
+              </Button>
+            </div>
+          ))}
+          <p className="text-muted-foreground text-xs lg:col-span-3">
+            Staging fills the editors above — nothing publishes until you do, and the diff is
+            yours to read first.
+          </p>
+        </CardContent>
+      </Card>
 
       <VersionHistory org={org} />
     </div>

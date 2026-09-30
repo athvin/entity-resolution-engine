@@ -1,12 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Inbox, Layers, SkipForward, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { ConfirmTyped } from "@/components/ui/confirm-typed";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  fetchReviewIdsMatching,
+  SELECT_ALL_CAP,
   useBulkResolve,
   useResolveReview,
   useReviewInbox,
@@ -63,9 +66,46 @@ export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolea
   const [cursor, setCursor] = useState(0);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [lastStatus, setLastStatus] = useState<"applied" | "staged" | null>(null);
+  const [selectingAll, setSelectingAll] = useState<number | null>(null);
+  const [selectionNote, setSelectionNote] = useState<string | null>(null);
+  const [pendingBulk, setPendingBulk] = useState<Resolution | null>(null);
 
   const rows = useMemo(() => (inbox.data?.pages ?? []).flatMap((page) => page.items), [inbox.data]);
   const active: ReviewRow | undefined = rows[Math.min(cursor, Math.max(rows.length - 1, 0))];
+  const allLoadedSelected = rows.length > 0 && rows.every((row) => selected.has(row.review_id));
+  const headerCheckbox = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (headerCheckbox.current) {
+      headerCheckbox.current.indeterminate = selected.size > 0 && !allLoadedSelected;
+    }
+  }, [selected.size, allLoadedSelected]);
+
+  const toggleAllLoaded = useCallback(() => {
+    setSelectionNote(null);
+    setSelected((current) => {
+      if (rows.length > 0 && rows.every((row) => current.has(row.review_id))) {
+        return new Set();
+      }
+      return new Set(rows.map((row) => row.review_id));
+    });
+  }, [rows]);
+
+  async function selectWholeFilter() {
+    setSelectingAll(0);
+    setSelectionNote(null);
+    try {
+      const { ids, capped } = await fetchReviewIdsMatching(org, reason, setSelectingAll);
+      setSelected(new Set(ids));
+      setSelectionNote(
+        capped
+          ? `selection capped at ${String(SELECT_ALL_CAP)} — resolve these, then select again`
+          : null,
+      );
+    } finally {
+      setSelectingAll(null);
+    }
+  }
 
   const act = useCallback(
     (resolution: Resolution) => {
@@ -98,6 +138,8 @@ export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolea
         act("no_match");
       } else if (event.key === "x") {
         act("dismiss");
+      } else if (event.key === "a") {
+        toggleAllLoaded();
       } else {
         return;
       }
@@ -107,7 +149,7 @@ export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolea
     return () => {
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [act, rows.length]);
+  }, [act, rows.length, toggleAllLoaded]);
 
   useEffect(() => {
     if (
@@ -129,17 +171,29 @@ export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolea
     });
   }
 
-  function bulkResolve(resolution: Resolution) {
-    if (selected.size === 0) return;
+  const CONFIRM_THRESHOLD = 100;
+
+  function runBulk(resolution: Resolution) {
     bulk.mutate(
       { items: [...selected].map((review_id) => ({ review_id, resolution })) },
       {
         onSuccess: (result) => {
           setLastStatus(result.status);
           setSelected(new Set());
+          setSelectionNote(null);
         },
       },
     );
+  }
+
+  function bulkResolve(resolution: Resolution) {
+    if (selected.size === 0) return;
+    // Past the threshold the cost is restated by the person paying it.
+    if (selected.size > CONFIRM_THRESHOLD) {
+      setPendingBulk(resolution);
+      return;
+    }
+    runBulk(resolution);
   }
 
   if (inbox.isPending) {
@@ -171,6 +225,20 @@ export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolea
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3" data-testid="review-inbox">
       <div className="flex flex-wrap items-center gap-2">
+        {isSteward && (
+          <input
+            ref={headerCheckbox}
+            type="checkbox"
+            checked={allLoadedSelected}
+            onChange={toggleAllLoaded}
+            aria-label={
+              allLoadedSelected ? "Clear selection" : `Select all ${String(rows.length)} loaded`
+            }
+            title="Select all loaded (a)"
+            className="size-4"
+            data-testid="select-all-loaded"
+          />
+        )}
         <select
           value={reason ?? ""}
           onChange={(event) => {
@@ -228,6 +296,61 @@ export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolea
         )}
       </div>
 
+      {isSteward && allLoadedSelected && inbox.hasNextPage && (
+        <Card className="border-primary/30" data-testid="select-all-banner">
+          <CardContent className="flex flex-wrap items-center gap-2 p-3 text-sm">
+            <span>
+              All {rows.length} loaded reviews are selected — more match this filter.
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={selectingAll !== null}
+              onClick={() => {
+                void selectWholeFilter();
+              }}
+              data-testid="select-whole-filter"
+            >
+              {selectingAll !== null
+                ? `collecting… ${String(selectingAll)}`
+                : `Select everything matching this filter (up to ${String(SELECT_ALL_CAP)})`}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+      {selectionNote && (
+        <p className="text-muted-foreground text-xs" data-testid="selection-note">
+          {selectionNote}
+        </p>
+      )}
+
+      <ConfirmTyped
+        open={pendingBulk !== null}
+        title={`Resolve ${String(selected.size)} reviews`}
+        description={
+          pendingBulk === "match"
+            ? "Every selected pair is asserted as a match and reconciled together."
+            : pendingBulk === "no_match"
+              ? "Every selected pair is asserted as never-a-match and reconciled together."
+              : "Every selected review is dismissed without writing an assertion."
+        }
+        expected={String(selected.size)}
+        confirmLabel={
+          pendingBulk === "match"
+            ? "Match all"
+            : pendingBulk === "no_match"
+              ? "Resolve as not matches"
+              : "Dismiss all"
+        }
+        onConfirm={() => {
+          if (pendingBulk) runBulk(pendingBulk);
+          setPendingBulk(null);
+        }}
+        onCancel={() => {
+          setPendingBulk(null);
+        }}
+      />
+
       <StagedBanner org={org} />
 
       {/* Desktop: queue list + decision panel. */}
@@ -279,6 +402,7 @@ export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolea
         </div>
         {active && (
           <DecisionPanel
+            org={org}
             review={active}
             disabled={!isSteward || resolve.isPending}
             onResolve={act}
@@ -291,7 +415,7 @@ export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolea
       <div className="flex min-h-0 flex-1 flex-col gap-3 lg:hidden">
         {active && (
           <>
-            <SwipeCard key={active.review_id} review={active} onResolve={act} />
+            <SwipeCard key={active.review_id} org={org} review={active} onResolve={act} />
             <div className="grid grid-cols-3 gap-2" data-testid="mobile-action-bar">
               <Button
                 disabled={!isSteward || resolve.isPending}

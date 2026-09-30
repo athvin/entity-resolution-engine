@@ -62,6 +62,16 @@ class ServerSettings:
     #: Extra ``ER_*`` entries merged into every auto-provisioned org's env —
     #: the place for shared S3 credentials as ``secret://`` references.
     tenant_env_extra: dict[str, str] = field(default_factory=dict)
+    #: SMTP relay URL: ``smtp://user:pass@host:port`` (STARTTLS) or
+    #: ``smtps://…`` (implicit TLS). The userinfo halves may be ``secret://``
+    #: references, resolved at send time. ``None`` disables sending — outbox
+    #: rows park as ``queued`` and drain when the relay is configured.
+    smtp_url: str | None = None
+    #: The From header of every platform email.
+    email_from: str | None = None
+    #: Link prefix into the frontend, e.g. ``https://app.example.com`` — emails
+    #: carry links, never data.
+    email_base_url: str | None = None
 
     @classmethod
     def from_env(cls) -> ServerSettings:
@@ -89,4 +99,7 @@ class ServerSettings:
             drop_root=os.environ.get("ERSERVER_DROP_ROOT") or None,
             config_template_path=os.environ.get("ERSERVER_CONFIG_TEMPLATE") or None,
             tenant_env_extra=tenant_env_extra,
+            smtp_url=os.environ.get("ERSERVER_SMTP_URL") or None,
+            email_from=os.environ.get("ERSERVER_EMAIL_FROM") or None,
+            email_base_url=os.environ.get("ERSERVER_EMAIL_BASE_URL") or None,
         )

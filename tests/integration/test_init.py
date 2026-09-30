@@ -47,7 +47,7 @@ from er.lake.objectstore import ObjectStore
 # S5.0's ownership table lists exactly this many `ddl.py`-owned relations, and S4.0
 # makes `er init` print one line per relation. A literal, because a count derived
 # from `DDL_OWNED` would agree with the registry no matter what the registry said.
-DDL_OWNED_COUNT = 15
+DDL_OWNED_COUNT = 16
 
 # `configs/test.yaml`'s `tenant:`, which Compose supplies to every service as
 # `ER_CONFIG` (S7.1). `--confirm-tenant` is compared against this value, not against
@@ -165,7 +165,7 @@ def actions(stdout: str) -> list[tuple[str, str]]:
 
 
 def test_init_creates_then_reports_exists(scratch: Scratch) -> None:
-    """AC1: fourteen `created` lines, then fourteen `exists` lines and nothing done."""
+    """AC1: one `created` line per relation, then all `exists` and nothing done."""
     first = run_er("init", env=scratch.env)
 
     assert first.returncode == 0, first.stderr
@@ -278,7 +278,7 @@ def test_reset_exits_3_when_writer_lock_held(
 def test_initialised_lake_fixture_has_only_ddl_owned_relations(
     initialised_lake: duckdb.DuckDBPyConnection,
 ) -> None:
-    """AC7: S8.1 step 3 yields the fourteen ddl.py-owned relations and no dbt one."""
+    """AC7: S8.1 step 3 yields the ddl.py-owned relations and no dbt one."""
     live = relations(initialised_lake)
 
     assert live == set(DDL_OWNED)

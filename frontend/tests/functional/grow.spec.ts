@@ -3,7 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { login, ORG, triageOrg, USERS, wizardOrg } from "./helpers";
 
 test.describe("config studio", () => {
-  test("renders thresholds over the histogram, survivorship, and locked tiers", async ({
+  test("renders thresholds over the histogram, survivorship, and rule editors", async ({
     page,
   }) => {
     await login(page, USERS.viewer);
@@ -12,8 +12,12 @@ test.describe("config studio", () => {
     await expect(page.getByTestId("gray-band")).toBeVisible();
     await expect(page.getByTestId("band-estimate")).toContainText("recently scored pairs");
     await expect(page.getByTestId("chain-email")).toContainText("validated");
-    await expect(page.getByTestId("blocking-card")).toContainText("email_exact");
-    await expect(page.getByTestId("comparisons-card")).toContainText("exact → username_exact");
+    // The rule editors render the config's rules — disabled for viewers, never hidden.
+    const keyType = page.getByLabel("Key type of rule 1");
+    await expect(keyType).toHaveValue("email_exact");
+    await expect(keyType).toBeDisabled();
+    await expect(page.getByTestId("level-email-exact")).toBeVisible();
+    await expect(page.getByTestId("tf-email")).toBeDisabled();
     // Viewers get no publish button and disabled sliders.
     await expect(page.getByTestId("publish-button")).toHaveCount(0);
     await expect(page.getByTestId("slider-auto-merge")).toBeDisabled();
@@ -37,6 +41,35 @@ test.describe("config studio", () => {
     // The history shows both versions with a working diff.
     await page.getByTestId("diff-2").click();
     await expect(page.getByTestId("version-diff")).toContainText("+ ");
+  });
+
+  test("an admin publishes a blocking change as tier B", async ({ page, isMobile }) => {
+    test.skip(isMobile, "the publish journey runs once, on desktop");
+    // Its own mutating org: the tier-A journey publishes on the triage org in
+    // parallel, and two publishes there would race the pinned version number.
+    await login(page, USERS.admin);
+    await page.goto("/selectall-dev/settings/config");
+    await expect(page.getByTestId("blocking-editor")).toBeVisible();
+
+    // The mutable config declares no blocking; adding a first rule arms tier B.
+    await page.getByTestId("blocking-add").click();
+    await page.getByLabel("Key type of rule 1").fill("email_exact");
+    await page.getByLabel("Expression of rule 1").fill("email");
+    await expect(page.getByTestId("publish-button")).toContainText("tier B (match rebuild)");
+    await page.getByTestId("publish-button").click();
+    await expect(page.getByTestId("publish-result")).toContainText("published (tier B)");
+  });
+
+  test("a comparison edit arms the tier C cost label", async ({ page, isMobile }) => {
+    test.skip(isMobile, "identical control; keep the matrix lean");
+    await login(page, USERS.admin);
+    await page.goto(`/${ORG}/settings/config`);
+    await expect(page.getByTestId("comparison-editor")).toBeVisible();
+    // Arm only — publishing would mutate the pixel-asserted acme fixtures.
+    await page.getByTestId("tf-email").click();
+    await expect(page.getByTestId("publish-button")).toContainText(
+      "tier C (retrain + full rebuild)",
+    );
   });
 
   test("survivorship pills reorder and the edit arms publish", async ({

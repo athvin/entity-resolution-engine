@@ -109,15 +109,62 @@ export interface BulkResult {
   apply_job?: string;
 }
 
+/** The server's per-call ceiling on bulk resolve (one writer-lock window). */
+export const BULK_RESOLVE_CHUNK = 200;
+
+/** The honest ceiling on "select everything matching this filter". */
+export const SELECT_ALL_CAP = 2_000;
+
+/**
+ * Walk the inbox cursor pages and collect ids for the whole filter, up to
+ * {@link SELECT_ALL_CAP}. Returns the ids and whether the cap truncated them —
+ * a capped selection must say so rather than read as "everything".
+ */
+export async function fetchReviewIdsMatching(
+  org: string,
+  reason: string | null,
+  onProgress?: (count: number) => void,
+): Promise<{ ids: string[]; capped: boolean }> {
+  const ids: string[] = [];
+  let cursor: string | null = null;
+  for (;;) {
+    const params = new URLSearchParams({ limit: "200" });
+    if (reason) params.set("reason", reason);
+    if (cursor) params.set("cursor", cursor);
+    const page: ReviewPage = await bffFetch<ReviewPage>(
+      `/api/orgs/${org}/reviews?${params.toString()}`,
+    );
+    for (const item of page.items) {
+      if (ids.length >= SELECT_ALL_CAP) return { ids, capped: true };
+      ids.push(item.review_id);
+    }
+    onProgress?.(ids.length);
+    cursor = page.next_cursor;
+    if (cursor === null) return { ids, capped: false };
+  }
+}
+
 export function useBulkResolve(org: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: { items: { review_id: string; resolution: Resolution }[] }) =>
-      bffFetch<BulkResult>(`/api/orgs/${org}/reviews/bulk-resolve`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...body, apply_now: true }),
-      }),
+    // Chunked to the server's 200-per-lock-window cap: a select-all batch posts
+    // sequential chunks, and the honest applied|staged chip reports the last.
+    mutationFn: async (body: { items: { review_id: string; resolution: Resolution }[] }) => {
+      let combined: BulkResult | null = null;
+      for (let start = 0; start < body.items.length; start += BULK_RESOLVE_CHUNK) {
+        const chunk = body.items.slice(start, start + BULK_RESOLVE_CHUNK);
+        const result = await bffFetch<BulkResult>(`/api/orgs/${org}/reviews/bulk-resolve`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ items: chunk, apply_now: true }),
+        });
+        combined = combined
+          ? { ...result, failed: combined.failed + result.failed }
+          : result;
+      }
+      if (combined === null) throw new Error("bulk resolve needs at least one item");
+      return combined;
+    },
     onSuccess: (_result, variables) => {
       const ids = new Set(variables.items.map((item) => item.review_id));
       const snapshots = queryClient.getQueriesData<InfiniteData<ReviewPage>>({
@@ -132,6 +179,36 @@ export function useBulkResolve(org: string) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.metrics(org) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.jobs(org) });
     },
+  });
+}
+
+export interface SourceRecord {
+  record_key: string;
+  source_system: string;
+  source_record_id: string;
+  attributes: Record<string, unknown>;
+}
+
+/**
+ * The two source records behind a review pair — the compare grid's read.
+ *
+ * Review rows carry keys and weight evidence only, so the field-by-field view
+ * needs this lookup. Keyed by the pair so switching rows in the inbox reuses a
+ * cached page instead of refetching what the steward just saw.
+ */
+export function useRecordPair(org: string, keyA: string | null, keyB: string | null) {
+  return useQuery({
+    queryKey: [...queryKeys.org(org), "record-pair", keyA ?? "", keyB ?? ""],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (keyA) params.append("key", keyA);
+      if (keyB) params.append("key", keyB);
+      return bffFetch<{ items: SourceRecord[]; snapshot: number }>(
+        `/api/orgs/${org}/records?${params.toString()}`,
+      );
+    },
+    enabled: keyA !== null && keyB !== null,
+    staleTime: 60_000,
   });
 }
 

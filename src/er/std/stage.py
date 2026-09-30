@@ -138,7 +138,6 @@ def standardize(
             connection, cfg, stage.run_id, full_refresh=full_refresh, changed_only=changed_only
         )
         raw = _count(connection, "raw_records")
-        seeded = _count(connection, "nickname_variants") > 0
         metrics.update(rows_pending=pending, raw_rows_total=raw)
         if changed_only and delta and pending == 0:
             stage.counters.set("rows_in", 0)
@@ -149,9 +148,12 @@ def standardize(
     variables = render_dbt_vars(
         cfg, stage.run_id, {BLOCKING_DBT_VAR: blocking_payload(cfg), "standardize_delta": delta}
     )
-    selector = "staging intermediate" + (" nickname_variants" if not seeded else "")
+    # `nickname_variants` is no longer a node here: it is a `ddl.py`-owned source
+    # seeded by `er init` (S5), so the build selects only the models that read it.
     with span("standardize.dbt_build", unit="records"):
-        result = run_dbt("build", select=selector, vars=variables, full_refresh=full_refresh)
+        result = run_dbt(
+            "build", select="staging intermediate", vars=variables, full_refresh=full_refresh
+        )
     with span("standardize.output_counts", unit="records") as metrics, connect() as connection:
         std = _count(connection, "int_std_records")
         blocking = _count(connection, "int_blocking_keys")

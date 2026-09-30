@@ -114,6 +114,14 @@ from er.obs.runctx import RunContext, StageRun
 from er.resume import ResumePlan, read_resume_rows, resume_plan
 from er.review.assertions import add_assertion, load_assertions_csv, retract_assertion
 from er.review.queue import OPEN, RESOLUTIONS, open_reviews, resolve_review
+from er.std.lexicon import (
+    LexiconPair,
+    add_pair,
+    lexicon_hash,
+    load_pairs,
+    remove_pair,
+    seed_lexicon,
+)
 from er.versions import (
     MODE_CORRECTION_PASS,
     MODE_FULL,
@@ -163,6 +171,7 @@ COMMANDS: tuple[str, ...] = (
     "correct",
     "assert",
     "review",
+    "lexicon",
     "lake maintain",
     "lake reset",
 )
@@ -190,6 +199,11 @@ _ASSERT_VERBS: tuple[str, ...] = ("add", "remove", "load")
 #: declared. ``list`` is the only read-only verb in the S4.7 lock split below.
 _REVIEW_VERBS: tuple[str, ...] = ("list", "resolve")
 
+#: The three sub-verbs S4.0 gives ``er lexicon``, mirroring ``er assert``'s shape:
+#: the lexicon rows are retractable the way assertions are, and the verbs that
+#: write them are declared once for the same reason.
+_LEXICON_VERBS: tuple[str, ...] = ("add", "remove", "load")
+
 #: Every command that mutates the namespace and therefore takes the S4.0b writer
 #: lock, as the path a user types after ``er``. S4.7 names this set; ``assert`` is
 #: here for all three of its verbs, and ``review`` only for ``resolve``.
@@ -206,6 +220,7 @@ MUTATING_COMMANDS: frozenset[str] = frozenset(
         "correct",
         "assert",
         "review resolve",
+        "lexicon",
         "lake maintain",
         "lake reset",
     }
@@ -815,6 +830,83 @@ class _AssertStage:
 
 
 @dataclass(frozen=True)
+class _LexiconStage:
+    """`er lexicon`: the three steward verbs over the `nickname_variants` relation.
+
+    The same shape as :class:`_AssertStage`, and for the same reasons: one
+    :func:`_run_command` stage whose stdout is S4.0's own — `variant_id,
+    variant_a, variant_b, active` — with flag combinations validated here, before
+    a connection is opened.
+
+    ``add`` and ``remove`` return ``10`` when the pair is already in (or already
+    out of) the active set: the lake is in the state the verb asks for, which is
+    "nothing to do", not an error. Editing the lexicon changes standardized
+    output without changing any `content_hash`, so the next incremental run
+    refuses with `lexicon_hash` drift and ``--allow-escalate`` promotes it to a
+    full rebuild recorded as ``lexicon_change`` (S4.0, S5.1).
+    """
+
+    action: str
+    a: str | None = None
+    b: str | None = None
+    by: str | None = None
+    path: Path | None = None
+    args: tuple[str, ...] = ()
+    name: str = "lexicon"
+
+    def _flag(self, value: str | None, flag: str) -> str:
+        """``value``, or the S4.0 exit-``2`` refusal for a verb missing a flag."""
+        if value is None:
+            raise ConfigError(f"er lexicon {self.action}: {flag} is required (S4.0)")
+        return value
+
+    @staticmethod
+    def _emit(pair: LexiconPair, options: GlobalOptions) -> None:
+        _write_stdout(
+            {
+                "variant_id": pair.variant_id,
+                "variant_a": pair.variant_a,
+                "variant_b": pair.variant_b,
+                "active": pair.active,
+            },
+            f"{pair.variant_id} {pair.variant_a} {pair.variant_b} active={pair.active}",
+            options,
+        )
+
+    def run(self, options: GlobalOptions) -> int:
+        if self.action == "add":
+            a, b = self._flag(self.a, "--a"), self._flag(self.b, "--b")
+            by = self._flag(self.by, "--by")
+            with connect() as connection:
+                written = add_pair(connection, a, b, created_by=by)
+            if written is None:
+                return int(ExitCode.NOTHING_TO_DO)
+            self._emit(written, options)
+            return int(ExitCode.SUCCESS)
+        if self.action == "remove":
+            a, b = self._flag(self.a, "--a"), self._flag(self.b, "--b")
+            by = self._flag(self.by, "--by")
+            with connect() as connection:
+                retracted = remove_pair(connection, a, b, retracted_by=by)
+            if retracted is None:
+                return int(ExitCode.NOTHING_TO_DO)
+            self._emit(retracted, options)
+            return int(ExitCode.SUCCESS)
+        if self.action == "load":
+            if self.path is None:
+                raise ConfigError("er lexicon load: --path is required (S4.0)")
+            by = self._flag(self.by, "--by")
+            with connect() as connection:
+                applied = load_pairs(connection, self.path, created_by=by)
+            for written in applied:
+                self._emit(written, options)
+            return int(ExitCode.SUCCESS if applied else ExitCode.NOTHING_TO_DO)
+        raise ConfigError(
+            f"er lexicon: unknown verb {self.action!r}; S4.0 declares {', '.join(_LEXICON_VERBS)}"
+        )
+
+
+@dataclass(frozen=True)
 class _ReviewStage:
     """`er review`: the two steward verbs over the `review_queue` relation (S4.3.5).
 
@@ -997,6 +1089,17 @@ def _preflight_schema(command: str) -> None:
         # piping the command's output must not have to parse a refusal out of it.
         sys.stderr.write(f"{exc}\n")
         raise typer.Exit(exit_code_for(exc)) from exc
+    # Only now, with the schema accepted, may anything be written: S5.1 promises a
+    # breaking difference commits NO snapshot, and seeding is a write. The lexicon
+    # is a matching input (S4.2) whose hash `runs` records, so it is settled here —
+    # under the lock, after the refusal point, and before the fingerprint the
+    # caller is about to take. Seeding it mid-run instead would make that run
+    # record an empty-lexicon hash and refuse the NEXT run as drift.
+    try:
+        with connect() as connection:
+            seed_lexicon(connection)
+    except MissingEnvError:
+        return
 
 
 def _stage_for(name: str, args: Sequence[str] = ()) -> Stage:
@@ -1161,10 +1264,12 @@ def _run_context(
     """
     document = options.config
     tf_snapshot_id = None
+    run_lexicon_hash = None
     if persist and document is not None:
         try:
             with connect() as connection:
                 active = find_active_model(connection)
+                run_lexicon_hash = lexicon_hash(connection)
             if active is not None:
                 model_version = model_version or active.model_version
                 tf_snapshot_id = active.tf_snapshot_id
@@ -1186,6 +1291,7 @@ def _run_context(
         tf_snapshot_id=tf_snapshot_id,
         std_version=None if document is None else document.versions.std_version,
         survivorship_version=(None if document is None else document.versions.survivorship_version),
+        lexicon_hash=run_lexicon_hash,
         rebuild_reason=rebuild_reason,
         source=connect if persist else None,
     )
@@ -1463,9 +1569,11 @@ def _current_fingerprint(options: GlobalOptions) -> RunFingerprint | None:
     if document is None or options.config_hash is None:
         return None
     model_version = None
+    current_lexicon = None
     try:
         with connect() as connection:
             active = find_active_model(connection)
+            current_lexicon = lexicon_hash(connection)
         if active is not None:
             model_version = active.model_version
     except MissingEnvError:
@@ -1476,6 +1584,7 @@ def _current_fingerprint(options: GlobalOptions) -> RunFingerprint | None:
         model_version=model_version,
         std_version=document.versions.std_version,
         survivorship_version=document.versions.survivorship_version,
+        lexicon_hash=current_lexicon,
     )
 
 
@@ -2136,6 +2245,41 @@ def assert_(
         options,
         mode=_MODE_STAGE,
         command="assert",
+        persist=True,
+    )
+
+
+@app.command()
+def lexicon(
+    action: Annotated[str, typer.Argument(help="add | remove | load.")],
+    a: Annotated[str | None, typer.Option("--a", help="One name of the pair.")] = None,
+    b: Annotated[str | None, typer.Option("--b", help="The other name.")] = None,
+    by: Annotated[str | None, typer.Option("--by", help="Steward, for every verb.")] = None,
+    lexicon_path: Annotated[
+        Path | None, typer.Option("--path", help="variant_a,variant_b CSV, for load.")
+    ] = None,
+    config: ConfigOption = None,
+    run_id: RunIdOption = None,
+    json_output: JsonOption = False,
+) -> None:
+    """Add, retract or bulk-load nickname lexicon pairs (S4.2, S5).
+
+    ``--a`` and ``--b`` are unordered: the pair is canonicalised lexically on the
+    way in, so passing them the wrong way round writes a canonical row rather than
+    earning an error. Rows are never deleted — ``remove`` flips ``active`` and
+    stamps ``retracted_by``/``retracted_at``, the `er assert` discipline.
+
+    A lexicon edit changes what standardization emits without changing any
+    delivered byte, so the next incremental run refuses with `lexicon_hash` drift
+    and ``--allow-escalate`` promotes it to the full rebuild the edit costs
+    (recorded as ``rebuild_reason='lexicon_change'``).
+    """
+    options = GlobalOptions.resolve(config_path=config, run_id=run_id, json_output=json_output)
+    _run_command(
+        _LexiconStage(action=action, a=a, b=b, by=by, path=lexicon_path, args=(action,)),
+        options,
+        mode=_MODE_STAGE,
+        command="lexicon",
         persist=True,
     )
 

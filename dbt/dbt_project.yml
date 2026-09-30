@@ -8,7 +8,6 @@ profile: er
 
 model-paths: ["models"]
 macro-paths: ["macros"]
-seed-paths: ["seeds"]
 test-paths: ["tests"]
 
 clean-targets: ["target", "dbt_packages"]
@@ -113,10 +112,9 @@ models:
     enforced: true
   +on_schema_change: append_new_columns
 
-# The seed lands in the lake for the same reason, and one more: `name_variants`
-# reaches it with `ref()` (S4.2), while `er standardize` selects `staging+
-# intermediate` -- a selection that does not include the seed. A seed materialized
-# into the in-memory database would therefore be gone by the time the model that
-# joins it runs, so it is loaded once into the lake and read from there.
-seeds:
-  +database: lake
+# This project has no seeds. The nickname lexicon used to be one; it is now the
+# `ddl.py`-owned `nickname_variants` relation (S5), seeded by `er init` and
+# edited by `er lexicon`, which `name_variants` reads with `source()`. A seed
+# would also have been wrong for it: `er standardize` selects `staging
+# intermediate`, so the seed was never in the selection that builds the models
+# joining it.

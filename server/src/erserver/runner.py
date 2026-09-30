@@ -56,6 +56,11 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
             run_id=run_id,
             if_changed=bool(params.get("if_changed", False)),
         )
+    elif kind == "lake_maintain":
+        maintain_kwargs: dict[str, Any] = {}
+        if "retain_days" in params:
+            maintain_kwargs["retain_days"] = int(params["retain_days"])
+        outcome = service.run_maintenance(config_path=config_path, run_id=run_id, **maintain_kwargs)
     elif kind == "provision":
         from erserver import provision
 

@@ -37,6 +37,42 @@ function goldenRecord(index) {
   };
 }
 
+/**
+ * A standardized source record, as `GET /v1/orgs/{org}/records` returns it.
+ * Derived from the key so any pair the review fixtures name resolves, and the
+ * two sides differ in exactly the fields the compare grid should highlight:
+ * the crm side carries a nickname and no unit, webforms/billing the formal
+ * name and a unit.
+ */
+function sourceRecord(recordKey) {
+  const [system = "crm", recordId = "0"] = recordKey.split(":");
+  const digits = Number(recordId.replace(/\D/g, "") || "0");
+  const formal = system === "crm";
+  const given = formal ? "Bob" : "Robert";
+  const family = FAMILY[digits % FAMILY.length];
+  return {
+    record_key: recordKey,
+    source_system: system,
+    source_record_id: recordId,
+    attributes: {
+      given_name: given,
+      family_name: family,
+      email: `r.${family.toLowerCase()}@example.test`,
+      phone_e164: `+1415555${String(1000 + digits)}`,
+      addr_number: String(100 + digits),
+      addr_street: "Market St",
+      addr_unit: formal ? null : "4B",
+      addr_city: "San Francisco",
+      addr_region: "CA",
+      addr_postal: "94103",
+      birth_date: "1970-01-01",
+      email_valid: true,
+      phone_valid: formal ? null : true,
+      updated_at_source: formal ? "2026-09-01T00:00:00Z" : "2026-09-20T00:00:00Z",
+    },
+  };
+}
+
 const encodeCursor = (snapshot, key) =>
   Buffer.from(JSON.stringify({ s: snapshot, k: key })).toString("base64url");
 const decodeCursor = (cursor) => JSON.parse(Buffer.from(cursor, "base64url").toString());
@@ -417,6 +453,7 @@ export function initialState() {
     "wizard-dev",
     "wizard-ios",
     "wizard-android",
+    "selectall-dev",
   ]) {
     state.orgs[org] = {
       name: org,
@@ -468,6 +505,39 @@ export function initialState() {
       published_at: "2026-09-21T12:00:00Z",
     };
   }
+  // The select-all journey needs a queue deeper than one 50-row page AND past
+  // the 100-item typed-confirm threshold: 130 rows, resolved in one action.
+  state.reviews["selectall-dev"] = Array.from({ length: 130 }, (_, index) => ({
+    review_id: `01jmselrev${String(index + 1).padStart(4, "0")}`,
+    subject_type: "pair",
+    rec_a_key: `crm:S-${String(index)}`,
+    rec_b_key: `billing:B-${String(index)}`,
+    entity_id: null,
+    reason: "gray_band",
+    match_probability: 0.7 + index * 0.002,
+    waterfall: { gamma_email: 1, mw_email: 1.2, mw_birth_date: -0.4, match_weight: 0.8 },
+    status: "open",
+    first_seen_run_id: "01jm0000000000000000000002",
+    last_seen_run_id: "01jm0000000000000000000002",
+    resolved_by: null,
+    resolved_at: null,
+  }));
+  state.metrics["selectall-dev"].open_reviews = 130;
+  // Golden records for the ad-hoc merge journey (its assertion write mutates
+  // state, so it stays off the pixel-asserted acme-dev fixtures).
+  state.golden["selectall-dev"] = Array.from({ length: 12 }, (_, index) => goldenRecord(index));
+  // Scored pairs for the band-browse journey (its flag-write mutates state, so
+  // it stays off the pixel-asserted acme-dev fixtures).
+  state.matchScores["selectall-dev"] = Array.from({ length: 10 }, (_, index) => ({
+    rec_a_key: `crm:S-${String(6000 + index)}`,
+    rec_b_key: `billing:B-${String(8000 + index)}`,
+    match_probability: 0.9 + index * 0.01,
+    model_version: "mv-2026-09-23",
+    evidence: { gamma_email: 2, mw_email: 4.1, match_weight: 5.2 },
+    run_id: "01jm0000000000000000000002",
+    scored_at: "2026-09-24T06:01:00Z",
+  }));
+
   state.audit = {
     "acme-dev": [
       {
@@ -576,18 +646,22 @@ function readBody(req) {
   });
 }
 
-/** The indented body of a yaml document's top-level `sources:` block, or "". */
-function sourcesBlock(yaml) {
+/** The indented body of one top-level yaml block (`sources:`, `blocking:`…), or "". */
+function topBlock(yaml, name) {
   const lines = String(yaml ?? "").split("\n");
-  const start = lines.findIndex((line) => line === "sources:");
+  const start = lines.findIndex((line) => line === `${name}:`);
   if (start < 0) return "";
   const rest = lines.slice(start + 1);
   const end = rest.findIndex((line) => line !== "" && !line.startsWith(" "));
-  // trimEnd: a serializer's trailing newline is not a sources change.
+  // trimEnd: a serializer's trailing newline is not a block change.
   return rest
     .slice(0, end < 0 ? undefined : end)
     .join("\n")
     .trimEnd();
+}
+
+function sourcesBlock(yaml) {
+  return topBlock(yaml, "sources");
 }
 
 /** The source names a config yaml declares, mirroring erserver's import check. */
@@ -923,6 +997,19 @@ const server = http.createServer((req, res) => {
     if ((match = /^\/v1\/orgs\/([^/]+)\/metrics$/.exec(path)) && req.method === "GET") {
       const metrics = state.metrics[match[1]];
       return metrics ? send(res, 200, metrics) : send(res, 503, { detail: "lake unavailable" });
+    }
+    if ((match = /^\/v1\/orgs\/([^/]+)\/records$/.exec(path)) && req.method === "GET") {
+      if (!state.orgs[match[1]]) return send(res, 404, { detail: "not found" });
+      const keys = url.searchParams.getAll("key");
+      if (keys.length === 0) return send(res, 422, { detail: "at least one key is required" });
+      return send(res, 200, {
+        // Sorted by key, like the real snapshot-pinned read.
+        items: keys
+          .filter((key) => !key.startsWith("gone:"))
+          .sort()
+          .map(sourceRecord),
+        snapshot: state.metrics[match[1]]?.snapshot ?? 1,
+      });
     }
     if ((match = /^\/v1\/orgs\/([^/]+)\/golden-records$/.exec(path)) && req.method === "GET") {
       const rows = state.golden[match[1]];
@@ -1331,15 +1418,28 @@ const server = http.createServer((req, res) => {
         (candidate) => candidate.version === Number(match[2]),
       );
       if (!row) return send(res, 404, { detail: "no such version" });
-      // Mirror configsvc.classify_tier for the one block the wizard changes: a
-      // sources: change is tier C and enqueues train + full rebuild; anything
-      // else keeps the tier-A single-job shape the config-studio specs pin.
-      const sourcesChanged = sourcesBlock(row.yaml) !== sourcesBlock(state.configs[org]?.yaml);
+      // Mirror configsvc.classify_tier for the studio-editable blocks:
+      // comparisons/sources → C (train + full rebuild), blocking → B (match
+      // rebuild), anything else keeps the tier-A single-job shape.
+      const previousYaml = state.configs[org]?.yaml;
+      const blockChanged = (name) => topBlock(row.yaml, name) !== topBlock(previousYaml, name);
+      const tierC = blockChanged("sources") || blockChanged("comparisons");
+      const tierB = !tierC && blockChanged("blocking");
       row.state = "published";
-      row.tier = sourcesChanged ? "C" : "A";
+      row.tier = tierC ? "C" : tierB ? "B" : "A";
       row.published_at = "2026-09-27T12:05:00Z";
       state.configs[org] = { ...row };
-      if (sourcesChanged) {
+      if (tierB) {
+        return send(res, 200, {
+          org,
+          version: row.version,
+          tier: "B",
+          changed_blocks: ["blocking"],
+          jobs_enqueued: ["01jmpublishmatchrebuild0j1"],
+          published_by: "user:mock via key:mock",
+        });
+      }
+      if (tierC) {
         const enqueued = ["train", "run_all_full"].map((kind, index) => ({
           job_id: `01jmpublish${kind.replace(/_/g, "")}${String(
             Object.values(state.jobs).flat().length + index,

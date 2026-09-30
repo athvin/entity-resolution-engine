@@ -70,8 +70,9 @@ INTERMEDIATE_SELECTOR = "intermediate"
 TOTAL_ROWS = 23
 
 #: The source whose record AC5 corrects, and the corrected value. A given name absent
-#: from `dbt/seeds/nickname_variants.csv`, so the edit moves `given_name` itself rather
-#: than only rearranging the `name_variants` array around an unchanged head.
+#: from the packaged lexicon CSV (`src/er/std/nickname_variants.csv`), so the edit
+#: moves `given_name` itself rather than only rearranging the `name_variants` array
+#: around an unchanged head.
 CORRECTED_SOURCE = "crm"
 CORRECTED_GIVEN_NAME = "Bartholomew"
 

@@ -76,6 +76,39 @@ test.describe("steward triage", () => {
     await expect(page.getByTestId("last-resolution-chip")).toBeVisible();
   });
 
+  test("select-all walks the whole filter and typed-confirm gates the batch", async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(isMobile, "bulk selection is the desktop grid path");
+    await login(page, USERS.steward);
+    await page.goto("/selectall-dev/reviews");
+    await expect(page.getByTestId("review-list")).toBeVisible();
+
+    // Header checkbox selects every LOADED row; the banner offers the rest.
+    await page.getByTestId("select-all-loaded").check();
+    await expect(page.getByTestId("bulk-bar")).toContainText("50 selected");
+    await expect(page.getByTestId("select-all-banner")).toBeVisible();
+
+    await page.getByTestId("select-whole-filter").click();
+    await expect(page.getByTestId("bulk-bar")).toContainText("130 selected");
+
+    // Past the 100-item threshold the cost is retyped before it is paid.
+    await page.getByTestId("bulk-match").click();
+    const dialog = page.getByRole("dialog", { name: "Resolve 130 reviews" });
+    await expect(dialog).toBeVisible();
+    const confirm = dialog.getByRole("button", { name: "Match all" });
+    await expect(confirm).toBeDisabled();
+    await dialog.getByRole("textbox").fill("130");
+    const [response] = await Promise.all([
+      page.waitForResponse((r) => r.url().includes("/reviews/bulk-resolve")),
+      confirm.click(),
+    ]);
+    const body = (await response.json()) as { failed: number };
+    expect(body.failed).toBe(0);
+    await expect(page.getByTestId("inbox-empty")).toBeVisible({ timeout: 10_000 });
+  });
+
   test("bulk resolve lands as one batch with one reconcile job", async ({
     page,
     isMobile,
