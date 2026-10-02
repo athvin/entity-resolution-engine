@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := check
-.PHONY: spec lint types unit dbt fixtures workflows integration check check-all clean benchmark benchmark-1m benchmark-workloads benchmark-10m frontend frontend-dev frontend-seed frontend-e2e frontend-baselines frontend-dev-reset
+.PHONY: run spec lint types unit dbt fixtures workflows integration check check-all clean benchmark benchmark-1m benchmark-workloads benchmark-10m frontend frontend-dev frontend-seed frontend-e2e frontend-baselines frontend-dev-reset
 
 BENCHMARK_REPEAT ?= 1
 
@@ -58,6 +58,9 @@ frontend:
 	cd frontend && corepack pnpm install --frozen-lockfile && corepack pnpm check && corepack pnpm build && corepack pnpm test:e2e
 
 # Containers (Postgres x2 + MinIO) + erweb migrations + erserver api/dispatcher; blocks.
+run:
+	bash frontend/dev/run.sh
+
 frontend-dev:
 	bash frontend/dev/up.sh
 
