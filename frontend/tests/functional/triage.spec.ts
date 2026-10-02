@@ -52,6 +52,15 @@ test.describe("steward triage", () => {
 
   test("20 reviews by swipe alone", async ({ page, isMobile }, testInfo) => {
     test.skip(!isMobile, "swipe is the phone path");
+    // Twenty sequential gestures, each followed by a poll for the next card:
+    // the cost is twenty round trips through the mobile layout, and the card
+    // carries the whole field-compare grid. The default 30s is Playwright's
+    // generic one rather than a budget chosen for this shape -- it runs in
+    // ~11s locally and WebKit on a loaded CI runner is several times slower,
+    // which left no headroom and timed out mid-loop on all three attempts.
+    // Raised rather than shortened: what this test is for is that twenty
+    // swipes each advance the queue, not that they are quick.
+    test.setTimeout(120_000);
     await openInbox(page, testInfo.project.name);
 
     for (let index = 0; index < 20; index += 1) {

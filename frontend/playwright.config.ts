@@ -53,9 +53,26 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
     },
     {
-      command: "node_modules/.bin/next start --port 3100",
+      // Built here when running locally, because `next start` serves whatever
+      // `.next/` already holds: a direct `pnpm test:e2e` after editing source
+      // otherwise tests the previous bundle and passes. `make frontend` and CI
+      // both build before this point, so they take the plain `start` branch and
+      // pay for no second build.
+      //
+      // This closes the stale-*bundle* half only. `reuseExistingServer` means a
+      // server already listening on 3100 is adopted as-is and this command never
+      // runs, so a server left over from an earlier build keeps serving old code
+      // — the same is true of the mock erserver above. `pnpm test:e2e:fresh`
+      // is the one-command way out: it kills both and starts over.
+      command: process.env.CI
+        ? "node_modules/.bin/next start --port 3100"
+        : "node_modules/.bin/next build && node_modules/.bin/next start --port 3100",
       port: 3100,
       reuseExistingServer: !process.env.CI,
+      // The default is 60s, which a cold `next build` exceeds. CI keeps the
+      // default: there the command is `start` alone, and a start that needs
+      // minutes is a failure worth surfacing as one.
+      ...(process.env.CI ? {} : { timeout: 300_000 }),
       env: {
         ERSERVER_BASE_URL: "http://localhost:8010",
         ERSERVER_OPERATOR_TOKEN: "mock-operator-token",

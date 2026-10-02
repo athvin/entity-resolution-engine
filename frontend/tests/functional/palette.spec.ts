@@ -40,6 +40,41 @@ test.describe("command palette", () => {
   });
 });
 
+test.describe("palette — runs", () => {
+  test("a steward starts a run from the palette and lands on its job", async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(isMobile, "state-mutating flow runs once, on the desktop project");
+    await login(page, USERS.steward);
+    // A private org: starting a run occupies the workspace's single writer
+    // slot, so sharing one with the Runs page's Run-now test would disable
+    // whichever button ran second.
+    await page.goto("/palette-dev/dashboard");
+    await page.getByTestId("open-palette").click();
+    await page.getByPlaceholder("Search records, pages, commands…").fill("run now");
+
+    // All three kinds answer to "run now" — the Runs page's split button and
+    // this list are one shared vocabulary.
+    await expect(page.getByRole("option", { name: /Incremental run/ })).toBeVisible();
+    await expect(page.getByRole("option", { name: /Correction pass/ })).toBeVisible();
+    await page.getByRole("option", { name: /Full re-resolution/ }).click();
+
+    await page.waitForURL(/\/runs\/[^/]+$/);
+    await expect(page.getByTestId("job-detail")).toContainText("run_all_full");
+  });
+
+  test("viewers get no run commands", async ({ page }) => {
+    await login(page, USERS.viewer);
+    await page.goto(`/${ORG}/dashboard`);
+    await page.getByTestId("open-palette").click();
+    await page.getByPlaceholder("Search records, pages, commands…").fill("run now");
+    // Starting a run is a steward action, so it is absent rather than offered
+    // and refused — the same rule the Runs page follows.
+    await expect(page.getByRole("option", { name: /Incremental run/ })).toHaveCount(0);
+  });
+});
+
 test.describe("palette — operator", () => {
   test("a super admin can view-as straight from the palette", async ({ page }) => {
     await login(page, USERS.superAdmin);

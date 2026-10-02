@@ -76,9 +76,11 @@ def derive_config(drop_root: Path) -> Path:
     return config_path
 
 
-def run_checked(command: list[str], env: dict[str, str] | None = None) -> None:
+def run_checked(
+    command: list[str], env: dict[str, str] | None = None, cwd: Path = REPO_ROOT
+) -> None:
     merged = {**os.environ, **(env or {})}
-    result = subprocess.run(command, capture_output=True, text=True, cwd=REPO_ROOT, env=merged)
+    result = subprocess.run(command, capture_output=True, text=True, cwd=cwd, env=merged)
     if result.returncode != 0:
         sys.stderr.write(result.stderr[-2000:])
         raise SystemExit(f"command failed: {' '.join(command)}")
@@ -236,17 +238,16 @@ def main() -> None:
     )
 
     print("==> creating BFF users (erweb schema)")
+    # Plain `node`, from inside frontend/, rather than `corepack pnpm --dir … exec`.
+    # corepack picks its pnpm from the *cwd's* manifest: invoked at the repo root it
+    # found a global pnpm, which then read frontend's `packageManager: pnpm@10.34.5`
+    # and refused to run as the wrong version (ERR_PNPM_BAD_PM_VERSION) -- failing the
+    # final step of a seed whose engine work had all succeeded. The indirection bought
+    # nothing: this script needs node and frontend/node_modules, both of which node
+    # resolves from the script's own location.
     run_checked(
-        [
-            "corepack",
-            "pnpm",
-            "--dir",
-            str(REPO_ROOT / "frontend"),
-            "exec",
-            "node",
-            "dev/create-users.mjs",
-            str(STATE / "keys.json"),
-        ]
+        ["node", "dev/create-users.mjs", str(STATE / "keys.json")],
+        cwd=REPO_ROOT / "frontend",
     )
 
     print("==> seeded")

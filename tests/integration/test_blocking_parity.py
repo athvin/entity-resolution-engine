@@ -437,14 +437,14 @@ def test_no_splink_relations_in_lake(
     standardized: duckdb.DuckDBPyConnection, cfg: Config, settings: dict[str, Any]
 ) -> None:
     """AC6: blocking a real corpus through `splink_api` leaves nothing of Splink's in the lake."""
+    # Non-vacuity is asserted inside `splink_blocked_pairs`, which counts its scratch
+    # relations before releasing them. It cannot be checked from here any more: the
+    # helper now releases the api it opens -- it runs on the session connection, and
+    # `__splink__` relations in the in-memory primary database are cleaned by nothing,
+    # so leaving them behind handed the next module this one's scratch. After the
+    # release the count is zero whether Splink did real work or none at all, so the
+    # guard moved to the one place that can still tell the difference.
     assert splink_pairs(standardized, cfg, settings)
-
-    materialized = scalar(
-        standardized,
-        "SELECT count(*) FROM duckdb_tables() WHERE database_name = current_database() "
-        "AND table_name LIKE '__splink__%'",
-    )
-    assert materialized > 0, "Splink materialized nothing; the leak check would be vacuous"
 
     assert leaked_splink_relations(standardized) == ()
     assert_no_splink_relations_in_lake(standardized)

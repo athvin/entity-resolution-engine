@@ -40,6 +40,10 @@ export const TRIAGE_ORGS = [
   // The select-all journey resolves its whole 130-review queue in one action,
   // so it gets a private org like every other mutating flow.
   "selectall-dev",
+  // Starting a run from the palette occupies the org's single writer slot, so
+  // it cannot share one with the Runs page's own Run-now test: whichever ran
+  // second would find the button correctly disabled and fail.
+  "palette-dev",
 ] as const;
 
 export async function installTestFixtures(db: Db): Promise<void> {

@@ -5,13 +5,18 @@ import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { useQuery } from "@tanstack/react-query";
 import { Command } from "cmdk";
-import { Building2, Eye, LogOut, Moon, ShieldCheck, Sun, User } from "lucide-react";
+import { Building2, Eye, LogOut, Moon, Play, ShieldCheck, Sun, User } from "lucide-react";
 
 import { bffFetch } from "@/lib/api/client";
 import type { Membership, SessionUser } from "@/lib/auth/types";
+import { useToast } from "@/components/ui/toaster";
+import { RUN_KINDS, type RunKind } from "@/lib/domain/run-kinds";
 import { NAV_ITEMS } from "@/lib/nav";
 import { useImpersonation, type AdminOrgRow } from "@/lib/query/admin";
-import type { GoldenPage } from "@/lib/query/hooks";
+import { effectiveRole, useSession, type GoldenPage } from "@/lib/query/hooks";
+import { useSubmitJob } from "@/lib/query/steward";
+
+const ROLE_RANK = { viewer: 0, steward: 1, admin: 2 } as const;
 
 interface CommandPaletteProps {
   org: string;
@@ -57,6 +62,15 @@ export function CommandPalette({
   const { enter, exit } = useImpersonation();
   const [input, setInput] = useState("");
   const q = useDebounced(input.trim(), 200);
+  const submit = useSubmitJob(org);
+  const toast = useToast();
+  // Through `effectiveRole` and the session, not the `memberships` prop: that
+  // prop carries real memberships, and under impersonation the role that
+  // decides what may be started is the impersonated one. Same call the Runs
+  // page makes, so the two surfaces cannot disagree about who may run.
+  const session = useSession();
+  const role = effectiveRole(session.data, org);
+  const isSteward = role !== null && ROLE_RANK[role] >= ROLE_RANK.steward;
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -90,6 +104,31 @@ export function CommandPalette({
     onOpenChange(false);
     setInput("");
     action();
+  }
+
+  /** Start a run from the palette, mirroring the Runs page's split button.
+   *
+   * The palette closes on select, so the outcome is reported by a toast rather
+   * than the inline error the Runs page can show — including the one an
+   * operator most needs to see, that the org already has a run in flight. The
+   * success path lands on the new job's page, which is where the Runs button
+   * goes too: starting a run and not being shown it is a dead end. */
+  function startRun(entry: RunKind) {
+    submit.mutate(
+      { kind: entry.kind, params: entry.params },
+      {
+        onSuccess: (result) => {
+          router.push(`/${org}/runs/${result.job_id}`);
+        },
+        onError: () => {
+          toast({
+            title: `Could not start the ${entry.label.toLowerCase()}`,
+            description: "the org may already have a run in flight",
+            tone: "destructive",
+          });
+        },
+      },
+    );
   }
 
   return (
@@ -136,6 +175,29 @@ export function CommandPalette({
                 </Command.Item>
               );
             })}
+          </Command.Group>
+        )}
+
+        {isSteward && (
+          <Command.Group heading="Run" className={GROUP_CLASS}>
+            {RUN_KINDS.map((entry) => (
+              <Command.Item
+                key={entry.kind}
+                // Searchable by what a steward types: "run now" finds all three.
+                value={`run now ${entry.label}`}
+                disabled={submit.isPending}
+                onSelect={() => {
+                  run(() => {
+                    startRun(entry);
+                  });
+                }}
+                className={ITEM_CLASS}
+                data-testid={`palette-run-${entry.kind}`}
+              >
+                <Play className="size-4" />
+                {entry.label}
+              </Command.Item>
+            ))}
           </Command.Group>
         )}
 
