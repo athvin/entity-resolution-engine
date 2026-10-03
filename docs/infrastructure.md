@@ -87,8 +87,8 @@ These are not preferences. Each comes from the existing implementation, and the 
 | The job queue and the tenant advisory lock are described as needing one Postgres cluster | [backend-design.md](backend-design.md) §5, [src/er/lake/catalog.py](../src/er/lake/catalog.py) | One Postgres *instance* per environment holding the control-plane DB and every tenant catalog DB. **Worth verifying** — PostgreSQL advisory locks are scoped per database, not per cluster, so this may be over-stated (§18.1). The design satisfies it either way |
 | `ERSERVER_CONFIG_ROOT` and `ERSERVER_DROP_ROOT` are written by the API and read by the runner — and the dispatcher — *by path* | [server/src/erserver/api.py](../server/src/erserver/api.py) import endpoint, [configsvc.py](../server/src/erserver/configsvc.py); `drain_staged` re-loads an org's config each idle pass at [server/src/erserver/dispatcher.py:352](../server/src/erserver/dispatcher.py) | A shared writable filesystem — EFS with the CSI driver — mounted by the API, the dispatcher, *and every runner Job* (§6.2). Pod-local storage cannot work, and this is what blocks a stateless multi-replica API today |
 | DuckDB's temp directory is CWD-relative (`/app/.tmp`, `/app/dbt/.tmp`) and no environment variable relocates it | [benchmarks/storage_sampler.py:29](../benchmarks/storage_sampler.py) | Ephemeral volumes mounted at exactly those two paths (§5.3) |
-| 141.48 GiB of *live* spill sampled on the 10M-record full reload, at a **4 GB** DuckDB memory limit in a 10 GiB container | [performance-10m-100k.md](performance-10m-100k.md) | NVMe instance store, not EBS. Ten million records fitting in 10 GiB is also why sizing is CPU-tiered rather than memory-tiered (§6.5) |
-| 2 → 6 DuckDB threads cut that same run **40%** with peak memory flat (9.14 vs 9.37 GiB) | [performance-thread-scaling.md](performance-thread-scaling.md) | vCPU is the time lever and memory is nearly constant in corpus size. Compute-optimized `c6id` nodes, not memory-optimized `r6id` (§5, §6.5) |
+| 141.48 GiB of *live* spill sampled on the 10M-record full reload, at a **4 GB** DuckDB memory limit in a 10 GiB container | [performance.md](performance.md) | NVMe instance store, not EBS. Ten million records fitting in 10 GiB is also why sizing is CPU-tiered rather than memory-tiered (§6.5) |
+| 2 → 6 DuckDB threads cut that same run **40%** with peak memory flat (9.14 vs 9.37 GiB) | [performance.md](performance.md) | vCPU is the time lever and memory is nearly constant in corpus size. Compute-optimized `c6id` nodes, not memory-optimized `r6id` (§5, §6.5) |
 | The dispatcher's startup reaper assumes it is alone | `queue.reap_stale(leader)` at [server/src/erserver/dispatcher.py:379](../server/src/erserver/dispatcher.py) | `replicas: 1` with `strategy: Recreate` — never RollingUpdate |
 | One active job per org, enforced by the `jobs_one_active_per_org` partial unique index | [server/src/erserver/db.py](../server/src/erserver/db.py) | A tenant scales *up*, never *out*. Size one runner to the largest tenant; scale `ERSERVER_CONCURRENCY` only for cross-tenant throughput |
 | Exit code `None` — killed, OOM, evicted — requeues with `--resume`, bounded by `max_attempts` (default 3) with exponential backoff | `dispose()` in [server/src/erserver/policy.py](../server/src/erserver/policy.py) | Spot interruption is survivable by design, which is what makes spot safe for runners. It is also why eviction is *expensive but bounded* rather than fatal — see §5.3 |
@@ -329,8 +329,8 @@ The evidence, all from runs already in the repo:
 
 | Measurement | Source | What it shows |
 |---|---|---|
-| 10M-record full reload: 2 vCPU, 2 DuckDB threads, **4 GB** DuckDB limit, 10 GiB container. Peak container memory **9.37 GiB** | [performance-10m-100k.md](performance-10m-100k.md) | Ten million records completed in a 10 GiB container |
-| Same corpus, 2 → 6 threads at the **same 4 GB** limit: 6,458s → 3,857s (**−40%**), peak memory 9.14 GiB | [performance-thread-scaling.md](performance-thread-scaling.md) | Threads buy time. Memory stayed flat while runtime fell 40% |
+| 10M-record full reload: 2 vCPU, 2 DuckDB threads, **4 GB** DuckDB limit, 10 GiB container. Peak container memory **9.37 GiB** | [performance.md](performance.md) | Ten million records completed in a 10 GiB container |
+| Same corpus, 2 → 6 threads at the **same 4 GB** limit: 6,458s → 3,857s (**−40%**), peak memory 9.14 GiB | [performance.md](performance.md) | Threads buy time. Memory stayed flat while runtime fell 40% |
 | 1M, 2 threads/4 GB → 6 threads/6 GB: 96.2s → 75.1s (−22%), peak 4.06 → 4.26 GiB | [performance.md](performance.md) | Same shape an order of magnitude down |
 
 The reason memory stays flat is that DuckDB **spills**, and spill is why §5.3 exists. A larger corpus does not need proportionally more RAM; it needs somewhere to put 141 GiB of temporary files. Local NVMe comes free with the instance while RAM is billed, so the economically correct posture is to *embrace* spilling to instance store rather than buying memory to avoid it.
@@ -783,7 +783,7 @@ make refresh-dev DEV=alice ORG=acme
   4. er ingest in Alice's namespace, then run_all_full
 ```
 
-Full raw fidelity on the records, using only supported engine paths. It loses prod's snapshot history and costs a pipeline run — roughly 90s at 1M records, or about 1h04m at 10M with 6 threads ([performance-thread-scaling.md](performance-thread-scaling.md)).
+Full raw fidelity on the records, using only supported engine paths. It loses prod's snapshot history and costs a pipeline run — roughly 90s at 1M records, or about 1h04m at 10M with 6 threads ([performance.md](performance.md)).
 
 Because dev Postgres is a pod rather than Aurora (§7.1), the catalog side of a refresh is `pg_dump`/`pg_restore` rather than a snapshot share. For a single tenant's catalog that is the simpler path anyway.
 
@@ -958,7 +958,7 @@ The trade is deliberate: this is allocated cost at a blended rate, not billed co
 
 This is not a pricing model. The purpose is narrower and more useful: **a signal that tells you when the current design has stopped working for some customer shape, early enough to do something about it.** What to charge is a separate question that does not need infrastructure to answer.
 
-The business half needs no new instrumentation. §10.1 establishes `runs`/`run_stages` as the system of record for business counters, and the typed set in `PROMOTED_COUNTERS` ([src/er/obs/counters.py](../src/er/obs/counters.py), [src/er/lake/model.py](../src/er/lake/model.py)) is already written per stage per run — the 10M-row reload recorded 3,898,183 golden records, 23,389,098 lineage rows, and 567,184,685 candidate pairs with nothing added ([performance-10m-100k.md](performance-10m-100k.md)). Joined to §16.2's per-run cost, that is three questions and one SQL query.
+The business half needs no new instrumentation. §10.1 establishes `runs`/`run_stages` as the system of record for business counters, and the typed set in `PROMOTED_COUNTERS` ([src/er/obs/counters.py](../src/er/obs/counters.py), [src/er/lake/model.py](../src/er/lake/model.py)) is already written per stage per run — the 10M-row reload recorded 3,898,183 golden records, 23,389,098 lineage rows, and 567,184,685 candidate pairs with nothing added ([performance.md](performance.md)). Joined to §16.2's per-run cost, that is three questions and one SQL query.
 
 **1. Is any tenant disproportionate?** Cost per tenant per month, ranked. Normalize by records processed — **cost per million records** — so a large tenant and a small one are comparable. A big tenant costing more is not a signal; a *small* tenant costing like a big one is.
 

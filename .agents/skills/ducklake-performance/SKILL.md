@@ -7,7 +7,7 @@ description: Analyze this repository's full-reload and incremental DuckDB/DuckLa
 
 Treat **full reloads and incremental runs as separate primary workloads**. Report
 both, including a regression in either one. Follow `DesignDoc.md` contracts and
-`docs/performance-profiling-plan.md`. Start with evidence; changing layout or moving
+`docs/performance.md`. Start with evidence; changing layout or moving
 code to DuckDB requires a measured experiment, not a guess from an operator name.
 
 ## Establish the evidence

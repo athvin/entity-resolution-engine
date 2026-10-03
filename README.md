@@ -59,12 +59,10 @@ profiled trials. Both workloads get independent reports, native DuckDB query fil
 DuckLake storage evidence and output-equivalence checks. See the
 [profiling guide](docs/profiling.md) and repository
 [analysis skill](.agents/skills/ducklake-performance/SKILL.md).
-The first [1M/100K measurements and tuning backlog](docs/performance-profiling-1m-100k.md)
-record a 93.3s reload and a 39.6s incremental delivery on the documented local envelope.
-The follow-up [profile-guided tuning](docs/performance-workload-tuning.md) compares
-three trials per version: medians improve from 94.07s to 91.70s for reload and from
-39.96s to 39.48s for incremental processing. It also records rejected SQL and layout
-experiments, including the cost of ordered and partitioned writes.
+The measured results — current medians (91.70s reload, 39.48s incremental on the
+documented local envelope), the tuning history, the evidence-linked backlog and the
+rejected SQL and layout experiments — are consolidated in the
+[performance record](docs/performance.md).
 
 ## Documentation
 
@@ -81,7 +79,7 @@ experiments, including the cost of ordered and partitioned writes.
 | [Contributing](CONTRIBUTING.md) | Local setup, tests and CI |
 | [Technical specification](DesignDoc.md) | Numbered schemas, algorithms and invariants referenced by tests |
 
-In a [single 1M hard-profile comparison](docs/performance-training-full-load.md),
+In a [single 1M hard-profile comparison](docs/performance.md),
 the experimental 1M EM pair target reduced training from **10.53s to 7.43s** and
 the complete initial load from **97.13s to 91.82s**, with no quality regression on
 that corpus. The reference configuration retains uncapped EM; these measurements

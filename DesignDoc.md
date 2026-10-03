@@ -1911,7 +1911,7 @@ tuning proposals. DuckLake tables have no ordinary indexes. Ordered writes,
 partitioning, compaction, native scratch indexes and Python-to-SQL pushdown are
 evaluated against the actual access paths and pinned capabilities. Proposed layout
 changes include sort/build/rewrite/maintenance costs and effects on BOTH workloads.
-See [the implementation plan](docs/performance-profiling-plan.md).
+See [the performance record](docs/performance.md).
 
 **Profile-guided implementation experiments.** Preserve candidate generation,
 model/TF parameters, exact event bytes and hashes, deterministic partitions and
@@ -1926,7 +1926,7 @@ including null ordering and the terminal record-key tie break. Ordered writes an
 partition experiments require measured gains including their write costs. Publish
 baseline/candidate timings and correctness for both workloads before retaining a
 candidate; no model, threshold or blocking change is implied by these experiments.
-The [measured follow-up](docs/performance-workload-tuning.md) records retained
+The [measured follow-up](docs/performance.md) records retained
 event-encoding reuse, 8,192-row staging pages and temporary current-score reuse,
 along with rejected survivorship and raw-record layout alternatives.
 
