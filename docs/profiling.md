@@ -70,10 +70,9 @@ uv run python benchmarks/workload_report.py artifacts/bench/<campaign>
 For a small harness check, use `benchmarks/full_pipeline.py --scale smoke --local
 --with-incremental --incremental-records 100 --incremental-scenario mixed-v1 --profile
 --with-profile-control` with `uv run python`. See the
-[implementation plan](performance-profiling-plan.md) and the repository
-[analysis skill](../.agents/skills/ducklake-performance/SKILL.md). The first completed
-[1M/100K campaign and tuning backlog](performance-profiling-1m-100k.md) retain both
-workloads' measured results. Ordered writes and
+[performance record](performance.md) and the repository
+[analysis skill](../.agents/skills/ducklake-performance/SKILL.md), which retain both
+workloads' measured results and the evidence-linked backlog. Ordered writes and
 partitioning are future measured experiments; this campaign changes no production
 layout, clustering or scoring algorithm.
 
