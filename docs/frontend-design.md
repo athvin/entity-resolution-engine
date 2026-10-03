@@ -43,8 +43,9 @@ Salesforce phase is a connector + writeback problem, not a product problem.
 
 **Deliberate non-goals for this phase:** no CRM vocabulary (no "Leads/Contacts/Accounts"
 framing — sources are sources, entities are entities); no billing/payments surface (Stripe is
-the eventual answer, explicitly out of scope now); no SSO/OIDC (basic email + password only,
-per decision — the seam for OIDC later is already named in backend-design §9).
+the eventual answer, explicitly out of scope now); SSO/OIDC has moved off this
+list — §2.4 specifies "Sign in with Salesforce / Google / Microsoft" layered on the existing
+session machinery, with password login retained alongside.
 
 ---
 
@@ -82,8 +83,9 @@ people. Per the locked decision, we keep this deliberately basic:
   this" with a person, not a key ULID. This is a small backend change (an actor override the
   operator/BFF is allowed to assert) and is on the gap list (§7).
 
-Password reset, MFA, and SSO are consciously deferred. The design keeps them addable: the
-`users` table and session layer are the only things an OIDC provider would later replace.
+Password reset and MFA remain consciously deferred. SSO no longer is — §2.4 specifies it —
+and the original bet held: one nullable column on `users` plus a new `identities` table are
+the only schema it needs, and the session layer survives byte-for-byte.
 
 ### 2.3 Impersonation — "View as tenant"
 
@@ -105,6 +107,105 @@ exactly as that tenant sees it.
 - **Safety rails**: impersonation sessions expire on their own (short TTL), and destructive
   actions (retract assertion, cancel job, publish config) get an extra "you are impersonating"
   confirm step.
+
+### 2.4 SSO — "Sign in with Salesforce / Google / Microsoft" (decided 2026-10-02)
+
+The §1 non-goal is lifted: SSO against the three IdPs our buyers already live in —
+Salesforce, Google, Microsoft — is the MVP login, with password login retained alongside.
+The mechanism was chosen against the repository as it exists and provider behaviour verified
+October 2026.
+
+**Decision: direct OIDC in the BFF via `openid-client` v6. No broker. The session layer
+survives untouched.** SSO replaces only the *credential verification* step of §2.2 —
+everything downstream (`createSession`, the `er_session` cookie, memberships, impersonation,
+audit attribution) is unchanged, which was §2.2's design bet and it held. Why not the
+alternatives: Cognito's federated free tier is 50 MAU and its DX is notorious; Auth0 starts
+~$150/mo; Clerk replaces the session layer we already have; and every broker adds a
+subprocessor to the compliance inventory for work this codebase has already done. Auth.js /
+next-auth is ruled out on status, not taste — v5 never left beta and entered maintenance
+mode in September 2025 — while `openid-client` (panva) is actively maintained and is
+precisely the "run the OAuth dance, mint your own session" shape needed. The named
+enterprise path: when a deal demands SAML/SCIM, that is WorkOS ($125/connection/mo) bolted
+on beside this, not a rebuild.
+
+**The flow** (authorization code + PKCE, per provider):
+
+```
+/api/auth/sso/{provider}/start      sets a short-lived httpOnly cookie {state, nonce,
+                                    PKCE verifier, next, invite_token?} → redirect to IdP
+/api/auth/sso/{provider}/callback   exchanges the code (openid-client), checks nonce,
+                                    looks up identities(provider, subject)
+                                    → createSession(user.id) → er_session, as today
+```
+
+`PUBLIC_PATHS` in `proxy.ts` gains exactly one entry — `/api/auth/sso` — whose prefix
+matching covers both routes.
+
+**Schema: one new table, one nullable column.** `erweb.identities` — `id`, `user_id` (FK,
+cascade), `provider`, `subject`, `email_at_link`, `created_at`, `last_login_at`; unique
+`(provider, subject)`; a user can hold several. And `users.password_hash` becomes nullable,
+with password login rejecting null-hash users. Nothing else in §2.2 moves.
+
+**Subject keying is the security-critical part** — never email:
+
+| Provider | `subject` | Why |
+|---|---|---|
+| Google | `sub` | Stable and documented |
+| Microsoft | `tid:oid` | The `email` claim is mutable and enabled the nOAuth account-takeover class; Microsoft's guidance is to key on oid+tid. `xms_edov` serves as a verified-domain signal for linking UX |
+| Salesforce | `organization_id:user_id` | Salesforce user IDs are unique only *per org*; the id_token `sub` is an identity URL containing both |
+
+**Linking rule — the invite is the authorization; SSO is only authentication.** The product
+is invite-only (§2.2: the user row is created at invite accept), and that makes the classic
+hard problem trivial:
+
+- An SSO login with no matching `identities` row and no invite token in flight is rejected
+  with an "ask your admin for an invite" screen. No auto-provisioning.
+- **No auto-linking by email match at login, ever.** That is the account-takeover vector,
+  and neither Microsoft nor Salesforce email claims are trustworthy for it.
+- Identity rows are created exactly two ways: accepting an invite via "Continue with …"
+  (the invite token rides in `state`; the callback creates user + identity + membership and
+  never sets a password), or a signed-in user linking a provider from their settings page.
+- Password accept stays as the fallback — both paths coexist at MVP. MFA is delegated to
+  the IdP for SSO users; "SSO required" becomes a per-org policy later, and the natural
+  enterprise-tier knob.
+
+**Provider realities, verified October 2026:**
+
+- **Salesforce — the one with a landmine.** Since September 2025, Salesforce blocks new
+  users of "uninstalled" Connected Apps: every customer org's admin must install/approve
+  ours before "Log in with Salesforce" works for their users. Acceptable here — B2B,
+  invite-only, and the same admin later approves the backend-design §10 data connector —
+  but it belongs in onboarding copy, not a support ticket. One Connected App serves both
+  login and the future connector: register `openid email profile api refresh_token`,
+  request only `openid email profile` at login (scope subsets are explicitly allowed), and
+  add `api refresh_token` by incremental consent when the connector lands. MVP scopes to
+  production orgs (`login.salesforce.com`); sandbox login (`test.salesforce.com`) is a
+  later flag.
+- **Microsoft.** One registration: `signInAudience: AzureADandPersonalMicrosoftAccount`,
+  the `/common` endpoint, v2 tokens — Outlook.com personal accounts and Entra work accounts
+  in one flow.
+- **Google.** Plain OIDC; the operational note is consent-screen/branding verification
+  before production, which has review lead time.
+- **No provider allows wildcard redirect URIs** in our configuration (Google exact-match;
+  Entra forbids wildcards when personal accounts are enabled; Salesforce exact list).
+  Per-developer environments at `alice.dev.<domain>` therefore register their hostnames
+  explicitly — limits are generous (100 URIs at Entra, 2,000 cumulative characters at
+  Salesforce) — and dev's seeded password login remains the inner loop. The internal dev
+  ALB (infrastructure.md §4.1) breaks none of this: the IdP never calls the app — the
+  browser carries the authorization code, and the token exchange is outbound.
+
+**Infra touchpoints** (details in infrastructure.md): three client-ID/secret pairs per
+environment join the existing `er/{env}/{ns}/erweb` secret, and the SSO routes join the
+prod WAF rate-rule list (§4.1 there).
+
+**Fixed alongside:** `resetLink()` emits `/reset/{token}` links but no `/reset` page
+exists — the password-reset email flow is dangling today and ships with this work.
+
+**What this deliberately does not touch: erserver.** Machine auth stays org-scoped `erk_`
+keys, the operator token stays, the BFF still translates session + membership into bearer
+credentials (§2.2), and backend-design §9's principle — membership and role resolved from
+the control plane, never trusted from token claims — is satisfied by construction, because
+no IdP token ever crosses the BFF boundary.
 
 ---
 
@@ -554,8 +655,10 @@ Phase letters refer to §9. Each item is small-to-medium API work unless marked 
 | 7.19 | Saved segments table + parameterized export job (campaigns) | C |
 | 7.20 | Audit read route (org-scoped for tenants, global for super admins); add the missing `webhook.delete` audit write | A (super-admin), D (tenant-facing) |
 
-Deliberately **not** on the list: SSE/websockets (polling is fine through GTM), OIDC/SSO,
-billing/metering, rate limiting (BFF mitigates), Salesforce connector.
+Deliberately **not** on the list: SSE/websockets (polling is fine through GTM),
+billing/metering, rate limiting (WAF handles prod — infrastructure §4.1), Salesforce
+connector. OIDC/SSO left this list: §2.4 specifies it, and it is BFF-only work — the one
+item that needed zero rows in this table.
 
 ---
 

@@ -185,7 +185,7 @@ Publish shows the tier and estimated runtime, then enqueues the required run wit
 
 ## 9. AuthN/AuthZ
 
-- **Humans:** OIDC (hosted provider) → short-lived JWT; org membership and role resolved from the control plane per request, not trusted from token claims alone.
+- **Humans:** authenticate to the web tier, not to this API. The decided design (frontend-design §2.4) is direct OIDC in the BFF — Salesforce / Google / Microsoft, authorization code + PKCE via `openid-client` — minting the BFF's own DB-backed session; no hosted provider, and no IdP token ever reaches erserver. Org membership and role are resolved from the control plane per request, never trusted from token claims — the original principle, unchanged.
 - **Machines:** org-scoped API keys (hashed at rest), role-scoped — what connectors and CI use.
 - **Roles:** `admin` (config publish, connections, members), `steward` (reviews, assertions, job submit), `viewer` (read-only), plus platform-internal `operator` (operator-only config blocks, train/correct/resume, maintenance). Maps directly to Cloudingo's "team access."
 - **Enforcement:** one middleware resolves principal → org → role and injects a `TenantContext` (org, role, lake-settings handle) as a FastAPI dependency; every engine call flows through it, making cross-tenant access structurally impossible rather than per-handler discipline. Isolation is schema-level, so no row-level security is needed.
