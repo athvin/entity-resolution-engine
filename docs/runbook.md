@@ -62,7 +62,9 @@ ingested records and assembly uses it to find the touched entities.
 The final command standardizes any remaining input, scores all candidates,
 reconciles entities and assembles golden records. Successful stage summaries go to
 stderr; `--json` selects machine-readable stdout. Run metadata lives in `runs` and
-`run_stages`.
+`run_stages`; `(run_id, stage)` holds one row, so repeated ingests under one run
+ID update the ingest stage's counters in place — per-delivery receipts live in
+`ingest_batches`.
 
 The main outputs are `lake.main.golden_records`, `golden_lineage`,
 `entity_membership` and `entity_events`. To export golden records from the demo:
@@ -80,6 +82,41 @@ PYTHON
 ```
 
 The CSV appears at `artifacts/demo/golden_records.csv` on the host.
+
+The lake has no standalone `.duckdb` file — run ad-hoc SQL through a connection
+from [`er.lake.ducklake.connect`](../src/er/lake/ducklake.py) as above, which
+loads extensions, configures storage and attaches the lake as `lake`; opening an
+unrelated DuckDB file does not attach this data. To list the persistent
+application relations:
+
+```sql
+SELECT database_name, schema_name, table_name AS object_name, 'table' AS kind
+FROM duckdb_tables() WHERE database_name = 'lake'
+UNION ALL
+SELECT database_name, schema_name, view_name, 'view'
+FROM duckdb_views() WHERE database_name = 'lake'
+ORDER BY kind, object_name;
+```
+
+To trace one golden entity's attribute winners back to the source payloads:
+
+```sql
+WITH chosen AS (
+    SELECT entity_id
+    FROM lake.main.golden_records
+    ORDER BY entity_id
+    LIMIT 1
+)
+SELECT l.entity_id, l.attribute, l.rule, l.record_key, r.payload
+FROM lake.main.golden_lineage l
+JOIN chosen USING (entity_id)
+JOIN lake.main.int_std_records s USING (record_key)
+JOIN lake.main.raw_records r
+  ON r.source_system = s.source_system
+ AND r.source_record_id = s.source_record_id
+ AND r.content_hash = s.content_hash
+ORDER BY l.attribute;
+```
 
 ## Incremental deliveries
 
