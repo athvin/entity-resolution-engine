@@ -38,9 +38,9 @@ ID-generation, serialization and graph operations process rows in Python; see
 Logical keys are enforced by writers and tests because DuckLake does not enforce
 primary-key or unique constraints.
 
-See [table relationships](table-relationships.md) for the complete application
-table inventory, Mermaid diagrams, runtime objects and the catalog audit from a
-100,000-record initial load.
+The [specification's data model](../DesignDoc.md#s5) is the normative table
+inventory — DDL, ownership and logical keys; the `REGISTRY` in
+[src/er/lake/model.py](../src/er/lake/model.py) is the code authority.
 
 ## Identity and golden records
 
@@ -78,8 +78,9 @@ are reused within a command and closed before dbt runs. `runs` and `run_stages`
 record configuration fingerprints, status, counters and snapshot ranges. Failed
 chains can resume from their first unfinished stage with the original configuration.
 
-There is no serving API or built-in scheduler. An external scheduler invokes the
-CLI, including periodic correction and maintenance. Coherence scoring currently
+The engine itself has no serving API or built-in scheduler; the control plane in
+[server/](backend-design.md) provides both, driving the engine per run —
+including periodic correction and maintenance. Coherence scoring currently
 uses `NoopScorer`; the interface exists for a future implementation.
 
 See the [runbook](runbook.md) for commands and the

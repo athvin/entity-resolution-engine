@@ -20,7 +20,10 @@ code to DuckDB requires a measured experiment, not a guess from an operator name
    incomplete. Never turn missing measurements into zeroes.
 3. Check source/image digest, input hashes, config, generator scenario/seed, versions,
    CPU quota, container memory, DuckDB threads/memory and matching runtime. Different
-   values mean a comparison is not controlled. Fresh catalogs do not mean cold caches.
+   values mean a comparison is not controlled — except the full `config_hash`, which
+   differs per trial by design (each trial gets a fresh tenant namespace in its
+   storage paths); `semantic_config_sha256` is the comparability key. Fresh catalogs
+   do not mean cold caches.
 4. Use unprofiled **control command time** as the end-to-end result. Report diagnostic
    overhead separately. Setup, generation, validation and full-rescore references are
    outside workload timing. Do not compare a diagnostic time with a prior control.
