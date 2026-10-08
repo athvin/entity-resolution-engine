@@ -3,8 +3,10 @@
 *The consolidated performance record: what the pipeline costs today, what drives
 that cost, how it got here, what was tried and rejected, and what the evidence says
 to do next. Consolidated 2026-10-03 from nine measurement reports; the full
-per-stage tables and campaign methodology live in git history, every campaign's
-machine-readable record is under [measurements/](measurements/), and raw artifacts
+per-stage tables and campaign methodology live in git history, each committed
+campaign's machine-readable record is under [measurements/](measurements/) (the
+work-in-progress thread-scaling campaign has none — see
+[Measurement records](#measurement-records)), and raw artifacts
 are git-ignored under `artifacts/`.*
 
 ## The numbers that matter
@@ -38,11 +40,15 @@ cloud runner classes on exactly these two numbers.)
 2. **Memory is nearly flat in corpus size; spill is not.** 1M peaks ~4 GiB and 10M
    peaks 9.37 GiB at the same 4 GB DuckDB limit, while spill reaches 141 GiB.
    Capacity planning is vCPU plus scratch disk, not memory tiers.
-3. **DuckDB threads are the wall-clock lever.** 2→6 threads: **−22% at 1M, −40%
-   at 10M**, peak memory flat (9.14 GiB), outputs bit-identical. Training and
-   matching scale near-linearly; ingestion is I/O-bound; **reconciliation is a
-   Python graph step that does not parallelize** (+3% at 1M, +14% at 10M) and
-   becomes the largest 1M stage. The curve above 6 threads is unmeasured
+3. **DuckDB threads are the wall-clock lever** (work in progress — one pass per
+   arm, no machine-readable record). 10M, 2→6 threads at the same 4 GB DuckDB
+   limit: **−40%**, peak memory flat (9.14 GiB). 1M: **−22%**, but the 6-thread
+   arm also raised the DuckDB limit 4→6 GB (peak 4.06→4.26 GiB), so it is not a
+   pure-thread comparison. Golden/lineage counts were identical across arms (at
+   1M, every quality metric too); no byte-level output comparison was recorded.
+   Training and matching scale near-linearly; ingestion is I/O-bound;
+   **reconciliation is a Python graph step that does not parallelize** (+3% at
+   1M, +14% at 10M) and becomes the largest 1M stage. The curve above 6 threads is unmeasured
    (infrastructure.md §18.2).
 4. **Incremental is cheap and provably equivalent.** 100K records onto the 10M
    lake took 2m 50s against the 1h 46m reload, and every campaign gates on
@@ -75,9 +81,11 @@ are milestones, not one continuous series:
   **82.74% / 97.91%** with **1,633,894 false-positive cluster pairs**.
 - **The EM pair-target experiment is promising and unpromoted.** `max_pairs: 1M`
   cut training **−29.4%** and the load −5.5% in a single hard-profile comparison,
-  with quality equal or marginally better. Promotion gates: three 10M repeats,
-  cluster precision non-decreasing, and any recall loss (max 0.01pp) must buy
-  ≥20% end-to-end time in the target workload.
+  with quality equal or marginally better. Promotion gates (stated in full in
+  DesignDoc §10.6, enforced by `benchmarks/acceptance.py`): three 10M repeats,
+  every held-out dataset evaluated independently, cluster precision
+  non-decreasing, any recall loss (max 0.01pp) must buy ≥20% end-to-end time in
+  the target workload, and no repeatable slowdown in another workload.
 - **Blocking-rule narrowing was rejected**: removing or narrowing the broad
   prediction rule dropped 71–78% of candidates but cost 0.40–0.71pp of cluster
   recall against the 0.01pp budget.
@@ -107,10 +115,14 @@ Recorded so nobody retries these without new evidence:
 2. **Reconciliation / label propagation** — the largest 1M stage after the
    matching fix, and it anti-scales with threads. A frontier/changed-label reuse
    experiment must preserve deterministic minimum labels, never-cut parity and
-   non-convergence behavior.
+   non-convergence behavior, and must include long/adversarial-chain tests — the
+   inputs where an incremental frontier diverges from fixpoint propagation.
 3. **dbt startup and compile overhead** — CLI import spans alone total 6.85s
    across the reload's eight commands and 3.41s across the incremental's four.
-   Any reuse must preserve tenant configuration, run variables and compiled SQL.
+   These are instrumented diagnostic wall spans, already counted inside their
+   enclosing command times — an upper bound on the opportunity, not a measured
+   gain. Any reuse must preserve tenant configuration, run variables and
+   compiled SQL.
 4. **An incremental batch predicate that permits file pruning** while preserving
    batch-ID checkpoint and replay semantics.
 5. **The thread-scaling knee above 6** — sets the top of the cloud runner class
@@ -130,18 +142,31 @@ make profile-workloads              # 1M reload + 100K incremental, diagnostic c
 `benchmarks/full_pipeline.py` is the underlying runner: `--scale {smoke,10k,100k,1m,10m}`,
 `--local` (fits limits to the host without shrinking the corpus), immutable
 `--image`/`--image-source`, `--corpus-root` to reuse generated inputs,
-`--with-incremental`, `--profile`. `benchmarks/performance_campaign.py` runs the
+`--with-incremental`, `--profile`, `--keep-failed` (retain a failed stack for
+diagnosis; tear it down afterwards with the `retained_project`/`retained_image`
+names recorded in `manifest.json`). Two `--local` gotchas: limits are derived
+from the host, so verify a run's recorded CPU, container-memory and DuckDB
+limits before comparing it against a recorded trial; and the free-disk check is
+a 2 GiB startup guard, not a prediction — a 10M reload spills ~141 GiB.
+`benchmarks/performance_campaign.py` runs the
 arm-based training/blocking experiments; `benchmarks/tuning_report.py` compares
 baseline/candidate trial sets; `benchmarks/build_performance_image.py` plus
 `benchmarks/performance.py` run frozen-image A/B comparisons.
 
 The rules every retained number followed: frozen images and recorded source
-hashes; fresh stacks per trial on an otherwise idle host; alternating
-baseline/candidate order; **unprofiled medians only** (diagnostic collection adds
-42–49% overhead and is never timed as evidence); equivalence gates — exact
-classifications, partitions, golden values and lineage; pair probabilities within
-`1e-10`; independently learned parameters within `1e-12`; model/TF bytes
-unchanged within a trial; failed trials stay failed. Python-side work that
+hashes; fresh stacks per trial on an otherwise idle host; **unprofiled times
+only** (diagnostic collection adds 42–49% overhead and is never timed as
+evidence); equivalence gates — exact classifications, partitions, golden values
+and lineage; pair probabilities within `1e-10`; independently learned parameters
+within `1e-12`; model/TF bytes unchanged within a trial; failed trials stay
+failed. The historical A/B campaigns additionally alternated baseline/candidate
+order; the 2026-09-23 tuning trials ran sequentially and reuse one profiling
+control (noted in that record's limitations), and single-trial numbers say so in
+their basis column. In the recorded fingerprints the full `config_hash`
+legitimately differs between trials — each trial runs in a fresh random tenant
+namespace that flows into storage paths — while `semantic_config_sha256` hashes
+the namespace-independent configuration and is the comparability key.
+Python-side work that
 deliberately stays out of SQL is inventoried in
 [python-processing-exceptions.md](python-processing-exceptions.md); trace
 semantics are in [profiling.md](profiling.md); migrating an existing lake across
@@ -179,3 +204,10 @@ baselines.
 | 10M/100K scale test (2026-09-23) | [measurements/workload-10m-100k-20260923.json](measurements/workload-10m-100k-20260923.json) |
 | Training/blocking quality screen (2026-09-23) | [measurements/performance-screening-20260923.json](measurements/performance-screening-20260923.json) |
 | EM-cap full-load confirmation (2026-09-23) | [measurements/training-full-load-20260923.json](measurements/training-full-load-20260923.json) |
+
+The work-in-progress thread-scaling campaign (2026-09-29, PR #54) has no machine-readable
+record — its raw outputs were git-ignored under `artifacts/bench/threads6-*` on
+one developer machine. Its report survives in git history as
+`docs/performance-thread-scaling.md` at `9090b33^`; the 2-thread 10M reference it
+compared against (6,458s) is the Splink-5 campaign's run in
+[measurements/splink5-20260922.json](measurements/splink5-20260922.json).
