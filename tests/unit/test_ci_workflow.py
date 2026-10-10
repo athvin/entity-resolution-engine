@@ -39,8 +39,16 @@ TAG_COMMENT = re.compile(r"^\s*#\s*(?P<tag>v[0-9][\w.-]*)\s*$")
 # S9.1's timeouts are the enforcement mechanism for the <10 min PR budget, not advice:
 # `static` and `unit` run concurrently, so the wall clock is max(10, 10) + 25. The
 # `server` and `frontend` jobs are off that critical path: each depends on nothing
-# and nothing waits on it.
-EXPECTED_TIMEOUTS = {"static": 10, "unit": 10, "server": 15, "frontend": 15, "integration": 25}
+# and nothing waits on it. `push-image` runs on main only (its `if` is asserted
+# below), so it never spends PR wall clock.
+EXPECTED_TIMEOUTS = {
+    "static": 10,
+    "unit": 10,
+    "server": 15,
+    "frontend": 15,
+    "integration": 25,
+    "push-image": 20,
+}
 
 # The uv the setup action installs must be the S2.1 pin everywhere, but the cache key
 # differs: the server control plane is a standalone project with its own lockfile.
@@ -177,6 +185,36 @@ def test_job_graph_runs_static_and_unit_in_parallel() -> None:
             "serialise into extra wall clock for the same result"
         )
     assert job("integration")["needs"] == ["static", "unit"]
+    assert job("push-image")["needs"] == ["static", "unit"], (
+        "an image must not reach the registry from a commit the fast tiers rejected"
+    )
+
+
+def test_push_image_job_is_main_only_with_scoped_oidc() -> None:
+    """The infrastructure.md §11 trust contract, asserted where it can drift.
+
+    The er-ci-ecr-push role's trust policy pins the OIDC `sub` claim to
+    refs/heads/main on the AWS side; this test pins the workflow side. A PR from a
+    fork runs attacker-authored workflow code, so the job must be unreachable from
+    the pull_request path, and `id-token: write` must be scoped to this job alone —
+    at workflow level it would hand every PR job a credential-minting token.
+    """
+    push = job("push-image")
+
+    assert push["if"] == "github.event_name == 'push' && github.ref == 'refs/heads/main'"
+    assert push["permissions"] == {"contents": "read", "id-token": "write"}
+
+    build = next(
+        step
+        for step in push["steps"]
+        if str(step.get("uses", "")).startswith("docker/build-push-action@")
+    )
+    assert build["with"]["push"] is True
+    assert "load" not in build["with"]
+    # Immutable tags in the registry: the commit SHA is the tag, so a re-push of the
+    # same commit is rejected by ECR rather than silently replacing bytes.
+    assert build["with"]["tags"].endswith("/er-pipeline:${{ github.sha }}")
+    assert ".dkr.ecr.us-east-2.amazonaws.com" in build["with"]["tags"]
 
 
 def test_all_uses_are_sha_pinned_with_tag_comments() -> None:
