@@ -114,8 +114,9 @@ activation takes up to 24h and never backfills (§16.1).
   - [x] `er-pipeline`/`er-api`/`er-web` repositories: tag immutability, scan-on-push,
     last-30 lifecycle. Single registry — replication dissolved with the accounts.
   - [x] OIDC provider + `er-ci-ecr-push` with `sub` pinned to `main`; CI `push-image` job.
-  - [ ] Probes: first main push lands in ECR; re-pushing the same tag rejected; a PR-branch
-    assume of the push role **fails**.
+  - [x] Probe (2026-10-10): first main push landed — `er-pipeline:a2dccbf…` in ECR via OIDC
+    (after pinning the trust policy to GitHub's immutable subject claims). Remaining:
+    re-push-same-tag rejection and the PR-branch assume-fails negative probe.
 
 - [x] **0.8 Branch protection + budget alarms** (§8.6, §16)
   - [x] Direct push to `main` rejected; PR without review cannot merge (1 review + all 36
