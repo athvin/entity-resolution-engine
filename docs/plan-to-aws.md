@@ -48,12 +48,13 @@ Phase 4  hardening + audit run-up  ◄── end state
 These are not tasks; they are answers the plan blocks on. Resolve each before the phase
 that consumes it.
 
-- [ ] **D1 — Auto Mode or self-managed Karpenter** (§5.5, §18.3). The NVMe question is
-  answered (yes, automatic); what remains is whether Auto Mode's NodePools honour
-  `do-not-disrupt` and a `WhenEmpty` equivalent. **Resolve before 1.2** — it decides how
-  the cluster is built, and checking it costs an afternoon of reading and a throwaway
-  cluster. Done when: the answer is written into §18.3, the §1 decisions table is updated,
-  and tasks 1.2/1.3 below are annotated with which branch applies.
+- [x] **D1 — Auto Mode or self-managed Karpenter** (§5.5, §18.3). **Resolved 2026-10-10:
+  Auto Mode.** `do-not-disrupt` is honoured across consolidation policies and NodePools
+  expose `consolidationPolicy: WhenEmpty` + `consolidateAfter`; the ~12%-of-on-demand fee
+  (charged even on Spot) is ~$10–20/mo at this footprint, with a revisit trigger at
+  ~$50/mo recorded in §5.5. Tasks 1.2/1.3 build the Auto Mode branch — no system node
+  group, no Karpenter controller to operate; snapshot-prebake (§11.1 rung 3) is off the
+  table, so image-pull mitigation stops at SOCI + the image split.
 - [x] **D2 — domain** (§18.8). **Resolved 2026-10-10: `dupezero.com`, Cloudflare Registrar.**
   Registrar pins the apex to Cloudflare nameservers, so Cloudflare is the DNS plane —
   external-dns (Cloudflare provider, unproxied records), ACM validation and SES DKIM
