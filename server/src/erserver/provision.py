@@ -76,9 +76,14 @@ def tenant_namespace(org: str) -> str:
     return f"t_{org.replace('-', '_')[:40]}_{digest}"
 
 
-def tenant_db_name(org: str) -> str:
-    """The org's dedicated catalog database — under Postgres's 63-byte limit."""
-    return f"er_{tenant_namespace(org)}"
+def tenant_db_name(org: str, prefix: str = "er_") -> str:
+    """The org's dedicated catalog database — under Postgres's 63-byte limit.
+
+    ``prefix`` is ``ERSERVER_TENANT_DB_PREFIX``: stacks sharing one Postgres
+    cluster set it per stack so the same org derives distinct databases; the
+    default keeps today's names bit-for-bit.
+    """
+    return f"{prefix}{tenant_namespace(org)}"
 
 
 @dataclass(frozen=True)
@@ -124,7 +129,7 @@ def plan_for(settings: ServerSettings, org: str) -> TenantPlan:
     del maint_dsn  # only its presence is checked here; the runner reads the env
 
     tenant = tenant_namespace(org)
-    db_name = tenant_db_name(org)
+    db_name = tenant_db_name(org, prefix=settings.tenant_db_prefix)
     catalog_dsn = dsn_template.format(dbname=db_name)
     data_path = data_path_template.format(ns=tenant)
     return TenantPlan(

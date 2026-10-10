@@ -61,6 +61,22 @@ def test_long_org_names_truncate_without_colliding() -> None:
     assert len(provision.tenant_db_name(first)) <= 63
 
 
+def test_db_prefix_defaults_to_er_and_honors_an_override() -> None:
+    ns = provision.tenant_namespace("acme")
+    assert provision.tenant_db_name("acme") == f"er_{ns}"
+    assert provision.tenant_db_name("acme", prefix="alice_") == f"alice_{ns}"
+
+
+def test_settings_read_the_db_prefix_from_the_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ERSERVER_DSN", "postgresql://unused/cp")
+    monkeypatch.delenv("ERSERVER_TENANT_DB_PREFIX", raising=False)
+    assert ServerSettings.from_env().tenant_db_prefix == "er_"
+    monkeypatch.setenv("ERSERVER_TENANT_DB_PREFIX", "alice_")
+    assert ServerSettings.from_env().tenant_db_prefix == "alice_"
+
+
 # --------------------------------------------------------------------------- #
 # plan_for
 # --------------------------------------------------------------------------- #
@@ -78,6 +94,12 @@ def test_plan_derives_the_whole_tenant_identity() -> None:
     assert plan.env["ER_LAKE_DATA_PATH"] == plan.data_path
     assert plan.env["ER_LAKE_METADATA_SCHEMA"] == plan.tenant
     assert plan.env["ER_S3_ENDPOINT"] == "minio:9000"
+
+
+def test_plan_carries_the_configured_db_prefix() -> None:
+    plan = provision.plan_for(settings(tenant_db_prefix="alice_"), "acme")
+    assert plan.db_name == f"alice_{provision.tenant_namespace('acme')}"
+    assert plan.catalog_dsn == f"postgresql://er:pw@catalog:5432/{plan.db_name}"
 
 
 def test_identity_keys_win_over_the_shared_extras() -> None:
