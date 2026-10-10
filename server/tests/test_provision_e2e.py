@@ -88,7 +88,7 @@ def client(tmp_path_factory: pytest.TempPathFactory) -> Iterator[TestClient]:
             "ER_S3_ENDPOINT": S3_ENDPOINT,
             "ER_S3_ACCESS_KEY_ID": S3_KEY,
             "ER_S3_SECRET_ACCESS_KEY": "secret://E2E_S3",
-            "ER_S3_REGION": "us-east-1",
+            "ER_S3_REGION": "us-east-2",
             "ER_S3_URL_STYLE": "path",
             "ER_S3_USE_SSL": "false",
             "ER_DUCKDB_THREADS": "4",

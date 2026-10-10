@@ -42,7 +42,7 @@ er:
           endpoint: "{{ env_var('ER_S3_ENDPOINT', '') }}"
           url_style: "{{ env_var('ER_S3_URL_STYLE', 'path') }}"
           use_ssl: "{{ env_var('ER_S3_USE_SSL', 'false') }}"
-          region: "{{ env_var('ER_S3_REGION', 'us-east-1') }}"
+          region: "{{ env_var('ER_S3_REGION', 'us-east-2') }}"
       # Emitted as ATTACH <path> AS <alias> (...) -- the ATTACH of S4.0b.
       attach:
         - path: "ducklake:postgres:{{ env_var('ER_CATALOG_DSN', '') }}"

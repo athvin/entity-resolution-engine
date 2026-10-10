@@ -65,7 +65,7 @@ This design adds that substrate, with five goals:
 | Telemetry | **OpenTelemetry to a collector**, exporter swappable; CloudWatch + X-Ray first | Three runtimes, one standard; a run crosses five process boundaries; and the self-hosted roadmap item makes vendor neutrality a product requirement, not a preference (§10) |
 | Cost attribution | **Tags + CUR + EKS split cost allocation**, plus a per-run cost figure in Postgres | Pods are not AWS resources, so tags alone cannot see them. Per-developer falls out of namespace-per-developer, per-tenant falls out of pod-per-run (§16.1) |
 | SOC 2 | **Build only what cannot be retrofitted**: 400-day audit trails, a compliance-mode Object-Locked archive, CloudTrail log validation, branch protection | Type 2 fails on evidence, not architecture. Policies and assessments can wait; six months of logs cannot be produced after the fact (§8.6) |
-| Region | `us-east-1`, single region, no DR replication in this phase | Already the only region in the repo (`ER_S3_REGION` in [frontend/dev/env.sh](../frontend/dev/env.sh), [configs/default.yaml](../configs/default.yaml)) |
+| Region | `us-east-2`, single region, no DR replication in this phase | Chosen 2026-10-10 when the Identity Center organization instance was created there — its primary region is permanent. Every service this design uses is available in us-east-2 at the same price points; the repo's `ER_S3_REGION` sites ([docker/compose.yaml](../docker/compose.yaml), [frontend/dev/env.sh](../frontend/dev/env.sh), [dbt/profiles/profiles.yml](../dbt/profiles/profiles.yml)) match |
 | Edge access | **Dev behind an internal ALB reached over Tailscale; prod internet-facing behind WAF.** `er-api` is never on any load balancer | Dev namespaces hold real records, and an application login as the only boundary is the posture §8.2 rejects. The BFF is the sole browser surface by construction (§4.1) |
 | Email | **SES** — SMTP credential now, SES API + IRSA in Phase 4 | The mailer is built and wired (invites, password reset, job notifications); SES SMTP cannot use temporary credentials, so the interim is a second scoped IAM user (§7.5, §9.3) |
 | Deploys | **Terraform and Helm apply from CI on `main`; the prod-scoped Terraform role trusts only CI and `ProdAdmin`** | The §8.2 guardrail denies exempt Terraform, which makes that role's trust policy part of the guardrail rather than plumbing (§14.2) |
@@ -142,7 +142,7 @@ One VPC per environment, `/16`, three availability zones, public and private sub
 - **An S3 Gateway Endpoint is mandatory, not an optimization.** A large run moves hundreds of gigabytes between the runner and the lake; routing that through a NAT Gateway at $0.045/GB would dominate the bill. The gateway endpoint is free and keeps the traffic on the AWS backbone.
 - **One NAT Gateway in nonprod**, three in prod for AZ independence once prod carries traffic. The single nonprod NAT means cross-AZ traffic from the other two subnets at $0.01/GB each way — real but small next to a per-AZ NAT.
 
-**Interface endpoints are deliberately not used.** The first draft specified them for ECR (api + dkr), Secrets Manager, STS, and CloudWatch Logs, justified as keeping node bootstrap off the NAT path. That reasoning ignored their price: five endpoints × three AZs × ~$0.01/hr is **~$110/mo per environment**, against the $33 NAT they were avoiding. For a one-developer footprint this inverts the decision. Non-S3 traffic goes through the NAT, and the only volume that looked material was ECR image pulls — but it is not: ECR serves image *layer blobs* from S3 (the regional `prod-us-east-1-starport-layer-bucket`), so the bytes of a pull ride the free gateway endpoint and only the manifest and auth calls cross the NAT. What a cold node's pull costs is time, not money — §11.1.
+**Interface endpoints are deliberately not used.** The first draft specified them for ECR (api + dkr), Secrets Manager, STS, and CloudWatch Logs, justified as keeping node bootstrap off the NAT path. That reasoning ignored their price: five endpoints × three AZs × ~$0.01/hr is **~$110/mo per environment**, against the $33 NAT they were avoiding. For a one-developer footprint this inverts the decision. Non-S3 traffic goes through the NAT, and the only volume that looked material was ECR image pulls — but it is not: ECR serves image *layer blobs* from S3 (the regional `prod-us-east-2-starport-layer-bucket`), so the bytes of a pull ride the free gateway endpoint and only the manifest and auth calls cross the NAT. What a cold node's pull costs is time, not money — §11.1.
 
 Revisit this when there are enough nodes that per-GB NAT processing exceeds the fixed endpoint cost, or when a compliance requirement forbids the NAT path.
 
@@ -454,7 +454,7 @@ One filesystem per environment with an access point per namespace, mounted at `E
 
 Email is not a future feature, which the earlier revisions implicitly treated it as. [server/src/erserver/mailer.py](../server/src/erserver/mailer.py) is a complete sender behind a durable `email_outbox` table that the dispatcher's leader tick drains with retry and backoff, and live flows depend on it: member invites, password reset, `job_failed` and `report_completed` notifications. It is dormant today only because nothing sets `ERSERVER_SMTP_URL` — which in a cloud environment means every invite parks silently in the outbox.
 
-A `ses/` Terraform module provides the domain identity with Easy DKIM (three CNAMEs), a custom MAIL FROM (MX + SPF records), and a configuration set for bounce and complaint tracking. Pods reach the SMTP endpoint through the NAT on 587 — an SMTP interface endpoint exists but has availability-zone gaps in `us-east-1` and is not worth it at this scale, and port 25 is throttled from EC2 regardless.
+A `ses/` Terraform module provides the domain identity with Easy DKIM (three CNAMEs), a custom MAIL FROM (MX + SPF records), and a configuration set for bounce and complaint tracking. Pods reach the SMTP endpoint through the NAT on 587 — an SMTP interface endpoint exists but is not worth it at this scale (it has had availability-zone gaps in some regions), and port 25 is throttled from EC2 regardless.
 
 Two facts carry lead time, which is why this lands in Phase 1 rather than whenever email first matters. Production access (sandbox exit) is a human-reviewed request with a stated ~24-hour first response — file it early. And the sandbox's limits — 200 messages a day, verified recipients only — are *fine for dev indefinitely*: verify the developers' own addresses and dev never needs the exit at all. The credential is §9.3's problem.
 
@@ -635,7 +635,7 @@ Two parts to the fix. A **reloader** — annotate the Deployments so a change to
 
 `ObjectStore.from_env()` in [src/er/lake/objectstore.py](../src/er/lake/objectstore.py) and `attach_statements()` in [src/er/lake/ducklake.py](../src/er/lake/ducklake.py) both require a literal `ER_S3_ACCESS_KEY_ID` / `ER_S3_SECRET_ACCESS_KEY` and a non-empty scheme-less `ER_S3_ENDPOINT`. There is no credential-chain path, no `AWS_*` support, and no way to omit the endpoint — `require_env` rejects empty values deliberately, because an empty secret attaches a lake that authenticates as nobody.
 
-**Phase 1 (no code change).** One IAM user per environment with a lake-scoped policy, keys in Secrets Manager, with `ER_S3_ENDPOINT=s3.us-east-1.amazonaws.com`, `ER_S3_URL_STYLE=vhost`, `ER_S3_USE_SSL=true`. This works against real S3 today. Rotation here has the same restart requirement as §9.1.
+**Phase 1 (no code change).** One IAM user per environment with a lake-scoped policy, keys in Secrets Manager, with `ER_S3_ENDPOINT=s3.us-east-2.amazonaws.com`, `ER_S3_URL_STYLE=vhost`, `ER_S3_USE_SSL=true`. This works against real S3 today. Rotation here has the same restart requirement as §9.1.
 
 **Phase 4 (the right answer).** A credential-provider mode so DuckDB uses `CREATE SECRET (TYPE s3, PROVIDER credential_chain)` and boto3 uses its default chain, both picking up the IRSA web-identity token, after which no static S3 key exists anywhere — and the §9.1 rotation problem disappears for S3 entirely.
 
@@ -922,7 +922,7 @@ This is also where the runner becomes a Kubernetes Job (§6), which means it car
 
 ## 16. Cost
 
-Rough `us-east-1` monthly figures. Estimates for shaping decisions, not a quote.
+Rough `us-east-2` monthly figures (identical to `us-east-1` for every line item here). Estimates for shaping decisions, not a quote.
 
 The first draft put dev at ~$185. That was optimistic by roughly 2×: it assumed Aurora auto-pause that cannot happen (§7.1), and omitted interface endpoints that cost more than the NAT they replaced (§4). Corrected, and with §5.2's suspend-on-idle:
 
