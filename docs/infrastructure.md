@@ -55,7 +55,7 @@ This design adds that substrate, with five goals:
 
 | Decision | Choice | Why |
 |---|---|---|
-| Accounts | Two — `nonprod` (dev + staging) and `prod` — under an Organization whose management account is neither | One boundary to plumb, and it is the boundary that matters. Prod cannot be the management account because SCPs do not apply there |
+| Accounts | **One** (rev 4, operator decision 2026-10-10) — environments separated by `er-dev-*`/`er-prod-*` prefix and by permission-set policy, not account boundary | Minimal operational surface. The trade: SCPs evaluate against nothing, so every §8.2 guardrail is IAM-layer — §3 records what that gives up |
 | Identity | IAM Identity Center with permission sets | Short-lived credentials; no long-lived human access keys to leak or rotate |
 | Clusters | One EKS cluster per environment, **dev first — prod deferred until there is prod traffic** | Cluster-scoped failures and prod secrets both stay inside one environment (§5.4). Deferring prod costs nothing today and keeps the decision for when it matters |
 | Postgres | **In-namespace StatefulSet in dev, Aurora in prod** | The catalog is the lake's metadata and must persist, but it does not need a managed server standing up for one developer. ~$3/mo of EBS against Aurora's ~$44/mo floor (§7.1) |
@@ -64,16 +64,16 @@ This design adds that substrate, with five goals:
 | Run sizing | **Tiered on vCPU with a near-constant memory floor**, sized per run from the record count | 10M records peaked at 9.37 GiB, and 2→6 threads cut runtime 40% with memory flat. This inverts [backend-design.md](backend-design.md) §7's memory-tiered classes (§6.5) |
 | Telemetry | **OpenTelemetry to a collector**, exporter swappable; CloudWatch + X-Ray first | Three runtimes, one standard; a run crosses five process boundaries; and the self-hosted roadmap item makes vendor neutrality a product requirement, not a preference (§10) |
 | Cost attribution | **Tags + CUR + EKS split cost allocation**, plus a per-run cost figure in Postgres | Pods are not AWS resources, so tags alone cannot see them. Per-developer falls out of namespace-per-developer, per-tenant falls out of pod-per-run (§16.1) |
-| SOC 2 | **Build only what cannot be retrofitted**: 400-day audit trails, an Object-Locked archive in the management account, CloudTrail log validation, branch protection | Type 2 fails on evidence, not architecture. Policies and assessments can wait; six months of logs cannot be produced after the fact (§8.6) |
+| SOC 2 | **Build only what cannot be retrofitted**: 400-day audit trails, a compliance-mode Object-Locked archive, CloudTrail log validation, branch protection | Type 2 fails on evidence, not architecture. Policies and assessments can wait; six months of logs cannot be produced after the fact (§8.6) |
 | Region | `us-east-2`, single region, no DR replication in this phase | Chosen 2026-10-10 when the Identity Center organization instance was created there — its primary region is permanent. Every service this design uses is available in us-east-2 at the same price points; the repo's `ER_S3_REGION` sites ([docker/compose.yaml](../docker/compose.yaml), [frontend/dev/env.sh](../frontend/dev/env.sh), [dbt/profiles/profiles.yml](../dbt/profiles/profiles.yml)) match |
 | Edge access | **Dev behind an internal ALB reached over Tailscale; prod internet-facing behind WAF.** `er-api` is never on any load balancer | Dev namespaces hold real records, and an application login as the only boundary is the posture §8.2 rejects. The BFF is the sole browser surface by construction (§4.1) |
 | Email | **SES** — SMTP credential now, SES API + IRSA in Phase 4 | The mailer is built and wired (invites, password reset, job notifications); SES SMTP cannot use temporary credentials, so the interim is a second scoped IAM user (§7.5, §9.3) |
-| Deploys | **Terraform and Helm apply from CI on `main`; prod's Terraform role trusts only CI and `ProdAdmin`** | The §8.2 SCPs exempt Terraform, which makes that role's trust policy part of the guardrail rather than plumbing (§14.2) |
+| Deploys | **Terraform and Helm apply from CI on `main`; the prod-scoped Terraform role trusts only CI and `ProdAdmin`** | The §8.2 guardrail denies exempt Terraform, which makes that role's trust policy part of the guardrail rather than plumbing (§14.2) |
 | Product SSO | **Direct OIDC in the BFF — Salesforce, Google, Microsoft — via `openid-client`; no broker; existing DB sessions kept** | Zero new subprocessors and zero MAU pricing; the session layer already exists and survives unchanged. WorkOS is the named path when enterprise SAML arrives ([frontend-design.md](frontend-design.md) §2.4) |
 
 **Deliberately deferred:** the prod cluster and prod Aurora (no prod traffic yet — §15); the staging environment (no users yet); `arm64`/Graviton images (~20% cheaper on the app tier, but CI runs on x86 and multi-arch buildx via QEMU hurts the inner loop); multi-region anything, and with it any real DR posture (§18.6).
 
-**Considered and not chosen:** Argo Workflows for the job path (§6.1), a single cluster for all environments (§5.4), Aurora Serverless v2 auto-pause in dev (§7.1), VPC interface endpoints (§4), memory-tiered resource classes (§6.5), ALB OIDC authentication against Identity Center (§4.1). EKS Auto Mode moves off this list to *reopened* — its blocker dissolved under research (§5.5).
+**Considered and not chosen:** Argo Workflows for the job path (§6.1), a single cluster for all environments (§5.4), Aurora Serverless v2 auto-pause in dev (§7.1), VPC interface endpoints (§4), memory-tiered resource classes (§6.5), ALB OIDC authentication against Identity Center (§4.1). EKS Auto Mode moved off this list entirely — **chosen** (D1 resolved 2026-10-10, §5.5): the §5.1 disruption controls are honoured and the fee is noise at this footprint.
 
 ## 2. Constraints the application imposes
 
@@ -99,22 +99,41 @@ These are not preferences. Each comes from the existing implementation, and the 
 
 ## 3. Account and organization topology
 
+**Revision 4 (2026-10-10): one account.** Revisions 1–3 specified a three-account
+organization (`mgmt`/`nonprod`/`prod`). The operator chose to collapse to a single
+account to keep the operational surface minimal — one login, one bill, one root
+user, no cross-account plumbing. This section records what that trades away and
+what stands in for it; the three-account design remains in git history as the
+shape to return to when the team grows.
+
 ```
-Organization root
-├── mgmt                    management account — no workloads, no standing access
-│                           Identity Center, consolidated billing,
-│                           org CloudTrail + the locked audit-log archive (§8.6)
-├── OU: nonprod
-│   └── nonprod             eks-dev, aurora-nonprod (staging only), er-nonprod-lake,
-│                           ECR (source of truth), TF state
-└── OU: prod
-    └── prod                eks-prod, aurora-prod, er-prod-lake, ECR (replica)
-                            — all deferred until there is prod traffic (§15)
+Organization root (kept — Identity Center requires it; otherwise inert)
+└── er (797781631727)       everything: Identity Center, billing, the
+                            Object-Locked audit archive (§8.6), ECR, TF state,
+                            dev environments, and — behind the §15 prod gate —
+                            prod, separated by prefix and role, not account
 ```
 
-Service control policies attach to OUs and do not apply to the management account, which is the reason prod gets its own account rather than doubling as the org root.
+Environment separation is by **name and by role**: resources carry an
+`er-dev-*` / `er-prod-*` prefix (buckets, roles, clusters, secrets), and the
+Identity Center permission sets scope who may touch which prefix (§8.1, §8.2).
 
-The management account holding no workloads is also what makes it the right home for the audit-log archive. Developers hold `PlatformAdmin` in nonprod and nobody has standing access to the management account, so logs delivered there cannot be deleted by the principals they record — which is the property an auditor checks and the reason a two-account split alone is insufficient (§8.6).
+**What the collapse gives up — recorded deliberately, accepted by the operator:**
+
+- **SCPs no longer apply to anything.** Service control policies never evaluate
+  against the organization's management account, which is now the only account.
+  Every §8.2 guardrail is therefore an IAM-layer deny carried by the permission
+  sets — enforceable, but one policy edit from absent, where the OU boundary was
+  structural. This was the prior revision's central argument for three accounts.
+- **Blast radius is shared.** Dev mutation is unrestricted by design (§8.1), and
+  dev mistakes now share an account — and its service quotas — with prod data.
+- **The audit archive lives with the workloads.** The compensating control is S3
+  Object Lock in compliance mode: 400-day retention that not even the root user
+  can shorten, preserving tamper evidence without an account boundary (§8.6).
+- **SOC 2 CC6 is evidenced from policy text** rather than account membership.
+
+The former `nonprod` member account (660360495170) is parked empty at the
+organization root at zero cost; close it or re-adopt it if the split returns.
 
 ## 4. Network, per environment
 
@@ -222,7 +241,9 @@ Auto Mode manages Karpenter and the core addons, removing both the system node g
 
 The second revision declined it on one question: whether §5.3's `instanceStorePolicy: RAID0` is expressible. **The answer is yes — and better than expressible, automatic.** Auto Mode formats instance-store NVMe for ephemeral use on its own, striping RAID0 across multiple drives, with no field to set; constrain the NodePool to NVMe families and `emptyDir` lands on it. Auto Mode also enforces IMDSv2 with hop limit 1 unconditionally (§5.6) and ships SOCI parallel pull on by default (§11.1) — two things this design wants anyway.
 
-What it would still cost: the management fee; no custom AMIs or `blockDeviceMappings`, so §11.1's snapshot-prebake rung is off the table; and since April 2026 Auto Mode's managed instances are hidden from `DescribeInstances`, which confuses inventory tooling. One check remains before flipping: whether Auto Mode's NodePool surface honours the §5.1 disruption controls — `do-not-disrupt` and a `WhenEmpty` equivalent — because those are the safety of the runner path, and losing them silently would reproduce exactly the invisible-slowness failure §5.1 exists to prevent. §18.3 now carries that residue, not the NVMe question. If it passes, Auto Mode is the better fit for this team and the system node group line simply disappears.
+What it would still cost: the management fee; no custom AMIs or `blockDeviceMappings`, so §11.1's snapshot-prebake rung is off the table; and since April 2026 Auto Mode's managed instances are hidden from `DescribeInstances`, which confuses inventory tooling.
+
+**Resolved (D1, 2026-10-10): Auto Mode — the check passed.** Auto Mode honours `karpenter.sh/do-not-disrupt` (the node is preserved while the annotated pod runs, across every consolidation policy), and its NodePool surface exposes `disruption.consolidationPolicy: WhenEmpty` with `consolidateAfter` — the §5.1 runner-path controls survive verbatim. The surcharge arithmetic at this footprint: the fee is ~12% of the **on-demand** rate per instance-hour and is charged even on Spot capacity — a poor percentage on discounted runners, but in absolute terms roughly $9/mo for the always-on app node and cents per runner-hour, against not operating Karpenter's upgrade treadmill solo. **Revisit trigger:** if the Auto Mode fee line in the CUR exceeds ~$50/mo, re-run this decision against self-managed Karpenter (which also reopens §11.1's prebake rung). §18.3 is closed; the system node group line disappears from §5.
 
 ### 5.6 Node and pod hardening
 
@@ -455,21 +476,44 @@ No IAM users exist for humans, and no long-lived access keys exist anywhere exce
 
 Two cautions on `ProdDataReadOnly`. The Kubernetes `view` role must never become `edit` — the built-in `view` excludes Secrets, which is the only thing keeping §9's projected prod secrets out of reach. And read access to prod **pod logs** is a PII path in a system whose whole purpose is handling personal records; the permission set grants `logs:` read for debugging, which is only safe because §10.4 makes it a rule that log lines carry identifiers and counts and never attribute values. That rule is what this grant depends on, and §17 verifies it rather than trusting it.
 
-### 8.2 Why prod writes are blocked structurally
+### 8.2 How prod writes are blocked in one account
 
-An SCP on the prod OU denies mutating actions unless the caller is `ProdAdmin`, the platform's own `er-prod-*` roles, or Terraform. Two statements are required, and the first draft showed only the first:
+*(Rev 4: the two guardrail statements previously lived in an SCP on the prod OU.
+With a single account there is no OU and SCPs evaluate against nothing, so the
+same two statements ride the permission sets as inline denies.)*
 
-**Statement 1 — data mutation.** Denies `s3:Put*`/`Delete*`, `rds:Delete*`/`Modify*`, `eks:Delete*`/`Update*`, `secretsmanager:Put*`/`Delete*`, and `kms:ScheduleKeyDeletion`, conditioned on `ArnNotLike aws:PrincipalArn` against the exempt list.
+`PlatformAdmin` carries AdministratorAccess **plus two deny statements** scoped
+to the prod prefix; `ProdAdmin` (1h sessions, prod-admins group only) is the
+only permission set without them:
 
-**Statement 2 — privilege escalation.** Denies `iam:CreateRole`, `PutRolePolicy`, `AttachRolePolicy`, `UpdateAssumeRolePolicy`, and `CreateAccessKey`, exempting only `ProdAdmin` and Terraform.
+**Statement 1 — data mutation.** Denies `s3:Put*`/`Delete*` on `er-prod-*`
+buckets, `rds:Delete*`/`Modify*`, `eks:Delete*`/`Update*`,
+`secretsmanager:Put*`/`Delete*` and `kms:ScheduleKeyDeletion` on `er-prod-*`
+/ `er/prod/*`-named resources.
 
-Statement 2 is not optional, and its absence from the first draft made the central claim false. Statement 1 exempts any role matching `er-prod-*`, because the application must write the lake — so without Statement 2, anyone able to call `iam:CreateRole` in prod mints `er-prod-app-anything` and walks straight out of the guardrail. The exemption is only trustworthy because minting the thing it exempts is itself denied.
+**Statement 2 — privilege escalation.** Denies `iam:CreateRole`,
+`PutRolePolicy`, `AttachRolePolicy`, `UpdateAssumeRolePolicy` and
+`CreateAccessKey` against `er-prod-*` roles. Statement 1 leaves the
+application's own `er-prod-*` roles writable paths to the lake, so statement 2
+is what keeps a developer from minting `er-prod-app-anything` and walking out
+of the guardrail — the exemption is only trustworthy because minting the thing
+it exempts is itself denied.
 
-**Both statements also need `BoolIfExists: {"aws:PrincipalIsAWSService": "false"}`.** Without it the deny catches AWS's own service-initiated writes — CloudTrail delivering logs to its prod bucket, ALB access logs, ECR replication writing into the prod registry — and each fails with no obvious cause. (SCPs never apply to service-linked roles, so those need no exemption.)
+**The enforcement difference from the SCP version is honest and material.** An
+SCP sits above the identity-policy layer and catches a wrongly written IAM
+policy; an inline deny *is* the identity-policy layer. Whoever can edit
+permission sets can remove the guard — one policy edit, not a structural
+boundary. The operator accepted this trade (§3). Mitigations, all required for
+the claim to mean anything: the permission sets live in Terraform behind
+`main`'s branch protection (§8.6), so removing a deny is a reviewed, logged
+diff; `ProdAdmin` assumption is alerted on (§8.6); and prod-mutating IAM paths
+are tested by the §17 probes exactly as the SCP was — the probe asserts the
+deny, not the mechanism.
 
-With both statements in place, the claim holds: a developer with `ProdDataReadOnly` has no reachable write path even if a prod IAM policy is written wrongly, because the SCP is evaluated above the identity-policy layer. That is the property a single-account design cannot offer, where the same guarantee rests on every policy carrying the right `Deny` and one omission is an incident.
-
-One more door rides on the exemptions themselves: both statements exempt *Terraform*, which means whoever can assume the Terraform role walks through the guardrail legitimately. That makes the role's **trust policy** part of this section's claim, not an implementation detail — and §14.2 pins it: assumable only by the CI apply role on `main` and by `ProdAdmin` as break-glass. Trusted any wider — say, by the nonprod account, where every developer holds `PlatformAdmin` — and the claim above fails the same way it failed without Statement 2, one layer up.
+The Terraform exemption survives unchanged: whoever can assume the Terraform
+apply role walks through the guardrail legitimately, so the role's **trust
+policy** is part of this section's claim — §14.2 pins it to the CI apply role
+on `main` and `ProdAdmin` as break-glass.
 
 ### 8.3 Customer-managed KMS keys, from day one
 
@@ -482,19 +526,19 @@ Retrofitting a CMK onto a live prod database means a full snapshot-copy-and-rest
 
 ECR is the deliberate exception — AES256, because images are built from public source, hold no records, and a CMK would require a key plus cross-account grants in every replica account for no confidentiality gain.
 
-### 8.4 How a nonprod workload reads prod
+### 8.4 How a dev workload reads prod
 
-Humans assume `ProdDataReadOnly` through Identity Center. A *workload* needs an explicit role chain:
+Humans assume `ProdDataReadOnly` through Identity Center. A *workload* needs an explicit role chain — same account since rev 4, but the two-role shape is kept so the readable surface is one role's policy, not the workload's:
 
 ```
-nonprod: IRSA role er-nonprod-data-refresh
-  └─ sts:AssumeRole ──→ prod: role er-prod-data-export
+IRSA role er-dev-data-refresh
+  └─ sts:AssumeRole ──→ role er-prod-data-export
                                s3:Get*/List* on er-prod-lake
                                kms:Decrypt on the prod lake CMK
                                rds-db:connect as er_readonly
 ```
 
-The prod role's trust policy names the nonprod IRSA role ARN specifically. It holds no write permissions, so §8.2 never comes into play.
+The export role's trust policy names the refresh IRSA role ARN specifically. It holds no write permissions, so §8.2 never comes into play.
 
 ### 8.5 Consequences of holding real data in lower environments
 
@@ -527,9 +571,7 @@ A first SOC 2 is expected ([backend-design.md](backend-design.md) §15 phase 4 a
 
 The split matters: retention is a **compliance parameter for audit trails and a cost parameter for everything else**, and conflating them is what makes people either overpay or fail the window. §10.4 is updated accordingly.
 
-**2. Audit logs must land where no one with workload access can delete them.** This is a genuine gap in the two-account design. §14 puts Terraform state in nonprod, and the organization trail in §3 has no stated destination — if CloudTrail delivers into an account where developers hold `PlatformAdmin`, a developer can delete the record of their own actions, and the control fails on inspection.
-
-The standard answer is a dedicated log-archive account. For a two-person team the pragmatic answer is the **management account**: it holds no workloads, nobody has standing access to it, and it already exists. The bucket needs versioning, **S3 Object Lock in compliance mode**, and a policy denying deletes to everything but the org root.
+**2. Audit logs must land where no one with workload access can delete them.** In the rev 4 single account there is no "elsewhere" to deliver to, so the control is carried entirely by the bucket itself: versioning, **S3 Object Lock in compliance mode at 400 days** — a retention not even the root user can shorten or override — plus a policy denying deletes to everything but the account root. A developer can see the archive; nobody, including the principals the logs record, can remove an object before its retention expires. (The standard answer remains a dedicated log-archive account; it is the first thing to reinstate if the account split returns — §3.)
 
 **3. CloudTrail log file validation, enabled from the start.** This is the specific tamper-evidence mechanism auditors ask about — CloudTrail writes signed digest files so you can prove the log was not altered. It only validates logs written *after* it is enabled.
 
@@ -541,7 +583,7 @@ Written policies, the risk assessment, vendor assessments, security training rec
 
 #### What this design already satisfies
 
-Worth knowing so effort does not go where it is not needed. The access-control criteria (CC6) are the largest block and this design is unusually well placed: no IAM users for humans, no long-lived access keys, MFA enforced, short sessions, least privilege through permission sets, and prod mutation blocked by an SCP above the identity-policy layer (§8.2). Encryption at rest is customer-managed throughout (§8.3), and TLS is enforced by bucket policy (§7.3). Change management (CC8) is covered by Terraform in git, tests on every PR, and §11's promote-by-digest — an immutable tag plus a digest means you can *prove* what ran in prod came from a specific reviewed commit, which is better evidence than most organisations can produce.
+Worth knowing so effort does not go where it is not needed. The access-control criteria (CC6) are the largest block and this design is unusually well placed: no IAM users for humans, no long-lived access keys, MFA enforced, short sessions, least privilege through permission sets, and prod mutation blocked by the §8.2 permission-set denies (IAM-layer since rev 4 — weaker than the prior SCP posture; §3 records the accepted trade). Encryption at rest is customer-managed throughout (§8.3), and TLS is enforced by bucket policy (§7.3). Change management (CC8) is covered by Terraform in git, tests on every PR, and §11's promote-by-digest — an immutable tag plus a digest means you can *prove* what ran in prod came from a specific reviewed commit, which is better evidence than most organisations can produce.
 
 #### Two things that are findings today
 
@@ -713,11 +755,9 @@ Three images, two of which do not exist yet:
 | `er-api` | **new** | Slim: `src/er` + `server/src/erserver`, no dbt, no MinIO. Serves both `er-api` and `er-dispatcher` |
 | `er-web` | **new** | Next.js standalone output on Node 22 |
 
-ECR repositories live in **nonprod as the source of truth**, with tag immutability, scan-on-push, and a lifecycle policy retaining the last 30 images. An ECR replication configuration copies them into the prod account; repositories are declared in prod too, rather than left to replication's auto-creation, so the replica inherits the same immutability and lifecycle instead of registry defaults.
+ECR repositories live in the account's single registry, with tag immutability, scan-on-push, and a lifecycle policy retaining the last 30 images. *(Rev 4: the prior nonprod-source-of-truth → prod-replica arrangement collapses with the accounts; replication and the destination registry policy are no longer needed.)*
 
-This gives per-environment registries while guaranteeing the digest running in prod is byte-identical to the one tested in dev: prod pulls from its own registry, with no cross-account IAM at pull time, but nothing is ever rebuilt for prod. **Promotion is by digest, never by tag.**
-
-Two operational notes. Cross-account replication needs *both* halves — the source's replication configuration and the destination's registry policy; with only the source half it fails silently and absent images are the only signal. And replication is asynchronous with no completion signal, so a prod deploy must gate on the digest being present in the prod registry rather than assuming it.
+The byte-identity guarantee survives without replication because it never depended on it: **promotion is by digest, never by tag.** A prod deploy pins the exact digest CI built and tested; an immutable tag plus a digest proves what ran in prod came from a specific reviewed commit.
 
 CI gains a GitHub OIDC provider and a push job replacing today's `load: true`. CI currently consumes zero repository secrets and declares only `permissions: contents: read`; the push job adds `id-token: write` and assumes `er-ci-ecr-push`. The trust policy restricts the `sub` claim to pushes on `main` — **pull requests are excluded deliberately**, since a PR from a fork runs attacker-authored workflow code and must never hold a push credential.
 
@@ -797,11 +837,10 @@ Cross-account Aurora snapshot plumbing is still built for staging refresh and pr
 infra/
   terraform/
     bootstrap/
-      organization/       Organization, OUs, member accounts (local state, then migrated)
-      state-backend/      the S3 state bucket, in nonprod
+      organization/       the Organization import + the parked former-nonprod account
+      state-backend/      the S3 state bucket
     modules/
-      org-guardrails/     the two prod SCPs
-      identity-center/    permission sets, groups, assignments
+      identity-center/    permission sets (incl. the §8.2 guard denies), groups, assignments
       github-oidc/        OIDC provider + CI push role
       network/            VPC, subnets, S3 gateway endpoint, NAT, Tailscale subnet router
       eks/                cluster, addons, Karpenter NodePools, access entries
@@ -811,7 +850,8 @@ infra/
       ses/                domain identity, Easy DKIM, MAIL FROM, configuration set
       irsa/               reusable IRSA role factory
     envs/
-      mgmt/   nonprod/   prod/
+      core/               the account: billing, identity, audit, registry, CI trust
+                          (dev/prod workload stacks arrive with Phases 1 and 3)
   k8s/
     charts/
       er-platform/        environment-level: api, dispatcher, web, ingress
@@ -820,9 +860,9 @@ infra/
 
 Bootstrap is two stacks, not one, because the state bucket must live in an account and a provider that assumes into an account created by the same apply has an unknown `role_arn` at plan time.
 
-Terraform state lives in S3 in the nonprod account with `use_lockfile = true` — native conditional-write locking, no DynamoDB table. The bucket is versioned (the only recovery path from a truncated state file) and SSE-KMS encrypted under its own CMK, because state holds database endpoints and every output marked sensitive.
+Terraform state lives in S3 in the account with `use_lockfile = true` — native conditional-write locking, no DynamoDB table. The bucket is versioned (the only recovery path from a truncated state file) and SSE-KMS encrypted under its own CMK, because state holds database endpoints and every output marked sensitive.
 
-**One accepted trade-off to name explicitly:** prod's state lives in the nonprod account, where every developer holds `PlatformAdmin`. That partially undercuts the §5.4 and §8.2 boundary reasoning. It is accepted for now because a single state store is one thing to back up and one policy to reason about, and because the state holds infrastructure layout rather than records — but a prod-account state bucket is the stricter answer, and the right one once more than one person holds `PlatformAdmin`.
+*(Rev 4 note: the prior revision's trade-off — prod state living in the nonprod account — dissolved with the accounts. What replaces it is the broader §3 trade: state, like everything else, is protected by role policy rather than an account boundary.)*
 
 ### 14.1 Application changes this requires
 
@@ -851,24 +891,24 @@ This is a longer list than the first draft's, and most of the additions come fro
 
 The earlier revisions defined what runs and never who applies it — and the gap was load-bearing, because two §8 claims quietly depend on the answer: promote-by-digest is only CC8 *evidence* if the deploy path enforces it, and the SCP exemption for Terraform is only safe if assuming the Terraform role is harder than the SCP it bypasses.
 
-**Terraform.** Plan on every PR under a read-only role; apply on `main` under a per-account apply role — both assumed through §11's existing GitHub OIDC provider, with the same `main`-only `sub` restriction the ECR push role carries, and for the same reason: a PR from a fork runs attacker-authored workflow code. The prod apply role's trust policy names exactly two principals — the CI apply role and `ProdAdmin` as break-glass. That trust policy is the §8.2 guardrail's last clause, which is also the real argument for eventually moving prod's state out of the nonprod account; §14 already concedes that point.
+**Terraform.** Plan on every PR under a read-only role; apply on `main` under the apply role — both assumed through §11's existing GitHub OIDC provider, with the same `main`-only `sub` restriction the ECR push role carries, and for the same reason: a PR from a fork runs attacker-authored workflow code. The prod-scoped apply role's trust policy names exactly two principals — the CI apply role and `ProdAdmin` as break-glass. That trust policy is the §8.2 guardrail's last clause.
 
-**Helm.** Dev platform releases apply from CI on `main`; `make dev-up` stays a human command, because a developer namespace is that developer's to create and destroy. Prod deploys are manually triggered, pass an image **digest** — never a tag — and gate on that digest being present in the prod registry first, because §11's replication is asynchronous and silent. Argo CD remains out of scope, as §6.1 noted; this section is the minimum that turns promote-by-digest from a convention into a property.
+**Helm.** Dev platform releases apply from CI on `main`; `make dev-up` stays a human command, because a developer namespace is that developer's to create and destroy. Prod deploys are manually triggered, pass an image **digest** — never a tag — and gate on that digest being present in the registry first. Argo CD remains out of scope, as §6.1 noted; this section is the minimum that turns promote-by-digest from a convention into a property.
 
 ## 15. Build order
 
-**Phase 0 — Foundations.** Organization, OUs, both prod SCPs, Identity Center permission sets and groups, the two bootstrap stacks, GitHub OIDC, ECR repositories and replication, budget alarms.
+**Phase 0 — Foundations.** The account baseline (root MFA, S3 BPA, billing access), Identity Center permission sets and groups — including the §8.2 guard denies, the two bootstrap stacks, GitHub OIDC, ECR repositories, budget alarms.
 
 **Phase 0 also carries everything that cannot be retrofitted**, which is the only reason any of it is this early:
 
 - **Cost attribution** (§16.1): activate the cost allocation tags, enable Split Cost Allocation Data for EKS, start CUR delivery. None of it backfills.
-- **Audit trails** (§8.6): the organization CloudTrail with log file validation, delivered to an Object-Locked bucket in the management account, at 400-day retention. AWS Config with a narrow recording scope. A log is only tamper-evident from the moment validation is switched on, and retention cannot reach backwards.
+- **Audit trails** (§8.6): CloudTrail with log file validation, delivered to the compliance-mode Object-Locked bucket at 400-day retention. AWS Config with a narrow recording scope. A log is only tamper-evident from the moment validation is switched on, and retention cannot reach backwards.
 - **Branch protection on `main`** with required review, which is both the CC8 change-management control and the thing that makes §8.6's "access review is a git diff" claim true.
 - **Account floors that are one-liners now and findings later** (§5.6): account-level S3 Block Public Access in all three accounts, MFA on every root user, no root access keys.
 
 Everything else in this document can be added later. These cannot, which is why they come before there is anything to observe. All of it is verifiable with no cluster running.
 
-**Phase 1 — dev.** Network, EKS dev, Karpenter with the §5.1 disruption settings and the §5.6 node hardening, the nonprod lake bucket with lifecycle, EFS with automatic backups, External Secrets Operator with a reloader. Both Dockerfiles and the CI push job. Ship `ERSERVER_TENANT_DB_PREFIX`. The edge and email substrate lands here too, because both carry lead time or block Phase 2: the hosted zone, wildcard dev certificate, external-dns, the internal ALB and the Tailscale subnet router (§4.1); the SES module with the production-access request filed (§7.5). This is also where the §5.5 Auto Mode check happens — before the Karpenter configuration deepens, not after.
+**Phase 1 — dev.** Network, EKS dev, Karpenter with the §5.1 disruption settings and the §5.6 node hardening, the nonprod lake bucket with lifecycle, EFS with automatic backups, External Secrets Operator with a reloader. Both Dockerfiles and the CI push job. Ship `ERSERVER_TENANT_DB_PREFIX`. The edge and email substrate lands here too, because both carry lead time or block Phase 2: the Cloudflare DNS zone wiring (§18.8), wildcard dev certificate, external-dns (Cloudflare provider), the internal ALB and the Tailscale subnet router (§4.1); the SES module with the production-access request filed (§7.5). This is also where the §5.5 Auto Mode check happens — before the Karpenter configuration deepens, not after.
 
 **Phase 1 also brings the observability floor** (§10.6): the collector gateway and log-collection DaemonSet, structured logs shipped with trace fields, and FastAPI/psycopg auto-instrumentation. No schema change, and it means Phase 2 is debuggable rather than guesswork.
 
@@ -876,7 +916,7 @@ Everything else in this document can be added later. These cannot, which is why 
 
 This is also where the runner becomes a Kubernetes Job (§6), which means it carries the coupled set: progress written by the runner (§6.3), `jobs.trace_context` and per-stage spans (§10.2), `force_flush()` on exit, per-run CPU sizing (§6.5), and the EFS mounts on the Job and the dispatcher (§6.2). Those are one piece of work, not six — they all sit on the boundary the subprocess pipe used to cover.
 
-**Phase 3 — Prod, when there is prod traffic.** Network, EKS prod, Aurora prod multi-AZ, the prod lake with CMK and scoped CloudTrail, the cross-account export role, `make refresh-dev` Path A, and the internet-facing prod ALB behind WAF — rate rules on the three unauthenticated write paths (§4.1). Nothing here is needed to develop against real data, which is why it is sequenced last rather than second.
+**Phase 3 — Prod, when there is prod traffic.** Network, EKS prod, Aurora prod multi-AZ, the prod lake with CMK and scoped CloudTrail, the prefix-scoped export role (§8.4), `make refresh-dev` Path A, and the internet-facing prod ALB behind WAF — rate rules on the three unauthenticated write paths (§4.1). Nothing here is needed to develop against real data, which is why it is sequenced last rather than second.
 
 **Phase 4 — Hardening and the audit run-up.** The IRSA credential chain (§9.2) and the SES API port that retires the SMTP key (§9.3) — the two retirements §8.1 now promises — per-tenant scoped ServiceAccounts (§6.4), `ER_PROFILE_*` output as span events, dashboards for the [backend-design.md](backend-design.md) §14 metric list, alerting, automated snapshot sharing. GuardDuty in prod. The SOC 2 artifacts that are point-in-time rather than time-dependent — policies, risk assessment, the subprocessor inventory including the Anthropic data flow, vendor assessments, a documented break-glass procedure, and a restore test with its record (§8.6).
 
@@ -988,19 +1028,19 @@ Deliberately small: one Athena query over the CUR, one SQL query over `runs`/`ru
 
 Each phase has a behavioural check, not a green `terraform apply`. Several of these exist specifically because the first draft asserted things it had not tested.
 
-**Phase 0 — the security claim.** The assertion the whole two-account design exists to make. The prod lake does not exist until Phase 3, so Phase 0 asserts against a resource that does:
+**Phase 0 — the security claim.** The assertion §8.2 exists to make, probed against the guard denies the permission sets carry (rev 4: IAM-layer, so the probe asserts the deny itself, not an SCP). The prod lake does not exist until Phase 3, so Phase 0 asserts against the prod-prefixed names directly:
 
 ```bash
-aws sso login --profile dev-readonly-prod
-aws ecr describe-repositories                       # succeeds — read works
-aws ecr delete-repository --repository-name er-api   # MUST fail: AccessDenied from the SCP
+aws sso login --profile platform-admin
+aws s3api list-objects-v2 --bucket er-prod-lake      # read path intact (NoSuchBucket until Phase 3 is fine)
+aws s3api put-object --bucket er-prod-lake --key probe   # MUST fail: AccessDenied, Statement 1 (§8.2)
 aws iam create-role --role-name er-prod-app-probe \
   --assume-role-policy-document file://trust.json    # MUST fail: Statement 2 (§8.2)
 aws sso login --profile prod-admin
-aws ecr describe-repositories                        # succeeds
+aws iam create-role --role-name er-prod-app-probe ... && aws iam delete-role --role-name er-prod-app-probe   # succeeds — the exemption works
 ```
 
-The second and third commands failing is the point. The third specifically tests the privilege-escalation statement whose absence made the first draft's claim false — if it succeeds, the `er-prod-*` exemption is an open door. Re-run the full form against the lake once Phase 3 lands.
+The second and third commands failing under `PlatformAdmin` is the point. The third specifically tests the privilege-escalation statement — if it succeeds, the `er-prod-*` exemption is an open door. Re-run the full form against the real lake once Phase 3 lands, and re-run it **after any permission-set change**, because rev 4 moved the guard into exactly the layer such a change edits.
 
 **Phase 0 — the things that cannot be checked later.** Both are verified now precisely because neither backfills.
 
@@ -1039,12 +1079,12 @@ Measurements and decisions this design is waiting on. The first four are things 
 
 1. **Is the one-Postgres-instance constraint real?** §2 cites [backend-design.md](backend-design.md) §5 for the queue and the tenant advisory lock needing one cluster. PostgreSQL advisory locks are scoped per *database*, and the lock is taken on the tenant catalog DB while the queue lives in the control-plane DB — so they are in different databases regardless, and the serialization guarantee appears to come from the `jobs_one_active_per_org` unique index instead. If the constraint is over-stated it removes a real design option; §7.1 satisfies it either way, so this is not blocking.
 2. **Where the thread-scaling curve flattens.** §6.5 makes vCPU the sizing lever on the strength of a 2→6 thread measurement that cut 10M-row runtime 40%. The measurement stops at 6, and it is unlikely to stay linear: the same run showed **reconcile 14% *slower*** at 6 threads, being a Python graph step that does not parallelize with DuckDB threads. Past some count the Python stages dominate and further vCPU buys nothing. A 10M run at 6 / 12 / 16 / 24 threads sets the top of the class ladder, and the same run with `ER_PROFILE_STORAGE` confirms spill at the 8 GB limit the L class actually uses — which is near the 4 GB the 141 GiB figure was measured at, so this is a confirmation rather than an extrapolation.
-3. **~~Does EKS Auto Mode support `instanceStorePolicy: RAID0`?~~ Resolved — yes, automatically.** Auto Mode formats instance-store NVMe for ephemeral use and stripes RAID0 across multiple drives with no field to set. The residue that now decides §5.5: whether Auto Mode's NodePool surface honours `do-not-disrupt` and a `WhenEmpty` equivalent — the §5.1 controls that keep a bin-packing consolidation from discarding an hour of a run — plus the surcharge arithmetic at this footprint.
+3. **~~Does EKS Auto Mode support the §5.1/§5.3 node controls?~~ Resolved 2026-10-10 — yes on all counts, and D1 is decided: Auto Mode.** RAID0 NVMe is automatic; `do-not-disrupt` is honoured across consolidation policies; NodePools expose `consolidationPolicy: WhenEmpty` + `consolidateAfter`. Fee: ~12% of on-demand per instance-hour (charged even on Spot) — ~$10–20/mo at this footprint. Decision and revisit trigger recorded in §5.5; tasks 1.2/1.3 build the Auto Mode branch.
 4. **Telemetry volume per pipeline run** — CloudTrail data events, and separately OTel log/span volume. Decides whether §7.3's scoped trail is affordable, whether §10.4's log levels are aggressive enough, and whether traces need tail sampling. Both are answerable from one instrumented 10M run, and both are §16 line items currently carrying a range instead of a number.
 5. **Whether the dispatcher should watch pod logs or the runner should write its own progress** (§6.3). The recommendation is the latter, but it is a behavioural change to a path the frontend's job-detail view depends on, so it wants a decision before the Job launcher is written rather than during.
 6. **DR posture.** Single region, no cross-region replication, no stated RPO/RTO for customer CRM data. Aurora PITR and S3 versioning cover deletion and corruption, not regional loss. Fine for now; it should be a stated accepted risk rather than an omission.
 7. **DuckLake path storage** — absolute or relative in the catalog. Determines the size of `er lake rehome` (§13) and therefore whether Path A is permanent.
-8. **Hosted zone and domain** — required in Phase 1 for external-dns, the wildcard dev certificate, and the internal ALB (§4.1). The one piece of this design that needs a purchase decision.
+8. ~~**Hosted zone and domain**~~ **Resolved 2026-10-10: `dupezero.com`, registered at Cloudflare.** Cloudflare Registrar pins the apex to Cloudflare's nameservers, so **Cloudflare is the DNS plane** — no Route 53 zone. Consequences, all mechanical: external-dns runs its Cloudflare provider (scoped API token from Secrets Manager, `--domain-filter=dev.dupezero.com`, `--txt-owner-id` per cluster) and must create **DNS-only (unproxied) records**, since dev hostnames resolve to an internal, tailnet-reached ALB that Cloudflare's proxy could never reach; ACM stays the certificate authority (the wildcard dev cert validates via a CNAME the Terraform `cloudflare` provider writes); SES Easy-DKIM CNAMEs and MAIL FROM records land in the Cloudflare zone the same way.
 9. **Resource classes need revising in [backend-design.md](backend-design.md) §7, not just implementing.** That document specifies S 8 GiB / M 24 GiB / **L 64 GiB**, and §6.5 here shows the measurements do not support it — 10M records peaked at 9.37 GiB, and runtime is CPU-bound. `resource_class` appears nowhere in `server/src` or `frontend/src` yet, so nothing is built on the old numbers; this is a chance to correct the spec before it is implemented rather than after. The revised shape should land in `backend-design.md` so the two documents do not disagree.
 10. **API pod DuckDB sizing** — until the [backend-design.md](backend-design.md) §8 split is implemented, a tenant configured for a large runner also sizes the API pods' attaches (§2). The `app` NodePool is sized defensively as a result.
 11. **What granularity Split Cost Allocation Data actually exposes.** §16.1 and §16.2 assume per-pod CUR rows carrying namespace and workload, which covers per-developer (namespace) and per-tenant-run (workload) cleanly. Whether arbitrary pod *labels* surface as CUR columns decides whether per-tenant grouping is a direct query or needs joining through the `jobs` table on workload name. Either works; the second is more code. Worth confirming against one real CUR before building reporting on top of it.
