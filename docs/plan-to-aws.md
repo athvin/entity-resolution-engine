@@ -161,9 +161,9 @@ catches cross-module leaks here.
 - [ ] **1.4 Edge** (§4.1)
   - A test Ingress gets a Cloudflare DNS record (external-dns, unproxied) and the wildcard cert; reachable over the tailnet; **connection fails from a non-tailnet network** — test both directions.
   - One ALB serves multiple test Ingresses via `group.name`.
-- [ ] **1.5 EFS** (§7.4)
-  - Mounts from a test pod through a namespace access point; write on one pod, read on another.
-  - AWS Backup default plan attached; first recovery point exists after the first daily window.
+- [x] **1.5 EFS** (§7.4) — *er-dev-config: elastic throughput, own CMK, mount targets across the three private subnets, EFS CSI addon via Pod Identity.*
+  - [x] Probe (2026-10-10): write on one pod, read on another, through an access point.
+  - [ ] AWS Backup default plan is attached (policy ENABLED); first recovery point lands after the first daily window.
 - [ ] **1.6 Secrets** (§9, §9.1)
   - ExternalSecret syncs a Secrets Manager entry into the namespace; editing the secret triggers a rolling restart of an annotated test Deployment — observe the restart, don't trust the annotation.
   - None of the `frontend/dev/env.sh` committed values appear in any cloud secret (§8.5) — grep the synced Secrets for the known strings.
