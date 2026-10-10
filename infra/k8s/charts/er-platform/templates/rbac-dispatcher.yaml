@@ -1,0 +1,44 @@
+# §6.2: the dispatcher's authority over runner Jobs — a namespace-scoped Role,
+# never a ClusterRole. A dispatcher able to create pods cluster-wide would
+# undercut §5.4's argument for separate clusters.
+#
+# The verbs are exactly what erserver.k8s uses:
+#   - batch/jobs create/get/list/watch/delete: launch, poll to terminal state,
+#     reconcile-by-name at startup, delete on cancellation;
+#   - pods get/list: find the run's pod to read its terminal exit state;
+#   - pods/log get: ONE tail fetch after termination, to recover the runner's
+#     terminal result line (the exit-code taxonomy's error_class). Never a
+#     stream — progress is the runner's own Postgres write (§6.3, gate D3).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: er-dispatcher
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "er-platform.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: er-dispatcher
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "er-platform.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: er-dispatcher
+subjects:
+  - kind: ServiceAccount
+    name: er-dispatcher
+    namespace: {{ .Release.Namespace }}

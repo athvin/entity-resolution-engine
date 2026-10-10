@@ -951,6 +951,8 @@ export interface components {
             progress: {
                 [key: string]: unknown;
             };
+            /** Resource Class */
+            resource_class?: string | null;
             /** Run Id */
             run_id: string | null;
             /** Schedule Id */
@@ -2068,6 +2070,7 @@ export interface operations {
             query?: never;
             header?: {
                 "Idempotency-Key"?: string | null;
+                traceparent?: string | null;
                 Authorization?: string | null;
                 "X-Acting-User"?: string | null;
             };

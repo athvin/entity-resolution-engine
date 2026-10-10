@@ -175,6 +175,82 @@ def test_reap_stale_requeues_active_jobs_with_resume(conn: psycopg.Connection, o
     assert reaped.params["resume_run_id"] == "01JSTALE"
 
 
+def test_reap_jobs_requeues_only_the_named_rows(conn: psycopg.Connection, org: str) -> None:
+    """The kubernetes reconciliation reaps the lost, never the adopted (§6)."""
+    lost = queue.enqueue(conn, org, "run_all_full", idempotency_key="lost")
+    assert queue.claim(conn) is not None
+    queue.mark_running(conn, lost.job_id, run_id="01JLOST")
+
+    assert [job.job_id for job in queue.active_jobs(conn)] == [lost.job_id]
+    assert queue.reap_jobs(conn, []) == 0
+    assert queue.reap_jobs(conn, ["no-such-job"]) == 0
+    assert queue.reap_jobs(conn, [lost.job_id]) == 1
+    reaped = queue.get_job(conn, org, lost.job_id)
+    assert reaped is not None
+    assert reaped.state == QUEUED
+    assert reaped.params["resume_run_id"] == "01JLOST"
+    assert queue.active_jobs(conn) == []
+
+
+def test_sizing_rides_the_job_row_from_the_last_known_record_count(
+    conn: psycopg.Connection, org: str
+) -> None:
+    """§6.5: class from the job ledger's counters, stored on jobs.resource_class."""
+    assert queue.last_known_records(conn, org) is None
+
+    first = queue.enqueue(conn, org, "run_all_full", idempotency_key="sz1")
+    claimed = queue.claim(conn)
+    assert claimed is not None
+    # No history yet: the dispatcher records the default class on the row.
+    queue.mark_running(conn, first.job_id, run_id="01JSZ1", resource_class="M")
+    queue.heartbeat(
+        conn,
+        first.job_id,
+        {"stages": [{"stage": "ingest", "rows_in": 70_000, "rows_out": 70_000}]},
+    )
+    queue.finish(
+        conn,
+        first.job_id,
+        dispose(0, None, attempt=0, max_attempts=3),
+        exit_code=0,
+        error_class=None,
+        error_detail=None,
+    )
+    stored = queue.get_job(conn, org, first.job_id)
+    assert stored is not None and stored.resource_class == "M"
+    assert queue.last_known_records(conn, org) == 70_000
+
+    # The next claim derives its class from that count: 70k records is S.
+    queue.enqueue(conn, org, "run_all_incremental", idempotency_key="sz2")
+    seen: dict[str, Any] = {}
+
+    def fake_launch(payload: dict[str, Any], env: dict[str, str], **kwargs: Any) -> RunnerResult:
+        seen["payload"] = payload
+        return _result(payload, 0)
+
+    assert dispatcher.run_once(conn, launch=fake_launch)
+    assert seen["payload"]["resource_class"] == "S"
+
+
+def test_trace_context_rides_the_job_row_into_the_runner_env(
+    conn: psycopg.Connection, org: str
+) -> None:
+    """§10.2: the traceparent captured at enqueue re-enters the runner's env."""
+    traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+    job = queue.enqueue(
+        conn, org, "run_all_incremental", idempotency_key="tp", trace_context=traceparent
+    )
+    assert job.trace_context == traceparent
+    seen: dict[str, Any] = {}
+
+    def fake_launch(payload: dict[str, Any], env: dict[str, str], **kwargs: Any) -> RunnerResult:
+        seen["env"] = env
+        return _result(payload, 0)
+
+    assert dispatcher.run_once(conn, launch=fake_launch)
+    assert seen["env"]["TRACEPARENT"] == traceparent
+
+
 # --------------------------------------------------------------------------- #
 # dispatcher
 # --------------------------------------------------------------------------- #

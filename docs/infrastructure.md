@@ -314,7 +314,7 @@ Job (one per run, in the platform namespace)
 
 Cancellation keeps today's semantics: the dispatcher deletes the Job, Kubernetes sends `SIGTERM`, and the engine stops at the next stage boundary. `terminationGracePeriodSeconds` must exceed the engine's stage-boundary check interval and the dispatcher's existing `TERMINATE_GRACE_SECONDS = 10.0`.
 
-The dispatcher's ServiceAccount gets a namespace-scoped **Role**, not a ClusterRole: `create`/`get`/`list`/`watch`/`delete` on `batch/jobs`, `get`/`list`/`watch` on `pods`. Namespace-scoped matters — a dispatcher able to create pods cluster-wide would undercut §5.4's argument for separate clusters.
+The dispatcher's ServiceAccount gets a namespace-scoped **Role**, not a ClusterRole: `create`/`get`/`list`/`watch`/`delete` on `batch/jobs`, `get`/`list` on `pods`, and `get` on `pods/log` — the last for exactly one tail fetch *after* a Job reaches a terminal state, to recover the runner's terminal result line (the S4.7 `error_class` the §2 retry matrix branches on). That read is not the §6.3 progress stream and must never become one; without it the container exit code alone still drives every terminal row of the matrix, degrading only the two class-refined rows (`lock_conflict`, `transient_io`) to permanent failures. Namespace-scoped matters — a dispatcher able to create pods cluster-wide would undercut §5.4's argument for separate clusters.
 
 ### 6.3 Progress reporting is the one thing this breaks
 
