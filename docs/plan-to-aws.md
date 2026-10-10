@@ -101,7 +101,7 @@ activation takes up to 24h and never backfills (§16.1).
   - [x] CloudTrail `er-org-trail` logging, multi-region, log-file validation on,
     delivering to the compliance-mode Object-Locked bucket (400d) under its own CMK.
   - [ ] First digest delivered and `aws cloudtrail validate-logs` passes (waiting on delivery).
-  - [ ] The control test: under `PlatformAdmin`, deleting an archive object **must fail**.
+  - [x] The control test (2026-10-10): under `PlatformAdmin`, deleting an archive object fails with AccessDenied.
   - [x] AWS Config recording, narrow scope.
 
 - [x] **0.6 Cost attribution — before anything billable** (§16.1)
@@ -148,7 +148,7 @@ catches cross-module leaks here.
 
 ## Phase 1 — Cluster and substrate (needs: Phase 0, D1, D2)
 
-- [ ] **1.1 Network** (§4)
+- [ ] **1.1 Network** (§4) — *applied 2026-10-10: er-dev VPC /16, 3 AZs, single NAT, S3 gateway endpoint on both route tables; API inventory confirms zero interface endpoints. The private-instance egress probe remains.*
   - From a private-subnet test instance: S3 reachable with the NAT route removed (gateway endpoint carries it); general egress via NAT; **zero interface endpoints exist**.
 - [ ] **1.2 EKS cluster** (§5; shape depends on D1)
   - `kubectl` works via Identity Center; the `view`-only group can read but cannot read Secrets (`kubectl auth can-i get secrets` → no).

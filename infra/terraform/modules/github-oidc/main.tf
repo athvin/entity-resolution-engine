@@ -8,9 +8,29 @@ variable "repository" {
   type        = string
 }
 
+variable "owner_id" {
+  description = "Numeric GitHub owner ID (gh api users/<owner> -q .id)."
+  type        = string
+}
+
+variable "repository_id" {
+  description = "Numeric GitHub repository ID (gh api repos/<owner>/<name> -q .id)."
+  type        = string
+}
+
 variable "branch" {
   type    = string
   default = "main"
+}
+
+locals {
+  # GitHub issues immutable subject claims (use_immutable_subject: true):
+  # owner and repo carry their numeric IDs, so the sub survives renames and
+  # cannot be reclaimed by re-registering a deleted name. Pinning the
+  # immutable form is strictly stronger than the classic repo:<owner>/<name>.
+  owner_name = split("/", var.repository)[0]
+  repo_name  = split("/", var.repository)[1]
+  subject    = "repo:${local.owner_name}@${var.owner_id}/${local.repo_name}@${var.repository_id}:ref:refs/heads/${var.branch}"
 }
 
 variable "ecr_repository_arns" {
@@ -49,7 +69,7 @@ data "aws_iam_policy_document" "trust" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.repository}:ref:refs/heads/${var.branch}"]
+      values   = [local.subject]
     }
   }
 }
