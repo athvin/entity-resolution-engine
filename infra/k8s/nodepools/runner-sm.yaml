@@ -1,0 +1,38 @@
+# §5/§5.1: S and M runner classes — 8 vCPU, local NVMe (Auto Mode stripes it
+# RAID0 automatically). WhenEmpty ONLY: WhenEmptyOrUnderutilized would let a
+# bin-packing consolidation discard an hour of a run; runner pods additionally
+# carry karpenter.sh/do-not-disrupt (§6's Job spec). expireAfter handles AMI
+# hygiene since a do-not-disrupt pod otherwise pins a node indefinitely.
+# Tainted so only runner Jobs (which tolerate it) land on NVMe capacity.
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: runner-sm
+spec:
+  template:
+    spec:
+      nodeClassRef:
+        group: eks.amazonaws.com
+        kind: NodeClass
+        name: default
+      taints:
+        - key: er.dupezero.com/runner
+          value: "true"
+          effect: NoSchedule
+      requirements:
+        - key: eks.amazonaws.com/instance-family
+          operator: In
+          values: ["c6id", "c8id", "c5ad", "c5d", "m6id"]
+        - key: eks.amazonaws.com/instance-size
+          operator: In
+          values: ["2xlarge"]
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["spot", "on-demand"]
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["amd64"]
+      expireAfter: 72h
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 30s

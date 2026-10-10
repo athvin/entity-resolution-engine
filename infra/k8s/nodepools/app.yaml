@@ -1,0 +1,30 @@
+# §5/§5.1: the app pool — er-api, er-web, er-dispatcher. Spot in dev.
+# WhenEmptyOrUnderutilized is correct HERE and forbidden on the runner pools:
+# app pods are stateless replicas, a runner pod is an hour of work.
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: app
+spec:
+  template:
+    spec:
+      nodeClassRef:
+        group: eks.amazonaws.com
+        kind: NodeClass
+        name: default
+      requirements:
+        - key: eks.amazonaws.com/instance-family
+          operator: In
+          values: ["m6i", "m6a"]
+        - key: eks.amazonaws.com/instance-size
+          operator: In
+          values: ["large"]
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["spot", "on-demand"]
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["amd64"]
+  disruption:
+    consolidationPolicy: WhenEmptyOrUnderutilized
+    consolidateAfter: 1m
