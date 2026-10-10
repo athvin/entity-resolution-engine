@@ -54,8 +54,10 @@ that consumes it.
   the cluster is built, and checking it costs an afternoon of reading and a throwaway
   cluster. Done when: the answer is written into §18.3, the §1 decisions table is updated,
   and tasks 1.2/1.3 below are annotated with which branch applies.
-- [ ] **D2 — domain and hosted zone** (§18.8). The one purchase decision in the plan.
-  **Resolve in week one** — Track S and task 1.4 both block on it.
+- [x] **D2 — domain** (§18.8). **Resolved 2026-10-10: `dupezero.com`, Cloudflare Registrar.**
+  Registrar pins the apex to Cloudflare nameservers, so Cloudflare is the DNS plane —
+  external-dns (Cloudflare provider, unproxied records), ACM validation and SES DKIM
+  CNAMEs via the Terraform `cloudflare` provider. Track S and 1.4 are unblocked.
 - [ ] **D3 — progress reporting** (§6.3, §18.5). The recommendation (runner writes its own
   progress to Postgres) stands unless overturned. **Confirm before 2.3 is started**, since
   the Job launcher is built around the answer.
@@ -155,7 +157,7 @@ catches cross-module leaks here.
   - From a non-hostNetwork pod: `curl -m 1 169.254.169.254` **times out** (IMDSv2 hop limit 1).
   - A privileged test pod is rejected in a namespace labeled `baseline` (PSS enforcing).
 - [ ] **1.4 Edge** (§4.1)
-  - A test Ingress gets a Route 53 record (external-dns) and the wildcard cert; reachable over the tailnet; **connection fails from a non-tailnet network** — test both directions.
+  - A test Ingress gets a Cloudflare DNS record (external-dns, unproxied) and the wildcard cert; reachable over the tailnet; **connection fails from a non-tailnet network** — test both directions.
   - One ALB serves multiple test Ingresses via `group.name`.
 - [ ] **1.5 EFS** (§7.4)
   - Mounts from a test pod through a namespace access point; write on one pod, read on another.
