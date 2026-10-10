@@ -141,6 +141,40 @@ jobs:
           path: artifacts/
           if-no-files-found: error
 
+  push-image:
+    # §11 (infrastructure.md): er-pipeline reaches ECR only from main. The
+    # er-ci-ecr-push trust policy pins the OIDC sub claim to refs/heads/main —
+    # PRs are excluded deliberately, since a PR from a fork runs
+    # attacker-authored workflow code and must never hold a push credential.
+    # Tags are immutable in the registry; the commit SHA is the tag, and
+    # promotion to prod is by digest, never by tag.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [static, unit]
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Assume er-ci-ecr-push via OIDC
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::660360495170:role/er-ci-ecr-push
+          aws-region: us-east-2
+      - name: Log in to ECR
+        run: aws ecr get-login-password --region us-east-2 |
+             docker login --username AWS --password-stdin 660360495170.dkr.ecr.us-east-2.amazonaws.com
+      - name: Build and push er-pipeline
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          tags: 660360495170.dkr.ecr.us-east-2.amazonaws.com/er-pipeline:${{ github.sha }}
+          cache-from: type=gha
+
   integration:
     runs-on: ubuntu-latest
     timeout-minutes: 25

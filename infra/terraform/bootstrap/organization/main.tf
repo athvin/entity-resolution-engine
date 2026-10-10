@@ -7,10 +7,12 @@
 resource "aws_organizations_organization" "this" {
   feature_set = "ALL"
 
-  # Identity Center enabled this principal when the org was created; omitting an
-  # already-enabled principal here would disable it on apply.
+  # Identity Center enabled sso.amazonaws.com when the org was created; omitting
+  # an already-enabled principal here would disable it on apply. cloudtrail is
+  # required for the §8.6 organization trail.
   aws_service_access_principals = [
     "sso.amazonaws.com",
+    "cloudtrail.amazonaws.com",
   ]
 
   # SCPs attach to the OUs below (infrastructure.md §8.2); the type must be
@@ -44,6 +46,14 @@ resource "aws_organizations_account" "nonprod" {
     # role_name is create-only and cannot be read back from the API.
     ignore_changes = [role_name]
   }
+}
+
+# §8.2's guardrails attach to the OU, so the prod account (quota-pending) is
+# covered from the moment it is created.
+module "org_guardrails" {
+  source = "../../modules/org-guardrails"
+
+  prod_ou_id = aws_organizations_organizational_unit.prod.id
 }
 
 resource "aws_organizations_account" "prod" {
