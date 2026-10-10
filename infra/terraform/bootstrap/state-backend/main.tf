@@ -15,7 +15,7 @@ resource "aws_kms_alias" "state" {
 }
 
 resource "aws_s3_bucket" "state" {
-  bucket = "er-terraform-state-660360495170"
+  bucket = "er-terraform-state-797781631727"
 
   lifecycle {
     prevent_destroy = true

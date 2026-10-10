@@ -9,15 +9,14 @@ terraform {
   }
 }
 
-# Management account (run with AWS_PROFILE=er-mgmt). No workloads live here —
-# only billing, audit, and org-level resources (infrastructure.md §3).
+# The account (rev 4, infrastructure.md §3). Run with AWS_PROFILE=er-mgmt.
 provider "aws" {
   region = "us-east-2"
 
   default_tags {
     tags = {
       Project     = "entity-resolution"
-      Environment = "mgmt"
+      Environment = "core"
       ManagedBy   = "terraform"
     }
   }
@@ -31,7 +30,7 @@ provider "aws" {
   default_tags {
     tags = {
       Project     = "entity-resolution"
-      Environment = "mgmt"
+      Environment = "core"
       ManagedBy   = "terraform"
     }
   }

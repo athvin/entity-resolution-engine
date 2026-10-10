@@ -66,48 +66,58 @@ that consumes it.
 
 ## Phase 0 — Foundations (start here)
 
+*(Rev 4, 2026-10-10: executed against the single-account topology — infrastructure.md
+§3 records the collapse and its trade. Checkboxes below reflect actual state.)*
+
 Everything in this phase is verifiable with no cluster running (§15). The ordering rule
 inside the phase: **0.6 (cost tags) before any billable resource exists**, because
 activation takes up to 24h and never backfills (§16.1).
 
-- [ ] **0.1 Organization, accounts, OUs** (§3)
-  - `mgmt`, `nonprod`, `prod` accounts exist under the Organization; mgmt holds no workloads.
-  - MFA enabled on all three root users; zero root access keys (`aws iam get-account-summary` shows `AccountAccessKeysPresent: 0` in each).
-  - Account-level S3 Block Public Access on in all three accounts (§5.6).
+- [x] **0.1 The account baseline** (§3) — account `er` 797781631727 under Organization
+  `o-bqzb54i69b` (kept for Identity Center; otherwise inert).
+  - [x] Root MFA on; zero root access keys (`AccountAccessKeysPresent: 0`).
+  - [x] Account-level S3 Block Public Access on (§5.6).
+  - The former `nonprod` member account (660360495170) is parked empty at the org root.
 
-- [ ] **0.2 Terraform bootstrap — two stacks** (§14)
-  - State bucket in nonprod: versioned, SSE-KMS under its own CMK, `use_lockfile` works (two concurrent plans — second one blocks).
-  - The organization stack's local state is migrated into the bucket and a fresh `terraform plan` on both stacks is empty.
+- [x] **0.2 Terraform bootstrap — two stacks** (§14)
+  - [x] State bucket: versioned, SSE-KMS under its own CMK, `use_lockfile` locking.
+  - [x] Both bootstrap stacks' state migrated into the bucket; plans clean.
 
-- [ ] **0.3 Identity Center** (§8.1)
-  - All three permission sets assumable via `aws sso login`; session durations are 8h/4h/1h as specified.
-  - Access is by group membership: adding a test user to the group grants access, removing revokes it, and no per-person assignment exists.
-  - Zero IAM users for humans in any account.
+- [x] **0.3 Identity Center** (§8.1)
+  - [x] PlatformAdmin 8h / ProdDataReadOnly 4h / ProdAdmin 1h permission sets; access by
+    group membership (`developers`, `prod-admins`); zero IAM users for humans.
 
-- [ ] **0.4 The two SCPs** (§8.2, verification script in §17 Phase 0)
-  - Under `ProdDataReadOnly`: `aws ecr describe-repositories` succeeds; `aws ecr delete-repository` fails with AccessDenied; `aws iam create-role --role-name er-prod-app-probe` **fails** — this is the Statement 2 probe and the single most important check in the phase.
-  - Under `ProdAdmin`: the same mutations succeed.
-  - A service-initiated write still works (CloudTrail delivers a log file after the SCP attaches — the `BoolIfExists` clause held).
+- [x] **0.4 The two guard denies** (§8.2 — rev 4: inline on the permission sets, no SCP)
+  - [x] `DenyProdDataMutation` + `DenyProdIamEscalation` ride `PlatformAdmin`.
+  - [ ] §17 Phase 0 probe run: under `PlatformAdmin`, `er-prod-*` writes and
+    `iam:CreateRole er-prod-app-probe` **fail**; under `ProdAdmin` they succeed.
+    **Re-run after any permission-set change** — the guard now lives in that layer.
 
-- [ ] **0.5 Audit trails, Object Lock, Config** (§8.6, §15)
-  - Org CloudTrail delivers to the mgmt-account bucket; digest files exist and `aws cloudtrail validate-logs` passes.
-  - Archive bucket: versioning on, Object Lock in **compliance** mode, 400-day retention — read back from the API, not the console.
-  - The control test, not an inspection: assume `PlatformAdmin` in nonprod and attempt to delete an archive object — **it must fail** (§17).
-  - AWS Config recording with the narrow scope, in both workload accounts.
+- [x] **0.5 Audit trail, Object Lock, Config** (§8.6, §15)
+  - [x] CloudTrail `er-org-trail` logging, multi-region, log-file validation on,
+    delivering to the compliance-mode Object-Locked bucket (400d) under its own CMK.
+  - [ ] First digest delivered and `aws cloudtrail validate-logs` passes (waiting on delivery).
+  - [ ] The control test: under `PlatformAdmin`, deleting an archive object **must fail**.
+  - [x] AWS Config recording, narrow scope.
 
-- [ ] **0.6 Cost attribution — before anything billable** (§16.1)
-  - `Project`, `Environment`, `ManagedBy`, `Developer` show **Active** in the Billing console.
-  - CUR delivery to S3 configured, partitioned, with Split Cost Allocation Data for EKS enabled.
-  - Deferred check (append when it lands): first CUR file contains split-allocation columns.
+- [x] **0.6 Cost attribution — before anything billable** (§16.1)
+  - [x] CUR 2.0 export (hourly, Parquet, per-resource, Split Cost Allocation Data) delivering to S3.
+  - [ ] `Project`, `Environment`, `ManagedBy`, `Developer` activated once they surface in
+    billing (~24h after first tagged resource).
+  - [ ] Deferred check: first CUR file contains split-allocation columns.
 
-- [ ] **0.7 GitHub OIDC + ECR** (§11, §17 Phase 1)
-  - Repositories in both accounts with tag immutability and scan-on-push; replication configured on the source **and** registry policy on the destination.
-  - CI on `main` pushes `er-pipeline`; re-pushing the same tag is rejected; the digest in prod ECR equals nonprod byte-for-byte.
-  - A workflow run from a PR branch attempting to assume the push role **fails** — run the probe, don't assume it.
+- [x] **0.7 GitHub OIDC + ECR** (§11, §17 Phase 1)
+  - [x] `er-pipeline`/`er-api`/`er-web` repositories: tag immutability, scan-on-push,
+    last-30 lifecycle. Single registry — replication dissolved with the accounts.
+  - [x] OIDC provider + `er-ci-ecr-push` with `sub` pinned to `main`; CI `push-image` job.
+  - [ ] Probes: first main push lands in ECR; re-pushing the same tag rejected; a PR-branch
+    assume of the push role **fails**.
 
-- [ ] **0.8 Branch protection + budget alarms** (§8.6, §16)
-  - Direct push to `main` rejected; PR without review cannot merge.
-  - Budget alarms at $300 and $600; fire a test notification and see it arrive.
+- [x] **0.8 Branch protection + budget alarms** (§8.6, §16)
+  - [x] Direct push to `main` rejected; PR without review cannot merge (1 review + all 36
+    checks required; `enforce_admins` off as the conscious solo-operator bypass).
+  - [x] Budget alarms at $300 and $600 (ACTUAL + FORECASTED, email).
+  - [ ] Fire a test notification and see it arrive.
 
 **Phase 0 exit:** all §17 Phase 0 probes pass, and the two "cannot backfill" systems
 (trails, cost attribution) have each produced their first real artifact.

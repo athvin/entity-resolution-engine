@@ -1,7 +1,7 @@
-# Task 0.7 (infrastructure.md §11): ECR in nonprod as the source of truth.
-# Tag immutability + scan-on-push + last-30 lifecycle. AES256 is the §8.3
-# deliberate exception — images hold no records. Replication to prod (plus
-# the prod-side registry policy) lands once the prod account exists.
+# Task 0.7 (infrastructure.md §11, rev 4): the account's single registry —
+# immutable tags, scan-on-push, last-30 lifecycle. AES256 is the §8.3
+# deliberate exception. Promotion is by digest, never by tag; replication
+# dissolved with the account split.
 
 locals {
   images = ["er-pipeline", "er-api", "er-web"]

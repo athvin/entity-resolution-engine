@@ -215,7 +215,9 @@ resource "aws_cloudtrail" "org" {
   s3_bucket_name = aws_s3_bucket.audit.id
   kms_key_id     = aws_kms_key.audit.arn
 
-  is_organization_trail         = true
+  # Rev 4: one account, so a plain multi-region trail; the org delivery prefix
+  # in the bucket policy is kept harmlessly for history.
+  is_organization_trail         = false
   is_multi_region_trail         = true
   include_global_service_events = true
   enable_log_file_validation    = true

@@ -3,8 +3,6 @@
 # window". Evidence generator; not a compliance engine.
 
 locals {
-  nonprod_account_id = "660360495170"
-
   config_resource_types = [
     "AWS::S3::Bucket",
     "AWS::S3::AccountPublicAccessBlock",
@@ -24,7 +22,7 @@ resource "aws_iam_service_linked_role" "config" {
 }
 
 resource "aws_s3_bucket" "config" {
-  bucket = "er-config-${local.nonprod_account_id}"
+  bucket = "er-config-${local.mgmt_account_id}"
 }
 
 resource "aws_s3_bucket_public_access_block" "config" {
@@ -52,7 +50,7 @@ data "aws_iam_policy_document" "config_bucket" {
     condition {
       test     = "StringEquals"
       variable = "aws:SourceAccount"
-      values   = [local.nonprod_account_id]
+      values   = [local.mgmt_account_id]
     }
   }
 
@@ -66,7 +64,7 @@ data "aws_iam_policy_document" "config_bucket" {
       identifiers = ["config.amazonaws.com"]
     }
 
-    resources = ["${aws_s3_bucket.config.arn}/AWSLogs/${local.nonprod_account_id}/Config/*"]
+    resources = ["${aws_s3_bucket.config.arn}/AWSLogs/${local.mgmt_account_id}/Config/*"]
 
     condition {
       test     = "StringEquals"
@@ -77,7 +75,7 @@ data "aws_iam_policy_document" "config_bucket" {
     condition {
       test     = "StringEquals"
       variable = "aws:SourceAccount"
-      values   = [local.nonprod_account_id]
+      values   = [local.mgmt_account_id]
     }
   }
 
