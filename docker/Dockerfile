@@ -2,6 +2,13 @@
 # registries and binary downloads no longer serve the pinned community releases.
 # Build those releases from verified source archives for the host architecture.
 #
+# This is also the er-pipeline runner image (infrastructure.md S11): the
+# dispatcher launches each run as `python -m erserver.runner '<payload json>'`
+# -- as a forked subprocess today and as a Kubernetes Job's container command
+# (S6.2) -- so the venv carries the server package (erserver) alongside the
+# engine. Only the package and its runtime dependencies: no server tests, and
+# the engine's own lockfile stays authoritative for every package it pins.
+#
 # Python and uv are pinned by tag; the Go build image is pinned by digest.
 # The source commits and archive checksums are recorded in er.versions (S2.1).
 #
@@ -32,23 +39,43 @@ FROM python:3.12-slim AS builder
 COPY --from=ghcr.io/astral-sh/uv:0.11.3 /uv /bin/uv
 WORKDIR /app
 
-# LICENSE travels with the manifest because pyproject.toml declares
+# LICENSE travels with the manifests because pyproject.toml declares
 # `license = { file = "LICENSE" }`: hatchling reads that file when it generates the
-# project metadata, so the second sync below cannot install `er` without it.
+# project metadata, so the root project sync below cannot install `er` without it.
+# The server manifests ride the same layer: the server is a standalone uv project
+# (server/README.md) that consumes `er` as an editable path dependency on the
+# repository root, so both manifests and both lockfiles are build inputs here,
+# exactly as in docker/Dockerfile.api.
 COPY pyproject.toml uv.lock LICENSE ./
+COPY server/pyproject.toml server/uv.lock server/
 
-# Dependencies only -- src/ is not in the context yet, and this is the expensive
-# layer Docker should cache across source edits. The dev dependency group is
-# installed on purpose and MUST NOT be excluded: the `pipeline` service's command
-# is `pytest`, so pytest, pytest-xdist and hypothesis have to be in the runtime
-# image, and tests/unit/test_dockerfile_contract.py fails if the flag that would
-# drop them appears anywhere in this file (S7.3).
-RUN uv sync --frozen --no-install-project
+# Dependencies only -- neither src tree is in the context yet, and these are the
+# expensive layers Docker should cache across source edits. Two locks, one venv,
+# and the ROOT lock wins: the first sync seeds /app/.venv with erserver's
+# dependencies at the server lock's pins, then the second re-asserts the engine's
+# own lock over every package it names -- S2.1 makes that lock the engine's
+# closed set, and this image is where the integration suite runs, so the shared
+# packages the two locks resolve differently must land at the S2.1 pins.
+# `--inexact` keeps the server-only packages (fastapi, uvicorn, httpx, ...) that
+# the root lock does not know about. The dev dependency group is installed on
+# purpose and MUST NOT be excluded: the `pipeline` service's command is `pytest`,
+# so pytest, pytest-xdist and hypothesis have to be in the runtime image, and
+# tests/unit/test_dockerfile_contract.py fails if the flag that would drop them
+# appears anywhere in this file (S7.3). The server's test extra stays out for the
+# same reason in reverse: the suite's tools come from the root dev group.
+RUN UV_PROJECT_ENVIRONMENT=/app/.venv uv sync --frozen --project server --no-install-project --no-install-package er
+RUN uv sync --frozen --inexact --no-install-project
 
 COPY src/ src/
-# Now install the project itself into /app/.venv. `uv sync` installs it editable,
-# which is why the runtime stage still copies src/.
-RUN uv sync --frozen
+COPY server/src/ server/src/
+# Now install the projects themselves into /app/.venv. `uv sync` installs `er`
+# editable, which is why the runtime stage still copies both src trees. erserver
+# arrives via `uv pip install --no-deps` rather than a server-project sync: a
+# sync against server/uv.lock here would re-pin the packages both locks share to
+# the server lock's resolution, drifting the engine off its own S2.1 lock --
+# --no-deps installs exactly one package into an already-correct environment.
+RUN uv sync --frozen --inexact
+RUN uv pip install --python /app/.venv/bin/python --no-deps --editable ./server
 
 # Bake DuckDB extensions at BUILD time so no container ever downloads one at
 # runtime. This is the precondition for `autoinstall_known_extensions = false` in
@@ -80,6 +107,9 @@ COPY --from=storage-builder /src/minio/LICENSE /src/minio/NOTICE /src/minio/CRED
 COPY --from=storage-builder /src/mc/LICENSE /src/mc/NOTICE /src/mc/CREDITS /usr/share/licenses/mc/
 WORKDIR /app
 COPY src/ src/
+# erserver is installed editable from /app/server, so its src tree must ship
+# exactly like src/ does: read-only at run time, root-owned on purpose.
+COPY server/src/ server/src/
 # dbt writes target/, logs/, .tmp/ and profiles/.user.yml under dbt/ at run time,
 # so this tree must belong to the runtime user. Everything else COPYed into the
 # image is read-only at run time and stays root-owned on purpose.
