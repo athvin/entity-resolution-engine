@@ -438,7 +438,7 @@ s3://er-nonprod-lake/dev/alice/{ns}/     ERSERVER_LAKE_DATA_PATH_TEMPLATE, per d
 s3://er-prod-lake/{ns}/                  prod
 ```
 
-`ERSERVER_LAKE_DATA_PATH_TEMPLATE` is validated to contain `{ns}` and end with `/` ([server/src/erserver/settings.py:55](../server/src/erserver/settings.py)); both forms satisfy it. The repository currently carries **three** inconsistent layouts — `s3://lake/er/` in the CI compose stack, `s3://lake/tenants/{ns}/` in the dev stack, and `s3://er-lake/{ns}/` as the settings default. Normalizing on the above is part of this work.
+`ERSERVER_LAKE_DATA_PATH_TEMPLATE` is validated to contain `{ns}` and end with `/` ([server/src/erserver/settings.py:55](../server/src/erserver/settings.py)); both forms satisfy it. Local stacks carry the same shape under the single MinIO bucket: the settings default and the dev stack both use `s3://lake/{ns}/`, and the CI compose stack is its fixed single-tenant instance `s3://lake/er/`.
 
 Models stay under the tenant's prefix (`provision.py` sets `model_uri_prefix = f"{plan.data_path}models/"`) so a tenant purge is one prefix delete.
 
