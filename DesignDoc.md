@@ -298,7 +298,7 @@ lake:
       endpoint: "{{ env_var('ER_S3_ENDPOINT', '') }}"
       url_style: "{{ env_var('ER_S3_URL_STYLE', 'path') }}"
       use_ssl: "{{ env_var('ER_S3_USE_SSL', 'false') }}"
-      region: "{{ env_var('ER_S3_REGION', 'us-east-1') }}"
+      region: "{{ env_var('ER_S3_REGION', 'us-east-2') }}"
   attach:                                # emitted as ATTACH ... AS <alias> (...)
     - path: "ducklake:postgres:{{ env_var('ER_CATALOG_DSN', '') }}"
       alias: lake
@@ -1320,7 +1320,7 @@ x-er-env: &er-env
   ER_S3_ENDPOINT:            objectstore:9000        # host:port — NO scheme; DuckDB httpfs rejects a URL here
   ER_S3_ACCESS_KEY_ID:       erminio
   ER_S3_SECRET_ACCESS_KEY:   erminiopassword
-  ER_S3_REGION:              us-east-1
+  ER_S3_REGION:              us-east-2
   ER_S3_URL_STYLE:           path
   ER_S3_USE_SSL:             "false"
   ER_LAKE_DATA_PATH:         s3://lake/er/
