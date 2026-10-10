@@ -60,7 +60,7 @@ class ServerSettings:
     #: (docs/infrastructure.md §7.2). The default keeps today's names.
     tenant_db_prefix: str = "er_"
     #: Per-tenant S3 prefix template; must contain ``{ns}`` and end with ``/``.
-    lake_data_path_template: str = "s3://er-lake/{ns}/"
+    lake_data_path_template: str = "s3://lake/{ns}/"
     #: Directory for server-managed org config files: ``{config_root}/{org}.yaml``.
     config_root: str | None = None
     #: Directory for per-org drop dirs: ``{drop_root}/{org}``.
@@ -104,7 +104,7 @@ class ServerSettings:
             tenant_dsn_template=os.environ.get("ERSERVER_TENANT_DSN_TEMPLATE") or None,
             tenant_db_prefix=os.environ.get("ERSERVER_TENANT_DB_PREFIX") or "er_",
             lake_data_path_template=os.environ.get("ERSERVER_LAKE_DATA_PATH_TEMPLATE")
-            or "s3://er-lake/{ns}/",
+            or "s3://lake/{ns}/",
             config_root=os.environ.get("ERSERVER_CONFIG_ROOT") or None,
             drop_root=os.environ.get("ERSERVER_DROP_ROOT") or None,
             config_template_path=os.environ.get("ERSERVER_CONFIG_TEMPLATE") or None,

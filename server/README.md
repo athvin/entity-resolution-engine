@@ -37,7 +37,7 @@ export ERSERVER_TENANT_DSN_TEMPLATE='postgresql://…/{dbname}'  # each org's ER
 export ERSERVER_CONFIG_ROOT=/var/lib/er/configs     # server-managed {org}.yaml files
 export ERSERVER_DROP_ROOT=/var/lib/er/drop          # per-org drop dirs
 # optional:
-export ERSERVER_LAKE_DATA_PATH_TEMPLATE='s3://er-lake/{ns}/'   # the default
+export ERSERVER_LAKE_DATA_PATH_TEMPLATE='s3://lake/{ns}/'   # the default
 export ERSERVER_CONFIG_TEMPLATE=…                   # defaults to the repo's configs/default.yaml
 export ERSERVER_TENANT_ENV_JSON='{"ER_S3_ENDPOINT":"…","ER_S3_SECRET_ACCESS_KEY":"secret://S3",…}'
                                                     # shared ER_* merged into every new org's env
