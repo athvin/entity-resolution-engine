@@ -86,7 +86,10 @@ COPY src/ src/
 COPY --chown=er:er dbt/ dbt/
 # Standalone CLI commands need dbt_utils in each fresh container. Resolve the
 # pinned packages during the build, independently of the developer's dbt cache.
-RUN dbt deps --project-dir dbt && rm -rf dbt/logs dbt/profiles/.user.yml
+# This runs as root (USER comes later), and a re-run of `dbt deps` at test time
+# rmtrees dbt_packages — so the baked tree must belong to the runtime user.
+RUN dbt deps --project-dir dbt && rm -rf dbt/logs dbt/profiles/.user.yml && \
+    chown -R er:er /app/dbt
 COPY configs/ configs/
 COPY benchmarks/ benchmarks/
 COPY fixtures/ fixtures/
