@@ -197,3 +197,54 @@ jobs:
           name: integration-artifacts-${{ matrix.shard }}
           path: artifacts/
           if-no-files-found: error
+
+  push-image:
+    # Build and push the three images (infrastructure.md S11) to nonprod ECR,
+    # tagged with the commit SHA; replication carries them to prod. Gated twice
+    # on `main`: the `if` below, and the er-ci-ecr-push trust policy's `sub`
+    # claim -- a PR from a fork runs attacker-authored workflow code and must
+    # never hold a push credential, which is also why the job consumes zero
+    # repository secrets and authenticates through OIDC alone.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [static, unit, server, frontend, integration]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      id-token: write # the OIDC token exchange; granted to this job only
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          role-to-assume: arn:aws:iam::797781631727:role/er-ci-ecr-push
+          aws-region: us-east-2
+      - uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
+      - name: Push er-pipeline
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          tags: 797781631727.dkr.ecr.us-east-2.amazonaws.com/er-pipeline:${{ github.sha }}
+          # The integration job already wrote this commit's layers to the GHA
+          # cache under the default scope, so this build is a cache replay.
+          cache-from: type=gha
+      - name: Push er-api
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: docker/Dockerfile.api
+          push: true
+          tags: 797781631727.dkr.ecr.us-east-2.amazonaws.com/er-api:${{ github.sha }}
+          cache-from: "type=gha,scope=er-api"
+          cache-to: "type=gha,mode=max,scope=er-api" # quoted: unquoted, the comma ends the flow-mapping entry
+      - name: Push er-web
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: frontend
+          file: frontend/Dockerfile
+          push: true
+          tags: 797781631727.dkr.ecr.us-east-2.amazonaws.com/er-web:${{ github.sha }}
+          cache-from: "type=gha,scope=er-web"
+          cache-to: "type=gha,mode=max,scope=er-web" # quoted: unquoted, the comma ends the flow-mapping entry

@@ -39,8 +39,25 @@ TAG_COMMENT = re.compile(r"^\s*#\s*(?P<tag>v[0-9][\w.-]*)\s*$")
 # S9.1's timeouts are the enforcement mechanism for the <10 min PR budget, not advice:
 # `static` and `unit` run concurrently, so the wall clock is max(10, 10) + 25. The
 # `server` and `frontend` jobs are off that critical path: each depends on nothing
-# and nothing waits on it.
-EXPECTED_TIMEOUTS = {"static": 10, "unit": 10, "server": 15, "frontend": 15, "integration": 25}
+# and nothing waits on it. `push-image` runs on `main` only, so its timeout guards
+# runner minutes rather than the PR budget.
+EXPECTED_TIMEOUTS = {
+    "static": 10,
+    "unit": 10,
+    "server": 15,
+    "frontend": 15,
+    "integration": 25,
+    "push-image": 30,
+}
+
+# infrastructure.md S11: the three images, pushed to nonprod ECR by commit SHA.
+# Tag immutability upstream is what makes the SHA tag a promotable artifact.
+ECR_REGISTRY = "797781631727.dkr.ecr.us-east-2.amazonaws.com"
+EXPECTED_IMAGE_PUSHES = {
+    "er-pipeline": {"context": ".", "file": "docker/Dockerfile"},
+    "er-api": {"context": ".", "file": "docker/Dockerfile.api"},
+    "er-web": {"context": "frontend", "file": "frontend/Dockerfile"},
+}
 
 # The uv the setup action installs must be the S2.1 pin everywhere, but the cache key
 # differs: the server control plane is a standalone project with its own lockfile.
@@ -177,6 +194,10 @@ def test_job_graph_runs_static_and_unit_in_parallel() -> None:
             "serialise into extra wall clock for the same result"
         )
     assert job("integration")["needs"] == ["static", "unit"]
+
+    # The push job gates on EVERYTHING: a pushed tag is immutable upstream, so an
+    # image from a commit any job failed on could never be replaced, only renamed.
+    assert set(job("push-image")["needs"]) == set(EXPECTED_TIMEOUTS) - {"push-image"}
 
 
 def test_all_uses_are_sha_pinned_with_tag_comments() -> None:
@@ -328,6 +349,79 @@ def test_cache_to_is_a_quoted_scalar() -> None:
     assert build["with"]["cache-to"] == "type=gha,mode=max"
     assert build["with"]["cache-from"] == "type=gha"
     assert 'cache-to: "type=gha,mode=max"' in workflow_text()
+
+
+def test_push_image_job_pushes_all_three_images_from_main_only() -> None:
+    """infrastructure.md S11: the push job's guard rails, each of them load-bearing.
+
+    The `if` is what keeps a pull request -- whose workflow code may be
+    attacker-authored (fork) -- from ever reaching the push role; `id-token: write`
+    on this job alone is what keeps every other job incapable of the OIDC exchange;
+    and `push: true` with no `load:` is what distinguishes this job from the
+    integration build, which must never publish. Asserted per image, because a job
+    that pushes two of the three still goes green on its own.
+    """
+    definition = job("push-image")
+
+    assert definition["if"] == "github.event_name == 'push' && github.ref == 'refs/heads/main'", (
+        "the push job must run only on a push to main; a PR must never hold a push credential (S11)"
+    )
+    assert definition["permissions"] == {"contents": "read", "id-token": "write"}, (
+        "id-token: write is the OIDC exchange; contents: read keeps the rest of the "
+        "workflow-level read-only stance"
+    )
+    for name in set(EXPECTED_TIMEOUTS) - {"push-image"}:
+        assert "permissions" not in job(name), (
+            f"{name} must inherit the workflow's read-only token; only push-image "
+            "may widen it, and only by id-token"
+        )
+
+    credentials, login = (
+        next(
+            step
+            for step in definition["steps"]
+            if str(step.get("uses", "")).startswith(f"aws-actions/{action}@")
+        )
+        for action in ("configure-aws-credentials", "amazon-ecr-login")
+    )
+    assert credentials["with"]["role-to-assume"].endswith(":role/er-ci-ecr-push"), (
+        "the job must assume er-ci-ecr-push via OIDC -- it is the role whose trust "
+        "policy restricts the sub claim to main (S11)"
+    )
+    assert credentials["with"]["aws-region"] == "us-east-2"
+    assert "with" not in login, "amazon-ecr-login takes no inputs here; a registry id would drift"
+
+    builds = [
+        step
+        for step in definition["steps"]
+        if str(step.get("uses", "")).startswith("docker/build-push-action@")
+    ]
+    pushed = {}
+    for build in builds:
+        with_block = build["with"]
+        assert with_block["push"] is True, f"{with_block['file']} builds without pushing"
+        assert "load" not in with_block, "push and load are different jobs' verbs"
+        registry, _, reference = with_block["tags"].partition("/")
+        repository, _, tag = reference.partition(":")
+        assert registry == ECR_REGISTRY
+        assert tag == "${{ github.sha }}", (
+            f"{repository} must be tagged with the commit SHA -- the tag a prod "
+            "deploy resolves to a digest (S11's promote-by-digest)"
+        )
+        pushed[repository] = {"context": with_block["context"], "file": with_block["file"]}
+
+    assert pushed == EXPECTED_IMAGE_PUSHES, (
+        "the push job must push exactly the three S11 images from their own "
+        f"contexts and Dockerfiles; got {pushed}"
+    )
+    for details in EXPECTED_IMAGE_PUSHES.values():
+        assert (REPO_ROOT / details["file"]).is_file(), f"{details['file']} does not exist"
+
+    # Order: both credential steps precede the first build, or the pushes fail --
+    # but only at run time on main, long after the PR that broke it went green.
+    steps = definition["steps"]
+    first_build = steps.index(builds[0])
+    assert steps.index(credentials) < steps.index(login) < first_build
 
 
 def test_run_steps_reference_existing_files() -> None:

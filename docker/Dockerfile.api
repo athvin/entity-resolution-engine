@@ -1,0 +1,76 @@
+# The er-api image (infrastructure.md S11, backend-design.md S4): the control
+# plane only. One image serves both deployables -- `er-api` runs the default
+# uvicorn command below, `er-dispatcher` overrides it with
+# `python -m erserver.dispatcher`.
+#
+# Deliberately slim relative to docker/Dockerfile (the er-pipeline image): no
+# dbt project, no baked dbt packages, no MinIO binaries, no tests, fixtures or
+# benchmarks. The dbt-core *distribution* still arrives through the venv because
+# the `er` package declares it (S2.1's closed set); what this image drops is
+# everything a runner needs and an API process never executes.
+#
+# Base images follow docker/Dockerfile's S2.1 pinning conventions: Python and uv
+# by the pinned tag (tests/unit/test_dockerfile_contract.py holds them to the
+# pin table). The build context is the repository root
+# (`docker build -f docker/Dockerfile.api .`), so every COPY is repo-root-relative.
+
+# ---- builder ----
+FROM python:3.12-slim AS builder
+COPY --from=ghcr.io/astral-sh/uv:0.11.3 /uv /bin/uv
+WORKDIR /app
+
+# The server is a standalone uv project (server/README.md) that consumes `er` as
+# an editable path dependency on the repository root, so both manifests and both
+# lockfiles participate in one resolve. LICENSE travels with the root manifest
+# because pyproject.toml declares `license = { file = "LICENSE" }` and hatchling
+# reads it when generating `er`'s metadata.
+COPY pyproject.toml uv.lock LICENSE ./
+COPY server/pyproject.toml server/uv.lock server/
+
+# Dependencies only -- neither src tree is in the context yet, so this is the
+# expensive layer Docker caches across source edits. `--no-install-package er`
+# keeps the editable path dependency out of this layer the same way
+# `--no-install-project` keeps erserver out. No test extra: this image runs the
+# control plane, not a suite.
+RUN uv sync --frozen --project server --no-install-project --no-install-package er
+
+COPY src/ src/
+COPY server/src/ server/src/
+# Now install `er` and `erserver` themselves into /app/server/.venv. Both are
+# editable installs, which is why the runtime stage still copies the src trees.
+RUN uv sync --frozen --project server
+
+# Bake DuckDB extensions at BUILD time so no container ever downloads one at
+# runtime -- the API's read path opens DuckLake connections under
+# `autoinstall_known_extensions = false` exactly like the pipeline (S4.0b, B1).
+ENV DUCKDB_EXTENSION_DIRECTORY=/opt/duckdb_extensions
+RUN /app/server/.venv/bin/python -c "\
+import duckdb, os; \
+c = duckdb.connect(config={'extension_directory': os.environ['DUCKDB_EXTENSION_DIRECTORY']}); \
+[c.execute(f'INSTALL {e}') for e in ('ducklake','postgres','httpfs')]"
+
+# ---- runtime ----
+FROM python:3.12-slim AS runtime
+ENV PATH=/app/server/.venv/bin:$PATH \
+    PYTHONDONTWRITEBYTECODE=1
+# Non-root, per infrastructure.md S5.6: Pod Security `restricted` requires it and
+# the API/dispatcher never need root. Same uid/gid convention as docker/Dockerfile.
+RUN groupadd --gid 1001 er && \
+    useradd --uid 1001 --gid er --create-home --shell /usr/sbin/nologin er
+COPY --from=builder /app/server/.venv /app/server/.venv
+COPY --from=builder /opt/duckdb_extensions /opt/duckdb_extensions
+WORKDIR /app
+COPY src/ src/
+COPY server/src/ server/src/
+# The provisioning seed template defaults to `<repo>/configs/default.yaml`,
+# resolved relative to the erserver package (provision.py); carrying configs/
+# keeps that default true in the container.
+COPY configs/ configs/
+# /app/.tmp is DuckDB's CWD-relative spill directory (infrastructure.md S18.1);
+# /app itself belongs to the user so runtime scratch beside the code can exist.
+RUN mkdir -p /app/.tmp && chown er:er /app /app/.tmp
+USER er
+ENTRYPOINT []
+# The er-api deployable's command; er-dispatcher overrides CMD with
+# ["python", "-m", "erserver.dispatcher"] (same image, different command).
+CMD ["uvicorn", "--factory", "erserver.api:create_app", "--host", "0.0.0.0", "--port", "8000"]

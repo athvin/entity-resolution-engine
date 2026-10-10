@@ -1,0 +1,15 @@
+# The image installs its own dependency tree from pnpm-lock.yaml; a host
+# node_modules carries host-platform native binaries and must never be COPYed.
+node_modules
+.next
+
+# Test output and the local dev substrate are not build inputs.
+test-results
+playwright-report
+tests
+dev/.state
+
+# Repository noise.
+.DS_Store
+Dockerfile
+.dockerignore
