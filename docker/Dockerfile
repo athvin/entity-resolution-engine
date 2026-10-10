@@ -65,6 +65,14 @@ FROM python:3.12-slim AS runtime
 ENV PATH=/app/.venv/bin:$PATH \
     PYTHONDONTWRITEBYTECODE=1 \
     DBT_PROFILES_DIR=/app/dbt/profiles
+# Every process in this image runs as this non-root user (infrastructure.md S5.6):
+# pytest in the compose `pipeline` service, the MinIO server in `objectstore`,
+# `mc` in `objectstore-init`, and `er` itself. uid/gid 1001 deliberately matches
+# the GitHub Actions runner that owns the ../artifacts bind mount, so the junit
+# XML and dbt logs stay writable from inside the container on a Linux host.
+# --create-home because mc writes ~/.mc and MinIO reads ~/.minio.
+RUN groupadd --gid 1001 er && \
+    useradd --uid 1001 --gid er --create-home --shell /usr/sbin/nologin er
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /opt/duckdb_extensions /opt/duckdb_extensions
 COPY --from=storage-builder /out/minio /out/mc /usr/local/bin/
@@ -72,10 +80,16 @@ COPY --from=storage-builder /src/minio/LICENSE /src/minio/NOTICE /src/minio/CRED
 COPY --from=storage-builder /src/mc/LICENSE /src/mc/NOTICE /src/mc/CREDITS /usr/share/licenses/mc/
 WORKDIR /app
 COPY src/ src/
-COPY dbt/ dbt/
+# dbt writes target/, logs/, .tmp/ and profiles/.user.yml under dbt/ at run time,
+# so this tree must belong to the runtime user. Everything else COPYed into the
+# image is read-only at run time and stays root-owned on purpose.
+COPY --chown=er:er dbt/ dbt/
 # Standalone CLI commands need dbt_utils in each fresh container. Resolve the
 # pinned packages during the build, independently of the developer's dbt cache.
-RUN dbt deps --project-dir dbt && rm -rf dbt/logs dbt/profiles/.user.yml
+# This runs as root (USER comes later), and a re-run of `dbt deps` at test time
+# rmtrees dbt_packages — so the baked tree must belong to the runtime user.
+RUN dbt deps --project-dir dbt && rm -rf dbt/logs dbt/profiles/.user.yml && \
+    chown -R er:er /app/dbt
 COPY configs/ configs/
 COPY benchmarks/ benchmarks/
 COPY fixtures/ fixtures/
@@ -90,6 +104,13 @@ COPY pyproject.toml ./
 COPY scripts/ scripts/
 # artifacts/ is the Compose bind-mount target (S7.4) and .bench is the benchmark
 # scratch directory; both must exist before anything mounts or writes into them.
-RUN mkdir -p /app/artifacts /app/.bench
+# .tmp and dbt/.tmp are DuckDB's CWD-relative spill directories (infrastructure.md
+# S18.1), /data is the `objectstore` volume -- an anonymous volume inherits the
+# image directory's ownership, which is what lets non-root MinIO write it -- and
+# /app itself must belong to the user so pytest/hypothesis can create their
+# caches beside the code.
+RUN mkdir -p /app/artifacts /app/.bench /app/.tmp /app/dbt/.tmp /data && \
+    chown er:er /app /app/artifacts /app/.bench /app/.tmp /app/dbt/.tmp /data
+USER er
 ENTRYPOINT []
 CMD ["er", "--help"]

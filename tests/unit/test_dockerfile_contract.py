@@ -23,6 +23,10 @@ DESIGN_DOC = REPO_ROOT / "DesignDoc.md"
 DOCKERFILE = REPO_ROOT / "docker" / "Dockerfile"
 DOCKERIGNORE = REPO_ROOT / ".dockerignore"
 
+# infrastructure.md S11's two new images: the control plane and the web UI.
+API_DOCKERFILE = REPO_ROOT / "docker" / "Dockerfile.api"
+WEB_DOCKERFILE = REPO_ROOT / "frontend" / "Dockerfile"
+
 # S7.3: compile storage tools, build Python, then assemble the shared runtime.
 EXPECTED_STAGES = ("storage-builder", "builder", "runtime")
 
@@ -165,6 +169,116 @@ def test_runtime_copies_extension_dir_and_scripts() -> None:
     )
     assert re.search(r"^COPY\s+scripts/\s+scripts/\s*$", runtime, re.MULTILINE), (
         "the verify command runs /app/scripts/check_extensions.py, so scripts/ must ship"
+    )
+
+
+def file_text(path: Path) -> str:
+    assert path.is_file(), f"{path.relative_to(REPO_ROOT)} does not exist"
+    return path.read_text(encoding="utf-8")
+
+
+def stage_body_of(text: str, name: str) -> str:
+    """Everything between `FROM … AS <name>` and the next FROM, for any Dockerfile."""
+    match = re.search(rf"^FROM\s+\S+\s+AS\s+{re.escape(name)}\s*$", text, re.MULTILINE)
+    assert match, f"no stage named {name}"
+    rest = text[match.end() :]
+    following = re.search(r"^FROM\s", rest, re.MULTILINE)
+    return rest[: following.start()] if following else rest
+
+
+def effective_user(text: str) -> str:
+    """The user the image runs as: the last USER instruction of the final stage.
+
+    Asserted on the *last* instruction deliberately -- a `USER er` followed by a
+    `USER root` still greps as non-root while running everything as root.
+    """
+    users = re.findall(r"^USER\s+(\S+)\s*$", text, re.MULTILINE)
+    assert users, "no USER instruction; the image runs as root (infrastructure.md S5.6)"
+    return users[-1]
+
+
+def test_all_three_images_run_as_non_root() -> None:
+    """infrastructure.md S5.6: Pod Security `restricted` requires a non-root USER,
+    and a root engine process in a PII cluster is unforced risk. One loop, because
+    the requirement is one rule over all three images, not three conventions."""
+    for dockerfile in (DOCKERFILE, API_DOCKERFILE, WEB_DOCKERFILE):
+        user = effective_user(file_text(dockerfile))
+        assert user not in {"root", "0"}, f"{dockerfile.name} runs as {user}"
+
+
+def test_pipeline_runtime_owns_every_directory_it_writes() -> None:
+    """A.5's whole risk: a USER added without ownership turns the first write --
+    MinIO's /data, DuckDB's spill, dbt's logs -- into EACCES far from this file.
+    The anonymous `/data` volume inherits the image directory's ownership, which
+    is why it must exist here and not only at `minio server /data` start."""
+    runtime = stage_body("runtime")
+
+    for directory in ("/app/artifacts", "/app/.bench", "/app/.tmp", "/app/dbt/.tmp", "/data"):
+        assert re.search(rf"^RUN mkdir -p .*{re.escape(directory)}\b", runtime, re.MULTILINE), (
+            f"the runtime stage must create {directory} before USER drops privileges"
+        )
+        assert re.search(rf"chown [\w:]+ .*{re.escape(directory)}\b", runtime), (
+            f"{directory} must belong to the runtime user, or the first write fails"
+        )
+    # dbt/ is the one COPYed tree the runtime user writes into (target/, logs/).
+    assert re.search(r"^COPY --chown=\S+ dbt/ dbt/\s*$", runtime, re.MULTILINE)
+
+
+def test_api_dockerfile_is_pinned_and_slim() -> None:
+    """S11's er-api row: `src/er` + `server/src/erserver`, no dbt project, no MinIO,
+    no tests -- under the same S2.1 base-image pins as docker/Dockerfile."""
+    text = file_text(API_DOCKERFILE)
+
+    stages = FROM_RE.findall(text)
+    assert tuple(name for _, name in stages) == ("builder", "runtime")
+    assert len(re.findall(r"^FROM\s", text, re.MULTILINE)) == len(stages)
+    expected_python = f"python:{PINS['python'].version}-slim"
+    for image, name in stages:
+        assert image == expected_python, f"stage {name} is built on {image}, not {expected_python}"
+    assert UV_IMAGE_RE.findall(text) == [f"ghcr.io/astral-sh/uv:{PINS['uv'].version}"]
+
+    runtime = stage_body_of(text, "runtime")
+    assert "COPY --from=builder /app/server/.venv /app/server/.venv" in runtime
+    assert f"COPY --from=builder {baked_extension_directory()} {baked_extension_directory()}" in (
+        runtime
+    ), "the API's read path ATTACHes DuckLake under autoinstall=false, like the pipeline (B1)"
+    for tree in ("src/", "server/src/"):
+        assert re.search(rf"^COPY\s+{re.escape(tree)}\s+{re.escape(tree)}\s*$", runtime, re.M), (
+            f"the runtime stage must carry {tree}; both installs are editable"
+        )
+
+    # Slim is a list of absences (S11): what the pipeline image carries and this
+    # one must not. `storage-builder` covers both MinIO binaries.
+    for forbidden in ("storage-builder", "COPY dbt/", "COPY tests/", "COPY fixtures/", "dbt deps"):
+        assert forbidden not in text, f"Dockerfile.api must not carry {forbidden!r}"
+
+
+def test_web_dockerfile_is_digest_pinned_standalone_node() -> None:
+    """S11's er-web row: Next standalone output on Node 22, with the base pinned by
+    digest the way docker/Dockerfile pins its Go build image -- a tag a human reads,
+    a digest that makes it immutable."""
+    text = file_text(WEB_DOCKERFILE)
+
+    images = {image for image, _ in FROM_RE.findall(text)}
+    assert len(images) == 1, "builder and runtime must share one pinned Node base"
+    (image,) = images
+    assert re.fullmatch(r"node:22[\w.-]*@sha256:[0-9a-f]{64}", image), (
+        f"the Node base must be node:22, pinned by digest; got {image}"
+    )
+
+    runtime = stage_body_of(text, "runtime")
+    assert "/app/.next/standalone" in runtime, (
+        "the runtime stage must deploy the standalone output, not node_modules"
+    )
+    assert "/app/.next/static" in runtime, (
+        "server.js serves static assets only if they are copied in beside it"
+    )
+    assert '"server.js"' in runtime, "standalone output is started as `node server.js`"
+
+    ignore = WEB_DOCKERFILE.parent / ".dockerignore"
+    assert "node_modules" in file_text(ignore).split(), (
+        "frontend/.dockerignore must exclude node_modules: a host install carries "
+        "host-platform native binaries into a linux/amd64 image"
     )
 
 
