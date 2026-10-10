@@ -1,0 +1,48 @@
+# §8.5/§12: default-deny ingress with only in-namespace traffic allowed — a
+# bare podSelector (no namespaceSelector) matches pods in THIS namespace only,
+# so alice's pods reach alice's Postgres and bob's cannot. This is the object
+# the §17 Phase 2 check probes behaviourally: under the VPC CNI *without* the
+# policy agent enabled it looks correct and enforces nothing.
+#
+# Egress is deliberately unrestricted: cross-namespace isolation holds because
+# every developer namespace carries this same ingress deny, and the pods need
+# S3, SES, ECR and Secrets Manager egress anyway.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: {{ include "er-dev-namespace.name" . }}
+  labels:
+    {{- include "er-dev-namespace.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {}
+{{- if .Values.webIngressFromVpc.enabled }}
+---
+# The one hole the edge needs (§4.1): the internal ALB's targets are pod IPs
+# (target-type ip) and the connection originates from the ALB dataplane in the
+# VPC — not from any pod — so it needs an ipBlock allowance. Scoped to er-web
+# (the only Ingress-exposed pod; the label is er-platform's) on its one port.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-alb-to-web
+  namespace: {{ include "er-dev-namespace.name" . }}
+  labels:
+    {{- include "er-dev-namespace.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: er-web
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: {{ .Values.webIngressFromVpc.vpcCidr }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.webIngressFromVpc.port }}
+{{- end }}

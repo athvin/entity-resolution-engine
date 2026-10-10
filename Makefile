@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := check
-.PHONY: run spec lint types unit dbt fixtures workflows integration check check-all clean benchmark benchmark-1m benchmark-workloads benchmark-10m frontend frontend-dev frontend-seed frontend-e2e frontend-baselines frontend-dev-reset
+.PHONY: run spec lint types unit dbt fixtures workflows integration check check-all clean benchmark benchmark-1m benchmark-workloads benchmark-10m frontend frontend-dev frontend-seed frontend-e2e frontend-baselines frontend-dev-reset dev-up dev-suspend dev-resume dev-down
 
 BENCHMARK_REPEAT ?= 1
 
@@ -80,6 +80,63 @@ frontend-baselines:
 frontend-dev-reset:
 	docker compose -f frontend/dev/compose.yaml down -v
 	rm -rf frontend/dev/.state
+
+# --- developer environments (infrastructure.md §12, plan-to-aws 2.1/2.2) ---
+#
+# Two Helm releases per developer: `$(DEV)` (er-dev-namespace, held in the
+# `default` namespace because it creates $(DEV) itself) and `er-platform`
+# (inside $(DEV)). The AWS side — the per-namespace EFS access point and the
+# er/dev/$(DEV)/* secrets — is scripts/dev_env.sh, which needs PlatformAdmin
+# credentials (see its header for the optional ER_DEV_* inputs).
+
+ER_DEV_CONTEXT ?= er-dev
+
+# Stand a developer environment up from nothing: make dev-up DEV=alice TAG=<git sha>
+# (CI pushes er-api/er-web to ECR by commit sha; pass API_DIGEST/WEB_DIGEST to pin harder.)
+dev-up:
+	@test -n "$(DEV)" || { echo "usage: make dev-up DEV=<name> TAG=<git sha>"; exit 2; }
+	@test -n "$(TAG)" || { echo "TAG=<git sha> required: CI pushes er-api/er-web by commit sha"; exit 2; }
+	kubectl --context $(ER_DEV_CONTEXT) apply -f infra/k8s/storage/ebs-gp3.yaml
+	set -e; eval "$$(bash scripts/dev_env.sh up $(DEV))"; \
+	helm --kube-context $(ER_DEV_CONTEXT) upgrade --install $(DEV) infra/k8s/charts/er-dev-namespace \
+	  --namespace default --set developer=$(DEV); \
+	kubectl --context $(ER_DEV_CONTEXT) -n $(DEV) rollout status statefulset/er-postgres --timeout=300s; \
+	helm --kube-context $(ER_DEV_CONTEXT) upgrade --install er-platform infra/k8s/charts/er-platform \
+	  --namespace $(DEV) --set developer=$(DEV) \
+	  --set images.tag=$(TAG) \
+	  $(if $(API_DIGEST),--set images.api.digest=$(API_DIGEST)) \
+	  $(if $(WEB_DIGEST),--set images.web.digest=$(WEB_DIGEST)) \
+	  --set efs.fileSystemId=$$ER_EFS_FS_ID --set efs.accessPointId=$$ER_EFS_AP_ID \
+	  --wait --timeout 10m
+
+# §5.2: everything to zero — Karpenter reclaims the app node, the leader
+# connection goes away, Postgres stops billing compute. PVC and S3 kept.
+dev-suspend:
+	@test -n "$(DEV)" || { echo "usage: make dev-suspend DEV=<name>"; exit 2; }
+	kubectl --context $(ER_DEV_CONTEXT) -n $(DEV) scale deployment --all --replicas=0
+	kubectl --context $(ER_DEV_CONTEXT) -n $(DEV) scale statefulset er-postgres --replicas=0
+
+# Back up in under a minute. kubectl, not `helm upgrade`: helm's three-way
+# merge sees no manifest diff after a kubectl scale, so it would leave the
+# replica counts at zero. Postgres first, then the API (its dispatcher is
+# init-gated on /healthz regardless — the ordering just avoids a long wait).
+dev-resume:
+	@test -n "$(DEV)" || { echo "usage: make dev-resume DEV=<name>"; exit 2; }
+	kubectl --context $(ER_DEV_CONTEXT) -n $(DEV) scale statefulset er-postgres --replicas=1
+	kubectl --context $(ER_DEV_CONTEXT) -n $(DEV) rollout status statefulset/er-postgres --timeout=300s
+	kubectl --context $(ER_DEV_CONTEXT) -n $(DEV) scale deployment er-api er-web --replicas=1
+	kubectl --context $(ER_DEV_CONTEXT) -n $(DEV) rollout status deployment/er-api --timeout=300s
+	kubectl --context $(ER_DEV_CONTEXT) -n $(DEV) scale deployment er-dispatcher --replicas=1
+
+# The purge path (§12): releases gone, namespace (and with it the Postgres PVC,
+# hence the EBS volume) gone, then the AWS side — access point, secrets, lake
+# prefix — via dev_env.sh. backend-design §7's tenant purge, environment-sized.
+dev-down:
+	@test -n "$(DEV)" || { echo "usage: make dev-down DEV=<name>"; exit 2; }
+	helm --kube-context $(ER_DEV_CONTEXT) --namespace $(DEV) uninstall er-platform --ignore-not-found
+	helm --kube-context $(ER_DEV_CONTEXT) --namespace default uninstall $(DEV) --ignore-not-found
+	kubectl --context $(ER_DEV_CONTEXT) wait --for=delete namespace/$(DEV) --timeout=300s || true
+	bash scripts/dev_env.sh down $(DEV)
 
 # Rebuildable local caches only. Run outputs under artifacts/ are removed separately.
 clean:

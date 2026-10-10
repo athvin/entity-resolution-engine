@@ -1,0 +1,72 @@
+# er-api: the control plane (docker/Dockerfile.api's default CMD — uvicorn
+# against the create_app factory). ensure_schema rides this boot, exactly as it
+# does locally; the dispatcher's init container gates on /healthz so the DDL is
+# never blocked by the leader connection (§2 boot order).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: er-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: er-api
+    app.kubernetes.io/component: api
+    {{- include "er-platform.labels" . | nindent 4 }}
+  annotations:
+    # §9.1: rotation needs a restart that envFrom does not give; reloader
+    # rolls this Deployment when er-erserver-env changes.
+    reloader.stakater.com/auto: "true"
+spec:
+  replicas: {{ .Values.api.replicas }}
+  selector:
+    matchLabels:
+      {{- include "er-platform.selectorLabels" (dict "root" . "name" "er-api") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: api
+        {{- include "er-platform.selectorLabels" (dict "root" . "name" "er-api") | nindent 8 }}
+        {{- include "er-platform.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: er-api
+      securityContext:
+        {{- include "er-platform.podSecurityContext" . | nindent 8 }}
+        runAsUser: 1001 # the er user baked into Dockerfile.api
+        runAsGroup: 1001
+      containers:
+        - name: er-api
+          image: {{ include "er-platform.image" (dict "root" . "image" .Values.images.api) }}
+          securityContext:
+            {{- include "er-platform.containerSecurityContext" . | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            {{- include "er-platform.erserverEnv" . | nindent 12 }}
+          envFrom:
+            - secretRef:
+                name: er-erserver-env
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+          volumeMounts:
+            - name: er-efs
+              mountPath: {{ .Values.efs.mountPath }}
+            # DuckDB's spill directory is CWD-relative and not relocatable
+            # (§2); the API's read path attaches DuckLake, so give it real
+            # scratch instead of the container's writable layer.
+            - name: duckdb-tmp
+              mountPath: /app/.tmp
+      volumes:
+        - name: er-efs
+          persistentVolumeClaim:
+            claimName: er-efs
+        - name: duckdb-tmp
+          emptyDir:
+            sizeLimit: 2Gi

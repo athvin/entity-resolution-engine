@@ -1,0 +1,93 @@
+# er-platform values. The committed defaults hold NO credentials and NO
+# environment-specific identifiers beyond the nonprod registry/bucket names —
+# every secret value lives in Secrets Manager and arrives via ExternalSecrets
+# (infrastructure.md §8.5: the committed dev set in frontend/dev/env.sh stays
+# exclusively in the local Compose path).
+
+# The developer (== namespace) this install serves; defaults to the release
+# namespace, so `helm -n alice upgrade --install er-platform …` needs no flag.
+# Names the §9 Secrets Manager entries: er/{environment}/{developer}/{erserver,erweb}.
+developer: ""
+
+# The {env} half of the §9 secret names, and ERSERVER_ENV (anything but "dev"
+# disables the FastAPI docs routes — §4.1).
+environment: dev
+
+images:
+  registry: 797781631727.dkr.ecr.us-east-2.amazonaws.com
+  # Shared default tag: CI pushes er-api/er-web by commit sha (ci.yaml). The
+  # "latest" default never exists in ECR (tags are immutable, CI never pushes
+  # it), so an install that forgot to pin fails at image pull instead of
+  # silently running stale code. `make dev-up TAG=<sha>` sets it.
+  tag: latest
+  api:
+    repository: er-api
+    tag: "" # overrides images.tag when set
+    digest: "" # sha256:…; takes precedence over any tag (§14.2 promote-by-digest)
+  web:
+    repository: er-web
+    tag: ""
+    digest: ""
+
+externalSecrets:
+  # infra/k8s/secrets/cluster-secret-store.yaml, installed in task 1.6.
+  clusterSecretStore: aws-secrets-manager
+  refreshInterval: 1h
+
+# The shared writable filesystem (§6.2/§7.4): one EFS access point per
+# namespace, created by `scripts/dev_env.sh up` at dev-up time. Both roots are
+# subdirectories of the one mount — erserver creates them lazily
+# (provision.py mkdirs config parents; api.py:334 mkdirs drop roots).
+efs:
+  fileSystemId: "" # fs-…       (required to install; the PV cannot mount without it)
+  accessPointId: "" # fsap-…    (posix user 1001:1001 — the er uid in Dockerfile.api)
+  mountPath: /srv/er
+
+erserver:
+  # s3://{lake.bucket}/{lake.prefix}/{ns}/ — §7.3's nonprod layout. prefix
+  # defaults to dev/{developer}.
+  lake:
+    bucket: er-nonprod-lake
+    prefix: ""
+  # ERSERVER_TENANT_DB_PREFIX; empty keeps the erserver default ("er_").
+  tenantDbPrefix: ""
+  email:
+    from: "" # ERSERVER_EMAIL_FROM; empty leaves email disabled (outbox parks — §7.5)
+    baseUrl: "" # ERSERVER_EMAIL_BASE_URL; defaults to https://{host} when ingress host is known
+
+api:
+  replicas: 1
+  resources:
+    # Defensive, per §2/§18.10: the read path attaches the *tenant's* DuckDB
+    # env, so API memory must cover ER_DUCKDB_MEMORY_LIMIT in the tenant env
+    # (the dev_env.sh default is 2GB) until the backend-design §8 split lands.
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { cpu: "1", memory: 3Gi }
+
+dispatcher:
+  # replicas and strategy are NOT values: §2's reaper assumes it is alone, so
+  # the template hard-codes replicas 1 / Recreate.
+  concurrency: 2 # ERSERVER_CONCURRENCY — cross-tenant throughput only
+  pollSeconds: "" # ERSERVER_POLL_SECONDS; empty keeps the erserver default (2s)
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: 500m, memory: 1Gi }
+
+web:
+  replicas: 1
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: 500m, memory: 1Gi }
+
+# The §4.1 edge: internal ALB shared across dev namespaces via group.name,
+# hostname published by external-dns into Cloudflare (unproxied). DISABLED by
+# default — task 1.4 (ALB controller/IngressClass, external-dns, the wildcard
+# cert) is blocked on user-side items; flip this on with the real class name
+# and certificate ARN once 1.4 lands.
+ingress:
+  enabled: false
+  className: alb
+  groupName: er-dev
+  domain: dupezero.com
+  host: "" # defaults to {developer}.dev.{domain}
+  certificateArn: ""

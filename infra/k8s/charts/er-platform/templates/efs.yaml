@@ -1,0 +1,47 @@
+# §6.2/§7.4: the shared writable filesystem. Static provisioning against the
+# per-namespace EFS access point (created by scripts/dev_env.sh at dev-up):
+# volumeHandle is fs-id::access-point-id, the access point enforces posix user
+# 1001:1001 (the er uid in Dockerfile.api) and roots this namespace at its own
+# directory, so one filesystem serves every namespace without any pod seeing
+# another's drops. Mounted by er-api and er-dispatcher at
+# {{ .Values.efs.mountPath }}; ERSERVER_CONFIG_ROOT and ERSERVER_DROP_ROOT are
+# subdirectories erserver creates lazily. Runner Jobs mount the same claim
+# (task 2.3).
+#
+# Reclaim is Retain: the PV object is a release resource (helm uninstall
+# removes it) and the backing access point belongs to scripts/dev_env.sh —
+# nothing here may delete data on EFS.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  # PVs are cluster-scoped; the namespace suffix keeps developers apart.
+  name: er-efs-{{ .Release.Namespace }}
+  labels:
+    {{- include "er-platform.labels" . | nindent 4 }}
+spec:
+  capacity:
+    storage: 5Gi # EFS ignores capacity; the field is required
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: "" # static binding — never the dynamic provisioner
+  claimRef:
+    namespace: {{ .Release.Namespace }}
+    name: er-efs
+  csi:
+    driver: efs.csi.aws.com
+    volumeHandle: {{ required "efs.fileSystemId is required (fs-…)" .Values.efs.fileSystemId }}::{{ required "efs.accessPointId is required (fsap-…)" .Values.efs.accessPointId }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: er-efs
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "er-platform.labels" . | nindent 4 }}
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: ""
+  volumeName: er-efs-{{ .Release.Namespace }}
+  resources:
+    requests:
+      storage: 5Gi
