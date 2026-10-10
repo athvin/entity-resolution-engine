@@ -74,6 +74,14 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
     # Job attribution (design §7.12): the person or schedule behind every run.
     "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS created_by text",
     "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS schedule_id text",
+    # Per-run sizing rides the job row, never orgs.env (infrastructure.md §6.5,
+    # §18.10): the §6.5 class the dispatcher selected at claim time, which the
+    # kubernetes launcher translates into pod resources and ER_DUCKDB_* env.
+    "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS resource_class text",
+    # W3C traceparent captured at enqueue (infrastructure.md §10.2): trace
+    # context does not survive the queue-table hop by itself, so it is stored
+    # here and re-enters the runner's environment at launch.
+    "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS trace_context text",
     # Orgs grew columns after the skeleton; additive and idempotent.
     "ALTER TABLE orgs ADD COLUMN IF NOT EXISTS drop_root text",
     "ALTER TABLE orgs ADD COLUMN IF NOT EXISTS active_config_version integer",

@@ -40,6 +40,7 @@ __all__ = [
     "OrgNotActiveError",
     "UnknownKindError",
     "UnknownOrgError",
+    "active_jobs",
     "cancel",
     "claim",
     "enqueue",
@@ -48,12 +49,14 @@ __all__ = [
     "get_job",
     "heartbeat",
     "job_state",
+    "last_known_records",
     "list_jobs",
     "mark_canceled",
     "mark_running",
     "org_row",
     "org_state",
     "parse_result_line",
+    "reap_jobs",
     "reap_stale",
     "register_org",
     "resume_job",
@@ -95,12 +98,17 @@ class Job:
     # Attribution (design §7.12): who submitted, and which schedule fired it.
     created_by: str | None = None
     schedule_id: str | None = None
+    # Per-run sizing (infrastructure.md §6.5): the resource class the dispatcher
+    # selected at claim time. Rides the job row, never orgs.env (§18.10).
+    resource_class: str | None = None
+    # W3C traceparent captured at enqueue (infrastructure.md §10.2).
+    trace_context: str | None = None
 
 
 _JOB_COLUMNS = (
     "job_id, org, kind, params, state, priority, idempotency_key, run_id, "
     "attempt, max_attempts, exit_code, error_class, error_detail, outcome, progress, "
-    "created_by, schedule_id"
+    "created_by, schedule_id, resource_class, trace_context"
 )
 
 
@@ -256,6 +264,7 @@ def enqueue(
     max_attempts: int = 3,
     created_by: str | None = None,
     schedule_id: str | None = None,
+    trace_context: str | None = None,
 ) -> Job:
     """Queue one job, or return the job an identical idempotency key created.
 
@@ -276,7 +285,8 @@ def enqueue(
     with connection.cursor(row_factory=dict_row) as cursor:
         cursor.execute(
             f"INSERT INTO jobs (job_id, org, kind, params, idempotency_key, priority, "
-            f"max_attempts, created_by, schedule_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
+            f"max_attempts, created_by, schedule_id, trace_context) "
+            f"VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
             f"ON CONFLICT (org, idempotency_key) WHERE idempotency_key IS NOT NULL "
             f"DO NOTHING RETURNING {_JOB_COLUMNS}",
             (
@@ -289,6 +299,7 @@ def enqueue(
                 max_attempts,
                 created_by,
                 schedule_id,
+                trace_context,
             ),
         )
         row = cursor.fetchone()
@@ -340,12 +351,25 @@ def claim(connection: psycopg.Connection) -> Job | None:
         return None
 
 
-def mark_running(connection: psycopg.Connection, job_id: str, *, run_id: str) -> None:
-    """Record the run the dispatcher launched for this job."""
+def mark_running(
+    connection: psycopg.Connection,
+    job_id: str,
+    *,
+    run_id: str,
+    resource_class: str | None = None,
+) -> None:
+    """Record the run — and the §6.5 sizing class — the dispatcher launched.
+
+    ``resource_class`` is written here, at dispatch, because this is the moment
+    the sizing decision is made; it stays on the row so a retry (which keeps its
+    ``run_id``) is re-classed from fresh data, never from a stale copy.
+    """
     with connection.cursor() as cursor:
         cursor.execute(
-            "UPDATE jobs SET state = %s, run_id = %s, updated_at = now() WHERE job_id = %s",
-            (RUNNING, run_id, job_id),
+            "UPDATE jobs SET state = %s, run_id = %s, "
+            "resource_class = coalesce(%s, resource_class), updated_at = now() "
+            "WHERE job_id = %s",
+            (RUNNING, run_id, resource_class, job_id),
         )
     connection.commit()
 
@@ -525,6 +549,78 @@ def resume_job(connection: psycopg.Connection, org: str, job_id: str) -> bool:
         resumed = cursor.rowcount == 1
     connection.commit()
     return resumed
+
+
+def active_jobs(connection: psycopg.Connection) -> list[Job]:
+    """Every job in an active state, for startup reconciliation (§6).
+
+    The kubernetes launcher's runs outlive a dispatcher restart, so the
+    restarted dispatcher matches these rows against existing Jobs by
+    deterministic name instead of blindly requeueing them.
+    """
+    with connection.cursor(row_factory=dict_row) as cursor:
+        cursor.execute(
+            f"SELECT {_JOB_COLUMNS} FROM jobs WHERE state = ANY(%s) ORDER BY job_id",
+            (list(ACTIVE_STATES),),
+        )
+        rows = cursor.fetchall()
+    return [_job(row) for row in rows]
+
+
+def reap_jobs(connection: psycopg.Connection, job_ids: list[str]) -> int:
+    """Requeue exactly these jobs, resuming their recorded runs.
+
+    The targeted sibling of :func:`reap_stale`, for the kubernetes launcher's
+    startup reconciliation: only the active rows whose Job no longer exists are
+    lost; the rest are re-adopted, not requeued.
+    """
+    if not job_ids:
+        return 0
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "UPDATE jobs SET state = %s, not_before = now(), updated_at = now(), "
+            "params = CASE WHEN run_id IS NULL THEN params "
+            "ELSE params || jsonb_build_object('resume_run_id', run_id) END "
+            "WHERE state = ANY(%s) AND job_id = ANY(%s)",
+            (QUEUED, list(ACTIVE_STATES), job_ids),
+        )
+        reaped = cursor.rowcount
+    connection.commit()
+    return reaped
+
+
+def last_known_records(connection: psycopg.Connection, org: str) -> int | None:
+    """The org's record count as of its last completed pipeline run, or ``None``.
+
+    Read from the control-plane job ledger (the streamed S5.2 stage counters in
+    ``jobs.progress``), never the lake — the dispatcher does not touch DuckDB.
+    The largest of ``rows_in``/``rows_out`` across the stages of the most recent
+    succeeded pipeline job is the corpus-size signal §6.5's class ladder keys on.
+    """
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT (
+              SELECT max(greatest(
+                coalesce(nullif(stage->>'rows_in', '')::bigint, 0),
+                coalesce(nullif(stage->>'rows_out', '')::bigint, 0)
+              ))
+              FROM jsonb_array_elements(progress->'stages') AS stage
+            )
+            FROM jobs
+            WHERE org = %s AND state = 'succeeded' AND outcome = 'completed'
+              AND kind IN ('run_all_full', 'run_all_incremental', 'correct')
+              AND jsonb_typeof(progress->'stages') = 'array'
+            ORDER BY job_id DESC
+            LIMIT 1
+            """,
+            (org,),
+        )
+        row = cursor.fetchone()
+    if row is None or row[0] is None:
+        return None
+    count = int(row[0])
+    return count if count > 0 else None
 
 
 def reap_stale(connection: psycopg.Connection) -> int:

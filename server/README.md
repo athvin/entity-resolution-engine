@@ -14,10 +14,11 @@ The server consumes `er` as an editable path dependency.
 |---|---|
 | `erserver.api` | FastAPI control plane. Never executes pipeline stages. |
 | `erserver.dispatcher` | Leader loop: claims jobs, launches runners, ticks cron schedules, drains staged steward actions, delivers webhooks, reaps stale jobs at startup. |
-| `erserver.runner` | One subprocess per pipeline run, executing through `er.service` under the org's injected `ER_*` environment. |
+| `erserver.runner` | One process per pipeline run, executing through `er.service` under the org's injected `ER_*` environment. |
+| `erserver.k8s` | The Kubernetes Job launcher (infrastructure.md §6): one `batch/v1` Job per run behind the same `launch` seam, selected by `ERSERVER_LAUNCHER=kubernetes` (requires `ERSERVER_RUNNER_IMAGE`; see `ERSERVER_K8S_*`/`ERSERVER_RUNNER_*` in `settings.py`). Sizing per run from the §6.5 class riding the job row. |
 
-Run locally (single-VM mode; the k8s-Job launcher is a later substitution
-behind the same `launch` seam):
+Run locally (single-VM mode — the default `ERSERVER_LAUNCHER=subprocess`
+forks the runner behind the same `launch` seam the k8s launcher implements):
 
 ```sh
 export ERSERVER_DSN=postgresql://…       # control-plane Postgres
@@ -139,10 +140,11 @@ ERSERVER_E2E=1 ERSERVER_TEST_DSN=postgresql://postgres:er@localhost:5433/postgre
 
 ## Deliberately not built (design phases 4–5 / needs external systems)
 
-Salesforce connector and merge writeback (no org to test against), the k8s-Job
-launcher (same `launch` seam, no cluster here), OIDC human auth, per-tenant STS
-credentials, the Postgres FTS search escape hatch, Marketo, custom entity
-types. The engine remains person-centric (design §13).
+Salesforce connector and merge writeback (no org to test against), OIDC human
+auth, per-tenant STS credentials, the Postgres FTS search escape hatch,
+Marketo, custom entity types. The engine remains person-centric (design §13).
+The k8s-Job launcher is built (`erserver.k8s`, cluster-mocked tests only here)
+— its live acceptance runs against a real cluster in plan-to-aws task 2.3.
 
 One label to read correctly: config publish reports a cost **tier** (A/B/C),
 but every tier currently enqueues a full rebuild — the engine's own drift

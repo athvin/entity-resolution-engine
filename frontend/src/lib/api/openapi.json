@@ -288,6 +288,17 @@
             "title": "Progress",
             "type": "object"
           },
+          "resource_class": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resource Class"
+          },
           "run_id": {
             "anyOf": [
               {
@@ -3011,6 +3022,22 @@
                 }
               ],
               "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "traceparent",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Traceparent"
             }
           },
           {

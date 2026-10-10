@@ -79,6 +79,28 @@ spec:
             - name: ERSERVER_POLL_SECONDS
               value: {{ . | quote }}
             {{- end }}
+            # The §6 Job launcher. Runner Jobs land in this same namespace
+            # (the Role in rbac-dispatcher.yaml is namespace-scoped), mount
+            # the same er-efs claim at the same path, and take their baseline
+            # secret env from the same projected Secret via envFrom.
+            - name: ERSERVER_LAUNCHER
+              value: {{ .Values.dispatcher.launcher | quote }}
+            {{- if eq .Values.dispatcher.launcher "kubernetes" }}
+            - name: ERSERVER_RUNNER_IMAGE
+              value: {{ include "er-platform.image" (dict "root" . "image" .Values.images.runner) | quote }}
+            {{- end }}
+            - name: ERSERVER_K8S_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: ERSERVER_RUNNER_EFS_CLAIM
+              value: er-efs
+            - name: ERSERVER_RUNNER_EFS_MOUNT_PATH
+              value: {{ .Values.efs.mountPath | quote }}
+            - name: ERSERVER_RUNNER_ENV_SECRET
+              value: er-erserver-env
+            - name: ERSERVER_RUNNER_SERVICE_ACCOUNT
+              value: er-runner
           envFrom:
             - secretRef:
                 name: er-erserver-env

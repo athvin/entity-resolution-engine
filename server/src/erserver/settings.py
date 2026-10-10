@@ -80,11 +80,43 @@ class ServerSettings:
     #: Link prefix into the frontend, e.g. ``https://app.example.com`` — emails
     #: carry links, never data.
     email_base_url: str | None = None
+    #: How runs execute: ``subprocess`` (the single-VM default — the dispatcher
+    #: forks ``python -m erserver.runner``) or ``kubernetes`` (one batch/v1 Job
+    #: per run behind the same ``launch`` seam; docs/infrastructure.md §6).
+    launcher: str = "subprocess"
+    #: Image every runner Job runs (``registry/repo:tag`` or ``@digest``).
+    #: Required when ``launcher=kubernetes``; never defaulted — an unpinned
+    #: runner image is exactly the stale-code hazard §14.2 exists to prevent.
+    runner_image: str | None = None
+    #: Namespace the runner Jobs are created in. Empty means "the namespace this
+    #: dispatcher runs in", read from the ServiceAccount mount at launch time.
+    k8s_namespace: str | None = None
+    #: Name of the projected Secret (§9: the ExternalSecret target) the runner
+    #: pod consumes via ``envFrom`` — the same baseline the dispatcher itself
+    #: reads, so ``ERSERVER_SECRET_*`` values never ride the Job manifest.
+    #: Empty disables the reference.
+    runner_env_secret: str | None = "er-erserver-env"
+    #: ServiceAccount the runner pods run as. §6.4 anticipates a per-tenant
+    #: value in Phase 4; until then every run shares this one.
+    runner_service_account: str | None = None
+    #: PVC name and mount path of the shared EFS filesystem (§6.2/§7.4): the
+    #: runner opens the org config and lists CSV drops by path, so the mount
+    #: path must equal the API's and the dispatcher's.
+    runner_efs_claim: str = "er-efs"
+    runner_efs_mount_path: str = "/srv/er"
+    #: How often the kubernetes launcher polls a Job for completion/cancel.
+    k8s_poll_seconds: float = 5.0
 
     @classmethod
     def from_env(cls) -> ServerSettings:
         poll = os.environ.get("ERSERVER_POLL_SECONDS")
         workers = os.environ.get("ERSERVER_CONCURRENCY")
+        launcher = os.environ.get("ERSERVER_LAUNCHER") or "subprocess"
+        if launcher not in ("subprocess", "kubernetes"):
+            raise ValueError(
+                f"ERSERVER_LAUNCHER must be 'subprocess' or 'kubernetes', got {launcher!r}"
+            )
+        k8s_poll = os.environ.get("ERSERVER_K8S_POLL_SECONDS")
         extra_json = os.environ.get("ERSERVER_TENANT_ENV_JSON")
         tenant_env_extra: dict[str, str] = {}
         if extra_json and extra_json.strip():
@@ -112,4 +144,13 @@ class ServerSettings:
             smtp_url=os.environ.get("ERSERVER_SMTP_URL") or None,
             email_from=os.environ.get("ERSERVER_EMAIL_FROM") or None,
             email_base_url=os.environ.get("ERSERVER_EMAIL_BASE_URL") or None,
+            launcher=launcher,
+            runner_image=os.environ.get("ERSERVER_RUNNER_IMAGE") or None,
+            k8s_namespace=os.environ.get("ERSERVER_K8S_NAMESPACE") or None,
+            runner_env_secret=os.environ.get("ERSERVER_RUNNER_ENV_SECRET", "er-erserver-env")
+            or None,
+            runner_service_account=os.environ.get("ERSERVER_RUNNER_SERVICE_ACCOUNT") or None,
+            runner_efs_claim=os.environ.get("ERSERVER_RUNNER_EFS_CLAIM") or "er-efs",
+            runner_efs_mount_path=os.environ.get("ERSERVER_RUNNER_EFS_MOUNT_PATH") or "/srv/er",
+            k8s_poll_seconds=float(k8s_poll) if k8s_poll else 5.0,
         )

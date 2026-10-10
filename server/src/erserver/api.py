@@ -120,6 +120,9 @@ class JobOut(BaseModel):
     progress: dict[str, Any]
     created_by: str | None = None
     schedule_id: str | None = None
+    #: The §6.5 sizing class the dispatcher selected at claim time; ``None``
+    #: until the job has been dispatched (infrastructure.md §6.5).
+    resource_class: str | None = None
 
     @classmethod
     def of(cls, job: queue.Job) -> "JobOut":
@@ -509,6 +512,7 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
         conn: Conn,
         caller: Caller,
         idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+        traceparent: Annotated[str | None, Header()] = None,
     ) -> JobOut:
         guard(caller, org, "steward")
         if idempotency_key is None or not idempotency_key.strip():
@@ -527,6 +531,9 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
                 priority=body.priority,
                 max_attempts=body.max_attempts,
                 created_by=caller.effective_actor,
+                # §10.2: the W3C traceparent survives the queue-table hop on
+                # the job row, and re-enters the runner's env at dispatch.
+                trace_context=traceparent,
             )
         except queue.UnknownOrgError as exc:
             raise HTTPException(404, str(exc)) from exc

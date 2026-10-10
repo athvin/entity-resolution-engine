@@ -28,6 +28,13 @@ images:
     repository: er-web
     tag: ""
     digest: ""
+  # The image every runner Job runs (§6.2/§11: er-pipeline — the engine, dbt,
+  # and the baked DuckDB extensions). Resolved to ERSERVER_RUNNER_IMAGE on the
+  # dispatcher; the same tag-pinning rule as above applies.
+  runner:
+    repository: er-pipeline
+    tag: ""
+    digest: ""
 
 externalSecrets:
   # infra/k8s/secrets/cluster-secret-store.yaml, installed in task 1.6.
@@ -69,6 +76,12 @@ dispatcher:
   # the template hard-codes replicas 1 / Recreate.
   concurrency: 2 # ERSERVER_CONCURRENCY — cross-tenant throughput only
   pollSeconds: "" # ERSERVER_POLL_SECONDS; empty keeps the erserver default (2s)
+  # ERSERVER_LAUNCHER: how runs execute (infrastructure.md §6). "kubernetes"
+  # is the in-cluster default — one batch/v1 Job per run on the tainted runner
+  # NodePools; "subprocess" forks the runner inside the dispatcher pod, which
+  # in this image cannot run dbt-backed pipeline stages (er-api carries no dbt
+  # project) — it exists for debugging, not operation.
+  launcher: kubernetes
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: 500m, memory: 1Gi }

@@ -19,6 +19,9 @@ dependencies = [
   "httpx>=0.27,<1",
   "croniter>=2,<7",
   "python-multipart>=0.0.9",
+  # The official client, for the §6 Job launcher (erserver.k8s). The dispatcher
+  # talks to the API server; the runner pod itself never does.
+  "kubernetes>=31,<40",
 ]
 
 [project.optional-dependencies]
@@ -41,7 +44,8 @@ python_version = "3.12"
 strict = true
 files = ["src/erserver"]
 
-# croniter ships no type information; everything else here is typed.
+# croniter and the kubernetes client ship no type information; everything else
+# here is typed.
 [[tool.mypy.overrides]]
-module = ["croniter", "croniter.*"]
+module = ["croniter", "croniter.*", "kubernetes", "kubernetes.*"]
 ignore_missing_imports = true

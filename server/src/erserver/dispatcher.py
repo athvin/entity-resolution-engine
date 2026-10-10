@@ -1,14 +1,23 @@
 """The dispatcher: claim jobs, launch runners, tick schedules, drain steward queues.
 
-One leader process (docs/backend-design.md §4, §5). Runners launch as
-subprocesses — the single-VM fallback; the k8s-Job launcher is a later
-substitution behind the same ``launch`` seam — with the org's ``ER_*``
-environment injected at spawn.
+One leader process (docs/backend-design.md §4, §5). Runs launch behind one
+seam — :data:`LaunchFn` — with the org's ``ER_*`` environment injected at
+spawn, in whichever of two shapes ``ERSERVER_LAUNCHER`` selects:
 
-Progress needs no engine change: the engine already emits exactly one JSON
-line per stage on stderr (S5.2), so the launcher streams stderr and each stage
-record lands in ``jobs.progress`` while the run is still going. Cancellation
-is honest kill-and-resume: a ``canceling`` job's runner gets SIGTERM, the job
+- ``subprocess`` (default): fork ``python -m erserver.runner`` — the
+  single-VM mode. The engine emits one JSON line per stage on stderr (S5.2);
+  the launcher streams it and each record lands in ``jobs.progress`` live.
+- ``kubernetes``: one batch/v1 Job per run (:mod:`erserver.k8s`,
+  docs/infrastructure.md §6). No pipe exists, and none is simulated: the
+  runner writes its own stage rows to Postgres (``run_stages``) as it goes
+  (gate D3), so progress survives a dispatcher restart; the dispatcher polls
+  the Job to its terminal state and maps it onto the same exit-code taxonomy.
+  At startup, running job rows are reconciled against existing Jobs by
+  deterministic name — re-adopted if alive, requeued with ``--resume`` only
+  if truly lost.
+
+Cancellation is honest kill-and-resume in both shapes: a ``canceling`` job's
+runner gets SIGTERM (subprocess) or its Job deleted (kubernetes), the job
 becomes ``canceled``, and its run resumes from its first unfinished stage when
 resubmitted (S4.7).
 
@@ -28,18 +37,29 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:
+    from erserver.k8s import KubernetesLauncher
 
 import psycopg
 from ulid import ULID
 
 from er.lake.model import PROMOTED_COUNTERS
-from erserver import db, events, notify, queue, schedules, steward
+from erserver import db, events, notify, queue, schedules, sizing, steward
 from erserver.policy import CANCELING, FAILED, SUCCEEDED, dispose
 from erserver.secrets import UnresolvedSecretError, resolve_env
 from erserver.settings import ServerSettings
 
-__all__ = ["RunnerResult", "flush_webhooks", "launch_runner", "run_once", "serve", "tick"]
+__all__ = [
+    "RunnerResult",
+    "flush_webhooks",
+    "launch_runner",
+    "reconcile",
+    "run_once",
+    "serve",
+    "tick",
+]
 
 #: Webhook delivery moved to the event spine with the spine itself; this alias
 #: keeps the dispatcher's public name (tests and shutdown call it here).
@@ -196,13 +216,24 @@ def run_once(connection: psycopg.Connection, *, launch: LaunchFn = launch_runner
         events.emit(connection, job.org, "job.failed", failure)
         return True
     run_id = job.run_id or str(ULID())
-    queue.mark_running(connection, job.job_id, run_id=run_id)
+    # Per-run sizing rides the job row, never orgs.env (infrastructure.md §6.5,
+    # §18.10): classed here, at dispatch, from the org's last known record
+    # count. Only the kubernetes launcher translates the class into pod
+    # resources and ER_DUCKDB_* env; the subprocess path records it and
+    # changes nothing else.
+    resource_class = sizing.select_class(
+        queue.last_known_records(connection, job.org),
+        kind=job.kind,
+        override=job.params.get("resource_class"),
+    )
+    queue.mark_running(connection, job.job_id, run_id=run_id, resource_class=resource_class.name)
     payload = {
         "job_id": job.job_id,
         "kind": job.kind,
         "params": job.params,
         "config_path": config_path,
         "run_id": run_id,
+        "resource_class": resource_class.name,
     }
 
     stage_records: list[dict[str, Any]] = []
@@ -216,13 +247,35 @@ def run_once(connection: psycopg.Connection, *, launch: LaunchFn = launch_runner
     def should_cancel() -> bool:
         return queue.job_state(connection, job.job_id) == CANCELING
 
+    env = {**os.environ, **env_overrides}
+    if job.trace_context:
+        # §10.2: the W3C traceparent captured at enqueue re-enters the runner
+        # through its environment — the one hop trace context cannot survive
+        # by itself.
+        env["TRACEPARENT"] = job.trace_context
     result = launch(
         payload,
-        {**os.environ, **env_overrides},
+        env,
         on_stage=on_stage,
         should_cancel=should_cancel,
     )
+    _complete(connection, job, run_id, result, stage_records)
+    return True
 
+
+def _complete(
+    connection: psycopg.Connection,
+    job: queue.Job,
+    run_id: str,
+    result: RunnerResult,
+    stage_records: list[dict[str, Any]],
+) -> None:
+    """Dispose of a finished attempt: the shared tail of launch and adoption.
+
+    Everything after the launcher returns is launcher-agnostic — parse the
+    terminal result line, apply the §5 retry matrix, emit the events — so the
+    kubernetes path's startup re-adoption reuses it verbatim.
+    """
     if result.canceled:
         queue.mark_canceled(connection, job.job_id)
         events.emit(
@@ -231,7 +284,7 @@ def run_once(connection: psycopg.Connection, *, launch: LaunchFn = launch_runner
             "job.completed",
             {"job_id": job.job_id, "kind": job.kind, "state": "canceled", "run_id": run_id},
         )
-        return True
+        return
 
     parsed = queue.parse_result_line(result.stdout)
     if result.returncode < 0:
@@ -301,7 +354,67 @@ def run_once(connection: psycopg.Connection, *, launch: LaunchFn = launch_runner
                 "review.created",
                 {"run_id": run_id, "job_id": job.job_id, "count": opened},
             )
-    return True
+
+
+class AdoptableLauncher(Protocol):
+    """What startup reconciliation needs from a launcher whose runs outlive it."""
+
+    def exists(self, job_id: str) -> bool: ...
+
+    def adopt(
+        self,
+        job_id: str,
+        *,
+        on_stage: Callable[[dict[str, Any]], None] | None = None,
+        should_cancel: Callable[[], bool] | None = None,
+    ) -> RunnerResult: ...
+
+
+def reconcile(
+    connection: psycopg.Connection, launcher: AdoptableLauncher
+) -> tuple[list[queue.Job], int]:
+    """Match active job rows against existing runner Jobs, by deterministic name.
+
+    The kubernetes launcher's runs keep going while the dispatcher is down, so
+    the blind startup reaper would double-dispatch them. Instead: a row whose
+    Job still exists is *adopted* (the caller waits out its completion); only a
+    row whose Job is gone is requeued with ``--resume``, exactly as a dead
+    subprocess would be. Returns ``(adopted, reaped_count)``.
+    """
+    active = queue.active_jobs(connection)
+    adopted = [job for job in active if launcher.exists(job.job_id)]
+    adopted_ids = {job.job_id for job in adopted}
+    lost = [job.job_id for job in active if job.job_id not in adopted_ids]
+    return adopted, queue.reap_jobs(connection, lost)
+
+
+def _finish_adopted(dsn: str, job: queue.Job, launcher: AdoptableLauncher) -> None:
+    """Wait out one adopted run on its own connection, then dispose of it.
+
+    Progress needs nothing from us while we wait — the runner writes its own
+    ``run_stages`` rows (D3); this thread exists only to apply the retry
+    matrix and emit the terminal events once the Job finishes.
+    """
+    connection = db.connect(dsn)
+    try:
+        stage_records: list[dict[str, Any]] = []
+
+        def on_stage(record: dict[str, Any]) -> None:
+            stage_records.append(
+                {key: record.get(key) for key in _STAGE_RECORD_FIELDS if key in record}
+            )
+            queue.heartbeat(connection, job.job_id, {"stages": stage_records})
+
+        result = launcher.adopt(
+            job.job_id,
+            on_stage=on_stage,
+            should_cancel=lambda: queue.job_state(connection, job.job_id) == CANCELING,
+        )
+        _complete(connection, job, job.run_id or job.job_id, result, stage_records)
+    except Exception as exc:  # noqa: BLE001 - a lost adoption must be visible, not fatal
+        sys.stderr.write(f"dispatcher: adopted job {job.job_id} failed to settle: {exc}\n")
+    finally:
+        connection.close()
 
 
 def tick_schedules(connection: psycopg.Connection) -> int:
@@ -374,18 +487,40 @@ def serve(settings: ServerSettings | None = None) -> None:
     schedule ticks, staged-steward draining, and the startup reaper.
     """
     resolved = settings if settings is not None else ServerSettings.from_env()
+    adoptable: KubernetesLauncher | None = None
+    if resolved.launcher == "kubernetes":
+        from erserver.k8s import KubernetesLauncher as _KubernetesLauncher
+
+        adoptable = _KubernetesLauncher(resolved)  # fails fast on a missing image
+    launch: LaunchFn = adoptable if adoptable is not None else launch_runner
     leader = db.connect(resolved.dsn)
     db.ensure_schema(leader)
-    reaped = queue.reap_stale(leader)
-    if reaped:
-        sys.stderr.write(f"dispatcher: requeued {reaped} stale job(s) from a prior run\n")
+    if adoptable is not None:
+        # The runs outlive us (§6): reconcile instead of blindly reaping. Rows
+        # whose Job still exists are waited out on their own threads; only the
+        # truly lost ones are requeued with --resume.
+        adopted, reaped = reconcile(leader, adoptable)
+        if reaped:
+            sys.stderr.write(f"dispatcher: requeued {reaped} job(s) whose runner Job is gone\n")
+        for adopted_job in adopted:
+            sys.stderr.write(f"dispatcher: re-adopted running job {adopted_job.job_id}\n")
+            threading.Thread(
+                target=_finish_adopted,
+                args=(resolved.dsn, adopted_job, adoptable),
+                name=f"er-adopt-{adopted_job.job_id}",
+                daemon=True,
+            ).start()
+    else:
+        reaped = queue.reap_stale(leader)
+        if reaped:
+            sys.stderr.write(f"dispatcher: requeued {reaped} stale job(s) from a prior run\n")
     stop = threading.Event()
 
     def worker() -> None:
         connection = db.connect(resolved.dsn)
         try:
             while not stop.is_set():
-                if not run_once(connection):
+                if not run_once(connection, launch=launch):
                     stop.wait(resolved.poll_seconds)
         finally:
             connection.close()
