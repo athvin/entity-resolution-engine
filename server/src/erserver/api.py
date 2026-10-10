@@ -211,7 +211,17 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
             bootstrap.close()
         yield
 
-    app = FastAPI(title="er control plane", version="0.2.0", lifespan=lifespan)
+    # The docs routes are unauthenticated, so outside dev they are off entirely
+    # and ``/healthz`` stays the only anonymous surface (infrastructure.md §4.1).
+    dev = resolved.environment == "dev"
+    app = FastAPI(
+        title="er control plane",
+        version="0.2.0",
+        lifespan=lifespan,
+        docs_url="/docs" if dev else None,
+        redoc_url="/redoc" if dev else None,
+        openapi_url="/openapi.json" if dev else None,
+    )
 
     def connection() -> Iterator[psycopg.Connection]:
         conn = db.connect(resolved.dsn)

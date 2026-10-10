@@ -36,6 +36,10 @@ class ServerSettings:
 
     #: Postgres DSN of the control-plane database (orgs, jobs, schedules).
     dsn: str
+    #: Deployment environment. Anything other than ``dev`` disables the FastAPI
+    #: docs routes (``/docs``, ``/redoc``, ``/openapi.json``) — the only
+    #: unauthenticated surface besides ``/healthz`` (docs/infrastructure.md §4.1).
+    environment: str = "dev"
     #: Dispatcher poll interval when the queue was empty, in seconds.
     poll_seconds: float = 2.0
     #: The platform operator's bearer token; ``None`` disables operator auth
@@ -51,6 +55,10 @@ class ServerSettings:
     #: DSN template producing each org's ``ER_CATALOG_DSN``; must contain
     #: ``{dbname}``, e.g. ``postgresql://er:pw@catalog:5432/{dbname}``.
     tenant_dsn_template: str | None = None
+    #: Prefix of each tenant's dedicated database name, so server stacks that
+    #: share one Postgres cluster derive distinct databases for the same org
+    #: (docs/infrastructure.md §7.2). The default keeps today's names.
+    tenant_db_prefix: str = "er_"
     #: Per-tenant S3 prefix template; must contain ``{ns}`` and end with ``/``.
     lake_data_path_template: str = "s3://er-lake/{ns}/"
     #: Directory for server-managed org config files: ``{config_root}/{org}.yaml``.
@@ -88,11 +96,13 @@ class ServerSettings:
             tenant_env_extra = parsed
         return cls(
             dsn=_require("ERSERVER_DSN"),
+            environment=os.environ.get("ERSERVER_ENV") or "dev",
             poll_seconds=float(poll) if poll else 2.0,
             operator_token=os.environ.get("ERSERVER_OPERATOR_TOKEN") or None,
             concurrency=max(1, int(workers)) if workers else 2,
             maint_dsn=os.environ.get("ERSERVER_MAINT_DSN") or None,
             tenant_dsn_template=os.environ.get("ERSERVER_TENANT_DSN_TEMPLATE") or None,
+            tenant_db_prefix=os.environ.get("ERSERVER_TENANT_DB_PREFIX") or "er_",
             lake_data_path_template=os.environ.get("ERSERVER_LAKE_DATA_PATH_TEMPLATE")
             or "s3://er-lake/{ns}/",
             config_root=os.environ.get("ERSERVER_CONFIG_ROOT") or None,
