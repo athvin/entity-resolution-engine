@@ -41,7 +41,9 @@ REQUIRED_DOCKERIGNORE_ENTRIES = (
 
 FROM_RE = re.compile(r"^FROM\s+(\S+)\s+AS\s+(\S+)\s*$", re.MULTILINE)
 UV_IMAGE_RE = re.compile(r"^COPY\s+--from=(ghcr\.io/astral-sh/uv:\S+)\s", re.MULTILINE)
-UV_SYNC_RE = re.compile(r"^RUN\s+uv sync[^\n]*", re.MULTILINE)
+# A sync may target the shared venv explicitly (UV_PROJECT_ENVIRONMENT=...), so the
+# pattern admits one environment assignment between RUN and the uv invocation.
+UV_SYNC_RE = re.compile(r"^RUN\s+(?:UV_PROJECT_ENVIRONMENT=\S+\s+)?uv sync[^\n]*", re.MULTILINE)
 
 
 def dockerfile_text() -> str:
@@ -123,32 +125,92 @@ def test_storage_build_verifies_sources_and_bundles_both_tools() -> None:
     assert "COPY --from=storage-builder /out/minio /out/mc /usr/local/bin/" in runtime
 
 
-def test_builder_syncs_twice_and_never_uses_no_dev() -> None:
+def test_builder_sync_order_and_never_uses_no_dev() -> None:
+    """The builder composes the two uv projects into one venv, root lock last.
+
+    The dispatcher launches every run as `python -m erserver.runner` in this image
+    (infrastructure.md S6.2), so erserver and its dependencies must be present --
+    but S2.1 makes the ROOT lock the engine's closed set and this image is where
+    the integration suite runs, so every package the root lock names must land at
+    the root pin. Hence the order: the server lock seeds the venv, the root lock
+    re-asserts its pins over everything it owns, and erserver itself arrives
+    --no-deps so no later step drifts a shared package back to the server lock's
+    resolution.
+    """
     text = dockerfile_text()
     assert "--no-dev" not in text, (
         "the pipeline service's command is pytest; --no-dev would build an image that "
         "cannot run the suite it exists to run (S7.3)"
     )
+    assert "--extra" not in text, (
+        "the server's test extra (pytest, mypy) must stay out: the suite's tools come "
+        "from the root dev group at the root lock's pins, and a second pytest install "
+        "from server/uv.lock could silently shadow them"
+    )
 
     builder = stage_body("builder")
     syncs = list(UV_SYNC_RE.finditer(builder))
-    assert len(syncs) == 2, (
-        "the builder syncs twice on purpose: dependencies first, then the project "
-        f"(found {len(syncs)} `uv sync` invocations)"
+    assert len(syncs) == 3, (
+        "the builder syncs three times on purpose: server dependencies, root "
+        f"dependencies, then the root project (found {len(syncs)} `uv sync` invocations)"
     )
 
-    first, second = syncs
-    assert "--frozen" in first.group(0) and "--no-install-project" in first.group(0), (
-        "the first sync installs dependencies only; src/ is not in the context yet"
+    server_deps, root_deps, root_project = syncs
+    assert "UV_PROJECT_ENVIRONMENT=/app/.venv" in server_deps.group(0), (
+        "the server sync must target the shared /app/.venv, never server/.venv -- one "
+        "venv is the whole point of composing the two projects"
     )
-    assert second.group(0).split() == ["RUN", "uv", "sync", "--frozen"], (
-        f"the second sync must be a plain `uv sync --frozen`, got {second.group(0)!r}"
+    for flag in ("--frozen", "--project server", "--no-install-project", "--no-install-package er"):
+        assert flag in server_deps.group(0), (
+            f"the server sync installs the server lock's dependencies only ({flag} "
+            "missing); neither src tree is in the context yet"
+        )
+
+    assert "--frozen" in root_deps.group(0) and "--no-install-project" in root_deps.group(0), (
+        "the second sync installs root dependencies only; src/ is not in the context yet"
+    )
+    assert "--project server" not in root_deps.group(0), (
+        "the second sync is the ROOT lock re-asserting the S2.1 pins over the venv"
+    )
+    assert "--inexact" in root_deps.group(0), (
+        "an exact root sync would evict the server-only packages the first sync added"
     )
 
-    copy_src = re.search(r"^COPY\s+src/\s+src/\s*$", builder, re.MULTILINE)
-    assert copy_src, "the builder must COPY src/ before it installs the project"
-    assert first.end() < copy_src.start() < second.start(), (
-        "COPY src/ must sit between the two syncs, or the dependency layer is not cached"
+    assert root_project.group(0).split() == ["RUN", "uv", "sync", "--frozen", "--inexact"], (
+        f"the project sync must be a plain `uv sync --frozen --inexact`, got "
+        f"{root_project.group(0)!r}"
+    )
+
+    for tree in ("src/", "server/src/"):
+        copy = re.search(rf"^COPY\s+{re.escape(tree)}\s+{re.escape(tree)}\s*$", builder, re.M)
+        assert copy, f"the builder must COPY {tree} before it installs the projects"
+        assert root_deps.end() < copy.start() < root_project.start(), (
+            f"COPY {tree} must sit between the dependency syncs and the project "
+            "installs, or the dependency layers are not cached"
+        )
+
+    manifests = re.search(
+        r"^COPY\s+server/pyproject\.toml\s+server/uv\.lock\s+server/\s*$", builder, re.MULTILINE
+    )
+    assert manifests and manifests.end() < server_deps.start(), (
+        "both server manifests must be in place before the first sync, in their own "
+        "COPY so a server source edit cannot invalidate the dependency layers"
+    )
+
+    erserver_install = re.search(
+        r"^RUN uv pip install --python /app/\.venv/bin/python --no-deps "
+        r"--editable \./server\s*$",
+        builder,
+        re.MULTILINE,
+    )
+    assert erserver_install, (
+        "erserver must be installed with `uv pip install --no-deps --editable`: a "
+        "server-project sync here would re-pin every package both locks share to the "
+        "server lock's resolution, drifting the engine off its own S2.1 lock"
+    )
+    assert erserver_install.start() > root_project.end(), (
+        "erserver installs after the root project sync: nothing may follow the root "
+        "lock's re-assert except the one --no-deps package"
     )
 
 
@@ -167,6 +229,10 @@ def test_runtime_copies_extension_dir_and_scripts() -> None:
     assert "COPY --from=builder /app/.venv /app/.venv" in runtime, (
         "the runtime stage must carry the venv the builder synced"
     )
+    for tree in ("src/", "server/src/"):
+        assert re.search(rf"^COPY\s+{re.escape(tree)}\s+{re.escape(tree)}\s*$", runtime, re.M), (
+            f"the runtime stage must carry {tree}; both installs are editable"
+        )
     assert re.search(r"^COPY\s+scripts/\s+scripts/\s*$", runtime, re.MULTILINE), (
         "the verify command runs /app/scripts/check_extensions.py, so scripts/ must ship"
     )
