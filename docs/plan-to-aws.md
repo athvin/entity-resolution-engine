@@ -89,8 +89,9 @@ activation takes up to 24h and never backfills (§16.1).
 
 - [x] **0.4 The two guard denies** (§8.2 — rev 4: inline on the permission sets, no SCP)
   - [x] `DenyProdDataMutation` + `DenyProdIamEscalation` ride `PlatformAdmin`.
-  - [ ] §17 Phase 0 probe run: under `PlatformAdmin`, `er-prod-*` writes and
-    `iam:CreateRole er-prod-app-probe` **fail**; under `ProdAdmin` they succeed.
+  - [x] §17 Phase 0 probe run (2026-10-10): under `PlatformAdmin`, PutObject on an
+    `er-prod-*` bucket and `iam:CreateRole er-prod-app-probe` both fail with
+    "an explicit deny in an identity-based policy"; under `ProdAdmin` both succeed.
     **Re-run after any permission-set change** — the guard now lives in that layer.
 
 - [x] **0.5 Audit trail, Object Lock, Config** (§8.6, §15)
