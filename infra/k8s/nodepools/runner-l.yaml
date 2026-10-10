@@ -1,0 +1,35 @@
+# §5/§5.1: the L runner class — 16 vCPU, local NVMe. c5d.4xlarge is excluded
+# deliberately: 400 GB of NVMe against the L class's 400 GiB spill limit is
+# negative headroom once the image and kubelet overhead land (§5.3).
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: runner-l
+spec:
+  template:
+    spec:
+      nodeClassRef:
+        group: eks.amazonaws.com
+        kind: NodeClass
+        name: default
+      taints:
+        - key: er.dupezero.com/runner
+          value: "true"
+          effect: NoSchedule
+      requirements:
+        - key: eks.amazonaws.com/instance-family
+          operator: In
+          values: ["c6id", "c8id", "c5ad", "m6id"]
+        - key: eks.amazonaws.com/instance-size
+          operator: In
+          values: ["4xlarge"]
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["spot", "on-demand"]
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["amd64"]
+      expireAfter: 72h
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 30s

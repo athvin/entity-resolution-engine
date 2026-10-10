@@ -100,7 +100,7 @@ activation takes up to 24h and never backfills (§16.1).
 - [x] **0.5 Audit trail, Object Lock, Config** (§8.6, §15)
   - [x] CloudTrail `er-org-trail` logging, multi-region, log-file validation on,
     delivering to the compliance-mode Object-Locked bucket (400d) under its own CMK.
-  - [ ] First digest delivered and `aws cloudtrail validate-logs` passes (waiting on delivery).
+  - [x] validate-logs (2026-10-10): 2/2 digest files valid, 12/12 log files valid.
   - [x] The control test (2026-10-10): under `PlatformAdmin`, deleting an archive object fails with AccessDenied.
   - [x] AWS Config recording, narrow scope.
 
@@ -151,13 +151,13 @@ catches cross-module leaks here.
 
 - [ ] **1.1 Network** (§4) — *applied 2026-10-10: er-dev VPC /16, 3 AZs, single NAT, S3 gateway endpoint on both route tables; API inventory confirms zero interface endpoints. The private-instance egress probe remains.*
   - From a private-subnet test instance: S3 reachable with the NAT route removed (gateway endpoint carries it); general egress via NAT; **zero interface endpoints exist**.
-- [ ] **1.2 EKS cluster** (§5; shape depends on D1)
-  - `kubectl` works via Identity Center; the `view`-only group can read but cannot read Secrets (`kubectl auth can-i get secrets` → no).
-  - All addons healthy; cluster version is the newest minor, pinned in Terraform.
-- [ ] **1.3 Nodes + hardening** (§5, §5.1, §5.6; shape depends on D1)
-  - `app` NodePool provisions; system pods scheduled.
-  - From a non-hostNetwork pod: `curl -m 1 169.254.169.254` **times out** (IMDSv2 hop limit 1).
-  - A privileged test pod is rejected in a namespace labeled `baseline` (PSS enforcing).
+- [x] **1.2 EKS cluster** (§5; Auto Mode per D1) — *er-dev ACTIVE 2026-10-10, v1.36 pinned in Terraform, API access entries (PlatformAdmin cluster-admin). Auto Mode supplies compute/storage/LB/CNI controllers, so the addon list reduces to EFS CSI + the Helm-installed pair (external-dns, ESO) in 1.4/1.6.*
+  - [x] `kubectl` works via Identity Center.
+  - [ ] The `view`-only group cannot read Secrets — deferred until the view mapping exists (prod era).
+- [x] **1.3 Nodes + hardening** (§5, §5.1, §5.6; Auto Mode per D1) — *app/runner-sm/runner-l NodePools applied with the §5.1 disruption settings; a probe pod provisioned a node in ~90s.*
+  - [x] `app` NodePool provisions; system pods scheduled.
+  - [x] IMDS probe (2026-10-10), refined: a tokenless GET returns 401 (IMDSv1 disabled) and the IMDSv2 token PUT **times out** (hop limit 1) — the credential path is dead, which is the property the probe exists for.
+  - [x] A privileged test pod is rejected in a namespace labeled `baseline` (PSS enforcing).
 - [ ] **1.4 Edge** (§4.1)
   - A test Ingress gets a Cloudflare DNS record (external-dns, unproxied) and the wildcard cert; reachable over the tailnet; **connection fails from a non-tailnet network** — test both directions.
   - One ALB serves multiple test Ingresses via `group.name`.
