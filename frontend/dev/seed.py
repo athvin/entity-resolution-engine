@@ -49,7 +49,7 @@ def tenant_env(root: Path) -> dict[str, str]:
         "ER_S3_ENDPOINT": "localhost:9000",
         "ER_S3_ACCESS_KEY_ID": "minioadmin",
         "ER_S3_SECRET_ACCESS_KEY": "minioadmin",
-        "ER_S3_REGION": "us-east-1",
+        "ER_S3_REGION": "us-east-2",
         "ER_S3_URL_STYLE": "path",
         "ER_S3_USE_SSL": "false",
         "ER_LAKE_DATA_PATH": f"s3://lake/{NS}/",

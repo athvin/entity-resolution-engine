@@ -63,7 +63,7 @@ def test_overlay_does_not_leak_across_threads(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_empty_overlay_value_is_missing_not_blank(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ER_S3_REGION", "us-east-1")
+    monkeypatch.setenv("ER_S3_REGION", "us-east-2")
     with lake_environment({"ER_S3_REGION": "  "}):
         with pytest.raises(MissingEnvError, match="ER_S3_REGION"):
             require_env("ER_S3_REGION")
