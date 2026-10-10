@@ -44,6 +44,8 @@ module "github_oidc" {
   source = "../../modules/github-oidc"
 
   repository          = "athvin/entity-resolution-engine"
+  owner_id            = "273880343"
+  repository_id       = "1334344510"
   ecr_repository_arns = [for r in aws_ecr_repository.this : r.arn]
 }
 
