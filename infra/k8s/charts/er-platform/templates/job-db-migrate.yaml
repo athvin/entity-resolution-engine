@@ -1,0 +1,55 @@
+# §12 step 3: the drizzle migrations as a pre-install/pre-upgrade hook, running
+# `node scripts/db-migrate.mjs` from the er-web image (frontend/Dockerfile
+# carries the runner and its own module tree for exactly this Job).
+# ensure_schema is NOT here — it rides the API's boot, as it does locally.
+#
+# Ordering on a first install: the ExternalSecrets run at hook weight -10 and
+# this Job at 0, but helm only waits for Job hooks — so the pod may briefly
+# sit in CreateContainerConfigError until ESO's first sync lands the
+# er-erweb-env Secret. The kubelet retries container-config resolution without
+# consuming backoffLimit; the deadline below bounds the wait.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: er-web-db-migrate
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: er-web-db-migrate
+    app.kubernetes.io/component: migrations
+    {{- include "er-platform.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    # Keep a FAILED Job around for kubectl logs; a succeeded one is noise.
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3 # a transient Postgres hiccup, not a config error, is retryable
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: er-web-db-migrate
+        {{- include "er-platform.labels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      securityContext:
+        {{- include "er-platform.podSecurityContext" . | nindent 8 }}
+        runAsUser: 1000
+        runAsGroup: 1000
+      containers:
+        - name: db-migrate
+          image: {{ include "er-platform.image" (dict "root" . "image" .Values.images.web) }}
+          command: ["node", "scripts/db-migrate.mjs"]
+          securityContext:
+            {{- include "er-platform.containerSecurityContext" . | nindent 12 }}
+          env:
+            # Only the one key the migrator reads — not envFrom on the whole
+            # erweb secret.
+            - name: ERWEB_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: er-erweb-env
+                  key: ERWEB_DATABASE_URL
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 512Mi }

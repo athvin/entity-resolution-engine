@@ -1,0 +1,70 @@
+# er-web: the Next.js BFF (frontend/Dockerfile, standalone output, `node
+# server.js`, non-root `node` uid 1000). The browser only ever talks to this
+# pod; ERSERVER_BASE_URL stays a cluster-internal URL and er-api is on no load
+# balancer anywhere (§4.1).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: er-web
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: er-web
+    app.kubernetes.io/component: web
+    {{- include "er-platform.labels" . | nindent 4 }}
+  annotations:
+    reloader.stakater.com/auto: "true" # §9.1
+spec:
+  replicas: {{ .Values.web.replicas }}
+  selector:
+    matchLabels:
+      {{- include "er-platform.selectorLabels" (dict "root" . "name" "er-web") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: web
+        {{- include "er-platform.selectorLabels" (dict "root" . "name" "er-web") | nindent 8 }}
+        {{- include "er-platform.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: er-web
+      securityContext:
+        {{- include "er-platform.podSecurityContext" . | nindent 8 }}
+        runAsUser: 1000 # the node user the image ships
+        runAsGroup: 1000
+      containers:
+        - name: er-web
+          image: {{ include "er-platform.image" (dict "root" . "image" .Values.images.web) }}
+          securityContext:
+            {{- include "er-platform.containerSecurityContext" . | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: ERSERVER_BASE_URL
+              value: http://er-api:8000
+            {{- if .Values.ingress.enabled }}
+            - name: ERWEB_PUBLIC_BASE_URL
+              value: https://{{ include "er-platform.host" . }}
+            {{- end }}
+            # env.ts requires the operator token; §9 keeps it in the erserver
+            # entry, so er-web takes exactly that one key rather than envFrom
+            # on a secret full of DSNs it must never see.
+            - name: ERSERVER_OPERATOR_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: er-erserver-env
+                  key: ERSERVER_OPERATOR_TOKEN
+          envFrom:
+            - secretRef:
+                name: er-erweb-env
+          # An unauthenticated / is a redirect to /login; 3xx counts as probe
+          # success, and it proves the server is actually routing.
+          readinessProbe:
+            httpGet: { path: /, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /, port: http }
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.web.resources | nindent 12 }}

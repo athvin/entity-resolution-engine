@@ -1,0 +1,21 @@
+# Task 2.2 prerequisite (§7.1): the EBS StorageClass the per-developer
+# Postgres PVCs bind to. EKS Auto Mode ships its block-storage controller but
+# NO usable StorageClass — the cluster's bootstrap `gp2` class points at the
+# retired in-tree provisioner and would leave every PVC Pending forever. This
+# is the Auto Mode driver. Cluster-scoped and applied once, like nodepools/;
+# `make dev-up` applies it idempotently.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gp3
+provisioner: ebs.csi.eks.amazonaws.com
+parameters:
+  type: gp3
+  encrypted: "true"
+# WaitForFirstConsumer: the volume lands in the AZ the pod schedules into —
+# with Immediate, a single-NAT three-AZ VPC can pin the pod away from its
+# volume. Reclaim Delete is dev-down's PVC purge doing its job (§12); prod is
+# Aurora and never touches this class.
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+reclaimPolicy: Delete

@@ -1,0 +1,43 @@
+{{- if .Values.ingress.enabled }}
+# §4.1/§12: er-web — and ONLY er-web — on the one shared internal ALB, joined
+# via group.name; external-dns publishes the host into Cloudflare as a
+# DNS-only (unproxied) record, since the ALB is internal and tailnet-reached.
+# Disabled by default: task 1.4 (IngressClass, external-dns, the wildcard ACM
+# cert) is blocked on user-side items — flip ingress.enabled with the real
+# certificateArn once 1.4 lands. When enabling, also open the er-dev-namespace
+# chart's webIngressFromVpc so the default-deny NetworkPolicy admits the ALB's
+# targets (target-type ip: the ALB dataplane, not a pod, originates traffic).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: er-web
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: er-web
+    app.kubernetes.io/component: web
+    {{- include "er-platform.labels" . | nindent 4 }}
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internal
+    alb.ingress.kubernetes.io/group.name: {{ .Values.ingress.groupName }}
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    {{- with .Values.ingress.certificateArn }}
+    alb.ingress.kubernetes.io/certificate-arn: {{ . }}
+    {{- end }}
+    # Cloudflare is the DNS plane (§18.8); proxied records could never reach
+    # an internal ALB, so pin DNS-only explicitly.
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "false"
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ include "er-platform.host" . }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: er-web
+                port:
+                  name: http
+{{- end }}

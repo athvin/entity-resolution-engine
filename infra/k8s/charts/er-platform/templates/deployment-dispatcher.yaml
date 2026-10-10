@@ -1,0 +1,93 @@
+# er-dispatcher: same image as er-api with the CMD overridden (Dockerfile.api's
+# documented split). Three §2 constraints are hard-coded rather than valued:
+#   - replicas 1 and strategy Recreate: the startup reaper
+#     (queue.reap_stale) assumes it is alone — never RollingUpdate;
+#   - an init container that BLOCKS until the API answers /healthz: starting
+#     together, the dispatcher's leader connection blocks the API's
+#     ensure_schema DDL indefinitely (frontend/dev/up.sh learned this first);
+#   - the same EFS mount as the API: drain_staged re-loads org configs by path
+#     on every idle pass (dispatcher.py:352).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: er-dispatcher
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: er-dispatcher
+    app.kubernetes.io/component: dispatcher
+    {{- include "er-platform.labels" . | nindent 4 }}
+  annotations:
+    # §9.1: with Recreate, a secret rotation is a brief gap in job dispatch
+    # rather than a seamless rollout — rotation is scheduled, not arbitrary.
+    reloader.stakater.com/auto: "true"
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "er-platform.selectorLabels" (dict "root" . "name" "er-dispatcher") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: dispatcher
+        {{- include "er-platform.selectorLabels" (dict "root" . "name" "er-dispatcher") | nindent 8 }}
+        {{- include "er-platform.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: er-dispatcher
+      securityContext:
+        {{- include "er-platform.podSecurityContext" . | nindent 8 }}
+        runAsUser: 1001
+        runAsGroup: 1001
+      initContainers:
+        # Reuses the api image (already on the node, python included) instead
+        # of pulling a shell/curl image. Blocks forever by design: kill the
+        # API and a restarting dispatcher must WAIT, not proceed (§2).
+        - name: wait-for-api
+          image: {{ include "er-platform.image" (dict "root" . "image" .Values.images.api) }}
+          securityContext:
+            {{- include "er-platform.containerSecurityContext" . | nindent 12 }}
+          command:
+            - python
+            - -c
+            - |
+              import time, urllib.request
+              url = "http://er-api:8000/healthz"
+              while True:
+                  try:
+                      with urllib.request.urlopen(url, timeout=2) as response:
+                          if response.status == 200:
+                              break
+                  except Exception as error:  # noqa: BLE001 — keep waiting
+                      print(f"waiting for {url}: {error}", flush=True)
+                  time.sleep(2)
+              print("er-api is healthy; starting dispatcher", flush=True)
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 200m, memory: 128Mi }
+      containers:
+        - name: er-dispatcher
+          image: {{ include "er-platform.image" (dict "root" . "image" .Values.images.api) }}
+          command: ["python", "-m", "erserver.dispatcher"]
+          securityContext:
+            {{- include "er-platform.containerSecurityContext" . | nindent 12 }}
+          env:
+            {{- include "er-platform.erserverEnv" . | nindent 12 }}
+            - name: ERSERVER_CONCURRENCY
+              value: {{ .Values.dispatcher.concurrency | quote }}
+            {{- with .Values.dispatcher.pollSeconds }}
+            - name: ERSERVER_POLL_SECONDS
+              value: {{ . | quote }}
+            {{- end }}
+          envFrom:
+            - secretRef:
+                name: er-erserver-env
+          resources:
+            {{- toYaml .Values.dispatcher.resources | nindent 12 }}
+          volumeMounts:
+            - name: er-efs
+              mountPath: {{ .Values.efs.mountPath }}
+      volumes:
+        - name: er-efs
+          persistentVolumeClaim:
+            claimName: er-efs

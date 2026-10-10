@@ -1,0 +1,33 @@
+# §12: ResourceQuota is what stops one developer's 10M-row run from starving
+# the cluster, and requests.ephemeral-storage is what makes §5.3's spill
+# sizing ENFORCED rather than advisory. A quota on a resource rejects any pod
+# with no request for it, hence the LimitRange below filling defaults for
+# containers that omit one (the runner Jobs of 2.3 always set their own).
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: er-quota
+  namespace: {{ include "er-dev-namespace.name" . }}
+  labels:
+    {{- include "er-dev-namespace.labels" . | nindent 4 }}
+spec:
+  hard:
+    requests.memory: {{ .Values.quota.requestsMemory }}
+    limits.cpu: {{ .Values.quota.limitsCpu | quote }}
+    requests.ephemeral-storage: {{ .Values.quota.requestsEphemeralStorage }}
+    count/jobs.batch: {{ .Values.quota.jobs | quote }}
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: er-limits
+  namespace: {{ include "er-dev-namespace.name" . }}
+  labels:
+    {{- include "er-dev-namespace.labels" . | nindent 4 }}
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        {{- toYaml .Values.limitRange.defaultRequest | nindent 8 }}
+      default:
+        {{- toYaml .Values.limitRange.default | nindent 8 }}

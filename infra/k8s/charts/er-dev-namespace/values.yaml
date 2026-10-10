@@ -1,0 +1,51 @@
+# er-dev-namespace values. No credential ever lives here: the Postgres
+# passwords and role passwords come from er/{environment}/{developer}/postgres
+# in Secrets Manager, created by scripts/dev_env.sh at dev-up (§8.5).
+
+# REQUIRED: the developer's name — it names the Namespace and the §9 secret
+# path. `make dev-up DEV=alice` sets it.
+developer: ""
+
+environment: dev
+
+externalSecrets:
+  clusterSecretStore: aws-secrets-manager
+  refreshInterval: 1h
+
+postgres:
+  # Pinned by digest, matching docker/compose.yaml and frontend/dev/compose.yaml
+  # exactly — a pod is *closer* to tested parity than Aurora (§7.1).
+  image: postgres:16@sha256:11a9d238fbb48bab14599c57e41123254452b1a2d93c6c8595bce96f346bd082
+  # §7.1's dev shape: 1 vCPU / 2 GiB, 50 GiB gp3, single-AZ (pinned by EBS).
+  storage: 50Gi
+  # infra/k8s/storage/ebs-gp3.yaml — Auto Mode's built-in EBS driver; the
+  # cluster ships no usable default class. Applied by `make dev-up`.
+  storageClassName: gp3
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { cpu: "1", memory: 2Gi }
+
+# §12: what stops one developer's 10M-row run from starving the cluster. The
+# ephemeral-storage quota is what makes §5.3's spill sizing enforceable, and
+# jobs.batch caps runner Jobs (one is the drizzle hook Job during an upgrade).
+quota:
+  requestsMemory: 80Gi
+  limitsCpu: "24"
+  requestsEphemeralStorage: 900Gi
+  jobs: 4
+
+# LimitRange defaults — required so pods that omit a resource still pass the
+# quota (a ResourceQuota on a resource rejects any pod with no request for
+# it). Runner Jobs (2.3) always set their own explicit values.
+limitRange:
+  defaultRequest: { cpu: 100m, memory: 256Mi, ephemeral-storage: 512Mi }
+  default: { cpu: "1", memory: 1Gi, ephemeral-storage: 4Gi }
+
+# Escape hatch through the default-deny NetworkPolicy for the §4.1 internal
+# ALB (target-type ip — the connection arrives from the ALB dataplane in the
+# VPC, not from a pod). OFF until task 1.4 lands; enable together with
+# er-platform's ingress.enabled.
+webIngressFromVpc:
+  enabled: false
+  vpcCidr: 10.0.0.0/16
+  port: 3000

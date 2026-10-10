@@ -1,0 +1,37 @@
+# ClusterIP only, both of them: er-api is on no load balancer in any
+# environment (§4.1) and er-web is reached through the (flag-gated) Ingress.
+apiVersion: v1
+kind: Service
+metadata:
+  name: er-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: er-api
+    app.kubernetes.io/component: api
+    {{- include "er-platform.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "er-platform.selectorLabels" (dict "root" . "name" "er-api") | nindent 4 }}
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: er-web
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: er-web
+    app.kubernetes.io/component: web
+    {{- include "er-platform.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "er-platform.selectorLabels" (dict "root" . "name" "er-web") | nindent 4 }}
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http

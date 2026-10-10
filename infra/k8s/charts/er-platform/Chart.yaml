@@ -1,0 +1,16 @@
+# Task 2.1 (plan-to-aws.md Phase 2; infrastructure.md §12, §14): the
+# environment-level application chart — er-api, er-dispatcher, er-web, their
+# ExternalSecrets, the EFS mount, the drizzle pre-upgrade hook Job, and the
+# (flag-gated) edge Ingress. Installed once per namespace: a developer namespace
+# gets it with that developer's values after er-dev-namespace, and a future
+# staging/prod environment installs it standalone.
+apiVersion: v2
+name: er-platform
+description: >-
+  The er control plane and BFF: er-api, er-dispatcher (replicas 1, Recreate,
+  init-gated on the API's /healthz), er-web, External Secrets projections of
+  the §9 Secrets Manager entries, and the shared EFS config/drop roots.
+type: application
+version: 0.1.0
+# appVersion is deliberately absent: images are pinned per install by tag or
+# digest (infrastructure.md §14.2 — prod promotes by digest, never by tag).
