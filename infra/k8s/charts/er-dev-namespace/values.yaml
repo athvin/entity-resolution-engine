@@ -27,18 +27,42 @@ postgres:
 
 # §12: what stops one developer's 10M-row run from starving the cluster. The
 # ephemeral-storage quota is what makes §5.3's spill sizing enforceable, and
-# jobs.batch caps runner Jobs (one is the drizzle hook Job during an upgrade).
+# jobs.batch caps runner Jobs (one is the drizzle hook Job during an upgrade;
+# the idle-suspend CronJob holds up to 3 more — one live plus its 1+1 history
+# — which is why this is 10 and not the 8 the 2.3 incident settled on).
 quota:
   requestsMemory: 80Gi
   limitsCpu: "24"
   requestsEphemeralStorage: 900Gi
-  jobs: 8
+  jobs: 10
 # LimitRange defaults — required so pods that omit a resource still pass the
 # quota (a ResourceQuota on a resource rejects any pod with no request for
 # it). Runner Jobs (2.3) always set their own explicit values.
 limitRange:
   defaultRequest: { cpu: 100m, memory: 256Mi, ephemeral-storage: 512Mi }
   default: { cpu: "1", memory: 1Gi, ephemeral-storage: 4Gi }
+
+# §5.2: the idle-suspend CronJob. Suspends THIS namespace — the same scaling
+# operations as `make dev-suspend` — when max(last_seen_at) across
+# erweb.sessions is older than thresholdHours AND no job is queued or running.
+# last_seen_at is throttled to hourly updates by the frontend, which is why
+# the threshold is 4 hours and not less. Resume is manual (`make dev-resume`).
+idleSuspend:
+  enabled: true
+  schedule: "*/15 * * * *"
+  thresholdHours: 4
+  # The er-api image: python + psycopg already inside, nothing to install.
+  # Same pinning rule as er-platform's images — CI pushes by commit sha and
+  # "latest" never exists in ECR, so a forgotten pin fails at image pull.
+  # `make dev-up DEV=<name> TAG=<sha>` sets the tag here too.
+  image:
+    registry: 797781631727.dkr.ecr.us-east-2.amazonaws.com
+    repository: er-api
+    tag: latest
+    digest: "" # sha256:…; takes precedence over the tag
+  resources:
+    requests: { cpu: 50m, memory: 64Mi, ephemeral-storage: 64Mi }
+    limits: { cpu: 200m, memory: 256Mi, ephemeral-storage: 256Mi }
 
 # Escape hatch through the default-deny NetworkPolicy for the §4.1 internal
 # ALB (target-type ip — the connection arrives from the ALB dataplane in the

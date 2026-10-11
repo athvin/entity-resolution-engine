@@ -1,8 +1,9 @@
-# Task 2.2 (plan-to-aws.md Phase 2; infrastructure.md §12, §14): a developer's
-# environment substrate — the Namespace itself (PSS baseline), its Postgres
-# StatefulSet + PVC, the default-deny NetworkPolicy, ResourceQuota/LimitRange,
-# and the postgres credential ExternalSecret. er-platform installs on top,
-# into the namespace this chart creates.
+# Tasks 2.2 and 2.4 (plan-to-aws.md Phase 2; infrastructure.md §12, §14,
+# §5.2): a developer's environment substrate — the Namespace itself (PSS
+# baseline), its Postgres StatefulSet + PVC, the default-deny NetworkPolicy,
+# ResourceQuota/LimitRange, the postgres credential ExternalSecret, and the
+# idle-suspend CronJob. er-platform installs on top, into the namespace this
+# chart creates.
 #
 # The release is installed into a namespace that already exists (default, by
 # `make dev-up`) because Helm stores release state before applying manifests —
@@ -12,6 +13,7 @@ name: er-dev-namespace
 description: >-
   Per-developer namespace: PSS-labeled Namespace, postgres:16 StatefulSet with
   -c max_locks_per_transaction=1024, default-deny-ingress NetworkPolicy,
-  ResourceQuota and LimitRange, and the er/{env}/{dev}/postgres projection.
+  ResourceQuota and LimitRange, the er/{env}/{dev}/postgres projection, and
+  the §5.2 idle-suspend CronJob.
 type: application
 version: 0.1.0

@@ -1,0 +1,144 @@
+{{- if .Values.idleSuspend.enabled }}
+# §5.2: the idle-suspend CronJob — per-namespace infrastructure, so it lives
+# here and not in er-platform. Every tick it evaluates the §5.2 predicate
+# (max(last_seen_at) across erweb.sessions older than thresholdHours AND no
+# job queued/dispatching/running/canceling) and, when it holds, performs the
+# same operations as `make dev-suspend`: every Deployment and the er-postgres
+# StatefulSet to 0. Resume stays manual (`make dev-resume`) — a suspended
+# namespace's tick finds everything at 0 and exits quietly.
+#
+# The script is scripts/idle_suspend.py, carried as a ConfigMap entry; the
+# values only reach it as env (ER_IDLE_THRESHOLD_HOURS), so the file stays
+# pure Python.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: er-idle-suspend
+  namespace: {{ include "er-dev-namespace.name" . }}
+  labels:
+    {{- include "er-dev-namespace.labels" . | nindent 4 }}
+data:
+  idle_suspend.py: |
+    {{- .Files.Get "scripts/idle_suspend.py" | nindent 4 }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: er-idle-suspend
+  namespace: {{ include "er-dev-namespace.name" . }}
+  labels:
+    {{- include "er-dev-namespace.labels" . | nindent 4 }}
+---
+# Namespace-scoped, like er-platform's dispatcher Role (§6.2's reasoning: a
+# pod able to scale workloads cluster-wide would undercut the isolation §5.4
+# argues for). The verbs are exactly what the script does: list Deployments,
+# get the StatefulSet, patch both scale subresources — never the workloads
+# themselves, so this ServiceAccount cannot alter a pod spec.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: er-idle-suspend
+  namespace: {{ include "er-dev-namespace.name" . }}
+  labels:
+    {{- include "er-dev-namespace.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale", "statefulsets/scale"]
+    verbs: ["patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: er-idle-suspend
+  namespace: {{ include "er-dev-namespace.name" . }}
+  labels:
+    {{- include "er-dev-namespace.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: er-idle-suspend
+subjects:
+  - kind: ServiceAccount
+    name: er-idle-suspend
+    namespace: {{ include "er-dev-namespace.name" . }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: er-idle-suspend
+  namespace: {{ include "er-dev-namespace.name" . }}
+  labels:
+    app.kubernetes.io/name: er-idle-suspend
+    {{- include "er-dev-namespace.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.idleSuspend.schedule | quote }}
+  concurrencyPolicy: Forbid
+  # Finished Jobs count against the §12 count/jobs.batch quota (the 2.3 live
+  # incident), so keep exactly one of each outcome around for debugging —
+  # at most 3 Job objects including a running one.
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    metadata:
+      labels:
+        app.kubernetes.io/name: er-idle-suspend
+        {{- include "er-dev-namespace.labels" . | nindent 8 }}
+    spec:
+      # No retry: the next tick is the retry. The deadline covers a cold
+      # node + image pull (a suspended namespace has no node; Karpenter
+      # provisions one for this pod and reclaims it after).
+      backoffLimit: 0
+      activeDeadlineSeconds: 600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: er-idle-suspend
+            {{- include "er-dev-namespace.labels" . | nindent 12 }}
+        spec:
+          serviceAccountName: er-idle-suspend
+          restartPolicy: Never
+          # restricted-clean (the namespace warns on restricted): same shape
+          # as er-platform's pods; 1001 is the er uid in Dockerfile.api.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: idle-suspend
+              image: {{ include "er-dev-namespace.idleSuspendImage" . }}
+              command: ["python", "/scripts/idle_suspend.py"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: ER_IDLE_THRESHOLD_HOURS
+                  value: {{ .Values.idleSuspend.thresholdHours | quote }}
+                # The control-plane DSN (er_app@erctl). er_app owns public
+                # (erserver's jobs) AND the erweb schema — dev_env.sh builds
+                # ERWEB_DATABASE_URL from the same role — so one DSN answers
+                # both §5.2 questions. optional: er-platform projects this
+                # secret minutes after this chart installs (dev-up order);
+                # the script skips quietly while it is absent.
+                - name: ERSERVER_DSN
+                  valueFrom:
+                    secretKeyRef:
+                      name: er-erserver-env
+                      key: ERSERVER_DSN
+                      optional: true
+              resources:
+                {{- toYaml .Values.idleSuspend.resources | nindent 16 }}
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+                  readOnly: true
+          volumes:
+            - name: script
+              configMap:
+                name: er-idle-suspend
+{{- end }}

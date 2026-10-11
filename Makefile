@@ -99,7 +99,9 @@ dev-up:
 	kubectl --context $(ER_DEV_CONTEXT) apply -f infra/k8s/storage/ebs-gp3.yaml
 	set -e; eval "$$(bash scripts/dev_env.sh up $(DEV))"; \
 	helm --kube-context $(ER_DEV_CONTEXT) upgrade --install $(DEV) infra/k8s/charts/er-dev-namespace \
-	  --namespace default --set developer=$(DEV); \
+	  --namespace default --set developer=$(DEV) \
+	  --set idleSuspend.image.tag=$(TAG) \
+	  $(if $(API_DIGEST),--set idleSuspend.image.digest=$(API_DIGEST)); \
 	kubectl --context $(ER_DEV_CONTEXT) -n $(DEV) rollout status statefulset/er-postgres --timeout=300s; \
 	helm --kube-context $(ER_DEV_CONTEXT) upgrade --install er-platform infra/k8s/charts/er-platform \
 	  --namespace $(DEV) --set developer=$(DEV) \
