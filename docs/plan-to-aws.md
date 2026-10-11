@@ -172,9 +172,18 @@ catches cross-module leaks here.
 - [ ] **1.7 SES** (§7.5)
   - Domain identity verified (DKIM CNAMEs resolve); a pod sends a test mail via `ERSERVER_SMTP_URL` to a verified address and it arrives with DKIM pass.
   - Production-access request **filed** (not granted — filing is the DoD; dev runs in sandbox indefinitely).
-- [ ] **1.8 Observability floor** (§10.6 Phase 1)
-  - Collector gateway and log DaemonSet healthy; a test pod's stdout appears in CloudWatch.
-  - With the er-api image from Track A deployed as a smoke test: RED metrics for `/healthz` visible via auto-instrumentation.
+- [x] **1.8 Observability floor** (§10.6 Phase 1) — *live 2026-10-10: Fluent Bit DaemonSet
+  (aws-for-fluent-bit 0.2.0, runner-taint-tolerant) → `/er/dev/containers` (30d, §10.4);
+  OTel collector gateway (contrib 0.161.0) → awsemf (`ER/Dev`, `/er/dev/metrics`) + awsxray;
+  both via Pod Identity (envs/dev/observability.tf; shipper deliberately lacks
+  CreateLogGroup). `make obs-up` codifies the pinned installs; config in
+  infra/k8s/observability/. RED via the OTel operator's Python injection — er-platform's
+  `otel.autoInstrument` flag (default off; ON for alice). One live finding: the documented
+  `--reuse-values --set` flip drops new chart defaults, so the Instrumentation CR's
+  endpoint rendered empty and the agent exported to localhost — fixed with a
+  template-level endpoint fallback.*
+  - [x] Collector gateway and log DaemonSet healthy; a test pod's stdout appears in CloudWatch — probe pod's marker line retrieved from `/er/dev/containers` stream `default.obs-probe-18.obs-probe-18` with k8s metadata attached.
+  - [x] With the er-api image from Track A deployed as a smoke test: RED metrics for `/healthz` visible via auto-instrumentation — `ER/Dev http.server.duration` datapoints (60 req/min, avg 2.4 ms, the deliberate 404 as its own `http.status_code` series) and X-Ray trace summaries (`GET /healthz` 200, ~1 ms). Injection races the CR on first enable (webhook `failurePolicy: Ignore`) — a `rollout restart` after the flag lands picks it up.
 
 **Phase 1 exit:** a smoke `er-api` pod is reachable at a tailnet hostname with TLS, its
 logs and metrics are visible, and its secrets came from Secrets Manager.

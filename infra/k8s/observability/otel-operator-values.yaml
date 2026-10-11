@@ -1,0 +1,28 @@
+# OpenTelemetry Operator (task 1.8): exists for exactly one capability — the
+# §10 auto-instrumentation path. er-api ships no OTel libraries, so RED
+# metrics "without app code changes" means the operator's mutating webhook
+# injects the Python auto-instrumentation (init container + PYTHONPATH
+# sitecustomize) into pods annotated instrumentation.opentelemetry.io/
+# inject-python. The er-platform chart carries the Instrumentation CR and the
+# annotation behind `otel.autoInstrument` (default off).
+#
+# Chart: open-telemetry/opentelemetry-operator 0.124.1 — pin with --version.
+#   helm --kube-context er-dev upgrade --install otel-operator open-telemetry/opentelemetry-operator \
+#     --version 0.124.1 --namespace observability -f infra/k8s/observability/otel-operator-values.yaml
+# (`make obs-up` runs exactly this.)
+
+admissionWebhooks:
+  # No cert-manager on this cluster (and none planned for Phase 1): let Helm
+  # generate the self-signed webhook cert.
+  certManager:
+    enabled: false
+  autoGenerateCert:
+    enabled: true
+    # Keep the cert across `helm upgrade` — recreating it races the webhook
+    # configuration's caBundle.
+    recreate: false
+
+manager:
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 256Mi }

@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := check
-.PHONY: run spec lint types unit dbt fixtures workflows integration check check-all clean benchmark benchmark-1m benchmark-workloads benchmark-10m frontend frontend-dev frontend-seed frontend-e2e frontend-baselines frontend-dev-reset dev-up dev-suspend dev-resume dev-down
+.PHONY: run spec lint types unit dbt fixtures workflows integration check check-all clean benchmark benchmark-1m benchmark-workloads benchmark-10m frontend frontend-dev frontend-seed frontend-e2e frontend-baselines frontend-dev-reset dev-up dev-suspend dev-resume dev-down obs-up
 
 BENCHMARK_REPEAT ?= 1
 
@@ -137,6 +137,24 @@ dev-down:
 	helm --kube-context $(ER_DEV_CONTEXT) --namespace default uninstall $(DEV) --ignore-not-found
 	kubectl --context $(ER_DEV_CONTEXT) wait --for=delete namespace/$(DEV) --timeout=300s || true
 	bash scripts/dev_env.sh down $(DEV)
+
+# --- observability floor (infrastructure.md §10.5/§10.6 Phase 1, plan 1.8) ---
+#
+# Cluster-wide, namespace `observability`: the Fluent Bit log DaemonSet, the
+# OTel collector gateway, and the OTel operator (auto-instrumentation). Chart
+# versions are pinned HERE; config lives in infra/k8s/observability/*.yaml;
+# the AWS side (log groups, Pod Identity roles) is
+# infra/terraform/envs/dev/observability.tf. Idempotent, like dev-up.
+obs-up:
+	kubectl --context $(ER_DEV_CONTEXT) apply -f infra/k8s/observability/namespace.yaml
+	helm repo add eks https://aws.github.io/eks-charts --force-update
+	helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts --force-update
+	helm --kube-context $(ER_DEV_CONTEXT) upgrade --install fluent-bit eks/aws-for-fluent-bit \
+	  --version 0.2.0 --namespace observability -f infra/k8s/observability/fluent-bit-values.yaml
+	helm --kube-context $(ER_DEV_CONTEXT) upgrade --install otel-collector open-telemetry/opentelemetry-collector \
+	  --version 0.175.1 --namespace observability -f infra/k8s/observability/otel-collector-values.yaml
+	helm --kube-context $(ER_DEV_CONTEXT) upgrade --install otel-operator open-telemetry/opentelemetry-operator \
+	  --version 0.124.1 --namespace observability -f infra/k8s/observability/otel-operator-values.yaml
 
 # Rebuildable local caches only. Run outputs under artifacts/ are removed separately.
 clean:

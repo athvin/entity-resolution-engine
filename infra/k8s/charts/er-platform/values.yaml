@@ -92,6 +92,20 @@ web:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: 500m, memory: 1Gi }
 
+# §10.6 Phase 1 (plan 1.8): API RED metrics via the OTel operator's Python
+# auto-instrumentation — er-api carries no OTel libraries, so the operator's
+# webhook injects them (init container + PYTHONPATH sitecustomize) into pods
+# annotated inject-python. OFF by default: the annotation and the
+# Instrumentation CR only render when the operator (infra/k8s/observability/
+# otel-operator-values.yaml) is installed, which is an er-dev-cluster fact,
+# not a chart fact. Dev flips it on:
+#   helm -n alice upgrade er-platform ... --reuse-values --set otel.autoInstrument=true
+otel:
+  autoInstrument: false
+  # The §10.5 gateway. Must stay the http/protobuf port (4318) — the Python
+  # agent does not speak OTLP/gRPC.
+  endpoint: http://otel-collector.observability.svc.cluster.local:4318
+
 # The §4.1 edge: internal ALB shared across dev namespaces via group.name,
 # hostname published by external-dns into Cloudflare (unproxied). DISABLED by
 # default — task 1.4 (ALB controller/IngressClass, external-dns, the wildcard

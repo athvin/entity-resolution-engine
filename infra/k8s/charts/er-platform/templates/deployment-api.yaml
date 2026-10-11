@@ -22,6 +22,14 @@ spec:
       {{- include "er-platform.selectorLabels" (dict "root" . "name" "er-api") | nindent 6 }}
   template:
     metadata:
+      {{- if .Values.otel.autoInstrument }}
+      annotations:
+        # Task 1.8 (§10.6 Phase 1): the OTel operator's webhook matches this
+        # against the namespace's Instrumentation CR (instrumentation.yaml)
+        # and injects the Python auto-instrumentation — RED metrics with no
+        # app code change.
+        instrumentation.opentelemetry.io/inject-python: "true"
+      {{- end }}
       labels:
         app.kubernetes.io/component: api
         {{- include "er-platform.selectorLabels" (dict "root" . "name" "er-api") | nindent 8 }}

@@ -1,0 +1,45 @@
+# Fluent Bit log DaemonSet (task 1.8, §10.5 topology: logs stay on
+# stdout/stderr and a DaemonSet tails them — the path that survives the crash
+# that loses unflushed OTLP spans).
+#
+# Chart: eks/aws-for-fluent-bit 0.2.0 (app 3.2.1) — pin with --version.
+#   helm repo add eks https://aws.github.io/eks-charts
+#   helm --kube-context er-dev upgrade --install fluent-bit eks/aws-for-fluent-bit \
+#     --version 0.2.0 --namespace observability -f infra/k8s/observability/fluent-bit-values.yaml
+# (`make obs-up` runs exactly this.)
+#
+# Credentials: EKS Pod Identity on the `fluent-bit` ServiceAccount
+# (er-dev-fluent-bit role, envs/dev/observability.tf). No IRSA annotation, no
+# node role.
+
+serviceAccount:
+  create: true
+  name: fluent-bit
+
+# §10.4's substrate: runner-node logs must ship too — the engine's structured
+# stage records land on a tainted runner node, and the PII-grep probe reads
+# them from CloudWatch. Tolerate the runner taint (infra/k8s/nodepools/
+# runner-*.yaml) so the DaemonSet lands there as well as on app nodes.
+tolerations:
+  - key: er.dupezero.com/runner
+    operator: Exists
+    effect: NoSchedule
+
+cloudWatchLogs:
+  enabled: true
+  match: "*"
+  region: us-east-2
+  # Terraform-managed group (30-day retention, §10.4); the role deliberately
+  # lacks logs:CreateLogGroup, so a typo here fails loudly instead of creating
+  # an unmanaged, retention-less group.
+  logGroupName: /er/dev/containers
+  autoCreateGroup: false
+  # One stream per container, named so `aws logs filter-log-events
+  # --log-stream-name-prefix <ns>.` scopes to a namespace.
+  logStreamTemplate: $kubernetes['namespace_name'].$kubernetes['pod_name'].$kubernetes['container_name']
+  # Fallback when the kubernetes filter could not attach metadata.
+  logStreamPrefix: "unmatched-"
+
+resources:
+  requests: { cpu: 50m, memory: 64Mi }
+  limits: { memory: 256Mi }
