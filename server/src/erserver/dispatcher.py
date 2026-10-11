@@ -287,6 +287,10 @@ def _complete(
         return
 
     parsed = queue.parse_result_line(result.stdout)
+    if parsed is None and result.returncode >= 0:
+        # The stdout line rides the pod log, which dies with a reclaimed node;
+        # the runner's own row carries the durable copy (progress.result).
+        parsed = queue.stored_result(connection, job.job_id)
     if result.returncode < 0:
         exit_code: int | None = None
         error_class: str | None = "infra"

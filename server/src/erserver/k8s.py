@@ -27,9 +27,11 @@ rows to Postgres (``run_stages``, via :mod:`er.obs.runctx`) as each stage
 completes, so live progress survives a dispatcher restart with no pod-log
 stream anywhere. The one log read here is a single tail fetch *after* the Job
 reaches a terminal state, to recover the runner's terminal result line — the
-exit-code taxonomy's ``error_class`` — and it degrades gracefully: an
-unreadable log still yields the container exit code, which drives
-:func:`erserver.policy.dispose` for every terminal row of the matrix.
+exit-code taxonomy's ``error_class``. The runner also files that record on its
+own job row (``progress.result``, :func:`erserver.runner.persist_result`), so
+a log that died with its WhenEmpty-reclaimed node no longer costs the
+taxonomy; and when both channels come up empty the container exit code still
+drives :func:`erserver.policy.dispose` for every terminal row of the matrix.
 
 Secrets keep §9's shape: the control plane stores ``secret://`` references and
 the dispatcher resolves them at dispatch, exactly as in subprocess mode. The
