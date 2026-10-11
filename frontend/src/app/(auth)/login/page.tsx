@@ -40,7 +40,7 @@ function LoginForm() {
     <main className="bg-muted/40 flex min-h-dvh items-center justify-center p-4">
       <Card className="w-full max-w-sm" data-testid="login-card">
         <CardHeader className="space-y-2 text-center">
-          <CardTitle className="text-2xl">ER Cloud</CardTitle>
+          <CardTitle className="text-2xl">DupeZero</CardTitle>
           <CardDescription>Sign in to your workspace</CardDescription>
         </CardHeader>
         <CardContent>
