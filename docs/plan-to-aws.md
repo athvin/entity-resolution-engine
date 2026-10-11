@@ -234,8 +234,14 @@ The heart of the migration. 2.3 is the largest single piece of work in the plan.
 - [ ] **2.5 The two paranoia checks** (§17 Phase 2)
   - [x] PII grep (2026-10-10, with a positive control — 19 shipped runner-log events in the
     window): seeded name, email, and phone all absent from a completed run's shipped logs.
-  - [ ] A spill-heavy run (10M-scale fixture) completes without eviction — deliberately
-    deferred to an attended session: hours of runtime and real spot cost; say the word.
+  - [ ] A spill-heavy run (10M-scale fixture) completes without eviction — attended run
+    started 2026-10-11 (org `spill10m`, 10M-record corpus synced to the drop dir, class L).
+    **Blocked on an account quota, not code:** a fresh account caps *All Standard Spot*
+    (`L-34B43A08`) and *On-Demand Standard* (`L-1216C47A`) at 8 vCPU each, and a class-L
+    node is 16 — Karpenter churned NodeClaims with `VcpuLimitExceeded` and the runner sat
+    `Pending`. Both quotas requested 8→64 (us-east-2); run proceeds on approval. Documented
+    in infrastructure.md §5. This also sets up the idle-suspend job-guard observation (2.4):
+    the dispatcher kept the job active throughout the wait without the idle tick suspending it.
 
 **Phase 2 live evidence (2026-10-10):** org auto-provision → three imports → train →
 `run_all_full` (exit 0) all through launched Jobs on NVMe runner nodes; a provision ran

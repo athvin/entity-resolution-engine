@@ -176,6 +176,8 @@ So the right node has many vCPU, modest RAM, and a large NVMe for spill. `c6id.4
 
 Spare capacity on these nodes is not waste: the one-active-job-per-org constraint means two *different* tenants' runs bin-pack onto one node, and at ~14 GiB per L pod a `c6id.4xlarge` holds two.
 
+**Account vCPU quota is the real floor on node size, and it bites a fresh account.** A new AWS account defaults the two quotas these NodePools draw on — *All Standard Spot Instance Requests* (`L-34B43A08`) and *Running On-Demand Standard instances* (`L-1216C47A`) — to **8 vCPU each**, measured in vCPUs, not instances. A single `runner-l` node is 16 vCPU, so under the default a class-L run can never place: Karpenter's fleet request fails `VcpuLimitExceeded`/`MaxSpotInstanceCountExceeded`, the NodeClaim is torn down and retried, and the runner pod sits `Pending` forever while the dispatcher dutifully keeps the job active (observed 2026-10-11, first 10M run). Both quotas are raised to **64 vCPU** (us-east-2) — enough for the 2-vCPU app node plus concurrent L and M runs with headroom, short of the ~128+ range that draws manual review. This is exactly the §8 "dev shares prod's service quotas" hazard made concrete: the quota is an account-wide ceiling, so a prod tenant and a developer's 10M experiment draw from the same 64. Revisit before Phase 3 onboards a real tenant.
+
 ### 5.1 Karpenter disruption settings
 
 The first draft said "all NodePools scale to zero" and specified no disruption settings at all. The defaults are actively wrong for this workload, and the wrong choice here is invisible — it shows up as jobs taking longer, not as errors.
