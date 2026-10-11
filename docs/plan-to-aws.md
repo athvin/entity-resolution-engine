@@ -194,12 +194,14 @@ logs and metrics are visible, and its secrets came from Secrets Manager.
 
 The heart of the migration. 2.3 is the largest single piece of work in the plan.
 
-- [ ] **2.1 `er-platform` chart** (§12, §14) — *dev-up green 2026-10-10: all four pods
-  Running first try; dispatcher init-gate held; drizzle hook ran; ExternalSecrets synced.*
+- [x] **2.1 `er-platform` chart** (§12, §14) — dev-up green 2026-10-10: all four pods
+  Running first try; dispatcher init-gate held (blocked until the API answered, observed
+  again on every resume); drizzle hook ran; ExternalSecrets synced; EFS mounted by API and
+  dispatcher with drops visible to runner Jobs.
   - API, dispatcher, web deploy; dispatcher has `replicas: 1`, `strategy: Recreate`, and an init container gating on `/healthz` — kill the API and watch the dispatcher init **block** (§2 boot order).
   - The drizzle pre-upgrade hook Job ran (`drizzle.__drizzle_migrations` matches `_journal.json`); `ensure_schema` completed on API boot.
   - API and dispatcher pods both mount EFS at config root and drop root (§6.2) — `exec` and `touch` a file from the API, read it from the dispatcher.
-- [ ] **2.2 `er-dev-namespace` chart + lifecycle targets** (§12, §17 Phase 2) — *live
+- [x] **2.2 `er-dev-namespace` chart + lifecycle targets** (§12, §17 Phase 2) — *live
   2026-10-10: `make dev-up DEV=alice` from nothing; org auto-provisioned through the
   launcher onto the dev lake; cross-namespace Postgres probe FAILED OPEN until the Auto
   Mode Network Policy Controller ConfigMap was applied (infra/k8s/network-policy-controller.yaml
@@ -209,7 +211,7 @@ The heart of the migration. 2.3 is the largest single piece of work in the plan.
   - `make dev-suspend` → Karpenter reclaims the app node and `pg_stat_activity` on the (stopped) DB path shows nothing held; resume → golden-record counts and snapshot history unchanged (PVC survived).
   - From alice's namespace, a connection to bob's Postgres service **fails** — NetworkPolicy enforcing, which proves the CNI policy agent is actually on (§8.5).
   - `make dev-down` → PVC gone, S3 prefix empty, secrets deleted.
-- [ ] **2.3 Runner NodePools + the Kubernetes Job launcher + its coupled set** (§5.1, §5.3, §6, §10.2, §15) — *first launched runs green 2026-10-10 (provision 77s pod-to-complete on a fresh NVMe node; train succeeded; post-train imports ingest). Live incident: the §12 count/jobs.batch=4 quota filled with TTL-lingering finished Jobs and a launch 403'd into a stranded claim — dispatcher restart requeued it exactly as the reconcile path was designed to; fixed by TTL 3600→600, quota 4→8, and a bounded, logged quota-wait in the launcher. error_class fidelity degrades when WhenEmpty-30s reclaims the node before the log tail — follow-up: persist the terminal result via the DB channel.*
+- [x] **2.3 Runner NodePools + the Kubernetes Job launcher + its coupled set** (§5.1, §5.3, §6, §10.2, §15) — *first launched runs green 2026-10-10 (provision 77s pod-to-complete on a fresh NVMe node; train succeeded; post-train imports ingest). Live incident: the §12 count/jobs.batch=4 quota filled with TTL-lingering finished Jobs and a launch 403'd into a stranded claim — dispatcher restart requeued it exactly as the reconcile path was designed to; fixed by TTL 3600→600, quota 4→8, and a bounded, logged quota-wait in the launcher. error_class fidelity degrades when WhenEmpty-30s reclaims the node before the log tail — follow-up: persist the terminal result via the DB channel.*
   - One Job per run; on a deliberate config error (engine exit 2), **exactly one pod** is ever created (`backoffLimit: 0` held).
   - `df -h /app/.tmp` inside a runner shows instance-store NVMe, not the root filesystem; the pod carries `requests.ephemeral-storage` and the `emptyDir` sizeLimit.
   - Runner pods carry `karpenter.sh/do-not-disrupt`; the node empties ~30s after the run.
@@ -226,8 +228,18 @@ The heart of the migration. 2.3 is the largest single piece of work in the plan.
   observation**; suspended/half-suspended namespaces exit 0 quietly by design.*
   - A namespace with `last_seen_at` > 4h old and no jobs suspends on the next tick; a namespace with a **running job does not**, regardless of session age. Test both.
 - [ ] **2.5 The two paranoia checks** (§17 Phase 2)
-  - Grep a completed run's logs for a seeded name, email, and phone — all three absent (§10.4's rule, which §8.1's log grant depends on).
-  - A spill-heavy run (10M-scale fixture) completes without eviction (§5.3 sizing is right).
+  - [x] PII grep (2026-10-10, with a positive control — 19 shipped runner-log events in the
+    window): seeded name, email, and phone all absent from a completed run's shipped logs.
+  - [ ] A spill-heavy run (10M-scale fixture) completes without eviction — deliberately
+    deferred to an attended session: hours of runtime and real spot cost; say the word.
+
+**Phase 2 live evidence (2026-10-10):** org auto-provision → three imports → train →
+`run_all_full` (exit 0) all through launched Jobs on NVMe runner nodes; a provision ran
+pod-to-complete in 77s on a fresh node; `lake_maintain` succeeded (the max_locks proof);
+suspend reclaimed the app node and resume restored the stack with the lake untouched;
+32 lake objects under the tenant prefix on er-dev-lake. The §17 checks that remain are
+the 4h idle-suspend observation, the EFS first recovery point, the first CUR file,
+cost-tag activation (keys not yet surfaced in billing), and the 10M spill run.
 
 **Phase 2 exit:** all nine §17 Phase 2 checks pass in a fresh namespace created from
 nothing by `make dev-up`.
