@@ -1,0 +1,92 @@
+# OTel Collector gateway (task 1.8, §10.5 topology: one Deployment every
+# deployable pushes OTLP to; it batches and routes). Backend per §10.5: start
+# with CloudWatch (EMF) for metrics and X-Ray for traces — not because they
+# are the best backends but because the exporter is the swappable part. Moving
+# to AMP/Grafana Cloud later is an `exporters:` edit in THIS file plus the
+# §10.5 PII rule check (logs never leave the account; they do not flow through
+# this gateway at all — the Fluent Bit DaemonSet owns logs).
+#
+# Chart: open-telemetry/opentelemetry-collector 0.175.1 — pin with --version.
+#   helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
+#   helm --kube-context er-dev upgrade --install otel-collector open-telemetry/opentelemetry-collector \
+#     --version 0.175.1 --namespace observability -f infra/k8s/observability/otel-collector-values.yaml
+# (`make obs-up` runs exactly this.)
+#
+# Credentials: EKS Pod Identity on the `otel-collector` ServiceAccount
+# (er-dev-otel-collector role, envs/dev/observability.tf).
+
+mode: deployment
+replicaCount: 1
+
+# Service DNS pinned to otel-collector.observability — the name the
+# er-platform chart's Instrumentation CR (and later §10.2 SDK config) points
+# at. Renaming this breaks every OTLP sender.
+fullnameOverride: otel-collector
+
+image:
+  # contrib, not core: awsemf and awsxray live only in the contrib
+  # distribution. The AWS distro (ADOT) packages the same exporters; contrib
+  # keeps us on the upstream release train.
+  repository: otel/opentelemetry-collector-contrib
+  tag: 0.161.0 # pinned to the chart's appVersion
+command:
+  name: otelcol-contrib
+
+serviceAccount:
+  create: true
+  name: otel-collector
+
+# The namespace cannot enforce PSS (the log DaemonSet needs hostPath), so this
+# pod carries the restricted profile itself — the gateway handles every
+# service's telemetry and deserves the tightest box available. The contrib
+# image runs as uid 10001.
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+
+# OTLP in, nothing else: the chart's jaeger/zipkin defaults are surface we do
+# not accept (null strips them from the rendered config).
+ports:
+  jaeger-compact: { enabled: false }
+  jaeger-thrift: { enabled: false }
+  jaeger-grpc: { enabled: false }
+  zipkin: { enabled: false }
+
+config:
+  receivers:
+    jaeger: null
+    zipkin: null
+    prometheus: null
+  exporters:
+    awsemf:
+      region: us-east-2
+      # §10.3: operational metrics under one namespace; resource_class — never
+      # tenant — is the dimension (cardinality rule).
+      namespace: ER/Dev
+      # Terraform-managed event group (30d, envs/dev/observability.tf);
+      # CloudWatch extracts the metric data on ingest.
+      log_group_name: /er/dev/metrics
+      log_stream_name: otel-collector
+    awsxray:
+      region: us-east-2
+  service:
+    pipelines:
+      metrics:
+        receivers: [otlp]
+        processors: [memory_limiter, batch]
+        exporters: [awsemf]
+      traces:
+        receivers: [otlp]
+        processors: [memory_limiter, batch]
+        exporters: [awsxray]
+      # No OTLP logs pipeline: logs ride stdout -> Fluent Bit (§10.5).
+      logs: null
+
+resources:
+  requests: { cpu: 100m, memory: 128Mi }
+  limits: { memory: 512Mi }

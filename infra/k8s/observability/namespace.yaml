@@ -1,0 +1,16 @@
+# The observability namespace (task 1.8, §10.5 topology): the Fluent Bit
+# DaemonSet, the OTel collector gateway, and the OTel operator live here.
+#
+# PSS is `privileged` — the one namespace in the cluster that cannot enforce
+# baseline, because the log DaemonSet's whole job is a hostPath mount of
+# /var/log (baseline forbids hostPath). Everything else in the namespace is
+# restricted-clean; warn/audit keep the drift visible.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: observability
+  labels:
+    app.kubernetes.io/part-of: er
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted

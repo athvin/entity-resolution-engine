@@ -1,0 +1,49 @@
+{{- if .Values.otel.autoInstrument }}
+# The namespace's auto-instrumentation recipe (task 1.8, §10.6 Phase 1). The
+# OTel operator's webhook reads this when a pod carrying the inject-python
+# annotation (deployment-api.yaml) is created, and injects the Python
+# auto-instrumentation: an init container copies the agent into an emptyDir,
+# PYTHONPATH points at its sitecustomize, and FastAPI/psycopg instrumentation
+# initializes before uvicorn imports the app — zero application change, which
+# is the §10 requirement.
+#
+# Requires the operator's CRD (infra/k8s/observability/otel-operator-values.yaml
+# install), which is why the default is off: `helm template` of this chart must
+# not assume cluster add-ons.
+apiVersion: opentelemetry.io/v1alpha1
+kind: Instrumentation
+metadata:
+  name: er-python
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "er-platform.labels" . | nindent 4 }}
+spec:
+  exporter:
+    # The default repeats values.yaml deliberately: `helm upgrade
+    # --reuse-values --set otel.autoInstrument=true` (the documented flip)
+    # reuses the OLD release's values and drops NEW chart defaults, which left
+    # this empty on first live enable — the agent then exported to localhost
+    # and the collector saw nothing. The template-level fallback makes the
+    # flag self-sufficient.
+    endpoint: {{ .Values.otel.endpoint | default "http://otel-collector.observability.svc.cluster.local:4318" }}
+  propagators:
+    - tracecontext
+    - baggage
+  sampler:
+    # §10.2: dev volume is nothing; sample everything. Head-sampling the API
+    # read path is a prod-era tune.
+    type: parentbased_always_on
+  python:
+    env:
+      # The Python agent only speaks OTLP over http/protobuf (hence the 4318
+      # endpoint above).
+      - name: OTEL_EXPORTER_OTLP_PROTOCOL
+        value: http/protobuf
+      - name: OTEL_TRACES_EXPORTER
+        value: otlp
+      - name: OTEL_METRICS_EXPORTER
+        value: otlp
+      # Logs stay on stdout -> Fluent Bit (§10.5); no OTLP log path.
+      - name: OTEL_LOGS_EXPORTER
+        value: none
+{{- end }}
