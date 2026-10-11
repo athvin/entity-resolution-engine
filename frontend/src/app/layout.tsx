@@ -3,7 +3,7 @@ import "./globals.css";
 import { Providers } from "./providers";
 
 export const metadata: Metadata = {
-  title: { default: "ER Cloud", template: "%s · ER Cloud" },
+  title: { default: "DupeZero", template: "%s · DupeZero" },
   description: "Entity resolution, explained — golden records, duplicates, and reviews.",
 };
 
