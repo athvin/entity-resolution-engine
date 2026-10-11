@@ -224,9 +224,13 @@ The heart of the migration. 2.3 is the largest single piece of work in the plan.
   predicate over `ERSERVER_DSN` and scales deployments + er-postgres to 0 via the
   API scale subresource (namespace-scoped Role). helm lint/template + kubeconform
   clean; `--dry-run=server` against er-dev accepted all five objects with no PSS
-  warnings. The two acceptance tests below need a 4h idle window — **pending live
-  observation**; suspended/half-suspended namespaces exit 0 quietly by design.*
-  - A namespace with `last_seen_at` > 4h old and no jobs suspends on the next tick; a namespace with a **running job does not**, regardless of session age. Test both.
+  warnings.* **Live-observed 2026-10-11:** with `max(last_seen_at)` > 4h old and no
+  active jobs, the tick scaled alice's deployments and er-postgres to 0 unattended
+  (found suspended on return; DB re-check confirmed the predicate inputs). Bonus
+  observation: a half-resume (Postgres up, deployments still 0 after a `dev-resume`
+  aborted on an expired SSO token) was re-suspended by the next tick — the predicate
+  evaluates and completes the suspend rather than leaving the half-state running.
+  - A namespace with `last_seen_at` > 4h old and no jobs suspends on the next tick ✓ (2026-10-11); a namespace with a **running job does not**, regardless of session age — the job-guard clause remains untested live (needs a run in flight at a tick).
 - [ ] **2.5 The two paranoia checks** (§17 Phase 2)
   - [x] PII grep (2026-10-10, with a positive control — 19 shipped runner-log events in the
     window): seeded name, email, and phone all absent from a completed run's shipped logs.
@@ -237,9 +241,10 @@ The heart of the migration. 2.3 is the largest single piece of work in the plan.
 `run_all_full` (exit 0) all through launched Jobs on NVMe runner nodes; a provision ran
 pod-to-complete in 77s on a fresh node; `lake_maintain` succeeded (the max_locks proof);
 suspend reclaimed the app node and resume restored the stack with the lake untouched;
-32 lake objects under the tenant prefix on er-dev-lake. The §17 checks that remain are
-the 4h idle-suspend observation, the EFS first recovery point, the first CUR file,
-cost-tag activation (keys not yet surfaced in billing), and the 10M spill run.
+32 lake objects under the tenant prefix on er-dev-lake. The 4h idle-suspend fired
+unattended on 2026-10-11 (2.4 closed, job-guard clause still unobserved). The §17
+checks that remain are the EFS first recovery point, the first CUR file, cost-tag
+activation (keys not yet surfaced in billing), and the 10M spill run.
 
 **Phase 2 exit:** all nine §17 Phase 2 checks pass in a fresh namespace created from
 nothing by `make dev-up`.
