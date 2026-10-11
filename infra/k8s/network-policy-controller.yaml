@@ -1,0 +1,12 @@
+# §8.5's "one-line addon setting and a silent failure if missed", Auto Mode
+# form: NetworkPolicy objects enforce NOTHING until this ConfigMap enables the
+# Network Policy Controller. The §17 cross-namespace probe is what proves it —
+# it failed open before this was applied (2026-10-10) and must be re-run after
+# any cluster rebuild.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: amazon-vpc-cni
+  namespace: kube-system
+data:
+  enable-network-policy-controller: "true"

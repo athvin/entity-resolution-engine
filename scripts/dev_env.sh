@@ -26,7 +26,7 @@ set -euo pipefail
 
 AWS_REGION="${AWS_REGION:-us-east-2}"
 EFS_NAME="${ER_EFS_NAME:-er-dev-config}"             # infra/terraform/envs/dev/efs.tf
-LAKE_BUCKET="${ER_LAKE_BUCKET:-er-nonprod-lake}"     # §7.3
+LAKE_BUCKET="${ER_LAKE_BUCKET:-er-dev-lake-797781631727}" # §7.3, rev 4 naming
 SECRET_ENV="${ER_SECRET_ENV:-dev}"                   # the {env} half of §9's names
 
 die() {

@@ -54,7 +54,7 @@ erserver:
   # s3://{lake.bucket}/{lake.prefix}/{ns}/ — §7.3's nonprod layout. prefix
   # defaults to dev/{developer}.
   lake:
-    bucket: er-nonprod-lake
+    bucket: er-dev-lake-797781631727
     prefix: ""
   # ERSERVER_TENANT_DB_PREFIX; empty keeps the erserver default ("er_").
   tenantDbPrefix: ""

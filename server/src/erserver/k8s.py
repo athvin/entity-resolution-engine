@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import time
 from collections.abc import Callable
 from typing import Any
@@ -72,8 +73,16 @@ RUNNER_TAINT_KEY = "er.dupezero.com/runner"
 NODEPOOL_LABEL = "karpenter.sh/nodepool"
 
 #: §6.2: the dispatcher keeps the finished Job around long enough to read its
-#: final status (and the terminal log line) even across its own restart.
-TTL_SECONDS_AFTER_FINISHED = 3600
+#: final status (and the terminal log line) even across its own restart — but
+#: short enough that finished Jobs do not starve the §12 count/jobs.batch
+#: quota: at 3600 this wedged a live queue (4 lingering Jobs = quota full and
+#: every create 403s). Ten minutes covers restart recovery with quota headroom.
+TTL_SECONDS_AFTER_FINISHED = 600
+
+#: How long a launch waits out a full count/jobs.batch quota before failing the
+#: attempt (the row then requeues under the normal retry policy).
+QUOTA_RETRY_SECONDS = 600
+QUOTA_RETRY_INTERVAL = 15.0
 
 #: §6.2: must exceed the engine's stage-boundary check interval and the
 #: dispatcher's own TERMINATE_GRACE_SECONDS (10s) so SIGTERM lets the engine
@@ -384,13 +393,31 @@ class KubernetesLauncher:
             env_secret=settings.runner_env_secret,
             service_account=settings.runner_service_account,
         )
-        try:
-            batch.create_namespaced_job(namespace=self.namespace, body=manifest)
-        except ApiException as exc:
-            if exc.status != 409:
+        deadline = time.monotonic() + QUOTA_RETRY_SECONDS
+        while True:
+            try:
+                batch.create_namespaced_job(namespace=self.namespace, body=manifest)
+            except ApiException as exc:
+                if exc.status == 409:
+                    # Already exists: a prior dispatcher died between create and
+                    # wait. The deterministic name makes the retry an adoption,
+                    # not a twin.
+                    break
+                # The §12 count/jobs.batch quota counts finished Jobs until
+                # their TTL reaps them; a full namespace must read as "waiting
+                # for quota", visibly, never as a silently stranded claim.
+                if exc.status == 403 and "exceeded quota" in str(exc.body or ""):
+                    if time.monotonic() >= deadline:
+                        raise
+                    sys.stderr.write(
+                        f"dispatcher: runner Job {name} waiting on namespace job quota\n"
+                    )
+                    if should_cancel is not None and should_cancel():
+                        raise
+                    time.sleep(QUOTA_RETRY_INTERVAL)
+                    continue
                 raise
-            # Already exists: a prior dispatcher died between create and wait.
-            # The deterministic name makes the retry an adoption, not a twin.
+            break
         return self._wait(name, on_stage=on_stage, should_cancel=should_cancel)
 
     def exists(self, job_id: str) -> bool:
