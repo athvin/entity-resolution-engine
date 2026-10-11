@@ -1,5 +1,9 @@
 # Architecture
 
+*Engine layer — single-tenant per lake. The multi-tenant platform that runs many
+such lakes is in the [README](../README.md#architecture-at-a-glance) and
+[backend-design.md](backend-design.md).*
+
 The engine turns source records into a maintained set of people and golden
 records. Each source record has a stable `source_system:source_record_id` key;
 each resolved entity has a separate persistent identifier.

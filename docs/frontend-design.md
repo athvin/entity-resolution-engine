@@ -9,26 +9,16 @@ references it. No code here — this is the "what we build and why" document, an
 
 ## 1. Positioning & thesis
 
-We are attacking **Cloudingo** (Symphonic Source): a Salesforce-only dedupe SaaS priced
-$2,500 / $6,000 / $10,000 per year per Salesforce org, annual-only, plus a **$100 per
-100,000 records volume tax** above 300k records, with API access gated to the $10k tier at
-1,000 calls/day. Their product is genuinely deep (see §6) but structurally weak in five
-places their own reviewers name:
+We are attacking **Cloudingo** (Symphonic Source): a Salesforce-only dedupe SaaS. Its
+pricing tiers, feature depth and limitations are documented in
+[research-cloudingo.md](research-cloudingo.md) — the short version is that it is genuinely
+deep (see §6) but structurally weak in five places its own reviewers name:
 
-1. **Salesforce-jailed.** One Salesforce org per subscription; the only other connector is
-   Marketo (leads only). Teams cleaning across CRM + warehouse + marketing + files can't use it.
-2. **No real prevention.** Records are created dirty, then swept up post-hoc; their "real-time"
-   merge is a continuous sweeper capped at 100k groups/day, and the prevention API is
-   Enterprise-only with a tiny daily budget.
-3. **No ML, no explainability.** Thirteen hand-composed string-matching styles, no per-pair
-   confidence, no "here's why these two are the same person." Rule building is manual
-   trial-and-error that "rewards those who have time to tinker."
-4. **Dated, dense UI with a steep learning curve.** "Not the most intuitive product, there's a
-   lot going on"; no embedded help; spreadsheet-era layout; slow at volume; mass merge capped
-   at one page of results at a time.
-5. **Sales-team frictions.** Email your account rep to enable a custom object; weekly-only
-   data-quality dashboard that cannot be manually refreshed; 30-day undo retention; 2-year
-   report archival; annual-only contracts.
+1. **Salesforce-jailed** — one org per subscription; Marketo (leads only) is the sole other connector.
+2. **No real prevention** — records are created dirty and swept post-hoc; the prevention API is Enterprise-only with a tiny daily budget.
+3. **No ML, no explainability** — hand-composed string-matching styles, no per-pair confidence, no "why are these the same person."
+4. **Dated, dense UI** — "a lot going on," no embedded help, slow at volume, mass merge capped at one page at a time.
+5. **Sales-team frictions** — email-your-rep to enable features, weekly-only dashboards, short undo retention, annual-only contracts.
 
 Our engine already out-guns their matching core: probabilistic (Splink-based) scoring with
 per-pair `match_probability` and a full evidence waterfall, config-versioned thresholds,
@@ -43,8 +33,8 @@ Salesforce phase is a connector + writeback problem, not a product problem.
 
 **Deliberate non-goals for this phase:** no CRM vocabulary (no "Leads/Contacts/Accounts"
 framing — sources are sources, entities are entities); no billing/payments surface (Stripe is
-the eventual answer, explicitly out of scope now); SSO/OIDC has moved off this
-list — §2.4 specifies "Sign in with Salesforce / Google / Microsoft" layered on the existing
+the eventual answer, explicitly out of scope now). SSO/OIDC is **in** scope — §2.4
+specifies "Sign in with Salesforce / Google / Microsoft" layered on the existing
 session machinery, with password login retained alongside.
 
 ---
@@ -110,8 +100,8 @@ exactly as that tenant sees it.
 
 ### 2.4 SSO — "Sign in with Salesforce / Google / Microsoft" (decided 2026-10-02)
 
-The §1 non-goal is lifted: SSO against the three IdPs our buyers already live in —
-Salesforce, Google, Microsoft — is the MVP login, with password login retained alongside.
+SSO against the three IdPs our buyers already live in —
+Salesforce, Google, Microsoft — is the MVP login (§1, in scope), with password login retained alongside.
 The mechanism was chosen against the repository as it exists and provider behaviour verified
 October 2026.
 
@@ -257,6 +247,11 @@ possible contrast with Cloudingo's most-cited complaint ("a lot going on", deep 
 - **Beautiful and calm.** A real design system (dark/light), generous whitespace, motion used
   to explain state changes (a merged pair visually collapsing into one entity) rather than to
   decorate.
+- **Black and white, period.** The main app and theme use no color — both the dark and light
+  themes are strictly grayscale. No brand accent, no colored chips or badges, no palette.
+  Color is decoration, and decoration is the opposite of what this product sells: hierarchy
+  comes from type scale, weight, spacing and motion. Clean-cut beats pretty. (This is a
+  standing constraint on every surface and component, not a launch-phase simplification.)
 - **Explain, don't gate.** Where Cloudingo has no embedded help, every score, tier label, and
   state chip in our UI is hoverable/expandable to a plain-language explanation ("0.93 — just
   below your auto-merge threshold of 0.95; that's why it's asking you").
@@ -451,10 +446,11 @@ Two distinct flows, deliberately separated:
    states plainly "this triggers a retrain and full rebuild, ~⟨estimate from run history⟩")
    and runs the first import.
 
-**Hard blocker to name honestly:** the dbt staging layer is hardcoded to three sources
-(`crm`, `billing`, `webforms`) — a genuinely new source name needs a generated staging
-model, not just config. Self-serve sources are gated on that backend work (§7.17); until
-then the wizard ends with "queued for activation" and an operator step.
+**Resolved (was a hard blocker):** the dbt staging layer used to hardcode three sources
+(`crm`, `billing`, `webforms`), so a genuinely new source name needed a generated staging
+model, not just config. §7.17 shipped the config-driven `stg_records` model — one union arm
+per configured source — so the wizard now commits a new source and runs the import without
+an operator step.
 
 ### 5.6 Config studio — no raw YAML, ever
 
@@ -560,6 +556,8 @@ The platform-operator cockpit, in the same app behind the `is_super_admin` flag:
 ---
 
 ## 6. Cloudingo parity & differentiation matrix
+
+*Competitor feature/pricing detail lives in [research-cloudingo.md](research-cloudingo.md); this matrix is our product's parity and differentiation stance, not a restatement of their product.*
 
 Legend: **Have** = engine/API supports it today, UI just renders it · **Partial** = core
 exists, missing a listed gap · **Gap** = needs backend work (§7) · **Roadmap** = consciously

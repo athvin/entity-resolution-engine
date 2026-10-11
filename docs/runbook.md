@@ -1,9 +1,12 @@
 # Operating the engine
 
+*Engine layer — operating one tenant's lake via the CLI. The multi-tenant control
+plane that runs these as jobs is [backend-design.md](backend-design.md); the
+[README](../README.md#architecture-at-a-glance) has the whole platform.*
+
 Commands below run from the repository root. Training is always explicit;
 `run-all` uses an existing active model. For an isolated, automatically cleaned-up
 smoke run, use the [README quickstart](../README.md#try-the-complete-pipeline).
-
 ## Development lake
 
 Use a dedicated Compose project to keep this lake separate from integration tests:

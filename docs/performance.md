@@ -1,5 +1,7 @@
 # Performance
 
+*Engine layer — single-tenant engine measurements (one lake, one node).*
+
 *The consolidated performance record: what the pipeline costs today, what drives
 that cost, how it got here, what was tried and rejected, and what the evidence says
 to do next. Consolidated 2026-10-03 from nine measurement reports; the full
@@ -8,7 +10,6 @@ campaign's machine-readable record is under [measurements/](measurements/) (the
 work-in-progress thread-scaling campaign has none — see
 [Measurement records](#measurement-records)), and raw artifacts
 are git-ignored under `artifacts/`.*
-
 ## The numbers that matter
 
 The standard workload is **1M synthetic records (400k people), seed 42,

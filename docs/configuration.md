@@ -1,9 +1,11 @@
 # Configuration
 
+*Engine-layer configuration (one tenant's lake). Under the multi-tenant control
+plane, config is versioned and published per tenant — [backend-design.md](backend-design.md) §6.*
+
 Start with [configs/default.yaml](../configs/default.yaml). The checked-in
 [test configuration](../configs/test.yaml) supplies the fixture and Compose defaults.
 Pass `--config PATH` after a command or set `ER_CONFIG` to select a file.
-
 ## Source data
 
 Deliver CSV or Parquet files in `<drop-root>/<source-name>/`. For example,
@@ -48,7 +50,7 @@ delivery is the complete key set for that source: absent keys become tombstones.
 | `generator` | Synthetic fixture seed |
 | `clustering` | Iteration limit and protected-edge threshold |
 | `coherence` | Current scorer: `noop` |
-| `correction_pass` | Desired cron cadence; an external scheduler must invoke it |
+| `correction_pass` | Cron cadence. Under the control plane it is synced into a schedule on config publish (backend-design §5); standalone, an external scheduler invokes it |
 
 Configuration is validated by Pydantic and cross-field rules before processing.
 All blocks and their exact constraints are in [S6](../DesignDoc.md#s6).
