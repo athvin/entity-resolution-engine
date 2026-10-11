@@ -32,8 +32,7 @@ quota:
   requestsMemory: 80Gi
   limitsCpu: "24"
   requestsEphemeralStorage: 900Gi
-  jobs: 4
-
+  jobs: 8
 # LimitRange defaults — required so pods that omit a resource still pass the
 # quota (a ResourceQuota on a resource rejects any pod with no request for
 # it). Runner Jobs (2.3) always set their own explicit values.

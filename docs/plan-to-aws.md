@@ -114,9 +114,11 @@ activation takes up to 24h and never backfills (§16.1).
   - [x] `er-pipeline`/`er-api`/`er-web` repositories: tag immutability, scan-on-push,
     last-30 lifecycle. Single registry — replication dissolved with the accounts.
   - [x] OIDC provider + `er-ci-ecr-push` with `sub` pinned to `main`; CI `push-image` job.
-  - [x] Probe (2026-10-10): first main push landed — `er-pipeline:a2dccbf…` in ECR via OIDC
-    (after pinning the trust policy to GitHub's immutable subject claims). Remaining:
-    re-push-same-tag rejection and the PR-branch assume-fails negative probe.
+  - [x] Probe (2026-10-10): first main push landed via OIDC (after pinning the trust
+    policy to GitHub's immutable subject claims); all three images push per commit.
+  - [x] Immutability probe: put-image with a different manifest on an existing tag →
+    ImageTagAlreadyExistsException. The PR-branch assume-fails negative rides the
+    next real PR run (structural via the sub pin).
 
 - [x] **0.8 Branch protection + budget alarms** (§8.6, §16)
   - [x] Direct push to `main` rejected; PR without review cannot merge (1 review + all 36
@@ -183,17 +185,22 @@ logs and metrics are visible, and its secrets came from Secrets Manager.
 
 The heart of the migration. 2.3 is the largest single piece of work in the plan.
 
-- [ ] **2.1 `er-platform` chart** (§12, §14)
+- [ ] **2.1 `er-platform` chart** (§12, §14) — *dev-up green 2026-10-10: all four pods
+  Running first try; dispatcher init-gate held; drizzle hook ran; ExternalSecrets synced.*
   - API, dispatcher, web deploy; dispatcher has `replicas: 1`, `strategy: Recreate`, and an init container gating on `/healthz` — kill the API and watch the dispatcher init **block** (§2 boot order).
   - The drizzle pre-upgrade hook Job ran (`drizzle.__drizzle_migrations` matches `_journal.json`); `ensure_schema` completed on API boot.
   - API and dispatcher pods both mount EFS at config root and drop root (§6.2) — `exec` and `touch` a file from the API, read it from the dispatcher.
-- [ ] **2.2 `er-dev-namespace` chart + lifecycle targets** (§12, §17 Phase 2)
+- [ ] **2.2 `er-dev-namespace` chart + lifecycle targets** (§12, §17 Phase 2) — *live
+  2026-10-10: `make dev-up DEV=alice` from nothing; org auto-provisioned through the
+  launcher onto the dev lake; cross-namespace Postgres probe FAILED OPEN until the Auto
+  Mode Network Policy Controller ConfigMap was applied (infra/k8s/network-policy-controller.yaml
+  — §8.5's predicted silent failure, found by the probe), then BLOCKED as designed.*
   - `make dev-up DEV=alice` → login at `alice.dev.<domain>` over the tailnet, create an org, submit `run_all_full`, run completes.
   - `er lake maintain` succeeds — the `max_locks_per_transaction=1024` flag took effect (the operation that fails at 64).
   - `make dev-suspend` → Karpenter reclaims the app node and `pg_stat_activity` on the (stopped) DB path shows nothing held; resume → golden-record counts and snapshot history unchanged (PVC survived).
   - From alice's namespace, a connection to bob's Postgres service **fails** — NetworkPolicy enforcing, which proves the CNI policy agent is actually on (§8.5).
   - `make dev-down` → PVC gone, S3 prefix empty, secrets deleted.
-- [ ] **2.3 Runner NodePools + the Kubernetes Job launcher + its coupled set** (§5.1, §5.3, §6, §10.2, §15)
+- [ ] **2.3 Runner NodePools + the Kubernetes Job launcher + its coupled set** (§5.1, §5.3, §6, §10.2, §15) — *first launched runs green 2026-10-10 (provision 77s pod-to-complete on a fresh NVMe node; train succeeded; post-train imports ingest). Live incident: the §12 count/jobs.batch=4 quota filled with TTL-lingering finished Jobs and a launch 403'd into a stranded claim — dispatcher restart requeued it exactly as the reconcile path was designed to; fixed by TTL 3600→600, quota 4→8, and a bounded, logged quota-wait in the launcher. error_class fidelity degrades when WhenEmpty-30s reclaims the node before the log tail — follow-up: persist the terminal result via the DB channel.*
   - One Job per run; on a deliberate config error (engine exit 2), **exactly one pod** is ever created (`backoffLimit: 0` held).
   - `df -h /app/.tmp` inside a runner shows instance-store NVMe, not the root filesystem; the pod carries `requests.ephemeral-storage` and the `emptyDir` sizeLimit.
   - Runner pods carry `karpenter.sh/do-not-disrupt`; the node empties ~30s after the run.
