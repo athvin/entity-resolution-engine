@@ -19,8 +19,10 @@
 > suites, including a full E2E that drives a real lake (Postgres catalog +
 > MinIO) entirely through the API and dispatcher. Deliberately not built
 > (needs external systems or is §15 phase 4–5): the Salesforce connector and
-> writeback, the k8s Job launcher, OIDC, STS per-tenant credentials, FTS
-> search, Marketo, non-person entity types.
+> writeback ([connectors.md](connectors.md)), OIDC, STS per-tenant
+> credentials, FTS search, Marketo, non-person entity types. (The k8s Job
+> launcher has since shipped — `server/src/erserver/k8s.py`, live-probed per
+> plan-to-aws.md §2.3.)
 
 ---
 
@@ -62,7 +64,7 @@ We already have the hard part — a proven, incremental entity-resolution engine
 **The two constraints that shape everything:**
 
 1. **One writer per tenant**, enforced by a session-scoped Postgres advisory lock; a second writer exits 3. Stages are synchronous and minutes-to-hours long (1M full ≈ 93s; 10M full ≈ 1h46m).
-2. **Memory envelope up to ~56 GiB** at large scale, with process-global `ER_*` env configuring the lake connection.
+2. **CPU- and spill-bound at scale, not memory-bound.** Runtime scales with DuckDB thread count and the local NVMe spill volume; the memory working set stays a near-constant floor (measured ~9.4 GiB peak at 10M against a low DuckDB limit, because DuckDB spills rather than growing). Process-global `ER_*` env configures the lake connection.
 
 ## 3. Feature-parity matrix
 
@@ -93,13 +95,13 @@ Classification: **ENGINE** (exists, needs an API veneer) · **EXT** (engine exte
 |---|---|---|---|---|
 | `er-api` (FastAPI/uvicorn) | `er-api` (slim, no dbt) | N stateless, autoscaled | 2–4 GiB | Control-plane CRUD, read path over DuckLake, steward writes, auth. **Never executes pipeline stages.** |
 | `er-dispatcher` | `er-api` | 1, leader-elected | <1 GiB | Queue polling, per-tenant serialization, cron, k8s Job launch/watch, zombie detection. Never touches DuckDB. |
-| `er-runner` | `er-pipeline` (existing, with dbt) | one k8s Job pod per pipeline run | tier-sized 8–64 GiB | Executes exactly one run via the `er/service.py` facade (§12), heartbeats progress, exits. |
+| `er-runner` | `er-pipeline` (existing, with dbt) | one k8s Job pod per pipeline run | ~6–14 GiB + local NVMe spill | Executes exactly one run via the `er/service.py` facade (§12), heartbeats progress, exits. |
 
 **Why a k8s Job per run, not long-lived workers:**
 
 - The engine's tenant seam is process-scoped: `src/er/lake/env.py` is the single reader of the `ER_*` env set. One pod per (tenant, run) makes env injection the isolation mechanism instead of a hazard.
 - The advisory lock is session-scoped (`src/er/lake/catalog.py` holds a dedicated Postgres connection for the run's lifetime). A pod that dies releases the lock automatically — the crash-safety property the engine already documents. Long-lived workers multiplexing tenants would have to reimplement that care.
-- Memory bin-packing: pods sized per tenant tier are the only sane answer to a 56 GiB envelope; idle 56 GiB long-lived workers are dead money, and an OOM kill's blast radius is one tenant's one resumable run.
+- Bin-packing: pods sized per tenant tier are the only sane answer to a workload that scales on vCPU and local NVMe spill (hundreds of GiB) while memory stays a near-constant floor; idle tier-sized workers are dead money, and a pod failure's blast radius is one tenant's one resumable run.
 - The `er-pipeline` image is already described in `docker/Dockerfile` as "later the k8s job image" — this is the intended landing.
 
 The API stays responsive trivially because it never runs stages: it imports `er` only for config validation, the read-API module, and sub-second steward primitives. **Non-k8s fallback** for single-VM/self-hosted deployments: the dispatcher forks the runner as a subprocess with the same env-injection contract.
@@ -169,7 +171,7 @@ Publish shows the tier and estimated runtime, then enqueues the required run wit
 
 - **Control-plane DB** (separate database, same cluster): orgs, users, api_keys, config_versions, jobs, schedules, webhooks, idempotency keys, audit_log, staged_steward_actions.
 - **Secrets:** connector and per-tenant storage credentials live in a secrets manager, referenced by ID, injected into runner pods as env at dispatch. MVP uses one service credential with engine-enforced prefix isolation; a hardening phase adds STS-scoped per-tenant credentials as defense in depth.
-- **Noisy neighbors / the 56 GiB problem:** orgs carry a `resource_class` — S (≤100k records, 8 GiB), M (≤1M, 24 GiB), L (≤10M, 64 GiB, dedicated node pool). The class sets pod requests/limits **and** `ER_DUCKDB_MEMORY_LIMIT`/`ER_DUCKDB_THREADS`, with per-class concurrency caps so L jobs can't starve the cluster.
+- **Noisy neighbors:** orgs carry a `resource_class`, selected at claim time from the org's last known record count — **S** (≤100k records: 2 vCPU, 6 GiB, 40 GiB spill), **M** (≤1M: 6 vCPU, 10 GiB, 150 GiB spill; the default before any run has completed), **L** (unbounded: 12 vCPU, 14 GiB, 400 GiB spill, dedicated node pool). The classes are **vCPU- and spill-tiered, not memory-tiered** — measurements show runtime is CPU-bound and memory nearly flat because DuckDB spills to local NVMe rather than growing its working set (authority: `server/src/erserver/sizing.py`, infrastructure.md §6.5). Each class sets the pod CPU/memory/ephemeral-storage requests **and** `ER_DUCKDB_THREADS`/`ER_DUCKDB_MEMORY_LIMIT` together — DuckDB reads neither cgroup limits nor host core count, so either alone is a silent misconfiguration — with per-class concurrency caps so L jobs can't starve the cluster.
 - **Lifecycle** (implemented through `active`; `POST /v1/orgs` without a `config_path` runs the whole provision step): provision (org row in state `provisioning` → seed config template as version 1 → issue one-time admin key → `provision` job creates the dedicated database and runs `er init` → dispatcher flips the org `active`) → active → suspended (schedules off, writes rejected, reads allowed) → purge (optional export, drop database, delete prefix, delete secrets; 30-day grace). Jobs other than `provision` are refused (409) while the org is not `active`.
 
 ## 8. Read path
@@ -192,6 +194,8 @@ Publish shows the tier and estimated runtime, then enqueues the required run wit
 - **Audit:** a control-plane audit_log for every authenticated mutation pairs with the lake-side `entity_events` for a complete "who merged what, when" story.
 
 ## 10. Connector abstraction and Salesforce v1
+
+*This section is the normative summary; [connectors.md](connectors.md) is the standalone connector design and build plan.*
 
 **Principle: connectors are producers and appliers at the edges of an unchanged engine.** Extraction lands Parquet files in the tenant's drop dir — the engine's existing ingest adapters, content-hash change detection, and tombstones do the rest. Writeback consumes engine outputs. The engine never learns about Salesforce.
 
@@ -267,7 +271,7 @@ The canonical schema is person-centric end to end (given/family name, email, pho
 
 | Phase | Scope | Why |
 |---|---|---|
-| **1 — Walking skeleton** | Control-plane DB (orgs, keys, config as uploaded YAML), `er/service.py`, `jobs` + dispatcher + k8s Job runner for run-all full/incremental, heartbeat status, one pilot tenant | Proves the riskiest seam end-to-end: job-per-pod running the unmodified sync engine under the advisory lock inside a tier-sized memory envelope |
+| **1 — Walking skeleton** | Control-plane DB (orgs, keys, config as uploaded YAML), `er/service.py`, `jobs` + dispatcher + k8s Job runner for run-all full/incremental, heartbeat status, one pilot tenant | Proves the riskiest seam end-to-end: job-per-pod running the unmodified sync engine under the advisory lock inside a tier-sized resource envelope |
 | **2 — Read + steward** | `LakeSettings`, read-API module, golden/duplicates/reviews/assertions endpoints, snapshot-pinned pagination, roles | Makes the product demoable against Cloudingo's merge grid — the buying moment |
 | **3 — Automation + connector seam → MVP launch** | Schedules, retry/resume/idempotency, imports (preview report), events/webhooks, config versioning + publish tiers; **Salesforce connector in insights mode** (OAuth, Lead+Contact, bulk sync, polling); dashboards; merge-plan CSV export | The smallest sellable wedge: a zero-risk "audit your org" with visibly better match quality, priced under Cloudingo Standard, with the export as the action bridge |
 | **4 — Parity: writeback** | Apply service (preview → approve → apply, journal, staleness guard), manual/mass/auto tiers, undo/restore, import commit + upsert, Accounts (organization entity type), field analysis, continuous micro-batch tier, per-tenant STS creds, SOC2 groundwork | Exit criterion: a Cloudingo Standard/Professional customer switches without losing a workflow (accepting minutes-not-seconds real-time) |
@@ -277,7 +281,7 @@ The canonical schema is person-centric end to end (given/family name, email, pho
 
 **Technical (each answered in the design):**
 
-1. **Synchronous, memory-heavy stages vs a responsive multi-tenant API** → topology: the API never executes stages; job-per-pod with tier-sized memory; heartbeat cache so polling never opens DuckDB; OOM blast radius is one resumable run (§4, §5).
+1. **Synchronous, memory-heavy stages vs a responsive multi-tenant API** → topology: the API never executes stages; job-per-pod sized per tenant tier (vCPU + NVMe spill, memory a near-constant floor); heartbeat cache so polling never opens DuckDB; a pod failure's blast radius is one resumable run (§4, §5).
 2. **Single-writer lock vs steward interactivity** — a 10M full run holds the tenant lock ~1h46m. → Steward writes try inline with a short lock timeout (common case sub-second); on conflict they land in `staged_steward_actions`, drained by a micro-job when the lock frees. Semantically honest: assertions only take effect at the next reconcile anyway, so the UI truthfully shows "queued, applies after the current job" (§9, §5).
 3. **Process-global `ER_*` env vs one API process serving many tenants** → the `LakeSettings` change, confined to the single documented env seam; runner pods keep env injection unchanged (§12).
 4. **Consistent reads and pagination while writers commit snapshots** → DuckLake MVCC + snapshot-pinned cursors + snapshot-keyed caching, with the `lake maintain` retention coupling stated (§8).

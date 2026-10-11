@@ -1,12 +1,14 @@
 # Python processing exceptions
 
+*Engine-internals audit (single-tenant engine). Below the product/tenancy layers;
+see the [README](../README.md#architecture-at-a-glance).*
+
 The normal data path keeps records and intermediate results in DuckDB. Python
 selects SQL operations, manages transactions, invokes dbt/Splink, and reads small
 results. This inventory covers production entry points and the benchmark/fixture
 utilities audited for the SQL pushdown change. Pure collection APIs remain as
 compatibility interfaces and independent test oracles; their presence does not
 mean the CLI still uses them.
-
 ## Data flows now executed in DuckDB
 
 | Use case | Previous Python boundary | Current implementation |

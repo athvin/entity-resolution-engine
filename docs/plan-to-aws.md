@@ -1,9 +1,10 @@
 # Plan to AWS — the ordered build plan, with acceptance criteria
 
-*The execution companion to [infrastructure.md](infrastructure.md) (third revision). That
+*The execution companion to [infrastructure.md](infrastructure.md) (revision 4). That
 document holds every design decision and its rationale; this one holds only **order** and
 **definition of done**. Each task cites the section that designed it — if a task and the
-design disagree, the design doc wins and this file is stale. Written 2026-10-03.*
+design disagree, the design doc wins and this file is stale. Written 2026-10-03; executed
+against the single-account topology (rev 4, 2026-10-11).*
 
 Tasks are checkboxes so this file doubles as the tracker. A task is **done** when every
 acceptance criterion is observed — not when the Terraform applies. That rule is inherited
@@ -308,7 +309,7 @@ data into a developer namespace using only the designed path.
 - [ ] **4.1 Retire both static credentials** (§9.2, §9.3, §18.17 — ship together)
   - S3: DuckDB `credential_chain` + boto3 default chain via IRSA; `tests/unit/test_dbt_profiles.py` still holds the three config sites identical.
   - Email: `mailer.py` ported to the SES API under IRSA; invites and password resets still deliver.
-  - The check that makes it real: `aws iam list-users` / `list-access-keys` across both workload accounts returns **zero** service users — §8.1's claim becomes unconditional.
+  - The check that makes it real: `aws iam list-users` / `list-access-keys` in the account returns **zero** service users — §8.1's claim becomes unconditional.
 - [ ] **4.2 Per-tenant runner ServiceAccounts** (§6.4) — a runner for tenant A, given tenant B's prefix explicitly, gets AccessDenied from S3.
 - [ ] **4.3 Observability completion** (§10.6 Phase 4) — dashboards for the backend-design §14 metric list; alerts on queue depth, eviction/OOM counts, spot interruption rate, `ProdAdmin` assumption (§8.6); `ER_PROFILE_*` as span events.
 - [ ] **4.4 Audit artifacts with teeth** (§8.6)

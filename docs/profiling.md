@@ -1,8 +1,9 @@
 # Profiling the complete pipeline
 
+*Engine layer — single-tenant pipeline profiling.*
+
 For a controlled baseline/candidate performance comparison, see
 [performance.md](performance.md).
-
 ## Primary workload: 1M reload followed by 100K new record keys
 
 ```sh
