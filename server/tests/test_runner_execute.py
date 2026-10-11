@@ -145,3 +145,90 @@ def test_provision_dispatches_to_the_provision_module(monkeypatch: pytest.Monkey
     assert (record["mode"], record["exit_code"], record["job_id"]) == ("provision", 0, "job-p")
     assert seen["run_id"] == RUN_ID
     assert seen["params"] == {"tenant": "t_x", "db_name": "er_t_x", "data_path": "s3://lake/t_x/"}
+
+
+class _RecordingCursor:
+    def __init__(self, log: list[tuple[str, tuple]]) -> None:
+        self._log = log
+
+    def __enter__(self) -> _RecordingCursor:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def execute(self, sql: str, params: tuple) -> None:
+        self._log.append((sql, params))
+
+
+class _RecordingConnection:
+    def __init__(self, log: list[tuple[str, tuple]]) -> None:
+        self._log = log
+
+    def __enter__(self) -> _RecordingConnection:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def cursor(self) -> _RecordingCursor:
+        return _RecordingCursor(self._log)
+
+
+def test_persist_result_files_the_record_on_the_job_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import psycopg
+
+    executed: list[tuple[str, tuple]] = []
+    seen_dsn: dict[str, str] = {}
+
+    def fake_connect(dsn: str, connect_timeout: int) -> _RecordingConnection:
+        seen_dsn["dsn"] = dsn
+        return _RecordingConnection(executed)
+
+    monkeypatch.setenv("ERSERVER_DSN", "postgresql://control/erctl")
+    monkeypatch.setattr(psycopg, "connect", fake_connect)
+    runner.persist_result({"job_id": "job-1", "exit_code": 3, "error_class": "data"})
+
+    assert seen_dsn["dsn"] == "postgresql://control/erctl"
+    (sql, params) = executed[0]
+    assert "progress = progress ||" in sql
+    assert params[1] == "job-1"
+    assert params[0].obj == {"result": {"job_id": "job-1", "exit_code": 3, "error_class": "data"}}
+
+
+def test_persist_result_without_dsn_or_job_id_touches_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import psycopg
+
+    def exploding_connect(*args: object, **kwargs: object) -> None:
+        raise AssertionError("must not connect")
+
+    monkeypatch.setattr(psycopg, "connect", exploding_connect)
+    monkeypatch.delenv("ERSERVER_DSN", raising=False)
+    runner.persist_result({"job_id": "job-1", "exit_code": 0})
+    monkeypatch.setenv("ERSERVER_DSN", "postgresql://control/erctl")
+    runner.persist_result({"exit_code": 0})
+
+
+def test_persist_result_failure_never_fails_the_run(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import json as json_module
+
+    import psycopg
+
+    def broken_connect(*args: object, **kwargs: object) -> None:
+        raise OSError("control plane unreachable")
+
+    monkeypatch.setenv("ERSERVER_DSN", "postgresql://control/erctl")
+    monkeypatch.setattr(psycopg, "connect", broken_connect)
+    status = runner.main(["erserver.runner", json_module.dumps(payload())])
+
+    captured = capsys.readouterr()
+    assert status == 0
+    assert "could not persist the terminal result" in captured.err
+    assert json_module.loads(captured.out.strip().splitlines()[-1])["exit_code"] == 0

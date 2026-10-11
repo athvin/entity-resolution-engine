@@ -493,3 +493,45 @@ def test_complete_maps_a_negative_returncode_to_the_none_exit_row(
     exhausted = queue.Job(**{**vars(exhausted), "attempt": 2})
     dispatcher._complete(object(), exhausted, RUN_ID, result, [])
     assert captured["disposition"].state == FAILED
+
+
+def test_complete_recovers_the_result_from_the_job_row_when_the_log_died(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A reclaimed node costs the pod log, not the taxonomy (progress.result)."""
+    captured: dict[str, Any] = {}
+
+    def fake_finish(connection: Any, job_id: str, disposition: Any, **kwargs: Any) -> None:
+        captured["disposition"] = disposition
+        captured.update(kwargs)
+
+    heartbeats: list[dict[str, Any]] = []
+    monkeypatch.setattr(dispatcher.queue, "finish", fake_finish)
+    monkeypatch.setattr(
+        dispatcher.queue, "heartbeat", lambda conn, jid, progress: heartbeats.append(progress)
+    )
+    monkeypatch.setattr(dispatcher.events, "emit", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        dispatcher.queue,
+        "stored_result",
+        lambda conn, jid: {"exit_code": 3, "error_class": "data", "stages": [{"stage": "match"}]},
+    )
+
+    # Exit code 3 but an empty log tail: without the stored record this row
+    # would finish with error_class=None and the stderr placeholder.
+    result = RunnerResult(returncode=3, stdout="", stderr="", canceled=False)
+    dispatcher._complete(object(), job_row(JOB_ID), RUN_ID, result, [])
+
+    assert captured["exit_code"] == 3
+    assert captured["error_class"] == "data"
+    assert heartbeats and heartbeats[0]["stages"] == [{"stage": "match"}]
+
+    # A result line in the tail still wins over the stored copy.
+    monkeypatch.setattr(
+        dispatcher.queue,
+        "stored_result",
+        lambda conn, jid: (_ for _ in ()).throw(AssertionError("must not read the row")),
+    )
+    line = '{"exit_code": 0, "error_class": null, "stages": []}'
+    dispatcher._complete(object(), job_row(JOB_ID), RUN_ID, RunnerResult(0, line, "", False), [])
+    assert captured["exit_code"] == 0 and captured["error_class"] is None

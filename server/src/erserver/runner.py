@@ -11,6 +11,7 @@ everywhere in the engine: telemetry, one JSON line per stage.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from dataclasses import asdict
 from pathlib import Path
@@ -73,12 +74,42 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
     return record
 
 
+def persist_result(record: dict[str, Any]) -> None:
+    """File the terminal record on the job row (``progress.result``).
+
+    The stdout result line rides the pod log, and the pod log dies with its
+    node — WhenEmpty reclaims runner nodes 30 seconds after the Job finishes,
+    sometimes before the dispatcher's one tail fetch. The job row does not die,
+    so this copy is what keeps the exit-code taxonomy's ``error_class`` whole.
+    Best-effort by design: a run must never fail because its receipt could not
+    be filed, and outside the server (no ``ERSERVER_DSN``) there is no row.
+    """
+    dsn = os.environ.get("ERSERVER_DSN", "")
+    job_id = record.get("job_id")
+    if not dsn or not job_id:
+        return
+    try:
+        import psycopg
+        from psycopg.types.json import Jsonb
+
+        with psycopg.connect(dsn, connect_timeout=10) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE jobs SET progress = progress || %s, updated_at = now() "
+                    "WHERE job_id = %s",
+                    (Jsonb({"result": record}), str(job_id)),
+                )
+    except Exception as exc:  # noqa: BLE001 — the receipt is best-effort
+        sys.stderr.write(f"runner: could not persist the terminal result: {exc}\n")
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 2:
         sys.stderr.write("usage: python -m erserver.runner '<job payload json>'\n")
         return 2
     payload = json.loads(argv[1])
     record = execute(payload)
+    persist_result(record)
     sys.stdout.write(json.dumps(record, separators=(",", ":")) + "\n")
     return int(record["exit_code"])
 

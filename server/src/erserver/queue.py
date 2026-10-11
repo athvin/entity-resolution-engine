@@ -56,6 +56,7 @@ __all__ = [
     "org_row",
     "org_state",
     "parse_result_line",
+    "stored_result",
     "reap_jobs",
     "reap_stale",
     "register_org",
@@ -382,6 +383,22 @@ def heartbeat(connection: psycopg.Connection, job_id: str, progress: dict[str, A
             (Jsonb(progress), job_id),
         )
     connection.commit()
+
+
+def stored_result(connection: psycopg.Connection, job_id: str) -> dict[str, Any] | None:
+    """The runner-persisted terminal record (``progress.result``), or ``None``.
+
+    The stdout result line is the primary channel, but it rides the pod log
+    and the pod log dies with a reclaimed node; the runner files this copy on
+    its own row (:func:`erserver.runner.persist_result`) before exiting.
+    """
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT progress -> 'result' FROM jobs WHERE job_id = %s", (job_id,))
+        row = cursor.fetchone()
+    payload = row[0] if row else None
+    if isinstance(payload, dict) and "exit_code" in payload:
+        return payload
+    return None
 
 
 def finish(
