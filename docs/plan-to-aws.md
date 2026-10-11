@@ -208,7 +208,13 @@ The heart of the migration. 2.3 is the largest single piece of work in the plan.
   - One trace spans BFF → API → queue wait → Job pod → every stage → dbt, including the final stage and exit status (`force_flush` held).
   - Per-run sizing rides the job row, not `orgs.env`; the Job's cpu/memory/threads/ephemeral match the record-count class (§6.5).
   - **Measurement artifact:** cold-node pull time recorded in §18.16 — it decides whether §11.1's image-split rung happens (spawn it as a follow-up task if pull time is unacceptable).
-- [ ] **2.4 Idle-suspend CronJob** (§5.2)
+- [x] **2.4 Idle-suspend CronJob** (§5.2) — *built 2026-10-10 in er-dev-namespace:
+  a `*/15` CronJob runs a psycopg script (er-api image) that evaluates the §5.2
+  predicate over `ERSERVER_DSN` and scales deployments + er-postgres to 0 via the
+  API scale subresource (namespace-scoped Role). helm lint/template + kubeconform
+  clean; `--dry-run=server` against er-dev accepted all five objects with no PSS
+  warnings. The two acceptance tests below need a 4h idle window — **pending live
+  observation**; suspended/half-suspended namespaces exit 0 quietly by design.*
   - A namespace with `last_seen_at` > 4h old and no jobs suspends on the next tick; a namespace with a **running job does not**, regardless of session age. Test both.
 - [ ] **2.5 The two paranoia checks** (§17 Phase 2)
   - Grep a completed run's logs for a seeded name, email, and phone — all three absent (§10.4's rule, which §8.1's log grant depends on).

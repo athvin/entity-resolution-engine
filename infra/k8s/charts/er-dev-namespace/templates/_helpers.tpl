@@ -10,3 +10,13 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
 {{- end }}
+
+{{/* The idle-suspend image ref, er-platform's digest-beats-tag rule (§14.2). */}}
+{{- define "er-dev-namespace.idleSuspendImage" -}}
+{{- $image := .Values.idleSuspend.image -}}
+{{- if $image.digest -}}
+{{ $image.registry }}/{{ $image.repository }}@{{ $image.digest }}
+{{- else -}}
+{{ $image.registry }}/{{ $image.repository }}:{{ $image.tag }}
+{{- end -}}
+{{- end }}
