@@ -1,0 +1,20 @@
+[package]
+name = "er-hash"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+sha2.workspace = true
+hex.workspace = true
+thiserror.workspace = true
+unicode-normalization = "0.1"
+
+[dev-dependencies]
+serde_json.workspace = true
+er-schema = { path = "../er-schema" }
+
+[lints]
+workspace = true

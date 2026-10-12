@@ -1,0 +1,26 @@
+[package]
+name = "dedupe-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "CLI for dedupe-core: train/predict/cluster against a DuckLake catalog"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "dedupe"
+path = "src/main.rs"
+
+[dependencies]
+dedupe-core = { path = "../dedupe-core" }
+clap = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+assert_cmd = "2"
+duckdb = { workspace = true }

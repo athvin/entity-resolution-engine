@@ -1,0 +1,807 @@
+{
+  "columns": [
+    "record_key",
+    "std_version",
+    "given_name",
+    "family_name",
+    "name_variants",
+    "email",
+    "email_valid",
+    "phone_e164",
+    "phone_valid",
+    "addr_number",
+    "addr_street",
+    "addr_unit",
+    "addr_city",
+    "addr_region",
+    "addr_postal",
+    "birth_date",
+    "updated_at_source",
+    "content_hash"
+  ],
+  "vectors": [
+    {
+      "name": "all_text",
+      "row": {
+        "record_key": {
+          "t": "text",
+          "v": "v_record_key"
+        },
+        "std_version": {
+          "t": "text",
+          "v": "v_std_version"
+        },
+        "given_name": {
+          "t": "text",
+          "v": "v_given_name"
+        },
+        "family_name": {
+          "t": "text",
+          "v": "v_family_name"
+        },
+        "name_variants": {
+          "t": "text",
+          "v": "v_name_variants"
+        },
+        "email": {
+          "t": "text",
+          "v": "v_email"
+        },
+        "email_valid": {
+          "t": "text",
+          "v": "v_email_valid"
+        },
+        "phone_e164": {
+          "t": "text",
+          "v": "v_phone_e164"
+        },
+        "phone_valid": {
+          "t": "text",
+          "v": "v_phone_valid"
+        },
+        "addr_number": {
+          "t": "text",
+          "v": "v_addr_number"
+        },
+        "addr_street": {
+          "t": "text",
+          "v": "v_addr_street"
+        },
+        "addr_unit": {
+          "t": "text",
+          "v": "v_addr_unit"
+        },
+        "addr_city": {
+          "t": "text",
+          "v": "v_addr_city"
+        },
+        "addr_region": {
+          "t": "text",
+          "v": "v_addr_region"
+        },
+        "addr_postal": {
+          "t": "text",
+          "v": "v_addr_postal"
+        },
+        "birth_date": {
+          "t": "text",
+          "v": "v_birth_date"
+        },
+        "updated_at_source": {
+          "t": "text",
+          "v": "v_updated_at_source"
+        },
+        "content_hash": {
+          "t": "text",
+          "v": "v_content_hash"
+        }
+      },
+      "digest": "6242a940fd81de17a138645b3f808e01cc97d307970fa6417c0e710c32745c7f"
+    },
+    {
+      "name": "bools",
+      "row": {
+        "record_key": {
+          "t": "text",
+          "v": "v_record_key"
+        },
+        "std_version": {
+          "t": "text",
+          "v": "v_std_version"
+        },
+        "given_name": {
+          "t": "text",
+          "v": "v_given_name"
+        },
+        "family_name": {
+          "t": "text",
+          "v": "v_family_name"
+        },
+        "name_variants": {
+          "t": "text",
+          "v": "v_name_variants"
+        },
+        "email": {
+          "t": "text",
+          "v": "v_email"
+        },
+        "email_valid": {
+          "t": "bool",
+          "v": true
+        },
+        "phone_e164": {
+          "t": "text",
+          "v": "v_phone_e164"
+        },
+        "phone_valid": {
+          "t": "bool",
+          "v": false
+        },
+        "addr_number": {
+          "t": "text",
+          "v": "v_addr_number"
+        },
+        "addr_street": {
+          "t": "text",
+          "v": "v_addr_street"
+        },
+        "addr_unit": {
+          "t": "text",
+          "v": "v_addr_unit"
+        },
+        "addr_city": {
+          "t": "text",
+          "v": "v_addr_city"
+        },
+        "addr_region": {
+          "t": "text",
+          "v": "v_addr_region"
+        },
+        "addr_postal": {
+          "t": "text",
+          "v": "v_addr_postal"
+        },
+        "birth_date": {
+          "t": "text",
+          "v": "v_birth_date"
+        },
+        "updated_at_source": {
+          "t": "text",
+          "v": "v_updated_at_source"
+        },
+        "content_hash": {
+          "t": "text",
+          "v": "v_content_hash"
+        }
+      },
+      "digest": "5b684787827dff450d5ac16423277ebb246f9d5b3277c56a98cf76402a4bd3d1"
+    },
+    {
+      "name": "date",
+      "row": {
+        "record_key": {
+          "t": "text",
+          "v": "v_record_key"
+        },
+        "std_version": {
+          "t": "text",
+          "v": "v_std_version"
+        },
+        "given_name": {
+          "t": "text",
+          "v": "v_given_name"
+        },
+        "family_name": {
+          "t": "text",
+          "v": "v_family_name"
+        },
+        "name_variants": {
+          "t": "text",
+          "v": "v_name_variants"
+        },
+        "email": {
+          "t": "text",
+          "v": "v_email"
+        },
+        "email_valid": {
+          "t": "text",
+          "v": "v_email_valid"
+        },
+        "phone_e164": {
+          "t": "text",
+          "v": "v_phone_e164"
+        },
+        "phone_valid": {
+          "t": "text",
+          "v": "v_phone_valid"
+        },
+        "addr_number": {
+          "t": "text",
+          "v": "v_addr_number"
+        },
+        "addr_street": {
+          "t": "text",
+          "v": "v_addr_street"
+        },
+        "addr_unit": {
+          "t": "text",
+          "v": "v_addr_unit"
+        },
+        "addr_city": {
+          "t": "text",
+          "v": "v_addr_city"
+        },
+        "addr_region": {
+          "t": "text",
+          "v": "v_addr_region"
+        },
+        "addr_postal": {
+          "t": "text",
+          "v": "v_addr_postal"
+        },
+        "birth_date": {
+          "t": "text",
+          "v": "1990-05-02"
+        },
+        "updated_at_source": {
+          "t": "text",
+          "v": "v_updated_at_source"
+        },
+        "content_hash": {
+          "t": "text",
+          "v": "v_content_hash"
+        }
+      },
+      "digest": "cfc402171535c80d244d82b70be793416f17231fd8fa88a8446c91a972e37537"
+    },
+    {
+      "name": "ts_no_us",
+      "row": {
+        "record_key": {
+          "t": "text",
+          "v": "v_record_key"
+        },
+        "std_version": {
+          "t": "text",
+          "v": "v_std_version"
+        },
+        "given_name": {
+          "t": "text",
+          "v": "v_given_name"
+        },
+        "family_name": {
+          "t": "text",
+          "v": "v_family_name"
+        },
+        "name_variants": {
+          "t": "text",
+          "v": "v_name_variants"
+        },
+        "email": {
+          "t": "text",
+          "v": "v_email"
+        },
+        "email_valid": {
+          "t": "text",
+          "v": "v_email_valid"
+        },
+        "phone_e164": {
+          "t": "text",
+          "v": "v_phone_e164"
+        },
+        "phone_valid": {
+          "t": "text",
+          "v": "v_phone_valid"
+        },
+        "addr_number": {
+          "t": "text",
+          "v": "v_addr_number"
+        },
+        "addr_street": {
+          "t": "text",
+          "v": "v_addr_street"
+        },
+        "addr_unit": {
+          "t": "text",
+          "v": "v_addr_unit"
+        },
+        "addr_city": {
+          "t": "text",
+          "v": "v_addr_city"
+        },
+        "addr_region": {
+          "t": "text",
+          "v": "v_addr_region"
+        },
+        "addr_postal": {
+          "t": "text",
+          "v": "v_addr_postal"
+        },
+        "birth_date": {
+          "t": "text",
+          "v": "v_birth_date"
+        },
+        "updated_at_source": {
+          "t": "text",
+          "v": "2026-08-14 13:05:06"
+        },
+        "content_hash": {
+          "t": "text",
+          "v": "v_content_hash"
+        }
+      },
+      "digest": "09a246a564d63321ddea4d7e70af47d47759449f0d5cfc03b8c72d9b4f829634"
+    },
+    {
+      "name": "ts_us",
+      "row": {
+        "record_key": {
+          "t": "text",
+          "v": "v_record_key"
+        },
+        "std_version": {
+          "t": "text",
+          "v": "v_std_version"
+        },
+        "given_name": {
+          "t": "text",
+          "v": "v_given_name"
+        },
+        "family_name": {
+          "t": "text",
+          "v": "v_family_name"
+        },
+        "name_variants": {
+          "t": "text",
+          "v": "v_name_variants"
+        },
+        "email": {
+          "t": "text",
+          "v": "v_email"
+        },
+        "email_valid": {
+          "t": "text",
+          "v": "v_email_valid"
+        },
+        "phone_e164": {
+          "t": "text",
+          "v": "v_phone_e164"
+        },
+        "phone_valid": {
+          "t": "text",
+          "v": "v_phone_valid"
+        },
+        "addr_number": {
+          "t": "text",
+          "v": "v_addr_number"
+        },
+        "addr_street": {
+          "t": "text",
+          "v": "v_addr_street"
+        },
+        "addr_unit": {
+          "t": "text",
+          "v": "v_addr_unit"
+        },
+        "addr_city": {
+          "t": "text",
+          "v": "v_addr_city"
+        },
+        "addr_region": {
+          "t": "text",
+          "v": "v_addr_region"
+        },
+        "addr_postal": {
+          "t": "text",
+          "v": "v_addr_postal"
+        },
+        "birth_date": {
+          "t": "text",
+          "v": "v_birth_date"
+        },
+        "updated_at_source": {
+          "t": "text",
+          "v": "2026-08-14 13:05:06.123456"
+        },
+        "content_hash": {
+          "t": "text",
+          "v": "v_content_hash"
+        }
+      },
+      "digest": "2156ebea75042f918ab113ed75b02a81e9f8cb0eb67a99abae4e5e217013c520"
+    },
+    {
+      "name": "list",
+      "row": {
+        "record_key": {
+          "t": "text",
+          "v": "v_record_key"
+        },
+        "std_version": {
+          "t": "text",
+          "v": "v_std_version"
+        },
+        "given_name": {
+          "t": "text",
+          "v": "v_given_name"
+        },
+        "family_name": {
+          "t": "text",
+          "v": "v_family_name"
+        },
+        "name_variants": {
+          "t": "list",
+          "v": [
+            "bob",
+            "robert",
+            "rob"
+          ]
+        },
+        "email": {
+          "t": "text",
+          "v": "v_email"
+        },
+        "email_valid": {
+          "t": "text",
+          "v": "v_email_valid"
+        },
+        "phone_e164": {
+          "t": "text",
+          "v": "v_phone_e164"
+        },
+        "phone_valid": {
+          "t": "text",
+          "v": "v_phone_valid"
+        },
+        "addr_number": {
+          "t": "text",
+          "v": "v_addr_number"
+        },
+        "addr_street": {
+          "t": "text",
+          "v": "v_addr_street"
+        },
+        "addr_unit": {
+          "t": "text",
+          "v": "v_addr_unit"
+        },
+        "addr_city": {
+          "t": "text",
+          "v": "v_addr_city"
+        },
+        "addr_region": {
+          "t": "text",
+          "v": "v_addr_region"
+        },
+        "addr_postal": {
+          "t": "text",
+          "v": "v_addr_postal"
+        },
+        "birth_date": {
+          "t": "text",
+          "v": "v_birth_date"
+        },
+        "updated_at_source": {
+          "t": "text",
+          "v": "v_updated_at_source"
+        },
+        "content_hash": {
+          "t": "text",
+          "v": "v_content_hash"
+        }
+      },
+      "digest": "856c5723c12e9e966ffaa051214886698256af85eacc8f6d4f0e0f0491e90d8c"
+    },
+    {
+      "name": "empty_list",
+      "row": {
+        "record_key": {
+          "t": "text",
+          "v": "v_record_key"
+        },
+        "std_version": {
+          "t": "text",
+          "v": "v_std_version"
+        },
+        "given_name": {
+          "t": "text",
+          "v": "v_given_name"
+        },
+        "family_name": {
+          "t": "text",
+          "v": "v_family_name"
+        },
+        "name_variants": {
+          "t": "list",
+          "v": []
+        },
+        "email": {
+          "t": "text",
+          "v": "v_email"
+        },
+        "email_valid": {
+          "t": "text",
+          "v": "v_email_valid"
+        },
+        "phone_e164": {
+          "t": "text",
+          "v": "v_phone_e164"
+        },
+        "phone_valid": {
+          "t": "text",
+          "v": "v_phone_valid"
+        },
+        "addr_number": {
+          "t": "text",
+          "v": "v_addr_number"
+        },
+        "addr_street": {
+          "t": "text",
+          "v": "v_addr_street"
+        },
+        "addr_unit": {
+          "t": "text",
+          "v": "v_addr_unit"
+        },
+        "addr_city": {
+          "t": "text",
+          "v": "v_addr_city"
+        },
+        "addr_region": {
+          "t": "text",
+          "v": "v_addr_region"
+        },
+        "addr_postal": {
+          "t": "text",
+          "v": "v_addr_postal"
+        },
+        "birth_date": {
+          "t": "text",
+          "v": "v_birth_date"
+        },
+        "updated_at_source": {
+          "t": "text",
+          "v": "v_updated_at_source"
+        },
+        "content_hash": {
+          "t": "text",
+          "v": "v_content_hash"
+        }
+      },
+      "digest": "685d035fc356b2b229e4e9e8104b18eff678bd7d1be2b1d63c62e6c46199caa5"
+    },
+    {
+      "name": "null_vs_empty_a",
+      "row": {
+        "record_key": {
+          "t": "text",
+          "v": "v_record_key"
+        },
+        "std_version": {
+          "t": "text",
+          "v": "v_std_version"
+        },
+        "given_name": {
+          "t": "text",
+          "v": "v_given_name"
+        },
+        "family_name": {
+          "t": "text",
+          "v": "v_family_name"
+        },
+        "name_variants": {
+          "t": "text",
+          "v": "v_name_variants"
+        },
+        "email": {
+          "t": "null"
+        },
+        "email_valid": {
+          "t": "text",
+          "v": "v_email_valid"
+        },
+        "phone_e164": {
+          "t": "text",
+          "v": "v_phone_e164"
+        },
+        "phone_valid": {
+          "t": "text",
+          "v": "v_phone_valid"
+        },
+        "addr_number": {
+          "t": "text",
+          "v": "v_addr_number"
+        },
+        "addr_street": {
+          "t": "text",
+          "v": "v_addr_street"
+        },
+        "addr_unit": {
+          "t": "text",
+          "v": "v_addr_unit"
+        },
+        "addr_city": {
+          "t": "text",
+          "v": "v_addr_city"
+        },
+        "addr_region": {
+          "t": "text",
+          "v": "v_addr_region"
+        },
+        "addr_postal": {
+          "t": "text",
+          "v": "v_addr_postal"
+        },
+        "birth_date": {
+          "t": "text",
+          "v": "v_birth_date"
+        },
+        "updated_at_source": {
+          "t": "text",
+          "v": "v_updated_at_source"
+        },
+        "content_hash": {
+          "t": "text",
+          "v": "v_content_hash"
+        }
+      },
+      "digest": "85849be9e4bde73d2465ed449b4319273cbf5e08f00d4f720786dd66ba7ac3b0"
+    },
+    {
+      "name": "null_vs_empty_b",
+      "row": {
+        "record_key": {
+          "t": "text",
+          "v": "v_record_key"
+        },
+        "std_version": {
+          "t": "text",
+          "v": "v_std_version"
+        },
+        "given_name": {
+          "t": "text",
+          "v": "v_given_name"
+        },
+        "family_name": {
+          "t": "text",
+          "v": "v_family_name"
+        },
+        "name_variants": {
+          "t": "text",
+          "v": "v_name_variants"
+        },
+        "email": {
+          "t": "text",
+          "v": ""
+        },
+        "email_valid": {
+          "t": "text",
+          "v": "v_email_valid"
+        },
+        "phone_e164": {
+          "t": "text",
+          "v": "v_phone_e164"
+        },
+        "phone_valid": {
+          "t": "text",
+          "v": "v_phone_valid"
+        },
+        "addr_number": {
+          "t": "text",
+          "v": "v_addr_number"
+        },
+        "addr_street": {
+          "t": "text",
+          "v": "v_addr_street"
+        },
+        "addr_unit": {
+          "t": "text",
+          "v": "v_addr_unit"
+        },
+        "addr_city": {
+          "t": "text",
+          "v": "v_addr_city"
+        },
+        "addr_region": {
+          "t": "text",
+          "v": "v_addr_region"
+        },
+        "addr_postal": {
+          "t": "text",
+          "v": "v_addr_postal"
+        },
+        "birth_date": {
+          "t": "text",
+          "v": "v_birth_date"
+        },
+        "updated_at_source": {
+          "t": "text",
+          "v": "v_updated_at_source"
+        },
+        "content_hash": {
+          "t": "text",
+          "v": "v_content_hash"
+        }
+      },
+      "digest": "85849be9e4bde73d2465ed449b4319273cbf5e08f00d4f720786dd66ba7ac3b0"
+    },
+    {
+      "name": "nfc_decomposed",
+      "row": {
+        "record_key": {
+          "t": "text",
+          "v": "v_record_key"
+        },
+        "std_version": {
+          "t": "text",
+          "v": "v_std_version"
+        },
+        "given_name": {
+          "t": "text",
+          "v": "cafe\u0301"
+        },
+        "family_name": {
+          "t": "text",
+          "v": "v_family_name"
+        },
+        "name_variants": {
+          "t": "text",
+          "v": "v_name_variants"
+        },
+        "email": {
+          "t": "text",
+          "v": "v_email"
+        },
+        "email_valid": {
+          "t": "text",
+          "v": "v_email_valid"
+        },
+        "phone_e164": {
+          "t": "text",
+          "v": "v_phone_e164"
+        },
+        "phone_valid": {
+          "t": "text",
+          "v": "v_phone_valid"
+        },
+        "addr_number": {
+          "t": "text",
+          "v": "v_addr_number"
+        },
+        "addr_street": {
+          "t": "text",
+          "v": "v_addr_street"
+        },
+        "addr_unit": {
+          "t": "text",
+          "v": "v_addr_unit"
+        },
+        "addr_city": {
+          "t": "text",
+          "v": "v_addr_city"
+        },
+        "addr_region": {
+          "t": "text",
+          "v": "v_addr_region"
+        },
+        "addr_postal": {
+          "t": "text",
+          "v": "v_addr_postal"
+        },
+        "birth_date": {
+          "t": "text",
+          "v": "v_birth_date"
+        },
+        "updated_at_source": {
+          "t": "text",
+          "v": "v_updated_at_source"
+        },
+        "content_hash": {
+          "t": "text",
+          "v": "v_content_hash"
+        }
+      },
+      "digest": "b27f498e147518def557fd9347915a61d3f7bc0bf0024bf30339a9bf927f64e7"
+    }
+  ]
+}

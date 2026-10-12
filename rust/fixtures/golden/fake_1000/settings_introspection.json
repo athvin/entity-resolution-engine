@@ -1,0 +1,383 @@
+{
+  "comparisons": [
+    {
+      "output_column_name": "first_name",
+      "gamma_column_name": "gamma_first_name",
+      "mw_column_name": "mw_first_name",
+      "input_columns_used_by_case_statement": [
+        "first_name"
+      ],
+      "levels": [
+        {
+          "sql_condition": "\"first_name_l\" IS NULL OR \"first_name_r\" IS NULL",
+          "comparison_vector_value": -1,
+          "is_null_level": true,
+          "is_else_level": null,
+          "is_exact_match": false,
+          "exact_match_colnames": null,
+          "input_columns_used_by_sql_condition": [
+            "first_name"
+          ],
+          "has_tf_adjustments": false,
+          "tf_adjustment_column": null
+        },
+        {
+          "sql_condition": "\"first_name_l\" = \"first_name_r\"",
+          "comparison_vector_value": 4,
+          "is_null_level": false,
+          "is_else_level": null,
+          "is_exact_match": true,
+          "exact_match_colnames": [
+            "first_name"
+          ],
+          "input_columns_used_by_sql_condition": [
+            "first_name"
+          ],
+          "has_tf_adjustments": true,
+          "tf_adjustment_column": "first_name"
+        },
+        {
+          "sql_condition": "jaro_winkler_similarity(\"first_name_l\", \"first_name_r\") >= 0.92",
+          "comparison_vector_value": 3,
+          "is_null_level": false,
+          "is_else_level": null,
+          "is_exact_match": false,
+          "exact_match_colnames": null,
+          "input_columns_used_by_sql_condition": [
+            "first_name"
+          ],
+          "has_tf_adjustments": false,
+          "tf_adjustment_column": null
+        },
+        {
+          "sql_condition": "jaro_winkler_similarity(\"first_name_l\", \"first_name_r\") >= 0.88",
+          "comparison_vector_value": 2,
+          "is_null_level": false,
+          "is_else_level": null,
+          "is_exact_match": false,
+          "exact_match_colnames": null,
+          "input_columns_used_by_sql_condition": [
+            "first_name"
+          ],
+          "has_tf_adjustments": false,
+          "tf_adjustment_column": null
+        },
+        {
+          "sql_condition": "jaro_winkler_similarity(\"first_name_l\", \"first_name_r\") >= 0.7",
+          "comparison_vector_value": 1,
+          "is_null_level": false,
+          "is_else_level": null,
+          "is_exact_match": false,
+          "exact_match_colnames": null,
+          "input_columns_used_by_sql_condition": [
+            "first_name"
+          ],
+          "has_tf_adjustments": false,
+          "tf_adjustment_column": null
+        },
+        {
+          "sql_condition": "ELSE",
+          "comparison_vector_value": 0,
+          "is_null_level": false,
+          "is_else_level": true,
+          "is_exact_match": false,
+          "exact_match_colnames": null,
+          "input_columns_used_by_sql_condition": [],
+          "has_tf_adjustments": false,
+          "tf_adjustment_column": null
+        }
+      ]
+    },
+    {
+      "output_column_name": "surname",
+      "gamma_column_name": "gamma_surname",
+      "mw_column_name": "mw_surname",
+      "input_columns_used_by_case_statement": [
+        "surname"
+      ],
+      "levels": [
+        {
+          "sql_condition": "\"surname_l\" IS NULL OR \"surname_r\" IS NULL",
+          "comparison_vector_value": -1,
+          "is_null_level": true,
+          "is_else_level": null,
+          "is_exact_match": false,
+          "exact_match_colnames": null,
+          "input_columns_used_by_sql_condition": [
+            "surname"
+          ],
+          "has_tf_adjustments": false,
+          "tf_adjustment_column": null
+        },
+        {
+          "sql_condition": "\"surname_l\" = \"surname_r\"",
+          "comparison_vector_value": 4,
+          "is_null_level": false,
+          "is_else_level": null,
+          "is_exact_match": true,
+          "exact_match_colnames": [
+            "surname"
+          ],
+          "input_columns_used_by_sql_condition": [
+            "surname"
+          ],
+          "has_tf_adjustments": true,
+          "tf_adjustment_column": "surname"
+        },
+        {
+          "sql_condition": "jaro_winkler_similarity(\"surname_l\", \"surname_r\") >= 0.92",
+          "comparison_vector_value": 3,
+          "is_null_level": false,
+          "is_else_level": null,
+          "is_exact_match": false,
+          "exact_match_colnames": null,
+          "input_columns_used_by_sql_condition": [
+            "surname"
+          ],
+          "has_tf_adjustments": false,
+          "tf_adjustment_column": null
+        },
+        {
+          "sql_condition": "jaro_winkler_similarity(\"surname_l\", \"surname_r\") >= 0.88",
+          "comparison_vector_value": 2,
+          "is_null_level": false,
+          "is_else_level": null,
+          "is_exact_match": false,
+          "exact_match_colnames": null,
+          "input_columns_used_by_sql_condition": [
+            "surname"
+          ],
+          "has_tf_adjustments": false,
+          "tf_adjustment_column": null
+        },
+        {
+          "sql_condition": "jaro_winkler_similarity(\"surname_l\", \"surname_r\") >= 0.7",
+          "comparison_vector_value": 1,
+          "is_null_level": false,
+          "is_else_level": null,
+          "is_exact_match": false,
+          "exact_match_colnames": null,
+          "input_columns_used_by_sql_condition": [
+            "surname"
+          ],
+          "has_tf_adjustments": false,
+          "tf_adjustment_column": null
+        },
+        {
+          "sql_condition": "ELSE",
+          "comparison_vector_value": 0,
+          "is_null_level": false,
+          "is_else_level": true,
+          "is_exact_match": false,
+          "exact_match_colnames": null,
+          "input_columns_used_by_sql_condition": [],
+          "has_tf_adjustments": false,
+          "tf_adjustment_column": null
+        }
+      ]
+    },
+    {
+      "output_column_name": "dob",
+      "gamma_column_name": "gamma_dob",
+      "mw_column_name": "mw_dob",
+      "input_columns_used_by_case_statement": [
+        "dob"
+      ],
+      "levels": [
+        {
+          "sql_condition": "\"dob_l\" IS NULL OR \"dob_r\" IS NULL",
+          "comparison_vector_value": -1,
+          "is_null_level": true,
+          "is_else_level": null,
+          "is_exact_match": false,
+          "exact_match_colnames": null,
+          "input_columns_used_by_sql_condition": [
+            "dob"
+          ],
+          "has_tf_adjustments": false,
+          "tf_adjustment_column": null
+        },
+        {
+          "sql_condition": "\"dob_l\" = \"dob_r\"",
+          "comparison_vector_value": 2,
+          "is_null_level": false,
+          "is_else_level": null,
+          "is_exact_match": true,
+          "exact_match_colnames": [
+            "dob"
+          ],
+          "input_columns_used_by_sql_condition": [
+            "dob"
+          ],
+          "has_tf_adjustments": false,
+          "tf_adjustment_column": null
+        },
+        {
+          "sql_condition": "levenshtein(\"dob_l\", \"dob_r\") <= 1",
+          "comparison_vector_value": 1,
+          "is_null_level": false,
+          "is_else_level": null,
+          "is_exact_match": false,
+          "exact_match_colnames": null,
+          "input_columns_used_by_sql_condition": [
+            "dob"
+          ],
+          "has_tf_adjustments": false,
+          "tf_adjustment_column": null
+        },
+        {
+          "sql_condition": "ELSE",
+          "comparison_vector_value": 0,
+          "is_null_level": false,
+          "is_else_level": true,
+          "is_exact_match": false,
+          "exact_match_colnames": null,
+          "input_columns_used_by_sql_condition": [],
+          "has_tf_adjustments": false,
+          "tf_adjustment_column": null
+        }
+      ]
+    },
+    {
+      "output_column_name": "city",
+      "gamma_column_name": "gamma_city",
+      "mw_column_name": "mw_city",
+      "input_columns_used_by_case_statement": [
+        "city"
+      ],
+      "levels": [
+        {
+          "sql_condition": "\"city_l\" IS NULL OR \"city_r\" IS NULL",
+          "comparison_vector_value": -1,
+          "is_null_level": true,
+          "is_else_level": null,
+          "is_exact_match": false,
+          "exact_match_colnames": null,
+          "input_columns_used_by_sql_condition": [
+            "city"
+          ],
+          "has_tf_adjustments": false,
+          "tf_adjustment_column": null
+        },
+        {
+          "sql_condition": "\"city_l\" = \"city_r\"",
+          "comparison_vector_value": 1,
+          "is_null_level": false,
+          "is_else_level": null,
+          "is_exact_match": true,
+          "exact_match_colnames": [
+            "city"
+          ],
+          "input_columns_used_by_sql_condition": [
+            "city"
+          ],
+          "has_tf_adjustments": true,
+          "tf_adjustment_column": "city"
+        },
+        {
+          "sql_condition": "ELSE",
+          "comparison_vector_value": 0,
+          "is_null_level": false,
+          "is_else_level": true,
+          "is_exact_match": false,
+          "exact_match_colnames": null,
+          "input_columns_used_by_sql_condition": [],
+          "has_tf_adjustments": false,
+          "tf_adjustment_column": null
+        }
+      ]
+    },
+    {
+      "output_column_name": "email",
+      "gamma_column_name": "gamma_email",
+      "mw_column_name": "mw_email",
+      "input_columns_used_by_case_statement": [
+        "email"
+      ],
+      "levels": [
+        {
+          "sql_condition": "\"email_l\" IS NULL OR \"email_r\" IS NULL",
+          "comparison_vector_value": -1,
+          "is_null_level": true,
+          "is_else_level": null,
+          "is_exact_match": false,
+          "exact_match_colnames": null,
+          "input_columns_used_by_sql_condition": [
+            "email"
+          ],
+          "has_tf_adjustments": false,
+          "tf_adjustment_column": null
+        },
+        {
+          "sql_condition": "\"email_l\" = \"email_r\"",
+          "comparison_vector_value": 4,
+          "is_null_level": false,
+          "is_else_level": null,
+          "is_exact_match": true,
+          "exact_match_colnames": [
+            "email"
+          ],
+          "input_columns_used_by_sql_condition": [
+            "email"
+          ],
+          "has_tf_adjustments": true,
+          "tf_adjustment_column": "email"
+        },
+        {
+          "sql_condition": "NULLIF(regexp_extract(\"email_l\", '^[^@]+', 0), '') = NULLIF(regexp_extract(\"email_r\", '^[^@]+', 0), '')",
+          "comparison_vector_value": 3,
+          "is_null_level": false,
+          "is_else_level": null,
+          "is_exact_match": false,
+          "exact_match_colnames": null,
+          "input_columns_used_by_sql_condition": [
+            "email"
+          ],
+          "has_tf_adjustments": false,
+          "tf_adjustment_column": null
+        },
+        {
+          "sql_condition": "jaro_winkler_similarity(\"email_l\", \"email_r\") >= 0.88",
+          "comparison_vector_value": 2,
+          "is_null_level": false,
+          "is_else_level": null,
+          "is_exact_match": false,
+          "exact_match_colnames": null,
+          "input_columns_used_by_sql_condition": [
+            "email"
+          ],
+          "has_tf_adjustments": false,
+          "tf_adjustment_column": null
+        },
+        {
+          "sql_condition": "jaro_winkler_similarity(NULLIF(regexp_extract(\"email_l\", '^[^@]+', 0), ''), NULLIF(regexp_extract(\"email_r\", '^[^@]+', 0), '')) >= 0.88",
+          "comparison_vector_value": 1,
+          "is_null_level": false,
+          "is_else_level": null,
+          "is_exact_match": false,
+          "exact_match_colnames": null,
+          "input_columns_used_by_sql_condition": [
+            "email"
+          ],
+          "has_tf_adjustments": false,
+          "tf_adjustment_column": null
+        },
+        {
+          "sql_condition": "ELSE",
+          "comparison_vector_value": 0,
+          "is_null_level": false,
+          "is_else_level": true,
+          "is_exact_match": false,
+          "exact_match_colnames": null,
+          "input_columns_used_by_sql_condition": [],
+          "has_tf_adjustments": false,
+          "tf_adjustment_column": null
+        }
+      ]
+    }
+  ],
+  "blocking_rules": [
+    "(l.\"first_name\" = r.\"first_name\") AND (l.\"city\" = r.\"city\")",
+    "l.\"surname\" = r.\"surname\""
+  ]
+}

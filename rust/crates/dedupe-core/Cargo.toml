@@ -1,0 +1,30 @@
+[package]
+name = "dedupe-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Fellegi-Sunter record linkage engine targeting DuckLake"
+
+[lints]
+workspace = true
+
+[dependencies]
+duckdb = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlparser = { workspace = true }
+thiserror = { workspace = true }
+regex = { workspace = true }
+petgraph = "0.8"
+
+[dev-dependencies]
+anyhow = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+criterion = { version = "0.8", features = ["html_reports"] }
+
+[[bench]]
+name = "pipeline"
+harness = false

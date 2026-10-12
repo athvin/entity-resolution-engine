@@ -1,0 +1,8 @@
+{
+  "dataset": "exploding",
+  "files": {
+    "model.json": "fa14274adebb6715ef773c1313be850dfe90ef5e427577643664dc5c3be89f6b",
+    "people.parquet": "a1ebecfc9d5d8827918ad2cd65dec524513a09852ef7d39575d42cd98f3a07e0",
+    "predictions.parquet": "9432acdba7434eae43d836b5158a94e05be8d00afc0def52e64c34b6112c343b"
+  }
+}
