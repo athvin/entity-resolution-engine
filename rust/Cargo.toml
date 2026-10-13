@@ -61,7 +61,10 @@ clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 sha2 = "0.10"
 hex = "0.4"
-# P3 control plane (er-server): the axum HTTP surface replacing FastAPI.
+# P3 control plane (er-server): the axum HTTP surface replacing FastAPI, and the
+# Postgres-backed job queue (SKIP-LOCKED) + org/config tables.
 axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
 tower = "0.5"
+tokio-postgres = "0.7"
+ulid = "1"

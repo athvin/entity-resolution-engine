@@ -12,6 +12,8 @@
 //! need Postgres/OIDC infrastructure that can't run in this sandbox. Auth is a
 //! SHA-256 bearer check (never argon2), matching the Python contract.
 
+pub mod pg;
+
 use std::sync::{Arc, Mutex};
 
 use axum::Json;
