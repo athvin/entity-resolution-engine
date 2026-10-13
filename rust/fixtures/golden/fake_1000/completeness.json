@@ -1,0 +1,37 @@
+[
+  {
+    "source_dataset": "input_data_1",
+    "column_name": "first_name",
+    "total_null_rows": 169,
+    "total_rows_inc_nulls": 1000,
+    "completeness": 0.8309999704360962
+  },
+  {
+    "source_dataset": "input_data_1",
+    "column_name": "surname",
+    "total_null_rows": 181,
+    "total_rows_inc_nulls": 1000,
+    "completeness": 0.8190000057220459
+  },
+  {
+    "source_dataset": "input_data_1",
+    "column_name": "dob",
+    "total_null_rows": 0,
+    "total_rows_inc_nulls": 1000,
+    "completeness": 1.0
+  },
+  {
+    "source_dataset": "input_data_1",
+    "column_name": "city",
+    "total_null_rows": 187,
+    "total_rows_inc_nulls": 1000,
+    "completeness": 0.8130000233650208
+  },
+  {
+    "source_dataset": "input_data_1",
+    "column_name": "email",
+    "total_null_rows": 211,
+    "total_rows_inc_nulls": 1000,
+    "completeness": 0.7889999747276306
+  }
+]

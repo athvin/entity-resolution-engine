@@ -1,0 +1,13 @@
+{
+  "dataset": "historical_50k",
+  "generated_with": {
+    "splink": "5.0.0",
+    "duckdb": "1.5.5"
+  },
+  "files": {
+    "clusters.parquet": "eb043c966dca0ec7cd4532cdf0d262f1ee92bb0b5fbfd31486febf5d1a1b833f",
+    "model_final.json": "08fc9d79582c67b91458f3b6953f2e94692e8aa3cc5402227abe6775ebb8f2bb",
+    "model_initial.json": "9f5b8ac0f8d23059b3a03093a790fc216318b68286969ad57211d218d8463227",
+    "predictions.parquet": "3847f61584fa8cbe15b88f0ad84e75df5d1be3f278959532680dc0f2aa22d396"
+  }
+}

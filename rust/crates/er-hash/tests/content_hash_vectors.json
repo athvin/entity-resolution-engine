@@ -1,0 +1,165 @@
+{
+  "description": "Golden vectors for the normative content_hash of DesignDoc.md S4.1. Each vector carries the written-out preimage as hex, so hashlib.sha256(bytes.fromhex(preimage_hex)).hexdigest() reproduces its digest without importing er.ingest.hashing. The suite asserts oracle == digest == content_hash(row, columns), so a change to the module that changes the digest fails against this file rather than silently rewriting it.",
+  "separator_hex": "1f",
+  "tombstone_content_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "vectors": [
+    {
+      "name": "ascii_three_columns",
+      "note": "Plain ASCII baseline over the S6 crm column names, in declared order.",
+      "columns": [
+        "first_name",
+        "last_name",
+        "email_address"
+      ],
+      "row": {
+        "first_name": "Ada",
+        "last_name": "Lovelace",
+        "email_address": "ada@example.com"
+      },
+      "preimage_hex": "4164611f4c6f76656c6163651f616461406578616d706c652e636f6d",
+      "digest": "78438bfa3dc88703607e4ef9a156aeb4d65065f64cf92fe7906db1239bb98011"
+    },
+    {
+      "name": "extra_unmapped_keys",
+      "note": "S4.1 exclusions: ingested_at, ingest_batch_id and std_version are never members of columns, so they cannot reach the preimage. Same digest as ascii_three_columns.",
+      "columns": [
+        "first_name",
+        "last_name",
+        "email_address"
+      ],
+      "row": {
+        "first_name": "Ada",
+        "last_name": "Lovelace",
+        "email_address": "ada@example.com",
+        "ingested_at": "2026-08-14T00:00:00Z",
+        "ingest_batch_id": "01J0000000000000000000000A",
+        "std_version": "v1",
+        "phone": "+15125550100"
+      },
+      "preimage_hex": "4164611f4c6f76656c6163651f616461406578616d706c652e636f6d",
+      "digest": "78438bfa3dc88703607e4ef9a156aeb4d65065f64cf92fe7906db1239bb98011"
+    },
+    {
+      "name": "column_order_swapped",
+      "note": "Same row, first two columns transposed. Declared order is load-bearing, so the digest differs from ascii_three_columns.",
+      "columns": [
+        "last_name",
+        "first_name",
+        "email_address"
+      ],
+      "row": {
+        "first_name": "Ada",
+        "last_name": "Lovelace",
+        "email_address": "ada@example.com"
+      },
+      "preimage_hex": "4c6f76656c6163651f4164611f616461406578616d706c652e636f6d",
+      "digest": "8d854f9950dfd650935a4eaed165ac4e8d1eb6e2e34b4cf5762382ceb7559b15"
+    },
+    {
+      "name": "nfd_spelling",
+      "note": "Combining acute (NFD). NFC-normalized before hashing, so it shares a digest with nfc_spelling despite different row bytes.",
+      "columns": [
+        "given_name"
+      ],
+      "row": {
+        "given_name": "Jose\u0301"
+      },
+      "preimage_hex": "4a6f73c3a9",
+      "digest": "24c2ab65b7adab7e070ba05a00a3f3ae074e28b8bcdd59735b7107e7a538a551"
+    },
+    {
+      "name": "nfc_spelling",
+      "note": "Precomposed (NFC). Same digest as nfd_spelling.",
+      "columns": [
+        "given_name"
+      ],
+      "row": {
+        "given_name": "Jos\u00e9"
+      },
+      "preimage_hex": "4a6f73c3a9",
+      "digest": "24c2ab65b7adab7e070ba05a00a3f3ae074e28b8bcdd59735b7107e7a538a551"
+    },
+    {
+      "name": "null_value",
+      "note": "NULL encodes as the empty string, so this collides with empty_string_value by design (S4.1).",
+      "columns": [
+        "first_name",
+        "last_name"
+      ],
+      "row": {
+        "first_name": "Ada",
+        "last_name": null
+      },
+      "preimage_hex": "4164611f",
+      "digest": "6c217639e76af5691e541958cdc86406d720805c742eab61bafce2c206e75816"
+    },
+    {
+      "name": "empty_string_value",
+      "note": "Empty string in the position null_value leaves NULL. Same digest, by design.",
+      "columns": [
+        "first_name",
+        "last_name"
+      ],
+      "row": {
+        "first_name": "Ada",
+        "last_name": ""
+      },
+      "preimage_hex": "4164611f",
+      "digest": "6c217639e76af5691e541958cdc86406d720805c742eab61bafce2c206e75816"
+    },
+    {
+      "name": "single_column",
+      "note": "One-column source: the preimage carries no separator at all.",
+      "columns": [
+        "email_address"
+      ],
+      "row": {
+        "email_address": "solo@example.com"
+      },
+      "preimage_hex": "736f6c6f406578616d706c652e636f6d",
+      "digest": "09a44e7ebbe5f90ca0e0d79dd6fb3b86434de7a5b7a7d784d8aaa5633119fa01"
+    },
+    {
+      "name": "separator_inside_left_value",
+      "note": "A value containing a literal 0x1f is hashed verbatim, never escaped. Its preimage_hex is byte-identical to separator_inside_right_value's -- the 1f at byte offset 7 is indistinguishable from a column boundary, so these two distinct rows share a digest. That ambiguity is a property of the encoding S4.1 pins, and is recorded here rather than worked around.",
+      "columns": [
+        "addr1",
+        "addr_city"
+      ],
+      "row": {
+        "addr1": "12 Main\u001fSt",
+        "addr_city": "Austin"
+      },
+      "preimage_hex": "3132204d61696e1f53741f41757374696e",
+      "digest": "1a519ae341b98e50a87f21581d9b1f2eed8d83af02729daa9966a0b30d4c7b80"
+    },
+    {
+      "name": "separator_inside_right_value",
+      "note": "The other half of the separator ambiguity documented on separator_inside_left_value.",
+      "columns": [
+        "addr1",
+        "addr_city"
+      ],
+      "row": {
+        "addr1": "12 Main",
+        "addr_city": "St\u001fAustin"
+      },
+      "preimage_hex": "3132204d61696e1f53741f41757374696e",
+      "digest": "1a519ae341b98e50a87f21581d9b1f2eed8d83af02729daa9966a0b30d4c7b80"
+    },
+    {
+      "name": "multibyte_non_latin",
+      "note": "Multi-byte CJK and Greek values: the preimage is UTF-8 bytes, not code points.",
+      "columns": [
+        "name_first",
+        "name_last"
+      ],
+      "row": {
+        "name_first": "\u9867\u5ba2",
+        "name_last": "\u03a9-42"
+      },
+      "preimage_hex": "e9a1a7e5aea21fcea92d3432",
+      "digest": "4d68e74a0a2ccc84ce29059a002fcb719dab19607d5fb5935ce338cf1b36a43b"
+    }
+  ]
+}
