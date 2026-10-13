@@ -1,0 +1,17 @@
+[package]
+name = "er-ingest"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+er-hash = { path = "../er-hash" }
+er-config = { path = "../er-config" }
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

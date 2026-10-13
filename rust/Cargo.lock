@@ -774,6 +774,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "er-ingest"
+version = "0.1.0"
+dependencies = [
+ "er-config",
+ "er-hash",
+ "serde_json",
+]
+
+[[package]]
 name = "er-obs"
 version = "0.1.0"
 dependencies = [
