@@ -17,6 +17,7 @@
 
 use std::collections::BTreeMap;
 
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -87,8 +88,12 @@ pub struct SourceSpec {
     pub record_id_column: String,
     pub updated_at_column: String,
     pub date_format: String,
-    /// canonical attribute -> the column that carries it in this source.
-    pub columns: BTreeMap<String, String>,
+    /// canonical attribute -> the column that carries it in this source, in
+    /// YAML-declared order. The order is load-bearing: ingest's `content_hash`
+    /// (S4.1) hashes `columns.values()` in exactly this order, so it is an
+    /// `IndexMap`, not a sorted map. (`config_hash` re-sorts it, so the digest is
+    /// order-independent — only the ingest preimage is not.)
+    pub columns: IndexMap<String, String>,
 }
 
 /// S6 `blocking[]`: one candidate-generation key and the expression that builds it.
@@ -310,6 +315,30 @@ mod tests {
         for comparison in config.comparisons.values() {
             assert!(comparison.levels.iter().all(Option::is_some));
         }
+    }
+
+    #[test]
+    fn source_columns_preserve_declared_order() {
+        // ingest's content_hash hashes columns.values() in YAML order, which is
+        // the canonical-attribute order, NOT sorted — a sorted map would reorder
+        // (addr_city would come first) and break the ingest preimage.
+        let config = load_config_str(DEFAULT_YAML).unwrap();
+        let crm = &config.sources["crm"];
+        let order: Vec<&str> = crm.columns.keys().map(String::as_str).collect();
+        assert_eq!(
+            order,
+            vec![
+                "given_name",
+                "family_name",
+                "email",
+                "phone",
+                "address_line",
+                "addr_city",
+                "addr_region",
+                "addr_postal",
+                "birth_date",
+            ]
+        );
     }
 
     #[test]

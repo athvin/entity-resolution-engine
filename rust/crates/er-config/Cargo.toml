@@ -13,6 +13,10 @@ serde_norway.workspace = true
 sha2.workspace = true
 hex.workspace = true
 thiserror.workspace = true
+# SourceSpec.columns must preserve YAML-declared order: ingest's content_hash
+# (S4.1) hashes the mapped column values in that order. config_hash is unaffected
+# (canonical_document re-serialises through a sorted serde_json::Map).
+indexmap = { version = "2", features = ["serde"] }
 
 [lints]
 workspace = true
