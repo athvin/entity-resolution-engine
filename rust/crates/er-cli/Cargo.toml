@@ -1,0 +1,20 @@
+[package]
+name = "er-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+dedupe-core = { path = "../dedupe-core" }
+er-config = { path = "../er-config" }
+er-ingest = { path = "../er-ingest" }
+er-standardize = { path = "../er-standardize" }
+anyhow.workspace = true
+
+[dev-dependencies]
+er-hash = { path = "../er-hash" }
+
+[lints]
+workspace = true
