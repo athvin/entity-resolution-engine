@@ -1334,6 +1334,82 @@ async fn org_metrics(
     }
 }
 
+/// Viewer+: duplicate groups (entities with >=2 members)
+/// (`GET /v1/orgs/{org}/duplicates`). Keyset page; query `cursor`, `limit`.
+async fn duplicates_list(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let session = match org_lake(&state, &org).await {
+        Ok(s) => s,
+        Err(r) => return *r,
+    };
+    let (snapshot, after) =
+        match read::page_start(&session, params.get("cursor").map(String::as_str)) {
+            Ok(x) => x,
+            Err(read::PageStartError::BadCursor) => {
+                return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "invalid cursor");
+            }
+            Err(read::PageStartError::Lake(e)) => {
+                return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
+            }
+        };
+    let limit = read::parse_limit(params.get("limit").map(String::as_str));
+    match read::duplicates(&session, snapshot, after.as_deref(), limit) {
+        Ok((items, next_cursor)) => Json(json!({
+            "items": items,
+            "snapshot": snapshot,
+            "next_cursor": next_cursor,
+        }))
+        .into_response(),
+        Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
+    }
+}
+
+/// Viewer+: active pairwise match scores (`GET /v1/orgs/{org}/match-scores`).
+/// Keyset page; query `cursor`, `limit`, `min`/`max` (probability band).
+async fn match_scores_list(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let session = match org_lake(&state, &org).await {
+        Ok(s) => s,
+        Err(r) => return *r,
+    };
+    let (snapshot, after) =
+        match read::page_start(&session, params.get("cursor").map(String::as_str)) {
+            Ok(x) => x,
+            Err(read::PageStartError::BadCursor) => {
+                return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "invalid cursor");
+            }
+            Err(read::PageStartError::Lake(e)) => {
+                return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
+            }
+        };
+    let limit = read::parse_limit(params.get("limit").map(String::as_str));
+    let min = read::parse_f64(params.get("min").map(String::as_str));
+    let max = read::parse_f64(params.get("max").map(String::as_str));
+    match read::match_scores_list(&session, snapshot, after.as_deref(), min, max, limit) {
+        Ok((items, next_cursor)) => Json(json!({
+            "items": items,
+            "snapshot": snapshot,
+            "next_cursor": next_cursor,
+        }))
+        .into_response(),
+        Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
+    }
+}
+
 #[derive(Deserialize)]
 struct KeyIn {
     role: String,
@@ -1447,6 +1523,8 @@ pub fn app(state: AppState) -> Router {
             get(golden_record_detail),
         )
         .route("/v1/orgs/{org}/metrics", get(org_metrics))
+        .route("/v1/orgs/{org}/duplicates", get(duplicates_list))
+        .route("/v1/orgs/{org}/match-scores", get(match_scores_list))
         .with_state(state)
 }
 

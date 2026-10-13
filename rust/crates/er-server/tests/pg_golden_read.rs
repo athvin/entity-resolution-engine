@@ -230,6 +230,49 @@ async fn golden_records_read_over_ducklake() {
     assert_eq!(m["open_reviews"], 0);
     assert!(m["snapshot"].as_i64().unwrap() >= 1);
 
+    // Duplicates: groups with >=2 members, each carrying its member list.
+    let resp = app
+        .clone()
+        .oneshot(op_get("/v1/orgs/acme/duplicates"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let dups = json_body(resp).await;
+    let groups = dups["items"].as_array().unwrap();
+    assert!(!groups.is_empty(), "base_10 has duplicate groups");
+    assert!(groups[0]["member_count"].as_i64().unwrap() >= 2);
+    assert!(groups[0]["members"].as_array().unwrap().len() >= 2);
+
+    // Match-scores: base_10 has 19 active scored pairs with evidence.
+    let resp = app
+        .clone()
+        .oneshot(op_get("/v1/orgs/acme/match-scores"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let scores = json_body(resp).await;
+    let pairs = scores["items"].as_array().unwrap();
+    assert_eq!(pairs.len(), 19, "base_10 scores 19 active pairs");
+    assert!(pairs[0].get("rec_a_key").is_some());
+    assert!(pairs[0].get("match_probability").is_some());
+    assert!(pairs[0].get("evidence").is_some());
+
+    // Probability band: min=0.95 keeps only the high-confidence pairs.
+    let resp = app
+        .clone()
+        .oneshot(op_get("/v1/orgs/acme/match-scores?min=0.95"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let banded = json_body(resp).await;
+    let hi = banded["items"].as_array().unwrap();
+    assert!(hi.len() <= pairs.len(), "band narrows the set");
+    assert!(
+        hi.iter()
+            .all(|p| p["match_probability"].as_f64().unwrap() >= 0.95),
+        "every banded pair is >= 0.95"
+    );
+
     // A viewer key can read (viewer+).
     let resp = app
         .clone()

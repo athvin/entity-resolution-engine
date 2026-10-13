@@ -266,6 +266,120 @@ pub fn entity_detail(
     })))
 }
 
+/// A keyset page of duplicate groups: entities with >=2 members, with their
+/// member list and a golden preview (`readapi.duplicate_groups`). Keyset on
+/// `entity_id`.
+///
+/// # Errors
+/// Propagates the lake query error.
+pub fn duplicates(
+    session: &Session,
+    snapshot: i64,
+    after: Option<&str>,
+    limit: i64,
+) -> Result<(Vec<Value>, Option<String>), String> {
+    let limit = limit.clamp(1, MAX_LIMIT);
+    let at = format!("AT (VERSION => {snapshot})");
+    let after_sql = after.map_or(String::new(), |a| format!("WHERE m.entity_id > {}", lit(a)));
+    // Pin each table via a CTE (clean snapshot read) rather than aliasing a
+    // time-travelled table inline, which the grammar handles awkwardly.
+    let sql = format!(
+        "SELECT entity_id, to_json(t) FROM ( \
+           WITH m AS (SELECT * FROM lake.main.entity_membership {at}), \
+                g AS (SELECT * FROM lake.main.golden_records {at}) \
+           SELECT m.entity_id, count(*) AS member_count, \
+                  list(m.source_system || ':' || m.source_record_id ORDER BY m.record_key) \
+                    AS members, \
+                  any_value(g.given_name) AS given_name, \
+                  any_value(g.family_name) AS family_name, \
+                  any_value(g.email) AS email \
+           FROM m LEFT JOIN g ON g.entity_id = m.entity_id \
+           {after_sql} \
+           GROUP BY m.entity_id HAVING count(*) >= 2 \
+           ORDER BY m.entity_id LIMIT {} \
+         ) t ORDER BY entity_id",
+        limit + 1
+    );
+    let rows = session.query_strings(&sql).map_err(|e| e.to_string())?;
+    let has_more = rows.len() as i64 > limit;
+    let page = &rows[..rows.len().min(limit as usize)];
+    let items: Vec<Value> = page
+        .iter()
+        .map(|r| serde_json::from_str(&r[1]).unwrap_or(Value::Null))
+        .collect();
+    let next_cursor = has_more
+        .then(|| page.last().map(|r| encode_cursor(snapshot, &r[0])))
+        .flatten();
+    Ok((items, next_cursor))
+}
+
+/// The composite key separator for `match_scores` cursors (`readapi` joins the
+/// pair on `\x1f`).
+const PAIR_SEP: char = '\u{1f}';
+
+/// A keyset page of active pairwise match scores (`readapi.match_scores_list`),
+/// optionally within a probability band. Keyset on the `(rec_a_key, rec_b_key)`
+/// pair, carried in the cursor key as `rec_a_key\x1frec_b_key`.
+///
+/// # Errors
+/// Propagates the lake query error.
+pub fn match_scores_list(
+    session: &Session,
+    snapshot: i64,
+    after: Option<&str>,
+    min_prob: Option<f64>,
+    max_prob: Option<f64>,
+    limit: i64,
+) -> Result<(Vec<Value>, Option<String>), String> {
+    let limit = limit.clamp(1, MAX_LIMIT);
+    let at = format!("AT (VERSION => {snapshot})");
+    let mut filters = vec!["is_active".to_string()];
+    if let Some(a) = after {
+        let (ka, kb) = a.split_once(PAIR_SEP).unwrap_or((a, ""));
+        filters.push(format!(
+            "(rec_a_key, rec_b_key) > ({}, {})",
+            lit(ka),
+            lit(kb)
+        ));
+    }
+    if let Some(lo) = min_prob {
+        filters.push(format!("match_probability >= {lo}"));
+    }
+    if let Some(hi) = max_prob {
+        filters.push(format!("match_probability <= {hi}"));
+    }
+    let sql = format!(
+        "SELECT rec_a_key, rec_b_key, to_json(t) FROM ( \
+           SELECT rec_a_key, rec_b_key, match_probability, model_version, evidence, run_id, \
+                  scored_at \
+           FROM lake.main.match_scores {at} WHERE {} \
+           ORDER BY rec_a_key, rec_b_key LIMIT {} \
+         ) t ORDER BY rec_a_key, rec_b_key",
+        filters.join(" AND "),
+        limit + 1
+    );
+    let rows = session.query_strings(&sql).map_err(|e| e.to_string())?;
+    let has_more = rows.len() as i64 > limit;
+    let page = &rows[..rows.len().min(limit as usize)];
+    let items: Vec<Value> = page
+        .iter()
+        .map(|r| serde_json::from_str(&r[2]).unwrap_or(Value::Null))
+        .collect();
+    let next_cursor = has_more
+        .then(|| {
+            page.last()
+                .map(|r| encode_cursor(snapshot, &format!("{}{PAIR_SEP}{}", r[0], r[1])))
+        })
+        .flatten();
+    Ok((items, next_cursor))
+}
+
+/// Parse an optional `f64` query value (e.g. a probability band bound).
+#[must_use]
+pub fn parse_f64(raw: Option<&str>) -> Option<f64> {
+    raw.and_then(|s| s.parse::<f64>().ok())
+}
+
 /// A snapshot-pinned scalar count.
 fn count_at(session: &Session, sql: &str) -> Result<i64, String> {
     let rows = session.query_strings(sql).map_err(|e| e.to_string())?;
