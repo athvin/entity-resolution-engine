@@ -106,9 +106,52 @@ pub fn name_norm(col: &str) -> String {
     null_semantics(&format!("nullif({collapsed}, '')"))
 }
 
+/// The precision a `strptime` format can resolve to (S4.2): `day` if it carries a
+/// day token (`%d`/`%-d`/`%j`), else `month` if a month token (`%m`/`%-m`/`%b`/`%B`),
+/// else `year`. `%%` (a literal percent) is stripped first so it cannot be read as
+/// a token prefix.
+#[must_use]
+pub fn date_precision(fmt: &str) -> &'static str {
+    let format = fmt.replace("%%", "");
+    const DAY: [&str; 3] = ["%d", "%-d", "%j"];
+    const MONTH: [&str; 4] = ["%m", "%-m", "%b", "%B"];
+    if DAY.iter().any(|t| format.contains(t)) {
+        "day"
+    } else if MONTH.iter().any(|t| format.contains(t)) {
+        "month"
+    } else {
+        "year"
+    }
+}
+
+/// S4.2 `parse_date(col, fmt)`: the scalar `birth_date DATE`. `fmt` is the
+/// source's `sources.<name>.date_format` (S6), resolved at render time. A format
+/// that cannot express a day renders a typed NULL (no `try_strptime` at all, so a
+/// `%Y` source cannot fabricate January 1st); otherwise `try_strptime` refuses a
+/// value the format does not fully describe. `null_semantics` runs first so a
+/// sentinel is absence, not a parse failure.
+#[must_use]
+pub fn parse_date(col: &str, fmt: &str) -> String {
+    if date_precision(fmt) != "day" {
+        return "cast(null as date)".to_string();
+    }
+    let present = null_semantics(&lowercase_trim(col));
+    let escaped = fmt.replace('\'', "''");
+    format!("cast(try_strptime({present}, '{escaped}') as date)")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn date_precision_tokens() {
+        assert_eq!(date_precision("%Y-%m-%d"), "day");
+        assert_eq!(date_precision("%m/%d/%Y"), "day");
+        assert_eq!(date_precision("%Y-%m"), "month");
+        assert_eq!(date_precision("%Y"), "year");
+        assert_eq!(parse_date("col", "%Y"), "cast(null as date)");
+    }
 
     #[test]
     fn region_is_uppercased_and_us_adds_nanp_branches() {

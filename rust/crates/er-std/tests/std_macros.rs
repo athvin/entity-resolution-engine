@@ -5,7 +5,7 @@
 //! match. Regenerate with `uv run python rust/crates/er-std/tests/gen_std_golden.py`.
 
 use dedupe_core::session::{Session, SessionOptions};
-use er_std::sql::{email_norm, name_norm};
+use er_std::sql::{email_norm, name_norm, parse_date};
 
 fn lit(value: Option<&str>) -> String {
     match value {
@@ -78,6 +78,33 @@ fn name_norm_matches_dbt_macro() {
             rows[0][0],
             expected_text(&case["name"]),
             "name_norm for {input:?} differs from the dbt macro",
+        );
+    }
+}
+
+#[test]
+fn parse_date_matches_dbt_macro() {
+    let golden: serde_json::Value = serde_json::from_str(include_str!("date_golden.json")).unwrap();
+    let cases = golden["cases"].as_array().unwrap();
+    assert!(cases.len() >= 10);
+    let session = Session::open_in_memory(SessionOptions::deterministic()).unwrap();
+
+    for case in cases {
+        let input = case["input"].as_str();
+        let fmt = case["fmt"].as_str().unwrap();
+        // Cast the DATE to VARCHAR so it renders as ISO text (query_strings has no
+        // DATE arm); DuckDB DATE->VARCHAR is "YYYY-MM-DD", matching str(date).
+        let projection = parse_date("col", fmt);
+        let sql = format!(
+            "select cast(({projection}) as varchar) as r \
+             from (select cast({} as varchar) as col) as input",
+            lit(input)
+        );
+        let rows = session.query_strings(&sql).unwrap();
+        assert_eq!(
+            rows[0][0],
+            expected_text(&case["birth_date"]),
+            "parse_date for {input:?} ({fmt}) differs from the dbt macro",
         );
     }
 }

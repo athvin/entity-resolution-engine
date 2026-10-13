@@ -51,6 +51,19 @@ def main() -> None:
         for value in NAME_INPUTS:
             row = h.eval_macro("name_norm", value)[0]
             name_cases.append({"input": value, "name": row[RESULT_COLUMN]})
+        date_inputs = [
+            ("1985-03-02", "%Y-%m-%d"), ("  1985-03-02  ", "%Y-%m-%d"),
+            ("03/02/1985", "%m/%d/%Y"), ("12/31/1999", "%m/%d/%Y"),
+            ("2000-02-29", "%Y-%m-%d"), ("2001-02-29", "%Y-%m-%d"),
+            ("1985", "%Y-%m-%d"), ("1985-03", "%Y-%m-%d"), ("not-a-date", "%Y-%m-%d"),
+            ("unknown", "%Y-%m-%d"), ("N/A", "%Y-%m-%d"), ("", "%Y-%m-%d"),
+            (None, "%Y-%m-%d"),
+            ("1985-03", "%Y-%m"), ("1985", "%Y"),  # month/year precision -> cast null
+        ]
+        date_cases = []
+        for value, fmt in date_inputs:
+            bd = h.eval_macro("parse_date", value, fmt)[0][RESULT_COLUMN]
+            date_cases.append({"input": value, "fmt": fmt, "birth_date": None if bd is None else str(bd)})
     finally:
         h.close()
     (HERE / "email_golden.json").write_text(
@@ -59,7 +72,10 @@ def main() -> None:
     (HERE / "name_golden.json").write_text(
         json.dumps({"_comment": "dbt name_norm via MacroHarness. Regen: uv run python rust/crates/er-std/tests/gen_std_golden.py",
                     "cases": name_cases}, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    print(f"wrote {len(email_cases)} email + {len(name_cases)} name cases")
+    (HERE / "date_golden.json").write_text(
+        json.dumps({"_comment": "dbt parse_date via MacroHarness. Regen: uv run python rust/crates/er-std/tests/gen_std_golden.py",
+                    "cases": date_cases}, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    print(f"wrote {len(email_cases)} email + {len(name_cases)} name + {len(date_cases)} date cases")
 
 
 if __name__ == "__main__":
