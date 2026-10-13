@@ -2341,6 +2341,154 @@ async fn staged_count(
 }
 
 #[derive(Deserialize)]
+struct ReviewResolveIn {
+    resolution: String,
+}
+
+/// Steward+: stage a review resolution
+/// (`POST /v1/orgs/{org}/reviews/{review_id}/resolve`; the Python
+/// `{review_id}:resolve` action). `resolution` is match | no_match | dismiss.
+async fn resolve_review(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, review_id)): Path<(String, String)>,
+    Json(body): Json<ReviewResolveIn>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
+    if !matches!(body.resolution.as_str(), "match" | "no_match" | "dismiss") {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "resolution must be match | no_match | dismiss",
+        );
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(
+            StatusCode::NOT_IMPLEMENTED,
+            "steward actions require Postgres",
+        );
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let action = json!({
+        "type": "resolve_review",
+        "review_id": review_id,
+        "resolution": body.resolution,
+    });
+    match steward_stage(&client, &principal.actor, &org, &action).await {
+        Ok(id) => staged_response(StatusCode::OK, &id),
+        Err(r) => *r,
+    }
+}
+
+#[derive(Deserialize)]
+struct BulkResolveItem {
+    review_id: String,
+    resolution: String,
+}
+
+#[derive(Deserialize)]
+struct BulkResolveIn {
+    items: Vec<BulkResolveItem>,
+    #[serde(default)]
+    apply_now: bool,
+}
+
+/// Steward+: stage many review resolutions in one window
+/// (`POST /v1/orgs/{org}/reviews/bulk-resolve`). 1..=200 items; with `apply_now`
+/// also enqueues the drain job.
+async fn bulk_resolve_reviews(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Json(body): Json<BulkResolveIn>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
+    if body.items.is_empty() || body.items.len() > 200 {
+        return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "items must be 1..=200");
+    }
+    if !body
+        .items
+        .iter()
+        .all(|i| matches!(i.resolution.as_str(), "match" | "no_match" | "dismiss"))
+    {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "resolution must be match | no_match | dismiss",
+        );
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(
+            StatusCode::NOT_IMPLEMENTED,
+            "steward actions require Postgres",
+        );
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    // One active-org check for the whole batch.
+    match pg::get_org(&client, &org).await {
+        Ok(Some(o)) if o.state == "active" => {}
+        Ok(Some(o)) => {
+            return detail_err(
+                StatusCode::CONFLICT,
+                format!(
+                    "org '{org}' is {}; steward actions are accepted only when active",
+                    o.state
+                ),
+            );
+        }
+        Ok(None) => return detail_err(StatusCode::NOT_FOUND, format!("no org '{org}'")),
+        Err(e) => return pg_err(e),
+    }
+    let mut action_ids = Vec::new();
+    for item in &body.items {
+        let action = json!({
+            "type": "resolve_review",
+            "review_id": item.review_id,
+            "resolution": item.resolution,
+        });
+        match pg::stage_action(&client, &org, &action, &principal.actor).await {
+            Ok(id) => action_ids.push(id),
+            Err(e) => return pg_err(e),
+        }
+    }
+    let _ = pg::audit(
+        &client,
+        &principal.actor,
+        Some(&org),
+        "steward.bulk_resolve",
+        &json!({ "count": action_ids.len() }),
+    )
+    .await;
+    let mut resp = json!({ "status": "staged", "action_ids": action_ids });
+    if body.apply_now {
+        let idem = format!("bulk-resolve-apply:{}", ulid::Ulid::new());
+        let params = json!({ "skip_ingest": true });
+        match pg::enqueue(
+            &client,
+            &org,
+            "run_all_incremental",
+            0,
+            Some(&idem),
+            Some(&params),
+        )
+        .await
+        {
+            Ok(job) => resp["apply_job"] = json!(job.job_id),
+            Err(e) => return pg_err(e),
+        }
+    }
+    (StatusCode::OK, Json(resp)).into_response()
+}
+
+#[derive(Deserialize)]
 struct KeyIn {
     role: String,
 }
@@ -2485,7 +2633,15 @@ pub fn app(state: AppState) -> Router {
         .route("/v1/orgs/{org}/match-scores", get(match_scores_list))
         .route("/v1/orgs/{org}/records", get(records_by_key))
         .route("/v1/orgs/{org}/reviews", get(reviews_list))
+        .route(
+            "/v1/orgs/{org}/reviews/bulk-resolve",
+            post(bulk_resolve_reviews),
+        )
         .route("/v1/orgs/{org}/reviews/{review_id}", get(review_detail))
+        .route(
+            "/v1/orgs/{org}/reviews/{review_id}/resolve",
+            post(resolve_review),
+        )
         .route(
             "/v1/orgs/{org}/assertions",
             get(assertions_list).post(add_assertion),

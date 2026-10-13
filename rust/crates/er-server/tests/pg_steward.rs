@@ -141,6 +141,70 @@ async fn steward_actions_stage_and_guard() {
     assert!(actions.iter().any(|a| a == "steward.add_assertion"));
     assert!(actions.iter().any(|a| a == "steward.retract_assertion"));
 
+    // resolve a review (stages a resolve_review action).
+    let resp = app
+        .clone()
+        .oneshot(req(
+            "POST",
+            "/v1/orgs/acme/reviews/gray_band:crm:C001:webforms:W006/resolve",
+            "op-secret",
+            Body::from(r#"{"resolution":"match"}"#),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(json_body(resp).await["status"], "staged");
+    assert_eq!(pending(&app).await, 4);
+
+    // bad resolution -> 422.
+    let resp = app
+        .clone()
+        .oneshot(req(
+            "POST",
+            "/v1/orgs/acme/reviews/some-id/resolve",
+            "op-secret",
+            Body::from(r#"{"resolution":"perhaps"}"#),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    // bulk-resolve stages one action per item.
+    let resp = app
+        .clone()
+        .oneshot(req(
+            "POST",
+            "/v1/orgs/acme/reviews/bulk-resolve",
+            "op-secret",
+            Body::from(
+                r#"{"items":[{"review_id":"r1","resolution":"dismiss"},{"review_id":"r2","resolution":"no_match"}]}"#,
+            ),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(
+        json_body(resp).await["action_ids"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(pending(&app).await, 6);
+
+    // empty bulk -> 422.
+    let resp = app
+        .clone()
+        .oneshot(req(
+            "POST",
+            "/v1/orgs/acme/reviews/bulk-resolve",
+            "op-secret",
+            Body::from(r#"{"items":[]}"#),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
     // a viewer key cannot stage (steward required).
     let resp = app
         .clone()
