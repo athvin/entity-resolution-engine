@@ -775,6 +775,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "er-golden"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "er-config",
+]
+
+[[package]]
 name = "er-hash"
 version = "0.1.0"
 dependencies = [
@@ -812,6 +820,7 @@ version = "0.1.0"
 dependencies = [
  "dedupe-core",
  "er-config",
+ "er-golden",
  "er-ids",
  "er-ingest",
  "er-reconcile",
