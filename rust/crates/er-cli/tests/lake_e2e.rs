@@ -324,3 +324,114 @@ fn reconcile_through_ducklake_matches_golden() {
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+/// golden.csv attribute columns (entity id dropped), in file order.
+const GOLDEN_COLUMNS: [&str; 13] = [
+    "given_name",
+    "family_name",
+    "email",
+    "phone_e164",
+    "addr_number",
+    "addr_street",
+    "addr_unit",
+    "addr_city",
+    "addr_region",
+    "addr_postal",
+    "birth_date",
+    "metadata",
+    "survivorship_version",
+];
+
+#[test]
+fn golden_through_ducklake_matches_golden() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let (session, config, tmp) = standardized_lake("golden");
+    match_model(&session);
+    er_cli::run_reconcile(
+        &session,
+        &config,
+        "01RUNRECON0000000000000000",
+        "2026-01-03 00:00:00",
+    )
+    .unwrap();
+    er_cli::run_golden(&session, &config).unwrap();
+
+    // golden_lineage by entity signature {attribute, record_key, rule}.
+    let mut got_lineage: BTreeMap<String, BTreeSet<(String, String, String)>> = BTreeMap::new();
+    for r in session
+        .query_strings(&format!(
+            "select entity_id, attribute, record_key, rule from {}",
+            er_cli::GOLDEN_LINEAGE
+        ))
+        .unwrap()
+    {
+        got_lineage.entry(r[0].clone()).or_default().insert((
+            r[1].clone(),
+            r[2].clone(),
+            r[3].clone(),
+        ));
+    }
+    let got_lineage_set: BTreeSet<BTreeSet<(String, String, String)>> =
+        got_lineage.into_values().collect();
+
+    let lineage =
+        std::fs::read_to_string(repo_fixture("base_10/expected/base/lineage.csv")).unwrap();
+    let mut want_lineage: BTreeMap<String, BTreeSet<(String, String, String)>> = BTreeMap::new();
+    for line in lineage.lines().skip(1).filter(|l| !l.is_empty()) {
+        // entity_label, attribute, record_key, source_system, source_record_id, rule, ver
+        let f: Vec<&str> = line.split(',').collect();
+        want_lineage.entry(f[0].to_string()).or_default().insert((
+            f[1].to_string(),
+            f[2].to_string(),
+            f[5].to_string(),
+        ));
+    }
+    let want_lineage_set: BTreeSet<BTreeSet<(String, String, String)>> =
+        want_lineage.into_values().collect();
+    assert_eq!(
+        got_lineage_set.len(),
+        10,
+        "golden_lineage covers 10 entities"
+    );
+    assert_eq!(
+        got_lineage_set, want_lineage_set,
+        "lake golden_lineage differs from golden"
+    );
+
+    // golden_records attribute columns (id dropped) vs golden.csv, in SQL (NULL/JSON).
+    let golden_path = repo_fixture("base_10/expected/base/golden.csv").replace('\'', "''");
+    let cols_decl = GOLDEN_COLUMNS
+        .iter()
+        .map(|c| format!("'{c}': 'VARCHAR'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    session
+        .execute_batch(&format!(
+            "create temp table golden_expected as select * from read_csv('{golden_path}', \
+             header = true, nullstr = '\\N', columns = {{'entity_label': 'VARCHAR', {cols_decl}}})"
+        ))
+        .unwrap();
+    let projection = GOLDEN_COLUMNS
+        .iter()
+        .map(|c| format!("cast({c} as varchar) as {c}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let cols = GOLDEN_COLUMNS.join(", ");
+    let diff = session
+        .count(&format!(
+            "((select {projection} from {gr} except select {cols} from golden_expected) \
+              union all \
+              (select {cols} from golden_expected except select {projection} from {gr}))",
+            gr = er_cli::GOLDEN_RECORDS,
+        ))
+        .unwrap();
+    assert_eq!(
+        diff, 0,
+        "{diff} lake golden_records rows differ from golden.csv"
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}

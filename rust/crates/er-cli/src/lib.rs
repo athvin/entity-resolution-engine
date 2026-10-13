@@ -38,6 +38,8 @@ pub const MATCH_SCORES: &str = "lake.main.match_scores";
 pub const ENTITY_MEMBERSHIP: &str = "lake.main.entity_membership";
 pub const ENTITIES: &str = "lake.main.entities";
 pub const ENTITY_EVENTS: &str = "lake.main.entity_events";
+pub const GOLDEN_LINEAGE: &str = "lake.main.golden_lineage";
+pub const GOLDEN_RECORDS: &str = "lake.main.golden_records";
 /// The nickname lexicon `int_std_records` reads — a temp relation (read
 /// cross-catalog while the lake write runs), seeded per session.
 pub const LEXICON: &str = "nickname_variants";
@@ -441,5 +443,31 @@ pub fn run_reconcile(session: &Session, config: &Config, run_id: &str, run_at: &
             rows.join(", ")
         ))?;
     }
+    Ok(())
+}
+
+/// S4.6 golden: assemble `lake.main.golden_lineage` (who won each attribute +
+/// the deciding rule) and `lake.main.golden_records` (the surviving values +
+/// metadata) from the lake's int_std_records / entity_membership / entities, in
+/// full-assembly mode. The generators are er-golden's; here they target lake
+/// relations.
+///
+/// # Errors
+/// Propagates the survivorship SQL / lake write errors.
+pub fn run_golden(session: &Session, config: &Config) -> Result<()> {
+    session.execute_batch(&format!("drop table if exists {GOLDEN_LINEAGE}"))?;
+    let lineage_sql =
+        er_golden::golden_lineage_sql(config, INT_STD_RECORDS, ENTITY_MEMBERSHIP, ENTITIES)?;
+    session.execute_batch(&format!("create table {GOLDEN_LINEAGE} as\n{lineage_sql}"))?;
+
+    session.execute_batch(&format!("drop table if exists {GOLDEN_RECORDS}"))?;
+    let records_sql = er_golden::golden_records_sql(
+        config,
+        GOLDEN_LINEAGE,
+        INT_STD_RECORDS,
+        ENTITY_MEMBERSHIP,
+        ENTITIES,
+    );
+    session.execute_batch(&format!("create table {GOLDEN_RECORDS} as\n{records_sql}"))?;
     Ok(())
 }
