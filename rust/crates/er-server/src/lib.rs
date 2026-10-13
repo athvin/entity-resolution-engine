@@ -2143,6 +2143,203 @@ async fn delete_schedule(
     }
 }
 
+/// Stage a steward action (the writer-lock-held path of `steward.py`
+/// `try_apply_or_stage`): the dispatcher drains it when the org goes quiet. The
+/// immediate-apply path needs the per-tenant writer lock on the postgres-backed
+/// ducklake catalog (infra-bound), so this always stages. Returns the staged
+/// `action_id` or a ready error response (404 no org, 409 not active).
+async fn steward_stage(
+    client: &tokio_postgres::Client,
+    actor: &str,
+    org: &str,
+    action: &Value,
+) -> Result<String, Box<axum::response::Response>> {
+    let detail = match pg::get_org(client, org).await {
+        Ok(Some(o)) => o,
+        Ok(None) => {
+            return Err(Box::new(detail_err(
+                StatusCode::NOT_FOUND,
+                format!("no org '{org}'"),
+            )));
+        }
+        Err(e) => return Err(Box::new(pg_err(e))),
+    };
+    if detail.state != "active" {
+        return Err(Box::new(detail_err(
+            StatusCode::CONFLICT,
+            format!(
+                "org '{org}' is {}; steward actions are accepted only when active",
+                detail.state
+            ),
+        )));
+    }
+    let action_type = action
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_string();
+    let action_id = pg::stage_action(client, org, action, actor)
+        .await
+        .map_err(|e| Box::new(pg_err(e)))?;
+    let _ = pg::audit(
+        client,
+        actor,
+        Some(org),
+        &format!("steward.{action_type}"),
+        &json!({ "action_id": action_id, "status": "staged" }),
+    )
+    .await;
+    Ok(action_id)
+}
+
+/// The staged-action response envelope (`_steward_action`): always `staged`
+/// here, so `pending_until_next_reconcile` is false (immediate apply is the
+/// infra-bound writer-lock path).
+fn staged_response(status: StatusCode, action_id: &str) -> axum::response::Response {
+    (
+        status,
+        Json(json!({
+            "status": "staged",
+            "action_id": action_id,
+            "pending_until_next_reconcile": false,
+        })),
+    )
+        .into_response()
+}
+
+#[derive(Deserialize)]
+struct AssertionIn {
+    kind: String,
+    a: String,
+    b: String,
+    #[serde(default)]
+    note: Option<String>,
+    #[serde(default)]
+    apply_now: bool,
+}
+
+/// Steward+: stage an always/never assertion on a pair
+/// (`POST /v1/orgs/{org}/assertions`). With `apply_now`, also enqueue an
+/// incremental rebuild that drains + applies it.
+async fn add_assertion(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Json(body): Json<AssertionIn>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
+    if body.kind != "always" && body.kind != "never" {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "kind must be always | never",
+        );
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(
+            StatusCode::NOT_IMPLEMENTED,
+            "steward actions require Postgres",
+        );
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let action = json!({
+        "type": "add_assertion",
+        "kind": body.kind,
+        "a": body.a,
+        "b": body.b,
+        "note": body.note,
+    });
+    let action_id = match steward_stage(&client, &principal.actor, &org, &action).await {
+        Ok(id) => id,
+        Err(r) => return *r,
+    };
+    if !body.apply_now {
+        return staged_response(StatusCode::CREATED, &action_id);
+    }
+    // apply_now: enqueue the incremental rebuild that drains the staged action.
+    let idem = format!("assert-apply:{}", ulid::Ulid::new());
+    let params = json!({ "skip_ingest": true });
+    match pg::enqueue(
+        &client,
+        &org,
+        "run_all_incremental",
+        0,
+        Some(&idem),
+        Some(&params),
+    )
+    .await
+    {
+        Ok(job) => (
+            StatusCode::CREATED,
+            Json(json!({
+                "status": "staged",
+                "action_id": action_id,
+                "pending_until_next_reconcile": false,
+                "apply_job": job.job_id,
+            })),
+        )
+            .into_response(),
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Steward+: stage an assertion retraction
+/// (`DELETE /v1/orgs/{org}/assertions/{assertion_id}`).
+async fn retract_assertion(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, assertion_id)): Path<(String, String)>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(
+            StatusCode::NOT_IMPLEMENTED,
+            "steward actions require Postgres",
+        );
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let action = json!({ "type": "retract_assertion", "assertion_id": assertion_id });
+    match steward_stage(&client, &principal.actor, &org, &action).await {
+        Ok(id) => staged_response(StatusCode::OK, &id),
+        Err(r) => *r,
+    }
+}
+
+/// Viewer+: how many steward actions await the next reconcile
+/// (`GET /v1/orgs/{org}/staged`).
+async fn staged_count(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(
+            StatusCode::NOT_IMPLEMENTED,
+            "steward actions require Postgres",
+        );
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    match pg::pending_count(&client, &org).await {
+        Ok(n) => Json(json!({ "pending_count": n })).into_response(),
+        Err(e) => pg_err(e),
+    }
+}
+
 #[derive(Deserialize)]
 struct KeyIn {
     role: String,
@@ -2289,7 +2486,15 @@ pub fn app(state: AppState) -> Router {
         .route("/v1/orgs/{org}/records", get(records_by_key))
         .route("/v1/orgs/{org}/reviews", get(reviews_list))
         .route("/v1/orgs/{org}/reviews/{review_id}", get(review_detail))
-        .route("/v1/orgs/{org}/assertions", get(assertions_list))
+        .route(
+            "/v1/orgs/{org}/assertions",
+            get(assertions_list).post(add_assertion),
+        )
+        .route(
+            "/v1/orgs/{org}/assertions/{assertion_id}",
+            axum::routing::delete(retract_assertion),
+        )
+        .route("/v1/orgs/{org}/staged", get(staged_count))
         .route("/v1/orgs/{org}/imports", get(imports_list))
         .route("/v1/orgs/{org}/runs", get(runs_list))
         .route("/v1/orgs/{org}/merge-plans", get(merge_plans))

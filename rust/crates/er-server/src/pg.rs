@@ -99,7 +99,18 @@ CREATE TABLE IF NOT EXISTS audit_log (\
   org text,\
   action text NOT NULL,\
   detail jsonb NOT NULL DEFAULT '{}'::jsonb\
-);";
+);\
+CREATE TABLE IF NOT EXISTS staged_steward_actions (\
+  action_id text PRIMARY KEY,\
+  org text NOT NULL REFERENCES orgs(name),\
+  action jsonb NOT NULL,\
+  state text NOT NULL DEFAULT 'pending' CHECK (state IN ('pending','applied','failed')),\
+  error text,\
+  created_by text NOT NULL,\
+  created_at timestamptz NOT NULL DEFAULT now(),\
+  applied_at timestamptz\
+);\
+CREATE INDEX IF NOT EXISTS staged_pending ON staged_steward_actions (org, state);";
 
 const JOB_COLS: &str = "job_id, org, kind, state, priority";
 
@@ -686,6 +697,43 @@ pub async fn get_config_version(
         created_at: r.get("created_at"),
         published_at: r.get("published_at"),
     }))
+}
+
+/// Stage a steward action for the dispatcher to drain when the org's writer
+/// lock goes quiet (`steward.py` `stage_action`); returns its `action_id`.
+///
+/// # Errors
+/// Propagates the insert error.
+pub async fn stage_action(
+    client: &Client,
+    org: &str,
+    action: &serde_json::Value,
+    created_by: &str,
+) -> Result<String, PgError> {
+    let action_id = ulid::Ulid::new().to_string();
+    client
+        .execute(
+            "INSERT INTO staged_steward_actions (action_id, org, action, created_by) \
+             VALUES ($1, $2, $3, $4)",
+            &[&action_id, &org, &action, &created_by],
+        )
+        .await?;
+    Ok(action_id)
+}
+
+/// How many steward actions are pending apply for an org (`steward.py`
+/// `pending_count`).
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn pending_count(client: &Client, org: &str) -> Result<i64, PgError> {
+    let row = client
+        .query_one(
+            "SELECT count(*) FROM staged_steward_actions WHERE org = $1 AND state = 'pending'",
+            &[&org],
+        )
+        .await?;
+    Ok(row.get::<_, i64>(0))
 }
 
 /// Append one audit-ledger row (`auth.py` `audit`): one per authenticated

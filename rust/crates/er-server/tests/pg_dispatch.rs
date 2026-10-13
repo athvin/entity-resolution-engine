@@ -38,7 +38,7 @@ async fn dispatcher_runs_run_all_over_a_per_org_ducklake() {
     let mut client = pg::connect(&dsn).await.unwrap();
     client
         .batch_execute(
-            "DROP TABLE IF EXISTS schedules, config_versions, api_keys, jobs, orgs CASCADE;",
+            "DROP TABLE IF EXISTS staged_steward_actions, audit_log, schedules, config_versions, api_keys, jobs, orgs CASCADE;",
         )
         .await
         .unwrap();
