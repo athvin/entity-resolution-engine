@@ -1028,6 +1028,8 @@ name = "er-server"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "base64 0.22.1",
+ "dedupe-core",
  "er-cli",
  "er-config",
  "hex",

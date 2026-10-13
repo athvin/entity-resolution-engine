@@ -70,3 +70,5 @@ tokio-postgres = { version = "0.7", features = ["with-serde_json-1"] }
 ulid = "1"
 # API-key secret generation (SHA-256-hashed at rest; the plaintext is random).
 rand = "0.9"
+# Opaque keyset read cursors (base64url of the snapshot + last key).
+base64 = "0.22"

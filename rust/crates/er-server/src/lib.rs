@@ -23,14 +23,16 @@
 //! OIDC needs an external provider; the rest land in the next bricks.
 
 pub mod pg;
+pub mod read;
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use er_config::{Config, config_hash, load_config_str};
 
 use axum::Json;
 use axum::Router;
-use axum::extract::{FromRequestParts, Path, State};
+use axum::extract::{FromRequestParts, Path, Query, State};
 use axum::http::StatusCode;
 use axum::http::request::Parts;
 use axum::response::IntoResponse;
@@ -118,6 +120,12 @@ fn pg_err(e: tokio_postgres::Error) -> axum::response::Response {
         Json(json!({ "error": format!("db: {e}") })),
     )
         .into_response()
+}
+
+/// A `{ "detail": … }` error body — the FastAPI shape the frontend BFF parses
+/// (`proxy.ts` reads `detail`, and keys its user-facing mapping on the status).
+fn detail_err(code: StatusCode, msg: impl Into<String>) -> axum::response::Response {
+    (code, Json(json!({ "detail": msg.into() }))).into_response()
 }
 
 /// The role lattice (`auth.py` `ROLE_RANK`): the derived `Ord` ranks
@@ -1197,6 +1205,87 @@ async fn cancel_job(
     }
 }
 
+/// Open the requesting org's lake read-only, resolving the org row first.
+/// Returns the attached session, or a ready error response (404 no org, 501 no
+/// Postgres backend, 503 lake unavailable).
+async fn org_lake(
+    state: &AppState,
+    org: &str,
+) -> Result<dedupe_core::Session, Box<axum::response::Response>> {
+    let Some(dsn) = &state.dsn else {
+        return Err(Box::new(detail_err(
+            StatusCode::NOT_IMPLEMENTED,
+            "read API requires Postgres",
+        )));
+    };
+    let client = connect_pg(dsn).await.map_err(|r| Box::new(*r))?;
+    let env = match pg::get_org(&client, org).await {
+        Ok(Some(o)) => o.env,
+        Ok(None) => {
+            return Err(Box::new(detail_err(
+                StatusCode::NOT_FOUND,
+                format!("no org '{org}'"),
+            )));
+        }
+        Err(e) => {
+            return Err(Box::new(detail_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("db: {e}"),
+            )));
+        }
+    };
+    read::open_org_lake(&env).map_err(|e| {
+        Box::new(detail_err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!("lake unavailable: {e}"),
+        ))
+    })
+}
+
+/// Viewer+: a keyset page of the org's golden (resolved) records
+/// (`GET /v1/orgs/{org}/golden-records`). Query: `q` (contains-search), `cursor`
+/// (opaque), `limit` (<=200). Reads the org's DuckLake at a pinned snapshot.
+async fn golden_records_list(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let session = match org_lake(&state, &org).await {
+        Ok(s) => s,
+        Err(r) => return *r,
+    };
+    let (snapshot, after) =
+        match read::page_start(&session, params.get("cursor").map(String::as_str)) {
+            Ok(x) => x,
+            Err(read::PageStartError::BadCursor) => {
+                return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "invalid cursor");
+            }
+            Err(read::PageStartError::Lake(e)) => {
+                return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
+            }
+        };
+    let limit = read::parse_limit(params.get("limit").map(String::as_str));
+    match read::golden_list(
+        &session,
+        snapshot,
+        params.get("q").map(String::as_str),
+        after.as_deref(),
+        limit,
+    ) {
+        Ok((items, next_cursor)) => Json(json!({
+            "items": items,
+            "snapshot": snapshot,
+            "next_cursor": next_cursor,
+        }))
+        .into_response(),
+        Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
+    }
+}
+
 #[derive(Deserialize)]
 struct KeyIn {
     role: String,
@@ -1304,6 +1393,7 @@ pub fn app(state: AppState) -> Router {
             post(publish_config_version),
         )
         .route("/v1/orgs/{org}/config", get(active_config))
+        .route("/v1/orgs/{org}/golden-records", get(golden_records_list))
         .with_state(state)
 }
 
