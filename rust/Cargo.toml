@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/dedupe-core", "crates/dedupe-cli", "crates/er-eval", "crates/er-errors", "crates/er-ids", "crates/er-hash", "crates/er-schema", "crates/er-obs", "crates/er-env", "crates/er-versions"]
+members = ["crates/dedupe-core", "crates/dedupe-cli", "crates/er-eval", "crates/er-errors", "crates/er-ids", "crates/er-hash", "crates/er-schema", "crates/er-obs", "crates/er-env", "crates/er-versions", "crates/er-config"]
 
 [workspace.package]
 version = "0.1.0"
@@ -50,6 +50,10 @@ needless_pass_by_value = "allow"
 duckdb = { version = "=1.10505.0", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
+# Maintained serde_yaml fork (serde_yaml itself is deprecated). Reads the S6
+# config document; config_hash is computed over the serde_json re-serialisation,
+# not this crate's output, so YAML quirks never reach the digest.
+serde_norway = "0.9"
 sqlparser = { version = "0.63", features = ["visitor"] }
 thiserror = "2"
 regex = "1"
