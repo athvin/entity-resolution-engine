@@ -1212,6 +1212,38 @@ async fn cancel_job(
     }
 }
 
+/// Steward+: requeue a failed/canceled job (`POST /v1/orgs/{org}/jobs/{job_id}/
+/// resume`; the Python `{job_id}:resume` action). 409 if the job isn't in a
+/// resumable state. Postgres-only (the in-memory store has no resume path).
+async fn resume_job(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, job_id)): Path<(String, String)>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "resume requires Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    match pg::resume_job(&client, &org, &job_id).await {
+        Ok(true) => (
+            StatusCode::OK,
+            Json(json!({ "job_id": job_id, "state": "queued" })),
+        )
+            .into_response(),
+        Ok(false) => detail_err(
+            StatusCode::CONFLICT,
+            "job is not resumable (not failed or canceled)",
+        ),
+        Err(e) => pg_err(e),
+    }
+}
+
 /// Open the requesting org's lake read-only, resolving the org row first.
 /// Returns the attached session, or a ready error response (404 no org, 501 no
 /// Postgres backend, 503 lake unavailable).
@@ -1808,6 +1840,7 @@ pub fn app(state: AppState) -> Router {
         // axum/matchit requires a param to be a whole segment, so the Python
         // `{job_id}:cancel` action becomes a `/cancel` sub-path here.
         .route("/v1/orgs/{org}/jobs/{job_id}/cancel", post(cancel_job))
+        .route("/v1/orgs/{org}/jobs/{job_id}/resume", post(resume_job))
         .route("/v1/orgs/{org}/api-keys", post(create_key))
         .route(
             "/v1/orgs/{org}/api-keys/{key_id}",

@@ -149,6 +149,41 @@ async fn job_lifecycle_over_postgres_http() {
         .unwrap();
     assert_eq!(json_body(resp).await["state"], "canceled");
 
+    // resume the canceled job -> back to queued
+    let resp = app
+        .clone()
+        .oneshot(op_request(
+            "POST",
+            &format!("/v1/orgs/acme/jobs/{job_id}/resume"),
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(json_body(resp).await["state"], "queued");
+    let resp = app
+        .clone()
+        .oneshot(op_request(
+            "GET",
+            &format!("/v1/orgs/acme/jobs/{job_id}"),
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(json_body(resp).await["state"], "queued");
+
+    // resuming a queued (non-failed/canceled) job is a 409
+    let resp = app
+        .clone()
+        .oneshot(op_request(
+            "POST",
+            &format!("/v1/orgs/acme/jobs/{job_id}/resume"),
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CONFLICT);
+
     // a genuinely absent job is a 404
     let resp = app
         .oneshot(op_request(

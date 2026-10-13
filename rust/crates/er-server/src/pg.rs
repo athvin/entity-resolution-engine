@@ -226,6 +226,27 @@ pub async fn mark(client: &Client, job_id: &str, state: &str) -> Result<(), PgEr
     Ok(())
 }
 
+/// Requeue a failed/canceled job (`queue.py` `resume_job`): back to `queued`
+/// with `not_before = now()`, `finished_at` cleared, and — if it has a `run_id`
+/// — a `resume_run_id` param so the next dispatch resumes that run. Returns
+/// `true` iff a resumable row changed; `false` (→ 409) for any other state.
+///
+/// # Errors
+/// Propagates the update error.
+pub async fn resume_job(client: &Client, org: &str, job_id: &str) -> Result<bool, PgError> {
+    let n = client
+        .execute(
+            "UPDATE jobs SET state = 'queued', not_before = now(), updated_at = now(), \
+             finished_at = NULL, \
+             params = CASE WHEN run_id IS NULL THEN params \
+                           ELSE params || jsonb_build_object('resume_run_id', run_id) END \
+             WHERE org = $1 AND job_id = $2 AND state IN ('failed', 'canceled')",
+            &[&org, &job_id],
+        )
+        .await?;
+    Ok(n == 1)
+}
+
 /// One job by id scoped to an org (`None` if absent / another org's).
 ///
 /// # Errors
