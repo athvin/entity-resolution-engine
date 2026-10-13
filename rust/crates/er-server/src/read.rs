@@ -193,3 +193,142 @@ pub fn parse_limit(raw: Option<&str>) -> i64 {
         .unwrap_or(DEFAULT_LIMIT)
         .clamp(1, MAX_LIMIT)
 }
+
+/// The lake's latest snapshot version (the pin for a cursor-less read).
+///
+/// # Errors
+/// Propagates the lake query error.
+pub fn latest_snapshot(session: &Session) -> Result<i64, String> {
+    session.latest_snapshot_version().map_err(|e| e.to_string())
+}
+
+/// Each row of an inner SELECT as a JSON object (NULLs/types preserved via
+/// `to_json`).
+fn json_rows(session: &Session, inner_sql: &str) -> Result<Vec<Value>, String> {
+    let rows = session
+        .query_strings(&format!("SELECT to_json(t) FROM ({inner_sql}) t"))
+        .map_err(|e| e.to_string())?;
+    Ok(rows
+        .iter()
+        .map(|r| serde_json::from_str(&r[0]).unwrap_or(Value::Null))
+        .collect())
+}
+
+/// One resolved entity with its members, lineage, and events
+/// (`readapi.entity_detail`), snapshot-pinned. `None` if the entity is absent
+/// at that snapshot (→ 404).
+///
+/// # Errors
+/// Propagates a lake query error.
+pub fn entity_detail(
+    session: &Session,
+    snapshot: i64,
+    entity_id: &str,
+) -> Result<Option<Value>, String> {
+    let eid = lit(entity_id);
+    let at = format!("AT (VERSION => {snapshot})");
+    let golden = json_rows(
+        session,
+        &format!(
+            "SELECT {GOLDEN_COLUMNS} FROM lake.main.golden_records {at} WHERE entity_id = {eid}"
+        ),
+    )?;
+    let Some(golden_row) = golden.into_iter().next() else {
+        return Ok(None);
+    };
+    let members = json_rows(
+        session,
+        &format!(
+            "SELECT source_system, source_record_id, record_key, assigned_at, run_id \
+             FROM lake.main.entity_membership {at} WHERE entity_id = {eid} ORDER BY record_key"
+        ),
+    )?;
+    let lineage = json_rows(
+        session,
+        &format!(
+            "SELECT attribute, record_key, source_system, source_record_id, rule \
+             FROM lake.main.golden_lineage {at} WHERE entity_id = {eid} \
+             ORDER BY attribute, record_key"
+        ),
+    )?;
+    let events = json_rows(
+        session,
+        &format!(
+            "SELECT event_id, seq, run_id, event_type, details, occurred_at \
+             FROM lake.main.entity_events {at} WHERE entity_id = {eid} ORDER BY occurred_at, seq"
+        ),
+    )?;
+    Ok(Some(json!({
+        "golden": golden_row,
+        "members": members,
+        "lineage": lineage,
+        "events": events,
+    })))
+}
+
+/// A snapshot-pinned scalar count.
+fn count_at(session: &Session, sql: &str) -> Result<i64, String> {
+    let rows = session.query_strings(sql).map_err(|e| e.to_string())?;
+    Ok(rows
+        .first()
+        .and_then(|r| r.first())
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(0))
+}
+
+/// Dashboard counters (`readapi.metrics`), snapshot-pinned: record/entity totals
+/// and duplicate-group sizing, plus the open-review count (0 when the lake has
+/// no `review_queue` yet — that table is written by the review stage, not the
+/// base pipeline).
+///
+/// # Errors
+/// Propagates a lake query error (other than a missing `review_queue`).
+pub fn metrics(session: &Session, snapshot: i64) -> Result<Value, String> {
+    let at = format!("AT (VERSION => {snapshot})");
+    let records = count_at(
+        session,
+        &format!("SELECT count(*) FROM lake.main.int_std_records {at}"),
+    )?;
+    let entities = count_at(
+        session,
+        &format!("SELECT count(*) FROM lake.main.golden_records {at}"),
+    )?;
+    let dup = session
+        .query_strings(&format!(
+            "SELECT count(*), coalesce(sum(c), 0) FROM ( \
+               SELECT entity_id, count(*) AS c FROM lake.main.entity_membership {at} \
+               GROUP BY entity_id HAVING count(*) >= 2 \
+             ) g"
+        ))
+        .map_err(|e| e.to_string())?;
+    let duplicate_groups: i64 = dup
+        .first()
+        .and_then(|r| r.first())
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    let records_in_dupes: i64 = dup
+        .first()
+        .and_then(|r| r.get(1))
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    // review_queue is optional in a base-pipeline lake; absence ⇒ 0 open.
+    let open_reviews = session
+        .query_strings(&format!(
+            "SELECT count(*) FROM lake.main.review_queue {at} WHERE status = 'open'"
+        ))
+        .ok()
+        .and_then(|r| {
+            r.first()
+                .and_then(|c| c.first())
+                .and_then(|s| s.parse::<i64>().ok())
+        })
+        .unwrap_or(0);
+    Ok(json!({
+        "records": records,
+        "entities": entities,
+        "duplicate_groups": duplicate_groups,
+        "records_in_duplicate_groups": records_in_dupes,
+        "open_reviews": open_reviews,
+        "snapshot": snapshot,
+    }))
+}

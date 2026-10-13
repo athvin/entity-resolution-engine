@@ -147,6 +147,7 @@ async fn golden_records_read_over_ducklake() {
     assert!(page["next_cursor"].is_null());
     assert!(items[0].get("entity_id").is_some());
     assert!(items[0].get("given_name").is_some());
+    let some_entity = items[0]["entity_id"].as_str().unwrap().to_string();
 
     // Keyset paging: limit=4 walks all 10 in 3 pages with no dup/missing.
     let mut seen: BTreeSet<String> = BTreeSet::new();
@@ -188,6 +189,46 @@ async fn golden_records_read_over_ducklake() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    // Detail: golden + members + lineage + events for a real entity.
+    let resp = app
+        .clone()
+        .oneshot(op_get(&format!(
+            "/v1/orgs/acme/golden-records/{some_entity}"
+        )))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let detail = json_body(resp).await;
+    assert_eq!(detail["golden"]["entity_id"], some_entity);
+    assert!(
+        !detail["members"].as_array().unwrap().is_empty(),
+        "an entity has >=1 member"
+    );
+    assert!(detail["lineage"].is_array());
+    assert!(detail["events"].is_array());
+
+    // Detail of an absent entity is a 404.
+    let resp = app
+        .clone()
+        .oneshot(op_get("/v1/orgs/acme/golden-records/no-such-entity"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
+    // Metrics: base_10 => 10 entities, 23 current std records, some dup groups.
+    let resp = app
+        .clone()
+        .oneshot(op_get("/v1/orgs/acme/metrics"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let m = json_body(resp).await;
+    assert_eq!(m["entities"], 10);
+    assert_eq!(m["records"], 23);
+    assert!(m["duplicate_groups"].as_i64().unwrap() >= 1);
+    assert_eq!(m["open_reviews"], 0);
+    assert!(m["snapshot"].as_i64().unwrap() >= 1);
 
     // A viewer key can read (viewer+).
     let resp = app

@@ -1286,6 +1286,54 @@ async fn golden_records_list(
     }
 }
 
+/// Viewer+: one resolved entity with members/lineage/events
+/// (`GET /v1/orgs/{org}/golden-records/{entity_id}`), 404 if absent.
+async fn golden_record_detail(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, entity_id)): Path<(String, String)>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let session = match org_lake(&state, &org).await {
+        Ok(s) => s,
+        Err(r) => return *r,
+    };
+    let snapshot = match read::latest_snapshot(&session) {
+        Ok(s) => s,
+        Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
+    };
+    match read::entity_detail(&session, snapshot, &entity_id) {
+        Ok(Some(detail)) => Json(detail).into_response(),
+        Ok(None) => detail_err(StatusCode::NOT_FOUND, format!("no entity '{entity_id}'")),
+        Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
+    }
+}
+
+/// Viewer+: dashboard counters over the org's lake (`GET /v1/orgs/{org}/metrics`).
+async fn org_metrics(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let session = match org_lake(&state, &org).await {
+        Ok(s) => s,
+        Err(r) => return *r,
+    };
+    let snapshot = match read::latest_snapshot(&session) {
+        Ok(s) => s,
+        Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
+    };
+    match read::metrics(&session, snapshot) {
+        Ok(m) => Json(m).into_response(),
+        Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
+    }
+}
+
 #[derive(Deserialize)]
 struct KeyIn {
     role: String,
@@ -1394,6 +1442,11 @@ pub fn app(state: AppState) -> Router {
         )
         .route("/v1/orgs/{org}/config", get(active_config))
         .route("/v1/orgs/{org}/golden-records", get(golden_records_list))
+        .route(
+            "/v1/orgs/{org}/golden-records/{entity_id}",
+            get(golden_record_detail),
+        )
+        .route("/v1/orgs/{org}/metrics", get(org_metrics))
         .with_state(state)
 }
 
