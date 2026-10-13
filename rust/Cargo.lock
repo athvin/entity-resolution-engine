@@ -807,6 +807,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "er-match"
+version = "0.1.0"
+dependencies = [
+ "dedupe-core",
+]
+
+[[package]]
 name = "er-obs"
 version = "0.1.0"
 dependencies = [
@@ -820,7 +827,11 @@ dependencies = [
 name = "er-reconcile"
 version = "0.1.0"
 dependencies = [
+ "er-ids",
+ "hex",
  "serde_json",
+ "sha2",
+ "thiserror",
 ]
 
 [[package]]

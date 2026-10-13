@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/dedupe-core", "crates/dedupe-cli", "crates/er-eval", "crates/er-errors", "crates/er-ids", "crates/er-hash", "crates/er-schema", "crates/er-obs", "crates/er-env", "crates/er-versions", "crates/er-config", "crates/er-std", "crates/er-ingest", "crates/er-standardize", "crates/er-reconcile"]
+members = ["crates/dedupe-core", "crates/dedupe-cli", "crates/er-eval", "crates/er-errors", "crates/er-ids", "crates/er-hash", "crates/er-schema", "crates/er-obs", "crates/er-env", "crates/er-versions", "crates/er-config", "crates/er-std", "crates/er-ingest", "crates/er-standardize", "crates/er-reconcile", "crates/er-match"]
 
 [workspace.package]
 version = "0.1.0"
