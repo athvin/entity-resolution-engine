@@ -5,5 +5,7 @@
 //! `entity_membership` gate land once the matching stage is in place.
 //!
 //! - [`cluster`]: S4.5.2 min-label propagation (connected components).
+//! - [`reconcile`]: the S4.5.3 INV-PERM offer/acceptance fixpoint.
 
 pub mod cluster;
+pub mod reconcile;

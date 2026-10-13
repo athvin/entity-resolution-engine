@@ -1,0 +1,279 @@
+{
+  "_comment": "reconcile_plan golden from er.entities.reconcile (CountingIdFactory start=0). Regen: uv run python rust/crates/er-reconcile/tests/gen_reconcile_golden.py",
+  "cases": [
+    {
+      "name": "all_create",
+      "p_old": {},
+      "p_new": [
+        [
+          "a",
+          "b"
+        ],
+        [
+          "c"
+        ]
+      ],
+      "assignments": [
+        [
+          "a",
+          "00000000000000000000000000"
+        ],
+        [
+          "b",
+          "00000000000000000000000000"
+        ],
+        [
+          "c",
+          "00000000000000000000000001"
+        ]
+      ],
+      "transitions": [
+        {
+          "entity_id": "00000000000000000000000000",
+          "status": "active",
+          "merged_into": null,
+          "is_new": true
+        },
+        {
+          "entity_id": "00000000000000000000000001",
+          "status": "active",
+          "merged_into": null,
+          "is_new": true
+        }
+      ],
+      "minted": [
+        "00000000000000000000000000",
+        "00000000000000000000000001"
+      ]
+    },
+    {
+      "name": "noop",
+      "p_old": {
+        "E1": [
+          "a",
+          "b"
+        ]
+      },
+      "p_new": [
+        [
+          "a",
+          "b"
+        ]
+      ],
+      "assignments": [],
+      "transitions": [],
+      "minted": []
+    },
+    {
+      "name": "merge",
+      "p_old": {
+        "E1": [
+          "a",
+          "b"
+        ],
+        "E2": [
+          "c",
+          "d"
+        ]
+      },
+      "p_new": [
+        [
+          "a",
+          "b",
+          "c",
+          "d"
+        ]
+      ],
+      "assignments": [
+        [
+          "c",
+          "E1"
+        ],
+        [
+          "d",
+          "E1"
+        ]
+      ],
+      "transitions": [
+        {
+          "entity_id": "E1",
+          "status": "active",
+          "merged_into": null,
+          "is_new": false
+        },
+        {
+          "entity_id": "E2",
+          "status": "merged",
+          "merged_into": "E1",
+          "is_new": false
+        }
+      ],
+      "minted": []
+    },
+    {
+      "name": "split",
+      "p_old": {
+        "E1": [
+          "a",
+          "b",
+          "c",
+          "d"
+        ]
+      },
+      "p_new": [
+        [
+          "a",
+          "b"
+        ],
+        [
+          "c",
+          "d"
+        ]
+      ],
+      "assignments": [
+        [
+          "c",
+          "00000000000000000000000000"
+        ],
+        [
+          "d",
+          "00000000000000000000000000"
+        ]
+      ],
+      "transitions": [
+        {
+          "entity_id": "00000000000000000000000000",
+          "status": "active",
+          "merged_into": null,
+          "is_new": true
+        },
+        {
+          "entity_id": "E1",
+          "status": "active",
+          "merged_into": null,
+          "is_new": false
+        }
+      ],
+      "minted": [
+        "00000000000000000000000000"
+      ]
+    },
+    {
+      "name": "tie_min_key",
+      "p_old": {
+        "E1": [
+          "a"
+        ],
+        "E2": [
+          "b"
+        ]
+      },
+      "p_new": [
+        [
+          "a",
+          "b"
+        ]
+      ],
+      "assignments": [
+        [
+          "b",
+          "E1"
+        ]
+      ],
+      "transitions": [
+        {
+          "entity_id": "E1",
+          "status": "active",
+          "merged_into": null,
+          "is_new": false
+        },
+        {
+          "entity_id": "E2",
+          "status": "merged",
+          "merged_into": "E1",
+          "is_new": false
+        }
+      ],
+      "minted": []
+    },
+    {
+      "name": "retire_and_orphan",
+      "p_old": {
+        "E1": [
+          "a"
+        ],
+        "E2": [
+          "b"
+        ]
+      },
+      "p_new": [
+        [
+          "b"
+        ]
+      ],
+      "assignments": [
+        [
+          "a",
+          "00000000000000000000000000"
+        ]
+      ],
+      "transitions": [
+        {
+          "entity_id": "00000000000000000000000000",
+          "status": "active",
+          "merged_into": null,
+          "is_new": true
+        },
+        {
+          "entity_id": "E1",
+          "status": "retired",
+          "merged_into": null,
+          "is_new": false
+        }
+      ],
+      "minted": [
+        "00000000000000000000000000"
+      ]
+    },
+    {
+      "name": "absorb_smaller",
+      "p_old": {
+        "E1": [
+          "a",
+          "b"
+        ],
+        "E2": [
+          "c"
+        ]
+      },
+      "p_new": [
+        [
+          "a",
+          "b",
+          "c"
+        ]
+      ],
+      "assignments": [
+        [
+          "c",
+          "E1"
+        ]
+      ],
+      "transitions": [
+        {
+          "entity_id": "E1",
+          "status": "active",
+          "merged_into": null,
+          "is_new": false
+        },
+        {
+          "entity_id": "E2",
+          "status": "merged",
+          "merged_into": "E1",
+          "is_new": false
+        }
+      ],
+      "minted": []
+    }
+  ]
+}
