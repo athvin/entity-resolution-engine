@@ -7,5 +7,7 @@
 //! - [`cluster`]: S4.5.2 min-label propagation (connected components).
 //! - [`reconcile`]: the S4.5.3 INV-PERM offer/acceptance fixpoint.
 
+pub mod assertions;
 pub mod cluster;
+pub mod never_cut;
 pub mod reconcile;

@@ -1,0 +1,204 @@
+{
+  "_comment": "never_cut_fixpoint golden from er.review.never_cut. Regen: uv run python rust/crates/er-reconcile/tests/gen_never_cut_golden.py",
+  "cases": [
+    {
+      "name": "no_never",
+      "edges": [
+        [
+          "a",
+          "b",
+          0.96
+        ]
+      ],
+      "assertions": [],
+      "cut_protect": 1.0,
+      "cuts": [],
+      "escalations": [],
+      "iterations": 0
+    },
+    {
+      "name": "satisfied",
+      "edges": [
+        [
+          "a",
+          "b",
+          0.96
+        ]
+      ],
+      "assertions": [
+        [
+          "a",
+          "x",
+          "A1"
+        ]
+      ],
+      "cut_protect": 1.0,
+      "cuts": [],
+      "escalations": [],
+      "iterations": 0
+    },
+    {
+      "name": "simple_cut",
+      "edges": [
+        [
+          "a",
+          "b",
+          0.96
+        ],
+        [
+          "b",
+          "c",
+          0.9
+        ]
+      ],
+      "assertions": [
+        [
+          "a",
+          "c",
+          "A1"
+        ]
+      ],
+      "cut_protect": 1.0,
+      "cuts": [
+        [
+          "b",
+          "c",
+          0.9,
+          "A1"
+        ]
+      ],
+      "escalations": [],
+      "iterations": 1
+    },
+    {
+      "name": "protected_escalate",
+      "edges": [
+        [
+          "a",
+          "b",
+          0.96
+        ],
+        [
+          "b",
+          "c",
+          0.97
+        ]
+      ],
+      "assertions": [
+        [
+          "a",
+          "c",
+          "A1"
+        ]
+      ],
+      "cut_protect": 0.95,
+      "cuts": [],
+      "escalations": [
+        [
+          "a",
+          "c",
+          "A1"
+        ]
+      ],
+      "iterations": 1
+    },
+    {
+      "name": "multi_iteration",
+      "edges": [
+        [
+          "a",
+          "b",
+          0.9
+        ],
+        [
+          "b",
+          "d",
+          0.8
+        ],
+        [
+          "a",
+          "d",
+          0.7
+        ]
+      ],
+      "assertions": [
+        [
+          "a",
+          "d",
+          "A1"
+        ]
+      ],
+      "cut_protect": 1.0,
+      "cuts": [
+        [
+          "a",
+          "d",
+          0.7,
+          "A1"
+        ],
+        [
+          "b",
+          "d",
+          0.8,
+          "A1"
+        ]
+      ],
+      "escalations": [],
+      "iterations": 2
+    },
+    {
+      "name": "two_pairs",
+      "edges": [
+        [
+          "a",
+          "b",
+          0.9
+        ],
+        [
+          "b",
+          "c",
+          0.9
+        ],
+        [
+          "d",
+          "e",
+          0.9
+        ],
+        [
+          "e",
+          "f",
+          0.9
+        ]
+      ],
+      "assertions": [
+        [
+          "a",
+          "c",
+          "A1"
+        ],
+        [
+          "d",
+          "f",
+          "A2"
+        ]
+      ],
+      "cut_protect": 1.0,
+      "cuts": [
+        [
+          "a",
+          "b",
+          0.9,
+          "A1"
+        ],
+        [
+          "d",
+          "e",
+          0.9,
+          "A2"
+        ]
+      ],
+      "escalations": [],
+      "iterations": 1
+    }
+  ]
+}
