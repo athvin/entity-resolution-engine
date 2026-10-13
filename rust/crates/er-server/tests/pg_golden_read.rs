@@ -301,6 +301,36 @@ async fn golden_records_read_over_ducklake() {
     assert_eq!(resp.status(), StatusCode::OK);
     assert_eq!(json_body(resp).await["items"].as_array().unwrap().len(), 0);
 
+    // Reviews/assertions/imports read tables the base pipeline doesn't populate
+    // yet: they respond 200 with an empty page, not 404/500.
+    for (uri, key) in [
+        ("/v1/orgs/acme/reviews", "items"),
+        ("/v1/orgs/acme/assertions", "items"),
+        ("/v1/orgs/acme/imports", "items"),
+    ] {
+        let resp = app.clone().oneshot(op_get(uri)).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "{uri}");
+        let body = json_body(resp).await;
+        assert_eq!(body[key].as_array().unwrap().len(), 0, "{uri} empty");
+    }
+
+    // Runs is a bare array, also empty on a base lake.
+    let resp = app
+        .clone()
+        .oneshot(op_get("/v1/orgs/acme/runs"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(json_body(resp).await.as_array().unwrap().len(), 0);
+
+    // A review by id is a 404 when there's no review_queue / no such review.
+    let resp = app
+        .clone()
+        .oneshot(op_get("/v1/orgs/acme/reviews/no-such-review"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
     // A viewer key can read (viewer+).
     let resp = app
         .clone()

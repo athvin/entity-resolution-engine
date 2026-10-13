@@ -1437,6 +1437,172 @@ async fn records_by_key(
     }
 }
 
+/// Resolve `(snapshot, after)` from the `cursor` query param, or a ready error
+/// response (422 bad cursor, 503 lake). Shared by the keyset read handlers.
+fn page_or_err(
+    session: &dedupe_core::Session,
+    cursor: Option<&str>,
+) -> Result<(i64, Option<String>), Box<axum::response::Response>> {
+    match read::page_start(session, cursor) {
+        Ok(x) => Ok(x),
+        Err(read::PageStartError::BadCursor) => Err(Box::new(detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid cursor",
+        ))),
+        Err(read::PageStartError::Lake(e)) => Err(Box::new(detail_err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!("lake: {e}"),
+        ))),
+    }
+}
+
+/// `{ items, next_cursor }` for a keyset reader result (the reviews/assertions/
+/// imports envelope — no `snapshot` key, matching the Python readapi).
+fn page_envelope(r: Result<(Vec<Value>, Option<String>), String>) -> axum::response::Response {
+    match r {
+        Ok((items, next_cursor)) => {
+            Json(json!({ "items": items, "next_cursor": next_cursor })).into_response()
+        }
+        Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
+    }
+}
+
+/// Viewer+: the open-review queue (`GET /v1/orgs/{org}/reviews`).
+async fn reviews_list(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let session = match org_lake(&state, &org).await {
+        Ok(s) => s,
+        Err(r) => return *r,
+    };
+    let (snapshot, after) = match page_or_err(&session, params.get("cursor").map(String::as_str)) {
+        Ok(x) => x,
+        Err(r) => return *r,
+    };
+    let limit = read::parse_limit(params.get("limit").map(String::as_str));
+    page_envelope(read::reviews_list(
+        &session,
+        snapshot,
+        after.as_deref(),
+        limit,
+    ))
+}
+
+/// Viewer+: one review by id (`GET /v1/orgs/{org}/reviews/{review_id}`), 404 if absent.
+async fn review_detail(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, review_id)): Path<(String, String)>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let session = match org_lake(&state, &org).await {
+        Ok(s) => s,
+        Err(r) => return *r,
+    };
+    let snapshot = match read::latest_snapshot(&session) {
+        Ok(s) => s,
+        Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
+    };
+    match read::review_get(&session, snapshot, &review_id) {
+        Ok(Some(r)) => Json(r).into_response(),
+        Ok(None) => detail_err(StatusCode::NOT_FOUND, format!("no review '{review_id}'")),
+        Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
+    }
+}
+
+/// Viewer+: the assertion ledger (`GET /v1/orgs/{org}/assertions`), active-only
+/// unless `?include_retracted=true`.
+async fn assertions_list(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let session = match org_lake(&state, &org).await {
+        Ok(s) => s,
+        Err(r) => return *r,
+    };
+    let (snapshot, after) = match page_or_err(&session, params.get("cursor").map(String::as_str)) {
+        Ok(x) => x,
+        Err(r) => return *r,
+    };
+    let include_retracted = matches!(
+        params.get("include_retracted").map(String::as_str),
+        Some("true" | "1")
+    );
+    let limit = read::parse_limit(params.get("limit").map(String::as_str));
+    page_envelope(read::assertions_list(
+        &session,
+        snapshot,
+        include_retracted,
+        after.as_deref(),
+        limit,
+    ))
+}
+
+/// Viewer+: ingest-batch receipts (`GET /v1/orgs/{org}/imports`), optional
+/// `?source` filter.
+async fn imports_list(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let session = match org_lake(&state, &org).await {
+        Ok(s) => s,
+        Err(r) => return *r,
+    };
+    let (snapshot, after) = match page_or_err(&session, params.get("cursor").map(String::as_str)) {
+        Ok(x) => x,
+        Err(r) => return *r,
+    };
+    let limit = read::parse_limit(params.get("limit").map(String::as_str));
+    page_envelope(read::imports_list(
+        &session,
+        snapshot,
+        params.get("source").map(String::as_str),
+        after.as_deref(),
+        limit,
+    ))
+}
+
+/// Viewer+: the 20 most recent runs (`GET /v1/orgs/{org}/runs`), a bare array.
+async fn runs_list(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let session = match org_lake(&state, &org).await {
+        Ok(s) => s,
+        Err(r) => return *r,
+    };
+    let snapshot = match read::latest_snapshot(&session) {
+        Ok(s) => s,
+        Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
+    };
+    match read::runs_list(&session, snapshot) {
+        Ok(items) => Json(json!(items)).into_response(),
+        Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
+    }
+}
+
 #[derive(Deserialize)]
 struct KeyIn {
     role: String,
@@ -1553,6 +1719,11 @@ pub fn app(state: AppState) -> Router {
         .route("/v1/orgs/{org}/duplicates", get(duplicates_list))
         .route("/v1/orgs/{org}/match-scores", get(match_scores_list))
         .route("/v1/orgs/{org}/records", get(records_by_key))
+        .route("/v1/orgs/{org}/reviews", get(reviews_list))
+        .route("/v1/orgs/{org}/reviews/{review_id}", get(review_detail))
+        .route("/v1/orgs/{org}/assertions", get(assertions_list))
+        .route("/v1/orgs/{org}/imports", get(imports_list))
+        .route("/v1/orgs/{org}/runs", get(runs_list))
         .with_state(state)
 }
 

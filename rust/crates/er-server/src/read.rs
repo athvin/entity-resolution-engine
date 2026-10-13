@@ -442,6 +442,225 @@ pub fn records_by_key(
         .collect())
 }
 
+/// Whether a lake query error is "the table isn't there" — expected for a lake
+/// whose review/assertion/run/ingest-tracking stages haven't populated these
+/// relations yet, in which case the reader returns an empty page rather than an
+/// error.
+fn is_missing_table(err: &str) -> bool {
+    err.contains("does not exist")
+        || err.contains("Catalog Error")
+        || err.contains("Table with name")
+}
+
+/// A generic snapshot-pinned keyset page over one lake table, ordered by
+/// `key_col`. Returns an empty page if the table is absent (a lake whose
+/// stage hasn't populated it). `columns` is the projection; `extra_filters` are
+/// AND-ed with the keyset predicate.
+///
+/// # Errors
+/// Propagates a non-missing-table lake query error.
+#[allow(clippy::too_many_arguments)]
+pub fn keyset_list(
+    session: &Session,
+    snapshot: i64,
+    table: &str,
+    columns: &str,
+    key_col: &str,
+    extra_filters: &[String],
+    after: Option<&str>,
+    limit: i64,
+) -> Result<(Vec<Value>, Option<String>), String> {
+    let limit = limit.clamp(1, MAX_LIMIT);
+    let at = format!("AT (VERSION => {snapshot})");
+    let mut filters: Vec<String> = extra_filters.to_vec();
+    if let Some(a) = after {
+        filters.push(format!("{key_col} > {}", lit(a)));
+    }
+    let where_sql = if filters.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", filters.join(" AND "))
+    };
+    let sql = format!(
+        "SELECT {key_col}, to_json(t) FROM ( \
+           SELECT {columns} FROM lake.main.{table} {at} {where_sql} \
+           ORDER BY {key_col} LIMIT {} \
+         ) t ORDER BY {key_col}",
+        limit + 1
+    );
+    match session.query_strings(&sql) {
+        Ok(rows) => {
+            let has_more = rows.len() as i64 > limit;
+            let page = &rows[..rows.len().min(limit as usize)];
+            let items = page
+                .iter()
+                .map(|r| serde_json::from_str(&r[1]).unwrap_or(Value::Null))
+                .collect();
+            let next = has_more
+                .then(|| page.last().map(|r| encode_cursor(snapshot, &r[0])))
+                .flatten();
+            Ok((items, next))
+        }
+        Err(e) => {
+            let s = e.to_string();
+            if is_missing_table(&s) {
+                Ok((Vec::new(), None))
+            } else {
+                Err(s)
+            }
+        }
+    }
+}
+
+const REVIEW_COLUMNS: &str = "review_id, subject_type, rec_a_key, rec_b_key, entity_id, reason, \
+     match_probability, waterfall, status, first_seen_run_id, last_seen_run_id, resolved_by, \
+     resolved_at";
+const ASSERTION_COLUMNS: &str = "assertion_id, rec_a_key, rec_b_key, kind, active, created_by, \
+     created_at, retracted_by, retracted_at, note";
+const IMPORT_COLUMNS: &str = "ingest_batch_id, run_id, source_system, path, new_count, \
+     changed_count, unchanged_count, tombstone_count, resurrected_count, full_refresh_keys, \
+     created_at";
+const RUN_COLUMNS: &str = "run_id, mode, status, started_at, ended_at, config_hash, \
+     model_version, tf_snapshot_id, rebuild_reason";
+
+/// The open-review queue, FIFO by `review_id` (`readapi.reviews_list`).
+///
+/// # Errors
+/// Propagates a non-missing-table lake query error.
+pub fn reviews_list(
+    session: &Session,
+    snapshot: i64,
+    after: Option<&str>,
+    limit: i64,
+) -> Result<(Vec<Value>, Option<String>), String> {
+    keyset_list(
+        session,
+        snapshot,
+        "review_queue",
+        REVIEW_COLUMNS,
+        "review_id",
+        &[],
+        after,
+        limit,
+    )
+}
+
+/// One review by id (`readapi.review_get`), `None` if absent / table missing.
+///
+/// # Errors
+/// Propagates a non-missing-table lake query error.
+pub fn review_get(
+    session: &Session,
+    snapshot: i64,
+    review_id: &str,
+) -> Result<Option<Value>, String> {
+    let sql = format!(
+        "SELECT to_json(t) FROM ( \
+           SELECT {REVIEW_COLUMNS} FROM lake.main.review_queue AT (VERSION => {snapshot}) \
+           WHERE review_id = {} \
+         ) t",
+        lit(review_id)
+    );
+    match session.query_strings(&sql) {
+        Ok(rows) => Ok(rows
+            .first()
+            .map(|r| serde_json::from_str(&r[0]).unwrap_or(Value::Null))),
+        Err(e) => {
+            let s = e.to_string();
+            if is_missing_table(&s) {
+                Ok(None)
+            } else {
+                Err(s)
+            }
+        }
+    }
+}
+
+/// The assertion ledger, keyed by `assertion_id` (`readapi.assertions_list`).
+/// Active-only unless `include_retracted`.
+///
+/// # Errors
+/// Propagates a non-missing-table lake query error.
+pub fn assertions_list(
+    session: &Session,
+    snapshot: i64,
+    include_retracted: bool,
+    after: Option<&str>,
+    limit: i64,
+) -> Result<(Vec<Value>, Option<String>), String> {
+    let filters: Vec<String> = if include_retracted {
+        Vec::new()
+    } else {
+        vec!["active".to_string()]
+    };
+    keyset_list(
+        session,
+        snapshot,
+        "assertions",
+        ASSERTION_COLUMNS,
+        "assertion_id",
+        &filters,
+        after,
+        limit,
+    )
+}
+
+/// The ingest-batch receipts, keyed by `ingest_batch_id`
+/// (`readapi.ingest_batches_list`). Optional `source` filter.
+///
+/// # Errors
+/// Propagates a non-missing-table lake query error.
+pub fn imports_list(
+    session: &Session,
+    snapshot: i64,
+    source: Option<&str>,
+    after: Option<&str>,
+    limit: i64,
+) -> Result<(Vec<Value>, Option<String>), String> {
+    let filters: Vec<String> = source
+        .filter(|s| !s.is_empty())
+        .map(|s| vec![format!("source_system = {}", lit(s))])
+        .unwrap_or_default();
+    keyset_list(
+        session,
+        snapshot,
+        "ingest_batches",
+        IMPORT_COLUMNS,
+        "ingest_batch_id",
+        &filters,
+        after,
+        limit,
+    )
+}
+
+/// The most recent runs, newest first, capped at 20 (`readapi.runs_list`): a
+/// bare array (not a keyset page). Empty if the `runs` table is absent.
+///
+/// # Errors
+/// Propagates a non-missing-table lake query error.
+pub fn runs_list(session: &Session, snapshot: i64) -> Result<Vec<Value>, String> {
+    let sql = format!(
+        "SELECT to_json(t) FROM ( \
+           SELECT {RUN_COLUMNS} FROM lake.main.runs AT (VERSION => {snapshot}) \
+           ORDER BY started_at DESC LIMIT 20 \
+         ) t"
+    );
+    match session.query_strings(&sql) {
+        Ok(rows) => Ok(rows
+            .iter()
+            .map(|r| serde_json::from_str(&r[0]).unwrap_or(Value::Null))
+            .collect()),
+        Err(e) => {
+            let s = e.to_string();
+            if is_missing_table(&s) {
+                Ok(Vec::new())
+            } else {
+                Err(s)
+            }
+        }
+    }
+}
+
 /// A snapshot-pinned scalar count.
 fn count_at(session: &Session, sql: &str) -> Result<i64, String> {
     let rows = session.query_strings(sql).map_err(|e| e.to_string())?;
