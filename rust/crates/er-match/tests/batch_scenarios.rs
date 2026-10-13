@@ -1,15 +1,19 @@
 //! Incremental (base -> batch) scenario gates (S8.2). Each scenario resolves a
-//! `base` phase, then a `batch` phase whose delivery changes the clustering, and
-//! both phases' membership partitions + event profiles are checked against the
-//! committed goldens (id-insensitively — Rust mints its own entity ids).
+//! `base` phase, then a `batch` phase whose delivery (or steward assertion)
+//! reshapes the clustering, checked against the committed goldens
+//! (id-insensitively — Rust mints its own entity ids).
 //!
 //! As the Python scenario tests do, both phases score the full cumulative corpus
 //! (`match --mode full`; reconcile auto-upgrades to full), so a batch is
 //! `reconcile_plan(p_old = prior membership, p_new = connected components over
-//! the cumulative corpus)` folded onto the prior membership. This exercises
-//! every reconcile transition end-to-end: merge, member_added (merge_scenario*),
-//! split + member_removed + created (split_scenario*), and content supersession
-//! (supersession_scenario).
+//! the cumulative corpus — after never-cut)` folded onto the prior membership.
+//! Exercises merge/member_added, split/member_removed/created, content
+//! supersession, and `never`-cut severing (bridge + partition-level path cuts).
+//!
+//! `edge_cut` events (emitted per never-cut edge) are not yet produced here, so
+//! scenarios whose batch events include `edge_cut` are gated on membership only;
+//! `always`-assertion merges and assertion retraction (assertions_scenario) and
+//! tombstone deletion (deletion_scenario) are the remaining assertion chunk.
 
 mod common;
 
@@ -17,14 +21,22 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use dedupe_core::session::{Session, SessionOptions};
 use er_ids::CountingIdFactory;
+use er_reconcile::assertions::check_contradiction_1;
 use er_reconcile::reconcile::ReconcilePlan;
 
-fn expected(scenario: &str, phase: &str, relation: &str) -> String {
+/// An expected relation if the scenario commits one for the phase; `None` means
+/// the phase makes no claim about it (S8.2.1).
+fn expected_opt(scenario: &str, phase: &str, relation: &str) -> Option<String> {
     let path = format!(
         "{}/../../../fixtures/static/{scenario}/expected/{phase}/{relation}.csv",
         env!("CARGO_MANIFEST_DIR")
     );
-    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {path}: {e}"))
+    std::fs::read_to_string(&path).ok()
+}
+
+fn expected(scenario: &str, phase: &str, relation: &str) -> String {
+    expected_opt(scenario, phase, relation)
+        .unwrap_or_else(|| panic!("{scenario}/{phase}/{relation}.csv not committed"))
 }
 
 /// The set of clusters (each a sorted record-key set) of a full membership.
@@ -86,16 +98,16 @@ fn events_csv(csv: &str) -> Vec<Vec<(String, usize)>> {
     event_profiles(by_label)
 }
 
-/// Resolve `base` then `batch`, asserting both phases' membership + events
-/// against the committed goldens.
-fn run_two_phase(scenario: &str) {
+/// Resolve `base` then `batch`. Base membership + events and batch membership are
+/// always asserted; batch events only when `gate_batch_events` (a scenario whose
+/// batch emits `edge_cut` is membership-only until cut events are produced).
+fn run_two_phase(scenario: &str, gate_batch_events: bool) {
     let session = Session::open_in_memory(SessionOptions::deterministic()).unwrap();
     let config = common::scenario_init(&session);
     // One id source threaded across phases, so a batch's new entities never
     // collide with ids minted in the base phase.
     let ids = CountingIdFactory::new(0);
 
-    // base phase: empty prior.
     common::land_phase(
         &session,
         &config,
@@ -105,22 +117,23 @@ fn run_two_phase(scenario: &str) {
         "2026-01-01 00:00:00",
     );
     common::rebuild_std(&session, &config);
-    let base_never = common::load_never_pairs(scenario, "base");
+    let base_assertions = common::load_assertions(scenario, "base");
     let base_plan =
-        common::resolve_with_prior(&session, &config, &BTreeMap::new(), &ids, &base_never);
+        common::resolve_with_prior(&session, &config, &BTreeMap::new(), &ids, &base_assertions);
     let base_mem = common::fold_plan(&BTreeMap::new(), &base_plan);
     assert_eq!(
         partition_of(&base_mem),
         partition_csv(&expected(scenario, "base", "membership")),
         "{scenario}: base membership differs from golden"
     );
-    assert_eq!(
-        events_of(&base_plan),
-        events_csv(&expected(scenario, "base", "events")),
-        "{scenario}: base events differ from golden"
-    );
+    if let Some(golden) = expected_opt(scenario, "base", "events") {
+        assert_eq!(
+            events_of(&base_plan),
+            events_csv(&golden),
+            "{scenario}: base events differ from golden"
+        );
+    }
 
-    // batch phase: prior = base membership; the delivery reshapes the clusters.
     common::land_phase(
         &session,
         &config,
@@ -130,42 +143,81 @@ fn run_two_phase(scenario: &str) {
         "2026-06-01 12:00:00",
     );
     common::rebuild_std(&session, &config);
-    let batch_never = common::load_never_pairs(scenario, "batch");
-    let batch_plan = common::resolve_with_prior(&session, &config, &base_mem, &ids, &batch_never);
+    let batch_assertions = common::load_assertions(scenario, "batch");
+    let batch_plan =
+        common::resolve_with_prior(&session, &config, &base_mem, &ids, &batch_assertions);
     let batch_mem = common::fold_plan(&base_mem, &batch_plan);
     assert_eq!(
         partition_of(&batch_mem),
         partition_csv(&expected(scenario, "batch", "membership")),
         "{scenario}: batch membership differs from golden"
     );
-    assert_eq!(
-        events_of(&batch_plan),
-        events_csv(&expected(scenario, "batch", "events")),
-        "{scenario}: batch events differ from golden"
-    );
+    if gate_batch_events {
+        assert_eq!(
+            events_of(&batch_plan),
+            events_csv(&expected(scenario, "batch", "events")),
+            "{scenario}: batch events differ from golden"
+        );
+    }
 }
 
+// Full membership + events parity (no edge_cut in these batches).
 #[test]
 fn merge_scenario() {
-    run_two_phase("merge_scenario");
+    run_two_phase("merge_scenario", true);
 }
 
 #[test]
 fn merge_scenario_tie() {
-    run_two_phase("merge_scenario_tie");
+    run_two_phase("merge_scenario_tie", true);
 }
 
 #[test]
 fn split_scenario() {
-    run_two_phase("split_scenario");
+    run_two_phase("split_scenario", true);
 }
 
 #[test]
 fn split_scenario_tie_2_2() {
-    run_two_phase("split_scenario_tie_2_2");
+    run_two_phase("split_scenario_tie_2_2", true);
 }
 
 #[test]
 fn supersession_scenario() {
-    run_two_phase("supersession_scenario");
+    run_two_phase("supersession_scenario", true);
+}
+
+// never-cut partition splits — membership parity (batch events carry `edge_cut`,
+// which these gates do not yet emit).
+#[test]
+fn assertions_path_tie() {
+    run_two_phase("assertions_path_tie", false);
+}
+
+#[test]
+fn assertions_cut_tie() {
+    run_two_phase("assertions_cut_tie", false);
+}
+
+#[test]
+fn assertions_two_iterations() {
+    run_two_phase("assertions_two_iterations", false);
+}
+
+#[test]
+fn assertions_non_batch() {
+    run_two_phase("assertions_non_batch", false);
+}
+
+/// CONTRADICTION-1 (S4.4.1): an `always`-closure that also carries a `never` over
+/// the same component is unsatisfiable, and the batch must refuse — the fixture
+/// commits no batch output. We assert the check finds the contradiction.
+#[test]
+fn assertions_contradiction_refuses() {
+    let batch_assertions = common::load_assertions("assertions_contradiction", "batch");
+    let findings = check_contradiction_1(&batch_assertions);
+    assert!(
+        !findings.is_empty(),
+        "expected CONTRADICTION-1 to reject the batch assertions"
+    );
 }

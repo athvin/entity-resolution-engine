@@ -17,7 +17,9 @@ use er_config::{Config, load_config_str};
 use er_ids::{CountingIdFactory, IdFactory};
 use er_ingest::landing::{create_raw_records_sql, land_base_delivery};
 use er_match::{build_frozen_tf_tables, load_model};
+use er_reconcile::assertions::{Assertion, AssertionKind};
 use er_reconcile::cluster::label_propagate;
+use er_reconcile::never_cut::{PathEdge, never_cut_fixpoint};
 use er_reconcile::reconcile::{ReconcilePlan, reconcile_plan};
 use er_standardize::build_int_std_records;
 
@@ -121,9 +123,8 @@ pub fn resolve_with_prior(
     config: &Config,
     p_old: &BTreeMap<String, Vec<String>>,
     id_factory: &dyn IdFactory,
-    never_pairs: &BTreeSet<(String, String)>,
+    never_assertions: &[Assertion],
 ) -> ReconcilePlan {
-    let _ = config;
     let settings = load_model(MODEL_JSON).unwrap();
     let input = session
         .register_table("int_std_records", "int_std_records")
@@ -138,23 +139,24 @@ pub fn resolve_with_prior(
     .unwrap();
     let predictions = run_predict_with_tf(session, &settings, &input, &tf_tables, None).unwrap();
 
-    let edges: Vec<(String, String)> = session
+    // Auto-merge edges (canonical, deduped) with their probabilities — never-cut
+    // chooses the lowest-probability edge on a path, so the weight is load-bearing.
+    let mut edges: Vec<PathEdge> = session
         .query_strings(&format!(
-            "select distinct rec_a_key, rec_b_key from (
-                 select least(record_key_l, record_key_r) as rec_a_key,
-                        greatest(record_key_l, record_key_r) as rec_b_key
-                   from {predictions}
-                  where record_key_l <> record_key_r and match_probability >= {AUTO_MERGE}
-               ) order by rec_a_key, rec_b_key",
+            "select distinct on (rec_a_key, rec_b_key) rec_a_key, rec_b_key, match_probability
+               from (
+                     select least(record_key_l, record_key_r) as rec_a_key,
+                            greatest(record_key_l, record_key_r) as rec_b_key,
+                            match_probability
+                       from {predictions}
+                      where record_key_l <> record_key_r and match_probability >= {AUTO_MERGE}
+                   )
+              order by rec_a_key, rec_b_key, match_probability desc",
             predictions = predictions.physical,
         ))
         .unwrap()
         .into_iter()
-        .map(|r| (r[0].clone(), r[1].clone()))
-        // S4.4 pre-clustering edge adjustment: drop any auto-merge edge a `never`
-        // assertion forbids. For a bridge (the asserted pair is a component's only
-        // connection) this splits it outright, with no partition-level cut.
-        .filter(|pair| !never_pairs.contains(pair))
+        .map(|r| (r[0].clone(), r[1].clone(), r[2].parse::<f64>().unwrap()))
         .collect();
 
     let nodes: Vec<String> = session
@@ -164,7 +166,31 @@ pub fn resolve_with_prior(
         .map(|r| r[0].clone())
         .collect();
 
-    let labels = label_propagate(&nodes, &edges);
+    // S4.4 never-cut: drop the edges the bounded fixpoint cuts so no `never` pair
+    // stays co-clustered (a direct bridge is a length-1 path cut outright; a pair
+    // joined only through other records forces a partition-level cut).
+    if !never_assertions.is_empty() {
+        let result = never_cut_fixpoint(
+            &edges,
+            never_assertions,
+            &nodes,
+            config.clustering.cut_protect_probability,
+            config.clustering.max_iterations.try_into().unwrap(),
+        )
+        .unwrap();
+        let cut: BTreeSet<(String, String)> = result
+            .cuts
+            .iter()
+            .map(|c| (c.rec_a_key.clone(), c.rec_b_key.clone()))
+            .collect();
+        edges.retain(|(a, b, _)| !cut.contains(&(a.clone(), b.clone())));
+    }
+
+    let plain: Vec<(String, String)> = edges
+        .iter()
+        .map(|(a, b, _)| (a.clone(), b.clone()))
+        .collect();
+    let labels = label_propagate(&nodes, &plain);
     let mut by_label: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for (record_key, label) in &labels {
         by_label
@@ -205,22 +231,35 @@ pub fn fold_plan(
     by_entity
 }
 
-/// The canonicalized `never`-assertion pairs a scenario declares for a phase,
-/// read from `fixtures/static/<scenario>/assertions.csv` (columns: phase,
-/// rec_a_key, rec_b_key, kind, created_by, note). Empty when the scenario has no
-/// assertions file. Pairs are canonicalized `a <= b` to match the SQL edge form.
-pub fn load_never_pairs(scenario: &str, phase: &str) -> BTreeSet<(String, String)> {
+/// The assertions a scenario declares for a phase, read from
+/// `fixtures/static/<scenario>/assertions.csv` (columns: phase, rec_a_key,
+/// rec_b_key, kind, created_by, note). All are `active` (the retraction case is
+/// not modeled yet); the synthesized `assertion_id` is only referenced by the
+/// cut/contradiction records, which these gates do not compare. Empty when the
+/// scenario has no assertions file.
+pub fn load_assertions(scenario: &str, phase: &str) -> Vec<Assertion> {
     let path = format!("{REPO_FIXTURES}/{scenario}/assertions.csv");
     let Ok(text) = std::fs::read_to_string(&path) else {
-        return BTreeSet::new();
+        return Vec::new();
     };
-    let mut out = BTreeSet::new();
+    let mut out = Vec::new();
     for line in text.lines().skip(1).filter(|l| !l.is_empty()) {
         let f: Vec<&str> = line.split(',').collect();
-        if f[0] == phase && f[3] == "never" {
-            let (a, b) = (f[1].to_string(), f[2].to_string());
-            out.insert(if a <= b { (a, b) } else { (b, a) });
+        if f[0] != phase {
+            continue;
         }
+        let kind = match f[3] {
+            "always" => AssertionKind::Always,
+            "never" => AssertionKind::Never,
+            other => panic!("unknown assertion kind {other:?} in {path}"),
+        };
+        out.push(Assertion {
+            assertion_id: format!("{}|{}|{}", f[1], f[2], f[3]),
+            rec_a_key: f[1].to_string(),
+            rec_b_key: f[2].to_string(),
+            kind,
+            active: true,
+        });
     }
     out
 }
@@ -260,7 +299,7 @@ pub fn resolve_base_10(session: &Session) -> (Config, ReconcilePlan) {
         &config,
         &BTreeMap::new(),
         &CountingIdFactory::new(0),
-        &BTreeSet::new(),
+        &[],
     );
     (config, plan)
 }
