@@ -57,7 +57,10 @@ target-version = "py312"
 # 95-103 columns and the pipeline's SQL-bearing strings read badly narrower.
 line-length = 100
 # Keep reference Markdown and the legacy specification linter out of formatting.
-extend-exclude = ["*.md", "scripts/lint_spec.py"]
+# `rust/` is the Rust workspace (all-Rust rebuild): its only Python is throwaway
+# golden-generator tooling run via `uv run`, which is not part of the shipped
+# `src/er` package and is not held to its lint config.
+extend-exclude = ["*.md", "scripts/lint_spec.py", "rust"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "W"]
