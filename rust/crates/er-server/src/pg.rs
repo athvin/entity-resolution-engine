@@ -721,6 +721,43 @@ pub async fn stage_action(
     Ok(action_id)
 }
 
+/// An org's pending steward actions, oldest first (`steward.py` `drain_org`'s
+/// read): `(action_id, action)` for the dispatcher to apply to the lake.
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn pending_actions(
+    client: &Client,
+    org: &str,
+) -> Result<Vec<(String, serde_json::Value)>, PgError> {
+    let rows = client
+        .query(
+            "SELECT action_id, action FROM staged_steward_actions \
+             WHERE org = $1 AND state = 'pending' ORDER BY created_at, action_id",
+            &[&org],
+        )
+        .await?;
+    Ok(rows
+        .iter()
+        .map(|r| (r.get("action_id"), r.get("action")))
+        .collect())
+}
+
+/// Mark a staged action applied (`steward.py` `drain_org`).
+///
+/// # Errors
+/// Propagates the update error.
+pub async fn mark_action_applied(client: &Client, action_id: &str) -> Result<(), PgError> {
+    client
+        .execute(
+            "UPDATE staged_steward_actions SET state = 'applied', applied_at = now() \
+             WHERE action_id = $1",
+            &[&action_id],
+        )
+        .await?;
+    Ok(())
+}
+
 /// How many steward actions are pending apply for an org (`steward.py`
 /// `pending_count`).
 ///

@@ -42,6 +42,7 @@ pub const GOLDEN_LINEAGE: &str = "lake.main.golden_lineage";
 pub const GOLDEN_RECORDS: &str = "lake.main.golden_records";
 pub const RUNS: &str = "lake.main.runs";
 pub const REVIEW_QUEUE: &str = "lake.main.review_queue";
+pub const ASSERTIONS: &str = "lake.main.assertions";
 /// The nickname lexicon `int_std_records` reads — a temp relation (read
 /// cross-catalog while the lake write runs), seeded per session.
 pub const LEXICON: &str = "nickname_variants";
@@ -322,6 +323,98 @@ pub fn write_run_end(session: &Session, run_id: &str, ended_at: &str) -> Result<
         esc(ended_at),
         esc(run_id),
     ))?;
+    Ok(())
+}
+
+/// Apply one drained steward action to the lake (the control plane's
+/// `staged_steward_actions`, dispatched when the org's writer lock is free):
+///   - `add_assertion` → insert an active assertion on the canonicalized pair
+///     (its `assertion_id` is the staged `action_id`, deterministic + stable);
+///   - `retract_assertion` → deactivate the named assertion;
+///   - `resolve_review` → set the review's status/resolver, and for
+///     `match`/`no_match` derive an `always`/`never` assertion from the review's
+///     pair so the next reconcile enforces it.
+///
+/// This records the intent in the lake; ENFORCEMENT (an assertion re-biasing the
+/// clustering) happens on the next assertion-adjusted reconcile — proven
+/// in-memory in er-match, not yet wired into `run_reconcile` over the lake.
+///
+/// # Errors
+/// Propagates lake DDL / write errors.
+pub fn apply_staged_action(
+    session: &Session,
+    action_id: &str,
+    action: &serde_json::Value,
+    applied_at: &str,
+) -> Result<()> {
+    let field = |k: &str| {
+        action
+            .get(k)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+    };
+    match action.get("type").and_then(serde_json::Value::as_str) {
+        Some("add_assertion") => {
+            create_ddl_table(session, "assertions")?;
+            let (a, b) = (field("a"), field("b"));
+            let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+            let note = action
+                .get("note")
+                .and_then(serde_json::Value::as_str)
+                .map_or("NULL".to_string(), |n| format!("'{}'", esc(n)));
+            session.execute_batch(&format!(
+                "INSERT INTO {ASSERTIONS} \
+                   (assertion_id, rec_a_key, rec_b_key, kind, active, created_by, created_at, note) \
+                 VALUES ('{id}', '{lo}', '{hi}', '{kind}', true, '{by}', '{at}', {note})",
+                id = esc(action_id),
+                lo = esc(lo),
+                hi = esc(hi),
+                kind = esc(field("kind")),
+                by = esc(field("created_by")),
+                at = esc(applied_at),
+            ))?;
+        }
+        Some("retract_assertion") => {
+            create_ddl_table(session, "assertions")?;
+            session.execute_batch(&format!(
+                "UPDATE {ASSERTIONS} SET active = false, retracted_at = '{at}' \
+                 WHERE assertion_id = '{id}'",
+                at = esc(applied_at),
+                id = esc(field("assertion_id")),
+            ))?;
+        }
+        Some("resolve_review") => {
+            let rid = esc(field("review_id"));
+            let resolution = field("resolution");
+            let status = match resolution {
+                "match" => "resolved_match",
+                "no_match" => "resolved_no_match",
+                _ => "dismissed",
+            };
+            session.execute_batch(&format!(
+                "UPDATE {REVIEW_QUEUE} SET status = '{status}', resolved_at = '{at}' \
+                 WHERE review_id = '{rid}'",
+                at = esc(applied_at),
+            ))?;
+            // match/no_match leave an always/never assertion on the review's pair.
+            if let Some(kind) = match resolution {
+                "match" => Some("always"),
+                "no_match" => Some("never"),
+                _ => None,
+            } {
+                create_ddl_table(session, "assertions")?;
+                session.execute_batch(&format!(
+                    "INSERT INTO {ASSERTIONS} \
+                       (assertion_id, rec_a_key, rec_b_key, kind, active, created_by, created_at) \
+                     SELECT '{id}', rec_a_key, rec_b_key, '{kind}', true, 'steward', '{at}' \
+                     FROM {REVIEW_QUEUE} WHERE review_id = '{rid}'",
+                    id = esc(action_id),
+                    at = esc(applied_at),
+                ))?;
+            }
+        }
+        _ => {}
+    }
     Ok(())
 }
 
