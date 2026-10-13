@@ -825,6 +825,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "er-standardize"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dedupe-core",
+ "er-config",
+ "er-hash",
+ "er-ingest",
+ "er-std",
+ "serde_json",
+]
+
+[[package]]
 name = "er-std"
 version = "0.1.0"
 dependencies = [
