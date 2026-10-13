@@ -8,11 +8,12 @@
 //! `reconcile_plan(p_old = prior membership, p_new = connected components over
 //! the cumulative corpus — after never-cut)` folded onto the prior membership.
 //! Exercises merge/member_added, split/member_removed/created, content
-//! supersession, and `never`-cut severing (bridge + partition-level path cuts).
+//! supersession, and `never`-cut severing — both the direct bridge (edge
+//! adjustment, no `edge_cut`) and partition-level path cuts (one `edge_cut`
+//! event per cut edge, attributed to the severed entity). Membership AND events
+//! are gated for all of these.
 //!
-//! `edge_cut` events (emitted per never-cut edge) are not yet produced here, so
-//! scenarios whose batch events include `edge_cut` are gated on membership only;
-//! `always`-assertion merges and assertion retraction (assertions_scenario) and
+//! `always`-assertion merges + assertion retraction (assertions_scenario) and
 //! tombstone deletion (deletion_scenario) are the remaining assertion chunk.
 
 mod common;
@@ -187,26 +188,25 @@ fn supersession_scenario() {
     run_two_phase("supersession_scenario", true);
 }
 
-// never-cut partition splits — membership parity (batch events carry `edge_cut`,
-// which these gates do not yet emit).
+// never-cut partition splits — membership + events parity (incl. edge_cut).
 #[test]
 fn assertions_path_tie() {
-    run_two_phase("assertions_path_tie", false);
+    run_two_phase("assertions_path_tie", true);
 }
 
 #[test]
 fn assertions_cut_tie() {
-    run_two_phase("assertions_cut_tie", false);
+    run_two_phase("assertions_cut_tie", true);
 }
 
 #[test]
 fn assertions_two_iterations() {
-    run_two_phase("assertions_two_iterations", false);
+    run_two_phase("assertions_two_iterations", true);
 }
 
 #[test]
 fn assertions_non_batch() {
-    run_two_phase("assertions_non_batch", false);
+    run_two_phase("assertions_non_batch", true);
 }
 
 /// CONTRADICTION-1 (S4.4.1): an `always`-closure that also carries a `never` over

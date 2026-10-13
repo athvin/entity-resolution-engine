@@ -16,6 +16,7 @@ er-standardize = { path = "../er-standardize" }
 er-reconcile = { path = "../er-reconcile" }
 er-ids = { path = "../er-ids" }
 er-golden = { path = "../er-golden" }
+serde_json.workspace = true
 
 [lints]
 workspace = true

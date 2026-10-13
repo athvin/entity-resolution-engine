@@ -19,8 +19,8 @@ use er_ingest::landing::{create_raw_records_sql, land_base_delivery};
 use er_match::{build_frozen_tf_tables, load_model};
 use er_reconcile::assertions::{Assertion, AssertionKind};
 use er_reconcile::cluster::label_propagate;
-use er_reconcile::never_cut::{PathEdge, never_cut_fixpoint};
-use er_reconcile::reconcile::{ReconcilePlan, reconcile_plan};
+use er_reconcile::never_cut::{Cut, PathEdge, never_cut_fixpoint};
+use er_reconcile::reconcile::{PlannedEvent, ReconcilePlan, reconcile_plan};
 use er_standardize::build_int_std_records;
 
 pub const MODEL_VERSION: &str = "v0001";
@@ -166,31 +166,44 @@ pub fn resolve_with_prior(
         .map(|r| r[0].clone())
         .collect();
 
-    // S4.4 never-cut: drop the edges the bounded fixpoint cuts so no `never` pair
-    // stays co-clustered (a direct bridge is a length-1 path cut outright; a pair
-    // joined only through other records forces a partition-level cut).
+    // S4.4 edge adjustment: suppress the DIRECT edge of every `never` pair before
+    // clustering. A bridge (the pair is a component's only connection) splits
+    // outright here — no partition-level cut, so no `edge_cut` event.
+    let never_pairs: BTreeSet<(String, String)> = never_assertions
+        .iter()
+        .map(|a| {
+            let (x, y) = (a.rec_a_key.clone(), a.rec_b_key.clone());
+            if x <= y { (x, y) } else { (y, x) }
+        })
+        .collect();
+    edges.retain(|(a, b, _)| !never_pairs.contains(&(a.clone(), b.clone())));
+
+    // S4.4.2 never-cut: a `never` pair still co-clustered through OTHER records
+    // forces a partition-level cut of the lowest-probability edge on the path.
+    // Each such cut (unlike the direct-edge adjustment above) is an `edge_cut`.
+    let mut cuts: Vec<Cut> = Vec::new();
     if !never_assertions.is_empty() {
-        let result = never_cut_fixpoint(
+        cuts = never_cut_fixpoint(
             &edges,
             never_assertions,
             &nodes,
             config.clustering.cut_protect_probability,
             config.clustering.max_iterations.try_into().unwrap(),
         )
-        .unwrap();
-        let cut: BTreeSet<(String, String)> = result
-            .cuts
+        .unwrap()
+        .cuts;
+        let cutset: BTreeSet<(String, String)> = cuts
             .iter()
             .map(|c| (c.rec_a_key.clone(), c.rec_b_key.clone()))
             .collect();
-        edges.retain(|(a, b, _)| !cut.contains(&(a.clone(), b.clone())));
+        edges.retain(|(a, b, _)| !cutset.contains(&(a.clone(), b.clone())));
     }
 
-    let plain: Vec<(String, String)> = edges
+    let plain_edges: Vec<(String, String)> = edges
         .iter()
         .map(|(a, b, _)| (a.clone(), b.clone()))
         .collect();
-    let labels = label_propagate(&nodes, &plain);
+    let labels = label_propagate(&nodes, &plain_edges);
     let mut by_label: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for (record_key, label) in &labels {
         by_label
@@ -199,7 +212,30 @@ pub fn resolve_with_prior(
             .push(record_key.clone());
     }
     let p_new: Vec<Vec<String>> = by_label.into_values().collect();
-    reconcile_plan(p_old, &p_new, id_factory)
+    let mut plan = reconcile_plan(p_old, &p_new, id_factory);
+
+    // S4.4.2 edge_cut events: one per cut, attributed to the prior entity it
+    // severed. Both endpoints were co-clustered, so they share a prior entity,
+    // which survives as the claimant fragment and carries the event.
+    if !cuts.is_empty() {
+        let mut prior_entity: BTreeMap<&str, &str> = BTreeMap::new();
+        for (entity, members) in p_old {
+            for m in members {
+                prior_entity.insert(m.as_str(), entity.as_str());
+            }
+        }
+        for c in &cuts {
+            if let Some(entity) = prior_entity.get(c.rec_a_key.as_str()) {
+                plan.events.push(PlannedEvent {
+                    entity_id: (*entity).to_string(),
+                    event_type: "edge_cut".to_string(),
+                    details: serde_json::Value::Null,
+                    details_hash: String::new(),
+                });
+            }
+        }
+    }
+    plan
 }
 
 /// Fold a reconcile plan onto the prior membership to get the full new
