@@ -143,6 +143,69 @@ pub fn land_base_delivery(
     Ok(count)
 }
 
+/// Land a full-refresh delivery (S4.1.1, `--full-refresh-keys`): land the
+/// delivered rows, then TOMBSTONE every pre-existing key of this source the
+/// delivery omits — append a row carrying [`TOMBSTONE_CONTENT_HASH`], stamped at
+/// `ingested_at` so it supersedes the live version. The standardization stage
+/// (`int_std_records`) then drops those keys, so an omitted record leaves the
+/// corpus (S4.5.5: `member_removed`, and `retired` when it empties an entity).
+/// Returns the number of delivered rows landed (tombstones excluded).
+///
+/// # Errors
+/// Propagates the CSV parse / session errors of [`land_base_delivery`] and the
+/// omitted-key query / tombstone insert.
+pub fn land_full_refresh(
+    session: &Session,
+    table: &str,
+    source: &str,
+    spec: &SourceSpec,
+    csv_text: &str,
+    ingest_batch_id: &str,
+    ingested_at: &str,
+) -> anyhow::Result<usize> {
+    let landed = land_base_delivery(
+        session,
+        table,
+        source,
+        spec,
+        csv_text,
+        ingest_batch_id,
+        ingested_at,
+    )?;
+    // Keys this source carried before this delivery but that the delivery omits.
+    let omitted = session
+        .query_strings(&format!(
+            "select distinct source_record_id from {table} \
+             where source_system = {src} and ingest_batch_id <> {batch} \
+               and source_record_id not in (\
+                 select source_record_id from {table} \
+                 where source_system = {src} and ingest_batch_id = {batch})",
+            src = sql_str(source),
+            batch = sql_str(ingest_batch_id),
+        ))
+        .map_err(|e| anyhow::anyhow!("full-refresh omitted-key query on {table}: {e}"))?;
+    if !omitted.is_empty() {
+        let rows: Vec<String> = omitted
+            .iter()
+            .map(|r| {
+                format!(
+                    "({}, {}, NULL, {}, true, {}::timestamp, {}, {}::timestamp)",
+                    sql_str(source),
+                    sql_str(&r[0]),
+                    sql_str(TOMBSTONE_CONTENT_HASH),
+                    sql_str(ingested_at),
+                    sql_str(ingest_batch_id),
+                    sql_str(ingested_at),
+                )
+            })
+            .collect();
+        session
+            .execute_batch(&format!("insert into {table} values {}", rows.join(", ")))
+            .map_err(|e| anyhow::anyhow!("insert tombstones into {table}: {e}"))?;
+    }
+    Ok(landed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

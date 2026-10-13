@@ -15,7 +15,7 @@ use dedupe_core::predict::run_predict_with_tf;
 use dedupe_core::session::Session;
 use er_config::{Config, load_config_str};
 use er_ids::{CountingIdFactory, IdFactory};
-use er_ingest::landing::{create_raw_records_sql, land_base_delivery};
+use er_ingest::landing::{create_raw_records_sql, land_base_delivery, land_full_refresh};
 use er_match::{build_frozen_tf_tables, load_model};
 use er_reconcile::assertions::{Assertion, AssertionKind};
 use er_reconcile::cluster::label_propagate;
@@ -76,6 +76,7 @@ pub fn land_phase(
     phase: &str,
     ingest_batch_id: &str,
     ingested_at: &str,
+    full_refresh: bool,
 ) -> Vec<String> {
     let mut landed = Vec::new();
     for (source, spec) in &config.sources {
@@ -83,7 +84,12 @@ pub fn land_phase(
         let Ok(csv_text) = std::fs::read_to_string(&path) else {
             continue;
         };
-        land_base_delivery(
+        let land = if full_refresh {
+            land_full_refresh
+        } else {
+            land_base_delivery
+        };
+        land(
             session,
             "raw_records",
             source,
@@ -96,6 +102,17 @@ pub fn land_phase(
         landed.push(source.clone());
     }
     landed
+}
+
+/// The record keys currently in the corpus (`int_std_records`) — tombstoned keys
+/// are already excluded by the standardization stage.
+pub fn live_records(session: &Session) -> BTreeSet<String> {
+    session
+        .query_strings("select record_key from int_std_records")
+        .unwrap()
+        .into_iter()
+        .map(|r| r[0].clone())
+        .collect()
 }
 
 /// (Re)build `int_std_records` from the current `raw_records`.
@@ -231,7 +248,27 @@ pub fn resolve_with_prior(
             .push(record_key.clone());
     }
     let p_new: Vec<Vec<String>> = by_label.into_values().collect();
-    let mut plan = reconcile_plan(p_old, &p_new, id_factory);
+
+    // Reconcile against the prior membership restricted to still-live records: a
+    // tombstoned record is no longer in the corpus, so it is not a member of any
+    // new cluster. (Its member_removed/retired is a reconcile-STAGE concern on
+    // top of this pure core — see the deletion gate.)
+    let live: BTreeSet<&str> = nodes.iter().map(String::as_str).collect();
+    let p_old_live: BTreeMap<String, Vec<String>> = p_old
+        .iter()
+        .map(|(entity, members)| {
+            (
+                entity.clone(),
+                members
+                    .iter()
+                    .filter(|r| live.contains(r.as_str()))
+                    .cloned()
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .filter(|(_, members)| !members.is_empty())
+        .collect();
+    let mut plan = reconcile_plan(&p_old_live, &p_new, id_factory);
 
     // S4.4.2 edge_cut events: one per cut, attributed to the prior entity it
     // severed. Both endpoints were co-clustered, so they share a prior entity,
@@ -264,11 +301,14 @@ pub fn resolve_with_prior(
 /// entity; merged/retired entities keep no members (all were reassigned). This
 /// is both the batch partition under test and the `p_old` for any next phase.
 ///
-/// Note: this does not yet drop tombstoned records (member_removed) — fine for
-/// base/merge/split scenarios, revisit for deletion_scenario.
+/// `live` is the current corpus (`live_records`); any prior record no longer in
+/// it was tombstoned this phase and is dropped (its `member_removed`/`retired`
+/// transition is in the plan). Reassigned records are always live, so they are
+/// kept.
 pub fn fold_plan(
     p_old: &BTreeMap<String, Vec<String>>,
     plan: &ReconcilePlan,
+    live: &BTreeSet<String>,
 ) -> BTreeMap<String, Vec<String>> {
     let mut record_entity: BTreeMap<String, String> = BTreeMap::new();
     for (entity, members) in p_old {
@@ -281,7 +321,9 @@ pub fn fold_plan(
     }
     let mut by_entity: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for (record, entity) in record_entity {
-        by_entity.entry(entity).or_default().push(record);
+        if live.contains(&record) {
+            by_entity.entry(entity).or_default().push(record);
+        }
     }
     by_entity
 }
@@ -372,6 +414,7 @@ pub fn land_and_standardize_base_10(session: &Session) -> Config {
         "base",
         "01BATCH0000000000000000BASE",
         "2026-01-01 00:00:00",
+        false,
     );
     rebuild_std(session, &config);
     config

@@ -99,114 +99,124 @@ fn events_csv(csv: &str) -> Vec<Vec<(String, usize)>> {
     event_profiles(by_label)
 }
 
-/// Resolve `base` then `batch`. Base membership + events and batch membership are
-/// always asserted; batch events only when `gate_batch_events` (a scenario whose
-/// batch emits `edge_cut` is membership-only until cut events are produced).
-fn run_two_phase(scenario: &str, gate_batch_events: bool) {
+/// Phase ingested_at stamps, strictly increasing so supersession/tombstone
+/// ordering (latest row wins) follows phase order.
+const PHASE_TS: [&str; 3] = [
+    "2026-01-01 00:00:00",
+    "2026-06-01 12:00:00",
+    "2026-09-01 12:00:00",
+];
+
+/// Run a scenario's phases in order — each `(name, full_refresh, gate_events)` —
+/// threading the prior membership and one id factory across them. Every phase
+/// asserts membership; events are asserted when `gate_events` and the phase
+/// commits an events golden (S8.2.1 absent = no claim).
+fn run_phases(scenario: &str, phases: &[(&str, bool, bool)]) {
     let session = Session::open_in_memory(SessionOptions::deterministic()).unwrap();
     let config = common::scenario_init(&session);
-    // One id source threaded across phases, so a batch's new entities never
-    // collide with ids minted in the base phase.
     let ids = CountingIdFactory::new(0);
+    let mut p_old: BTreeMap<String, Vec<String>> = BTreeMap::new();
 
-    common::land_phase(
-        &session,
-        &config,
-        scenario,
-        "base",
-        &format!("{scenario}-base"),
-        "2026-01-01 00:00:00",
-    );
-    common::rebuild_std(&session, &config);
-    let base_assertions = common::phase_assertions(scenario, "base");
-    let base_plan =
-        common::resolve_with_prior(&session, &config, &BTreeMap::new(), &ids, &base_assertions);
-    let base_mem = common::fold_plan(&BTreeMap::new(), &base_plan);
-    assert_eq!(
-        partition_of(&base_mem),
-        partition_csv(&expected(scenario, "base", "membership")),
-        "{scenario}: base membership differs from golden"
-    );
-    if let Some(golden) = expected_opt(scenario, "base", "events") {
-        assert_eq!(
-            events_of(&base_plan),
-            events_csv(&golden),
-            "{scenario}: base events differ from golden"
+    for (i, (phase, full_refresh, gate_events)) in phases.iter().enumerate() {
+        common::land_phase(
+            &session,
+            &config,
+            scenario,
+            phase,
+            &format!("{scenario}-{phase}"),
+            PHASE_TS[i],
+            *full_refresh,
         );
-    }
+        common::rebuild_std(&session, &config);
+        let assertions = common::phase_assertions(scenario, phase);
+        let plan = common::resolve_with_prior(&session, &config, &p_old, &ids, &assertions);
+        let mem = common::fold_plan(&p_old, &plan, &common::live_records(&session));
 
-    common::land_phase(
-        &session,
-        &config,
-        scenario,
-        "batch",
-        &format!("{scenario}-batch"),
-        "2026-06-01 12:00:00",
-    );
-    common::rebuild_std(&session, &config);
-    let batch_assertions = common::phase_assertions(scenario, "batch");
-    let batch_plan =
-        common::resolve_with_prior(&session, &config, &base_mem, &ids, &batch_assertions);
-    let batch_mem = common::fold_plan(&base_mem, &batch_plan);
-    assert_eq!(
-        partition_of(&batch_mem),
-        partition_csv(&expected(scenario, "batch", "membership")),
-        "{scenario}: batch membership differs from golden"
-    );
-    if gate_batch_events {
         assert_eq!(
-            events_of(&batch_plan),
-            events_csv(&expected(scenario, "batch", "events")),
-            "{scenario}: batch events differ from golden"
+            partition_of(&mem),
+            partition_csv(&expected(scenario, phase, "membership")),
+            "{scenario}/{phase}: membership differs from golden"
         );
+        if *gate_events {
+            if let Some(golden) = expected_opt(scenario, phase, "events") {
+                assert_eq!(
+                    events_of(&plan),
+                    events_csv(&golden),
+                    "{scenario}/{phase}: events differ from golden"
+                );
+            }
+        }
+        p_old = mem;
     }
 }
 
-// Full membership + events parity (no edge_cut in these batches).
+/// The ordinary base->batch scenarios: both phases full membership + events.
+const BASE_BATCH: [(&str, bool, bool); 2] = [("base", false, true), ("batch", false, true)];
+
 #[test]
 fn merge_scenario() {
-    run_two_phase("merge_scenario", true);
+    run_phases("merge_scenario", &BASE_BATCH);
 }
 
 #[test]
 fn merge_scenario_tie() {
-    run_two_phase("merge_scenario_tie", true);
+    run_phases("merge_scenario_tie", &BASE_BATCH);
 }
 
 #[test]
 fn split_scenario() {
-    run_two_phase("split_scenario", true);
+    run_phases("split_scenario", &BASE_BATCH);
 }
 
 #[test]
 fn split_scenario_tie_2_2() {
-    run_two_phase("split_scenario_tie_2_2", true);
+    run_phases("split_scenario_tie_2_2", &BASE_BATCH);
 }
 
 #[test]
 fn supersession_scenario() {
-    run_two_phase("supersession_scenario", true);
+    run_phases("supersession_scenario", &BASE_BATCH);
 }
 
 // never-cut partition splits — membership + events parity (incl. edge_cut).
 #[test]
 fn assertions_path_tie() {
-    run_two_phase("assertions_path_tie", true);
+    run_phases("assertions_path_tie", &BASE_BATCH);
 }
 
 #[test]
 fn assertions_cut_tie() {
-    run_two_phase("assertions_cut_tie", true);
+    run_phases("assertions_cut_tie", &BASE_BATCH);
 }
 
 #[test]
 fn assertions_two_iterations() {
-    run_two_phase("assertions_two_iterations", true);
+    run_phases("assertions_two_iterations", &BASE_BATCH);
 }
 
 #[test]
 fn assertions_non_batch() {
-    run_two_phase("assertions_non_batch", true);
+    run_phases("assertions_non_batch", &BASE_BATCH);
+}
+
+/// Three-phase deletion (S8.2): `base` resolves, `refresh` is a full-refresh
+/// delivery tombstoning the two omitted keys (the bridge W321 -> split; the
+/// singleton C323 -> retire), and `resurrect` re-delivers W321 with corrected
+/// values, merging the fragments back. Membership (all three phases) matches;
+/// events are gated only on `base` (whose `created`s come from the pure core).
+/// The tombstone-driven `member_removed`/`retired` attribution on `refresh` is a
+/// reconcile-STAGE concern (relational_stage.py), not in the pure `reconcile_plan`
+/// core this gate drives — deferred with the edge_cut attribution.
+#[test]
+fn deletion_scenario() {
+    run_phases(
+        "deletion_scenario",
+        &[
+            ("base", false, true),
+            ("refresh", true, false),
+            ("resurrect", false, false),
+        ],
+    );
 }
 
 /// The full assertion scenario: an `always` force-merge (A1), a direct `never`
@@ -219,7 +229,10 @@ fn assertions_non_batch() {
 /// down needs the Python reconcile source and is deferred.
 #[test]
 fn assertions_scenario() {
-    run_two_phase("assertions_scenario", false);
+    run_phases(
+        "assertions_scenario",
+        &[("base", false, true), ("batch", false, false)],
+    );
 }
 
 /// CONTRADICTION-1 (S4.4.1): an `always`-closure that also carries a `never` over
