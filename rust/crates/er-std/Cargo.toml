@@ -15,6 +15,9 @@ thiserror.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
+# Runs the generated standardization SQL in a real DuckDB session to prove
+# byte-parity with the dbt macros.
+dedupe-core = { path = "../dedupe-core" }
 
 [lints]
 workspace = true

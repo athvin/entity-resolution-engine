@@ -10,3 +10,4 @@
 
 pub mod address;
 pub mod lexicon;
+pub mod sql;

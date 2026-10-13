@@ -794,6 +794,7 @@ dependencies = [
 name = "er-std"
 version = "0.1.0"
 dependencies = [
+ "dedupe-core",
  "hex",
  "regex",
  "serde_json",

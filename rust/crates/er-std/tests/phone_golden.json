@@ -1,0 +1,137 @@
+{
+  "_comment": "Golden phone_e164 oracle from the dbt macro via MacroHarness. Regenerate: uv run python rust/crates/er-std/tests/gen_phone_golden.py",
+  "cases": [
+    {
+      "input": null,
+      "region": "US",
+      "phone_e164": null,
+      "phone_valid": null
+    },
+    {
+      "input": "",
+      "region": "US",
+      "phone_e164": null,
+      "phone_valid": null
+    },
+    {
+      "input": "N/A",
+      "region": "US",
+      "phone_e164": null,
+      "phone_valid": null
+    },
+    {
+      "input": "unknown",
+      "region": "US",
+      "phone_e164": null,
+      "phone_valid": null
+    },
+    {
+      "input": "-",
+      "region": "US",
+      "phone_e164": null,
+      "phone_valid": null
+    },
+    {
+      "input": "  (415) 555-0132 ",
+      "region": "US",
+      "phone_e164": "+14155550132",
+      "phone_valid": true
+    },
+    {
+      "input": "415-555-0132",
+      "region": "US",
+      "phone_e164": "+14155550132",
+      "phone_valid": true
+    },
+    {
+      "input": "+14155550132",
+      "region": "US",
+      "phone_e164": "+14155550132",
+      "phone_valid": true
+    },
+    {
+      "input": "4155550132",
+      "region": "US",
+      "phone_e164": "+14155550132",
+      "phone_valid": true
+    },
+    {
+      "input": "1-415-555-0132",
+      "region": "US",
+      "phone_e164": "+14155550132",
+      "phone_valid": true
+    },
+    {
+      "input": "415.555.0132",
+      "region": "US",
+      "phone_e164": "+14155550132",
+      "phone_valid": true
+    },
+    {
+      "input": "+442071838750",
+      "region": "US",
+      "phone_e164": "+442071838750",
+      "phone_valid": true
+    },
+    {
+      "input": "555-0132",
+      "region": "US",
+      "phone_e164": null,
+      "phone_valid": false
+    },
+    {
+      "input": "+1234567890123456",
+      "region": "US",
+      "phone_e164": null,
+      "phone_valid": false
+    },
+    {
+      "input": "04155550132",
+      "region": "US",
+      "phone_e164": null,
+      "phone_valid": false
+    },
+    {
+      "input": "14155550132",
+      "region": "US",
+      "phone_e164": "+14155550132",
+      "phone_valid": true
+    },
+    {
+      "input": "+442071838750",
+      "region": "GB",
+      "phone_e164": "+442071838750",
+      "phone_valid": true
+    },
+    {
+      "input": "4155550132",
+      "region": "GB",
+      "phone_e164": null,
+      "phone_valid": false
+    },
+    {
+      "input": "(415) 555-0132",
+      "region": "GB",
+      "phone_e164": null,
+      "phone_valid": false
+    },
+    {
+      "input": "1-415-555-0132",
+      "region": "GB",
+      "phone_e164": null,
+      "phone_valid": false
+    },
+    {
+      "input": null,
+      "region": "GB",
+      "phone_e164": null,
+      "phone_valid": null
+    },
+    {
+      "input": "020 7183 8750",
+      "region": "GB",
+      "phone_e164": null,
+      "phone_valid": false
+    }
+  ]
+}
