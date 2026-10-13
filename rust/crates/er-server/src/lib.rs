@@ -26,7 +26,7 @@ pub mod pg;
 
 use std::sync::{Arc, Mutex};
 
-use er_config::{config_hash, load_config_str};
+use er_config::{Config, config_hash, load_config_str};
 
 use axum::Json;
 use axum::Router;
@@ -720,6 +720,227 @@ async fn active_config(
     }
 }
 
+/// Change tiers (`configsvc.py` `classify_tier`), biggest-blast-radius first.
+const TIER_C_BLOCKS: [&str; 3] = ["comparisons", "standardization", "sources"];
+const TIER_B_BLOCKS: [&str; 1] = ["blocking"];
+const TIER_A_BLOCKS: [&str; 2] = ["thresholds", "survivorship"];
+/// Blocks only an operator may change (`configsvc.py`): everything structural.
+const OPERATOR_ONLY_BLOCKS: [&str; 7] = [
+    "tenant",
+    "storage",
+    "versions",
+    "training",
+    "clustering",
+    "coherence",
+    "generator",
+];
+
+/// Top-level config blocks that differ between two configs, compared via their
+/// canonical serde representation (the object keys are exactly the 14 S6 blocks).
+fn config_changed_blocks(old: &Config, new: &Config) -> Vec<String> {
+    let old_v = serde_json::to_value(old).unwrap_or(Value::Null);
+    let new_v = serde_json::to_value(new).unwrap_or(Value::Null);
+    let old_m = old_v.as_object();
+    let new_m = new_v.as_object();
+    let mut keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    if let Some(m) = old_m {
+        keys.extend(m.keys().cloned());
+    }
+    if let Some(m) = new_m {
+        keys.extend(m.keys().cloned());
+    }
+    keys.into_iter()
+        .filter(|k| old_m.and_then(|m| m.get(k)) != new_m.and_then(|m| m.get(k)))
+        .collect()
+}
+
+/// The publish tier for a changed-block set: C > B > A, else `None`.
+fn tier_for(changed: &[String]) -> Option<&'static str> {
+    let hits = |set: &[&str]| changed.iter().any(|b| set.contains(&b.as_str()));
+    if hits(&TIER_C_BLOCKS) {
+        Some("C")
+    } else if hits(&TIER_B_BLOCKS) {
+        Some("B")
+    } else if hits(&TIER_A_BLOCKS) {
+        Some("A")
+    } else {
+        None
+    }
+}
+
+/// Atomically write the published YAML to the org's `config_path` (tempfile +
+/// rename), the file the dispatcher reads. Synchronous IO is acceptable here —
+/// publish is rare and not on a hot path.
+fn write_config_file(path: &str, yaml: &str) -> std::io::Result<()> {
+    let tmp = format!("{path}.tmp");
+    std::fs::write(&tmp, yaml)?;
+    std::fs::rename(&tmp, path)
+}
+
+/// Admin+ (operator for structural blocks): publish a draft config version
+/// (`POST /v1/orgs/{org}/config/versions/{version}/publish`; the Python
+/// `{version}:publish` action). Re-validates, classifies the change tier versus
+/// the current active config, writes the YAML to `config_path`, points
+/// `active_config_version` at it, and enqueues the tier's rebuild jobs.
+///
+/// Soundness note: this refuses to publish to a non-active org up front (409)
+/// rather than publishing then 409-ing at enqueue as the Python does — an atomic
+/// refusal avoids a half-applied publish.
+async fn publish_config_version(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, version)): Path<(String, String)>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Admin) {
+        return e.into_response();
+    }
+    let Some(version) = parse_version(&version) else {
+        return config_version_missing(&org, &version).into_response();
+    };
+    let Some(dsn) = &state.dsn else {
+        return config_registry_unavailable();
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+
+    // The version being published + its re-validated config.
+    let detail = match pg::get_config_version(&client, &org, version).await {
+        Ok(Some(d)) => d,
+        Ok(None) => return config_version_missing(&org, &version.to_string()).into_response(),
+        Err(e) => return pg_err(e),
+    };
+    let new_config = match load_config_str(&detail.yaml) {
+        Ok(c) => c,
+        Err(e) => return config_invalid(&e).into_response(),
+    };
+
+    // Org publish context (config_path / state / current active version).
+    let (config_path, org_state, active_v) = match pg::org_publish_context(&client, &org).await {
+        Ok(Some(ctx)) => ctx,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": format!("no org '{org}'") })),
+            )
+                .into_response();
+        }
+        Err(e) => return pg_err(e),
+    };
+
+    // Classify the change versus the current active config (first publish => C).
+    let (tier, changed): (Option<&str>, Vec<String>) = match active_v {
+        None => (Some("C"), Vec::new()),
+        Some(av) => {
+            let old_yaml = match pg::get_config_version(&client, &org, av).await {
+                Ok(Some(d)) => d.yaml,
+                Ok(None) => String::new(),
+                Err(e) => return pg_err(e),
+            };
+            match load_config_str(&old_yaml) {
+                Ok(old_config) => {
+                    let changed = config_changed_blocks(&old_config, &new_config);
+                    (tier_for(&changed), changed)
+                }
+                // A previously-published config that no longer parses: treat the
+                // whole document as changed (fail safe to the broadest tier).
+                Err(_) => (Some("C"), Vec::new()),
+            }
+        }
+    };
+
+    // Structural (operator-only) blocks may only be changed by the operator.
+    let operator_only: Vec<&String> = changed
+        .iter()
+        .filter(|b| OPERATOR_ONLY_BLOCKS.contains(&b.as_str()))
+        .collect();
+    if !operator_only.is_empty() && principal.role != Role::Operator {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "error": format!("blocks {operator_only:?} are operator-only; publish refused"),
+            })),
+        )
+            .into_response();
+    }
+
+    // Refuse publishing to a suspended/provisioning org atomically.
+    if org_state != "active" {
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({ "error": format!("org '{org}' is not active") })),
+        )
+            .into_response();
+    }
+
+    // Write the YAML the dispatcher reads, then record the publish + repoint the
+    // org, then enqueue the tier's rebuild jobs.
+    if let Err(e) = write_config_file(&config_path, &detail.yaml) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("config write: {e}") })),
+        )
+            .into_response();
+    }
+    if let Err(e) = pg::publish_config_version(&client, &org, version, tier).await {
+        return pg_err(e);
+    }
+
+    let mut jobs_enqueued = Vec::new();
+    let rebuild_key = format!("publish:{version}:rebuild");
+    let rebuild_params = json!({ "skip_ingest": true });
+    match tier {
+        Some("C") => {
+            let train_key = format!("publish:{version}:train");
+            match pg::enqueue(&client, &org, "train", 0, Some(&train_key), None).await {
+                Ok(j) => jobs_enqueued.push(j.job_id),
+                Err(e) => return pg_err(e),
+            }
+            match pg::enqueue(
+                &client,
+                &org,
+                "run_all_full",
+                0,
+                Some(&rebuild_key),
+                Some(&rebuild_params),
+            )
+            .await
+            {
+                Ok(j) => jobs_enqueued.push(j.job_id),
+                Err(e) => return pg_err(e),
+            }
+        }
+        Some("A" | "B") => match pg::enqueue(
+            &client,
+            &org,
+            "run_all_full",
+            0,
+            Some(&rebuild_key),
+            Some(&rebuild_params),
+        )
+        .await
+        {
+            Ok(j) => jobs_enqueued.push(j.job_id),
+            Err(e) => return pg_err(e),
+        },
+        _ => {}
+    }
+
+    (
+        StatusCode::OK,
+        Json(json!({
+            "org": org,
+            "version": version,
+            "tier": tier,
+            "changed_blocks": changed,
+            "jobs_enqueued": jobs_enqueued,
+            "published_by": principal.actor,
+        })),
+    )
+        .into_response()
+}
+
 #[derive(Deserialize)]
 struct EnqueueJob {
     kind: String,
@@ -750,7 +971,7 @@ async fn create_job(
             Err(r) => return *r,
         };
         let priority = i32::try_from(body.priority).unwrap_or(0);
-        return match pg::enqueue(&client, &org, &body.kind, priority, None).await {
+        return match pg::enqueue(&client, &org, &body.kind, priority, None, None).await {
             Ok(job) => (StatusCode::ACCEPTED, Json(json!(job))).into_response(),
             Err(e) => pg_err(e),
         };
@@ -1037,6 +1258,11 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/v1/orgs/{org}/config/versions/{version}",
             get(get_config_version),
+        )
+        // Python's `{version}:publish` action -> a `/publish` sub-path (matchit).
+        .route(
+            "/v1/orgs/{org}/config/versions/{version}/publish",
+            post(publish_config_version),
         )
         .route("/v1/orgs/{org}/config", get(active_config))
         .with_state(state)

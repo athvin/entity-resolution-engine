@@ -25,8 +25,12 @@ async fn queue_lifecycle_over_postgres() {
         .unwrap();
 
     // Enqueue two jobs; claim takes the higher priority first.
-    let high = pg::enqueue(&client, "acme", "run", 5, None).await.unwrap();
-    let _low = pg::enqueue(&client, "acme", "run", 0, None).await.unwrap();
+    let high = pg::enqueue(&client, "acme", "run", 5, None, None)
+        .await
+        .unwrap();
+    let _low = pg::enqueue(&client, "acme", "run", 0, None, None)
+        .await
+        .unwrap();
     assert_eq!(high.state, "queued");
 
     let claimed = pg::claim(&client).await.unwrap().expect("a job to claim");
@@ -49,10 +53,10 @@ async fn queue_lifecycle_over_postgres() {
     pg::mark(&client, &next.job_id, "succeeded").await.unwrap();
 
     // Idempotent enqueue: the same key returns the original job.
-    let a = pg::enqueue(&client, "acme", "run", 0, Some("k1"))
+    let a = pg::enqueue(&client, "acme", "run", 0, Some("k1"), None)
         .await
         .unwrap();
-    let b = pg::enqueue(&client, "acme", "run", 0, Some("k1"))
+    let b = pg::enqueue(&client, "acme", "run", 0, Some("k1"), None)
         .await
         .unwrap();
     assert_eq!(a.job_id, b.job_id, "idempotency key must dedupe");

@@ -138,7 +138,8 @@ pub async fn ensure_org(client: &Client, name: &str, config_path: &str) -> Resul
 }
 
 /// Queue one job, or return the job an identical idempotency key created
-/// (queue.py `enqueue`). The org must exist (FK).
+/// (queue.py `enqueue`). The org must exist (FK). `params` is the job's input
+/// map (e.g. `{"skip_ingest": true}` for a publish rebuild); `None` stores `{}`.
 ///
 /// # Errors
 /// Propagates the insert/select error (incl. the FK violation for an unknown org).
@@ -148,17 +149,18 @@ pub async fn enqueue(
     kind: &str,
     priority: i32,
     idempotency_key: Option<&str>,
+    params: Option<&serde_json::Value>,
 ) -> Result<Job, PgError> {
     let job_id = ulid::Ulid::new().to_string();
     let inserted = client
         .query_opt(
             &format!(
-                "INSERT INTO jobs (job_id, org, kind, priority, idempotency_key) \
-                 VALUES ($1, $2, $3, $4, $5) \
+                "INSERT INTO jobs (job_id, org, kind, priority, idempotency_key, params) \
+                 VALUES ($1, $2, $3, $4, $5, COALESCE($6, '{{}}'::jsonb)) \
                  ON CONFLICT (org, idempotency_key) WHERE idempotency_key IS NOT NULL \
                  DO NOTHING RETURNING {JOB_COLS}"
             ),
-            &[&job_id, &org, &kind, &priority, &idempotency_key],
+            &[&job_id, &org, &kind, &priority, &idempotency_key, &params],
         )
         .await?;
     if let Some(row) = inserted {
