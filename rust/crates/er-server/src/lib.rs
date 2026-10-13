@@ -133,18 +133,70 @@ async fn create_job(
         )
             .into_response();
     }
+    let job = enqueue(&state, &org, &body.kind, body.priority);
+    (StatusCode::ACCEPTED, Json(json!(job))).into_response()
+}
+
+/// Enqueue a `queued` job directly (the body of `create_job`, reusable by the
+/// dispatcher and tests). Returns the minted job.
+pub fn enqueue(state: &AppState, org: &str, kind: &str, priority: i64) -> Job {
     let mut store = state.store.lock().unwrap();
     let job_id = format!("job-{}", store.next);
     store.next += 1;
     let job = Job {
-        job_id: job_id.clone(),
-        org,
-        kind: body.kind,
+        job_id,
+        org: org.to_string(),
+        kind: kind.to_string(),
         state: "queued".to_string(),
-        priority: body.priority,
+        priority,
     };
     store.jobs.push(job.clone());
-    (StatusCode::ACCEPTED, Json(json!(job))).into_response()
+    job
+}
+
+/// Dispatch one job (the control-plane -> data-plane bridge, S-queue claim):
+/// claim the highest-priority `queued` job (ties broken by enqueue order, like
+/// the Postgres `ORDER BY priority DESC, job_id`), mark it `running`, run it via
+/// `runner`, then record `succeeded`/`failed`. Returns the job in its final
+/// state, or `None` if nothing was queued.
+///
+/// `runner` is injected so the queue mechanics stay backend-agnostic: the binary
+/// wires a runner that opens the job's DuckLake and invokes `er_cli::run_all`;
+/// the in-memory store here becomes the Postgres SKIP-LOCKED queue later.
+pub fn dispatch_next(
+    state: &AppState,
+    runner: impl FnOnce(&Job) -> Result<(), String>,
+) -> Option<Job> {
+    let job = {
+        let mut store = state.store.lock().unwrap();
+        let idx = store
+            .jobs
+            .iter()
+            .enumerate()
+            .filter(|(_, j)| j.state == "queued")
+            .max_by(|a, b| {
+                a.1.priority.cmp(&b.1.priority).then_with(|| b.0.cmp(&a.0)) // earlier index wins the tie
+            })
+            .map(|(i, _)| i)?;
+        store.jobs[idx].state = "running".to_string();
+        store.jobs[idx].clone()
+    };
+
+    let outcome = runner(&job);
+
+    let mut store = state.store.lock().unwrap();
+    let slot = store
+        .jobs
+        .iter_mut()
+        .find(|j| j.job_id == job.job_id)
+        .expect("claimed job still present");
+    slot.state = if outcome.is_ok() {
+        "succeeded"
+    } else {
+        "failed"
+    }
+    .to_string();
+    Some(slot.clone())
 }
 
 /// Operator: list an org's jobs, newest first.

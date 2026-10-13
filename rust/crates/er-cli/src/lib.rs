@@ -471,3 +471,48 @@ pub fn run_golden(session: &Session, config: &Config) -> Result<()> {
     session.execute_batch(&format!("create table {GOLDEN_RECORDS} as\n{records_sql}"))?;
     Ok(())
 }
+
+/// Everything a full-mode `run-all` needs beyond the config + lake session: the
+/// lexicon seed, the per-source deliveries, the committed model, and the run's
+/// id + volatile stamps.
+pub struct PipelineInputs<'a> {
+    pub lexicon: &'a [(String, String)],
+    pub deliveries: &'a [(String, String)],
+    pub model: &'a MatchModel<'a>,
+    pub run_id: &'a str,
+    pub ingested_at: &'a str,
+    pub scored_at: &'a str,
+    pub run_at: &'a str,
+}
+
+/// The S4.0 full-mode chain over the lake: seed lexicon -> ingest every delivery
+/// -> standardize -> match -> reconcile -> golden, under one run id. The single
+/// entry point the `er run-all` binary and the control-plane dispatcher share.
+///
+/// # Errors
+/// Propagates any stage error.
+pub fn run_all(session: &Session, config: &Config, inputs: &PipelineInputs) -> Result<()> {
+    seed_lexicon(session, inputs.lexicon)?;
+    for (source, csv) in inputs.deliveries {
+        run_ingest(
+            session,
+            config,
+            source,
+            csv,
+            inputs.run_id,
+            inputs.ingested_at,
+            false,
+        )?;
+    }
+    run_standardize(session, config)?;
+    run_match(
+        session,
+        inputs.model,
+        config.thresholds.review_low,
+        inputs.run_id,
+        inputs.scored_at,
+    )?;
+    run_reconcile(session, config, inputs.run_id, inputs.run_at)?;
+    run_golden(session, config)?;
+    Ok(())
+}

@@ -181,41 +181,36 @@ fn main() -> Result<()> {
             tf_snapshot_id,
             run_id,
         } => {
-            er_cli::seed_lexicon(&session, &load_lexicon(&lexicon)?)?;
+            let lexicon = load_lexicon(&lexicon)?;
+            let mut deliveries: Vec<(String, String)> = Vec::new();
             for source in config.sources.keys() {
                 let path = drop.join(format!("{source}.csv"));
-                if !path.exists() {
-                    continue;
+                if path.exists() {
+                    let csv = std::fs::read_to_string(&path)
+                        .with_context(|| format!("reading {}", path.display()))?;
+                    deliveries.push((source.clone(), csv));
                 }
-                let csv = std::fs::read_to_string(&path)
-                    .with_context(|| format!("reading {}", path.display()))?;
-                er_cli::run_ingest(
-                    &session,
-                    &config,
-                    source,
-                    &csv,
-                    &run_id,
-                    "2026-01-01 00:00:00",
-                    false,
-                )?;
             }
-            er_cli::run_standardize(&session, &config)?;
             let settings = std::fs::read_to_string(&model)
                 .with_context(|| format!("reading {}", model.display()))?;
-            er_cli::run_match(
+            er_cli::run_all(
                 &session,
-                &er_cli::MatchModel {
-                    settings_json: &settings,
-                    tf_csv_path: &tf,
-                    model_version: &model_version,
-                    tf_snapshot_id: &tf_snapshot_id,
+                &config,
+                &er_cli::PipelineInputs {
+                    lexicon: &lexicon,
+                    deliveries: &deliveries,
+                    model: &er_cli::MatchModel {
+                        settings_json: &settings,
+                        tf_csv_path: &tf,
+                        model_version: &model_version,
+                        tf_snapshot_id: &tf_snapshot_id,
+                    },
+                    run_id: &run_id,
+                    ingested_at: "2026-01-01 00:00:00",
+                    scored_at: "2026-01-01 00:00:00",
+                    run_at: "2026-01-01 00:00:00",
                 },
-                config.thresholds.review_low,
-                &run_id,
-                "2026-01-01 00:00:00",
             )?;
-            er_cli::run_reconcile(&session, &config, &run_id, "2026-01-01 00:00:00")?;
-            er_cli::run_golden(&session, &config)?;
             println!("run-all complete ({run_id})");
         }
     }
