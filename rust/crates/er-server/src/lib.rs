@@ -1610,6 +1610,116 @@ async fn runs_list(
     }
 }
 
+/// Load an org's `source_system -> priority_rank` map from its active published
+/// config (needed only by the `source_priority` master-election policy).
+async fn org_source_ranks(
+    state: &AppState,
+    org: &str,
+) -> Result<std::collections::BTreeMap<String, i64>, Box<axum::response::Response>> {
+    let Some(dsn) = &state.dsn else {
+        return Err(Box::new(detail_err(
+            StatusCode::NOT_IMPLEMENTED,
+            "read API requires Postgres",
+        )));
+    };
+    let client = connect_pg(dsn).await?;
+    let active = match pg::org_publish_context(&client, org).await {
+        Ok(Some((_, _, Some(v)))) => v,
+        Ok(_) => {
+            return Err(Box::new(detail_err(
+                StatusCode::NOT_FOUND,
+                "no published config",
+            )));
+        }
+        Err(e) => {
+            return Err(Box::new(detail_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("db: {e}"),
+            )));
+        }
+    };
+    let yaml = match pg::get_config_version(&client, org, active).await {
+        Ok(Some(d)) => d.yaml,
+        Ok(None) => {
+            return Err(Box::new(detail_err(
+                StatusCode::NOT_FOUND,
+                "no published config",
+            )));
+        }
+        Err(e) => {
+            return Err(Box::new(detail_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("db: {e}"),
+            )));
+        }
+    };
+    let config =
+        load_config_str(&yaml).map_err(|e| Box::new(config_invalid(&e).into_response()))?;
+    Ok(config
+        .sources
+        .iter()
+        .map(|(name, spec)| (name.clone(), spec.priority_rank))
+        .collect())
+}
+
+/// Viewer+: merge plans for entities touched by a merge/member-add
+/// (`GET /v1/orgs/{org}/merge-plans`). Query: `policy` (master-election, default
+/// `most_attributes`), `since` (ISO8601), `limit`, `format` (json|csv).
+async fn merge_plans(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let policy = params
+        .get("policy")
+        .map_or(er_golden::DEFAULT_MASTER_ELECTION_POLICY, String::as_str);
+    if !er_golden::MASTER_ELECTION_POLICIES.contains(&policy) {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("unknown master-election policy '{policy}'"),
+        );
+    }
+    // source_priority is the only policy that needs the config's source ranks.
+    let source_ranks = if policy == "source_priority" {
+        match org_source_ranks(&state, &org).await {
+            Ok(r) => Some(r),
+            Err(r) => return *r,
+        }
+    } else {
+        None
+    };
+    let session = match org_lake(&state, &org).await {
+        Ok(s) => s,
+        Err(r) => return *r,
+    };
+    let limit = read::parse_limit(params.get("limit").map(String::as_str));
+    let items = match read::merge_plans(
+        &session,
+        policy,
+        params.get("since").map(String::as_str),
+        source_ranks.as_ref(),
+        limit,
+    ) {
+        Ok(items) => items,
+        Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
+    };
+    if params.get("format").map(String::as_str) == Some("csv") {
+        let csv = read::merge_plans_csv(&items);
+        (
+            StatusCode::OK,
+            [(axum::http::header::CONTENT_TYPE, "text/csv; charset=utf-8")],
+            csv,
+        )
+            .into_response()
+    } else {
+        Json(json!({ "items": items })).into_response()
+    }
+}
+
 #[derive(Deserialize)]
 struct KeyIn {
     role: String,
@@ -1731,6 +1841,7 @@ pub fn app(state: AppState) -> Router {
         .route("/v1/orgs/{org}/assertions", get(assertions_list))
         .route("/v1/orgs/{org}/imports", get(imports_list))
         .route("/v1/orgs/{org}/runs", get(runs_list))
+        .route("/v1/orgs/{org}/merge-plans", get(merge_plans))
         .with_state(state)
 }
 

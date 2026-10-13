@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 er-config = { path = "../er-config" }
+er-schema = { path = "../er-schema" }
 anyhow.workspace = true
 
 [lints]

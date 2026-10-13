@@ -331,6 +331,61 @@ async fn golden_records_read_over_ducklake() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 
+    // Merge-plans (default most_attributes policy): the affected→masters→join
+    // query executes. base_10's base resolution emits only `created` events (no
+    // merged/member_added), so `affected` — and the plan — is correctly empty;
+    // this proves the master-election SQL is valid and runs. (A merge-scenario
+    // lake yields rows.)
+    let resp = app
+        .clone()
+        .oneshot(op_get("/v1/orgs/acme/merge-plans"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(json_body(resp).await["items"].is_array());
+
+    // The other config-free policies each execute their own ORDER BY.
+    for policy in ["most_recent", "most_complete", "oldest"] {
+        let resp = app
+            .clone()
+            .oneshot(op_get(&format!(
+                "/v1/orgs/acme/merge-plans?policy={policy}"
+            )))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "policy {policy}");
+    }
+
+    // An unknown policy is a 422.
+    let resp = app
+        .clone()
+        .oneshot(op_get("/v1/orgs/acme/merge-plans?policy=nonsense"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    // CSV format: a text/csv body with the header row.
+    let resp = app
+        .clone()
+        .oneshot(op_get("/v1/orgs/acme/merge-plans?format=csv"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(
+        resp.headers()
+            .get(header::CONTENT_TYPE)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .starts_with("text/csv")
+    );
+    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    let csv = String::from_utf8(bytes.to_vec()).unwrap();
+    assert!(csv.starts_with("entity_id,master_key,member_count,member_records,"));
+    assert!(csv.lines().count() >= 1, "at least the header row");
+
     // A viewer key can read (viewer+).
     let resp = app
         .clone()

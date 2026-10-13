@@ -661,6 +661,113 @@ pub fn runs_list(session: &Session, snapshot: i64) -> Result<Vec<Value>, String>
     }
 }
 
+/// Merge plans for entities touched by a merge/member-add (optionally since a
+/// timestamp), one row per entity with >=2 members: the elected master record
+/// (per `policy`) and the member list (`readapi.merge_plans`). Reads live (the
+/// latest lake state), matching the Python export.
+///
+/// `source_ranks` is required only by the `source_priority` policy. Returns the
+/// plan rows as JSON objects.
+///
+/// # Errors
+/// [`er_golden::master::MasterElectionError`] text for an unknown policy /
+/// missing ranks, or the lake query error.
+pub fn merge_plans(
+    session: &Session,
+    policy: &str,
+    since: Option<&str>,
+    source_ranks: Option<&std::collections::BTreeMap<String, i64>>,
+    limit: i64,
+) -> Result<Vec<Value>, String> {
+    let limit = limit.clamp(1, MAX_LIMIT);
+    let masters_sql =
+        er_golden::masters_cte_sql(policy, "lake.main", source_ranks).map_err(|e| e.to_string())?;
+    let since_filter = since
+        .filter(|s| !s.is_empty())
+        .map(|s| format!("AND occurred_at >= {}::timestamp", lit(s)))
+        .unwrap_or_default();
+    let sql = format!(
+        "WITH affected AS ( \
+           SELECT DISTINCT entity_id FROM lake.main.entity_events \
+           WHERE event_type IN ('merged', 'member_added') {since_filter} \
+         ), \
+         masters AS ( {masters_sql} ) \
+         SELECT to_json(t) FROM ( \
+           SELECT m.entity_id, ms.master_key, \
+                  list(m.source_system || ':' || m.source_record_id ORDER BY m.record_key) \
+                    AS member_records, \
+                  count(*) AS member_count, \
+                  any_value(g.given_name) AS given_name, \
+                  any_value(g.family_name) AS family_name, \
+                  any_value(g.email) AS email, \
+                  any_value(g.phone_e164) AS phone_e164 \
+           FROM lake.main.entity_membership m \
+           JOIN masters ms ON ms.entity_id = m.entity_id \
+           LEFT JOIN lake.main.golden_records g ON g.entity_id = m.entity_id \
+           GROUP BY m.entity_id, ms.master_key HAVING count(*) >= 2 \
+           ORDER BY m.entity_id LIMIT {limit} \
+         ) t ORDER BY entity_id"
+    );
+    let rows = session.query_strings(&sql).map_err(|e| e.to_string())?;
+    Ok(rows
+        .iter()
+        .map(|r| serde_json::from_str(&r[0]).unwrap_or(Value::Null))
+        .collect())
+}
+
+/// Render merge-plan rows as CSV (`readapi.merge_plans` text/csv): the
+/// `;`-joined member list, else the golden preview columns.
+#[must_use]
+pub fn merge_plans_csv(items: &[Value]) -> String {
+    let mut out = String::from(
+        "entity_id,master_key,member_count,member_records,golden_given_name,\
+         golden_family_name,golden_email,golden_phone_e164\n",
+    );
+    let field = |v: &Value, k: &str| -> String {
+        match v.get(k) {
+            Some(Value::String(s)) => s.clone(),
+            Some(Value::Number(n)) => n.to_string(),
+            _ => String::new(),
+        }
+    };
+    let csv_cell = |s: &str| {
+        if s.contains([',', '"', '\n']) {
+            format!("\"{}\"", s.replace('"', "\"\""))
+        } else {
+            s.to_string()
+        }
+    };
+    for item in items {
+        let members = item
+            .get("member_records")
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(";")
+            })
+            .unwrap_or_default();
+        let row = [
+            field(item, "entity_id"),
+            field(item, "master_key"),
+            field(item, "member_count"),
+            members,
+            field(item, "given_name"),
+            field(item, "family_name"),
+            field(item, "email"),
+            field(item, "phone_e164"),
+        ]
+        .iter()
+        .map(|c| csv_cell(c))
+        .collect::<Vec<_>>()
+        .join(",");
+        out.push_str(&row);
+        out.push('\n');
+    }
+    out
+}
+
 /// A snapshot-pinned scalar count.
 fn count_at(session: &Session, sql: &str) -> Result<i64, String> {
     let rows = session.query_strings(sql).map_err(|e| e.to_string())?;

@@ -946,6 +946,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "er-config",
+ "er-schema",
 ]
 
 [[package]]
@@ -1032,6 +1033,7 @@ dependencies = [
  "dedupe-core",
  "er-cli",
  "er-config",
+ "er-golden",
  "hex",
  "rand 0.9.5",
  "serde",
