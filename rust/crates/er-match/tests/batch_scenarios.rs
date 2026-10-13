@@ -118,7 +118,7 @@ fn run_two_phase(scenario: &str, gate_batch_events: bool) {
         "2026-01-01 00:00:00",
     );
     common::rebuild_std(&session, &config);
-    let base_assertions = common::load_assertions(scenario, "base");
+    let base_assertions = common::phase_assertions(scenario, "base");
     let base_plan =
         common::resolve_with_prior(&session, &config, &BTreeMap::new(), &ids, &base_assertions);
     let base_mem = common::fold_plan(&BTreeMap::new(), &base_plan);
@@ -144,7 +144,7 @@ fn run_two_phase(scenario: &str, gate_batch_events: bool) {
         "2026-06-01 12:00:00",
     );
     common::rebuild_std(&session, &config);
-    let batch_assertions = common::load_assertions(scenario, "batch");
+    let batch_assertions = common::phase_assertions(scenario, "batch");
     let batch_plan =
         common::resolve_with_prior(&session, &config, &base_mem, &ids, &batch_assertions);
     let batch_mem = common::fold_plan(&base_mem, &batch_plan);
@@ -207,6 +207,19 @@ fn assertions_two_iterations() {
 #[test]
 fn assertions_non_batch() {
     run_two_phase("assertions_non_batch", true);
+}
+
+/// The full assertion scenario: an `always` force-merge (A1), a direct `never`
+/// (A2, edge adjustment), a path `never` forcing a partition cut (A3, edge_cut),
+/// and a retracted `always` (A4, active=false in the reconciled set) that must
+/// have no effect. Membership only: the partition (merge + both splits +
+/// retraction) matches, but the `edge_cut` event's entity ATTRIBUTION here
+/// differs from the single-prior-entity path scenarios (the golden attaches it
+/// to the newly-created split fragment, not the prior entity); nailing that rule
+/// down needs the Python reconcile source and is deferred.
+#[test]
+fn assertions_scenario() {
+    run_two_phase("assertions_scenario", false);
 }
 
 /// CONTRADICTION-1 (S4.4.1): an `always`-closure that also carries a `never` over

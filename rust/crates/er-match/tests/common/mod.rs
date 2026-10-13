@@ -123,7 +123,7 @@ pub fn resolve_with_prior(
     config: &Config,
     p_old: &BTreeMap<String, Vec<String>>,
     id_factory: &dyn IdFactory,
-    never_assertions: &[Assertion],
+    assertions: &[Assertion],
 ) -> ReconcilePlan {
     let settings = load_model(MODEL_JSON).unwrap();
     let input = session
@@ -166,10 +166,29 @@ pub fn resolve_with_prior(
         .map(|r| r[0].clone())
         .collect();
 
+    // S4.4 `always`: force-merge each active always pair by adding a protected
+    // edge (probability 1.0 >= cut_protect, so never-cut cannot sever it).
+    for a in assertions
+        .iter()
+        .filter(|a| a.kind == AssertionKind::Always)
+    {
+        let (x, y) = if a.rec_a_key <= a.rec_b_key {
+            (a.rec_a_key.clone(), a.rec_b_key.clone())
+        } else {
+            (a.rec_b_key.clone(), a.rec_a_key.clone())
+        };
+        edges.push((x, y, 1.0));
+    }
+
     // S4.4 edge adjustment: suppress the DIRECT edge of every `never` pair before
     // clustering. A bridge (the pair is a component's only connection) splits
     // outright here — no partition-level cut, so no `edge_cut` event.
-    let never_pairs: BTreeSet<(String, String)> = never_assertions
+    let nevers: Vec<Assertion> = assertions
+        .iter()
+        .filter(|a| a.kind == AssertionKind::Never)
+        .cloned()
+        .collect();
+    let never_pairs: BTreeSet<(String, String)> = nevers
         .iter()
         .map(|a| {
             let (x, y) = (a.rec_a_key.clone(), a.rec_b_key.clone());
@@ -182,10 +201,10 @@ pub fn resolve_with_prior(
     // forces a partition-level cut of the lowest-probability edge on the path.
     // Each such cut (unlike the direct-edge adjustment above) is an `edge_cut`.
     let mut cuts: Vec<Cut> = Vec::new();
-    if !never_assertions.is_empty() {
+    if !nevers.is_empty() {
         cuts = never_cut_fixpoint(
             &edges,
-            never_assertions,
+            &nevers,
             &nodes,
             config.clustering.cut_protect_probability,
             config.clustering.max_iterations.try_into().unwrap(),
@@ -300,8 +319,40 @@ pub fn load_assertions(scenario: &str, phase: &str) -> Vec<Assertion> {
     out
 }
 
+/// The assertions ACTIVE for a phase. Prefers the reconciled set
+/// `expected/<phase>/assertions.csv` (columns rec_a_key, rec_b_key, kind,
+/// active) — whose `active` flag reflects retraction (S4.5.5) — and falls back
+/// to the input `assertions.csv` (all active) when the phase commits none.
+pub fn phase_assertions(scenario: &str, phase: &str) -> Vec<Assertion> {
+    let reconciled = format!("{REPO_FIXTURES}/{scenario}/expected/{phase}/assertions.csv");
+    let Ok(text) = std::fs::read_to_string(&reconciled) else {
+        return load_assertions(scenario, phase);
+    };
+    let mut out = Vec::new();
+    for line in text.lines().skip(1).filter(|l| !l.is_empty()) {
+        // rec_a_key, rec_b_key, kind, active
+        let f: Vec<&str> = line.split(',').collect();
+        if f[3] != "true" {
+            continue;
+        }
+        let kind = match f[2] {
+            "always" => AssertionKind::Always,
+            "never" => AssertionKind::Never,
+            other => panic!("unknown assertion kind {other:?} in {reconciled}"),
+        };
+        out.push(Assertion {
+            assertion_id: format!("{}|{}|{}", f[0], f[1], f[2]),
+            rec_a_key: f[0].to_string(),
+            rec_b_key: f[1].to_string(),
+            kind,
+            active: true,
+        });
+    }
+    out
+}
+
 /// Initialize a session for a multi-phase scenario: create `raw_records` + seed
-/// the lexicon, returning the test config. The caller lands phases itself (via
+/// the lexicon, returning the config. The caller lands phases itself (via
 /// [`land_phase`] + [`rebuild_std`] + [`resolve_with_prior`]).
 pub fn scenario_init(session: &Session) -> Config {
     let config = test_config();
