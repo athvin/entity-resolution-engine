@@ -1,7 +1,6 @@
-# Rust workspace checks for the all-Rust rebuild under `rust/` (the engine,
-# the CLI, and the foundation crates that will replace the Python in src/er,
-# server/ and dbt/). Path-filtered so a Python- or frontend-only change never
-# pays for a Rust build, and a Rust-only change never waits on the Python tiers.
+# The application's CI. The engine, CLI, and control plane are Rust (under
+# `rust/`); the Python/dbt implementation has been removed, so this is the whole
+# backend gate — no longer path-filtered (the frontend keeps its own pnpm gate).
 #
 # The toolchain is installed with `rustup` rather than an action: dtolnay's
 # rust-toolchain selects the channel through its ref (`@stable`), which cannot
@@ -10,10 +9,8 @@ name: rust
 
 on:
   pull_request:
-    paths: ["rust/**", ".github/workflows/rust.yml"]
   push:
     branches: [main]
-    paths: ["rust/**", ".github/workflows/rust.yml"]
 
 permissions:
   contents: read
