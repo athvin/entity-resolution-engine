@@ -233,7 +233,8 @@ async fn golden_records_read_over_ducklake() {
     assert_eq!(m["entities"], 10);
     assert_eq!(m["records"], 23);
     assert!(m["duplicate_groups"].as_i64().unwrap() >= 1);
-    assert_eq!(m["open_reviews"], 0);
+    // run_all populates review_queue, so the gray-band pair is an open review.
+    assert!(m["open_reviews"].as_i64().unwrap() >= 1);
     assert!(m["snapshot"].as_i64().unwrap() >= 1);
 
     // Duplicates: groups with >=2 members, each carrying its member list.
@@ -303,17 +304,39 @@ async fn golden_records_read_over_ducklake() {
     assert_eq!(resp.status(), StatusCode::OK);
     assert_eq!(json_body(resp).await["items"].as_array().unwrap().len(), 0);
 
-    // Reviews/assertions/imports read tables the base pipeline doesn't populate
-    // yet: they respond 200 with an empty page, not 404/500.
-    for (uri, key) in [
-        ("/v1/orgs/acme/reviews", "items"),
-        ("/v1/orgs/acme/assertions", "items"),
-        ("/v1/orgs/acme/imports", "items"),
-    ] {
+    // Reviews: run_all populated review_queue with base_10's gray-band pair(s)
+    // (probability in [review_low, auto_merge)). The shared-household trap at
+    // ~0.857 is one such open gray_band review.
+    let resp = app
+        .clone()
+        .oneshot(op_get("/v1/orgs/acme/reviews"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let reviews = json_body(resp).await;
+    let review_items = reviews["items"].as_array().unwrap();
+    let non_empty = !review_items.is_empty();
+    assert!(non_empty, "base_10 has a gray-band review");
+    assert_eq!(review_items[0]["reason"], "gray_band");
+    assert_eq!(review_items[0]["status"], "open");
+    assert_eq!(review_items[0]["subject_type"], "pair");
+    let review_id = review_items[0]["review_id"].as_str().unwrap().to_string();
+
+    // review-by-id resolves that review.
+    let resp = app
+        .clone()
+        .oneshot(op_get(&format!("/v1/orgs/acme/reviews/{review_id}")))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(json_body(resp).await["review_id"], review_id);
+
+    // assertions/imports are still empty (no steward writes / ingest tracking yet).
+    for uri in ["/v1/orgs/acme/assertions", "/v1/orgs/acme/imports"] {
         let resp = app.clone().oneshot(op_get(uri)).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK, "{uri}");
         let body = json_body(resp).await;
-        assert_eq!(body[key].as_array().unwrap().len(), 0, "{uri} empty");
+        assert_eq!(body["items"].as_array().unwrap().len(), 0, "{uri} empty");
     }
 
     // Runs: run_all wrote a `runs` ledger row (full mode, succeeded).

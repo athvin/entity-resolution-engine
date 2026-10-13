@@ -41,6 +41,7 @@ pub const ENTITY_EVENTS: &str = "lake.main.entity_events";
 pub const GOLDEN_LINEAGE: &str = "lake.main.golden_lineage";
 pub const GOLDEN_RECORDS: &str = "lake.main.golden_records";
 pub const RUNS: &str = "lake.main.runs";
+pub const REVIEW_QUEUE: &str = "lake.main.review_queue";
 /// The nickname lexicon `int_std_records` reads — a temp relation (read
 /// cross-catalog while the lake write runs), seeded per session.
 pub const LEXICON: &str = "nickname_variants";
@@ -324,6 +325,55 @@ pub fn write_run_end(session: &Session, run_id: &str, ended_at: &str) -> Result<
     Ok(())
 }
 
+/// Populate `review_queue` with the gray-band pairs — active `match_scores`
+/// whose probability lands in `[review_low, auto_merge)` — as open `gray_band`
+/// pair reviews (S4.5 / design §7.10). Idempotent via a MERGE on the pair +
+/// reason: a re-run refreshes probability/waterfall + `last_seen_run_id` and
+/// leaves `review_id`/`first_seen_run_id`/`status` intact. The review_id is a
+/// deterministic key so the same pair keeps its review across runs.
+///
+/// NOTE: assertion-adjusted exclusion (pairs an `always`/`never` assertion
+/// already decides) is a later refinement; the base path reviews every
+/// gray-band pair.
+///
+/// # Errors
+/// Propagates lake DDL / MERGE errors.
+pub fn write_reviews(session: &Session, config: &Config, run_id: &str) -> Result<()> {
+    create_ddl_table(session, "review_queue")?;
+    let run_id = esc(run_id);
+    session.execute_batch(&format!(
+        "create temp table __review_src as \
+         select 'gray_band:' || rec_a_key || ':' || rec_b_key as review_id, \
+                'pair' as subject_type, rec_a_key, rec_b_key, \
+                cast(null as varchar) as entity_id, 'gray_band' as reason, \
+                match_probability, evidence as waterfall, 'open' as status, \
+                '{run_id}' as first_seen_run_id, '{run_id}' as last_seen_run_id, \
+                cast(null as varchar) as resolved_by, cast(null as timestamp) as resolved_at \
+         from {MATCH_SCORES} \
+         where is_active and match_probability >= {low} and match_probability < {high}",
+        low = config.thresholds.review_low,
+        high = config.thresholds.auto_merge,
+    ))?;
+    session.execute_batch(&format!(
+        "merge into {REVIEW_QUEUE} as target using __review_src as source \
+           on target.rec_a_key = source.rec_a_key and target.rec_b_key = source.rec_b_key \
+          and target.reason = source.reason \
+         when matched then update set match_probability = source.match_probability, \
+             waterfall = source.waterfall, last_seen_run_id = source.last_seen_run_id \
+         when not matched then insert \
+             (review_id, subject_type, rec_a_key, rec_b_key, entity_id, reason, \
+              match_probability, waterfall, status, first_seen_run_id, last_seen_run_id, \
+              resolved_by, resolved_at) \
+             values \
+             (source.review_id, source.subject_type, source.rec_a_key, source.rec_b_key, \
+              source.entity_id, source.reason, source.match_probability, source.waterfall, \
+              source.status, source.first_seen_run_id, source.last_seen_run_id, \
+              source.resolved_by, source.resolved_at)"
+    ))?;
+    session.execute_batch("drop table __review_src")?;
+    Ok(())
+}
+
 /// S4.5 reconcile: cluster the active auto-merge pairs in `lake.main.match_scores`
 /// into connected components, reconcile them against the prior
 /// `lake.main.entity_membership` (INV-PERM), and write the resulting
@@ -555,6 +605,7 @@ pub fn run_all(session: &Session, config: &Config, inputs: &PipelineInputs) -> R
     )?;
     run_reconcile(session, config, inputs.run_id, inputs.run_at)?;
     run_golden(session, config)?;
+    write_reviews(session, config, inputs.run_id)?;
     write_run_end(session, inputs.run_id, inputs.run_at)?;
     Ok(())
 }
