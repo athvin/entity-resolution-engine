@@ -30,7 +30,7 @@ jobs:
   lint:
     name: fmt + clippy + docs
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install stable toolchain
@@ -49,7 +49,7 @@ jobs:
   test:
     name: test
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install stable toolchain
@@ -63,7 +63,7 @@ jobs:
   bench-compile:
     name: benchmarks (compile)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install stable toolchain
@@ -89,7 +89,7 @@ jobs:
   ducklake-e2e:
     name: DuckLake + extensions e2e
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       DEDUPE_E2E_DUCKLAKE: "1"
       DEDUPE_E2E_EXTENSIONS: "1"
@@ -105,7 +105,13 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.duckdb/extensions
-          key: duckdb-extensions-${{ hashFiles('rust/Cargo.toml') }}
+          # Key on the lockfile (the DuckDB version lives there), and fall back to
+          # any prior extensions cache so a dependency change restores the already
+          # downloaded extensions instead of re-fetching them cold under the job
+          # timeout.
+          key: duckdb-extensions-${{ hashFiles('rust/Cargo.lock') }}
+          restore-keys: |
+            duckdb-extensions-
       - run: cargo test -p dedupe-cli
       - name: Extension loading (rapidfuzz)
         run: cargo test -p dedupe-core --test extensions
@@ -113,7 +119,7 @@ jobs:
   scale-tests:
     name: scale golden (50k)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       DEDUPE_SCALE_TESTS: "1"
     steps:
