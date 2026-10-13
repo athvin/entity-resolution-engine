@@ -36,6 +36,11 @@ def main() -> None:
                  "merged_into": t.merged_into, "is_new": t.is_new}
                 for t in plan.transitions
             ],
+            "events": [
+                {"entity_id": e.entity_id, "event_type": e.event_type,
+                 "details": dict(e.details), "details_hash": e.details_hash}
+                for e in plan.events
+            ],
             "minted": list(plan.minted),
         })
     (HERE / "reconcile_golden.json").write_text(

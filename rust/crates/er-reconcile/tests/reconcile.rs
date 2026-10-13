@@ -95,5 +95,33 @@ fn reconcile_plan_matches_python_golden() {
             str_vec(&case["minted"]),
             "{name}: minted differ"
         );
+
+        // events: entity_id, event_type, details (JSON), details_hash
+        let got_events: Vec<(String, String, serde_json::Value, String)> = plan
+            .events
+            .iter()
+            .map(|e| {
+                (
+                    e.entity_id.clone(),
+                    e.event_type.clone(),
+                    e.details.clone(),
+                    e.details_hash.clone(),
+                )
+            })
+            .collect();
+        let want_events: Vec<(String, String, serde_json::Value, String)> = case["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| {
+                (
+                    e["entity_id"].as_str().unwrap().to_string(),
+                    e["event_type"].as_str().unwrap().to_string(),
+                    e["details"].clone(),
+                    e["details_hash"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect();
+        assert_eq!(got_events, want_events, "{name}: events differ");
     }
 }

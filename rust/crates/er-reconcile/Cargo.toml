@@ -9,6 +9,9 @@ repository.workspace = true
 [dependencies]
 er-ids = { path = "../er-ids" }
 thiserror.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+hex.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
