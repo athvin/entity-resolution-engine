@@ -218,6 +218,86 @@ async fn orgs_crud_and_state_machine() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
 
+    // Operator PATCH resources: merges the DuckDB knobs into env.
+    let resp = app
+        .clone()
+        .oneshot(req(
+            "PATCH",
+            "/v1/orgs/acme/resources",
+            "op-secret",
+            Body::from(r#"{"duckdb_threads":8,"duckdb_memory_limit":"4GB"}"#),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let res = json_body(resp).await;
+    assert_eq!(res["duckdb_threads"], 8);
+    assert_eq!(res["duckdb_memory_limit"], "4GB");
+
+    // PATCH resources with neither field: 422.
+    let resp = app
+        .clone()
+        .oneshot(req(
+            "PATCH",
+            "/v1/orgs/acme/resources",
+            "op-secret",
+            Body::from("{}"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    // Operator cross-org job console: enqueue one, then see it in /v1/jobs.
+    let resp = app
+        .clone()
+        .oneshot(req(
+            "POST",
+            "/v1/orgs/acme/jobs",
+            "op-secret",
+            Body::from(r#"{"kind":"run"}"#),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::ACCEPTED);
+    let resp = app
+        .clone()
+        .oneshot(req("GET", "/v1/jobs", "op-secret", Body::empty()))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(!json_body(resp).await.as_array().unwrap().is_empty());
+    // Filter by state, and reject an unknown state.
+    let resp = app
+        .clone()
+        .oneshot(req(
+            "GET",
+            "/v1/jobs?state=queued",
+            "op-secret",
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let resp = app
+        .clone()
+        .oneshot(req(
+            "GET",
+            "/v1/jobs?state=bogus",
+            "op-secret",
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    // /v1/jobs is operator-only: a viewer key is 403.
+    let resp = app
+        .clone()
+        .oneshot(req("GET", "/v1/jobs", &viewer_key, Body::empty()))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+
     // viewer attempting suspend (requires operator): 403, in-scope.
     let resp = app
         .oneshot(req(

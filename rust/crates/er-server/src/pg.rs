@@ -261,6 +261,58 @@ pub async fn get_job(client: &Client, org: &str, job_id: &str) -> Result<Option<
     Ok(row.as_ref().map(job_from_row))
 }
 
+/// The cross-org queue view for the operator console (`queue.py`
+/// `list_jobs_all`): optionally filtered by `org` and/or `state`, newest first.
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn list_jobs_all(
+    client: &Client,
+    org: Option<&str>,
+    state: Option<&str>,
+    limit: i64,
+) -> Result<Vec<Job>, PgError> {
+    let limit = limit.clamp(1, 200);
+    let mut clauses = vec!["TRUE".to_string()];
+    let mut params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = Vec::new();
+    // Push references to the `&str` values (tokio-postgres impls ToSql on &str).
+    if let Some(o) = org.as_ref() {
+        clauses.push(format!("org = ${}", params.len() + 1));
+        params.push(o);
+    }
+    if let Some(s) = state.as_ref() {
+        clauses.push(format!("state = ${}", params.len() + 1));
+        params.push(s);
+    }
+    params.push(&limit);
+    let sql = format!(
+        "SELECT {JOB_COLS} FROM jobs WHERE {} ORDER BY job_id DESC LIMIT ${}",
+        clauses.join(" AND "),
+        params.len()
+    );
+    let rows = client.query(&sql, &params).await?;
+    Ok(rows.iter().map(job_from_row).collect())
+}
+
+/// Merge DuckDB resource knobs into an org's `env` (`queue.py` `merge_org_env`):
+/// `UPDATE orgs SET env = env || $2`.
+///
+/// # Errors
+/// Propagates the update error.
+pub async fn merge_org_env(
+    client: &Client,
+    org: &str,
+    updates: &serde_json::Value,
+) -> Result<(), PgError> {
+    client
+        .execute(
+            "UPDATE orgs SET env = env || $2 WHERE name = $1",
+            &[&org, &updates],
+        )
+        .await?;
+    Ok(())
+}
+
 /// An org's jobs, newest first.
 ///
 /// # Errors

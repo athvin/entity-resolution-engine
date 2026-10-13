@@ -1244,6 +1244,114 @@ async fn resume_job(
     }
 }
 
+/// The job-state vocabulary, for validating the `?state` filter.
+const JOB_STATES: [&str; 7] = [
+    "queued",
+    "dispatching",
+    "running",
+    "canceling",
+    "succeeded",
+    "failed",
+    "canceled",
+];
+
+/// Operator: the cross-org queue view (`GET /v1/jobs`), optional `org`/`state`
+/// filters, newest first. A bare array.
+async fn jobs_global(
+    principal: Principal,
+    State(state): State<AppState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    if let Err(e) = operator_only(&principal) {
+        return e.into_response();
+    }
+    if let Some(s) = params.get("state")
+        && !JOB_STATES.contains(&s.as_str())
+    {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("unknown state '{s}'"),
+        );
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "job console requires Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let limit = read::parse_limit(params.get("limit").map(String::as_str));
+    match pg::list_jobs_all(
+        &client,
+        params.get("org").map(String::as_str),
+        params.get("state").map(String::as_str),
+        limit,
+    )
+    .await
+    {
+        Ok(jobs) => Json(json!(jobs)).into_response(),
+        Err(e) => pg_err(e),
+    }
+}
+
+#[derive(Deserialize)]
+struct ResourcesIn {
+    #[serde(default)]
+    duckdb_threads: Option<i64>,
+    #[serde(default)]
+    duckdb_memory_limit: Option<String>,
+}
+
+/// Operator: set an org's DuckDB parallelism knobs
+/// (`PATCH /v1/orgs/{org}/resources`), merged into its `env`. 422 if neither
+/// field is given; returns the resulting `resources` view.
+async fn update_resources(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Json(body): Json<ResourcesIn>,
+) -> impl IntoResponse {
+    if let Err(e) = operator_only(&principal) {
+        return e.into_response();
+    }
+    let mut updates = serde_json::Map::new();
+    if let Some(threads) = body.duckdb_threads {
+        updates.insert("ER_DUCKDB_THREADS".to_string(), json!(threads.to_string()));
+    }
+    if let Some(mem) = body.duckdb_memory_limit.filter(|s| !s.is_empty()) {
+        updates.insert("ER_DUCKDB_MEMORY_LIMIT".to_string(), json!(mem));
+    }
+    if updates.is_empty() {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "provide duckdb_threads and/or duckdb_memory_limit",
+        );
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(
+            StatusCode::NOT_IMPLEMENTED,
+            "org registry requires Postgres",
+        );
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    match pg::org_exists(&client, &org).await {
+        Ok(true) => {}
+        Ok(false) => return detail_err(StatusCode::NOT_FOUND, format!("no org '{org}'")),
+        Err(e) => return pg_err(e),
+    }
+    if let Err(e) = pg::merge_org_env(&client, &org, &Value::Object(updates)).await {
+        return pg_err(e);
+    }
+    match pg::get_org(&client, &org).await {
+        Ok(Some(o)) => Json(resources_of(&o.env)).into_response(),
+        Ok(None) => detail_err(StatusCode::NOT_FOUND, format!("no org '{org}'")),
+        Err(e) => pg_err(e),
+    }
+}
+
 /// Open the requesting org's lake read-only, resolving the org row first.
 /// Returns the attached session, or a ready error response (404 no org, 501 no
 /// Postgres backend, 503 lake unavailable).
@@ -1830,7 +1938,12 @@ pub fn app(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/v1/orgs", get(list_orgs).post(create_org))
+        .route("/v1/jobs", get(jobs_global))
         .route("/v1/orgs/{org}", get(get_org))
+        .route(
+            "/v1/orgs/{org}/resources",
+            axum::routing::patch(update_resources),
+        )
         // Python's `{org}:suspend` / `{org}:resume` actions become sub-paths
         // (matchit forbids a param+literal in one segment, as with job cancel).
         .route("/v1/orgs/{org}/suspend", post(suspend_org))
