@@ -2,15 +2,18 @@
 //! `erserver` FastAPI app (`server/src/erserver/api.py`). It replaces FastAPI as
 //! the orgs / jobs / config / read-path HTTP surface.
 //!
-//! STATUS: the HTTP skeleton + the job lifecycle over an IN-MEMORY store. The
-//! router, `/healthz` (the only anonymous surface, infrastructure.md §4.1), the
-//! bearer-token auth boundary, and the `/v1/orgs/{org}/jobs` CRUD
-//! (enqueue/list/get/cancel) all work and are tested without network. The
-//! in-memory store stands in for the production Postgres job queue (SKIP-LOCKED):
-//! swapping the backend is a `JobStore` concern, not an endpoint one. OIDC BFF
-//! auth + the org/config/webhook/import endpoints are stubbed (501, TODO) — they
-//! need Postgres/OIDC infrastructure that can't run in this sandbox. Auth is a
-//! SHA-256 bearer check (never argon2), matching the Python contract.
+//! STATUS: the HTTP skeleton + the job lifecycle, over EITHER an in-memory store
+//! or the real Postgres SKIP-LOCKED queue in [`pg`] — chosen per [`AppState`] by
+//! whether a DSN is set (`ER_PG_DSN`). The router, `/healthz` (the only anonymous
+//! surface, infrastructure.md §4.1), the bearer-token auth boundary, and the
+//! `/v1/orgs/{org}/jobs` CRUD (enqueue/list/get/cancel) all work; the handlers
+//! connect to Postgres per-request (no pool), mirroring the Python
+//! `db.connect(dsn)` model. The in-memory path backs the network-free unit tests
+//! (`tests/http.rs`); the Postgres path is exercised by the gated
+//! `tests/pg_http.rs` (`ER_TEST_PG_DSN`). OIDC BFF auth + the
+//! org/config/webhook/import endpoints are stubbed (501, TODO) — they need
+//! OIDC infrastructure that can't run in this sandbox. Auth is a SHA-256 bearer
+//! check (never argon2), matching the Python contract.
 
 pub mod pg;
 
@@ -45,13 +48,20 @@ struct JobStore {
     jobs: Vec<Job>,
 }
 
-/// Process-wide server state. The OIDC verifier + the Postgres pool will join
-/// here when their infrastructure lands.
+/// Process-wide server state. The OIDC verifier will join here when its
+/// infrastructure lands.
+///
+/// The job-queue backend is chosen by `dsn`: `None` uses the in-memory
+/// `JobStore` (the HTTP unit tests + the local dev default); `Some(dsn)` routes
+/// the job handlers to the Postgres SKIP-LOCKED queue in [`pg`], connecting
+/// per-request (mirroring the Python `db.connect(dsn)`-per-request model — no
+/// pool dependency).
 #[derive(Clone)]
 pub struct AppState {
     /// The operator bearer token (cross-org admin). Empty disables operator auth.
     pub operator_token: String,
     store: Arc<Mutex<JobStore>>,
+    dsn: Option<String>,
 }
 
 impl AppState {
@@ -61,8 +71,44 @@ impl AppState {
         AppState {
             operator_token,
             store: Arc::new(Mutex::new(JobStore::default())),
+            dsn: None,
         }
     }
+
+    /// A state whose job handlers run against the Postgres control DB at `dsn`
+    /// (connect-per-request). The caller is responsible for having applied the
+    /// schema ([`pg::ensure_schema`]) at boot.
+    #[must_use]
+    pub fn with_pg(operator_token: String, dsn: String) -> Self {
+        AppState {
+            operator_token,
+            store: Arc::new(Mutex::new(JobStore::default())),
+            dsn: Some(dsn),
+        }
+    }
+}
+
+/// Connect to the control DB for one request, mapping a failure to a 500. The
+/// error response is boxed to keep the `Result` small (`clippy::result_large_err`).
+async fn connect_pg(dsn: &str) -> Result<tokio_postgres::Client, Box<axum::response::Response>> {
+    pg::connect(dsn).await.map_err(|e| {
+        Box::new(
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("db connect: {e}") })),
+            )
+                .into_response(),
+        )
+    })
+}
+
+/// Map a Postgres query error to a 500 response.
+fn pg_err(e: tokio_postgres::Error) -> axum::response::Response {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({ "error": format!("db: {e}") })),
+    )
+        .into_response()
 }
 
 /// An authenticated operator principal — the cross-org admin role. Extracting it
@@ -135,6 +181,17 @@ async fn create_job(
         )
             .into_response();
     }
+    if let Some(dsn) = &state.dsn {
+        let client = match connect_pg(dsn).await {
+            Ok(c) => c,
+            Err(r) => return *r,
+        };
+        let priority = i32::try_from(body.priority).unwrap_or(0);
+        return match pg::enqueue(&client, &org, &body.kind, priority, None).await {
+            Ok(job) => (StatusCode::ACCEPTED, Json(json!(job))).into_response(),
+            Err(e) => pg_err(e),
+        };
+    }
     let job = enqueue(&state, &org, &body.kind, body.priority);
     (StatusCode::ACCEPTED, Json(json!(job))).into_response()
 }
@@ -206,10 +263,20 @@ async fn list_jobs(
     _: Operator,
     State(state): State<AppState>,
     Path(org): Path<String>,
-) -> Json<Value> {
+) -> axum::response::Response {
+    if let Some(dsn) = &state.dsn {
+        let client = match connect_pg(dsn).await {
+            Ok(c) => c,
+            Err(r) => return *r,
+        };
+        return match pg::list_jobs(&client, &org).await {
+            Ok(jobs) => Json(json!({ "jobs": jobs })).into_response(),
+            Err(e) => pg_err(e),
+        };
+    }
     let store = state.store.lock().unwrap();
     let jobs: Vec<&Job> = store.jobs.iter().rev().filter(|j| j.org == org).collect();
-    Json(json!({ "jobs": jobs }))
+    Json(json!({ "jobs": jobs })).into_response()
 }
 
 /// Operator: one job by id (404 if absent / not this org's).
@@ -218,6 +285,21 @@ async fn get_job(
     State(state): State<AppState>,
     Path((org, job_id)): Path<(String, String)>,
 ) -> impl IntoResponse {
+    if let Some(dsn) = &state.dsn {
+        let client = match connect_pg(dsn).await {
+            Ok(c) => c,
+            Err(r) => return *r,
+        };
+        return match pg::get_job(&client, &org, &job_id).await {
+            Ok(Some(job)) => (StatusCode::OK, Json(json!(job))).into_response(),
+            Ok(None) => (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "no such job" })),
+            )
+                .into_response(),
+            Err(e) => pg_err(e),
+        };
+    }
     let store = state.store.lock().unwrap();
     match store
         .jobs
@@ -239,6 +321,32 @@ async fn cancel_job(
     State(state): State<AppState>,
     Path((org, job_id)): Path<(String, String)>,
 ) -> impl IntoResponse {
+    if let Some(dsn) = &state.dsn {
+        let client = match connect_pg(dsn).await {
+            Ok(c) => c,
+            Err(r) => return *r,
+        };
+        // Scope the cancel to the org (404 if absent / another org's), then mark.
+        return match pg::get_job(&client, &org, &job_id).await {
+            Ok(Some(job)) => match pg::mark(&client, &job_id, "canceled").await {
+                Ok(()) => (
+                    StatusCode::OK,
+                    Json(json!(Job {
+                        state: "canceled".to_string(),
+                        ..job
+                    })),
+                )
+                    .into_response(),
+                Err(e) => pg_err(e),
+            },
+            Ok(None) => (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "no such job" })),
+            )
+                .into_response(),
+            Err(e) => pg_err(e),
+        };
+    }
     let mut store = state.store.lock().unwrap();
     match store
         .jobs
@@ -271,7 +379,14 @@ pub fn app(state: AppState) -> Router {
         .with_state(state)
 }
 
-/// Read the operator bearer from the environment (`ER_OPERATOR_TOKEN`).
+/// Build the server state from the environment: the operator bearer
+/// (`ER_OPERATOR_TOKEN`) and, if `ER_PG_DSN` is set, the Postgres job-queue
+/// backend (otherwise the in-memory store).
+#[must_use]
 pub fn state_from_env() -> AppState {
-    AppState::new(std::env::var("ER_OPERATOR_TOKEN").unwrap_or_default())
+    let operator = std::env::var("ER_OPERATOR_TOKEN").unwrap_or_default();
+    match std::env::var("ER_PG_DSN") {
+        Ok(dsn) if !dsn.is_empty() => AppState::with_pg(operator, dsn),
+        _ => AppState::new(operator),
+    }
 }

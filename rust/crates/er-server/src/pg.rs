@@ -4,9 +4,11 @@
 //! enforced by Postgres, not code: at most one ACTIVE job per org (single-writer
 //! per tenant) and at most one job per `(org, idempotency_key)`.
 //!
-//! This is the production queue backend; the in-memory store in `lib.rs` remains
-//! for the HTTP unit tests. Wiring the HTTP handlers to this backend is the next
-//! step. Gated test: `tests/pg_e2e.rs` behind `ER_TEST_PG_DSN`.
+//! This is the production queue backend; the HTTP job handlers route here when
+//! `AppState` carries a DSN (connect-per-request). The in-memory store in
+//! `lib.rs` remains for the network-free HTTP unit tests. Gated tests:
+//! `tests/pg_e2e.rs` (the queue directly) and `tests/pg_http.rs` (the queue
+//! through the HTTP surface), both behind `ER_TEST_PG_DSN`.
 
 use tokio_postgres::{Client, Error as PgError, NoTls, Row};
 
@@ -197,6 +199,20 @@ pub async fn mark(client: &Client, job_id: &str, state: &str) -> Result<(), PgEr
         )
         .await?;
     Ok(())
+}
+
+/// One job by id scoped to an org (`None` if absent / another org's).
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn get_job(client: &Client, org: &str, job_id: &str) -> Result<Option<Job>, PgError> {
+    let row = client
+        .query_opt(
+            &format!("SELECT {JOB_COLS} FROM jobs WHERE org = $1 AND job_id = $2"),
+            &[&org, &job_id],
+        )
+        .await?;
+    Ok(row.as_ref().map(job_from_row))
 }
 
 /// An org's jobs, newest first.
