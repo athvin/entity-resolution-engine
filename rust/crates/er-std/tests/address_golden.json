@@ -1,0 +1,258 @@
+{
+  "_comment": "Golden RegexV1Parser oracle. Regenerate: uv run python rust/crates/er-std/tests/gen_golden.py",
+  "version": "1",
+  "cases": [
+    {
+      "input": null,
+      "addr_number": null,
+      "addr_street": null,
+      "addr_unit": null
+    },
+    {
+      "input": "",
+      "addr_number": null,
+      "addr_street": null,
+      "addr_unit": null
+    },
+    {
+      "input": "   ",
+      "addr_number": null,
+      "addr_street": null,
+      "addr_unit": null
+    },
+    {
+      "input": "null",
+      "addr_number": null,
+      "addr_street": null,
+      "addr_unit": null
+    },
+    {
+      "input": "N/A",
+      "addr_number": null,
+      "addr_street": null,
+      "addr_unit": null
+    },
+    {
+      "input": "n/a",
+      "addr_number": null,
+      "addr_street": null,
+      "addr_unit": null
+    },
+    {
+      "input": "-",
+      "addr_number": null,
+      "addr_street": null,
+      "addr_unit": null
+    },
+    {
+      "input": "Unknown",
+      "addr_number": null,
+      "addr_street": null,
+      "addr_unit": null
+    },
+    {
+      "input": "UNKNOWN",
+      "addr_number": null,
+      "addr_street": null,
+      "addr_unit": null
+    },
+    {
+      "input": "123 Main St",
+      "addr_number": "123",
+      "addr_street": "main st",
+      "addr_unit": null
+    },
+    {
+      "input": "123 Main Street, Apt 5",
+      "addr_number": "123",
+      "addr_street": "main street",
+      "addr_unit": "apt 5"
+    },
+    {
+      "input": "123 Main St Apt 4",
+      "addr_number": "123",
+      "addr_street": "main st",
+      "addr_unit": "apt 4"
+    },
+    {
+      "input": "123 Main St #4B",
+      "addr_number": "123",
+      "addr_street": "main st",
+      "addr_unit": "#4b"
+    },
+    {
+      "input": "123 Main St #12-B",
+      "addr_number": "123",
+      "addr_street": "main st",
+      "addr_unit": "#12-b"
+    },
+    {
+      "input": "123 Main St Unit A-1",
+      "addr_number": "123",
+      "addr_street": "main st",
+      "addr_unit": "unit a-1"
+    },
+    {
+      "input": "123 Main St Suite 200",
+      "addr_number": "123",
+      "addr_street": "main st",
+      "addr_unit": "suite 200"
+    },
+    {
+      "input": "123 Main St Ste 200",
+      "addr_number": "123",
+      "addr_street": "main st",
+      "addr_unit": "ste 200"
+    },
+    {
+      "input": "123 Main St Floor 2",
+      "addr_number": "123",
+      "addr_street": "main st",
+      "addr_unit": "floor 2"
+    },
+    {
+      "input": "123 Main St Fl 2",
+      "addr_number": "123",
+      "addr_street": "main st",
+      "addr_unit": "fl 2"
+    },
+    {
+      "input": "123 Main St Rm 3",
+      "addr_number": "123",
+      "addr_street": "main st",
+      "addr_unit": "rm 3"
+    },
+    {
+      "input": "123 Main St Room 3",
+      "addr_number": "123",
+      "addr_street": "main st",
+      "addr_unit": "room 3"
+    },
+    {
+      "input": "123 Main St Apartment 9",
+      "addr_number": "123",
+      "addr_street": "main st",
+      "addr_unit": "apartment 9"
+    },
+    {
+      "input": "221B Baker St",
+      "addr_number": "221b",
+      "addr_street": "baker st",
+      "addr_unit": null
+    },
+    {
+      "input": "5th Avenue",
+      "addr_number": null,
+      "addr_street": "5th avenue",
+      "addr_unit": null
+    },
+    {
+      "input": "10 Downing St",
+      "addr_number": "10",
+      "addr_street": "downing st",
+      "addr_unit": null
+    },
+    {
+      "input": "PO Box 123",
+      "addr_number": null,
+      "addr_street": null,
+      "addr_unit": null
+    },
+    {
+      "input": "P.O. Box 5",
+      "addr_number": null,
+      "addr_street": null,
+      "addr_unit": null
+    },
+    {
+      "input": "PO Box 9",
+      "addr_number": null,
+      "addr_street": null,
+      "addr_unit": null
+    },
+    {
+      "input": "Post Office Box 9",
+      "addr_number": null,
+      "addr_street": null,
+      "addr_unit": null
+    },
+    {
+      "input": "po box",
+      "addr_number": null,
+      "addr_street": null,
+      "addr_unit": null
+    },
+    {
+      "input": "Apt 5",
+      "addr_number": null,
+      "addr_street": null,
+      "addr_unit": null
+    },
+    {
+      "input": "123",
+      "addr_number": null,
+      "addr_street": null,
+      "addr_unit": null
+    },
+    {
+      "input": "123  Main   St",
+      "addr_number": "123",
+      "addr_street": "main st",
+      "addr_unit": null
+    },
+    {
+      "input": "123\tMain\nSt",
+      "addr_number": "123",
+      "addr_street": "main st",
+      "addr_unit": null
+    },
+    {
+      "input": "123 Main St.",
+      "addr_number": "123",
+      "addr_street": "main st",
+      "addr_unit": null
+    },
+    {
+      "input": "10 Café Street",
+      "addr_number": "10",
+      "addr_street": "café street",
+      "addr_unit": null
+    },
+    {
+      "input": "123 Main St",
+      "addr_number": null,
+      "addr_street": "123 main st",
+      "addr_unit": null
+    },
+    {
+      "input": "  123 Main St  ",
+      "addr_number": "123",
+      "addr_street": "main st",
+      "addr_unit": null
+    },
+    {
+      "input": "#5",
+      "addr_number": null,
+      "addr_street": null,
+      "addr_unit": null
+    },
+    {
+      "input": "123 Main St #5",
+      "addr_number": "123",
+      "addr_street": "main st",
+      "addr_unit": "#5"
+    },
+    {
+      "input": "Suite 200",
+      "addr_number": null,
+      "addr_street": null,
+      "addr_unit": null
+    },
+    {
+      "input": "1600 Pennsylvania Ave NW",
+      "addr_number": "1600",
+      "addr_street": "pennsylvania ave nw",
+      "addr_unit": null
+    }
+  ]
+}

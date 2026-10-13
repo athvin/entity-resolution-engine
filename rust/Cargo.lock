@@ -791,6 +791,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "er-std"
+version = "0.1.0"
+dependencies = [
+ "regex",
+ "serde_json",
+ "unicode-normalization",
+]
+
+[[package]]
 name = "er-versions"
 version = "0.1.0"
 dependencies = [
