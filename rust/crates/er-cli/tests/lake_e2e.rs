@@ -51,10 +51,9 @@ fn repo_fixture(rel: &str) -> String {
         .into_owned()
 }
 
-/// Open a fresh lake under a per-test temp dir (tests run in parallel) and run
-/// ingest + standardize over base_10's base delivery. Returns the session, the
-/// config, and the temp dir to clean up.
-fn standardized_lake(tag: &str) -> (Session, Config, PathBuf) {
+/// Open a fresh lake under a per-test temp dir (tests run in parallel) and seed
+/// the nickname lexicon. Returns the session, config, and temp dir.
+fn open_seeded_lake(tag: &str) -> (Session, Config, PathBuf) {
     let tmp = std::env::temp_dir().join(format!("er_cli_{tag}_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(tmp.join("data")).unwrap();
@@ -74,7 +73,12 @@ fn standardized_lake(tag: &str) -> (Session, Config, PathBuf) {
         })
         .collect();
     er_cli::seed_lexicon(&session, &lexicon).unwrap();
+    (session, config, tmp)
+}
 
+/// Open a seeded lake and run ingest + standardize over base_10's base delivery.
+fn standardized_lake(tag: &str) -> (Session, Config, PathBuf) {
+    let (session, config, tmp) = open_seeded_lake(tag);
     for source in ["crm", "billing", "webforms"] {
         let csv =
             std::fs::read_to_string(repo_fixture(&format!("base_10/base/{source}.csv"))).unwrap();
@@ -91,6 +95,50 @@ fn standardized_lake(tag: &str) -> (Session, Config, PathBuf) {
     }
     er_cli::run_standardize(&session, &config).unwrap();
     (session, config, tmp)
+}
+
+/// Resolve one phase of a scenario through the lake: ingest every delivered
+/// source, standardize, match, reconcile. Returns the membership partition.
+fn resolve_phase_through_lake(
+    session: &Session,
+    config: &Config,
+    scenario: &str,
+    phase: &str,
+    batch_id: &str,
+    ts: &str,
+) -> BTreeSet<BTreeSet<String>> {
+    for source in ["crm", "billing", "webforms"] {
+        let path = repo_fixture(&format!("{scenario}/{phase}/{source}.csv"));
+        if let Ok(csv) = std::fs::read_to_string(&path) {
+            er_cli::run_ingest(session, config, source, &csv, batch_id, ts, false).unwrap();
+        }
+    }
+    er_cli::run_standardize(session, config).unwrap();
+    match_model(session);
+    er_cli::run_reconcile(session, config, batch_id, ts).unwrap();
+    let rows: Vec<(String, String)> = session
+        .query_strings(&format!(
+            "select entity_id, record_key from {}",
+            er_cli::ENTITY_MEMBERSHIP
+        ))
+        .unwrap()
+        .into_iter()
+        .map(|r| (r[0].clone(), r[1].clone()))
+        .collect();
+    partition(&rows)
+}
+
+fn membership_golden(scenario: &str, phase: &str) -> BTreeSet<BTreeSet<String>> {
+    let csv = std::fs::read_to_string(repo_fixture(&format!(
+        "{scenario}/expected/{phase}/membership.csv"
+    )))
+    .unwrap();
+    let mut rows: Vec<(String, String)> = Vec::new();
+    for line in csv.lines().skip(1).filter(|l| !l.is_empty()) {
+        let f: Vec<&str> = line.split(',').collect();
+        rows.push((f[3].to_string(), format!("{}:{}", f[1], f[2])));
+    }
+    partition(&rows)
 }
 
 /// Mirror of er-standardize's std_hashes gate column render.
@@ -431,6 +479,53 @@ fn golden_through_ducklake_matches_golden() {
     assert_eq!(
         diff, 0,
         "{diff} lake golden_records rows differ from golden.csv"
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn incremental_merge_through_ducklake_matches_golden() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    // run_reconcile reads prior entity_membership from the lake, so resolving a
+    // second delivery against the first IS the incremental flow — no extra code.
+    let (session, config, tmp) = open_seeded_lake("incmerge");
+
+    let base = resolve_phase_through_lake(
+        &session,
+        &config,
+        "merge_scenario",
+        "base",
+        "01BATCHMERGEBASE0000000000",
+        "2026-01-01 00:00:00",
+    );
+    assert_eq!(
+        base,
+        membership_golden("merge_scenario", "base"),
+        "base membership differs"
+    );
+    assert_eq!(base.len(), 2, "merge_scenario base resolves to 2 entities");
+
+    let batch = resolve_phase_through_lake(
+        &session,
+        &config,
+        "merge_scenario",
+        "batch",
+        "01BATCHMERGEBATCH000000000",
+        "2026-06-01 12:00:00",
+    );
+    assert_eq!(
+        batch,
+        membership_golden("merge_scenario", "batch"),
+        "batch membership differs"
+    );
+    assert_eq!(
+        batch.len(),
+        1,
+        "the bridging record merges them into 1 entity"
     );
 
     let _ = std::fs::remove_dir_all(&tmp);
