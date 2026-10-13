@@ -812,7 +812,9 @@ version = "0.1.0"
 dependencies = [
  "dedupe-core",
  "er-config",
+ "er-ids",
  "er-ingest",
+ "er-reconcile",
  "er-standardize",
 ]
 
