@@ -1410,6 +1410,33 @@ async fn match_scores_list(
     }
 }
 
+/// Viewer+: standardized source records by `record_key`
+/// (`GET /v1/orgs/{org}/records?key=…`, `key` repeats, capped at 50). Not
+/// paginated — a bounded lookup. Returns `{ items, snapshot }`.
+async fn records_by_key(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let session = match org_lake(&state, &org).await {
+        Ok(s) => s,
+        Err(r) => return *r,
+    };
+    let snapshot = match read::latest_snapshot(&session) {
+        Ok(s) => s,
+        Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
+    };
+    let keys = read::keys_from_query(query.as_deref());
+    match read::records_by_key(&session, snapshot, &keys) {
+        Ok(items) => Json(json!({ "items": items, "snapshot": snapshot })).into_response(),
+        Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
+    }
+}
+
 #[derive(Deserialize)]
 struct KeyIn {
     role: String,
@@ -1525,6 +1552,7 @@ pub fn app(state: AppState) -> Router {
         .route("/v1/orgs/{org}/metrics", get(org_metrics))
         .route("/v1/orgs/{org}/duplicates", get(duplicates_list))
         .route("/v1/orgs/{org}/match-scores", get(match_scores_list))
+        .route("/v1/orgs/{org}/records", get(records_by_key))
         .with_state(state)
 }
 

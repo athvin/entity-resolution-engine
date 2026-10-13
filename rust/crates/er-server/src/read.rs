@@ -380,6 +380,68 @@ pub fn parse_f64(raw: Option<&str>) -> Option<f64> {
     raw.and_then(|s| s.parse::<f64>().ok())
 }
 
+/// The server-side cap on a `records?key=` lookup (`readapi`: "caps the list at
+/// 50").
+pub const MAX_KEYS: usize = 50;
+
+/// Collect the repeated `key=` values from a raw query string, percent-decoded,
+/// de-duplicated (order-preserving), and capped at [`MAX_KEYS`].
+#[must_use]
+pub fn keys_from_query(raw: Option<&str>) -> Vec<String> {
+    let Some(raw) = raw else { return Vec::new() };
+    let pairs: Vec<(String, String)> = serde_urlencoded::from_str(raw).unwrap_or_default();
+    let mut out = Vec::new();
+    for (k, v) in pairs {
+        if k == "key" && !v.is_empty() && !out.contains(&v) {
+            out.push(v);
+            if out.len() >= MAX_KEYS {
+                break;
+            }
+        }
+    }
+    out
+}
+
+/// Standardized source records by `record_key` (`readapi.records_by_key`),
+/// snapshot-pinned. Each item is `{record_key, source_system, source_record_id,
+/// attributes:{…}}`. Empty `keys` yields no items.
+///
+/// # Errors
+/// Propagates the lake query error.
+pub fn records_by_key(
+    session: &Session,
+    snapshot: i64,
+    keys: &[String],
+) -> Result<Vec<Value>, String> {
+    if keys.is_empty() {
+        return Ok(Vec::new());
+    }
+    let in_list = keys.iter().map(|k| lit(k)).collect::<Vec<_>>().join(", ");
+    let sql = format!(
+        "SELECT to_json(struct_pack( \
+           record_key := record_key, \
+           source_system := source_system, \
+           source_record_id := source_record_id, \
+           attributes := struct_pack( \
+             given_name := given_name, family_name := family_name, \
+             name_variants := name_variants, email := email, email_valid := email_valid, \
+             phone_e164 := phone_e164, phone_valid := phone_valid, \
+             addr_number := addr_number, addr_street := addr_street, addr_unit := addr_unit, \
+             addr_city := addr_city, addr_region := addr_region, addr_postal := addr_postal, \
+             birth_date := birth_date, metadata := metadata, \
+             updated_at_source := updated_at_source \
+           ) \
+         )) \
+         FROM lake.main.int_std_records AT (VERSION => {snapshot}) \
+         WHERE record_key IN ({in_list}) ORDER BY record_key"
+    );
+    let rows = session.query_strings(&sql).map_err(|e| e.to_string())?;
+    Ok(rows
+        .iter()
+        .map(|r| serde_json::from_str(&r[0]).unwrap_or(Value::Null))
+        .collect())
+}
+
 /// A snapshot-pinned scalar count.
 fn count_at(session: &Session, sql: &str) -> Result<i64, String> {
     let rows = session.query_strings(sql).map_err(|e| e.to_string())?;

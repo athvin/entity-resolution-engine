@@ -207,6 +207,10 @@ async fn golden_records_read_over_ducklake() {
     );
     assert!(detail["lineage"].is_array());
     assert!(detail["events"].is_array());
+    let some_key = detail["members"][0]["record_key"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     // Detail of an absent entity is a 404.
     let resp = app
@@ -272,6 +276,30 @@ async fn golden_records_read_over_ducklake() {
             .all(|p| p["match_probability"].as_f64().unwrap() >= 0.95),
         "every banded pair is >= 0.95"
     );
+
+    // Records-by-key: look up a real standardized record by its record_key.
+    let resp = app
+        .clone()
+        .oneshot(op_get(&format!("/v1/orgs/acme/records?key={some_key}")))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let recs = json_body(resp).await;
+    let got = recs["items"].as_array().unwrap();
+    assert_eq!(got.len(), 1, "one record for the looked-up key");
+    assert_eq!(got[0]["record_key"], some_key);
+    assert!(got[0].get("source_system").is_some());
+    assert!(got[0]["attributes"].is_object(), "attributes nested");
+    assert!(recs["snapshot"].as_i64().unwrap() >= 1);
+
+    // No key params => empty list (not an error).
+    let resp = app
+        .clone()
+        .oneshot(op_get("/v1/orgs/acme/records"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(json_body(resp).await["items"].as_array().unwrap().len(), 0);
 
     // A viewer key can read (viewer+).
     let resp = app

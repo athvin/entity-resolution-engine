@@ -16,6 +16,7 @@ er-config = { path = "../er-config" }
 dedupe-core = { path = "../dedupe-core" }
 axum = { workspace = true }
 base64 = { workspace = true }
+serde_urlencoded = { workspace = true }
 tokio = { workspace = true }
 tokio-postgres = { workspace = true }
 ulid = { workspace = true }
