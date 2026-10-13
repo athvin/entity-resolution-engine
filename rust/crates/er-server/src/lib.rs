@@ -384,7 +384,17 @@ async fn create_org(
     )
     .await
     {
-        Ok(()) => (StatusCode::CREATED, Json(json!({ "name": body.name }))).into_response(),
+        Ok(()) => {
+            let _ = pg::audit(
+                &client,
+                &principal.actor,
+                Some(&body.name),
+                "org.upsert",
+                &json!({}),
+            )
+            .await;
+            (StatusCode::CREATED, Json(json!({ "name": body.name }))).into_response()
+        }
         Err(e) => pg_err(e),
     }
 }
@@ -509,11 +519,19 @@ async fn transition_org(
         Ok(true) => {}
     }
     match pg::set_org_state(&client, org, new_state, expected).await {
-        Ok(true) => (
-            StatusCode::OK,
-            Json(json!({ "name": org, "state": new_state })),
-        )
-            .into_response(),
+        Ok(true) => {
+            let action = if new_state == "suspended" {
+                "org.suspend"
+            } else {
+                "org.resume"
+            };
+            let _ = pg::audit(&client, &principal.actor, Some(org), action, &json!({})).await;
+            (
+                StatusCode::OK,
+                Json(json!({ "name": org, "state": new_state })),
+            )
+                .into_response()
+        }
         Ok(false) => (
             StatusCode::CONFLICT,
             Json(json!({ "detail": not_in_expected })),
@@ -942,6 +960,14 @@ async fn publish_config_version(
         _ => {}
     }
 
+    let _ = pg::audit(
+        &client,
+        &principal.actor,
+        Some(&org),
+        "config.publish",
+        &json!({ "version": version, "tier": tier }),
+    )
+    .await;
     (
         StatusCode::OK,
         Json(json!({
@@ -987,7 +1013,17 @@ async fn create_job(
         };
         let priority = i32::try_from(body.priority).unwrap_or(0);
         return match pg::enqueue(&client, &org, &body.kind, priority, None, None).await {
-            Ok(job) => (StatusCode::ACCEPTED, Json(json!(job))).into_response(),
+            Ok(job) => {
+                let _ = pg::audit(
+                    &client,
+                    &principal.actor,
+                    Some(&org),
+                    "job.submit",
+                    &json!({ "job_id": job.job_id, "kind": body.kind }),
+                )
+                .await;
+                (StatusCode::ACCEPTED, Json(json!(job))).into_response()
+            }
             Err(e) => pg_err(e),
         };
     }
@@ -1231,11 +1267,21 @@ async fn resume_job(
         Err(r) => return *r,
     };
     match pg::resume_job(&client, &org, &job_id).await {
-        Ok(true) => (
-            StatusCode::OK,
-            Json(json!({ "job_id": job_id, "state": "queued" })),
-        )
-            .into_response(),
+        Ok(true) => {
+            let _ = pg::audit(
+                &client,
+                &principal.actor,
+                Some(&org),
+                "job.resume",
+                &json!({ "job_id": job_id }),
+            )
+            .await;
+            (
+                StatusCode::OK,
+                Json(json!({ "job_id": job_id, "state": "queued" })),
+            )
+                .into_response()
+        }
         Ok(false) => detail_err(
             StatusCode::CONFLICT,
             "job is not resumable (not failed or canceled)",
@@ -1291,6 +1337,75 @@ async fn jobs_global(
     {
         Ok(jobs) => Json(json!(jobs)).into_response(),
         Err(e) => pg_err(e),
+    }
+}
+
+/// Read the audit ledger from a request's query params, newest first.
+async fn audit_feed(
+    client: &tokio_postgres::Client,
+    org: Option<&str>,
+    params: &HashMap<String, String>,
+) -> Result<Vec<Value>, Box<axum::response::Response>> {
+    let action = params.get("action").map(String::as_str);
+    let before_id = params.get("before_id").and_then(|s| s.parse::<i64>().ok());
+    let limit = params
+        .get("limit")
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(100)
+        .clamp(1, 500);
+    pg::audit_rows(client, org, action, before_id, limit)
+        .await
+        .map_err(|e| Box::new(pg_err(e)))
+}
+
+/// Operator: the cross-tenant audit feed (`GET /v1/audit`), optional
+/// `org`/`action`/`before_id` filters.
+async fn audit_global(
+    principal: Principal,
+    State(state): State<AppState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    if let Err(e) = operator_only(&principal) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "audit requires Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    match audit_feed(&client, params.get("org").map(String::as_str), &params).await {
+        Ok(rows) => Json(json!(rows)).into_response(),
+        Err(r) => *r,
+    }
+}
+
+/// Admin+: an org's audit feed (`GET /v1/orgs/{org}/audit`).
+async fn audit_index(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Admin) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "audit requires Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    match pg::org_exists(&client, &org).await {
+        Ok(true) => {}
+        Ok(false) => return detail_err(StatusCode::NOT_FOUND, format!("no org '{org}'")),
+        Err(e) => return pg_err(e),
+    }
+    match audit_feed(&client, Some(&org), &params).await {
+        Ok(rows) => Json(json!(rows)).into_response(),
+        Err(r) => *r,
     }
 }
 
@@ -2064,11 +2179,21 @@ async fn create_key(
         Err(r) => return *r,
     };
     match pg::issue_key(&client, &org, role.as_str()).await {
-        Ok((key_id, key)) => (
-            StatusCode::CREATED,
-            Json(json!({ "key_id": key_id, "key": key, "role": role.as_str() })),
-        )
-            .into_response(),
+        Ok((key_id, key)) => {
+            let _ = pg::audit(
+                &client,
+                &principal.actor,
+                Some(&org),
+                "key.issue",
+                &json!({ "key_id": key_id, "role": role.as_str() }),
+            )
+            .await;
+            (
+                StatusCode::CREATED,
+                Json(json!({ "key_id": key_id, "key": key, "role": role.as_str() })),
+            )
+                .into_response()
+        }
         Err(e) => pg_err(e),
     }
 }
@@ -2095,7 +2220,17 @@ async fn revoke_key(
         Err(r) => return *r,
     };
     match pg::revoke_key(&client, &key_id, &org).await {
-        Ok(revoked) => (StatusCode::OK, Json(json!({ "revoked": revoked }))).into_response(),
+        Ok(revoked) => {
+            let _ = pg::audit(
+                &client,
+                &principal.actor,
+                Some(&org),
+                "key.revoke",
+                &json!({ "key_id": key_id, "revoked": revoked }),
+            )
+            .await;
+            (StatusCode::OK, Json(json!({ "revoked": revoked }))).into_response()
+        }
         Err(e) => pg_err(e),
     }
 }
@@ -2107,7 +2242,9 @@ pub fn app(state: AppState) -> Router {
         .route("/healthz", get(healthz))
         .route("/v1/orgs", get(list_orgs).post(create_org))
         .route("/v1/jobs", get(jobs_global))
+        .route("/v1/audit", get(audit_global))
         .route("/v1/orgs/{org}", get(get_org))
+        .route("/v1/orgs/{org}/audit", get(audit_index))
         .route(
             "/v1/orgs/{org}/resources",
             axum::routing::patch(update_resources),

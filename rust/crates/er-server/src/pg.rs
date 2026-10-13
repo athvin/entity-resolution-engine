@@ -91,7 +91,15 @@ CREATE TABLE IF NOT EXISTS schedules (\
   created_at timestamptz NOT NULL DEFAULT now()\
 );\
 CREATE UNIQUE INDEX IF NOT EXISTS schedules_one_correction_per_org ON schedules (org) WHERE source = 'config:correction_pass';\
-CREATE UNIQUE INDEX IF NOT EXISTS schedules_one_maintenance_per_org ON schedules (org) WHERE source = 'system:lake_maintain';";
+CREATE UNIQUE INDEX IF NOT EXISTS schedules_one_maintenance_per_org ON schedules (org) WHERE source = 'system:lake_maintain';\
+CREATE TABLE IF NOT EXISTS audit_log (\
+  id bigserial PRIMARY KEY,\
+  at timestamptz NOT NULL DEFAULT now(),\
+  actor text NOT NULL,\
+  org text,\
+  action text NOT NULL,\
+  detail jsonb NOT NULL DEFAULT '{}'::jsonb\
+);";
 
 const JOB_COLS: &str = "job_id, org, kind, state, priority";
 
@@ -678,6 +686,77 @@ pub async fn get_config_version(
         created_at: r.get("created_at"),
         published_at: r.get("published_at"),
     }))
+}
+
+/// Append one audit-ledger row (`auth.py` `audit`): one per authenticated
+/// mutation, pairing with the lake's `entity_events`.
+///
+/// # Errors
+/// Propagates the insert error.
+pub async fn audit(
+    client: &Client,
+    actor: &str,
+    org: Option<&str>,
+    action: &str,
+    detail: &serde_json::Value,
+) -> Result<(), PgError> {
+    client
+        .execute(
+            "INSERT INTO audit_log (actor, org, action, detail) VALUES ($1, $2, $3, $4)",
+            &[&actor, &org, &action, &detail],
+        )
+        .await?;
+    Ok(())
+}
+
+/// The audit ledger, newest first (`auth.py` `audit_rows`); `before_id` is the
+/// keyset cursor. Optional `org` / `action` filters.
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn audit_rows(
+    client: &Client,
+    org: Option<&str>,
+    action: Option<&str>,
+    before_id: Option<i64>,
+    limit: i64,
+) -> Result<Vec<serde_json::Value>, PgError> {
+    let limit = limit.clamp(1, 500);
+    let mut clauses = vec!["TRUE".to_string()];
+    let mut params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = Vec::new();
+    if let Some(o) = org.as_ref() {
+        clauses.push(format!("org = ${}", params.len() + 1));
+        params.push(o);
+    }
+    if let Some(a) = action.as_ref() {
+        clauses.push(format!("action = ${}", params.len() + 1));
+        params.push(a);
+    }
+    if let Some(b) = before_id.as_ref() {
+        clauses.push(format!("id < ${}", params.len() + 1));
+        params.push(b);
+    }
+    params.push(&limit);
+    let sql = format!(
+        "SELECT id, at::text AS at, actor, org, action, detail FROM audit_log \
+         WHERE {} ORDER BY id DESC LIMIT ${}",
+        clauses.join(" AND "),
+        params.len()
+    );
+    let rows = client.query(&sql, &params).await?;
+    Ok(rows
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "id": r.get::<_, i64>("id"),
+                "at": r.get::<_, String>("at"),
+                "actor": r.get::<_, String>("actor"),
+                "org": r.get::<_, Option<String>>("org"),
+                "action": r.get::<_, String>("action"),
+                "detail": r.get::<_, serde_json::Value>("detail"),
+            })
+        })
+        .collect())
 }
 
 /// A schedule row for the API listing (`schedules.py`).

@@ -301,6 +301,56 @@ async fn orgs_crud_and_state_machine() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
 
+    // Audit ledger: the mutations above wrote rows (operator cross-tenant feed).
+    let resp = app
+        .clone()
+        .oneshot(req("GET", "/v1/audit", "op-secret", Body::empty()))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let feed = json_body(resp).await;
+    let actions: Vec<&str> = feed
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|r| r["action"].as_str())
+        .collect();
+    assert!(actions.contains(&"org.upsert"), "actions: {actions:?}");
+    assert!(actions.contains(&"key.issue"));
+    assert!(actions.contains(&"org.suspend"));
+    assert!(actions.contains(&"org.resume"));
+    assert!(actions.contains(&"job.submit"));
+    // every row carries the operator actor + the acme org.
+    let first = &feed.as_array().unwrap()[0];
+    assert_eq!(first["actor"], "operator");
+    assert!(first["at"].as_str().is_some());
+
+    // org-scoped audit (admin): acme's rows only.
+    let resp = app
+        .clone()
+        .oneshot(req(
+            "GET",
+            "/v1/orgs/acme/audit",
+            "op-secret",
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let org_feed = json_body(resp).await;
+    let org_rows = org_feed.as_array().unwrap();
+    let has_rows = !org_rows.is_empty();
+    assert!(has_rows, "acme has audit rows");
+    assert!(org_rows.iter().all(|r| r["org"] == "acme"));
+
+    // /v1/audit is operator-only: a viewer key is 403.
+    let resp = app
+        .clone()
+        .oneshot(req("GET", "/v1/audit", &viewer_key, Body::empty()))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+
     // viewer attempting suspend (requires operator): 403, in-scope.
     let resp = app
         .oneshot(req(
