@@ -60,6 +60,52 @@ pub fn phone_e164(col: &str, region: &str) -> String {
     )
 }
 
+/// S4.2 `email_norm(col)`: the two projections `email` and `email_valid`.
+/// `strip_plus_addressing` and `placeholders` come from the `standardization` var
+/// (S6). A configured placeholder nulls to `email=NULL, email_valid=NULL` (no
+/// evidence), distinct from an unparsable value (`email=NULL, email_valid=false`).
+/// The validity pattern is the S6.1 V16 placeholder pattern in RE2.
+#[must_use]
+pub fn email_norm(col: &str, strip_plus_addressing: bool, placeholders: &[&str]) -> String {
+    let mut normalized = lowercase_trim(col);
+    if strip_plus_addressing {
+        // Only the first `+...` run of the local part, and only before the `@`.
+        normalized = format!("regexp_replace({normalized}, '[+][^@]*@', '@')");
+    }
+    let valid = format!(
+        "regexp_full_match({normalized}, '[^@[:space:]]+@[^@[:space:]]+[.][^@[:space:]]+')"
+    );
+    let is_placeholder = if placeholders.is_empty() {
+        "false".to_string()
+    } else {
+        let literals = placeholders
+            .iter()
+            .map(|p| p.replace('\'', "''"))
+            .collect::<Vec<_>>()
+            .join("', '");
+        format!("{normalized} in ('{literals}')")
+    };
+    format!(
+        "case when {is_placeholder} or not {valid} then null else {normalized} end as email, \
+         case when {normalized} is null or {is_placeholder} then null else {valid} end as email_valid"
+    )
+}
+
+/// S4.2 `name_norm(col)`: a scalar expression applied to `given_name` /
+/// `family_name`. `lowercase_trim`, then diacritic fold (re-composed to NFC),
+/// then `-`/`_` → space, then strip `. ' ’ ,`, then collapse internal whitespace,
+/// then `null_semantics` LAST (so the macro is unconditionally idempotent).
+#[must_use]
+pub fn name_norm(col: &str) -> String {
+    let lowered = lowercase_trim(col);
+    let folded = format!("nfc_normalize(strip_accents({lowered}))");
+    let separators = format!("regexp_replace({folded}, '[-_]', ' ', 'g')");
+    // `''` is one apostrophe to DuckDB; the class is `.` `'` `’` `,`.
+    let punctuated = format!("regexp_replace({separators}, '[.''’,]', '', 'g')");
+    let collapsed = format!("trim(regexp_replace({punctuated}, '[[:space:]]+', ' ', 'g'))");
+    null_semantics(&format!("nullif({collapsed}, '')"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

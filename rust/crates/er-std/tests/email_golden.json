@@ -1,0 +1,265 @@
+{
+  "_comment": "dbt email_norm via MacroHarness. Regen: uv run python rust/crates/er-std/tests/gen_std_golden.py",
+  "cases": [
+    {
+      "input": null,
+      "strip_plus": false,
+      "placeholders": [
+        "test@test.com",
+        "noreply@example.com"
+      ],
+      "email": null,
+      "email_valid": null
+    },
+    {
+      "input": "",
+      "strip_plus": false,
+      "placeholders": [
+        "test@test.com",
+        "noreply@example.com"
+      ],
+      "email": null,
+      "email_valid": null
+    },
+    {
+      "input": "Alice@Example.COM",
+      "strip_plus": false,
+      "placeholders": [
+        "test@test.com",
+        "noreply@example.com"
+      ],
+      "email": "alice@example.com",
+      "email_valid": true
+    },
+    {
+      "input": "  Carol@Example.com  ",
+      "strip_plus": false,
+      "placeholders": [
+        "test@test.com",
+        "noreply@example.com"
+      ],
+      "email": "carol@example.com",
+      "email_valid": true
+    },
+    {
+      "input": "bob+promo@example.com",
+      "strip_plus": false,
+      "placeholders": [
+        "test@test.com",
+        "noreply@example.com"
+      ],
+      "email": "bob+promo@example.com",
+      "email_valid": true
+    },
+    {
+      "input": "x+y+z@a.com",
+      "strip_plus": false,
+      "placeholders": [
+        "test@test.com",
+        "noreply@example.com"
+      ],
+      "email": "x+y+z@a.com",
+      "email_valid": true
+    },
+    {
+      "input": "test@test.com",
+      "strip_plus": false,
+      "placeholders": [
+        "test@test.com",
+        "noreply@example.com"
+      ],
+      "email": null,
+      "email_valid": null
+    },
+    {
+      "input": "noreply@example.com",
+      "strip_plus": false,
+      "placeholders": [
+        "test@test.com",
+        "noreply@example.com"
+      ],
+      "email": null,
+      "email_valid": null
+    },
+    {
+      "input": "not-an-email",
+      "strip_plus": false,
+      "placeholders": [
+        "test@test.com",
+        "noreply@example.com"
+      ],
+      "email": null,
+      "email_valid": false
+    },
+    {
+      "input": "a@b",
+      "strip_plus": false,
+      "placeholders": [
+        "test@test.com",
+        "noreply@example.com"
+      ],
+      "email": null,
+      "email_valid": false
+    },
+    {
+      "input": "a@b.c",
+      "strip_plus": false,
+      "placeholders": [
+        "test@test.com",
+        "noreply@example.com"
+      ],
+      "email": "a@b.c",
+      "email_valid": true
+    },
+    {
+      "input": "N/A",
+      "strip_plus": false,
+      "placeholders": [
+        "test@test.com",
+        "noreply@example.com"
+      ],
+      "email": null,
+      "email_valid": false
+    },
+    {
+      "input": "UPPER+Tag@Domain.COM",
+      "strip_plus": false,
+      "placeholders": [
+        "test@test.com",
+        "noreply@example.com"
+      ],
+      "email": "upper+tag@domain.com",
+      "email_valid": true
+    },
+    {
+      "input": null,
+      "strip_plus": true,
+      "placeholders": [
+        "test@test.com",
+        "noreply@example.com"
+      ],
+      "email": null,
+      "email_valid": null
+    },
+    {
+      "input": "",
+      "strip_plus": true,
+      "placeholders": [
+        "test@test.com",
+        "noreply@example.com"
+      ],
+      "email": null,
+      "email_valid": null
+    },
+    {
+      "input": "Alice@Example.COM",
+      "strip_plus": true,
+      "placeholders": [
+        "test@test.com",
+        "noreply@example.com"
+      ],
+      "email": "alice@example.com",
+      "email_valid": true
+    },
+    {
+      "input": "  Carol@Example.com  ",
+      "strip_plus": true,
+      "placeholders": [
+        "test@test.com",
+        "noreply@example.com"
+      ],
+      "email": "carol@example.com",
+      "email_valid": true
+    },
+    {
+      "input": "bob+promo@example.com",
+      "strip_plus": true,
+      "placeholders": [
+        "test@test.com",
+        "noreply@example.com"
+      ],
+      "email": "bob@example.com",
+      "email_valid": true
+    },
+    {
+      "input": "x+y+z@a.com",
+      "strip_plus": true,
+      "placeholders": [
+        "test@test.com",
+        "noreply@example.com"
+      ],
+      "email": "x@a.com",
+      "email_valid": true
+    },
+    {
+      "input": "test@test.com",
+      "strip_plus": true,
+      "placeholders": [
+        "test@test.com",
+        "noreply@example.com"
+      ],
+      "email": null,
+      "email_valid": null
+    },
+    {
+      "input": "noreply@example.com",
+      "strip_plus": true,
+      "placeholders": [
+        "test@test.com",
+        "noreply@example.com"
+      ],
+      "email": null,
+      "email_valid": null
+    },
+    {
+      "input": "not-an-email",
+      "strip_plus": true,
+      "placeholders": [
+        "test@test.com",
+        "noreply@example.com"
+      ],
+      "email": null,
+      "email_valid": false
+    },
+    {
+      "input": "a@b",
+      "strip_plus": true,
+      "placeholders": [
+        "test@test.com",
+        "noreply@example.com"
+      ],
+      "email": null,
+      "email_valid": false
+    },
+    {
+      "input": "a@b.c",
+      "strip_plus": true,
+      "placeholders": [
+        "test@test.com",
+        "noreply@example.com"
+      ],
+      "email": "a@b.c",
+      "email_valid": true
+    },
+    {
+      "input": "N/A",
+      "strip_plus": true,
+      "placeholders": [
+        "test@test.com",
+        "noreply@example.com"
+      ],
+      "email": null,
+      "email_valid": false
+    },
+    {
+      "input": "UPPER+Tag@Domain.COM",
+      "strip_plus": true,
+      "placeholders": [
+        "test@test.com",
+        "noreply@example.com"
+      ],
+      "email": "upper@domain.com",
+      "email_valid": true
+    }
+  ]
+}

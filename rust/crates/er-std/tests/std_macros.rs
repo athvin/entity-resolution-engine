@@ -1,0 +1,83 @@
+//! Output parity of the `email_norm` and `name_norm` SQL generators against the
+//! real dbt macros. Goldens (email_golden.json / name_golden.json) are produced
+//! by rendering+running the macros in DuckDB via the Python MacroHarness; here the
+//! Rust-generated SQL runs in a dedupe-core session over the same inputs and must
+//! match. Regenerate with `uv run python rust/crates/er-std/tests/gen_std_golden.py`.
+
+use dedupe_core::session::{Session, SessionOptions};
+use er_std::sql::{email_norm, name_norm};
+
+fn lit(value: Option<&str>) -> String {
+    match value {
+        None => "NULL".to_string(),
+        Some(s) => format!("'{}'", s.replace('\'', "''")),
+    }
+}
+
+fn expected_text(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::Null => "NULL".to_string(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
+#[test]
+fn email_norm_matches_dbt_macro() {
+    let golden: serde_json::Value =
+        serde_json::from_str(include_str!("email_golden.json")).unwrap();
+    let cases = golden["cases"].as_array().unwrap();
+    assert!(cases.len() >= 20);
+    let session = Session::open_in_memory(SessionOptions::deterministic()).unwrap();
+
+    for case in cases {
+        let input = case["input"].as_str();
+        let strip_plus = case["strip_plus"].as_bool().unwrap();
+        let placeholders: Vec<&str> = case["placeholders"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p.as_str().unwrap())
+            .collect();
+        let projection = email_norm("col", strip_plus, &placeholders);
+        let sql = format!(
+            "select {projection} from (select cast({} as varchar) as col) as input",
+            lit(input)
+        );
+        let rows = session.query_strings(&sql).unwrap();
+        assert_eq!(
+            rows[0][0],
+            expected_text(&case["email"]),
+            "email for {input:?} (strip_plus={strip_plus}) differs",
+        );
+        assert_eq!(
+            rows[0][1],
+            expected_text(&case["email_valid"]),
+            "email_valid for {input:?} (strip_plus={strip_plus}) differs",
+        );
+    }
+}
+
+#[test]
+fn name_norm_matches_dbt_macro() {
+    let golden: serde_json::Value = serde_json::from_str(include_str!("name_golden.json")).unwrap();
+    let cases = golden["cases"].as_array().unwrap();
+    assert!(cases.len() >= 10);
+    let session = Session::open_in_memory(SessionOptions::deterministic()).unwrap();
+
+    for case in cases {
+        let input = case["input"].as_str();
+        let projection = name_norm("col");
+        let sql = format!(
+            "select {projection} as r from (select cast({} as varchar) as col) as input",
+            lit(input)
+        );
+        let rows = session.query_strings(&sql).unwrap();
+        assert_eq!(
+            rows[0][0],
+            expected_text(&case["name"]),
+            "name_norm for {input:?} differs from the dbt macro",
+        );
+    }
+}
