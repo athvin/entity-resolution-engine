@@ -10,10 +10,17 @@
 //! connect to Postgres per-request (no pool), mirroring the Python
 //! `db.connect(dsn)` model. The in-memory path backs the network-free unit tests
 //! (`tests/http.rs`); the Postgres path is exercised by the gated
-//! `tests/pg_http.rs` (`ER_TEST_PG_DSN`). OIDC BFF auth + the
-//! org/config/webhook/import endpoints are stubbed (501, TODO) — they need
-//! OIDC infrastructure that can't run in this sandbox. Auth is a SHA-256 bearer
-//! check (never argon2), matching the Python contract.
+//! `tests/pg_http.rs` (`ER_TEST_PG_DSN`).
+//!
+//! AUTH ([`Principal`] / [`Role`] / `guard`): every `/v1` route is behind a
+//! bearer boundary resolving either the static operator token or an
+//! `erk_{key_id}_{secret}` API key (SHA-256-hashed at rest, never argon2 —
+//! matching the Python contract). The role lattice viewer<steward<admin<operator
+//! and the 404-on-cross-org-scope / 403-on-insufficient-role rules are ported
+//! from `auth.py`. Keys are minted/revoked at `/v1/orgs/{org}/api-keys`
+//! (operator-only); gated by `tests/pg_auth.rs`. OIDC BFF auth + the
+//! org-registry/config/webhook/import endpoints are still stubbed (501, TODO):
+//! OIDC needs an external provider; the rest land in the next bricks.
 
 pub mod pg;
 
@@ -111,39 +118,175 @@ fn pg_err(e: tokio_postgres::Error) -> axum::response::Response {
         .into_response()
 }
 
-/// An authenticated operator principal — the cross-org admin role. Extracting it
-/// enforces `Authorization: Bearer <operator_token>`; a missing header is 401, a
-/// wrong token 403 (matching erserver's `operator_only`).
-pub struct Operator;
+/// The role lattice (`auth.py` `ROLE_RANK`): the derived `Ord` ranks
+/// `Viewer < Steward < Admin < Operator`, so a role check is `role >= minimum`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Role {
+    Viewer,
+    Steward,
+    Admin,
+    Operator,
+}
 
-impl FromRequestParts<AppState> for Operator {
-    type Rejection = (StatusCode, String);
+impl Role {
+    #[must_use]
+    fn as_str(self) -> &'static str {
+        match self {
+            Role::Viewer => "viewer",
+            Role::Steward => "steward",
+            Role::Admin => "admin",
+            Role::Operator => "operator",
+        }
+    }
 
-    // The bearer check is synchronous; the Postgres API-key lookup that lands
-    // here later makes it genuinely async. Keep the `async fn` form until then.
-    #[allow(clippy::unused_async_trait_impl)]
+    /// Parse a role as stored in the DB / resolved onto a principal.
+    fn parse(s: &str) -> Option<Role> {
+        match s {
+            "viewer" => Some(Role::Viewer),
+            "steward" => Some(Role::Steward),
+            "admin" => Some(Role::Admin),
+            "operator" => Some(Role::Operator),
+            _ => None,
+        }
+    }
+
+    /// Parse a role valid for an API key — operator is NOT mintable as a key
+    /// (`api_keys.role` CHECK is admin/steward/viewer).
+    fn parse_key_role(s: &str) -> Option<Role> {
+        match Role::parse(s)? {
+            Role::Operator => None,
+            r => Some(r),
+        }
+    }
+}
+
+/// Constant-time byte equality (stands in for Python's `hmac.compare_digest`):
+/// compares the full length regardless of where the first mismatch is. Lengths
+/// here are fixed (operator token / 64-hex digest), so a length check leaks
+/// nothing.
+fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
+/// An authenticated caller (`auth.py` `Principal`): the static operator token
+/// resolves to `{actor: "operator", org: None, role: Operator}`; an
+/// `erk_{key_id}_{secret}` API key resolves to that key's org + role. Auth
+/// failures are a generic 401; authorization (scope / role) is a later `guard`.
+pub struct Principal {
+    pub actor: String,
+    pub org: Option<String>,
+    pub role: Role,
+}
+
+/// A 401 with the given generic message (auth failures never leak specifics).
+fn unauthorized(msg: &str) -> (StatusCode, Json<Value>) {
+    (StatusCode::UNAUTHORIZED, Json(json!({ "error": msg })))
+}
+
+impl FromRequestParts<AppState> for Principal {
+    type Rejection = (StatusCode, Json<Value>);
+
     async fn from_request_parts(
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        let header = parts
+        let credential = parts
             .headers
             .get(axum::http::header::AUTHORIZATION)
-            .and_then(|v| v.to_str().ok());
-        match header {
-            None => Err((
-                StatusCode::UNAUTHORIZED,
-                "missing Authorization".to_string(),
-            )),
-            Some(h) => {
-                let token = h.strip_prefix("Bearer ").unwrap_or(h);
-                if !state.operator_token.is_empty() && token == state.operator_token {
-                    Ok(Operator)
-                } else {
-                    Err((StatusCode::FORBIDDEN, "requires operator role".to_string()))
-                }
-            }
+            .and_then(|v| v.to_str().ok())
+            .and_then(|h| h.strip_prefix("Bearer "))
+            .map(str::trim);
+        let Some(credential) = credential.filter(|c| !c.is_empty()) else {
+            return Err(unauthorized("missing bearer credential"));
+        };
+
+        // The static operator token (constant-time), no DB touched.
+        if !state.operator_token.is_empty()
+            && ct_eq(credential.as_bytes(), state.operator_token.as_bytes())
+        {
+            return Ok(Principal {
+                actor: "operator".to_string(),
+                org: None,
+                role: Role::Operator,
+            });
         }
+
+        // Otherwise an API key: erk_<key_id>_<secret> (secret may contain '_',
+        // so split at most twice, like Python's `split("_", 2)`).
+        let parts3: Vec<&str> = credential.splitn(3, '_').collect();
+        if parts3.len() != 3 || parts3[0] != "erk" {
+            return Err(unauthorized("invalid credential"));
+        }
+        let (key_id, secret) = (parts3[1], parts3[2]);
+
+        // Key auth requires the Postgres backend; without it there are no keys.
+        let Some(dsn) = &state.dsn else {
+            return Err(unauthorized("invalid credential"));
+        };
+        let client = pg::connect(dsn).await.map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("db connect: {e}") })),
+            )
+        })?;
+        match pg::lookup_key(&client, key_id).await {
+            Ok(Some((org, role, key_hash)))
+                if ct_eq(key_hash.as_bytes(), pg::hash_secret(secret).as_bytes()) =>
+            {
+                Ok(Principal {
+                    actor: format!("key:{key_id}"),
+                    org: Some(org),
+                    role: Role::parse(&role).unwrap_or(Role::Viewer),
+                })
+            }
+            Ok(_) => Err(unauthorized("invalid credential")),
+            Err(e) => Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("db: {e}") })),
+            )),
+        }
+    }
+}
+
+/// Authorize an org-scoped request (`auth.py` `Principal.require`): operator
+/// bypasses; otherwise a principal whose org differs gets a 404 (scope errors
+/// never enumerate orgs), and an in-scope principal below `minimum` gets a 403.
+fn guard(p: &Principal, org: &str, minimum: Role) -> Result<(), (StatusCode, Json<Value>)> {
+    if p.role == Role::Operator {
+        return Ok(());
+    }
+    if p.org.as_deref() != Some(org) {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": format!("no org '{org}'") })),
+        ));
+    }
+    if p.role < minimum {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": format!("requires {} role", minimum.as_str()) })),
+        ));
+    }
+    Ok(())
+}
+
+/// Authorize an operator-only global surface (`auth.py` `operator_only`): plain
+/// 403 for any non-operator (no org scoping involved).
+fn operator_only(p: &Principal) -> Result<(), (StatusCode, Json<Value>)> {
+    if p.role == Role::Operator {
+        Ok(())
+    } else {
+        Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "requires operator role" })),
+        ))
     }
 }
 
@@ -152,12 +295,17 @@ async fn healthz() -> Json<Value> {
     Json(json!({ "status": "ok" }))
 }
 
-/// Operator: list orgs. TODO: read from the Postgres control DB (needs infra).
-async fn list_orgs(_: Operator) -> impl IntoResponse {
+/// Operator: list orgs. The org registry lands with orgs CRUD (next brick);
+/// until then this is a 501 behind the operator-only boundary.
+async fn list_orgs(principal: Principal) -> impl IntoResponse {
+    if let Err(e) = operator_only(&principal) {
+        return e.into_response();
+    }
     (
         StatusCode::NOT_IMPLEMENTED,
         Json(json!({ "error": "org registry not yet wired (needs Postgres)" })),
     )
+        .into_response()
 }
 
 #[derive(Deserialize)]
@@ -167,13 +315,16 @@ struct EnqueueJob {
     priority: i64,
 }
 
-/// Operator: enqueue a job for an org (S-queue enqueue).
+/// Enqueue a job for an org (S-queue enqueue). Requires steward+ in the org.
 async fn create_job(
-    _: Operator,
+    principal: Principal,
     State(state): State<AppState>,
     Path(org): Path<String>,
     Json(body): Json<EnqueueJob>,
 ) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
     if body.kind.trim().is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -258,12 +409,15 @@ pub fn dispatch_next(
     Some(slot.clone())
 }
 
-/// Operator: list an org's jobs, newest first.
+/// List an org's jobs, newest first. Requires viewer+ in the org.
 async fn list_jobs(
-    _: Operator,
+    principal: Principal,
     State(state): State<AppState>,
     Path(org): Path<String>,
 ) -> axum::response::Response {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
     if let Some(dsn) = &state.dsn {
         let client = match connect_pg(dsn).await {
             Ok(c) => c,
@@ -279,12 +433,15 @@ async fn list_jobs(
     Json(json!({ "jobs": jobs })).into_response()
 }
 
-/// Operator: one job by id (404 if absent / not this org's).
+/// One job by id (404 if absent / not this org's). Requires viewer+ in the org.
 async fn get_job(
-    _: Operator,
+    principal: Principal,
     State(state): State<AppState>,
     Path((org, job_id)): Path<(String, String)>,
 ) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
     if let Some(dsn) = &state.dsn {
         let client = match connect_pg(dsn).await {
             Ok(c) => c,
@@ -315,12 +472,15 @@ async fn get_job(
     }
 }
 
-/// Operator: cancel a job (idempotent-ish: queued/running -> canceled).
+/// Cancel a job (idempotent-ish: queued/running -> canceled). Requires steward+.
 async fn cancel_job(
-    _: Operator,
+    principal: Principal,
     State(state): State<AppState>,
     Path((org, job_id)): Path<(String, String)>,
 ) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
     if let Some(dsn) = &state.dsn {
         let client = match connect_pg(dsn).await {
             Ok(c) => c,
@@ -365,6 +525,78 @@ async fn cancel_job(
     }
 }
 
+#[derive(Deserialize)]
+struct KeyIn {
+    role: String,
+}
+
+/// Operator: mint an API key for an org, returning the plaintext ONCE
+/// (`POST /v1/orgs/{org}/api-keys`). Needs the Postgres backend.
+async fn create_key(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Json(body): Json<KeyIn>,
+) -> impl IntoResponse {
+    if let Err(e) = operator_only(&principal) {
+        return e.into_response();
+    }
+    // Operator can mint for any org; a key role of operator is rejected (422).
+    let Some(role) = Role::parse_key_role(&body.role) else {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": format!("invalid role '{}'", body.role) })),
+        )
+            .into_response();
+    };
+    let Some(dsn) = &state.dsn else {
+        return (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(json!({ "error": "api keys require Postgres" })),
+        )
+            .into_response();
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    match pg::issue_key(&client, &org, role.as_str()).await {
+        Ok((key_id, key)) => (
+            StatusCode::CREATED,
+            Json(json!({ "key_id": key_id, "key": key, "role": role.as_str() })),
+        )
+            .into_response(),
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Operator: revoke an API key, org-scoped and idempotent
+/// (`DELETE /v1/orgs/{org}/api-keys/{key_id}`).
+async fn revoke_key(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, key_id)): Path<(String, String)>,
+) -> impl IntoResponse {
+    if let Err(e) = operator_only(&principal) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(json!({ "error": "api keys require Postgres" })),
+        )
+            .into_response();
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    match pg::revoke_key(&client, &key_id, &org).await {
+        Ok(revoked) => (StatusCode::OK, Json(json!({ "revoked": revoked }))).into_response(),
+        Err(e) => pg_err(e),
+    }
+}
+
 /// Build the control-plane router. `/healthz` is anonymous; every `/v1` route is
 /// behind the bearer boundary.
 pub fn app(state: AppState) -> Router {
@@ -376,6 +608,11 @@ pub fn app(state: AppState) -> Router {
         // axum/matchit requires a param to be a whole segment, so the Python
         // `{job_id}:cancel` action becomes a `/cancel` sub-path here.
         .route("/v1/orgs/{org}/jobs/{job_id}/cancel", post(cancel_job))
+        .route("/v1/orgs/{org}/api-keys", post(create_key))
+        .route(
+            "/v1/orgs/{org}/api-keys/{key_id}",
+            axum::routing::delete(revoke_key),
+        )
         .with_state(state)
 }
 

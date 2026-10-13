@@ -1,8 +1,9 @@
-//! The Postgres-backed control-plane store (P3): the `orgs` + `jobs` schema and
-//! the SKIP-LOCKED job queue — a Rust (tokio-postgres) port of
-//! `server/src/erserver/db.py` + `queue.py`. The two correctness constraints are
-//! enforced by Postgres, not code: at most one ACTIVE job per org (single-writer
-//! per tenant) and at most one job per `(org, idempotency_key)`.
+//! The Postgres-backed control-plane store (P3): the `orgs` + `jobs` + `api_keys`
+//! schema, the SKIP-LOCKED job queue, and SHA-256 API-key mint/lookup/revoke — a
+//! Rust (tokio-postgres) port of `server/src/erserver/db.py` + `queue.py` +
+//! `auth.py`. The two queue correctness constraints are enforced by Postgres, not
+//! code: at most one ACTIVE job per org (single-writer per tenant) and at most
+//! one job per `(org, idempotency_key)`.
 //!
 //! This is the production queue backend; the HTTP job handlers route here when
 //! `AppState` carries a DSN (connect-per-request). The in-memory store in
@@ -55,7 +56,15 @@ CREATE TABLE IF NOT EXISTS jobs (\
 CREATE UNIQUE INDEX IF NOT EXISTS jobs_idempotency ON jobs (org, idempotency_key) WHERE idempotency_key IS NOT NULL;\
 DROP INDEX IF EXISTS jobs_one_active_per_org;\
 CREATE UNIQUE INDEX jobs_one_active_per_org ON jobs (org) WHERE state IN ('dispatching','running','canceling');\
-CREATE INDEX IF NOT EXISTS jobs_claimable ON jobs (state, not_before, priority, job_id);";
+CREATE INDEX IF NOT EXISTS jobs_claimable ON jobs (state, not_before, priority, job_id);\
+CREATE TABLE IF NOT EXISTS api_keys (\
+  key_id text PRIMARY KEY,\
+  org text NOT NULL REFERENCES orgs(name),\
+  role text NOT NULL CHECK (role IN ('admin','steward','viewer')),\
+  key_hash text NOT NULL,\
+  created_at timestamptz NOT NULL DEFAULT now(),\
+  revoked_at timestamptz\
+);";
 
 const JOB_COLS: &str = "job_id, org, kind, state, priority";
 
@@ -227,4 +236,83 @@ pub async fn list_jobs(client: &Client, org: &str) -> Result<Vec<Job>, PgError> 
         )
         .await?;
     Ok(rows.iter().map(job_from_row).collect())
+}
+
+/// SHA-256 hex of `secret` — the exact at-rest key representation (`auth.py`
+/// `_hash`): the UTF-8 bytes of the secret substring ONLY (no prefix, no salt),
+/// lowercase hex. Never argon2 — matching the Python contract verbatim.
+#[must_use]
+pub fn hash_secret(secret: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(secret.as_bytes());
+    hex::encode(digest)
+}
+
+/// Mint an API key for an org (`auth.py` `issue_key`): a lowercased-ULID
+/// `key_id`, a random url-safe `secret`, and the plaintext token
+/// `erk_{key_id}_{secret}` returned to the caller ONCE. Only the SHA-256 hash of
+/// the secret is stored. `role` must already be one of admin/steward/viewer (the
+/// table CHECK enforces it too). The org must exist (FK).
+///
+/// # Errors
+/// Propagates the insert error (incl. the FK violation / role CHECK violation).
+pub async fn issue_key(
+    client: &Client,
+    org: &str,
+    role: &str,
+) -> Result<(String, String), PgError> {
+    let key_id = ulid::Ulid::new().to_string().to_lowercase();
+    // 24 random bytes, hex-encoded: url-safe and free of '_', so the token
+    // survives the Python `credential.split("_", 2)` decode unambiguously.
+    let secret = {
+        use rand::RngCore;
+        let mut buf = [0u8; 24];
+        rand::rng().fill_bytes(&mut buf);
+        hex::encode(buf)
+    };
+    let key_hash = hash_secret(&secret);
+    client
+        .execute(
+            "INSERT INTO api_keys (key_id, org, role, key_hash) VALUES ($1, $2, $3, $4)",
+            &[&key_id, &org, &role, &key_hash],
+        )
+        .await?;
+    let full_key = format!("erk_{key_id}_{secret}");
+    Ok((key_id, full_key))
+}
+
+/// Revoke a key, scoped to its org and idempotent (`auth.py` `revoke_key`):
+/// returns `true` only if this call flipped a live key to revoked. A second
+/// revoke, or a `key_id` belonging to another org, returns `false`.
+///
+/// # Errors
+/// Propagates the update error.
+pub async fn revoke_key(client: &Client, key_id: &str, org: &str) -> Result<bool, PgError> {
+    let n = client
+        .execute(
+            "UPDATE api_keys SET revoked_at = now() \
+             WHERE key_id = $1 AND org = $2 AND revoked_at IS NULL",
+            &[&key_id, &org],
+        )
+        .await?;
+    Ok(n == 1)
+}
+
+/// Resolve a live (non-revoked) key by id, returning `(org, role, key_hash)`
+/// (`auth.py` `authenticate` lookup). The caller SHA-256s the presented secret
+/// and constant-time-compares it against `key_hash`.
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn lookup_key(
+    client: &Client,
+    key_id: &str,
+) -> Result<Option<(String, String, String)>, PgError> {
+    let row = client
+        .query_opt(
+            "SELECT org, role, key_hash FROM api_keys WHERE key_id = $1 AND revoked_at IS NULL",
+            &[&key_id],
+        )
+        .await?;
+    Ok(row.map(|r| (r.get("org"), r.get("role"), r.get("key_hash"))))
 }

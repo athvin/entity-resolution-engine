@@ -48,6 +48,9 @@ async fn v1_requires_bearer() {
         StatusCode::UNAUTHORIZED
     );
 
+    // A credential that is neither the operator token nor a valid `erk_` key is
+    // an auth failure (401), not an authorization failure (403) — matching the
+    // Python contract (403 is reserved for a valid principal lacking the role).
     let wrong = Request::builder()
         .uri("/v1/orgs")
         .header(header::AUTHORIZATION, "Bearer nope")
@@ -55,7 +58,7 @@ async fn v1_requires_bearer() {
         .unwrap();
     assert_eq!(
         test_app().oneshot(wrong).await.unwrap().status(),
-        StatusCode::FORBIDDEN
+        StatusCode::UNAUTHORIZED
     );
 }
 

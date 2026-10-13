@@ -14,9 +14,11 @@ async fn queue_lifecycle_over_postgres() {
     };
     let mut client = pg::connect(&dsn).await.unwrap();
 
-    // Clean slate (jobs references orgs), then apply the schema.
+    // Clean slate (api_keys + jobs both reference orgs), then apply the schema.
     client
-        .batch_execute("DROP TABLE IF EXISTS jobs; DROP TABLE IF EXISTS orgs;")
+        .batch_execute(
+            "DROP TABLE IF EXISTS api_keys; DROP TABLE IF EXISTS jobs; DROP TABLE IF EXISTS orgs;",
+        )
         .await
         .unwrap();
     pg::ensure_schema(&mut client).await.unwrap();

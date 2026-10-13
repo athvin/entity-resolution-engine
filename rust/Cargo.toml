@@ -68,3 +68,5 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
 tower = "0.5"
 tokio-postgres = "0.7"
 ulid = "1"
+# API-key secret generation (SHA-256-hashed at rest; the plaintext is random).
+rand = "0.9"
