@@ -6,5 +6,7 @@
 //! implements — so the patterns are shared verbatim.
 //!
 //! - [`address`]: the S4.2 `address_parse` v1 grammar.
+//! - [`lexicon`]: the nickname-lexicon canonicalisation and `lexicon_hash`.
 
 pub mod address;
+pub mod lexicon;

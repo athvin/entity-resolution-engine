@@ -794,8 +794,11 @@ dependencies = [
 name = "er-std"
 version = "0.1.0"
 dependencies = [
+ "hex",
  "regex",
  "serde_json",
+ "sha2",
+ "thiserror",
  "unicode-normalization",
 ]
 
