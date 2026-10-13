@@ -265,7 +265,8 @@ async fn orgs_crud_and_state_machine() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    assert!(!json_body(resp).await.as_array().unwrap().is_empty());
+    let n = json_body(resp).await.as_array().unwrap().len();
+    assert!(n >= 1, "the enqueued job appears in the cross-org console");
     // Filter by state, and reject an unknown state.
     let resp = app
         .clone()
