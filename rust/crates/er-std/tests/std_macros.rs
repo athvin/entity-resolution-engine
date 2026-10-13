@@ -5,7 +5,9 @@
 //! match. Regenerate with `uv run python rust/crates/er-std/tests/gen_std_golden.py`.
 
 use dedupe_core::session::{Session, SessionOptions};
-use er_std::sql::{email_norm, name_norm, name_variants, parse_date, source_metadata};
+use er_std::sql::{
+    address_parse, email_norm, name_norm, name_variants, parse_date, source_metadata,
+};
 
 fn lit(value: Option<&str>) -> String {
     match value {
@@ -184,6 +186,44 @@ fn name_variants_matches_dbt_macro() {
             rows[0][0],
             expected_text(&case["name_variants"]),
             "name_variants for {input:?} differs from the dbt macro",
+        );
+    }
+}
+
+#[test]
+fn address_parse_matches_grammar_golden() {
+    // Reuse the RegexV1Parser golden: the SQL generator sharing the grammar's
+    // pattern constants means a pass proves SQL == Rust grammar == (transitively,
+    // via tests/unit/dbt/test_address.py) the dbt macro.
+    let golden: serde_json::Value =
+        serde_json::from_str(include_str!("address_golden.json")).unwrap();
+    let session = Session::open_in_memory(SessionOptions::deterministic()).unwrap();
+    let cases = golden["cases"].as_array().unwrap();
+    let count = cases.len();
+    assert!(count > 20, "expected a broad case set");
+
+    for case in cases {
+        let input = case["input"].as_str();
+        let projection = address_parse("col", "null", "null", "null");
+        let sql = format!(
+            "select {projection} from (select cast({} as varchar) as col) as input",
+            lit(input)
+        );
+        let rows = session.query_strings(&sql).unwrap();
+        assert_eq!(
+            rows[0][0],
+            expected_text(&case["addr_number"]),
+            "addr_number for {input:?} differs",
+        );
+        assert_eq!(
+            rows[0][1],
+            expected_text(&case["addr_street"]),
+            "addr_street for {input:?} differs",
+        );
+        assert_eq!(
+            rows[0][2],
+            expected_text(&case["addr_unit"]),
+            "addr_unit for {input:?} differs",
         );
     }
 }

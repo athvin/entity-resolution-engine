@@ -162,6 +162,43 @@ pub fn source_metadata(payload: &str, excluded: &[&str]) -> String {
     )
 }
 
+/// S4.2 `address_parse(address_line, city, region, postal)`: the six `addr_*`
+/// projections. Only `addr_number`/`addr_street`/`addr_unit` are parsed from
+/// `address_line` (the SQL twin of [`crate::address::RegexV1Parser`], sharing its
+/// three pattern constants verbatim — that shared definition is the cross-check);
+/// `addr_city`/`addr_region`/`addr_postal` are `null_semantics(lowercase_trim(...))`
+/// pass-throughs that map directly from their own columns (S6). All three parsed
+/// components are NULL unless the street is. Pass-through cols default to the SQL
+/// literal `null` so a one-input harness can render over an address line alone.
+#[must_use]
+pub fn address_parse(address_line: &str, city: &str, region: &str, postal: &str) -> String {
+    use crate::address::{ADDRESS_NUMBER_PATTERN, ADDRESS_PO_BOX_PATTERN, ADDRESS_UNIT_PATTERN};
+    let stripped = format!(
+        "regexp_replace({}, '[.,]', '', 'g')",
+        lowercase_trim(address_line)
+    );
+    let collapsed =
+        format!("nullif(trim(regexp_replace({stripped}, '[[:space:]]+', ' ', 'g')), '')");
+    let vocabulary = null_semantics(&collapsed);
+    let line = format!(
+        "case when regexp_full_match({vocabulary}, '{ADDRESS_PO_BOX_PATTERN}') then null else {vocabulary} end"
+    );
+    let unit = format!("nullif(regexp_extract({line}, '{ADDRESS_UNIT_PATTERN}', 2), '')");
+    let rest = format!("trim(regexp_replace({line}, '{ADDRESS_UNIT_PATTERN}', ''))");
+    let number = format!("nullif(regexp_extract({rest}, '{ADDRESS_NUMBER_PATTERN}', 1), '')");
+    let street =
+        format!("nullif(trim(regexp_replace({rest}, '{ADDRESS_NUMBER_PATTERN}', '')), '')");
+    format!(
+        "case when {street} is null then null else {number} end as addr_number, \
+         {street} as addr_street, \
+         case when {street} is null then null else {unit} end as addr_unit, \
+         {} as addr_city, {} as addr_region, {} as addr_postal",
+        null_semantics(&lowercase_trim(city)),
+        null_semantics(&lowercase_trim(region)),
+        null_semantics(&lowercase_trim(postal)),
+    )
+}
+
 /// S4.2 `name_variants(col)`: the `LIST(VARCHAR) NOT NULL` column. Never SQL NULL
 /// — the EMPTY list when `name_norm(col)` is NULL, else a list whose element 0 is
 /// exactly `name_norm(col)` (the symmetry guarantee, built by PREPENDING rather
