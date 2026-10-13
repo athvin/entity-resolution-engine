@@ -78,7 +78,20 @@ CREATE TABLE IF NOT EXISTS config_versions (\
   created_at timestamptz NOT NULL DEFAULT now(),\
   published_at timestamptz,\
   PRIMARY KEY (org, version)\
-);";
+);\
+CREATE TABLE IF NOT EXISTS schedules (\
+  schedule_id text PRIMARY KEY,\
+  org text NOT NULL REFERENCES orgs(name),\
+  kind text NOT NULL,\
+  params jsonb NOT NULL DEFAULT '{}'::jsonb,\
+  cron text NOT NULL,\
+  enabled boolean NOT NULL DEFAULT true,\
+  source text NOT NULL DEFAULT 'api',\
+  last_enqueued_at timestamptz,\
+  created_at timestamptz NOT NULL DEFAULT now()\
+);\
+CREATE UNIQUE INDEX IF NOT EXISTS schedules_one_correction_per_org ON schedules (org) WHERE source = 'config:correction_pass';\
+CREATE UNIQUE INDEX IF NOT EXISTS schedules_one_maintenance_per_org ON schedules (org) WHERE source = 'system:lake_maintain';";
 
 const JOB_COLS: &str = "job_id, org, kind, state, priority";
 
@@ -665,6 +678,104 @@ pub async fn get_config_version(
         created_at: r.get("created_at"),
         published_at: r.get("published_at"),
     }))
+}
+
+/// A schedule row for the API listing (`schedules.py`).
+pub struct ScheduleRow {
+    pub schedule_id: String,
+    pub kind: String,
+    pub cron: String,
+    pub enabled: bool,
+    pub source: String,
+    pub last_enqueued_at: Option<String>,
+}
+
+/// Create an API-sourced schedule (`schedules.py` `create`); returns its id.
+///
+/// # Errors
+/// Propagates the insert error.
+pub async fn create_schedule(
+    client: &Client,
+    org: &str,
+    kind: &str,
+    cron: &str,
+    params: &serde_json::Value,
+) -> Result<String, PgError> {
+    let schedule_id = ulid::Ulid::new().to_string();
+    client
+        .execute(
+            "INSERT INTO schedules (schedule_id, org, kind, params, cron, source) \
+             VALUES ($1, $2, $3, $4, $5, 'api')",
+            &[&schedule_id, &org, &kind, &params, &cron],
+        )
+        .await?;
+    Ok(schedule_id)
+}
+
+/// An org's schedules, oldest first (`schedules.py` `list_schedules`).
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn list_schedules(client: &Client, org: &str) -> Result<Vec<ScheduleRow>, PgError> {
+    let rows = client
+        .query(
+            "SELECT schedule_id, kind, cron, enabled, source, \
+                    last_enqueued_at::text AS last_enqueued_at \
+             FROM schedules WHERE org = $1 ORDER BY created_at",
+            &[&org],
+        )
+        .await?;
+    Ok(rows
+        .iter()
+        .map(|r| ScheduleRow {
+            schedule_id: r.get("schedule_id"),
+            kind: r.get("kind"),
+            cron: r.get("cron"),
+            enabled: r.get("enabled"),
+            source: r.get("source"),
+            last_enqueued_at: r.get("last_enqueued_at"),
+        })
+        .collect())
+}
+
+/// Enable/disable an API-sourced schedule (`schedules.py` `set_enabled`):
+/// config/system-owned rows (`source != 'api'`) refuse. `true` iff a row
+/// changed.
+///
+/// # Errors
+/// Propagates the update error.
+pub async fn set_schedule_enabled(
+    client: &Client,
+    org: &str,
+    schedule_id: &str,
+    enabled: bool,
+) -> Result<bool, PgError> {
+    let n = client
+        .execute(
+            "UPDATE schedules SET enabled = $1 \
+             WHERE schedule_id = $2 AND org = $3 AND source = 'api'",
+            &[&enabled, &schedule_id, &org],
+        )
+        .await?;
+    Ok(n == 1)
+}
+
+/// Delete a schedule (`schedules.py` `delete`). `true` iff a row was removed.
+///
+/// # Errors
+/// Propagates the delete error.
+pub async fn delete_schedule(
+    client: &Client,
+    org: &str,
+    schedule_id: &str,
+) -> Result<bool, PgError> {
+    let n = client
+        .execute(
+            "DELETE FROM schedules WHERE org = $1 AND schedule_id = $2",
+            &[&org, &schedule_id],
+        )
+        .await?;
+    Ok(n == 1)
 }
 
 /// Mark a version published and point the org at it (`configsvc.py` `publish`

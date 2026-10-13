@@ -107,7 +107,9 @@ async fn golden_records_read_over_ducklake() {
     // An org whose env points the read API at that lake.
     let mut client = pg::connect(&dsn).await.unwrap();
     client
-        .batch_execute("DROP TABLE IF EXISTS config_versions, api_keys, jobs, orgs CASCADE;")
+        .batch_execute(
+            "DROP TABLE IF EXISTS schedules, config_versions, api_keys, jobs, orgs CASCADE;",
+        )
         .await
         .unwrap();
     pg::ensure_schema(&mut client).await.unwrap();

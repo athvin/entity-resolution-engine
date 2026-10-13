@@ -1860,6 +1860,174 @@ async fn merge_plans(
     }
 }
 
+/// Job kinds that may be scheduled (`erserver.policy.SCHEDULABLE_KINDS`).
+const SCHEDULABLE_KINDS: [&str; 5] = [
+    "run_all_full",
+    "run_all_incremental",
+    "correct",
+    "train",
+    "lake_maintain",
+];
+
+/// A lightweight 5-field cron check (looser than croniter: field count + the
+/// cron character class; it does not validate ranges/step bounds).
+fn valid_cron(s: &str) -> bool {
+    let fields: Vec<&str> = s.split_whitespace().collect();
+    fields.len() == 5
+        && fields.iter().all(|f| {
+            !f.is_empty()
+                && f.bytes()
+                    .all(|b| b.is_ascii_digit() || b"*/,-".contains(&b))
+        })
+}
+
+#[derive(Deserialize)]
+struct ScheduleIn {
+    kind: String,
+    cron: String,
+    #[serde(default)]
+    params: Option<Value>,
+}
+
+#[derive(Deserialize)]
+struct ScheduleUpdateIn {
+    enabled: bool,
+}
+
+/// Admin+: create an API-sourced schedule (`POST /v1/orgs/{org}/schedules`).
+async fn create_schedule(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Json(body): Json<ScheduleIn>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Admin) {
+        return e.into_response();
+    }
+    if !SCHEDULABLE_KINDS.contains(&body.kind.as_str()) {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("kind '{}' is not schedulable", body.kind),
+        );
+    }
+    if !valid_cron(&body.cron) {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("invalid cron expression: '{}'", body.cron),
+        );
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "schedules require Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    match pg::org_exists(&client, &org).await {
+        Ok(true) => {}
+        Ok(false) => return detail_err(StatusCode::NOT_FOUND, format!("no org '{org}'")),
+        Err(e) => return pg_err(e),
+    }
+    let params = body.params.unwrap_or_else(|| json!({}));
+    match pg::create_schedule(&client, &org, &body.kind, &body.cron, &params).await {
+        Ok(schedule_id) => (
+            StatusCode::CREATED,
+            Json(json!({ "schedule_id": schedule_id, "kind": body.kind, "cron": body.cron })),
+        )
+            .into_response(),
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Viewer+: list an org's schedules (`GET /v1/orgs/{org}/schedules`).
+async fn schedules_index(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "schedules require Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    match pg::list_schedules(&client, &org).await {
+        Ok(rows) => {
+            let out: Vec<Value> = rows
+                .iter()
+                .map(|s| {
+                    json!({
+                        "schedule_id": s.schedule_id,
+                        "kind": s.kind,
+                        "cron": s.cron,
+                        "enabled": s.enabled,
+                        "source": s.source,
+                        "last_enqueued_at": s.last_enqueued_at,
+                    })
+                })
+                .collect();
+            Json(json!(out)).into_response()
+        }
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Admin+: enable/disable a schedule (`PATCH /v1/orgs/{org}/schedules/{id}`).
+/// Config/system-owned rows refuse (409).
+async fn update_schedule(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, schedule_id)): Path<(String, String)>,
+    Json(body): Json<ScheduleUpdateIn>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Admin) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "schedules require Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    match pg::set_schedule_enabled(&client, &org, &schedule_id, body.enabled).await {
+        Ok(true) => {
+            Json(json!({ "schedule_id": schedule_id, "enabled": body.enabled })).into_response()
+        }
+        Ok(false) => detail_err(
+            StatusCode::CONFLICT,
+            "schedule is unknown, belongs to another org, or is config-owned",
+        ),
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Admin+: delete a schedule (`DELETE /v1/orgs/{org}/schedules/{id}`).
+async fn delete_schedule(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, schedule_id)): Path<(String, String)>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Admin) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "schedules require Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    match pg::delete_schedule(&client, &org, &schedule_id).await {
+        Ok(deleted) => Json(json!({ "deleted": deleted })).into_response(),
+        Err(e) => pg_err(e),
+    }
+}
+
 #[derive(Deserialize)]
 struct KeyIn {
     role: String,
@@ -1988,6 +2156,14 @@ pub fn app(state: AppState) -> Router {
         .route("/v1/orgs/{org}/imports", get(imports_list))
         .route("/v1/orgs/{org}/runs", get(runs_list))
         .route("/v1/orgs/{org}/merge-plans", get(merge_plans))
+        .route(
+            "/v1/orgs/{org}/schedules",
+            get(schedules_index).post(create_schedule),
+        )
+        .route(
+            "/v1/orgs/{org}/schedules/{schedule_id}",
+            axum::routing::patch(update_schedule).delete(delete_schedule),
+        )
         .with_state(state)
 }
 

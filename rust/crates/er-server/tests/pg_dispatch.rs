@@ -37,7 +37,9 @@ async fn dispatcher_runs_run_all_over_a_per_org_ducklake() {
     // Control plane: a clean queue with one org and one queued job.
     let mut client = pg::connect(&dsn).await.unwrap();
     client
-        .batch_execute("DROP TABLE IF EXISTS config_versions, api_keys, jobs, orgs CASCADE;")
+        .batch_execute(
+            "DROP TABLE IF EXISTS schedules, config_versions, api_keys, jobs, orgs CASCADE;",
+        )
         .await
         .unwrap();
     pg::ensure_schema(&mut client).await.unwrap();

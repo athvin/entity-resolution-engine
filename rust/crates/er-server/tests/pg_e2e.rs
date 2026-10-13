@@ -16,7 +16,9 @@ async fn queue_lifecycle_over_postgres() {
 
     // Clean slate (api_keys + jobs both reference orgs), then apply the schema.
     client
-        .batch_execute("DROP TABLE IF EXISTS config_versions, api_keys, jobs, orgs CASCADE;")
+        .batch_execute(
+            "DROP TABLE IF EXISTS schedules, config_versions, api_keys, jobs, orgs CASCADE;",
+        )
         .await
         .unwrap();
     pg::ensure_schema(&mut client).await.unwrap();
