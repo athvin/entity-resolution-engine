@@ -749,6 +749,8 @@ dependencies = [
  "er-config",
  "er-hash",
  "er-ingest",
+ "er-match",
+ "er-schema",
  "er-standardize",
 ]
 

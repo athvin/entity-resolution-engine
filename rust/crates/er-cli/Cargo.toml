@@ -11,6 +11,8 @@ dedupe-core = { path = "../dedupe-core" }
 er-config = { path = "../er-config" }
 er-ingest = { path = "../er-ingest" }
 er-standardize = { path = "../er-standardize" }
+er-match = { path = "../er-match" }
+er-schema = { path = "../er-schema" }
 anyhow.workspace = true
 
 [dev-dependencies]
