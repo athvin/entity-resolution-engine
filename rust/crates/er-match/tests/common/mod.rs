@@ -2,19 +2,19 @@
 // uses a different subset, so unused-in-one-binary items are expected.
 #![allow(dead_code)]
 
-//! Shared setup for the matching/golden gates: land base_10's base delivery,
-//! standardize it, and (for the end-to-end gates) run the whole resolution
-//! through reconcile. Standardization itself is gated byte-exact vs Python in
-//! `er-standardize` (std_hashes.rs over this same delivery), and matching at
-//! 1e-10 in `match_scores.rs`, so the downstream gates take those as given.
+//! Shared setup for the matching/golden/scenario gates: land deliveries,
+//! standardize, and run the resolution (match -> cluster -> reconcile).
+//! Standardization is gated byte-exact vs Python in `er-standardize`
+//! (std_hashes.rs) and matching at 1e-10 in `match_scores.rs`, so the
+//! downstream gates take those as given.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use dedupe_core::predict::run_predict_with_tf;
 use dedupe_core::session::Session;
-use er_config::load_config_str;
-use er_ids::CountingIdFactory;
+use er_config::{Config, load_config_str};
+use er_ids::{CountingIdFactory, IdFactory};
 use er_ingest::landing::{create_raw_records_sql, land_base_delivery};
 use er_match::{build_frozen_tf_tables, load_model};
 use er_reconcile::cluster::label_propagate;
@@ -29,16 +29,19 @@ const TF_CSV: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/tests/fixtures/model_test_v1.tf.csv"
 );
+/// The canonical scenario fixtures (fixtures/static), read at runtime so every
+/// scenario need not be vendored into this crate.
+const REPO_FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../fixtures/static");
 
-/// Build `int_std_records` for base_10's base delivery into `session`, returning
-/// the config. Leaves a table named `int_std_records` in the session.
-pub fn land_and_standardize_base_10(session: &Session) -> er_config::Config {
-    let config = load_config_str(include_str!("../fixtures/test.yaml")).unwrap();
+fn test_config() -> Config {
+    load_config_str(include_str!("../fixtures/test.yaml")).unwrap()
+}
+
+/// Create `raw_records` and seed the nickname lexicon `name_variants` reads.
+pub fn init_raw(session: &Session) {
     session
         .execute_batch(&create_raw_records_sql("raw_records"))
         .unwrap();
-
-    // Seed the nickname lexicon the `name_variants` relation reads.
     let values: Vec<String> = include_str!("../fixtures/nickname_variants.csv")
         .lines()
         .skip(1)
@@ -59,50 +62,68 @@ pub fn land_and_standardize_base_10(session: &Session) -> er_config::Config {
             values.join(", ")
         ))
         .unwrap();
+}
 
-    for (source, csv_text) in [
-        ("crm", include_str!("../fixtures/base_10/base/crm.csv")),
-        (
-            "billing",
-            include_str!("../fixtures/base_10/base/billing.csv"),
-        ),
-        (
-            "webforms",
-            include_str!("../fixtures/base_10/base/webforms.csv"),
-        ),
-    ] {
-        let spec = &config.sources[source];
+/// Append one scenario phase's deliveries to `raw_records`, reading whichever
+/// `fixtures/static/<scenario>/<phase>/<source>.csv` exist (a phase may deliver
+/// a subset of sources). Returns the sources landed.
+pub fn land_phase(
+    session: &Session,
+    config: &Config,
+    scenario: &str,
+    phase: &str,
+    ingest_batch_id: &str,
+    ingested_at: &str,
+) -> Vec<String> {
+    let mut landed = Vec::new();
+    for (source, spec) in &config.sources {
+        let path = format!("{REPO_FIXTURES}/{scenario}/{phase}/{source}.csv");
+        let Ok(csv_text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
         land_base_delivery(
             session,
             "raw_records",
             source,
             spec,
-            csv_text,
-            "01BATCH0000000000000000BASE",
-            "2026-01-01 00:00:00",
+            &csv_text,
+            ingest_batch_id,
+            ingested_at,
         )
         .unwrap();
+        landed.push(source.clone());
     }
+    landed
+}
 
+/// (Re)build `int_std_records` from the current `raw_records`.
+pub fn rebuild_std(session: &Session, config: &Config) {
+    session
+        .execute_batch("drop table if exists int_std_records")
+        .unwrap();
     build_int_std_records(
         session,
-        &config,
+        config,
         "raw_records",
         "nickname_variants",
         "int_std_records",
     )
     .unwrap();
-
-    config
 }
 
-/// Full base_10 resolution: standardize -> frozen-TF match -> cluster
-/// (connected components of pairs >= auto_merge) -> reconcile (empty prior). The
-/// session is left holding `int_std_records`; returns the config and the plan,
-/// whose `assignments`/`transitions` seed `entity_membership`/`entities`.
-pub fn resolve_base_10(session: &Session) -> (er_config::Config, ReconcilePlan) {
-    let config = land_and_standardize_base_10(session);
-
+/// Match the current `int_std_records` with frozen TF, cluster the auto-merge
+/// pairs into connected components, and reconcile against `p_old` (the prior
+/// active membership; empty for a base phase). `id_factory` mints new entity
+/// ids and MUST be threaded across a scenario's phases (one instance for base
+/// then batch) so a later phase's new entities never collide with earlier ids.
+pub fn resolve_with_prior(
+    session: &Session,
+    config: &Config,
+    p_old: &BTreeMap<String, Vec<String>>,
+    id_factory: &dyn IdFactory,
+    never_pairs: &BTreeSet<(String, String)>,
+) -> ReconcilePlan {
+    let _ = config;
     let settings = load_model(MODEL_JSON).unwrap();
     let input = session
         .register_table("int_std_records", "int_std_records")
@@ -130,6 +151,10 @@ pub fn resolve_base_10(session: &Session) -> (er_config::Config, ReconcilePlan) 
         .unwrap()
         .into_iter()
         .map(|r| (r[0].clone(), r[1].clone()))
+        // S4.4 pre-clustering edge adjustment: drop any auto-merge edge a `never`
+        // assertion forbids. For a bridge (the asserted pair is a component's only
+        // connection) this splits it outright, with no partition-level cut.
+        .filter(|pair| !never_pairs.contains(pair))
         .collect();
 
     let nodes: Vec<String> = session
@@ -148,13 +173,101 @@ pub fn resolve_base_10(session: &Session) -> (er_config::Config, ReconcilePlan) 
             .push(record_key.clone());
     }
     let p_new: Vec<Vec<String>> = by_label.into_values().collect();
-    let plan = reconcile_plan(&BTreeMap::new(), &p_new, &CountingIdFactory::new(0));
+    reconcile_plan(p_old, &p_new, id_factory)
+}
+
+/// Fold a reconcile plan onto the prior membership to get the full new
+/// membership (entity_id -> member record_keys). `reconcile_plan` returns only
+/// the DELTA (the set-equal fast path emits nothing for unchanged groups), so
+/// the full partition is `p_old` with each assignment's record moved to its new
+/// entity; merged/retired entities keep no members (all were reassigned). This
+/// is both the batch partition under test and the `p_old` for any next phase.
+///
+/// Note: this does not yet drop tombstoned records (member_removed) — fine for
+/// base/merge/split scenarios, revisit for deletion_scenario.
+pub fn fold_plan(
+    p_old: &BTreeMap<String, Vec<String>>,
+    plan: &ReconcilePlan,
+) -> BTreeMap<String, Vec<String>> {
+    let mut record_entity: BTreeMap<String, String> = BTreeMap::new();
+    for (entity, members) in p_old {
+        for m in members {
+            record_entity.insert(m.clone(), entity.clone());
+        }
+    }
+    for a in &plan.assignments {
+        record_entity.insert(a.record_key.clone(), a.entity_id.clone());
+    }
+    let mut by_entity: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (record, entity) in record_entity {
+        by_entity.entry(entity).or_default().push(record);
+    }
+    by_entity
+}
+
+/// The canonicalized `never`-assertion pairs a scenario declares for a phase,
+/// read from `fixtures/static/<scenario>/assertions.csv` (columns: phase,
+/// rec_a_key, rec_b_key, kind, created_by, note). Empty when the scenario has no
+/// assertions file. Pairs are canonicalized `a <= b` to match the SQL edge form.
+pub fn load_never_pairs(scenario: &str, phase: &str) -> BTreeSet<(String, String)> {
+    let path = format!("{REPO_FIXTURES}/{scenario}/assertions.csv");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return BTreeSet::new();
+    };
+    let mut out = BTreeSet::new();
+    for line in text.lines().skip(1).filter(|l| !l.is_empty()) {
+        let f: Vec<&str> = line.split(',').collect();
+        if f[0] == phase && f[3] == "never" {
+            let (a, b) = (f[1].to_string(), f[2].to_string());
+            out.insert(if a <= b { (a, b) } else { (b, a) });
+        }
+    }
+    out
+}
+
+/// Initialize a session for a multi-phase scenario: create `raw_records` + seed
+/// the lexicon, returning the test config. The caller lands phases itself (via
+/// [`land_phase`] + [`rebuild_std`] + [`resolve_with_prior`]).
+pub fn scenario_init(session: &Session) -> Config {
+    let config = test_config();
+    init_raw(session);
+    config
+}
+
+/// Land base_10's base delivery and build `int_std_records` (the std/match/golden
+/// gates' entry point). Returns the config.
+pub fn land_and_standardize_base_10(session: &Session) -> Config {
+    let config = test_config();
+    init_raw(session);
+    land_phase(
+        session,
+        &config,
+        "base_10",
+        "base",
+        "01BATCH0000000000000000BASE",
+        "2026-01-01 00:00:00",
+    );
+    rebuild_std(session, &config);
+    config
+}
+
+/// Full base_10 resolution (base phase, empty prior). Leaves `int_std_records`
+/// in the session; returns the config and the plan.
+pub fn resolve_base_10(session: &Session) -> (Config, ReconcilePlan) {
+    let config = land_and_standardize_base_10(session);
+    let plan = resolve_with_prior(
+        session,
+        &config,
+        &BTreeMap::new(),
+        &CountingIdFactory::new(0),
+        &BTreeSet::new(),
+    );
     (config, plan)
 }
 
 /// Materialize `entity_membership(record_key, entity_id)` and
-/// `entities(entity_id, status)` from a reconcile plan, so the golden stage's
-/// SQL can join them exactly as it joins the lake relations.
+/// `entities(entity_id, status)` from a reconcile plan, so the golden stage's SQL
+/// can join them exactly as it joins the lake relations.
 pub fn materialize_entities(session: &Session, plan: &ReconcilePlan) {
     let membership: Vec<String> = plan
         .assignments
