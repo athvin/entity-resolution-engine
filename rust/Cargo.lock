@@ -1028,6 +1028,7 @@ name = "er-server"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "er-config",
  "hex",
  "rand 0.9.5",
  "serde",

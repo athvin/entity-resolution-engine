@@ -11,6 +11,7 @@ name = "er-server"
 path = "src/main.rs"
 
 [dependencies]
+er-config = { path = "../er-config" }
 axum = { workspace = true }
 tokio = { workspace = true }
 tokio-postgres = { workspace = true }

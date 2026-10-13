@@ -1,9 +1,10 @@
-//! The Postgres-backed control-plane store (P3): the `orgs` + `jobs` + `api_keys`
-//! schema, the SKIP-LOCKED job queue, and SHA-256 API-key mint/lookup/revoke — a
-//! Rust (tokio-postgres) port of `server/src/erserver/db.py` + `queue.py` +
-//! `auth.py`. The two queue correctness constraints are enforced by Postgres, not
-//! code: at most one ACTIVE job per org (single-writer per tenant) and at most
-//! one job per `(org, idempotency_key)`.
+//! The Postgres-backed control-plane store (P3): the schema (orgs, jobs,
+//! api_keys, config_versions), the SKIP-LOCKED job queue, SHA-256 API-key
+//! mint/lookup/revoke, and the config-version registry — a Rust (tokio-postgres)
+//! port of `server/src/erserver/` `db.py`, `queue.py`, `auth.py`, `configsvc.py`.
+//! The two queue correctness constraints are enforced by Postgres, not code: at
+//! most one ACTIVE job per org (single-writer per tenant) and at most one job per
+//! `(org, idempotency_key)`.
 //!
 //! This is the production queue backend; the HTTP job handlers route here when
 //! `AppState` carries a DSN (connect-per-request). The in-memory store in
@@ -20,8 +21,9 @@ pub const DISPATCHING: &str = "dispatching";
 /// States that hold an org's single-writer slot (jobs_one_active_per_org).
 const ACTIVE_STATES: [&str; 3] = ["dispatching", "running", "canceling"];
 
-/// The control-plane schema (orgs + jobs + the load-bearing indexes). The
-/// `jobs`/`orgs` columns fold in the DDL that db.py adds via later ALTERs.
+/// The control-plane schema (orgs + jobs + api_keys + config_versions + the
+/// load-bearing indexes). The `jobs`/`orgs` columns fold in the DDL that db.py
+/// adds via later ALTERs.
 const SCHEMA: &str = "\
 CREATE TABLE IF NOT EXISTS orgs (\
   name text PRIMARY KEY,\
@@ -64,6 +66,18 @@ CREATE TABLE IF NOT EXISTS api_keys (\
   key_hash text NOT NULL,\
   created_at timestamptz NOT NULL DEFAULT now(),\
   revoked_at timestamptz\
+);\
+CREATE TABLE IF NOT EXISTS config_versions (\
+  org text NOT NULL REFERENCES orgs(name),\
+  version integer NOT NULL,\
+  yaml text NOT NULL,\
+  config_hash text NOT NULL,\
+  state text NOT NULL DEFAULT 'draft' CHECK (state IN ('draft','published')),\
+  tier text,\
+  created_by text NOT NULL,\
+  created_at timestamptz NOT NULL DEFAULT now(),\
+  published_at timestamptz,\
+  PRIMARY KEY (org, version)\
 );";
 
 const JOB_COLS: &str = "job_id, org, kind, state, priority";
@@ -440,4 +454,168 @@ pub async fn set_org_state(
         )
         .await?;
     Ok(n == 1)
+}
+
+/// The publish-time context for an org: `(config_path, state,
+/// active_config_version)`, `None` if the org is absent.
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn org_publish_context(
+    client: &Client,
+    org: &str,
+) -> Result<Option<(String, String, Option<i32>)>, PgError> {
+    let row = client
+        .query_opt(
+            "SELECT config_path, state, active_config_version FROM orgs WHERE name = $1",
+            &[&org],
+        )
+        .await?;
+    Ok(row.map(|r| {
+        (
+            r.get("config_path"),
+            r.get("state"),
+            r.get("active_config_version"),
+        )
+    }))
+}
+
+/// A config-version list row (`configsvc.py` list — no `yaml` body).
+pub struct ConfigVersionRow {
+    pub version: i32,
+    pub config_hash: String,
+    pub state: String,
+    pub tier: Option<String>,
+    pub created_by: String,
+    pub created_at: String,
+    pub published_at: Option<String>,
+}
+
+/// A config-version detail (adds the `yaml` body).
+pub struct ConfigVersionDetail {
+    pub version: i32,
+    pub yaml: String,
+    pub config_hash: String,
+    pub state: String,
+    pub tier: Option<String>,
+    pub created_by: String,
+    pub created_at: String,
+    pub published_at: Option<String>,
+}
+
+/// Insert a new draft config version (`configsvc.py` `create_version`): the
+/// version is `max(version)+1` for the org. Returns the assigned version. The
+/// `(org, version)` PK rejects a concurrent duplicate.
+///
+/// # Errors
+/// Propagates the query/insert error.
+pub async fn create_config_version(
+    client: &Client,
+    org: &str,
+    yaml: &str,
+    config_hash: &str,
+    created_by: &str,
+) -> Result<i32, PgError> {
+    let next: i32 = client
+        .query_one(
+            "SELECT coalesce(max(version), 0) + 1 AS v FROM config_versions WHERE org = $1",
+            &[&org],
+        )
+        .await?
+        .get("v");
+    client
+        .execute(
+            "INSERT INTO config_versions (org, version, yaml, config_hash, created_by) \
+             VALUES ($1, $2, $3, $4, $5)",
+            &[&org, &next, &yaml, &config_hash, &created_by],
+        )
+        .await?;
+    Ok(next)
+}
+
+/// An org's config versions, newest first (`configsvc.py` list; no `yaml`).
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn list_config_versions(
+    client: &Client,
+    org: &str,
+) -> Result<Vec<ConfigVersionRow>, PgError> {
+    let rows = client
+        .query(
+            "SELECT version, config_hash, state, tier, created_by, \
+                    created_at::text AS created_at, published_at::text AS published_at \
+             FROM config_versions WHERE org = $1 ORDER BY version DESC",
+            &[&org],
+        )
+        .await?;
+    Ok(rows
+        .iter()
+        .map(|r| ConfigVersionRow {
+            version: r.get("version"),
+            config_hash: r.get("config_hash"),
+            state: r.get("state"),
+            tier: r.get("tier"),
+            created_by: r.get("created_by"),
+            created_at: r.get("created_at"),
+            published_at: r.get("published_at"),
+        })
+        .collect())
+}
+
+/// One config version (with `yaml`), `None` if absent.
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn get_config_version(
+    client: &Client,
+    org: &str,
+    version: i32,
+) -> Result<Option<ConfigVersionDetail>, PgError> {
+    let row = client
+        .query_opt(
+            "SELECT version, yaml, config_hash, state, tier, created_by, \
+                    created_at::text AS created_at, published_at::text AS published_at \
+             FROM config_versions WHERE org = $1 AND version = $2",
+            &[&org, &version],
+        )
+        .await?;
+    Ok(row.map(|r| ConfigVersionDetail {
+        version: r.get("version"),
+        yaml: r.get("yaml"),
+        config_hash: r.get("config_hash"),
+        state: r.get("state"),
+        tier: r.get("tier"),
+        created_by: r.get("created_by"),
+        created_at: r.get("created_at"),
+        published_at: r.get("published_at"),
+    }))
+}
+
+/// Mark a version published and point the org at it (`configsvc.py` `publish`
+/// DB writes): `config_versions` state/tier/`published_at`, then
+/// `orgs.active_config_version`.
+///
+/// # Errors
+/// Propagates either update error.
+pub async fn publish_config_version(
+    client: &Client,
+    org: &str,
+    version: i32,
+    tier: Option<&str>,
+) -> Result<(), PgError> {
+    client
+        .execute(
+            "UPDATE config_versions SET state = 'published', tier = $3, published_at = now() \
+             WHERE org = $1 AND version = $2",
+            &[&org, &version, &tier],
+        )
+        .await?;
+    client
+        .execute(
+            "UPDATE orgs SET active_config_version = $2 WHERE name = $1",
+            &[&org, &version],
+        )
+        .await?;
+    Ok(())
 }

@@ -37,9 +37,7 @@ async fn job_lifecycle_over_postgres_http() {
     // Clean slate + schema + the org the FK requires.
     let mut client = pg::connect(&dsn).await.unwrap();
     client
-        .batch_execute(
-            "DROP TABLE IF EXISTS api_keys; DROP TABLE IF EXISTS jobs; DROP TABLE IF EXISTS orgs;",
-        )
+        .batch_execute("DROP TABLE IF EXISTS config_versions, api_keys, jobs, orgs CASCADE;")
         .await
         .unwrap();
     pg::ensure_schema(&mut client).await.unwrap();

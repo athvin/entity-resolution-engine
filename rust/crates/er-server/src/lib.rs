@@ -26,6 +26,8 @@ pub mod pg;
 
 use std::sync::{Arc, Mutex};
 
+use er_config::{config_hash, load_config_str};
+
 use axum::Json;
 use axum::Router;
 use axum::extract::{FromRequestParts, Path, State};
@@ -528,6 +530,197 @@ async fn resume_org(
 }
 
 #[derive(Deserialize)]
+struct ConfigIn {
+    yaml: String,
+}
+
+/// 422 for an invalid config (`api.py`: `ConfigValidationError`). `er-config`'s
+/// error renders a YAML line/col location, not a JSON pointer.
+fn config_invalid(e: &er_config::ConfigError) -> (StatusCode, Json<Value>) {
+    (
+        StatusCode::UNPROCESSABLE_ENTITY,
+        Json(json!({ "error": format!("config error: {e}") })),
+    )
+}
+
+/// Admin+: create a draft config version (`POST /v1/orgs/{org}/config/versions`).
+/// The YAML is structurally validated and hashed; the version is `max+1`.
+async fn create_config_version(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Json(body): Json<ConfigIn>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Admin) {
+        return e.into_response();
+    }
+    let config = match load_config_str(&body.yaml) {
+        Ok(c) => c,
+        Err(e) => return config_invalid(&e).into_response(),
+    };
+    let hash = config_hash(&config);
+    let Some(dsn) = &state.dsn else {
+        return config_registry_unavailable();
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    match pg::create_config_version(&client, &org, &body.yaml, &hash, &principal.actor).await {
+        Ok(version) => (
+            StatusCode::CREATED,
+            Json(json!({
+                "org": org,
+                "version": version,
+                "config_hash": hash,
+                "state": "draft",
+            })),
+        )
+            .into_response(),
+        Err(e) => pg_err(e),
+    }
+}
+
+/// The 501 for config routes when no Postgres backend is configured.
+fn config_registry_unavailable() -> axum::response::Response {
+    (
+        StatusCode::NOT_IMPLEMENTED,
+        Json(json!({ "error": "config registry requires Postgres" })),
+    )
+        .into_response()
+}
+
+/// Viewer+: list an org's config versions, newest first (no `yaml` body).
+async fn list_config_versions(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return config_registry_unavailable();
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    match pg::list_config_versions(&client, &org).await {
+        Ok(rows) => {
+            let out: Vec<Value> = rows
+                .iter()
+                .map(|r| {
+                    json!({
+                        "version": r.version,
+                        "config_hash": r.config_hash,
+                        "state": r.state,
+                        "tier": r.tier,
+                        "created_by": r.created_by,
+                        "created_at": r.created_at,
+                        "published_at": r.published_at,
+                    })
+                })
+                .collect();
+            Json(json!(out)).into_response()
+        }
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Parse a `{version}` path segment to the stored integer, or `None`.
+fn parse_version(s: &str) -> Option<i32> {
+    s.parse::<i32>().ok()
+}
+
+/// Viewer+: one config version with its `yaml` (404 if absent).
+async fn get_config_version(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, version)): Path<(String, String)>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let Some(version) = parse_version(&version) else {
+        return config_version_missing(&org, &version).into_response();
+    };
+    let Some(dsn) = &state.dsn else {
+        return config_registry_unavailable();
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    match pg::get_config_version(&client, &org, version).await {
+        Ok(Some(d)) => Json(config_detail_json(&d)).into_response(),
+        Ok(None) => config_version_missing(&org, &version.to_string()).into_response(),
+        Err(e) => pg_err(e),
+    }
+}
+
+/// The 404 body for a missing config version.
+fn config_version_missing(org: &str, version: &str) -> (StatusCode, Json<Value>) {
+    (
+        StatusCode::NOT_FOUND,
+        Json(json!({ "error": format!("no config version {version} for org '{org}'") })),
+    )
+}
+
+/// JSON of a full config-version detail.
+fn config_detail_json(d: &pg::ConfigVersionDetail) -> Value {
+    json!({
+        "version": d.version,
+        "yaml": d.yaml,
+        "config_hash": d.config_hash,
+        "state": d.state,
+        "tier": d.tier,
+        "created_by": d.created_by,
+        "created_at": d.created_at,
+        "published_at": d.published_at,
+    })
+}
+
+/// Viewer+: the org's active (published) config (`GET /v1/orgs/{org}/config`),
+/// 404 if nothing is published.
+async fn active_config(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return config_registry_unavailable();
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let active = match pg::org_publish_context(&client, &org).await {
+        Ok(Some((_, _, Some(v)))) => v,
+        Ok(_) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "no published config" })),
+            )
+                .into_response();
+        }
+        Err(e) => return pg_err(e),
+    };
+    match pg::get_config_version(&client, &org, active).await {
+        Ok(Some(d)) => Json(config_detail_json(&d)).into_response(),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "no published config" })),
+        )
+            .into_response(),
+        Err(e) => pg_err(e),
+    }
+}
+
+#[derive(Deserialize)]
 struct EnqueueJob {
     kind: String,
     #[serde(default)]
@@ -837,6 +1030,15 @@ pub fn app(state: AppState) -> Router {
             "/v1/orgs/{org}/api-keys/{key_id}",
             axum::routing::delete(revoke_key),
         )
+        .route(
+            "/v1/orgs/{org}/config/versions",
+            post(create_config_version).get(list_config_versions),
+        )
+        .route(
+            "/v1/orgs/{org}/config/versions/{version}",
+            get(get_config_version),
+        )
+        .route("/v1/orgs/{org}/config", get(active_config))
         .with_state(state)
 }
 
