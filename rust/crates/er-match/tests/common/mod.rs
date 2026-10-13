@@ -270,25 +270,64 @@ pub fn resolve_with_prior(
         .collect();
     let mut plan = reconcile_plan(&p_old_live, &p_new, id_factory);
 
-    // S4.4.2 edge_cut events: one per cut, attributed to the prior entity it
-    // severed. Both endpoints were co-clustered, so they share a prior entity,
-    // which survives as the claimant fragment and carries the event.
-    if !cuts.is_empty() {
-        let mut prior_entity: BTreeMap<&str, &str> = BTreeMap::new();
-        for (entity, members) in p_old {
-            for m in members {
-                prior_entity.insert(m.as_str(), entity.as_str());
+    // STAGE events on top of the pure plan (relational_stage.py), which the pure
+    // reconcile_plan core does not emit:
+
+    // Post-reconcile placement of each live record: p_old_live overridden by the
+    // plan's assignments. An `edge_cut` attaches to the entity holding the cut's
+    // rec_a_key (the canonical smaller endpoint) AFTER reconcile — the survivor
+    // if it kept the prior id, else the new fragment (relational_stage.py:337-342).
+    let mut placement: BTreeMap<String, String> = BTreeMap::new();
+    for (entity, members) in &p_old_live {
+        for m in members {
+            placement.insert(m.clone(), entity.clone());
+        }
+    }
+    for a in &plan.assignments {
+        placement.insert(a.record_key.clone(), a.entity_id.clone());
+    }
+    for c in &cuts {
+        if let Some(entity) = placement.get(&c.rec_a_key) {
+            plan.events.push(PlannedEvent {
+                entity_id: entity.clone(),
+                event_type: "edge_cut".to_string(),
+                details: serde_json::json!({ "rec_a_key": c.rec_a_key, "rec_b_key": c.rec_b_key }),
+                details_hash: format!("cut:{}:{}", c.rec_a_key, c.rec_b_key),
+            });
+        }
+    }
+
+    // Tombstone departures (full-refresh deletions): a record in the prior
+    // membership no longer in the live corpus. One `member_removed` (cause
+    // tombstone) per prior entity that lost records — in ADDITION to the plan's
+    // recluster member_removed (relational_stage.py:325-331). A prior entity
+    // emptied entirely by tombstoning `retired`s (the pure plan never saw it,
+    // since p_old_live dropped it) (relational.py:159-163).
+    let mut departed: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut live_count: BTreeMap<String, usize> = BTreeMap::new();
+    for (entity, members) in p_old {
+        for m in members {
+            if live.contains(m.as_str()) {
+                *live_count.entry(entity.clone()).or_default() += 1;
+            } else {
+                departed.entry(entity.clone()).or_default().push(m.clone());
             }
         }
-        for c in &cuts {
-            if let Some(entity) = prior_entity.get(c.rec_a_key.as_str()) {
-                plan.events.push(PlannedEvent {
-                    entity_id: (*entity).to_string(),
-                    event_type: "edge_cut".to_string(),
-                    details: serde_json::Value::Null,
-                    details_hash: String::new(),
-                });
-            }
+    }
+    for (entity, keys) in &departed {
+        plan.events.push(PlannedEvent {
+            entity_id: entity.clone(),
+            event_type: "member_removed".to_string(),
+            details: serde_json::json!({ "cause": "tombstone", "member_keys": keys }),
+            details_hash: format!("tombstone:{entity}"),
+        });
+        if live_count.get(entity).copied().unwrap_or(0) == 0 {
+            plan.events.push(PlannedEvent {
+                entity_id: entity.clone(),
+                event_type: "retired".to_string(),
+                details: serde_json::Value::Null,
+                details_hash: format!("retired:{entity}"),
+            });
         }
     }
     plan

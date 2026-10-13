@@ -213,8 +213,8 @@ fn deletion_scenario() {
         "deletion_scenario",
         &[
             ("base", false, true),
-            ("refresh", true, false),
-            ("resurrect", false, false),
+            ("refresh", true, true),
+            ("resurrect", false, true),
         ],
     );
 }
@@ -231,7 +231,7 @@ fn deletion_scenario() {
 fn assertions_scenario() {
     run_phases(
         "assertions_scenario",
-        &[("base", false, true), ("batch", false, false)],
+        &[("base", false, true), ("batch", false, true)],
     );
 }
 
