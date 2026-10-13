@@ -4,12 +4,40 @@
 //! base_10's committed goldens — the same oracles the in-memory stage gates use,
 //! now proving the lake orchestration end to end.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use dedupe_core::Session;
 use er_config::{Config, load_config_str};
 use er_hash::std_hash::{STD_HASH_COLUMNS, StdValue, table_content_hash};
+
+/// base_10's committed match model (frozen settings + TF snapshot).
+fn match_model(session: &Session) {
+    let model_json = std::fs::read_to_string(repo_fixture("model_test_v1.json")).unwrap();
+    let tf_csv = repo_fixture("model_test_v1.tf.csv");
+    er_cli::run_match(
+        session,
+        &er_cli::MatchModel {
+            settings_json: &model_json,
+            tf_csv_path: std::path::Path::new(&tf_csv),
+            model_version: "v0001",
+            tf_snapshot_id: "01JWMDTFSNAP00000000000001",
+        },
+        0.60,
+        "01RUNMATCH0000000000000000",
+        "2026-01-02 00:00:00",
+    )
+    .unwrap();
+}
+
+/// Partition from `entity_id -> members` rows: set of clusters (id-insensitive).
+fn partition(pairs: &[(String, String)]) -> BTreeSet<BTreeSet<String>> {
+    let mut by: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for (entity, member) in pairs {
+        by.entry(entity.clone()).or_default().insert(member.clone());
+    }
+    by.into_values().collect()
+}
 
 fn enabled() -> bool {
     std::env::var("DEDUPE_E2E_DUCKLAKE").as_deref() == Ok("1")
@@ -205,6 +233,94 @@ fn match_through_ducklake_matches_golden() {
         ))
         .unwrap();
     assert_eq!(null_evidence, 0, "every scored pair must carry evidence");
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn reconcile_through_ducklake_matches_golden() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let (session, config, tmp) = standardized_lake("recon");
+    match_model(&session);
+    er_cli::run_reconcile(
+        &session,
+        &config,
+        "01RUNRECON0000000000000000",
+        "2026-01-03 00:00:00",
+    )
+    .unwrap();
+
+    // Membership partition (id-insensitive) vs base_10 membership.csv.
+    let got_rows: Vec<(String, String)> = session
+        .query_strings(&format!(
+            "select entity_id, record_key from {}",
+            er_cli::ENTITY_MEMBERSHIP
+        ))
+        .unwrap()
+        .into_iter()
+        .map(|r| (r[0].clone(), r[1].clone()))
+        .collect();
+    let got = partition(&got_rows);
+
+    let membership =
+        std::fs::read_to_string(repo_fixture("base_10/expected/base/membership.csv")).unwrap();
+    let mut want_rows: Vec<(String, String)> = Vec::new();
+    for line in membership.lines().skip(1).filter(|l| !l.is_empty()) {
+        // persona_id, source_system, source_record_id, entity_label
+        let f: Vec<&str> = line.split(',').collect();
+        want_rows.push((f[3].to_string(), format!("{}:{}", f[1], f[2])));
+    }
+    let want = partition(&want_rows);
+    assert_eq!(got.len(), 10, "base_10 resolves to 10 entities in the lake");
+    assert_eq!(
+        got, want,
+        "lake entity_membership partition differs from golden"
+    );
+
+    // Event profiles (per-entity {event_type: count}) vs events.csv.
+    let mut got_events: BTreeMap<String, BTreeMap<String, usize>> = BTreeMap::new();
+    for r in session
+        .query_strings(&format!(
+            "select entity_id, event_type from {}",
+            er_cli::ENTITY_EVENTS
+        ))
+        .unwrap()
+    {
+        *got_events
+            .entry(r[0].clone())
+            .or_default()
+            .entry(r[1].clone())
+            .or_default() += 1;
+    }
+    let mut got_profiles: Vec<Vec<(String, usize)>> = got_events
+        .into_values()
+        .map(|m| m.into_iter().collect())
+        .collect();
+    got_profiles.sort();
+
+    let events = std::fs::read_to_string(repo_fixture("base_10/expected/base/events.csv")).unwrap();
+    let mut want_events: BTreeMap<String, BTreeMap<String, usize>> = BTreeMap::new();
+    for line in events.lines().skip(1).filter(|l| !l.is_empty()) {
+        // entity_label, event_type, count
+        let f: Vec<&str> = line.split(',').collect();
+        want_events
+            .entry(f[0].to_string())
+            .or_default()
+            .insert(f[1].to_string(), f[2].parse().unwrap());
+    }
+    let mut want_profiles: Vec<Vec<(String, usize)>> = want_events
+        .into_values()
+        .map(|m| m.into_iter().collect())
+        .collect();
+    want_profiles.sort();
+
+    assert_eq!(
+        got_profiles, want_profiles,
+        "lake entity_events differ from golden"
+    );
 
     let _ = std::fs::remove_dir_all(&tmp);
 }

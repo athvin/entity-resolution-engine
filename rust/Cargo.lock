@@ -748,10 +748,13 @@ dependencies = [
  "dedupe-core",
  "er-config",
  "er-hash",
+ "er-ids",
  "er-ingest",
  "er-match",
+ "er-reconcile",
  "er-schema",
  "er-standardize",
+ "serde_json",
 ]
 
 [[package]]

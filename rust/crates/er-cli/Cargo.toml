@@ -13,7 +13,10 @@ er-ingest = { path = "../er-ingest" }
 er-standardize = { path = "../er-standardize" }
 er-match = { path = "../er-match" }
 er-schema = { path = "../er-schema" }
+er-reconcile = { path = "../er-reconcile" }
+er-ids = { path = "../er-ids" }
 anyhow.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 er-hash = { path = "../er-hash" }

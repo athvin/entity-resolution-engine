@@ -23,13 +23,21 @@ use dedupe_core::session::SessionOptions;
 use dedupe_core::session::ducklake::DuckLakeConfig;
 use er_config::Config;
 use er_ingest::landing::{create_raw_records_sql, land_base_delivery, land_full_refresh};
+use std::collections::BTreeMap;
+
+use er_ids::{CountingIdFactory, IdFactory};
 use er_match::{build_frozen_tf_tables, load_model};
+use er_reconcile::cluster::label_propagate;
+use er_reconcile::reconcile::reconcile_plan;
 use er_standardize::build_int_std_records;
 
 /// The lake relations this crate reads/writes, fully qualified.
 pub const RAW_RECORDS: &str = "lake.main.raw_records";
 pub const INT_STD_RECORDS: &str = "lake.main.int_std_records";
 pub const MATCH_SCORES: &str = "lake.main.match_scores";
+pub const ENTITY_MEMBERSHIP: &str = "lake.main.entity_membership";
+pub const ENTITIES: &str = "lake.main.entities";
+pub const ENTITY_EVENTS: &str = "lake.main.entity_events";
 /// The nickname lexicon `int_std_records` reads — a temp relation (read
 /// cross-catalog while the lake write runs), seeded per session.
 pub const LEXICON: &str = "nickname_variants";
@@ -253,5 +261,185 @@ pub fn run_match(
               source.evidence, true, null, null, source.run_id, source.scored_at)"
     ))?;
     session.execute_batch("drop table __match_src")?;
+    Ok(())
+}
+
+/// SQL single-quoted literal escape.
+fn esc(s: &str) -> String {
+    s.replace('\'', "''")
+}
+
+/// Create a DDL-owned S5 relation in the lake (idempotent `CREATE TABLE IF NOT
+/// EXISTS` from the er-schema registry).
+fn create_ddl_table(session: &Session, name: &str) -> Result<()> {
+    let spec = er_schema::model::all_specs()
+        .into_iter()
+        .find(|s| s.name == name)
+        .ok_or_else(|| anyhow::anyhow!("{name} spec missing from S5 registry"))?;
+    session.execute_batch(
+        &er_schema::model::create_table_sql(&spec).map_err(|e| anyhow::anyhow!("{e}"))?,
+    )?;
+    Ok(())
+}
+
+/// S4.5 reconcile: cluster the active auto-merge pairs in `lake.main.match_scores`
+/// into connected components, reconcile them against the prior
+/// `lake.main.entity_membership` (INV-PERM), and write the resulting
+/// membership / `entities` lifecycle / `entity_events` back to the lake.
+///
+/// NOTE: this is the pure-core path (label_propagate + reconcile_plan) wired to
+/// the lake — correct for full-mode base resolution. The relational edge-cut /
+/// tombstone event attribution (assertions/deletion) is the next enhancement.
+///
+/// # Errors
+/// Propagates lake DDL / query / write errors.
+pub fn run_reconcile(session: &Session, config: &Config, run_id: &str, run_at: &str) -> Result<()> {
+    create_ddl_table(session, "entity_membership")?;
+    create_ddl_table(session, "entities")?;
+    create_ddl_table(session, "entity_events")?;
+
+    let auto_merge = config.thresholds.auto_merge;
+    let edges: Vec<(String, String)> = session
+        .query_strings(&format!(
+            "select rec_a_key, rec_b_key from {MATCH_SCORES} \
+             where is_active and match_probability >= {auto_merge} order by rec_a_key, rec_b_key"
+        ))?
+        .into_iter()
+        .map(|r| (r[0].clone(), r[1].clone()))
+        .collect();
+    let nodes: Vec<String> = session
+        .query_strings(&format!(
+            "select record_key from {INT_STD_RECORDS} order by record_key"
+        ))?
+        .into_iter()
+        .map(|r| r[0].clone())
+        .collect();
+
+    // Prior active membership (empty on the first run).
+    let mut p_old: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for r in session.query_strings(&format!(
+        "select entity_id, record_key from {ENTITY_MEMBERSHIP} order by entity_id, record_key"
+    ))? {
+        p_old.entry(r[0].clone()).or_default().push(r[1].clone());
+    }
+
+    let labels = label_propagate(&nodes, &edges);
+    let mut by_label: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (record_key, label) in &labels {
+        by_label
+            .entry(label.clone())
+            .or_default()
+            .push(record_key.clone());
+    }
+    let p_new: Vec<Vec<String>> = by_label.into_values().collect();
+
+    // Continue the entity-id counter past every entity ever minted, so a new
+    // phase's ids never collide with persisted ones.
+    let minted: i64 = session.query_strings(&format!("select count(*) from {ENTITIES}"))?[0][0]
+        .parse()
+        .unwrap_or(0);
+    let plan = reconcile_plan(
+        &p_old,
+        &p_new,
+        &CountingIdFactory::new(minted.max(0) as u128),
+    );
+
+    let ts = esc(run_at);
+    let rid = esc(run_id);
+
+    if !plan.assignments.is_empty() {
+        let rows: Vec<String> = plan
+            .assignments
+            .iter()
+            .map(|a| {
+                let (sys, srid) = a
+                    .record_key
+                    .split_once(':')
+                    .unwrap_or((a.record_key.as_str(), ""));
+                format!(
+                    "('{}', '{}', '{}', '{}')",
+                    esc(sys),
+                    esc(srid),
+                    esc(&a.record_key),
+                    esc(&a.entity_id)
+                )
+            })
+            .collect();
+        session.execute_batch(&format!(
+            "create temp table __mem_src as select * from (values {}) \
+             as t(source_system, source_record_id, record_key, entity_id)",
+            rows.join(", ")
+        ))?;
+        session.execute_batch(&format!(
+            "merge into {ENTITY_MEMBERSHIP} as target using __mem_src as source
+               on target.source_system = source.source_system
+              and target.source_record_id = source.source_record_id
+             when matched then update set record_key = source.record_key,
+                 entity_id = source.entity_id, assigned_at = cast('{ts}' as timestamp), run_id = '{rid}'
+             when not matched then insert
+                 (source_system, source_record_id, record_key, entity_id, assigned_at, run_id)
+                 values (source.source_system, source.source_record_id, source.record_key,
+                         source.entity_id, cast('{ts}' as timestamp), '{rid}')"
+        ))?;
+        session.execute_batch("drop table __mem_src")?;
+    }
+
+    if !plan.transitions.is_empty() {
+        let rows: Vec<String> = plan
+            .transitions
+            .iter()
+            .map(|t| {
+                let merged = t
+                    .merged_into
+                    .as_ref()
+                    .map_or_else(|| "null".to_string(), |m| format!("'{}'", esc(m)));
+                format!("('{}', '{}', {merged})", esc(&t.entity_id), esc(&t.status))
+            })
+            .collect();
+        session.execute_batch(&format!(
+            "create temp table __ent_src as select * from (values {}) \
+             as t(entity_id, status, merged_into)",
+            rows.join(", ")
+        ))?;
+        session.execute_batch(&format!(
+            "merge into {ENTITIES} as target using __ent_src as source
+               on target.entity_id = source.entity_id
+             when matched then update set status = source.status,
+                 merged_into = source.merged_into, updated_at = cast('{ts}' as timestamp),
+                 updated_run_id = '{rid}'
+             when not matched then insert
+                 (entity_id, status, merged_into, created_at, updated_at, created_run_id, updated_run_id)
+                 values (source.entity_id, source.status, source.merged_into,
+                         cast('{ts}' as timestamp), cast('{ts}' as timestamp), '{rid}', '{rid}')"
+        ))?;
+        session.execute_batch("drop table __ent_src")?;
+    }
+
+    if !plan.events.is_empty() {
+        let event_ids = CountingIdFactory::new(0);
+        let rows: Vec<String> = plan
+            .events
+            .iter()
+            .enumerate()
+            .map(|(i, e)| {
+                let details =
+                    serde_json::to_string(&e.details).unwrap_or_else(|_| "{}".to_string());
+                format!(
+                    "('{}', {i}, '{rid}', '{}', '{}', '{}'::json, '{}', cast('{ts}' as timestamp))",
+                    esc(&event_ids.new_id()),
+                    esc(&e.entity_id),
+                    esc(&e.event_type),
+                    esc(&details),
+                    esc(&e.details_hash),
+                )
+            })
+            .collect();
+        session.execute_batch(&format!(
+            "insert into {ENTITY_EVENTS} \
+             (event_id, seq, run_id, entity_id, event_type, details, details_hash, occurred_at) \
+             values {}",
+            rows.join(", ")
+        ))?;
+    }
     Ok(())
 }
