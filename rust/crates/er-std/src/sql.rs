@@ -162,6 +162,26 @@ pub fn source_metadata(payload: &str, excluded: &[&str]) -> String {
     )
 }
 
+/// S4.2 `name_variants(col)`: the `LIST(VARCHAR) NOT NULL` column. Never SQL NULL
+/// — the EMPTY list when `name_norm(col)` is NULL, else a list whose element 0 is
+/// exactly `name_norm(col)` (the symmetry guarantee, built by PREPENDING rather
+/// than union+sort) followed by the sorted, de-duplicated one-hop lexicon
+/// neighbours (symmetric read of the `active` rows; never a transitive closure).
+/// `lexicon` is the qualified `nickname_variants` relation name.
+#[must_use]
+pub fn name_variants(col: &str, lexicon: &str) -> String {
+    let normalized = name_norm(col);
+    format!(
+        "case when {normalized} is null then cast([] as varchar[]) \
+         else list_prepend({normalized}, coalesce(( \
+         select list_sort(list_distinct(list(edge.variant_other))) \
+         from (select variant_a as variant_self, variant_b as variant_other from {lexicon} where active \
+         union all \
+         select variant_b as variant_self, variant_a as variant_other from {lexicon} where active) as edge \
+         where edge.variant_self = {normalized}), cast([] as varchar[]))) end"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

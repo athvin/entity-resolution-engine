@@ -5,7 +5,7 @@
 //! match. Regenerate with `uv run python rust/crates/er-std/tests/gen_std_golden.py`.
 
 use dedupe_core::session::{Session, SessionOptions};
-use er_std::sql::{email_norm, name_norm, parse_date, source_metadata};
+use er_std::sql::{email_norm, name_norm, name_variants, parse_date, source_metadata};
 
 fn lit(value: Option<&str>) -> String {
     match value {
@@ -138,6 +138,52 @@ fn source_metadata_matches_dbt_macro() {
             rows[0][0],
             expected_text(&case["metadata"]),
             "source_metadata differs from the dbt macro for payload {payload}",
+        );
+    }
+}
+
+#[test]
+fn name_variants_matches_dbt_macro() {
+    let golden: serde_json::Value =
+        serde_json::from_str(include_str!("variants_golden.json")).unwrap();
+    let session = Session::open_in_memory(SessionOptions::deterministic()).unwrap();
+
+    // Build the nickname lexicon table from the golden's committed seed pairs.
+    let values: Vec<String> = golden["lexicon"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| {
+            let a = p[0].as_str().unwrap().replace('\'', "''");
+            let b = p[1].as_str().unwrap().replace('\'', "''");
+            format!("('{a}', '{b}', true)")
+        })
+        .collect();
+    session
+        .execute_batch(&format!(
+            "create table nickname_lex as select * from (values {}) \
+             as t(variant_a, variant_b, active)",
+            values.join(", ")
+        ))
+        .unwrap();
+
+    let cases = golden["cases"].as_array().unwrap();
+    let count = cases.len();
+    assert!(count > 10, "expected a broad case set");
+    for case in cases {
+        let input = case["input"].as_str();
+        // array_to_string with chr(31) == the \x1f form std_hash hashes; empty list -> "".
+        let projection = name_variants("col", "nickname_lex");
+        let sql = format!(
+            "select array_to_string(({projection}), chr(31)) as r \
+             from (select cast({} as varchar) as col) as input",
+            lit(input)
+        );
+        let rows = session.query_strings(&sql).unwrap();
+        assert_eq!(
+            rows[0][0],
+            expected_text(&case["name_variants"]),
+            "name_variants for {input:?} differs from the dbt macro",
         );
     }
 }

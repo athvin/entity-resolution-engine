@@ -1,0 +1,119 @@
+{
+  "_comment": "dbt name_variants via seeded MacroHarness. Regen: uv run python rust/crates/er-std/tests/gen_variants_golden.py",
+  "lexicon": [
+    [
+      "anthony",
+      "tony"
+    ],
+    [
+      "beth",
+      "elizabeth"
+    ],
+    [
+      "bob",
+      "robert"
+    ],
+    [
+      "bobby",
+      "robert"
+    ],
+    [
+      "catherine",
+      "cathy"
+    ],
+    [
+      "chris",
+      "christopher"
+    ],
+    [
+      "dave",
+      "david"
+    ],
+    [
+      "elizabeth",
+      "liz"
+    ],
+    [
+      "james",
+      "jim"
+    ],
+    [
+      "james",
+      "jimmy"
+    ],
+    [
+      "michael",
+      "mike"
+    ],
+    [
+      "sue",
+      "susan"
+    ]
+  ],
+  "cases": [
+    {
+      "input": null,
+      "name_variants": ""
+    },
+    {
+      "input": "",
+      "name_variants": ""
+    },
+    {
+      "input": "Robert",
+      "name_variants": "robert\u001fbob\u001fbobby"
+    },
+    {
+      "input": "bob",
+      "name_variants": "bob\u001frobert"
+    },
+    {
+      "input": "bobby",
+      "name_variants": "bobby\u001frobert"
+    },
+    {
+      "input": "james",
+      "name_variants": "james\u001fjim\u001fjimmy"
+    },
+    {
+      "input": "elizabeth",
+      "name_variants": "elizabeth\u001fbeth\u001fliz"
+    },
+    {
+      "input": "catherine",
+      "name_variants": "catherine\u001fcathy"
+    },
+    {
+      "input": "smith",
+      "name_variants": "smith"
+    },
+    {
+      "input": "O'Brien",
+      "name_variants": "obrien"
+    },
+    {
+      "input": "José",
+      "name_variants": "jose"
+    },
+    {
+      "input": "  Mike  ",
+      "name_variants": "mike\u001fmichael"
+    },
+    {
+      "input": "susan",
+      "name_variants": "susan\u001fsue"
+    },
+    {
+      "input": "dave",
+      "name_variants": "dave\u001fdavid"
+    },
+    {
+      "input": "chris",
+      "name_variants": "chris\u001fchristopher"
+    },
+    {
+      "input": "anthony",
+      "name_variants": "anthony\u001ftony"
+    }
+  ]
+}
