@@ -1,0 +1,77 @@
+{
+  "_comment": "dbt source_metadata via MacroHarness. Regen: uv run python rust/crates/er-std/tests/gen_metadata_golden.py",
+  "cases": [
+    {
+      "payload": "{\"crm_id\": \"1\", \"first_name\": \"Ann\", \"last_name\": \"Lee\", \"email_address\": \"a@b.com\", \"phone\": \"5551234\", \"street_address\": \"1 Main\", \"city\": \"X\", \"state\": \"CA\", \"zip\": \"90001\", \"dob\": \"1990-01-01\", \"last_modified\": \"t\", \"persona_id\": \"P1\", \"notes\": \"vip\", \"loyalty\": \"gold\"}",
+      "excluded": [
+        "crm_id",
+        "last_modified",
+        "persona_id",
+        "first_name",
+        "last_name",
+        "email_address",
+        "phone",
+        "street_address",
+        "city",
+        "state",
+        "zip",
+        "dob"
+      ],
+      "metadata": "{\"loyalty\":\"gold\",\"notes\":\"vip\"}"
+    },
+    {
+      "payload": "{\"crm_id\": \"1\", \"first_name\": \"Ann\", \"last_name\": \"Lee\", \"email_address\": \"a@b.com\", \"phone\": \"5551234\", \"street_address\": \"1 Main\", \"city\": \"X\", \"state\": \"CA\", \"zip\": \"90001\", \"dob\": \"1990-01-01\", \"last_modified\": \"t\", \"persona_id\": \"P1\"}",
+      "excluded": [
+        "crm_id",
+        "last_modified",
+        "persona_id",
+        "first_name",
+        "last_name",
+        "email_address",
+        "phone",
+        "street_address",
+        "city",
+        "state",
+        "zip",
+        "dob"
+      ],
+      "metadata": "{}"
+    },
+    {
+      "payload": "{\"crm_id\": \"1\", \"first_name\": \"Ann\", \"last_name\": \"Lee\", \"email_address\": \"a@b.com\", \"phone\": \"5551234\", \"street_address\": \"1 Main\", \"city\": \"X\", \"state\": \"CA\", \"zip\": \"90001\", \"dob\": \"1990-01-01\", \"last_modified\": \"t\", \"persona_id\": \"P1\", \"z_last\": \"1\", \"a_first\": \"2\", \"m_mid\": \"3\"}",
+      "excluded": [
+        "crm_id",
+        "last_modified",
+        "persona_id",
+        "first_name",
+        "last_name",
+        "email_address",
+        "phone",
+        "street_address",
+        "city",
+        "state",
+        "zip",
+        "dob"
+      ],
+      "metadata": "{\"a_first\":\"2\",\"m_mid\":\"3\",\"z_last\":\"1\"}"
+    },
+    {
+      "payload": "{\"crm_id\": \"1\", \"first_name\": \"Ann\", \"last_name\": \"Lee\", \"email_address\": \"a@b.com\", \"phone\": \"5551234\", \"street_address\": \"1 Main\", \"city\": \"X\", \"state\": \"CA\", \"zip\": \"90001\", \"dob\": \"1990-01-01\", \"last_modified\": \"t\", \"persona_id\": \"P1\", \"a/b\": \"slash\", \"c~d\": \"tilde\"}",
+      "excluded": [
+        "crm_id",
+        "last_modified",
+        "persona_id",
+        "first_name",
+        "last_name",
+        "email_address",
+        "phone",
+        "street_address",
+        "city",
+        "state",
+        "zip",
+        "dob"
+      ],
+      "metadata": "{\"a/b\":\"slash\",\"c~d\":\"tilde\"}"
+    }
+  ]
+}

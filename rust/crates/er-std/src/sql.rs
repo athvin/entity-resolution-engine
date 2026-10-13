@@ -140,6 +140,28 @@ pub fn parse_date(col: &str, fmt: &str) -> String {
     format!("cast(try_strptime({present}, '{escaped}') as date)")
 }
 
+/// S4.2 `source_metadata(payload, spec)`: preserve the unmapped source fields of
+/// `payload` (a JSON column) verbatim as a JSON object, keys sorted for
+/// deterministic repeated deliveries. `excluded` is the set of keys NOT kept — the
+/// caller builds it as `[record_id_column, updated_at_column, "persona_id"]` plus
+/// every mapped `columns[attr]`. JSON pointers keep punctuation in field names
+/// literal (`~`->`~0`, `/`->`~1`).
+#[must_use]
+pub fn source_metadata(payload: &str, excluded: &[&str]) -> String {
+    let literals = excluded
+        .iter()
+        .map(|e| e.replace('\'', "''"))
+        .collect::<Vec<_>>()
+        .join("', '");
+    format!(
+        "to_json(map_from_entries(list_transform(\
+         list_sort(list_filter(coalesce(json_keys({payload}), []::varchar[]), \
+         k -> not list_contains(['{literals}'], k))), \
+         k -> struct_pack(key := k, value := json_extract({payload}, \
+         '/' || replace(replace(k, '~', '~0'), '/', '~1'))))))"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

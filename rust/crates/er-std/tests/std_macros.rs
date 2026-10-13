@@ -5,7 +5,7 @@
 //! match. Regenerate with `uv run python rust/crates/er-std/tests/gen_std_golden.py`.
 
 use dedupe_core::session::{Session, SessionOptions};
-use er_std::sql::{email_norm, name_norm, parse_date};
+use er_std::sql::{email_norm, name_norm, parse_date, source_metadata};
 
 fn lit(value: Option<&str>) -> String {
     match value {
@@ -105,6 +105,39 @@ fn parse_date_matches_dbt_macro() {
             rows[0][0],
             expected_text(&case["birth_date"]),
             "parse_date for {input:?} ({fmt}) differs from the dbt macro",
+        );
+    }
+}
+
+#[test]
+fn source_metadata_matches_dbt_macro() {
+    let golden: serde_json::Value =
+        serde_json::from_str(include_str!("metadata_golden.json")).unwrap();
+    let cases = golden["cases"].as_array().unwrap();
+    let count = cases.len();
+    assert!(count > 0, "expected metadata cases");
+    let session = Session::open_in_memory(SessionOptions::deterministic()).unwrap();
+
+    for case in cases {
+        let payload = case["payload"].as_str().unwrap();
+        let excluded: Vec<&str> = case["excluded"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e.as_str().unwrap())
+            .collect();
+        // Cast the JSON result to VARCHAR so it renders as text in query_strings.
+        let projection = source_metadata("col", &excluded);
+        let sql = format!(
+            "select cast(({projection}) as varchar) as r \
+             from (select cast({} as varchar) as col) as input",
+            lit(Some(payload))
+        );
+        let rows = session.query_strings(&sql).unwrap();
+        assert_eq!(
+            rows[0][0],
+            expected_text(&case["metadata"]),
+            "source_metadata differs from the dbt macro for payload {payload}",
         );
     }
 }
