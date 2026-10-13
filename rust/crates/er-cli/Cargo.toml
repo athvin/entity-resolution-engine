@@ -6,7 +6,12 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[[bin]]
+name = "er"
+path = "src/main.rs"
+
 [dependencies]
+clap = { workspace = true }
 dedupe-core = { path = "../dedupe-core" }
 er-config = { path = "../er-config" }
 er-ingest = { path = "../er-ingest" }
@@ -21,6 +26,7 @@ serde_json.workspace = true
 
 [dev-dependencies]
 er-hash = { path = "../er-hash" }
+assert_cmd = "2"
 
 [lints]
 workspace = true
