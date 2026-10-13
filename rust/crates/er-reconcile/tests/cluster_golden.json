@@ -1,0 +1,217 @@
+{
+  "_comment": "label_propagate golden from er.entities.cluster. Regen: uv run python rust/crates/er-reconcile/tests/gen_cluster_golden.py",
+  "cases": [
+    {
+      "name": "chain",
+      "nodes": [
+        "a",
+        "b",
+        "c"
+      ],
+      "edges": [
+        [
+          "a",
+          "b"
+        ],
+        [
+          "b",
+          "c"
+        ]
+      ],
+      "labels": {
+        "a": "a",
+        "b": "a",
+        "c": "a"
+      }
+    },
+    {
+      "name": "reversed",
+      "nodes": [
+        "a",
+        "b",
+        "c"
+      ],
+      "edges": [
+        [
+          "c",
+          "b"
+        ],
+        [
+          "b",
+          "a"
+        ]
+      ],
+      "labels": {
+        "a": "a",
+        "b": "a",
+        "c": "a"
+      }
+    },
+    {
+      "name": "two_components",
+      "nodes": [
+        "a",
+        "b",
+        "x",
+        "y",
+        "z"
+      ],
+      "edges": [
+        [
+          "a",
+          "b"
+        ],
+        [
+          "x",
+          "y"
+        ],
+        [
+          "y",
+          "z"
+        ]
+      ],
+      "labels": {
+        "a": "a",
+        "b": "a",
+        "x": "x",
+        "y": "x",
+        "z": "x"
+      }
+    },
+    {
+      "name": "singletons",
+      "nodes": [
+        "m",
+        "n",
+        "o"
+      ],
+      "edges": [],
+      "labels": {
+        "m": "m",
+        "n": "n",
+        "o": "o"
+      }
+    },
+    {
+      "name": "star",
+      "nodes": [
+        "k",
+        "a",
+        "b",
+        "c"
+      ],
+      "edges": [
+        [
+          "k",
+          "a"
+        ],
+        [
+          "k",
+          "b"
+        ],
+        [
+          "k",
+          "c"
+        ]
+      ],
+      "labels": {
+        "a": "a",
+        "b": "a",
+        "c": "a",
+        "k": "a"
+      }
+    },
+    {
+      "name": "cycle",
+      "nodes": [
+        "p",
+        "q",
+        "r"
+      ],
+      "edges": [
+        [
+          "p",
+          "q"
+        ],
+        [
+          "q",
+          "r"
+        ],
+        [
+          "r",
+          "p"
+        ]
+      ],
+      "labels": {
+        "p": "p",
+        "q": "p",
+        "r": "p"
+      }
+    },
+    {
+      "name": "isolated_plus_edge",
+      "nodes": [
+        "z1",
+        "a",
+        "b"
+      ],
+      "edges": [
+        [
+          "a",
+          "b"
+        ]
+      ],
+      "labels": {
+        "a": "a",
+        "b": "a",
+        "z1": "z1"
+      }
+    },
+    {
+      "name": "min_label",
+      "nodes": [
+        "banana",
+        "apple",
+        "cherry"
+      ],
+      "edges": [
+        [
+          "banana",
+          "cherry"
+        ],
+        [
+          "cherry",
+          "apple"
+        ]
+      ],
+      "labels": {
+        "apple": "apple",
+        "banana": "apple",
+        "cherry": "apple"
+      }
+    },
+    {
+      "name": "unsorted_order",
+      "nodes": [
+        "c3",
+        "a1",
+        "b2"
+      ],
+      "edges": [
+        [
+          "b2",
+          "a1"
+        ],
+        [
+          "c3",
+          "b2"
+        ]
+      ],
+      "labels": {
+        "a1": "a1",
+        "b2": "a1",
+        "c3": "a1"
+      }
+    }
+  ]
+}
