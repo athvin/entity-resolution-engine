@@ -24,6 +24,10 @@ hex = { workspace = true }
 
 [dev-dependencies]
 tower = { workspace = true }
+# The dispatcher's data-plane runner: the gated tests/pg_dispatch.rs opens a
+# per-org DuckLake and runs the whole pipeline (er_cli::run_all) from a claimed
+# job, proving the control -> data-plane bridge end to end.
+er-cli = { path = "../er-cli" }
 
 [lints]
 workspace = true

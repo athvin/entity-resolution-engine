@@ -1042,6 +1042,45 @@ pub fn dispatch_next(
     Some(slot.clone())
 }
 
+/// The REAL dispatcher step (`dispatch_next`'s Postgres twin, the control ->
+/// data-plane bridge): claim the next runnable job from the SKIP-LOCKED queue
+/// (`pg::claim`, which also enforces one-active-per-org), move it `running`, run
+/// it via `runner`, then record `succeeded`/`failed`. Returns the job in its
+/// final state, or `None` if nothing was claimable.
+///
+/// `runner` is injected so the queue mechanics stay backend-agnostic: the
+/// production dispatcher process wires a runner that resolves the job's org to
+/// its per-org DuckLake + published config + delivery/model inputs and calls
+/// `er_cli::run_all` (proven end-to-end over a real DuckLake by the gated
+/// `tests/pg_dispatch.rs`). The org -> inputs resolution (drop-file + model
+/// registry lookup) is the remaining infrastructure-bound wiring.
+///
+/// # Errors
+/// Propagates a queue (claim/mark) error. A `runner` failure is NOT an error —
+/// it is recorded as the job's `failed` terminal state.
+pub async fn dispatch_pg<F>(
+    client: &tokio_postgres::Client,
+    runner: F,
+) -> Result<Option<Job>, tokio_postgres::Error>
+where
+    F: FnOnce(&Job) -> Result<(), String>,
+{
+    let Some(job) = pg::claim(client).await? else {
+        return Ok(None);
+    };
+    pg::mark(client, &job.job_id, "running").await?;
+    let final_state = if runner(&job).is_ok() {
+        "succeeded"
+    } else {
+        "failed"
+    };
+    pg::mark(client, &job.job_id, final_state).await?;
+    Ok(Some(Job {
+        state: final_state.to_string(),
+        ..job
+    }))
+}
+
 /// List an org's jobs, newest first. Requires viewer+ in the org.
 async fn list_jobs(
     principal: Principal,
