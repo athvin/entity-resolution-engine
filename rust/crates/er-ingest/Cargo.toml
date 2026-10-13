@@ -9,6 +9,10 @@ repository.workspace = true
 [dependencies]
 er-hash = { path = "../er-hash" }
 er-config = { path = "../er-config" }
+dedupe-core = { path = "../dedupe-core" }
+serde_json.workspace = true
+anyhow.workspace = true
+csv = "1"
 
 [dev-dependencies]
 serde_json.workspace = true
