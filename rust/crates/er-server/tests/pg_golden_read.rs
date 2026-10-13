@@ -316,14 +316,19 @@ async fn golden_records_read_over_ducklake() {
         assert_eq!(body[key].as_array().unwrap().len(), 0, "{uri} empty");
     }
 
-    // Runs is a bare array, also empty on a base lake.
+    // Runs: run_all wrote a `runs` ledger row (full mode, succeeded).
     let resp = app
         .clone()
         .oneshot(op_get("/v1/orgs/acme/runs"))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_eq!(json_body(resp).await.as_array().unwrap().len(), 0);
+    let runs = json_body(resp).await;
+    let run_arr = runs.as_array().unwrap();
+    assert_eq!(run_arr.len(), 1, "run_all recorded one run");
+    assert_eq!(run_arr[0]["mode"], "full");
+    assert_eq!(run_arr[0]["status"], "succeeded");
+    assert!(run_arr[0]["config_hash"].as_str().is_some());
 
     // A review by id is a 404 when there's no review_queue / no such review.
     let resp = app

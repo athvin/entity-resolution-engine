@@ -40,6 +40,7 @@ pub const ENTITIES: &str = "lake.main.entities";
 pub const ENTITY_EVENTS: &str = "lake.main.entity_events";
 pub const GOLDEN_LINEAGE: &str = "lake.main.golden_lineage";
 pub const GOLDEN_RECORDS: &str = "lake.main.golden_records";
+pub const RUNS: &str = "lake.main.runs";
 /// The nickname lexicon `int_std_records` reads — a temp relation (read
 /// cross-catalog while the lake write runs), seeded per session.
 pub const LEXICON: &str = "nickname_variants";
@@ -284,6 +285,45 @@ fn create_ddl_table(session: &Session, name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Record the `runs` row at the start of a full run (status `running`): the run
+/// ledger the read API's `GET /runs` surfaces. `started_at` is the run's logical
+/// timestamp; `code_version` is this crate's version.
+///
+/// # Errors
+/// Propagates lake DDL / insert errors.
+pub fn write_run_start(session: &Session, config: &Config, inputs: &PipelineInputs) -> Result<()> {
+    create_ddl_table(session, "runs")?;
+    session.execute_batch(&format!(
+        "INSERT INTO {RUNS} (run_id, tenant, mode, status, started_at, config_hash, \
+           model_version, tf_snapshot_id, std_version, survivorship_version, code_version) \
+         VALUES ('{run_id}', '{tenant}', 'full', 'running', '{started_at}', '{hash}', \
+           '{model_version}', '{tf_snapshot_id}', '{std_v}', '{surv_v}', '{code_v}')",
+        run_id = esc(inputs.run_id),
+        tenant = esc(&config.tenant),
+        started_at = esc(inputs.run_at),
+        hash = esc(&er_config::config_hash(config)),
+        model_version = esc(inputs.model.model_version),
+        tf_snapshot_id = esc(inputs.model.tf_snapshot_id),
+        std_v = esc(&config.versions.std_version),
+        surv_v = esc(&config.versions.survivorship_version),
+        code_v = esc(env!("CARGO_PKG_VERSION")),
+    ))?;
+    Ok(())
+}
+
+/// Close the `runs` row on success (status `succeeded`, `ended_at` stamped).
+///
+/// # Errors
+/// Propagates the lake update error.
+pub fn write_run_end(session: &Session, run_id: &str, ended_at: &str) -> Result<()> {
+    session.execute_batch(&format!(
+        "UPDATE {RUNS} SET status = 'succeeded', ended_at = '{}' WHERE run_id = '{}'",
+        esc(ended_at),
+        esc(run_id),
+    ))?;
+    Ok(())
+}
+
 /// S4.5 reconcile: cluster the active auto-merge pairs in `lake.main.match_scores`
 /// into connected components, reconcile them against the prior
 /// `lake.main.entity_membership` (INV-PERM), and write the resulting
@@ -492,6 +532,7 @@ pub struct PipelineInputs<'a> {
 /// # Errors
 /// Propagates any stage error.
 pub fn run_all(session: &Session, config: &Config, inputs: &PipelineInputs) -> Result<()> {
+    write_run_start(session, config, inputs)?;
     seed_lexicon(session, inputs.lexicon)?;
     for (source, csv) in inputs.deliveries {
         run_ingest(
@@ -514,5 +555,6 @@ pub fn run_all(session: &Session, config: &Config, inputs: &PipelineInputs) -> R
     )?;
     run_reconcile(session, config, inputs.run_id, inputs.run_at)?;
     run_golden(session, config)?;
+    write_run_end(session, inputs.run_id, inputs.run_at)?;
     Ok(())
 }
