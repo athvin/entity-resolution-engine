@@ -316,3 +316,128 @@ pub async fn lookup_key(
         .await?;
     Ok(row.map(|r| (r.get("org"), r.get("role"), r.get("key_hash"))))
 }
+
+/// A row of the operator org listing (`queue.py` `list_orgs`). `created_at` is
+/// rendered to text in SQL so the port stays free of a timestamp-type feature.
+pub struct OrgSummary {
+    pub name: String,
+    pub state: String,
+    pub active_config_version: Option<i32>,
+    pub created_at: String,
+}
+
+/// An org's detail view (`queue.py` `org_record`). `env` is the raw settings map
+/// the handler projects `resources` out of.
+pub struct OrgDetail {
+    pub name: String,
+    pub state: String,
+    pub active_config_version: Option<i32>,
+    pub drop_root: Option<String>,
+    pub env: serde_json::Value,
+}
+
+/// Upsert a bring-your-own-config org (`queue.py` `ensure_org`, the create-org
+/// BYO path): insert `active`, or on replay refresh `config_path`/`env`/
+/// `drop_root` while leaving `state` intact. `env` binds straight to the jsonb
+/// column (tokio-postgres `with-serde_json-1`).
+///
+/// # Errors
+/// Propagates the insert error.
+pub async fn upsert_org_byo(
+    client: &Client,
+    name: &str,
+    config_path: &str,
+    env: &serde_json::Value,
+    drop_root: Option<&str>,
+) -> Result<(), PgError> {
+    client
+        .execute(
+            "INSERT INTO orgs (name, config_path, env, drop_root, state) \
+             VALUES ($1, $2, $3, $4, 'active') \
+             ON CONFLICT (name) DO UPDATE SET config_path = EXCLUDED.config_path, \
+               env = EXCLUDED.env, drop_root = EXCLUDED.drop_root",
+            &[&name, &config_path, &env, &drop_root],
+        )
+        .await?;
+    Ok(())
+}
+
+/// Whether an org exists (for the org-or-404 precheck).
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn org_exists(client: &Client, name: &str) -> Result<bool, PgError> {
+    let row = client
+        .query_opt("SELECT 1 FROM orgs WHERE name = $1", &[&name])
+        .await?;
+    Ok(row.is_some())
+}
+
+/// All orgs, name-ordered (`queue.py` `list_orgs`).
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn list_orgs(client: &Client) -> Result<Vec<OrgSummary>, PgError> {
+    let rows = client
+        .query(
+            "SELECT name, state, active_config_version, created_at::text AS created_at \
+             FROM orgs ORDER BY name",
+            &[],
+        )
+        .await?;
+    Ok(rows
+        .iter()
+        .map(|r| OrgSummary {
+            name: r.get("name"),
+            state: r.get("state"),
+            active_config_version: r.get("active_config_version"),
+            created_at: r.get("created_at"),
+        })
+        .collect())
+}
+
+/// One org's detail (`queue.py` `org_record`), `None` if absent. `env` is read
+/// as text and reparsed to JSON.
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn get_org(client: &Client, name: &str) -> Result<Option<OrgDetail>, PgError> {
+    let row = client
+        .query_opt(
+            "SELECT name, state, active_config_version, drop_root, env::text AS env \
+             FROM orgs WHERE name = $1",
+            &[&name],
+        )
+        .await?;
+    Ok(row.map(|r| {
+        let env_text: String = r.get("env");
+        OrgDetail {
+            name: r.get("name"),
+            state: r.get("state"),
+            active_config_version: r.get("active_config_version"),
+            drop_root: r.get("drop_root"),
+            env: serde_json::from_str(&env_text).unwrap_or_else(|_| serde_json::json!({})),
+        }
+    }))
+}
+
+/// Transition an org's `state` only from `expected` (`queue.py` `set_org_state`):
+/// returns `true` iff a row changed. A no-op (wrong current state) returns
+/// `false`, which the handler maps to 409.
+///
+/// # Errors
+/// Propagates the update error.
+pub async fn set_org_state(
+    client: &Client,
+    name: &str,
+    new_state: &str,
+    expected: &str,
+) -> Result<bool, PgError> {
+    let n = client
+        .execute(
+            "UPDATE orgs SET state = $1 WHERE name = $2 AND state = $3",
+            &[&new_state, &name, &expected],
+        )
+        .await?;
+    Ok(n == 1)
+}

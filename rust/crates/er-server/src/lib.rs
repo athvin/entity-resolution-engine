@@ -295,17 +295,236 @@ async fn healthz() -> Json<Value> {
     Json(json!({ "status": "ok" }))
 }
 
-/// Operator: list orgs. The org registry lands with orgs CRUD (next brick);
-/// until then this is a 501 behind the operator-only boundary.
-async fn list_orgs(principal: Principal) -> impl IntoResponse {
+/// Org-name rule from `OrgIn` (`api.py`): 1..=128 chars, first `[a-z0-9]`, rest
+/// `[a-z0-9_-]`.
+fn valid_org_name(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    if bytes.is_empty() || bytes.len() > 128 {
+        return false;
+    }
+    let is_tail = |b: u8| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-';
+    let head_ok = bytes[0].is_ascii_lowercase() || bytes[0].is_ascii_digit();
+    head_ok && bytes.iter().all(|&b| is_tail(b))
+}
+
+#[derive(Deserialize)]
+struct OrgIn {
+    name: String,
+    #[serde(default)]
+    config_path: Option<String>,
+    #[serde(default)]
+    env: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    drop_root: Option<String>,
+}
+
+/// Operator: create an org (`POST /v1/orgs`). The bring-your-own-config path
+/// (a `config_path` is given) upserts the org `active` and returns `{name}`.
+/// The auto-provisioning path (no `config_path`) needs the engine seed template
+/// and dispatcher, which aren't wired in this environment, so it reports the
+/// faithful 503 that Python raises as `ProvisioningNotConfigured`.
+async fn create_org(
+    principal: Principal,
+    State(state): State<AppState>,
+    Json(body): Json<OrgIn>,
+) -> impl IntoResponse {
     if let Err(e) = operator_only(&principal) {
         return e.into_response();
     }
-    (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(json!({ "error": "org registry not yet wired (needs Postgres)" })),
+    if !valid_org_name(&body.name) {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": format!("invalid org name '{}'", body.name) })),
+        )
+            .into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(json!({ "error": "org registry requires Postgres" })),
+        )
+            .into_response();
+    };
+    let Some(config_path) = body.config_path.as_deref() else {
+        // Auto mode: no seed template configured here → the real 503 branch.
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": "auto-provisioning not configured" })),
+        )
+            .into_response();
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let env = json!(body.env);
+    match pg::upsert_org_byo(
+        &client,
+        &body.name,
+        config_path,
+        &env,
+        body.drop_root.as_deref(),
     )
-        .into_response()
+    .await
+    {
+        Ok(()) => (StatusCode::CREATED, Json(json!({ "name": body.name }))).into_response(),
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Operator: list all orgs (`GET /v1/orgs`).
+async fn list_orgs(principal: Principal, State(state): State<AppState>) -> impl IntoResponse {
+    if let Err(e) = operator_only(&principal) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(json!({ "error": "org registry requires Postgres" })),
+        )
+            .into_response();
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    match pg::list_orgs(&client).await {
+        Ok(orgs) => {
+            let out: Vec<Value> = orgs
+                .iter()
+                .map(|o| {
+                    json!({
+                        "name": o.name,
+                        "state": o.state,
+                        "active_config_version": o.active_config_version,
+                        "created_at": o.created_at,
+                    })
+                })
+                .collect();
+            Json(json!(out)).into_response()
+        }
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Project the `resources` view out of an org's `env` map (`api.py`): the
+/// DuckDB thread/memory knobs, each `null` when unset.
+fn resources_of(env: &Value) -> Value {
+    let threads = env
+        .get("ER_DUCKDB_THREADS")
+        .and_then(Value::as_str)
+        .and_then(|s| s.parse::<i64>().ok());
+    let memory = env.get("ER_DUCKDB_MEMORY_LIMIT").and_then(Value::as_str);
+    json!({ "duckdb_threads": threads, "duckdb_memory_limit": memory })
+}
+
+/// Viewer+: an org's detail (`GET /v1/orgs/{org}`), 404 if absent.
+async fn get_org(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(json!({ "error": "org registry requires Postgres" })),
+        )
+            .into_response();
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    match pg::get_org(&client, &org).await {
+        Ok(Some(o)) => Json(json!({
+            "name": o.name,
+            "state": o.state,
+            "active_config_version": o.active_config_version,
+            "drop_root": o.drop_root,
+            "resources": resources_of(&o.env),
+        }))
+        .into_response(),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": format!("no org '{org}'") })),
+        )
+            .into_response(),
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Transition an org's lifecycle state under an operator guard (the shared body
+/// of suspend/resume): 404 if absent, 409 if not in `expected`.
+async fn transition_org(
+    principal: &Principal,
+    state: &AppState,
+    org: &str,
+    new_state: &str,
+    expected: &str,
+    not_in_expected: &str,
+) -> axum::response::Response {
+    if let Err(e) = guard(principal, org, Role::Operator) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(json!({ "error": "org registry requires Postgres" })),
+        )
+            .into_response();
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    match pg::org_exists(&client, org).await {
+        Ok(false) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": format!("no org '{org}'") })),
+            )
+                .into_response();
+        }
+        Err(e) => return pg_err(e),
+        Ok(true) => {}
+    }
+    match pg::set_org_state(&client, org, new_state, expected).await {
+        Ok(true) => (
+            StatusCode::OK,
+            Json(json!({ "name": org, "state": new_state })),
+        )
+            .into_response(),
+        Ok(false) => (
+            StatusCode::CONFLICT,
+            Json(json!({ "error": not_in_expected })),
+        )
+            .into_response(),
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Operator: suspend an active org (`POST /v1/orgs/{org}/suspend`; the Python
+/// `{org}:suspend` action — a `/suspend` sub-path, per the matchit constraint).
+async fn suspend_org(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+) -> impl IntoResponse {
+    let msg = format!("org '{org}' is not active; only active orgs suspend");
+    transition_org(&principal, &state, &org, "suspended", "active", &msg).await
+}
+
+/// Operator: resume a suspended org (`POST /v1/orgs/{org}/resume`).
+async fn resume_org(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+) -> impl IntoResponse {
+    let msg = format!("org '{org}' is not suspended; nothing to resume");
+    transition_org(&principal, &state, &org, "active", "suspended", &msg).await
 }
 
 #[derive(Deserialize)]
@@ -602,7 +821,12 @@ async fn revoke_key(
 pub fn app(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
-        .route("/v1/orgs", get(list_orgs))
+        .route("/v1/orgs", get(list_orgs).post(create_org))
+        .route("/v1/orgs/{org}", get(get_org))
+        // Python's `{org}:suspend` / `{org}:resume` actions become sub-paths
+        // (matchit forbids a param+literal in one segment, as with job cancel).
+        .route("/v1/orgs/{org}/suspend", post(suspend_org))
+        .route("/v1/orgs/{org}/resume", post(resume_org))
         .route("/v1/orgs/{org}/jobs", post(create_job).get(list_jobs))
         .route("/v1/orgs/{org}/jobs/{job_id}", get(get_job))
         // axum/matchit requires a param to be a whole segment, so the Python
