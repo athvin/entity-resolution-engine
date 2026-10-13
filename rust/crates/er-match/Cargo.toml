@@ -9,5 +9,10 @@ repository.workspace = true
 [dependencies]
 dedupe-core = { path = "../dedupe-core" }
 
+[dev-dependencies]
+er-config = { path = "../er-config" }
+er-ingest = { path = "../er-ingest" }
+er-standardize = { path = "../er-standardize" }
+
 [lints]
 workspace = true

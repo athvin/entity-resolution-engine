@@ -811,6 +811,9 @@ name = "er-match"
 version = "0.1.0"
 dependencies = [
  "dedupe-core",
+ "er-config",
+ "er-ingest",
+ "er-standardize",
 ]
 
 [[package]]
