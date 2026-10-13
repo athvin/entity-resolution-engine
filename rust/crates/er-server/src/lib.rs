@@ -2,25 +2,32 @@
 //! `erserver` FastAPI app (`server/src/erserver/api.py`). It replaces FastAPI as
 //! the orgs / jobs / config / read-path HTTP surface.
 //!
-//! STATUS: the HTTP skeleton + the job lifecycle, over EITHER an in-memory store
-//! or the real Postgres SKIP-LOCKED queue in [`pg`] — chosen per [`AppState`] by
-//! whether a DSN is set (`ER_PG_DSN`). The router, `/healthz` (the only anonymous
-//! surface, infrastructure.md §4.1), the bearer-token auth boundary, and the
-//! `/v1/orgs/{org}/jobs` CRUD (enqueue/list/get/cancel) all work; the handlers
-//! connect to Postgres per-request (no pool), mirroring the Python
-//! `db.connect(dsn)` model. The in-memory path backs the network-free unit tests
-//! (`tests/http.rs`); the Postgres path is exercised by the gated
-//! `tests/pg_http.rs` (`ER_TEST_PG_DSN`).
+//! STATUS. The control plane runs over EITHER an in-memory store or the real
+//! Postgres SKIP-LOCKED queue in [`pg`] — chosen per [`AppState`] by whether a
+//! DSN is set (`ER_PG_DSN`); handlers connect to Postgres per-request (no pool),
+//! mirroring the Python `db.connect(dsn)` model. Live surfaces:
+//!   - orgs CRUD + lifecycle (create/list/get/suspend/resume),
+//!   - jobs (enqueue/list/get/cancel) over the SKIP-LOCKED queue, and the real
+//!     [`dispatch_pg`] bridge (claim → runner → mark),
+//!   - config versions (create/list/get/active/publish, with tier classification),
+//!   - the DuckLake-backed read API in [`read`] (golden-records list/detail,
+//!     metrics, duplicates, match-scores, records, reviews, assertions, imports,
+//!     runs) — resolves each org to its lake from `orgs.env` and reads
+//!     `lake.main.*` snapshot-pinned.
 //!
 //! AUTH ([`Principal`] / [`Role`] / `guard`): every `/v1` route is behind a
 //! bearer boundary resolving either the static operator token or an
-//! `erk_{key_id}_{secret}` API key (SHA-256-hashed at rest, never argon2 —
-//! matching the Python contract). The role lattice viewer<steward<admin<operator
-//! and the 404-on-cross-org-scope / 403-on-insufficient-role rules are ported
-//! from `auth.py`. Keys are minted/revoked at `/v1/orgs/{org}/api-keys`
-//! (operator-only); gated by `tests/pg_auth.rs`. OIDC BFF auth + the
-//! org-registry/config/webhook/import endpoints are still stubbed (501, TODO):
-//! OIDC needs an external provider; the rest land in the next bricks.
+//! `erk_{key_id}_{secret}` API key (SHA-256-hashed at rest, never argon2). The
+//! role lattice viewer<steward<admin<operator and the 404-on-cross-org-scope /
+//! 403-on-insufficient-role rules are ported from `auth.py`. Error bodies are
+//! the FastAPI `{detail}` shape the frontend BFF parses.
+//!
+//! NOT YET PORTED: the steward WRITE surface (assertion create/delete, review
+//! resolve, unmerge, job resume) and merge-plans — they need the review /
+//! assertion / run-tracking data-plane stages that were removed with the Python.
+//! OIDC BFF auth, the k8s launcher, the mailer, and webhook delivery are
+//! infrastructure-bound. Unit tests are network-free (`tests/http.rs`); the
+//! Postgres + DuckLake paths are gated (`ER_TEST_PG_DSN`, `DEDUPE_E2E_DUCKLAKE`).
 
 pub mod pg;
 pub mod read;
@@ -106,7 +113,7 @@ async fn connect_pg(dsn: &str) -> Result<tokio_postgres::Client, Box<axum::respo
         Box::new(
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("db connect: {e}") })),
+                Json(json!({ "detail": format!("db connect: {e}") })),
             )
                 .into_response(),
         )
@@ -117,7 +124,7 @@ async fn connect_pg(dsn: &str) -> Result<tokio_postgres::Client, Box<axum::respo
 fn pg_err(e: tokio_postgres::Error) -> axum::response::Response {
     (
         StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({ "error": format!("db: {e}") })),
+        Json(json!({ "detail": format!("db: {e}") })),
     )
         .into_response()
 }
@@ -197,7 +204,7 @@ pub struct Principal {
 
 /// A 401 with the given generic message (auth failures never leak specifics).
 fn unauthorized(msg: &str) -> (StatusCode, Json<Value>) {
-    (StatusCode::UNAUTHORIZED, Json(json!({ "error": msg })))
+    (StatusCode::UNAUTHORIZED, Json(json!({ "detail": msg })))
 }
 
 impl FromRequestParts<AppState> for Principal {
@@ -243,7 +250,7 @@ impl FromRequestParts<AppState> for Principal {
         let client = pg::connect(dsn).await.map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("db connect: {e}") })),
+                Json(json!({ "detail": format!("db connect: {e}") })),
             )
         })?;
         match pg::lookup_key(&client, key_id).await {
@@ -259,7 +266,7 @@ impl FromRequestParts<AppState> for Principal {
             Ok(_) => Err(unauthorized("invalid credential")),
             Err(e) => Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("db: {e}") })),
+                Json(json!({ "detail": format!("db: {e}") })),
             )),
         }
     }
@@ -275,13 +282,13 @@ fn guard(p: &Principal, org: &str, minimum: Role) -> Result<(), (StatusCode, Jso
     if p.org.as_deref() != Some(org) {
         return Err((
             StatusCode::NOT_FOUND,
-            Json(json!({ "error": format!("no org '{org}'") })),
+            Json(json!({ "detail": format!("no org '{org}'") })),
         ));
     }
     if p.role < minimum {
         return Err((
             StatusCode::FORBIDDEN,
-            Json(json!({ "error": format!("requires {} role", minimum.as_str()) })),
+            Json(json!({ "detail": format!("requires {} role", minimum.as_str()) })),
         ));
     }
     Ok(())
@@ -295,7 +302,7 @@ fn operator_only(p: &Principal) -> Result<(), (StatusCode, Json<Value>)> {
     } else {
         Err((
             StatusCode::FORBIDDEN,
-            Json(json!({ "error": "requires operator role" })),
+            Json(json!({ "detail": "requires operator role" })),
         ))
     }
 }
@@ -344,14 +351,14 @@ async fn create_org(
     if !valid_org_name(&body.name) {
         return (
             StatusCode::UNPROCESSABLE_ENTITY,
-            Json(json!({ "error": format!("invalid org name '{}'", body.name) })),
+            Json(json!({ "detail": format!("invalid org name '{}'", body.name) })),
         )
             .into_response();
     }
     let Some(dsn) = &state.dsn else {
         return (
             StatusCode::NOT_IMPLEMENTED,
-            Json(json!({ "error": "org registry requires Postgres" })),
+            Json(json!({ "detail": "org registry requires Postgres" })),
         )
             .into_response();
     };
@@ -359,7 +366,7 @@ async fn create_org(
         // Auto mode: no seed template configured here → the real 503 branch.
         return (
             StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({ "error": "auto-provisioning not configured" })),
+            Json(json!({ "detail": "auto-provisioning not configured" })),
         )
             .into_response();
     };
@@ -390,7 +397,7 @@ async fn list_orgs(principal: Principal, State(state): State<AppState>) -> impl 
     let Some(dsn) = &state.dsn else {
         return (
             StatusCode::NOT_IMPLEMENTED,
-            Json(json!({ "error": "org registry requires Postgres" })),
+            Json(json!({ "detail": "org registry requires Postgres" })),
         )
             .into_response();
     };
@@ -440,7 +447,7 @@ async fn get_org(
     let Some(dsn) = &state.dsn else {
         return (
             StatusCode::NOT_IMPLEMENTED,
-            Json(json!({ "error": "org registry requires Postgres" })),
+            Json(json!({ "detail": "org registry requires Postgres" })),
         )
             .into_response();
     };
@@ -459,7 +466,7 @@ async fn get_org(
         .into_response(),
         Ok(None) => (
             StatusCode::NOT_FOUND,
-            Json(json!({ "error": format!("no org '{org}'") })),
+            Json(json!({ "detail": format!("no org '{org}'") })),
         )
             .into_response(),
         Err(e) => pg_err(e),
@@ -482,7 +489,7 @@ async fn transition_org(
     let Some(dsn) = &state.dsn else {
         return (
             StatusCode::NOT_IMPLEMENTED,
-            Json(json!({ "error": "org registry requires Postgres" })),
+            Json(json!({ "detail": "org registry requires Postgres" })),
         )
             .into_response();
     };
@@ -494,7 +501,7 @@ async fn transition_org(
         Ok(false) => {
             return (
                 StatusCode::NOT_FOUND,
-                Json(json!({ "error": format!("no org '{org}'") })),
+                Json(json!({ "detail": format!("no org '{org}'") })),
             )
                 .into_response();
         }
@@ -509,7 +516,7 @@ async fn transition_org(
             .into_response(),
         Ok(false) => (
             StatusCode::CONFLICT,
-            Json(json!({ "error": not_in_expected })),
+            Json(json!({ "detail": not_in_expected })),
         )
             .into_response(),
         Err(e) => pg_err(e),
@@ -547,7 +554,7 @@ struct ConfigIn {
 fn config_invalid(e: &er_config::ConfigError) -> (StatusCode, Json<Value>) {
     (
         StatusCode::UNPROCESSABLE_ENTITY,
-        Json(json!({ "error": format!("config error: {e}") })),
+        Json(json!({ "detail": format!("config error: {e}") })),
     )
 }
 
@@ -593,7 +600,7 @@ async fn create_config_version(
 fn config_registry_unavailable() -> axum::response::Response {
     (
         StatusCode::NOT_IMPLEMENTED,
-        Json(json!({ "error": "config registry requires Postgres" })),
+        Json(json!({ "detail": "config registry requires Postgres" })),
     )
         .into_response()
 }
@@ -671,7 +678,7 @@ async fn get_config_version(
 fn config_version_missing(org: &str, version: &str) -> (StatusCode, Json<Value>) {
     (
         StatusCode::NOT_FOUND,
-        Json(json!({ "error": format!("no config version {version} for org '{org}'") })),
+        Json(json!({ "detail": format!("no config version {version} for org '{org}'") })),
     )
 }
 
@@ -711,7 +718,7 @@ async fn active_config(
         Ok(_) => {
             return (
                 StatusCode::NOT_FOUND,
-                Json(json!({ "error": "no published config" })),
+                Json(json!({ "detail": "no published config" })),
             )
                 .into_response();
         }
@@ -721,7 +728,7 @@ async fn active_config(
         Ok(Some(d)) => Json(config_detail_json(&d)).into_response(),
         Ok(None) => (
             StatusCode::NOT_FOUND,
-            Json(json!({ "error": "no published config" })),
+            Json(json!({ "detail": "no published config" })),
         )
             .into_response(),
         Err(e) => pg_err(e),
@@ -830,7 +837,7 @@ async fn publish_config_version(
         Ok(None) => {
             return (
                 StatusCode::NOT_FOUND,
-                Json(json!({ "error": format!("no org '{org}'") })),
+                Json(json!({ "detail": format!("no org '{org}'") })),
             )
                 .into_response();
         }
@@ -877,7 +884,7 @@ async fn publish_config_version(
     if org_state != "active" {
         return (
             StatusCode::CONFLICT,
-            Json(json!({ "error": format!("org '{org}' is not active") })),
+            Json(json!({ "detail": format!("org '{org}' is not active") })),
         )
             .into_response();
     }
@@ -887,7 +894,7 @@ async fn publish_config_version(
     if let Err(e) = write_config_file(&config_path, &detail.yaml) {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": format!("config write: {e}") })),
+            Json(json!({ "detail": format!("config write: {e}") })),
         )
             .into_response();
     }
@@ -969,7 +976,7 @@ async fn create_job(
     if body.kind.trim().is_empty() {
         return (
             StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "kind required" })),
+            Json(json!({ "detail": "kind required" })),
         )
             .into_response();
     }
@@ -1131,7 +1138,7 @@ async fn get_job(
             Ok(Some(job)) => (StatusCode::OK, Json(json!(job))).into_response(),
             Ok(None) => (
                 StatusCode::NOT_FOUND,
-                Json(json!({ "error": "no such job" })),
+                Json(json!({ "detail": "no such job" })),
             )
                 .into_response(),
             Err(e) => pg_err(e),
@@ -1146,7 +1153,7 @@ async fn get_job(
         Some(job) => (StatusCode::OK, Json(json!(job))).into_response(),
         None => (
             StatusCode::NOT_FOUND,
-            Json(json!({ "error": "no such job" })),
+            Json(json!({ "detail": "no such job" })),
         )
             .into_response(),
     }
@@ -1181,7 +1188,7 @@ async fn cancel_job(
             },
             Ok(None) => (
                 StatusCode::NOT_FOUND,
-                Json(json!({ "error": "no such job" })),
+                Json(json!({ "detail": "no such job" })),
             )
                 .into_response(),
             Err(e) => pg_err(e),
@@ -1199,7 +1206,7 @@ async fn cancel_job(
         }
         None => (
             StatusCode::NOT_FOUND,
-            Json(json!({ "error": "no such job" })),
+            Json(json!({ "detail": "no such job" })),
         )
             .into_response(),
     }
@@ -1623,14 +1630,14 @@ async fn create_key(
     let Some(role) = Role::parse_key_role(&body.role) else {
         return (
             StatusCode::UNPROCESSABLE_ENTITY,
-            Json(json!({ "error": format!("invalid role '{}'", body.role) })),
+            Json(json!({ "detail": format!("invalid role '{}'", body.role) })),
         )
             .into_response();
     };
     let Some(dsn) = &state.dsn else {
         return (
             StatusCode::NOT_IMPLEMENTED,
-            Json(json!({ "error": "api keys require Postgres" })),
+            Json(json!({ "detail": "api keys require Postgres" })),
         )
             .into_response();
     };
@@ -1661,7 +1668,7 @@ async fn revoke_key(
     let Some(dsn) = &state.dsn else {
         return (
             StatusCode::NOT_IMPLEMENTED,
-            Json(json!({ "error": "api keys require Postgres" })),
+            Json(json!({ "detail": "api keys require Postgres" })),
         )
             .into_response();
     };
