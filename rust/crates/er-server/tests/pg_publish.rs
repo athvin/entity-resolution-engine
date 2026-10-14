@@ -160,9 +160,17 @@ async fn config_publish_tiers_and_authz() {
     assert_ne!(v3_yaml, v2_yaml, "the generator edit must apply");
     let v3 = create_version(&app, &admin_key, &v3_yaml).await;
 
-    // The admin cannot publish an operator-only change -> 403.
+    // The admin cannot publish an operator-only change -> 403, with the FastAPI
+    // `{detail}` error body the BFF parses (not a bare `{error}`).
     let resp = publish(&app, &admin_key, v3).await;
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    let body = json_body(resp).await;
+    assert!(
+        body["detail"]
+            .as_str()
+            .is_some_and(|d| d.contains("operator-only")),
+        "403 body carries a {{detail}} message: {body}"
+    );
 
     // The operator can, and it is tier None (generator is not an A/B/C block).
     let resp = publish(&app, "op-secret", v3).await;

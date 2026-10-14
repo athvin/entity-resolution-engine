@@ -891,13 +891,10 @@ async fn publish_config_version(
         .filter(|b| OPERATOR_ONLY_BLOCKS.contains(&b.as_str()))
         .collect();
     if !operator_only.is_empty() && principal.role != Role::Operator {
-        return (
+        return detail_err(
             StatusCode::FORBIDDEN,
-            Json(json!({
-                "error": format!("blocks {operator_only:?} are operator-only; publish refused"),
-            })),
-        )
-            .into_response();
+            format!("blocks {operator_only:?} are operator-only; publish refused"),
+        );
     }
 
     // Refuse publishing to a suspended/provisioning org atomically.
