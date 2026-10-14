@@ -269,6 +269,64 @@ async fn unmerge_splits_and_respects_contradictions() {
     // The refused unmerge staged nothing new.
     assert_eq!(pg::pending_count(&client, "conflict").await.unwrap(), 0);
 
+    // --- Scenario C: the contradictions read flags the unsatisfiable pair. ---
+    // Add a `never` over the always-locked pair and drain it; now the ledger has
+    // always(keep,peel) + never(keep,peel) = a CONTRADICTION-1.
+    let resp = app
+        .clone()
+        .oneshot(op(
+            "POST",
+            "/v1/orgs/conflict/assertions",
+            Body::from(serde_json::json!({ "kind": "never", "a": keep, "b": peel }).to_string()),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    {
+        let session = er_cli::open_lake(&cat_b, &data_b).unwrap();
+        for (action_id, action) in &pg::pending_actions(&client, "conflict").await.unwrap() {
+            er_cli::apply_staged_action(&session, action_id, action, "2026-02-02 00:00:00")
+                .unwrap();
+            pg::mark_action_applied(&client, action_id).await.unwrap();
+        }
+    }
+    // Read it via the BFF's `assertions:contradictions` spelling (exercises the
+    // :action path normalizer end to end).
+    let resp = app
+        .clone()
+        .oneshot(op(
+            "GET",
+            "/v1/orgs/conflict/assertions:contradictions",
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = json_body(resp).await;
+    let findings = body["contradictions"]
+        .as_array()
+        .expect("contradictions array");
+    assert_eq!(
+        findings.len(),
+        1,
+        "the always+never pair is one contradiction"
+    );
+    let (lo, hi) = if keep <= peel {
+        (&keep, &peel)
+    } else {
+        (&peel, &keep)
+    };
+    assert_eq!(findings[0]["rec_a_key"], *lo);
+    assert_eq!(findings[0]["rec_b_key"], *hi);
+    assert!(
+        findings[0]["component"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m == &serde_json::json!(keep)),
+        "the component names the glued records"
+    );
+
     let _ = std::fs::remove_dir_all(&tmp_a);
     let _ = std::fs::remove_dir_all(&tmp_b);
 }

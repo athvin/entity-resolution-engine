@@ -2327,6 +2327,70 @@ fn canon_pair(a: &str, b: &str) -> (String, String) {
     }
 }
 
+/// Lift `read::active_assertions` rows `(id, a, b, kind)` into er-reconcile
+/// `Assertion`s (all active; rows with an unknown kind are dropped).
+fn active_to_assertions(
+    rows: Vec<(String, String, String, String)>,
+) -> Vec<er_reconcile::assertions::Assertion> {
+    rows.into_iter()
+        .filter_map(|(id, a, b, kind)| {
+            let kind = match kind.as_str() {
+                "always" => er_reconcile::assertions::AssertionKind::Always,
+                "never" => er_reconcile::assertions::AssertionKind::Never,
+                _ => return None,
+            };
+            Some(er_reconcile::assertions::Assertion {
+                assertion_id: id,
+                rec_a_key: a,
+                rec_b_key: b,
+                kind,
+                active: true,
+            })
+        })
+        .collect()
+}
+
+/// Viewer+: the unsatisfiable rule sets (`GET /v1/orgs/{org}/assertions:contradictions`,
+/// normalized to `/assertions/contradictions`): every active `never` whose
+/// endpoints fall inside one `always`-connected component (S4.4.1
+/// `check_contradiction_1`). Returns `{ contradictions: [...] }` — empty when the
+/// ledger is satisfiable or absent.
+async fn assertions_contradictions(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let session = match org_lake(&state, &org).await {
+        Ok(s) => s,
+        Err(r) => return *r,
+    };
+    let snapshot = match read::latest_snapshot(&session) {
+        Ok(s) => s,
+        Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
+    };
+    let active = match read::active_assertions(&session, snapshot) {
+        Ok(a) => a,
+        Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
+    };
+    let findings = er_reconcile::assertions::check_contradiction_1(&active_to_assertions(active));
+    let items: Vec<Value> = findings
+        .into_iter()
+        .map(|c| {
+            json!({
+                "rec_a_key": c.rec_a_key,
+                "rec_b_key": c.rec_b_key,
+                "never_assertion_id": c.never_assertion_id,
+                "always_assertion_ids": c.always_assertion_ids,
+                "component": c.component.into_iter().collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    Json(json!({ "contradictions": items })).into_response()
+}
+
 #[derive(Deserialize)]
 struct UnmergeIn {
     records: Vec<String>,
@@ -2428,23 +2492,7 @@ async fn unmerge_entity(
         Ok(a) => a,
         Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
     };
-    let mut assertions: Vec<er_reconcile::assertions::Assertion> = active
-        .into_iter()
-        .filter_map(|(id, a, b, kind)| {
-            let kind = match kind.as_str() {
-                "always" => er_reconcile::assertions::AssertionKind::Always,
-                "never" => er_reconcile::assertions::AssertionKind::Never,
-                _ => return None,
-            };
-            Some(er_reconcile::assertions::Assertion {
-                assertion_id: id,
-                rec_a_key: a,
-                rec_b_key: b,
-                kind,
-                active: true,
-            })
-        })
-        .collect();
+    let mut assertions = active_to_assertions(active);
     for (i, (a, b)) in proposed.iter().enumerate() {
         assertions.push(er_reconcile::assertions::Assertion {
             assertion_id: format!("proposed-{i}"),
@@ -2869,6 +2917,11 @@ fn build_routes(state: AppState) -> Router {
         .route(
             "/v1/orgs/{org}/assertions",
             get(assertions_list).post(add_assertion),
+        )
+        // Python's `assertions:contradictions` -> a `/contradictions` sub-path.
+        .route(
+            "/v1/orgs/{org}/assertions/contradictions",
+            get(assertions_contradictions),
         )
         .route(
             "/v1/orgs/{org}/assertions/{assertion_id}",
