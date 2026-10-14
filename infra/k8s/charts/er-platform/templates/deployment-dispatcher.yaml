@@ -1,12 +1,14 @@
-# er-dispatcher: same image as er-api with the CMD overridden (Dockerfile.api's
-# documented split). Three §2 constraints are hard-coded rather than valued:
-#   - replicas 1 and strategy Recreate: the startup reaper
-#     (queue.reap_stale) assumes it is alone — never RollingUpdate;
-#   - an init container that BLOCKS until the API answers /healthz: starting
-#     together, the dispatcher's leader connection blocks the API's
-#     ensure_schema DDL indefinitely (frontend/dev/up.sh learned this first);
-#   - the same EFS mount as the API: drain_staged re-loads org configs by path
-#     on every idle pass (dispatcher.py:352).
+# er-dispatcher: the same Rust image as er-api with CMD overridden to the
+# er-dispatcher binary (the in-process dispatcher — it runs the pipeline itself,
+# no per-run k8s Jobs). §2 constraints:
+#   - replicas 1 + strategy Recreate: a single claimer per queue (the
+#     one-active-per-org index tolerates more, but the idle reaper assumes one);
+#   - the same EFS mount as the API: the dispatcher re-loads each org's config +
+#     drop files by path (ER_CONFIG_PATH / drop_root) on the run path.
+# NOTE: the Python build needed a wait-for-api init container because the
+# dispatcher's leader connection could block the API's ensure_schema. The Rust
+# ensure_schema runs under pg_advisory_xact_lock (serialized), so concurrent
+# boot is safe and the init container is gone.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -39,68 +41,14 @@ spec:
         {{- include "er-platform.podSecurityContext" . | nindent 8 }}
         runAsUser: 1001
         runAsGroup: 1001
-      initContainers:
-        # Reuses the api image (already on the node, python included) instead
-        # of pulling a shell/curl image. Blocks forever by design: kill the
-        # API and a restarting dispatcher must WAIT, not proceed (§2).
-        - name: wait-for-api
-          image: {{ include "er-platform.image" (dict "root" . "image" .Values.images.api) }}
-          securityContext:
-            {{- include "er-platform.containerSecurityContext" . | nindent 12 }}
-          command:
-            - python
-            - -c
-            - |
-              import time, urllib.request
-              url = "http://er-api:8000/healthz"
-              while True:
-                  try:
-                      with urllib.request.urlopen(url, timeout=2) as response:
-                          if response.status == 200:
-                              break
-                  except Exception as error:  # noqa: BLE001 — keep waiting
-                      print(f"waiting for {url}: {error}", flush=True)
-                  time.sleep(2)
-              print("er-api is healthy; starting dispatcher", flush=True)
-          resources:
-            requests: { cpu: 50m, memory: 64Mi }
-            limits: { cpu: 200m, memory: 128Mi }
       containers:
         - name: er-dispatcher
           image: {{ include "er-platform.image" (dict "root" . "image" .Values.images.api) }}
-          command: ["python", "-m", "erserver.dispatcher"]
+          command: ["er-dispatcher"]
           securityContext:
             {{- include "er-platform.containerSecurityContext" . | nindent 12 }}
           env:
             {{- include "er-platform.erserverEnv" . | nindent 12 }}
-            - name: ERSERVER_CONCURRENCY
-              value: {{ .Values.dispatcher.concurrency | quote }}
-            {{- with .Values.dispatcher.pollSeconds }}
-            - name: ERSERVER_POLL_SECONDS
-              value: {{ . | quote }}
-            {{- end }}
-            # The §6 Job launcher. Runner Jobs land in this same namespace
-            # (the Role in rbac-dispatcher.yaml is namespace-scoped), mount
-            # the same er-efs claim at the same path, and take their baseline
-            # secret env from the same projected Secret via envFrom.
-            - name: ERSERVER_LAUNCHER
-              value: {{ .Values.dispatcher.launcher | quote }}
-            {{- if eq .Values.dispatcher.launcher "kubernetes" }}
-            - name: ERSERVER_RUNNER_IMAGE
-              value: {{ include "er-platform.image" (dict "root" . "image" .Values.images.runner) | quote }}
-            {{- end }}
-            - name: ERSERVER_K8S_NAMESPACE
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.namespace
-            - name: ERSERVER_RUNNER_EFS_CLAIM
-              value: er-efs
-            - name: ERSERVER_RUNNER_EFS_MOUNT_PATH
-              value: {{ .Values.efs.mountPath | quote }}
-            - name: ERSERVER_RUNNER_ENV_SECRET
-              value: er-erserver-env
-            - name: ERSERVER_RUNNER_SERVICE_ACCOUNT
-              value: er-runner
           envFrom:
             - secretRef:
                 name: er-erserver-env

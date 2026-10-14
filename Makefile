@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := check
-.PHONY: build fmt lint test check check-e2e frontend dev-up dev-suspend dev-resume dev-down obs-up clean
+.PHONY: build fmt lint test check check-e2e frontend image-api dev-up dev-suspend dev-resume dev-down obs-up clean
 
 # --- Rust backend: the application (engine, CLI, control plane) lives in rust/ ---
 #
@@ -36,6 +36,23 @@ check-e2e:
 # Playwright tier (visual baselines compare on Linux only; see frontend/README.md).
 frontend:
 	cd frontend && corepack pnpm install --frozen-lockfile && corepack pnpm check && corepack pnpm build && corepack pnpm test:e2e
+
+# --- container images (replaces the deleted ci.yaml image build) ---
+#
+# Build + push the Rust control-plane image to ECR by git sha. The one image
+# serves er-api (the server), er-dispatcher (CMD override), and the `er`
+# pipeline CLI — see rust/Dockerfile. Then `make dev-up TAG=<sha>` rolls it out.
+# Needs AWS creds with ECR push. (er-web is built from frontend/Dockerfile by
+# the frontend pipeline.)
+ECR_REGISTRY ?= 797781631727.dkr.ecr.us-east-2.amazonaws.com
+ECR_REGION ?= us-east-2
+
+image-api:
+	@test -n "$(TAG)" || { echo "usage: make image-api TAG=<git sha>"; exit 2; }
+	aws ecr get-login-password --region $(ECR_REGION) \
+	  | docker login --username AWS --password-stdin $(ECR_REGISTRY)
+	docker build -t $(ECR_REGISTRY)/er-api:$(TAG) -f rust/Dockerfile rust
+	docker push $(ECR_REGISTRY)/er-api:$(TAG)
 
 # --- developer environments (infrastructure.md §12, plan-to-aws 2.1/2.2) ---
 #
