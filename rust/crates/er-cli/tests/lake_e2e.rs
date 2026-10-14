@@ -531,6 +531,28 @@ fn incremental_merge_through_ducklake_matches_golden() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
+#[test]
+fn doctor_reports_an_empty_lake_as_not_ok() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    // A seeded-but-unrun lake has no pipeline relations yet.
+    let (session, config, tmp) = open_seeded_lake("doctor_empty");
+    let report = er_cli::doctor(&session, &config).unwrap();
+    assert_eq!(report["ok"], false, "an unpopulated lake is not ok");
+    assert_eq!(report["latest_run"], serde_json::Value::Null);
+    assert!(
+        report["relations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|r| r["present"] == false),
+        "no relations exist before the first run"
+    );
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
 /// `entity_id -> record_key` membership, as a flat vec.
 fn membership_rows(session: &Session) -> Vec<(String, String)> {
     session

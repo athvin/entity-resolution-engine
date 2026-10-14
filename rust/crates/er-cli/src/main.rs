@@ -87,6 +87,8 @@ enum Command {
         #[arg(long, default_value = "er-run")]
         run_id: String,
     },
+    /// Read-only health report over the lake + config (JSON on stdout).
+    Doctor,
 }
 
 fn load_config(path: &PathBuf) -> Result<Config> {
@@ -212,6 +214,13 @@ fn main() -> Result<()> {
                 },
             )?;
             println!("run-all complete ({run_id})");
+        }
+        Command::Doctor => {
+            let report = er_cli::doctor(&session, &config)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            if report["ok"] != serde_json::Value::Bool(true) {
+                std::process::exit(1);
+            }
         }
     }
     Ok(())

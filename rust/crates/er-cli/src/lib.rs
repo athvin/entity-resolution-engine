@@ -532,11 +532,7 @@ fn load_active_assertions(session: &Session) -> Result<Vec<Assertion>> {
     )) {
         Ok(rows) => rows,
         Err(e) => {
-            let s = e.to_string();
-            if s.contains("does not exist")
-                || s.contains("Catalog Error")
-                || s.contains("Table with name")
-            {
+            if is_missing_table(&e.to_string()) {
                 return Ok(Vec::new());
             }
             return Err(e.into());
@@ -797,6 +793,97 @@ pub fn run_golden(session: &Session, config: &Config) -> Result<()> {
     );
     session.execute_batch(&format!("create table {GOLDEN_RECORDS} as\n{records_sql}"))?;
     Ok(())
+}
+
+/// Whether a lake query error is "the table isn't there" (vs a real failure):
+/// the DuckDB/DuckLake surface for a relation that the pipeline/drain hasn't
+/// created yet. Lets readers treat an absent relation as empty.
+fn is_missing_table(err: &str) -> bool {
+    err.contains("does not exist")
+        || err.contains("Catalog Error")
+        || err.contains("Table with name")
+}
+
+/// `(present, row_count)` for a fully-qualified lake relation — `(false, 0)` when
+/// the relation hasn't been created yet.
+fn relation_count(session: &Session, qualified: &str) -> Result<(bool, i64)> {
+    match session.query_strings(&format!("select count(*) from {qualified}")) {
+        Ok(rows) => {
+            let n = rows
+                .first()
+                .and_then(|r| r.first())
+                .map_or(0, |v| v.parse::<i64>().unwrap_or(0));
+            Ok((true, n))
+        }
+        Err(e) => {
+            if is_missing_table(&e.to_string()) {
+                Ok((false, 0))
+            } else {
+                Err(e.into())
+            }
+        }
+    }
+}
+
+/// The lake relations `doctor` inspects, by bare name -> fully-qualified, in
+/// pipeline order. The DuckLake-resident outputs the Rust engine writes (the
+/// control-plane tables live in Postgres, not here).
+const DOCTOR_RELATIONS: [(&str, &str); 12] = [
+    ("raw_records", RAW_RECORDS),
+    ("int_std_records", INT_STD_RECORDS),
+    ("match_scores", MATCH_SCORES),
+    ("entity_membership", ENTITY_MEMBERSHIP),
+    ("entities", ENTITIES),
+    ("entity_events", ENTITY_EVENTS),
+    ("golden_records", GOLDEN_RECORDS),
+    ("golden_lineage", GOLDEN_LINEAGE),
+    ("runs", RUNS),
+    ("review_queue", REVIEW_QUEUE),
+    ("assertions", ASSERTIONS),
+    ("ingest_batches", INGEST_BATCHES),
+];
+
+/// A read-only health report over the lake + config (`er doctor`): the config
+/// fingerprint + versions, each lake relation's presence and row count, and the
+/// latest run's status. `ok` is true once the core resolved relations
+/// (`int_std_records`, `entity_membership`, `golden_records`) are all present —
+/// i.e. the pipeline has produced output — so a fresh, unpopulated lake reports
+/// `ok: false` with every relation absent rather than erroring.
+///
+/// # Errors
+/// Propagates a non-missing-table lake query error (a genuinely broken lake).
+pub fn doctor(session: &Session, config: &Config) -> Result<serde_json::Value> {
+    let mut relations = Vec::with_capacity(DOCTOR_RELATIONS.len());
+    let mut present: std::collections::BTreeMap<&str, bool> = std::collections::BTreeMap::new();
+    for (name, qualified) in DOCTOR_RELATIONS {
+        let (is_present, rows) = relation_count(session, qualified)?;
+        present.insert(name, is_present);
+        relations.push(serde_json::json!({ "name": name, "present": is_present, "rows": rows }));
+    }
+    let ok = ["int_std_records", "entity_membership", "golden_records"]
+        .iter()
+        .all(|n| present.get(n).copied().unwrap_or(false));
+
+    // The latest run (if the ledger exists): run_id + status + mode.
+    let latest_run = match session.query_strings(&format!(
+        "select run_id, status, mode from {RUNS} order by started_at desc limit 1"
+    )) {
+        Ok(rows) => rows
+            .first()
+            .map(|r| serde_json::json!({ "run_id": r[0], "status": r[1], "mode": r[2] })),
+        Err(e) if is_missing_table(&e.to_string()) => None,
+        Err(e) => return Err(e.into()),
+    };
+
+    Ok(serde_json::json!({
+        "tenant": config.tenant,
+        "config_hash": er_config::config_hash(config),
+        "std_version": config.versions.std_version,
+        "survivorship_version": config.versions.survivorship_version,
+        "relations": relations,
+        "latest_run": latest_run,
+        "ok": ok,
+    }))
 }
 
 /// Everything a full-mode `run-all` needs beyond the config + lake session: the

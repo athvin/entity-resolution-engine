@@ -194,5 +194,46 @@ fn er_run_all_reproduces_base_10_relations() {
         "{diff} run-all golden_records rows differ from golden.csv"
     );
 
+    // `er doctor` reports the populated lake as healthy. Drop our session first
+    // so the separate `er` process can attach the (single-writer) catalog.
+    // (`drop` the local var shadows the fn, so name it fully.)
+    std::mem::drop(session);
+    let out = Command::cargo_bin("er")
+        .unwrap()
+        .args([
+            "--catalog",
+            &catalog,
+            "--data-path",
+            &data_path,
+            "--config",
+            crate_fixture("test.yaml").to_str().unwrap(),
+            "doctor",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "er doctor failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).expect("doctor emits JSON");
+    assert_eq!(report["ok"], true, "a fully-run lake is ok");
+    assert_eq!(report["latest_run"]["status"], "succeeded");
+    let rel = |name: &str| -> &serde_json::Value {
+        report["relations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["name"] == name)
+            .unwrap()
+    };
+    assert_eq!(
+        rel("int_std_records")["rows"],
+        23,
+        "23 standardized records"
+    );
+    assert_eq!(rel("entity_membership")["present"], true);
+    assert_eq!(rel("golden_records")["present"], true);
+
     let _ = std::fs::remove_dir_all(&tmp);
 }
