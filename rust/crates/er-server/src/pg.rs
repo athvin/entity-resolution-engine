@@ -92,6 +92,15 @@ CREATE TABLE IF NOT EXISTS schedules (\
 );\
 CREATE UNIQUE INDEX IF NOT EXISTS schedules_one_correction_per_org ON schedules (org) WHERE source = 'config:correction_pass';\
 CREATE UNIQUE INDEX IF NOT EXISTS schedules_one_maintenance_per_org ON schedules (org) WHERE source = 'system:lake_maintain';\
+CREATE TABLE IF NOT EXISTS webhooks (\
+  webhook_id text PRIMARY KEY,\
+  org text NOT NULL REFERENCES orgs(name),\
+  url text NOT NULL,\
+  events jsonb NOT NULL DEFAULT '[]'::jsonb,\
+  secret text NOT NULL,\
+  active boolean NOT NULL DEFAULT true,\
+  created_at timestamptz NOT NULL DEFAULT now()\
+);\
 CREATE TABLE IF NOT EXISTS audit_log (\
   id bigserial PRIMARY KEY,\
   at timestamptz NOT NULL DEFAULT now(),\
@@ -937,6 +946,76 @@ pub async fn delete_schedule(
         .execute(
             "DELETE FROM schedules WHERE org = $1 AND schedule_id = $2",
             &[&org, &schedule_id],
+        )
+        .await?;
+    Ok(n == 1)
+}
+
+/// A webhook row for the API listing (`webhooks.py`); the `secret` is never
+/// listed (returned once on create, like an API key).
+pub struct WebhookRow {
+    pub webhook_id: String,
+    pub url: String,
+    pub events: serde_json::Value,
+    pub active: bool,
+}
+
+/// Register an outbound webhook (`webhooks.py` `create`); returns its id. The
+/// `secret` is the caller-chosen or generated HMAC signing key stored for
+/// delivery-time signatures.
+///
+/// # Errors
+/// Propagates the insert error.
+pub async fn create_webhook(
+    client: &Client,
+    org: &str,
+    url: &str,
+    events: &serde_json::Value,
+    secret: &str,
+) -> Result<String, PgError> {
+    let webhook_id = ulid::Ulid::new().to_string();
+    client
+        .execute(
+            "INSERT INTO webhooks (webhook_id, org, url, events, secret) \
+             VALUES ($1, $2, $3, $4, $5)",
+            &[&webhook_id, &org, &url, &events, &secret],
+        )
+        .await?;
+    Ok(webhook_id)
+}
+
+/// An org's active webhooks, oldest first (`webhooks.py` `list`).
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn list_webhooks(client: &Client, org: &str) -> Result<Vec<WebhookRow>, PgError> {
+    let rows = client
+        .query(
+            "SELECT webhook_id, url, events, active FROM webhooks \
+             WHERE org = $1 AND active ORDER BY created_at",
+            &[&org],
+        )
+        .await?;
+    Ok(rows
+        .iter()
+        .map(|r| WebhookRow {
+            webhook_id: r.get("webhook_id"),
+            url: r.get("url"),
+            events: r.get("events"),
+            active: r.get("active"),
+        })
+        .collect())
+}
+
+/// Delete a webhook (`webhooks.py` `delete`). `true` iff a row was removed.
+///
+/// # Errors
+/// Propagates the delete error.
+pub async fn delete_webhook(client: &Client, org: &str, webhook_id: &str) -> Result<bool, PgError> {
+    let n = client
+        .execute(
+            "DELETE FROM webhooks WHERE org = $1 AND webhook_id = $2",
+            &[&org, &webhook_id],
         )
         .await?;
     Ok(n == 1)

@@ -2142,6 +2142,156 @@ async fn delete_schedule(
     }
 }
 
+#[derive(Deserialize)]
+struct WebhookIn {
+    url: String,
+    #[serde(default)]
+    events: Vec<String>,
+    #[serde(default)]
+    secret: Option<String>,
+}
+
+/// A fresh HMAC signing secret: 24 random bytes, hex-encoded (same shape as an
+/// API-key secret).
+fn gen_webhook_secret() -> String {
+    use rand::RngCore;
+    let mut buf = [0u8; 24];
+    rand::rng().fill_bytes(&mut buf);
+    hex::encode(buf)
+}
+
+/// Admin+: register an outbound webhook (`POST /v1/orgs/{org}/webhooks`). The
+/// HMAC signing `secret` is caller-supplied or generated, and returned ONCE
+/// (never listed thereafter, like an API key).
+///
+/// Delivery — signing each event payload with the secret and POSTing it to
+/// `url` — is the infra-bound part (a background sender, not run in this
+/// sandbox); this endpoint manages the registration.
+async fn create_webhook(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Json(body): Json<WebhookIn>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Admin) {
+        return e.into_response();
+    }
+    if body.url.trim().is_empty() {
+        return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "url is required");
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "webhooks require Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    match pg::org_exists(&client, &org).await {
+        Ok(true) => {}
+        Ok(false) => return detail_err(StatusCode::NOT_FOUND, format!("no org '{org}'")),
+        Err(e) => return pg_err(e),
+    }
+    let secret = body
+        .secret
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(gen_webhook_secret);
+    let events = json!(body.events);
+    match pg::create_webhook(&client, &org, &body.url, &events, &secret).await {
+        Ok(webhook_id) => {
+            let _ = pg::audit(
+                &client,
+                &principal.actor,
+                Some(&org),
+                "webhook.create",
+                &json!({ "webhook_id": webhook_id, "url": body.url }),
+            )
+            .await;
+            (
+                StatusCode::CREATED,
+                Json(json!({
+                    "webhook_id": webhook_id,
+                    "url": body.url,
+                    "events": events,
+                    "secret": secret,
+                    "active": true,
+                })),
+            )
+                .into_response()
+        }
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Viewer+: list an org's active webhooks (`GET /v1/orgs/{org}/webhooks`); the
+/// signing secret is never listed.
+async fn webhooks_index(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "webhooks require Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    match pg::list_webhooks(&client, &org).await {
+        Ok(rows) => {
+            let out: Vec<Value> = rows
+                .iter()
+                .map(|w| {
+                    json!({
+                        "webhook_id": w.webhook_id,
+                        "url": w.url,
+                        "events": w.events,
+                        "active": w.active,
+                    })
+                })
+                .collect();
+            Json(json!(out)).into_response()
+        }
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Admin+: delete a webhook (`DELETE /v1/orgs/{org}/webhooks/{webhook_id}`).
+async fn delete_webhook(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, webhook_id)): Path<(String, String)>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Admin) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "webhooks require Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    match pg::delete_webhook(&client, &org, &webhook_id).await {
+        Ok(deleted) => {
+            if deleted {
+                let _ = pg::audit(
+                    &client,
+                    &principal.actor,
+                    Some(&org),
+                    "webhook.delete",
+                    &json!({ "webhook_id": webhook_id }),
+                )
+                .await;
+            }
+            Json(json!({ "deleted": deleted })).into_response()
+        }
+        Err(e) => pg_err(e),
+    }
+}
+
 /// Stage a steward action (the writer-lock-held path of `steward.py`
 /// `try_apply_or_stage`): the dispatcher drains it when the org goes quiet. The
 /// immediate-apply path needs the per-tenant writer lock on the postgres-backed
@@ -2931,6 +3081,14 @@ fn build_routes(state: AppState) -> Router {
         .route(
             "/v1/orgs/{org}/schedules",
             get(schedules_index).post(create_schedule),
+        )
+        .route(
+            "/v1/orgs/{org}/webhooks",
+            get(webhooks_index).post(create_webhook),
+        )
+        .route(
+            "/v1/orgs/{org}/webhooks/{webhook_id}",
+            axum::routing::delete(delete_webhook),
         )
         .route(
             "/v1/orgs/{org}/schedules/{schedule_id}",
