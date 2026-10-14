@@ -89,6 +89,13 @@ enum Command {
     },
     /// Read-only health report over the lake + config (JSON on stdout).
     Doctor,
+    /// Lake maintenance: flush inlined rows, merge small files, expire old
+    /// snapshots. Prints a before/after file-count report (JSON).
+    Maintain {
+        /// Expire snapshots older than this DuckDB interval (e.g. "7 days").
+        #[arg(long, default_value = "7 days")]
+        expire_older_than: String,
+    },
 }
 
 fn load_config(path: &PathBuf) -> Result<Config> {
@@ -221,6 +228,10 @@ fn main() -> Result<()> {
             if report["ok"] != serde_json::Value::Bool(true) {
                 std::process::exit(1);
             }
+        }
+        Command::Maintain { expire_older_than } => {
+            let report = er_cli::run_maintain(&session, &expire_older_than)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
         }
     }
     Ok(())

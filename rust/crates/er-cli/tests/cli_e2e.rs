@@ -235,5 +235,43 @@ fn er_run_all_reproduces_base_10_relations() {
     assert_eq!(rel("entity_membership")["present"], true);
     assert_eq!(rel("golden_records")["present"], true);
 
+    // `er maintain` flushes + compacts + expires the lake and reports before/after
+    // file counts. "100 years" expiry keeps every snapshot (just exercises the
+    // call); the real signal is that maintenance runs clean over a live lake.
+    let out = Command::cargo_bin("er")
+        .unwrap()
+        .args([
+            "--catalog",
+            &catalog,
+            "--data-path",
+            &data_path,
+            "--config",
+            crate_fixture("test.yaml").to_str().unwrap(),
+            "maintain",
+            "--expire-older-than",
+            "100 years",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "er maintain failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let m: serde_json::Value = serde_json::from_slice(&out.stdout).expect("maintain emits JSON");
+    assert_eq!(m["expired_older_than"], "100 years");
+    let after = m["after"].as_array().expect("after stats");
+    assert!(
+        after.iter().any(|t| t["table"] == "golden_records"),
+        "maintenance stats cover the lake tables"
+    );
+    // Every table has at least one data file once inlined rows are flushed.
+    assert!(
+        after
+            .iter()
+            .all(|t| t["file_count"].as_i64().unwrap_or(-1) >= 1),
+        "flush produced a data file per table: {after:?}"
+    );
+
     let _ = std::fs::remove_dir_all(&tmp);
 }

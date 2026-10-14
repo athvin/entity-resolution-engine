@@ -886,6 +886,44 @@ pub fn doctor(session: &Session, config: &Config) -> Result<serde_json::Value> {
     }))
 }
 
+/// Per-table `(file_count, delete_file_count)` as a JSON array.
+fn stats_json(stats: &[(String, i64, i64)]) -> serde_json::Value {
+    serde_json::Value::Array(
+        stats
+            .iter()
+            .map(|(table, files, deletes)| {
+                serde_json::json!({
+                    "table": table,
+                    "file_count": files,
+                    "delete_file_count": deletes,
+                })
+            })
+            .collect(),
+    )
+}
+
+/// Lake maintenance (`er maintain`): flush inlined (catalog-resident) rows out to
+/// Parquet, merge small adjacent data files, and expire snapshots older than
+/// `expire_older_than` (a DuckDB interval string, e.g. `"7 days"` — keep it well
+/// above the longest-running read). Returns the before/after per-table file
+/// counts so an operator (or `GET /runs`) can see the compaction effect. This is
+/// the data-plane op behind the `lake_maintain` schedulable job kind.
+///
+/// # Errors
+/// Propagates the DuckLake maintenance call errors.
+pub fn run_maintain(session: &Session, expire_older_than: &str) -> Result<serde_json::Value> {
+    let before = session.lake_table_stats()?;
+    session.flush_inlined_data()?;
+    session.merge_adjacent_files(None, None)?;
+    session.expire_snapshots(expire_older_than)?;
+    let after = session.lake_table_stats()?;
+    Ok(serde_json::json!({
+        "expired_older_than": expire_older_than,
+        "before": stats_json(&before),
+        "after": stats_json(&after),
+    }))
+}
+
 /// Everything a full-mode `run-all` needs beyond the config + lake session: the
 /// lexicon seed, the per-source deliveries, the committed model, and the run's
 /// id + volatile stamps.
