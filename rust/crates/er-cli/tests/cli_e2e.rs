@@ -132,6 +132,34 @@ fn er_run_all_reproduces_base_10_relations() {
         "run-all membership partition differs from golden"
     );
 
+    // ingest_batches carries one receipt per source: base_10 is all-new
+    // (23 records across crm/billing/webforms), full_refresh_keys false.
+    let receipts = session
+        .query_strings(&format!(
+            "select source_system, new_count, changed_count, unchanged_count, \
+                    tombstone_count, resurrected_count, full_refresh_keys \
+             from {} order by source_system",
+            er_cli::INGEST_BATCHES
+        ))
+        .unwrap();
+    assert_eq!(receipts.len(), 3, "one ingest_batches receipt per source");
+    let total_new: i64 = receipts.iter().map(|r| r[1].parse::<i64>().unwrap()).sum();
+    assert_eq!(total_new, 23, "every base_10 record lands as new");
+    for r in &receipts {
+        assert_eq!(
+            (&r[2], &r[3], &r[4], &r[5], &r[6]),
+            (
+                &"0".to_string(),
+                &"0".to_string(),
+                &"0".to_string(),
+                &"0".to_string(),
+                &"false".to_string()
+            ),
+            "base delivery has no changed/unchanged/tombstone/resurrected and is not a full refresh ({})",
+            r[0]
+        );
+    }
+
     // golden_records match golden.csv (attribute columns, id-insensitive).
     let golden_path = repo_fixture("base_10/expected/base/golden.csv")
         .to_string_lossy()

@@ -46,6 +46,7 @@ pub const GOLDEN_RECORDS: &str = "lake.main.golden_records";
 pub const RUNS: &str = "lake.main.runs";
 pub const REVIEW_QUEUE: &str = "lake.main.review_queue";
 pub const ASSERTIONS: &str = "lake.main.assertions";
+pub const INGEST_BATCHES: &str = "lake.main.ingest_batches";
 /// The nickname lexicon `int_std_records` reads — a temp relation (read
 /// cross-catalog while the lake write runs), seeded per session.
 pub const LEXICON: &str = "nickname_variants";
@@ -316,6 +317,47 @@ pub fn write_run_start(session: &Session, config: &Config, inputs: &PipelineInpu
     Ok(())
 }
 
+/// Write this source's `ingest_batches` receipt row (S4.1): the
+/// new/changed/unchanged/tombstone/resurrected breakdown the read API's
+/// `GET /imports` surfaces, computed by [`er_ingest::landing::batch_receipt`]
+/// against the source's prior landed state. The receipt's `ingest_batch_id`
+/// (its primary key) is `{run_id}:{source}` so each source in a run gets a
+/// distinct row, while `raw_records` keeps the plain `run_id` batch id the
+/// receipt query scopes on. `path` is the delivery's drop path — the source
+/// name in this in-process seam; the real dispatcher supplies the object path.
+///
+/// # Errors
+/// Propagates the receipt query / lake DDL+insert errors.
+pub fn write_ingest_batch(
+    session: &Session,
+    run_id: &str,
+    source: &str,
+    path: &str,
+    full_refresh: bool,
+    created_at: &str,
+) -> Result<()> {
+    let r = er_ingest::landing::batch_receipt(session, RAW_RECORDS, source, run_id)?;
+    create_ddl_table(session, "ingest_batches")?;
+    session.execute_batch(&format!(
+        "INSERT INTO {INGEST_BATCHES} \
+           (ingest_batch_id, run_id, source_system, path, new_count, changed_count, \
+            unchanged_count, tombstone_count, resurrected_count, full_refresh_keys, created_at) \
+         VALUES ('{id}', '{rid}', '{src}', '{path}', {new}, {chg}, {unch}, {tomb}, {res}, {fr}, '{at}')",
+        id = esc(&format!("{run_id}:{source}")),
+        rid = esc(run_id),
+        src = esc(source),
+        path = esc(path),
+        new = r.new,
+        chg = r.changed,
+        unch = r.unchanged,
+        tomb = r.tombstone,
+        res = r.resurrected,
+        fr = full_refresh,
+        at = esc(created_at),
+    ))?;
+    Ok(())
+}
+
 /// Close the `runs` row on success (status `succeeded`, `ended_at` stamped).
 ///
 /// # Errors
@@ -339,8 +381,8 @@ pub fn write_run_end(session: &Session, run_id: &str, ended_at: &str) -> Result<
 ///     pair so the next reconcile enforces it.
 ///
 /// This records the intent in the lake; ENFORCEMENT (an assertion re-biasing the
-/// clustering) happens on the next assertion-adjusted reconcile — proven
-/// in-memory in er-match, not yet wired into `run_reconcile` over the lake.
+/// clustering) happens on the next [`run_reconcile`], which loads the active
+/// assertions and force-merges `always` / cuts `never` over the lake graph.
 ///
 /// # Errors
 /// Propagates lake DDL / write errors.
@@ -788,6 +830,14 @@ pub fn run_all(session: &Session, config: &Config, inputs: &PipelineInputs) -> R
             inputs.run_id,
             inputs.ingested_at,
             false,
+        )?;
+        write_ingest_batch(
+            session,
+            inputs.run_id,
+            source,
+            source,
+            false,
+            inputs.ingested_at,
         )?;
     }
     run_standardize(session, config)?;
