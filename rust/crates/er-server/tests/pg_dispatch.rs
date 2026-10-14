@@ -98,11 +98,15 @@ async fn dispatcher_runs_run_all_over_a_per_org_ducklake() {
     };
 
     // Dispatch: claim the job, run the whole pipeline, mark the outcome.
-    let done = dispatch_pg(&client, |job| {
-        assert_eq!(job.job_id, queued.job_id, "claimed the queued job");
-        assert_eq!(job.state, "dispatching", "claim moved it to dispatching");
-        er_cli::run_all(&session, &config, &inputs).map_err(|e| e.to_string())
-    })
+    let done = dispatch_pg(
+        &client,
+        |job| {
+            assert_eq!(job.job_id, queued.job_id, "claimed the queued job");
+            assert_eq!(job.state, "dispatching", "claim moved it to dispatching");
+            er_cli::run_all(&session, &config, &inputs).map_err(|e| e.to_string())
+        },
+        None,
+    )
     .await
     .unwrap()
     .expect("a job to dispatch");
@@ -132,7 +136,7 @@ async fn dispatcher_runs_run_all_over_a_per_org_ducklake() {
     let _ = pg::enqueue(&client, "acme", "run_all_full", 0, None, None)
         .await
         .unwrap();
-    let failed = dispatch_pg(&client, |_job| Err("boom".to_string()))
+    let failed = dispatch_pg(&client, |_job| Err("boom".to_string()), None)
         .await
         .unwrap()
         .expect("a second job to dispatch");
@@ -147,9 +151,11 @@ async fn dispatcher_runs_run_all_over_a_per_org_ducklake() {
     );
 
     // Empty queue: nothing claimable -> None (runner never invoked).
-    let none = dispatch_pg(&client, |_job| {
-        panic!("runner must not run on an empty queue")
-    })
+    let none = dispatch_pg(
+        &client,
+        |_job| panic!("runner must not run on an empty queue"),
+        None,
+    )
     .await
     .unwrap();
     assert!(none.is_none(), "no job left to claim");
