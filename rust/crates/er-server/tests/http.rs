@@ -137,3 +137,50 @@ async fn job_lifecycle_enqueue_list_get_cancel() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn action_colon_spelling_routes_like_the_subpath() {
+    // The BFF addresses actions as `{id}:action` (Python convention); the server
+    // normalizes that to the `{id}/action` sub-path it routes on.
+    let app = test_app();
+
+    let resp = app
+        .clone()
+        .oneshot(op_request(
+            "POST",
+            "/v1/orgs/acme/jobs",
+            Body::from(r#"{"kind":"run"}"#),
+        ))
+        .await
+        .unwrap();
+    let job_id = json_body(resp).await["job_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Cancel via `{id}:cancel` (NOT the `/cancel` sub-path).
+    let resp = app
+        .clone()
+        .oneshot(op_request(
+            "POST",
+            &format!("/v1/orgs/acme/jobs/{job_id}:cancel"),
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(json_body(resp).await["state"], "canceled");
+
+    // `{org}:suspend` normalizes too — reaches the suspend handler, which in the
+    // in-memory (no-Postgres) backend reports 501 rather than 404 (the point is
+    // that it ROUTED, not that it succeeded without a DB).
+    let resp = app
+        .oneshot(op_request("POST", "/v1/orgs/acme:suspend", Body::empty()))
+        .await
+        .unwrap();
+    assert_ne!(
+        resp.status(),
+        StatusCode::NOT_FOUND,
+        "{{org}}:suspend must route to the suspend handler"
+    );
+}

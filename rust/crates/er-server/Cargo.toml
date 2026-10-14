@@ -19,6 +19,8 @@ er-reconcile = { path = "../er-reconcile" }
 # The read API attaches each org's DuckLake (read-only) and queries lake.main.*.
 dedupe-core = { path = "../dedupe-core" }
 axum = { workspace = true }
+# The :action path normalizer wraps the router as an outer tower service.
+tower = { workspace = true }
 base64 = { workspace = true }
 serde_urlencoded = { workspace = true }
 tokio = { workspace = true }
@@ -31,7 +33,6 @@ sha2 = { workspace = true }
 hex = { workspace = true }
 
 [dev-dependencies]
-tower = { workspace = true }
 # The dispatcher's data-plane runner: the gated tests/pg_dispatch.rs opens a
 # per-org DuckLake and runs the whole pipeline (er_cli::run_all) from a claimed
 # job, proving the control -> data-plane bridge end to end.

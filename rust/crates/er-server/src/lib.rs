@@ -39,13 +39,15 @@ use er_config::{Config, config_hash, load_config_str};
 
 use axum::Json;
 use axum::Router;
-use axum::extract::{FromRequestParts, Path, Query, State};
+use axum::body::Body;
+use axum::extract::{FromRequestParts, Path, Query, Request, State};
 use axum::http::StatusCode;
 use axum::http::request::Parts;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use tower::ServiceExt as _;
 
 /// A queued unit of pipeline work (S-queue). `state` walks
 /// queued -> running -> {succeeded, failed, canceled}.
@@ -2795,7 +2797,11 @@ async fn revoke_key(
 
 /// Build the control-plane router. `/healthz` is anonymous; every `/v1` route is
 /// behind the bearer boundary.
-pub fn app(state: AppState) -> Router {
+///
+/// Action endpoints are registered in the `/parent/{id}/action` sub-path form
+/// (axum/matchit forbids a `{param}:action` segment); [`app`] wraps this with a
+/// normalizer that also accepts the BFF's `{id}:action` spelling.
+fn build_routes(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/v1/orgs", get(list_orgs).post(create_org))
@@ -2883,6 +2889,63 @@ pub fn app(state: AppState) -> Router {
         .with_state(state)
 }
 
+/// The action verbs the BFF appends as `{id}:action`, each mapping to a
+/// `{id}/action` sub-path route on this server.
+const ACTION_VERBS: [&str; 8] = [
+    "unmerge",
+    "resolve",
+    "cancel",
+    "resume",
+    "publish",
+    "bulk-resolve",
+    "contradictions",
+    "suspend",
+];
+
+/// Rewrite a Python-style `{id}:action` path into the `{id}/action` sub-path this
+/// server routes on. Splits the LAST segment on its LAST `:` and only rewrites
+/// when the suffix is one of [`ACTION_VERBS`] — so an id that itself contains
+/// colons (an unencoded `review_id` like `gray_band:crm:C001:webforms:W006`) is
+/// left alone, while the BFF's encoded `{id}:action` (the id's own colons arrive
+/// as `%3A`) is normalized. Returns `None` when no rewrite applies.
+fn rewrite_action_path(path: &str) -> Option<String> {
+    let (prefix, last) = path.rsplit_once('/')?;
+    let (head, action) = last.rsplit_once(':')?;
+    if !ACTION_VERBS.contains(&action) {
+        return None;
+    }
+    Some(format!("{prefix}/{head}/{action}"))
+}
+
+/// The control-plane service: `build_routes`, wrapped so the BFF's
+/// `{id}:action` spelling is accepted alongside the native `{id}/action`
+/// sub-path. The rewrite must happen BEFORE routing (an unknown `:action` path
+/// matches no route), so it sits in an outer service that normalizes the URI and
+/// defers to the inner router — not a `Router::layer`, which runs post-routing.
+pub fn app(state: AppState) -> Router {
+    let inner = build_routes(state);
+    Router::new().fallback_service(tower::service_fn(move |mut req: Request<Body>| {
+        let inner = inner.clone();
+        async move {
+            if let Some(new_path) = rewrite_action_path(req.uri().path()) {
+                let pq = match req.uri().query() {
+                    Some(q) => format!("{new_path}?{q}"),
+                    None => new_path,
+                };
+                if let Ok(pq) = pq.parse::<axum::http::uri::PathAndQuery>() {
+                    let mut parts = req.uri().clone().into_parts();
+                    parts.path_and_query = Some(pq);
+                    if let Ok(uri) = axum::http::Uri::from_parts(parts) {
+                        *req.uri_mut() = uri;
+                    }
+                }
+            }
+            // Router's Service error is Infallible, so this never returns Err.
+            inner.oneshot(req).await
+        }
+    }))
+}
+
 /// Build the server state from the environment: the operator bearer
 /// (`ER_OPERATOR_TOKEN`) and, if `ER_PG_DSN` is set, the Postgres job-queue
 /// backend (otherwise the in-memory store).
@@ -2892,5 +2955,89 @@ pub fn state_from_env() -> AppState {
     match std::env::var("ER_PG_DSN") {
         Ok(dsn) if !dsn.is_empty() => AppState::with_pg(operator, dsn),
         _ => AppState::new(operator),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rewrite_action_path;
+
+    #[test]
+    fn rewrites_every_action_spelling_the_bff_uses() {
+        let cases = [
+            (
+                "/v1/orgs/acme/golden-records/E1:unmerge",
+                "/v1/orgs/acme/golden-records/E1/unmerge",
+            ),
+            (
+                "/v1/orgs/acme/reviews/r1:resolve",
+                "/v1/orgs/acme/reviews/r1/resolve",
+            ),
+            (
+                "/v1/orgs/acme/jobs/J1:cancel",
+                "/v1/orgs/acme/jobs/J1/cancel",
+            ),
+            (
+                "/v1/orgs/acme/jobs/J1:resume",
+                "/v1/orgs/acme/jobs/J1/resume",
+            ),
+            (
+                "/v1/orgs/acme/config/versions/3:publish",
+                "/v1/orgs/acme/config/versions/3/publish",
+            ),
+            (
+                "/v1/orgs/acme/reviews:bulk-resolve",
+                "/v1/orgs/acme/reviews/bulk-resolve",
+            ),
+            (
+                "/v1/orgs/acme/assertions:contradictions",
+                "/v1/orgs/acme/assertions/contradictions",
+            ),
+            ("/v1/orgs/acme:suspend", "/v1/orgs/acme/suspend"),
+            ("/v1/orgs/acme:resume", "/v1/orgs/acme/resume"),
+        ];
+        for (input, want) in cases {
+            assert_eq!(rewrite_action_path(input).as_deref(), Some(want), "{input}");
+        }
+    }
+
+    #[test]
+    fn leaves_a_percent_encoded_id_colon_intact() {
+        // The BFF percent-encodes ids, so `crm:C001` arrives as `crm%3AC001`; the
+        // only literal `:` is the action delimiter.
+        assert_eq!(
+            rewrite_action_path("/v1/orgs/acme/golden-records/crm%3AC001:unmerge").as_deref(),
+            Some("/v1/orgs/acme/golden-records/crm%3AC001/unmerge"),
+        );
+    }
+
+    #[test]
+    fn leaves_non_action_paths_unchanged() {
+        for p in [
+            "/healthz",
+            "/v1/orgs",
+            "/v1/orgs/acme/jobs/J1",
+            "/v1/orgs/acme/golden-records/E1",
+            // An unencoded review_id full of colons, with NO trailing action verb:
+            // the last `:` suffix (`W006`) isn't an action, so it's left intact.
+            "/v1/orgs/acme/reviews/gray_band:crm:C001:webforms:W006",
+            // A sub-path action is already normalized — unchanged.
+            "/v1/orgs/acme/reviews/gray_band:crm:C001:webforms:W006/resolve",
+        ] {
+            assert_eq!(rewrite_action_path(p), None, "{p}");
+        }
+    }
+
+    #[test]
+    fn rewrites_an_action_on_an_id_that_itself_has_colons() {
+        // The BFF encodes the review_id, so its colons arrive as %3A and the only
+        // bare `:` is the action delimiter — the rewrite peels just the action.
+        assert_eq!(
+            rewrite_action_path(
+                "/v1/orgs/acme/reviews/gray_band%3Acrm%3AC001%3Awebforms%3AW006:resolve"
+            )
+            .as_deref(),
+            Some("/v1/orgs/acme/reviews/gray_band%3Acrm%3AC001%3Awebforms%3AW006/resolve"),
+        );
     }
 }
