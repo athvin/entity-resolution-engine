@@ -10,8 +10,16 @@ repository.workspace = true
 name = "er-server"
 path = "src/main.rs"
 
+# The in-process job dispatcher daemon (deploy: the er-dispatcher Deployment).
+[[bin]]
+name = "er-dispatcher"
+path = "src/bin/er-dispatcher.rs"
+
 [dependencies]
 er-config = { path = "../er-config" }
+# The in-process dispatcher runs the whole pipeline over the claimed job's
+# DuckLake (run_all / correct / maintain / train) — no per-run k8s Jobs.
+er-cli = { path = "../er-cli" }
 # The merge-plans read uses the shared master-record election SQL.
 er-golden = { path = "../er-golden" }
 # Unmerge prechecks proposed never-rules with the shared contradiction-1 check.
@@ -23,7 +31,8 @@ axum = { workspace = true }
 tower = { workspace = true }
 base64 = { workspace = true }
 serde_urlencoded = { workspace = true }
-tokio = { workspace = true }
+# `signal` (over the workspace features) for the dispatcher's SIGTERM drain.
+tokio = { workspace = true, features = ["signal"] }
 tokio-postgres = { workspace = true }
 ulid = { workspace = true }
 rand = { workspace = true }
@@ -34,12 +43,6 @@ sha2 = { workspace = true }
 hmac = { workspace = true }
 reqwest = { workspace = true }
 hex = { workspace = true }
-
-[dev-dependencies]
-# The dispatcher's data-plane runner: the gated tests/pg_dispatch.rs opens a
-# per-org DuckLake and runs the whole pipeline (er_cli::run_all) from a claimed
-# job, proving the control -> data-plane bridge end to end.
-er-cli = { path = "../er-cli" }
 
 [lints]
 workspace = true

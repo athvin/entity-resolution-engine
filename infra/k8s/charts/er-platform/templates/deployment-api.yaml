@@ -1,7 +1,7 @@
-# er-api: the control plane (docker/Dockerfile.api's default CMD — uvicorn
-# against the create_app factory). ensure_schema rides this boot, exactly as it
-# does locally; the dispatcher's init container gates on /healthz so the DDL is
-# never blocked by the leader connection (§2 boot order).
+# er-api: the control plane (the Rust rust/Dockerfile's default CMD — the
+# er-server binary serving axum on :8000). The schema is applied by the
+# db-migrate Job (`er-server migrate`) before rollout; the server also ensures
+# it is idempotent at boot.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -22,14 +22,10 @@ spec:
       {{- include "er-platform.selectorLabels" (dict "root" . "name" "er-api") | nindent 6 }}
   template:
     metadata:
-      {{- if .Values.otel.autoInstrument }}
-      annotations:
-        # Task 1.8 (§10.6 Phase 1): the OTel operator's webhook matches this
-        # against the namespace's Instrumentation CR (instrumentation.yaml)
-        # and injects the Python auto-instrumentation — RED metrics with no
-        # app code change.
-        instrumentation.opentelemetry.io/inject-python: "true"
-      {{- end }}
+      # NOTE: the Rust binaries don't use the OTel operator's Python
+      # auto-instrumentation (that injected a Python agent). Rust OTel is
+      # code-level (a future tracing-opentelemetry layer), so no inject-* pod
+      # annotation is emitted here.
       labels:
         app.kubernetes.io/component: api
         {{- include "er-platform.selectorLabels" (dict "root" . "name" "er-api") | nindent 8 }}
