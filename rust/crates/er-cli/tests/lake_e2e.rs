@@ -677,6 +677,59 @@ fn correct_applies_a_staged_assertion_without_rescoring() {
 }
 
 #[test]
+fn train_produces_a_scorable_model() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    // base_10 standardized gives int_std_records to fit on. Training over 23
+    // records is degenerate by design (S4.3.2) — this gate proves the training
+    // PATH produces artifacts that load + score, not bit-parity params.
+    let (session, config, tmp) = standardized_lake("train");
+
+    let template = std::fs::read_to_string(repo_fixture("model_test_v1.json")).unwrap();
+    let out_model = tmp.join("trained.json");
+    let out_tf = tmp.join("trained.tf.csv");
+    er_cli::run_train(
+        &session,
+        &er_cli::TrainInputs {
+            template_settings_json: &template,
+            deterministic_rules: &[r#"l."email" = r."email""#.to_string()],
+            em_rules: &[r#"l."given_name" = r."given_name""#.to_string()],
+            recall: 0.9,
+            u_max_pairs: 1e7,
+            model_version: "vtrain",
+            tf_snapshot_id: "01TRAINSNAP0000000000000001",
+        },
+        &out_model,
+        &out_tf,
+    )
+    .unwrap();
+    assert!(out_model.exists(), "trained settings written");
+    assert!(out_tf.exists(), "TF snapshot written");
+
+    // The trained artifacts round-trip: a full match with them scores pairs.
+    let trained = std::fs::read_to_string(&out_model).unwrap();
+    er_cli::run_match(
+        &session,
+        &er_cli::MatchModel {
+            settings_json: &trained,
+            tf_csv_path: &out_tf,
+            model_version: "vtrain",
+            tf_snapshot_id: "01TRAINSNAP0000000000000001",
+        },
+        config.thresholds.review_low,
+        "01TRAINRUN00000000000000001",
+        "2026-01-02 00:00:00",
+    )
+    .unwrap();
+    let scored = session.count(er_cli::MATCH_SCORES).unwrap();
+    assert!(scored >= 1, "the trained model scored at least one pair");
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
 fn assertions_enforce_clustering_through_ducklake() {
     if !enabled() {
         eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");

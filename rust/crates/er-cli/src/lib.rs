@@ -1046,3 +1046,114 @@ pub fn run_correct(session: &Session, config: &Config, run_id: &str, run_at: &st
     write_run_end(session, run_id, run_at)?;
     Ok(())
 }
+
+/// What `run_train` needs: the base settings TEMPLATE (comparison + blocking
+/// structure — training fits m/u/prior onto it), the training blocking rules
+/// (deterministic for the prior, EM for the sessions), and the identity to stamp
+/// the exported model + TF snapshot with.
+pub struct TrainInputs<'a> {
+    pub template_settings_json: &'a str,
+    pub deterministic_rules: &'a [String],
+    pub em_rules: &'a [String],
+    pub recall: f64,
+    pub u_max_pairs: f64,
+    pub model_version: &'a str,
+    pub tf_snapshot_id: &'a str,
+}
+
+/// Export the frozen term-frequency snapshot the trained model scores against
+/// (`model_version, tf_snapshot_id, column_name, value, tf_value`) — the CSV
+/// shape [`build_frozen_tf_tables`](crate::run_match) reads back. One row per
+/// (TF column, value); a model with no TF columns writes just the header. Uses
+/// DuckDB `COPY` so value quoting is the engine's problem, not ours.
+fn export_tf_snapshot(
+    session: &Session,
+    tf_columns: &[String],
+    tf_prefix: &str,
+    handles: &[dedupe_core::session::TableHandle],
+    model_version: &str,
+    tf_snapshot_id: &str,
+    out_tf: &Path,
+) -> Result<()> {
+    let path = out_tf.to_string_lossy();
+    if tf_columns.is_empty() {
+        std::fs::write(
+            out_tf,
+            "model_version,tf_snapshot_id,column_name,value,tf_value\n",
+        )?;
+        return Ok(());
+    }
+    let mut selects = Vec::with_capacity(tf_columns.len());
+    for col in tf_columns {
+        let handle = handles
+            .iter()
+            .find(|h| h.columns.iter().any(|c| c == col))
+            .ok_or_else(|| anyhow::anyhow!("no TF table materialized for column {col:?}"))?;
+        selects.push(format!(
+            "select '{mv}' as model_version, '{snap}' as tf_snapshot_id, '{col}' as column_name, \
+             cast(\"{col}\" as varchar) as value, cast(\"{tfp}{col}\" as varchar) as tf_value \
+             from {phys}",
+            mv = esc(model_version),
+            snap = esc(tf_snapshot_id),
+            col = esc(col),
+            tfp = esc(tf_prefix),
+            phys = handle.physical,
+        ));
+    }
+    session.execute_batch(&format!(
+        "COPY ({}) TO '{}' (HEADER, DELIMITER ',')",
+        selects.join("\nUNION ALL\n"),
+        esc(&path),
+    ))?;
+    Ok(())
+}
+
+/// S4.3.2 training (`er train`): fit a Splink model on the lake's
+/// `int_std_records` and write BOTH artifacts a later `full` match freezes
+/// against — the trained settings JSON (`out_model`) and the TF snapshot CSV
+/// (`out_tf`), stamped with `model_version` / `tf_snapshot_id`. The comparison +
+/// blocking STRUCTURE comes from the template; EM fits the parameters (the EM
+/// estimator itself is dedupe-core's, bit-parity-proven). Registering the model
+/// in a registry and promoting it is the control-plane's job; this is the
+/// data-plane step.
+///
+/// # Errors
+/// Propagates the model-load / linker / training / export / save errors.
+pub fn run_train(
+    session: &Session,
+    inputs: &TrainInputs,
+    out_model: &Path,
+    out_tf: &Path,
+) -> Result<()> {
+    let settings = er_match::load_model(inputs.template_settings_json)?;
+    let input = session.register_lake_table("int_std_records", "int_std_records")?;
+    let mut linker = dedupe_core::linker::Linker::new(session, settings, &input)
+        .map_err(|e| anyhow::anyhow!("linker setup: {e}"))?;
+    linker
+        .train(&dedupe_core::linker::TrainConfig {
+            deterministic_rules: inputs.deterministic_rules.to_vec(),
+            recall: inputs.recall,
+            u_max_pairs: inputs.u_max_pairs,
+            em_rules: inputs.em_rules.to_vec(),
+        })
+        .map_err(|e| anyhow::anyhow!("train: {e}"))?;
+
+    // Export the TF snapshot BEFORE consuming the linker for the model.
+    let tf_columns = linker.settings_ref().tf_columns();
+    let tf_prefix = linker.settings_ref().tf_prefix.clone();
+    export_tf_snapshot(
+        session,
+        &tf_columns,
+        &tf_prefix,
+        linker.tf_tables_ref(),
+        inputs.model_version,
+        inputs.tf_snapshot_id,
+        out_tf,
+    )?;
+
+    linker
+        .into_model()
+        .save_to_json_file(out_model)
+        .map_err(|e| anyhow::anyhow!("save trained model: {e}"))?;
+    Ok(())
+}

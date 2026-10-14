@@ -87,6 +87,33 @@ enum Command {
         #[arg(long, default_value = "er-run")]
         run_id: String,
     },
+    /// S4.3.2 — train a Splink model on int_std_records; writes the trained
+    /// settings JSON + the frozen TF snapshot CSV.
+    Train {
+        /// Base settings template (comparison + blocking structure).
+        #[arg(long)]
+        template: PathBuf,
+        /// Deterministic blocking rule for the prior (repeatable, SQL).
+        #[arg(long = "deterministic-rule")]
+        deterministic_rules: Vec<String>,
+        /// EM-session blocking rule (repeatable, SQL).
+        #[arg(long = "em-rule")]
+        em_rules: Vec<String>,
+        #[arg(long, default_value_t = 0.9)]
+        recall: f64,
+        #[arg(long, default_value_t = 1e7)]
+        max_pairs: f64,
+        #[arg(long)]
+        model_version: String,
+        #[arg(long)]
+        tf_snapshot_id: String,
+        /// Where to write the trained settings JSON.
+        #[arg(long)]
+        out_model: PathBuf,
+        /// Where to write the frozen TF snapshot CSV.
+        #[arg(long)]
+        out_tf: PathBuf,
+    },
     /// Apply staged corrections: re-reconcile (assertion-adjusted) + golden over
     /// the existing match_scores, without re-ingesting or re-scoring.
     Correct {
@@ -229,6 +256,40 @@ fn main() -> Result<()> {
                 },
             )?;
             println!("run-all complete ({run_id})");
+        }
+        Command::Train {
+            template,
+            deterministic_rules,
+            em_rules,
+            recall,
+            max_pairs,
+            model_version,
+            tf_snapshot_id,
+            out_model,
+            out_tf,
+        } => {
+            let template_settings_json = std::fs::read_to_string(&template)
+                .with_context(|| format!("reading {}", template.display()))?;
+            er_cli::run_train(
+                &session,
+                &er_cli::TrainInputs {
+                    template_settings_json: &template_settings_json,
+                    deterministic_rules: &deterministic_rules,
+                    em_rules: &em_rules,
+                    recall,
+                    u_max_pairs: max_pairs,
+                    model_version: &model_version,
+                    tf_snapshot_id: &tf_snapshot_id,
+                },
+                &out_model,
+                &out_tf,
+            )?;
+            println!(
+                "trained {} -> {} + {}",
+                model_version,
+                out_model.display(),
+                out_tf.display()
+            );
         }
         Command::Correct { run_id, run_at } => {
             er_cli::run_correct(&session, &config, &run_id, &run_at)?;
