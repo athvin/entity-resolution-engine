@@ -14,6 +14,8 @@ path = "src/main.rs"
 er-config = { path = "../er-config" }
 # The merge-plans read uses the shared master-record election SQL.
 er-golden = { path = "../er-golden" }
+# Unmerge prechecks proposed never-rules with the shared contradiction-1 check.
+er-reconcile = { path = "../er-reconcile" }
 # The read API attaches each org's DuckLake (read-only) and queries lake.main.*.
 dedupe-core = { path = "../dedupe-core" }
 axum = { workspace = true }

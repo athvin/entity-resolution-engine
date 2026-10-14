@@ -331,13 +331,28 @@ async fn golden_records_read_over_ducklake() {
     assert_eq!(resp.status(), StatusCode::OK);
     assert_eq!(json_body(resp).await["review_id"], review_id);
 
-    // assertions/imports are still empty (no steward writes / ingest tracking yet).
-    for uri in ["/v1/orgs/acme/assertions", "/v1/orgs/acme/imports"] {
-        let resp = app.clone().oneshot(op_get(uri)).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::OK, "{uri}");
-        let body = json_body(resp).await;
-        assert_eq!(body["items"].as_array().unwrap().len(), 0, "{uri} empty");
-    }
+    // assertions are still empty (no steward writes in a base run).
+    let resp = app
+        .clone()
+        .oneshot(op_get("/v1/orgs/acme/assertions"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(json_body(resp).await["items"].as_array().unwrap().len(), 0);
+
+    // imports: run_all wrote one ingest_batches receipt per source (crm/billing/
+    // webforms), each all-new for the base delivery.
+    let resp = app
+        .clone()
+        .oneshot(op_get("/v1/orgs/acme/imports"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let imports = json_body(resp).await;
+    let rows = imports["items"].as_array().unwrap();
+    assert_eq!(rows.len(), 3, "one receipt per delivered source");
+    let total_new: i64 = rows.iter().map(|r| r["new_count"].as_i64().unwrap()).sum();
+    assert_eq!(total_new, 23, "base_10 lands 23 new records");
 
     // Runs: run_all wrote a `runs` ledger row (full mode, succeeded).
     let resp = app

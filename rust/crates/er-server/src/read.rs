@@ -266,6 +266,66 @@ pub fn entity_detail(
     })))
 }
 
+/// The member record_keys of one entity at `snapshot`, ascending — empty when
+/// the entity is absent or `entity_membership` has not been materialized. The
+/// unmerge precheck uses this to know which records it may split and which to
+/// keep.
+///
+/// # Errors
+/// Propagates a non-missing-table lake query error.
+pub fn entity_member_keys(
+    session: &Session,
+    snapshot: i64,
+    entity_id: &str,
+) -> Result<Vec<String>, String> {
+    let sql = format!(
+        "SELECT record_key FROM lake.main.entity_membership AT (VERSION => {snapshot}) \
+         WHERE entity_id = {} ORDER BY record_key",
+        lit(entity_id)
+    );
+    match session.query_strings(&sql) {
+        Ok(rows) => Ok(rows.into_iter().map(|mut r| r.remove(0)).collect()),
+        Err(e) => {
+            let s = e.to_string();
+            if is_missing_table(&s) {
+                Ok(Vec::new())
+            } else {
+                Err(s)
+            }
+        }
+    }
+}
+
+/// The active assertions at `snapshot` as `(assertion_id, rec_a_key, rec_b_key,
+/// kind)`, empty when the ledger table is absent. Feeds the unmerge
+/// contradiction precheck (combined with the proposed `never` pairs).
+///
+/// # Errors
+/// Propagates a non-missing-table lake query error.
+pub fn active_assertions(
+    session: &Session,
+    snapshot: i64,
+) -> Result<Vec<(String, String, String, String)>, String> {
+    let sql = format!(
+        "SELECT assertion_id, rec_a_key, rec_b_key, kind \
+         FROM lake.main.assertions AT (VERSION => {snapshot}) WHERE active"
+    );
+    match session.query_strings(&sql) {
+        Ok(rows) => Ok(rows
+            .into_iter()
+            .map(|r| (r[0].clone(), r[1].clone(), r[2].clone(), r[3].clone()))
+            .collect()),
+        Err(e) => {
+            let s = e.to_string();
+            if is_missing_table(&s) {
+                Ok(Vec::new())
+            } else {
+                Err(s)
+            }
+        }
+    }
+}
+
 /// A keyset page of duplicate groups: entities with >=2 members, with their
 /// member list and a golden preview (`readapi.duplicate_groups`). Keyset on
 /// `entity_id`.

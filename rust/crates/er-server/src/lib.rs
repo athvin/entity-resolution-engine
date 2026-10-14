@@ -32,7 +32,7 @@
 pub mod pg;
 pub mod read;
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 
 use er_config::{Config, config_hash, load_config_str};
@@ -2251,6 +2251,7 @@ async fn add_assertion(
         "kind": body.kind,
         "a": body.a,
         "b": body.b,
+        "created_by": principal.actor,
         "note": body.note,
     });
     let action_id = match steward_stage(&client, &principal.actor, &org, &action).await {
@@ -2311,6 +2312,218 @@ async fn retract_assertion(
     match steward_stage(&client, &principal.actor, &org, &action).await {
         Ok(id) => staged_response(StatusCode::OK, &id),
         Err(r) => *r,
+    }
+}
+
+/// The canonical (lexically ordered) form of a record pair, matching the lake's
+/// assertion storage and `er_cli::canon`.
+fn canon_pair(a: &str, b: &str) -> (String, String) {
+    if a <= b {
+        (a.to_string(), b.to_string())
+    } else {
+        (b.to_string(), a.to_string())
+    }
+}
+
+#[derive(Deserialize)]
+struct UnmergeIn {
+    records: Vec<String>,
+    #[serde(default = "default_true")]
+    apply_now: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// Steward+: split members out of a resolved entity
+/// (`POST /v1/orgs/{org}/golden-records/{entity_id}/unmerge`). `records` is the
+/// member record_keys to peel off; the endpoint stages one `never` rule between
+/// each and a representative member it keeps (the lexically smallest member not
+/// being peeled), so the next reconcile severs them. With `apply_now` (the
+/// default) it also enqueues that incremental rebuild.
+///
+/// It reads the entity's membership + active assertions from the org's lake to
+/// pick the representative and to run the S4.4.1 contradiction precheck: if a
+/// proposed `never` falls inside an existing `always`-closure the split is
+/// impossible, so it refuses (409) rather than stage a self-cancelling rule.
+///
+/// Note: the BFF addresses this as `{entity_id}:unmerge` (the Python action
+/// convention); like the other `:action` routes this server exposes the sub-path
+/// form, pending the deploy-time repoint.
+async fn unmerge_entity(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, entity_id)): Path<(String, String)>,
+    Json(body): Json<UnmergeIn>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
+    if body.records.is_empty() || body.records.len() > 100 {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "records[] must carry 1..=100 member record_keys",
+        );
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(
+            StatusCode::NOT_IMPLEMENTED,
+            "steward actions require Postgres",
+        );
+    };
+
+    // Read the entity + active assertions from the lake (read-only) to pick the
+    // kept representative and precheck the proposed never-rules.
+    let session = match org_lake(&state, &org).await {
+        Ok(s) => s,
+        Err(r) => return *r,
+    };
+    let snapshot = match read::latest_snapshot(&session) {
+        Ok(s) => s,
+        Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
+    };
+    let members = match read::entity_member_keys(&session, snapshot, &entity_id) {
+        Ok(m) => m,
+        Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
+    };
+    if members.is_empty() {
+        return detail_err(StatusCode::NOT_FOUND, format!("no entity '{entity_id}'"));
+    }
+    let member_set: BTreeSet<&str> = members.iter().map(String::as_str).collect();
+    // The requested records that are actually members, de-duplicated + ordered.
+    let marked: BTreeSet<String> = body
+        .records
+        .iter()
+        .filter(|r| member_set.contains(r.as_str()))
+        .cloned()
+        .collect();
+    if marked.is_empty() {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "none of records[] are members of this entity",
+        );
+    }
+    if marked.len() >= members.len() {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "cannot unmerge every member; keep at least one record in the entity",
+        );
+    }
+    // Representative = the smallest member being kept (members is ascending).
+    let representative = members
+        .iter()
+        .find(|m| !marked.contains(m.as_str()))
+        .expect("a kept member exists (marked is a strict subset)");
+    // One canonical never-pair per peeled record, against the representative.
+    let proposed: Vec<(String, String)> = marked
+        .iter()
+        .map(|m| canon_pair(m, representative))
+        .collect();
+
+    // Contradiction-1 precheck over the active ledger + the proposed nevers.
+    let active = match read::active_assertions(&session, snapshot) {
+        Ok(a) => a,
+        Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
+    };
+    let mut assertions: Vec<er_reconcile::assertions::Assertion> = active
+        .into_iter()
+        .filter_map(|(id, a, b, kind)| {
+            let kind = match kind.as_str() {
+                "always" => er_reconcile::assertions::AssertionKind::Always,
+                "never" => er_reconcile::assertions::AssertionKind::Never,
+                _ => return None,
+            };
+            Some(er_reconcile::assertions::Assertion {
+                assertion_id: id,
+                rec_a_key: a,
+                rec_b_key: b,
+                kind,
+                active: true,
+            })
+        })
+        .collect();
+    for (i, (a, b)) in proposed.iter().enumerate() {
+        assertions.push(er_reconcile::assertions::Assertion {
+            assertion_id: format!("proposed-{i}"),
+            rec_a_key: a.clone(),
+            rec_b_key: b.clone(),
+            kind: er_reconcile::assertions::AssertionKind::Never,
+            active: true,
+        });
+    }
+    let blocking: Vec<_> = er_reconcile::assertions::check_contradiction_1(&assertions)
+        .into_iter()
+        .filter(|c| c.never_assertion_id.starts_with("proposed-"))
+        .collect();
+    if let Some(c) = blocking.first() {
+        return detail_err(
+            StatusCode::CONFLICT,
+            format!(
+                "unmerge conflicts with an always-rule: '{}' and '{}' are forced together",
+                c.rec_a_key, c.rec_b_key
+            ),
+        );
+    }
+    drop(session);
+
+    // Stage one never-rule per peeled record (attributed to the steward).
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let mut action_ids: Vec<String> = Vec::with_capacity(proposed.len());
+    for (a, b) in &proposed {
+        let action = json!({
+            "type": "add_assertion",
+            "kind": "never",
+            "a": a,
+            "b": b,
+            "created_by": principal.actor,
+            "note": format!("unmerge:{entity_id}"),
+        });
+        match steward_stage(&client, &principal.actor, &org, &action).await {
+            Ok(id) => action_ids.push(id),
+            Err(r) => return *r,
+        }
+    }
+    let pairs = action_ids.len();
+    if !body.apply_now {
+        return (
+            StatusCode::OK,
+            Json(json!({
+                "status": "staged",
+                "pairs": pairs,
+                "action_ids": action_ids,
+                "pending_until_next_reconcile": true,
+            })),
+        )
+            .into_response();
+    }
+    // apply_now: enqueue the incremental rebuild that drains + re-reconciles.
+    let idem = format!("unmerge-apply:{}", ulid::Ulid::new());
+    let params = json!({ "skip_ingest": true });
+    match pg::enqueue(
+        &client,
+        &org,
+        "run_all_incremental",
+        0,
+        Some(&idem),
+        Some(&params),
+    )
+    .await
+    {
+        Ok(job) => (
+            StatusCode::OK,
+            Json(json!({
+                "status": "applied",
+                "pairs": pairs,
+                "action_ids": action_ids,
+                "apply_job": job.job_id,
+            })),
+        )
+            .into_response(),
+        Err(e) => pg_err(e),
     }
 }
 
@@ -2627,6 +2840,11 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/v1/orgs/{org}/golden-records/{entity_id}",
             get(golden_record_detail),
+        )
+        // Python's `{entity_id}:unmerge` action -> an `/unmerge` sub-path (matchit).
+        .route(
+            "/v1/orgs/{org}/golden-records/{entity_id}/unmerge",
+            post(unmerge_entity),
         )
         .route("/v1/orgs/{org}/metrics", get(org_metrics))
         .route("/v1/orgs/{org}/duplicates", get(duplicates_list))
