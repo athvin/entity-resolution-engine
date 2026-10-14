@@ -530,3 +530,106 @@ fn incremental_merge_through_ducklake_matches_golden() {
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+/// `entity_id -> record_key` membership, as a flat vec.
+fn membership_rows(session: &Session) -> Vec<(String, String)> {
+    session
+        .query_strings(&format!(
+            "select entity_id, record_key from {}",
+            er_cli::ENTITY_MEMBERSHIP
+        ))
+        .unwrap()
+        .into_iter()
+        .map(|r| (r[0].clone(), r[1].clone()))
+        .collect()
+}
+
+#[test]
+fn assertions_enforce_clustering_through_ducklake() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let (session, config, tmp) = standardized_lake("assert");
+    match_model(&session);
+    er_cli::run_reconcile(
+        &session,
+        &config,
+        "01RUNBASE00000000000000000",
+        "2026-01-03 00:00:00",
+    )
+    .unwrap();
+
+    // Baseline: base_10 resolves to 10 entities.
+    let base = membership_rows(&session);
+    let base_entities: BTreeSet<String> = base.iter().map(|(e, _)| e.clone()).collect();
+    assert_eq!(base_entities.len(), 10, "base_10 baseline is 10 entities");
+
+    // --- `always`: merge two records from two different entities. ---
+    let mut by_entity: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (e, r) in &base {
+        by_entity.entry(e.clone()).or_default().push(r.clone());
+    }
+    let ents: Vec<(String, Vec<String>)> = by_entity.into_iter().collect();
+    let rec_a = ents[0].1[0].clone();
+    let rec_b = ents[1].1[0].clone();
+    assert_ne!(
+        ents[0].0, ents[1].0,
+        "the two records start in different entities"
+    );
+
+    let action =
+        serde_json::json!({ "type": "add_assertion", "kind": "always", "a": rec_a, "b": rec_b });
+    er_cli::apply_staged_action(&session, "act-always", &action, "2026-01-04 00:00:00").unwrap();
+    er_cli::run_reconcile(
+        &session,
+        &config,
+        "01RUNALW000000000000000000",
+        "2026-01-05 00:00:00",
+    )
+    .unwrap();
+
+    let after = membership_rows(&session);
+    let entity_of =
+        |rec: &str| -> String { after.iter().find(|(_, r)| r == rec).unwrap().0.clone() };
+    assert_eq!(
+        entity_of(&rec_a),
+        entity_of(&rec_b),
+        "the always assertion co-clusters the two records"
+    );
+    let after_entities: BTreeSet<String> = after.iter().map(|(e, _)| e.clone()).collect();
+    assert_eq!(after_entities.len(), 9, "two entities merged into one");
+
+    // --- `never`: split two records that share an entity. ---
+    let mut by_entity2: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (e, r) in &after {
+        by_entity2.entry(e.clone()).or_default().push(r.clone());
+    }
+    let (_, members) = by_entity2
+        .iter()
+        .find(|(_, members)| members.len() >= 2)
+        .expect("a multi-member entity to split");
+    let (split_a, split_b) = (members[0].clone(), members[1].clone());
+
+    let never =
+        serde_json::json!({ "type": "add_assertion", "kind": "never", "a": split_a, "b": split_b });
+    er_cli::apply_staged_action(&session, "act-never", &never, "2026-01-06 00:00:00").unwrap();
+    er_cli::run_reconcile(
+        &session,
+        &config,
+        "01RUNNVR000000000000000000",
+        "2026-01-07 00:00:00",
+    )
+    .unwrap();
+
+    let split = membership_rows(&session);
+    let split_entity =
+        |rec: &str| -> String { split.iter().find(|(_, r)| r == rec).unwrap().0.clone() };
+    assert_ne!(
+        split_entity(&split_a),
+        split_entity(&split_b),
+        "the never assertion separates the two records"
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}

@@ -27,9 +27,12 @@ use std::collections::BTreeMap;
 
 use er_ids::{CountingIdFactory, IdFactory};
 use er_match::{build_frozen_tf_tables, load_model};
+use er_reconcile::assertions::{Assertion, AssertionKind};
 use er_reconcile::cluster::label_propagate;
+use er_reconcile::never_cut::{PathEdge, never_cut_fixpoint};
 use er_reconcile::reconcile::reconcile_plan;
 use er_standardize::build_int_std_records;
+use std::collections::BTreeSet;
 
 /// The lake relations this crate reads/writes, fully qualified.
 pub const RAW_RECORDS: &str = "lake.main.raw_records";
@@ -467,6 +470,56 @@ pub fn write_reviews(session: &Session, config: &Config, run_id: &str) -> Result
     Ok(())
 }
 
+/// The canonical (smaller, larger) ordering of a record pair.
+fn canon(a: &str, b: &str) -> (String, String) {
+    if a <= b {
+        (a.to_string(), b.to_string())
+    } else {
+        (b.to_string(), a.to_string())
+    }
+}
+
+/// Load the active assertions from `lake.main.assertions` (empty if the table
+/// isn't there yet — a lake whose steward drain hasn't run).
+///
+/// # Errors
+/// Propagates a non-missing-table query error.
+fn load_active_assertions(session: &Session) -> Result<Vec<Assertion>> {
+    let rows = match session.query_strings(&format!(
+        "select assertion_id, rec_a_key, rec_b_key, kind from {ASSERTIONS} where active"
+    )) {
+        Ok(rows) => rows,
+        Err(e) => {
+            let s = e.to_string();
+            if s.contains("does not exist")
+                || s.contains("Catalog Error")
+                || s.contains("Table with name")
+            {
+                return Ok(Vec::new());
+            }
+            return Err(e.into());
+        }
+    };
+    Ok(rows
+        .into_iter()
+        .filter_map(|r| {
+            let kind = match r[3].as_str() {
+                "always" => AssertionKind::Always,
+                "never" => AssertionKind::Never,
+                _ => return None,
+            };
+            let (a, b) = canon(&r[1], &r[2]);
+            Some(Assertion {
+                assertion_id: r[0].clone(),
+                rec_a_key: a,
+                rec_b_key: b,
+                kind,
+                active: true,
+            })
+        })
+        .collect())
+}
+
 /// S4.5 reconcile: cluster the active auto-merge pairs in `lake.main.match_scores`
 /// into connected components, reconcile them against the prior
 /// `lake.main.entity_membership` (INV-PERM), and write the resulting
@@ -484,13 +537,21 @@ pub fn run_reconcile(session: &Session, config: &Config, run_id: &str, run_at: &
     create_ddl_table(session, "entity_events")?;
 
     let auto_merge = config.thresholds.auto_merge;
-    let edges: Vec<(String, String)> = session
+    // Auto-merge edges carry their probability: never-cut severs the
+    // lowest-probability edge on a path, so the weight is load-bearing.
+    let mut edges: Vec<PathEdge> = session
         .query_strings(&format!(
-            "select rec_a_key, rec_b_key from {MATCH_SCORES} \
+            "select rec_a_key, rec_b_key, match_probability from {MATCH_SCORES} \
              where is_active and match_probability >= {auto_merge} order by rec_a_key, rec_b_key"
         ))?
         .into_iter()
-        .map(|r| (r[0].clone(), r[1].clone()))
+        .map(|r| {
+            (
+                r[0].clone(),
+                r[1].clone(),
+                r[2].parse::<f64>().unwrap_or(1.0),
+            )
+        })
         .collect();
     let nodes: Vec<String> = session
         .query_strings(&format!(
@@ -499,6 +560,47 @@ pub fn run_reconcile(session: &Session, config: &Config, run_id: &str, run_at: &
         .into_iter()
         .map(|r| r[0].clone())
         .collect();
+
+    // S4.4 assertion adjustment (identical to er-match's proven in-memory path).
+    // Empty when the lake has no assertions, so the base run is unchanged.
+    let assertions = load_active_assertions(session)?;
+    for a in assertions
+        .iter()
+        .filter(|a| a.kind == AssertionKind::Always)
+    {
+        // `always`: a protected edge (prob 1.0 >= cut_protect) never-cut can't sever.
+        edges.push((a.rec_a_key.clone(), a.rec_b_key.clone(), 1.0));
+    }
+    let nevers: Vec<Assertion> = assertions
+        .iter()
+        .filter(|a| a.kind == AssertionKind::Never)
+        .cloned()
+        .collect();
+    // `never`: drop the direct edge (a bridge splits outright, no partition cut).
+    let never_pairs: BTreeSet<(String, String)> = nevers
+        .iter()
+        .map(|a| (a.rec_a_key.clone(), a.rec_b_key.clone()))
+        .collect();
+    edges.retain(|(a, b, _)| !never_pairs.contains(&(a.clone(), b.clone())));
+    // never-cut: sever the lowest-probability edge on any path still
+    // co-clustering a never pair through OTHER records (S4.4.2).
+    if !nevers.is_empty() {
+        let cuts = never_cut_fixpoint(
+            &edges,
+            &nevers,
+            &nodes,
+            config.clustering.cut_protect_probability,
+            usize::try_from(config.clustering.max_iterations).unwrap_or(50),
+        )
+        .map_err(|e| anyhow::anyhow!("never-cut: {e:?}"))?
+        .cuts;
+        let cutset: BTreeSet<(String, String)> = cuts
+            .iter()
+            .map(|c| (c.rec_a_key.clone(), c.rec_b_key.clone()))
+            .collect();
+        edges.retain(|(a, b, _)| !cutset.contains(&(a.clone(), b.clone())));
+    }
+    let edges: Vec<(String, String)> = edges.into_iter().map(|(a, b, _)| (a, b)).collect();
 
     // Prior active membership (empty on the first run).
     let mut p_old: BTreeMap<String, Vec<String>> = BTreeMap::new();
