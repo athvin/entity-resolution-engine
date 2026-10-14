@@ -60,7 +60,12 @@ regex = "1"
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 sha2 = "0.10"
+# Webhook payload signatures (HMAC-SHA256 over the delivered body).
+hmac = "0.12"
 hex = "0.4"
+# Outbound HTTP for webhook delivery (rustls, no OpenSSL). json feature off —
+# bodies are pre-serialized so the raw-byte signature matches what's sent.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 # P3 control plane (er-server): the axum HTTP surface replacing FastAPI, and the
 # Postgres-backed job queue (SKIP-LOCKED) + org/config tables.
 axum = "0.8"

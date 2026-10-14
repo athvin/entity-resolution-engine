@@ -1007,6 +1007,33 @@ pub async fn list_webhooks(client: &Client, org: &str) -> Result<Vec<WebhookRow>
         .collect())
 }
 
+/// The delivery targets for one event: `(webhook_id, url, secret)` of every
+/// active webhook subscribed to `event_type` (its `events` contains the type,
+/// or is empty = subscribe-to-all). Unlike [`list_webhooks`], this DOES return
+/// the secret — it's the HMAC key the delivery signs with.
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn webhooks_for_delivery(
+    client: &Client,
+    org: &str,
+    event_type: &str,
+) -> Result<Vec<(String, String, String)>, PgError> {
+    let rows = client
+        .query(
+            "SELECT webhook_id, url, secret FROM webhooks \
+             WHERE org = $1 AND active \
+               AND (events @> to_jsonb($2::text) OR jsonb_array_length(events) = 0) \
+             ORDER BY created_at",
+            &[&org, &event_type],
+        )
+        .await?;
+    Ok(rows
+        .iter()
+        .map(|r| (r.get("webhook_id"), r.get("url"), r.get("secret")))
+        .collect())
+}
+
 /// Delete a webhook (`webhooks.py` `delete`). `true` iff a row was removed.
 ///
 /// # Errors

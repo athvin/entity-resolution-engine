@@ -30,6 +30,9 @@ rand = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+# Webhook delivery: HMAC-SHA256 payload signatures + the outbound HTTP POST.
+hmac = { workspace = true }
+reqwest = { workspace = true }
 hex = { workspace = true }
 
 [dev-dependencies]

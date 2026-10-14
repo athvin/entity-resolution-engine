@@ -31,6 +31,7 @@
 
 pub mod pg;
 pub mod read;
+pub mod webhook;
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
@@ -1111,6 +1112,7 @@ pub fn dispatch_next(
 pub async fn dispatch_pg<F>(
     client: &tokio_postgres::Client,
     runner: F,
+    webhook_http: Option<&reqwest::Client>,
 ) -> Result<Option<Job>, tokio_postgres::Error>
 where
     F: FnOnce(&Job) -> Result<(), String>,
@@ -1125,10 +1127,16 @@ where
         "failed"
     };
     pg::mark(client, &job.job_id, final_state).await?;
-    Ok(Some(Job {
+    let completed = Job {
         state: final_state.to_string(),
         ..job
-    }))
+    };
+    // Best-effort webhook emit — a subscriber lookup / delivery failure never
+    // fails the job (the outcome is already persisted).
+    if let Some(http) = webhook_http {
+        let _ = webhook::emit_job_event(client, http, &completed).await;
+    }
+    Ok(Some(completed))
 }
 
 /// List an org's jobs, newest first. Requires viewer+ in the org.
