@@ -87,6 +87,14 @@ enum Command {
         #[arg(long, default_value = "er-run")]
         run_id: String,
     },
+    /// Apply staged corrections: re-reconcile (assertion-adjusted) + golden over
+    /// the existing match_scores, without re-ingesting or re-scoring.
+    Correct {
+        #[arg(long, default_value = "er-run")]
+        run_id: String,
+        #[arg(long, default_value = "2026-01-01 00:00:00")]
+        run_at: String,
+    },
     /// Read-only health report over the lake + config (JSON on stdout).
     Doctor,
     /// Lake maintenance: flush inlined rows, merge small files, expire old
@@ -221,6 +229,10 @@ fn main() -> Result<()> {
                 },
             )?;
             println!("run-all complete ({run_id})");
+        }
+        Command::Correct { run_id, run_at } => {
+            er_cli::run_correct(&session, &config, &run_id, &run_at)?;
+            println!("applied corrections ({run_id})");
         }
         Command::Doctor => {
             let report = er_cli::doctor(&session, &config)?;

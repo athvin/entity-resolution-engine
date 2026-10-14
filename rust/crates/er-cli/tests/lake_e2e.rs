@@ -566,6 +566,116 @@ fn membership_rows(session: &Session) -> Vec<(String, String)> {
         .collect()
 }
 
+/// A bare lake with base_10 fully resolved via `run_all` (writes the `runs`
+/// ledger row that `run_correct` reads the model identity from).
+fn run_all_base(tag: &str) -> (Session, Config, PathBuf) {
+    let tmp = std::env::temp_dir().join(format!("er_cli_{tag}_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(tmp.join("data")).unwrap();
+    let catalog = tmp.join("catalog.ducklake").to_string_lossy().into_owned();
+    let data_path = tmp.join("data").to_string_lossy().into_owned();
+    let session = er_cli::open_lake(&catalog, &data_path).unwrap();
+    let config = load_config_str(include_str!("fixtures/test.yaml")).unwrap();
+
+    let lexicon: Vec<(String, String)> = include_str!("fixtures/nickname_variants.csv")
+        .lines()
+        .skip(1)
+        .filter(|l| !l.is_empty())
+        .map(|l| {
+            let (a, b) = l.split_once(',').unwrap();
+            (a.to_string(), b.to_string())
+        })
+        .collect();
+    let deliveries: Vec<(String, String)> = ["crm", "billing", "webforms"]
+        .iter()
+        .map(|s| {
+            (
+                (*s).to_string(),
+                std::fs::read_to_string(repo_fixture(&format!("base_10/base/{s}.csv"))).unwrap(),
+            )
+        })
+        .collect();
+    let model_json = std::fs::read_to_string(repo_fixture("model_test_v1.json")).unwrap();
+    let tf_csv = repo_fixture("model_test_v1.tf.csv");
+    er_cli::run_all(
+        &session,
+        &config,
+        &er_cli::PipelineInputs {
+            lexicon: &lexicon,
+            deliveries: &deliveries,
+            model: &er_cli::MatchModel {
+                settings_json: &model_json,
+                tf_csv_path: std::path::Path::new(&tf_csv),
+                model_version: "v0001",
+                tf_snapshot_id: "01JWMDTFSNAP00000000000001",
+            },
+            run_id: "01RUNALLFULL0000000000000000",
+            ingested_at: "2026-01-01 00:00:00",
+            scored_at: "2026-01-02 00:00:00",
+            run_at: "2026-01-03 00:00:00",
+        },
+    )
+    .unwrap();
+    (session, config, tmp)
+}
+
+#[test]
+fn correct_applies_a_staged_assertion_without_rescoring() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let (session, config, tmp) = run_all_base("correct");
+
+    // Baseline: 10 entities, and the full run's ledger row.
+    let base = membership_rows(&session);
+    let base_entities: BTreeSet<String> = base.iter().map(|(e, _)| e.clone()).collect();
+    assert_eq!(base_entities.len(), 10);
+
+    // Pick two records sitting in different entities, stage an `always` between
+    // them (as the steward drain would), then run `correct` — NO re-ingest/score.
+    let mut by_entity: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (e, r) in &base {
+        by_entity.entry(e.clone()).or_default().push(r.clone());
+    }
+    let ents: Vec<(String, Vec<String>)> = by_entity.into_iter().collect();
+    let (rec_a, rec_b) = (ents[0].1[0].clone(), ents[1].1[0].clone());
+    let action =
+        serde_json::json!({ "type": "add_assertion", "kind": "always", "a": rec_a, "b": rec_b });
+    er_cli::apply_staged_action(&session, "act-correct", &action, "2026-02-01 00:00:00").unwrap();
+
+    er_cli::run_correct(
+        &session,
+        &config,
+        "01CORRECT0000000000000000AA",
+        "2026-02-02 00:00:00",
+    )
+    .unwrap();
+
+    // The two entities merged (10 -> 9) via reconcile alone.
+    let after = membership_rows(&session);
+    let entity_of = |rec: &str| after.iter().find(|(_, r)| r == rec).unwrap().0.clone();
+    assert_eq!(
+        entity_of(&rec_a),
+        entity_of(&rec_b),
+        "always merged the pair"
+    );
+    let after_entities: BTreeSet<String> = after.iter().map(|(e, _)| e.clone()).collect();
+    assert_eq!(after_entities.len(), 9);
+
+    // The ledger carries both the full run and the correct pass.
+    let modes: Vec<String> = session
+        .query_strings("select mode from lake.main.runs")
+        .unwrap()
+        .into_iter()
+        .map(|r| r[0].clone())
+        .collect();
+    assert!(modes.iter().any(|m| m == "full"));
+    assert!(modes.iter().any(|m| m == "correct"), "correct run recorded");
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
 #[test]
 fn assertions_enforce_clustering_through_ducklake() {
     if !enabled() {

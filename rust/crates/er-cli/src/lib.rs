@@ -298,18 +298,41 @@ fn create_ddl_table(session: &Session, name: &str) -> Result<()> {
 /// # Errors
 /// Propagates lake DDL / insert errors.
 pub fn write_run_start(session: &Session, config: &Config, inputs: &PipelineInputs) -> Result<()> {
+    write_run_row(
+        session,
+        config,
+        inputs.run_id,
+        inputs.run_at,
+        "full",
+        inputs.model.model_version,
+        inputs.model.tf_snapshot_id,
+    )
+}
+
+/// Insert one `running` row into the `runs` ledger with the given `mode` and the
+/// model identity the run scored against. `code_version` is this crate's version.
+fn write_run_row(
+    session: &Session,
+    config: &Config,
+    run_id: &str,
+    started_at: &str,
+    mode: &str,
+    model_version: &str,
+    tf_snapshot_id: &str,
+) -> Result<()> {
     create_ddl_table(session, "runs")?;
     session.execute_batch(&format!(
         "INSERT INTO {RUNS} (run_id, tenant, mode, status, started_at, config_hash, \
            model_version, tf_snapshot_id, std_version, survivorship_version, code_version) \
-         VALUES ('{run_id}', '{tenant}', 'full', 'running', '{started_at}', '{hash}', \
+         VALUES ('{run_id}', '{tenant}', '{mode}', 'running', '{started_at}', '{hash}', \
            '{model_version}', '{tf_snapshot_id}', '{std_v}', '{surv_v}', '{code_v}')",
-        run_id = esc(inputs.run_id),
+        run_id = esc(run_id),
         tenant = esc(&config.tenant),
-        started_at = esc(inputs.run_at),
+        mode = esc(mode),
+        started_at = esc(started_at),
         hash = esc(&er_config::config_hash(config)),
-        model_version = esc(inputs.model.model_version),
-        tf_snapshot_id = esc(inputs.model.tf_snapshot_id),
+        model_version = esc(model_version),
+        tf_snapshot_id = esc(tf_snapshot_id),
         std_v = esc(&config.versions.std_version),
         surv_v = esc(&config.versions.survivorship_version),
         code_v = esc(env!("CARGO_PKG_VERSION")),
@@ -977,5 +1000,49 @@ pub fn run_all(session: &Session, config: &Config, inputs: &PipelineInputs) -> R
     run_golden(session, config)?;
     write_reviews(session, config, inputs.run_id)?;
     write_run_end(session, inputs.run_id, inputs.run_at)?;
+    Ok(())
+}
+
+/// The "apply staged corrections" pass (`er correct`; the data-plane op behind a
+/// `run_all_incremental { skip_ingest: true }` job): re-run reconcile
+/// (assertion-adjusted) → golden → reviews over the EXISTING `match_scores`, so
+/// drained assertions / unmerges take effect WITHOUT re-ingesting or re-scoring.
+/// The `runs` row is mode `correct`, reusing the model identity of the latest
+/// run (the corpus was scored against it).
+///
+/// # Errors
+/// Returns an error if there is no prior run to correct (nothing has been scored
+/// yet); otherwise propagates the reconcile / golden / lake errors.
+pub fn run_correct(session: &Session, config: &Config, run_id: &str, run_at: &str) -> Result<()> {
+    let latest = session
+        .query_strings(&format!(
+            "select model_version, tf_snapshot_id from {RUNS} \
+             order by started_at desc, run_id desc limit 1"
+        ))
+        .map_err(|e| {
+            if is_missing_table(&e.to_string()) {
+                anyhow::anyhow!("no prior run to correct; run a full run first")
+            } else {
+                e.into()
+            }
+        })?;
+    let (model_version, tf_snapshot_id) = latest
+        .first()
+        .map(|r| (r[0].clone(), r[1].clone()))
+        .ok_or_else(|| anyhow::anyhow!("no prior run to correct; run a full run first"))?;
+
+    write_run_row(
+        session,
+        config,
+        run_id,
+        run_at,
+        "correct",
+        &model_version,
+        &tf_snapshot_id,
+    )?;
+    run_reconcile(session, config, run_id, run_at)?;
+    run_golden(session, config)?;
+    write_reviews(session, config, run_id)?;
+    write_run_end(session, run_id, run_at)?;
     Ok(())
 }
