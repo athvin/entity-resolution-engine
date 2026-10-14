@@ -1,0 +1,442 @@
+{
+  "_comment": "base_10 raw_records content_hash from er.ingest.hashing. Regen: uv run python rust/crates/er-ingest/tests/gen_raw_records_golden.py",
+  "cases": [
+    {
+      "source_system": "crm",
+      "source_record_id": "C001",
+      "payload": {
+        "crm_id": "C001",
+        "first_name": "Robert",
+        "last_name": "Chen",
+        "email_address": "robert.chen@example.com",
+        "phone": "(628) 555-0101",
+        "street_address": "1420 Judah Street Apt 5",
+        "city": "San Francisco",
+        "state": "CA",
+        "zip": "94107",
+        "dob": "1985-03-14",
+        "last_modified": "2024-01-05 08:12:00"
+      },
+      "content_hash": "fc86fbfa0d9f66dee53c6a4c457a126cb2e6101b79bf399aa66a8315d9bcad9f",
+      "metadata": []
+    },
+    {
+      "source_system": "crm",
+      "source_record_id": "C002",
+      "payload": {
+        "crm_id": "C002",
+        "first_name": "Priya",
+        "last_name": "Raghavan",
+        "email_address": "priya.raghavan@example.com",
+        "phone": "(415) 555-0132",
+        "street_address": "88 Harbor Street #4B",
+        "city": "San Francisco",
+        "state": "CA",
+        "zip": "94110",
+        "dob": "1990-07-22",
+        "last_modified": "2024-01-09 11:00:00"
+      },
+      "content_hash": "45a74a6abe2d71748708312dc597e2ec7095b00d17398688f4c723c703e97ef8",
+      "metadata": []
+    },
+    {
+      "source_system": "crm",
+      "source_record_id": "C003",
+      "payload": {
+        "crm_id": "C003",
+        "first_name": "Krystal",
+        "last_name": "Nowakowsky",
+        "email_address": "krystal.n@example.com",
+        "phone": "(415) 555-0177",
+        "street_address": "233 Cortland Avenue Unit 2",
+        "city": "San Francisco",
+        "state": "CA",
+        "zip": "94112",
+        "dob": "1978-12-03",
+        "last_modified": "2024-02-02 12:15:00"
+      },
+      "content_hash": "4bcfa773d76ace00007e73107eb677bf087e0b56920087fdf1079fdfcbea49d3",
+      "metadata": []
+    },
+    {
+      "source_system": "crm",
+      "source_record_id": "C004",
+      "payload": {
+        "crm_id": "C004",
+        "first_name": "Marcus",
+        "last_name": "Whitfield",
+        "email_address": "marcus.whitfield@example.com",
+        "phone": "(415) 555-0210",
+        "street_address": "742 Evergreen Terrace Apt 12",
+        "city": "San Francisco",
+        "state": "CA",
+        "zip": "94115",
+        "dob": "1972-05-09",
+        "last_modified": "2024-01-15 07:45:00"
+      },
+      "content_hash": "88a929ee8f3bb76a2ee809df4eaf4b814121e59425090d526031819c69690dec",
+      "metadata": []
+    },
+    {
+      "source_system": "crm",
+      "source_record_id": "C005",
+      "payload": {
+        "crm_id": "C005",
+        "first_name": "Yolanda",
+        "last_name": "Prescott",
+        "email_address": "yolanda.prescott@example.com",
+        "phone": "(415) 555-0288",
+        "street_address": "19 Pierce Street Apt 6",
+        "city": "San Francisco",
+        "state": "CA",
+        "zip": "94118",
+        "dob": "1968-11-30",
+        "last_modified": "2024-02-08 15:35:00"
+      },
+      "content_hash": "9d893e4ff1aca641fc64dd3d768c27ac2b7c3d3a77afa7adc7d04152db7665f5",
+      "metadata": []
+    },
+    {
+      "source_system": "crm",
+      "source_record_id": "C006",
+      "payload": {
+        "crm_id": "C006",
+        "first_name": "Catherine",
+        "last_name": "Halvorsen",
+        "email_address": "catherine.halvorsen@example.com",
+        "phone": "(415) 555-0341",
+        "street_address": "512 Balboa Street Apt 9",
+        "city": "San Francisco",
+        "state": "CA",
+        "zip": "94121",
+        "dob": "1983-09-17",
+        "last_modified": "2024-01-11 06:50:00"
+      },
+      "content_hash": "d2e8443e1fb5d585dbad6a84ea3dfb223c6bfaef35411f0c6a8085545666829e",
+      "metadata": []
+    },
+    {
+      "source_system": "crm",
+      "source_record_id": "C007",
+      "payload": {
+        "crm_id": "C007",
+        "first_name": "Elena",
+        "last_name": "Vasquez",
+        "email_address": "elena.vasquez@example.com",
+        "phone": "(415) 555-0519",
+        "street_address": "445 Noe Street Apt 11",
+        "city": "San Francisco",
+        "state": "CA",
+        "zip": "94127",
+        "dob": "1988-06-04",
+        "last_modified": "2024-01-19 14:30:00"
+      },
+      "content_hash": "da7f2d463d8ad2ece26161cb84d4e18a6b93f6373c6f60d545369736e5d34de4",
+      "metadata": []
+    },
+    {
+      "source_system": "crm",
+      "source_record_id": "C008",
+      "payload": {
+        "crm_id": "C008",
+        "first_name": "Thomas",
+        "last_name": "Okonkwo",
+        "email_address": "",
+        "phone": "(415) 555-0623",
+        "street_address": "920 Taraval Street Apt 8",
+        "city": "San Francisco",
+        "state": "CA",
+        "zip": "94129",
+        "dob": "1965-10-19",
+        "last_modified": "2024-03-08 10:45:00"
+      },
+      "content_hash": "ed8e0633c8d6c1993027d0827d20294e3aa714a14b5fa72232646cb29276632c",
+      "metadata": []
+    },
+    {
+      "source_system": "crm",
+      "source_record_id": "C009",
+      "payload": {
+        "crm_id": "C009",
+        "first_name": "Bobby",
+        "last_name": "Chen",
+        "email_address": "bobby.chen@example.com",
+        "phone": "(628) 555-0101",
+        "street_address": "1420 Judah Street Apt 5",
+        "city": "San Francisco",
+        "state": "CA",
+        "zip": "94107",
+        "dob": "1985-03-14",
+        "last_modified": "2024-04-19 09:05:00"
+      },
+      "content_hash": "a2066f97c6eb7991a766c3815efce37e66520881dec3d5ecb06b36bb01c98d32",
+      "metadata": []
+    },
+    {
+      "source_system": "billing",
+      "source_record_id": "B001",
+      "payload": {
+        "account_no": "B001",
+        "fname": "Robert",
+        "lname": "Chen",
+        "billing_email": "r.chen@example.com",
+        "contact_phone": "628-555-0101",
+        "addr1": "1420 Judah Street Apt 5",
+        "addr_city": "San Francisco",
+        "addr_state": "CA",
+        "postal_code": "94107",
+        "birth_date": "03/14/1985",
+        "updated_ts": "2024-02-11 10:30:00"
+      },
+      "content_hash": "e098436163d708b76ea44c4e4107bf893b52b6109e14c971c5adf7a1b9bda1de",
+      "metadata": []
+    },
+    {
+      "source_system": "billing",
+      "source_record_id": "B002",
+      "payload": {
+        "account_no": "B002",
+        "fname": "Priya",
+        "lname": "Raghavan",
+        "billing_email": "",
+        "contact_phone": "415-555-0132",
+        "addr1": "88 Harbor Street #4B",
+        "addr_city": "San Francisco",
+        "addr_state": "CA",
+        "postal_code": "94110",
+        "birth_date": "07/22/1990",
+        "updated_ts": "2024-02-18 16:20:00"
+      },
+      "content_hash": "a3050f614e9405ac3ca708d3f1f237849cc8569167dce00b66c917ee98b21cc9",
+      "metadata": []
+    },
+    {
+      "source_system": "billing",
+      "source_record_id": "B003",
+      "payload": {
+        "account_no": "B003",
+        "fname": "Krystal",
+        "lname": "Nowakowski",
+        "billing_email": "krystal.n@example.com",
+        "contact_phone": "415-555-0177",
+        "addr1": "233 Cortland Avenue Unit 2",
+        "addr_city": "San Francisco",
+        "addr_state": "CA",
+        "postal_code": "94112",
+        "birth_date": "12/03/1978",
+        "updated_ts": "2024-01-22 09:30:00"
+      },
+      "content_hash": "25ab9a3545a6561e44ee47bc869dc58b8e0c40a3042c1d15619dc8132e998c2a",
+      "metadata": []
+    },
+    {
+      "source_system": "billing",
+      "source_record_id": "B004",
+      "payload": {
+        "account_no": "B004",
+        "fname": "Marcus",
+        "lname": "Whitfield",
+        "billing_email": "",
+        "contact_phone": "415-555-0210",
+        "addr1": "742 Evergreen Terrace Apt 12",
+        "addr_city": "San Francisco",
+        "addr_state": "CA",
+        "postal_code": "94115",
+        "birth_date": "05/09/1972",
+        "updated_ts": "2024-02-25 13:10:00"
+      },
+      "content_hash": "62ffb63982eac18f2afa865a188f0b65d2241c46fcd99f556f51b8a9f87023a2",
+      "metadata": []
+    },
+    {
+      "source_system": "billing",
+      "source_record_id": "B005",
+      "payload": {
+        "account_no": "B005",
+        "fname": "Catherine",
+        "lname": "Halvorsen",
+        "billing_email": "catherine.halvorsen@example.com",
+        "contact_phone": "415-555-0341",
+        "addr1": "77 Cabrillo Way Unit 3",
+        "addr_city": "San Francisco",
+        "addr_state": "CA",
+        "postal_code": "94122",
+        "birth_date": "09/17/1983",
+        "updated_ts": "2024-02-14 11:25:00"
+      },
+      "content_hash": "17e3ee94c2460f580212bf37ab4a730e63da14aeb82f27371d66051a364ec235",
+      "metadata": []
+    },
+    {
+      "source_system": "billing",
+      "source_record_id": "B006",
+      "payload": {
+        "account_no": "B006",
+        "fname": "Cathy",
+        "lname": "Halverson",
+        "billing_email": "cathy.halverson@example.com",
+        "contact_phone": "628-555-0402",
+        "addr1": "1201 Fulton Street Apt 2",
+        "addr_city": "San Francisco",
+        "addr_state": "CA",
+        "postal_code": "94123",
+        "birth_date": "04/26/1979",
+        "updated_ts": "2024-02-21 09:55:00"
+      },
+      "content_hash": "2d6784a60e54ac24fe0b34f1ba082cb08770f9820806a3e8e5cbdbb920955625",
+      "metadata": []
+    },
+    {
+      "source_system": "billing",
+      "source_record_id": "B007",
+      "payload": {
+        "account_no": "B007",
+        "fname": "Elena",
+        "lname": "Vasquez",
+        "billing_email": "test@test.com",
+        "contact_phone": "415-555-0519",
+        "addr1": "445 Noe Street Apt 11",
+        "addr_city": "San Francisco",
+        "addr_state": "CA",
+        "postal_code": "94127",
+        "birth_date": "06/04/1988",
+        "updated_ts": "2024-02-27 07:20:00"
+      },
+      "content_hash": "b93d5ee383fe012ec9d7740b9fbd0005f22be67d4e581b5e5527d722b8cf34af",
+      "metadata": []
+    },
+    {
+      "source_system": "webforms",
+      "source_record_id": "W001",
+      "payload": {
+        "submission_id": "W001",
+        "name_first": "Bob",
+        "name_last": "Chen",
+        "email": "test@test.com",
+        "phone_number": "628-555-0101",
+        "address": "1420 Judah Street Apt 5",
+        "city": "San Francisco",
+        "region": "CA",
+        "postcode": "94107",
+        "date_of_birth": "1985-03-14",
+        "submitted_at": "2024-03-02 14:45:00"
+      },
+      "content_hash": "763cbd54dd74eea12c38c02f84d0f8feba8c5b090a1e5f80c003dc2e84ea4f6b",
+      "metadata": []
+    },
+    {
+      "source_system": "webforms",
+      "source_record_id": "W003",
+      "payload": {
+        "submission_id": "W003",
+        "name_first": "Priya",
+        "name_last": "Raghavan",
+        "email": "priya.r@example.com",
+        "phone_number": "+14155550132",
+        "address": "88 Harbor Street #4B",
+        "city": "San Francisco",
+        "region": "CA",
+        "postcode": "94110",
+        "date_of_birth": "1990-07-22",
+        "submitted_at": "2024-03-27 08:40:00"
+      },
+      "content_hash": "44f4b402c35f29deaa14f0562b9f6433f7f42038e053acf211ec638dd5186d79",
+      "metadata": []
+    },
+    {
+      "source_system": "webforms",
+      "source_record_id": "W004",
+      "payload": {
+        "submission_id": "W004",
+        "name_first": "Krystal",
+        "name_last": "Nowakowski",
+        "email": "",
+        "phone_number": "415-555-0177",
+        "address": "233 Cortland Avenue Unit 2",
+        "city": "San Francisco",
+        "region": "CA",
+        "postcode": "94112",
+        "date_of_birth": "1978-12-03",
+        "submitted_at": "2024-03-14 17:55:00"
+      },
+      "content_hash": "6289e13012c4d57eda3dd67488228bf4d3c26981482fd8b669e59a3db1476140",
+      "metadata": []
+    },
+    {
+      "source_system": "webforms",
+      "source_record_id": "W005",
+      "payload": {
+        "submission_id": "W005",
+        "name_first": "Yolanda",
+        "name_last": "Prescott",
+        "email": "yolanda.prescott@example.com",
+        "phone_number": "(415) 555-0288",
+        "address": "742 Evergreen Terrace Apt 12",
+        "city": "San Francisco",
+        "region": "CA",
+        "postcode": "94115",
+        "date_of_birth": "1968-11-30",
+        "submitted_at": "2024-01-28 10:05:00"
+      },
+      "content_hash": "6fb228fb69796c3ac4ce1a4ddca1b5546df9984a1e34e0827c7c02872c8f6634",
+      "metadata": []
+    },
+    {
+      "source_system": "webforms",
+      "source_record_id": "W006",
+      "payload": {
+        "submission_id": "W006",
+        "name_first": "Cathy",
+        "name_last": "Halverson",
+        "email": "cathy.halverson@example.com",
+        "phone_number": "(628) 555-0402",
+        "address": "1201 Fulton Street Apt 2",
+        "city": "San Francisco",
+        "region": "CA",
+        "postcode": "94121",
+        "date_of_birth": "",
+        "submitted_at": "2024-01-30 12:00:00"
+      },
+      "content_hash": "fdbaca2b4f92819435737b847a9ebf0874df6e92ced77ce9ac5b2b9eeb25c8a2",
+      "metadata": []
+    },
+    {
+      "source_system": "webforms",
+      "source_record_id": "W007",
+      "payload": {
+        "submission_id": "W007",
+        "name_first": "Dana",
+        "name_last": "Lin",
+        "email": "dana.lin@example.com",
+        "phone_number": "(415) 555-0455",
+        "address": "306 Ulloa Street Apt 7",
+        "city": "San Francisco",
+        "region": "CA",
+        "postcode": "94124",
+        "date_of_birth": "1995-02-11",
+        "submitted_at": "2024-02-05 08:00:00"
+      },
+      "content_hash": "52e9d7a67d274da6b51140ac32d6d541016de942ea802485b4b289e95198605f",
+      "metadata": []
+    },
+    {
+      "source_system": "webforms",
+      "source_record_id": "W008",
+      "payload": {
+        "submission_id": "W008",
+        "name_first": "Dena",
+        "name_last": "Linden",
+        "email": "dana.lin@example.com",
+        "phone_number": "415-555-0456",
+        "address": "306 Ulloa Street Apt 7",
+        "city": "San Francisco",
+        "region": "CA",
+        "postcode": "94124",
+        "date_of_birth": "1995-02-11",
+        "submitted_at": "2024-02-05 08:00:00"
+      },
+      "content_hash": "a0f31be3a6754c40650e1c4fe89c80c7fbfbc46578c81be2a8367023ae67ffcd",
+      "metadata": []
+    }
+  ]
+}

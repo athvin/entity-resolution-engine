@@ -1,0 +1,42 @@
+[package]
+name = "er-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "er-server"
+path = "src/main.rs"
+
+[dependencies]
+er-config = { path = "../er-config" }
+# The merge-plans read uses the shared master-record election SQL.
+er-golden = { path = "../er-golden" }
+# Unmerge prechecks proposed never-rules with the shared contradiction-1 check.
+er-reconcile = { path = "../er-reconcile" }
+# The read API attaches each org's DuckLake (read-only) and queries lake.main.*.
+dedupe-core = { path = "../dedupe-core" }
+axum = { workspace = true }
+# The :action path normalizer wraps the router as an outer tower service.
+tower = { workspace = true }
+base64 = { workspace = true }
+serde_urlencoded = { workspace = true }
+tokio = { workspace = true }
+tokio-postgres = { workspace = true }
+ulid = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+
+[dev-dependencies]
+# The dispatcher's data-plane runner: the gated tests/pg_dispatch.rs opens a
+# per-org DuckLake and runs the whole pipeline (er_cli::run_all) from a claimed
+# job, proving the control -> data-plane bridge end to end.
+er-cli = { path = "../er-cli" }
+
+[lints]
+workspace = true

@@ -1,0 +1,131 @@
+{
+  "_comment": "Golden er.std.lexicon oracle. Regenerate: uv run python rust/crates/er-std/tests/gen_lexicon_golden.py",
+  "hash_cases": [
+    {
+      "name": "empty",
+      "pairs": [],
+      "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "packaged",
+      "pairs": [
+        [
+          "anthony",
+          "tony"
+        ],
+        [
+          "beth",
+          "elizabeth"
+        ],
+        [
+          "bob",
+          "robert"
+        ],
+        [
+          "bobby",
+          "robert"
+        ],
+        [
+          "catherine",
+          "cathy"
+        ],
+        [
+          "chris",
+          "christopher"
+        ],
+        [
+          "dave",
+          "david"
+        ],
+        [
+          "elizabeth",
+          "liz"
+        ],
+        [
+          "james",
+          "jim"
+        ],
+        [
+          "james",
+          "jimmy"
+        ],
+        [
+          "michael",
+          "mike"
+        ],
+        [
+          "sue",
+          "susan"
+        ]
+      ],
+      "hash": "51590d48a65677b4073973eff83e209953df5e23d5c702481065111a8bdad315"
+    },
+    {
+      "name": "orient_dups",
+      "pairs": [
+        [
+          "bob",
+          "robert"
+        ],
+        [
+          "robert",
+          "bob"
+        ],
+        [
+          "al",
+          "albert"
+        ]
+      ],
+      "hash": "9030f919514fe3479e65cd66aa7e0b50b3f504de54ba9eabc33ea9fbe8fe8fba"
+    }
+  ],
+  "canon_cases": [
+    {
+      "a": "Bob",
+      "b": " Robert ",
+      "ok": true,
+      "out": [
+        "bob",
+        "robert"
+      ]
+    },
+    {
+      "a": "AL",
+      "b": "albert",
+      "ok": true,
+      "out": [
+        "al",
+        "albert"
+      ]
+    },
+    {
+      "a": "tony",
+      "b": "Anthony",
+      "ok": true,
+      "out": [
+        "anthony",
+        "tony"
+      ]
+    },
+    {
+      "a": "Al",
+      "b": "al",
+      "ok": false
+    },
+    {
+      "a": "",
+      "b": "x",
+      "ok": false
+    },
+    {
+      "a": "  ",
+      "b": "y",
+      "ok": false
+    },
+    {
+      "a": "Bob",
+      "b": "bob",
+      "ok": false
+    }
+  ]
+}

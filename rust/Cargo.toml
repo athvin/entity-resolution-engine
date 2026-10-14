@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/dedupe-core", "crates/dedupe-cli", "crates/er-eval", "crates/er-errors", "crates/er-ids", "crates/er-hash", "crates/er-schema", "crates/er-obs", "crates/er-env", "crates/er-versions"]
+members = ["crates/dedupe-core", "crates/dedupe-cli", "crates/er-eval", "crates/er-errors", "crates/er-ids", "crates/er-hash", "crates/er-schema", "crates/er-obs", "crates/er-env", "crates/er-versions", "crates/er-config", "crates/er-std", "crates/er-ingest", "crates/er-standardize", "crates/er-reconcile", "crates/er-match", "crates/er-golden", "crates/er-cli", "crates/er-server"]
 
 [workspace.package]
 version = "0.1.0"
@@ -50,6 +50,10 @@ needless_pass_by_value = "allow"
 duckdb = { version = "=1.10505.0", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
+# Maintained serde_yaml fork (serde_yaml itself is deprecated). Reads the S6
+# config document; config_hash is computed over the serde_json re-serialisation,
+# not this crate's output, so YAML quirks never reach the digest.
+serde_norway = "0.9"
 sqlparser = { version = "0.63", features = ["visitor"] }
 thiserror = "2"
 regex = "1"
@@ -57,3 +61,16 @@ clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 sha2 = "0.10"
 hex = "0.4"
+# P3 control plane (er-server): the axum HTTP surface replacing FastAPI, and the
+# Postgres-backed job queue (SKIP-LOCKED) + org/config tables.
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
+tower = "0.5"
+tokio-postgres = { version = "0.7", features = ["with-serde_json-1"] }
+ulid = "1"
+# API-key secret generation (SHA-256-hashed at rest; the plaintext is random).
+rand = "0.9"
+# Opaque keyset read cursors (base64url of the snapshot + last key).
+base64 = "0.22"
+# Parse repeated query params (e.g. ?key=a&key=b) the typed Query extractor can't.
+serde_urlencoded = "0.7"

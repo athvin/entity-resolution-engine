@@ -1,0 +1,22 @@
+[package]
+name = "er-config"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json.workspace = true
+serde_norway.workspace = true
+sha2.workspace = true
+hex.workspace = true
+thiserror.workspace = true
+# SourceSpec.columns must preserve YAML-declared order: ingest's content_hash
+# (S4.1) hashes the mapped column values in that order. config_hash is unaffected
+# (canonical_document re-serialises through a sorted serde_json::Map).
+indexmap = { version = "2", features = ["serde"] }
+
+[lints]
+workspace = true

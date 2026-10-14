@@ -1,0 +1,199 @@
+{
+  "_comment": "check_contradiction_1 golden. Regen: uv run python rust/crates/er-reconcile/tests/gen_contradiction_golden.py",
+  "cases": [
+    {
+      "name": "clean",
+      "assertions": [
+        [
+          "always",
+          "a",
+          "b",
+          "L1",
+          true
+        ],
+        [
+          "never",
+          "c",
+          "d",
+          "N1",
+          true
+        ]
+      ],
+      "contradictions": []
+    },
+    {
+      "name": "direct",
+      "assertions": [
+        [
+          "always",
+          "a",
+          "b",
+          "L1",
+          true
+        ],
+        [
+          "never",
+          "a",
+          "b",
+          "N1",
+          true
+        ]
+      ],
+      "contradictions": [
+        {
+          "rec_a_key": "a",
+          "rec_b_key": "b",
+          "never_assertion_id": "N1",
+          "always_assertion_ids": [
+            "L1"
+          ],
+          "component": [
+            "a",
+            "b"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "transitive",
+      "assertions": [
+        [
+          "always",
+          "a",
+          "b",
+          "L1",
+          true
+        ],
+        [
+          "always",
+          "b",
+          "c",
+          "L2",
+          true
+        ],
+        [
+          "never",
+          "a",
+          "c",
+          "N1",
+          true
+        ]
+      ],
+      "contradictions": [
+        {
+          "rec_a_key": "a",
+          "rec_b_key": "c",
+          "never_assertion_id": "N1",
+          "always_assertion_ids": [
+            "L1",
+            "L2"
+          ],
+          "component": [
+            "a",
+            "b",
+            "c"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "never_outside_closure",
+      "assertions": [
+        [
+          "always",
+          "a",
+          "b",
+          "L1",
+          true
+        ],
+        [
+          "never",
+          "a",
+          "x",
+          "N1",
+          true
+        ]
+      ],
+      "contradictions": []
+    },
+    {
+      "name": "retracted_never",
+      "assertions": [
+        [
+          "always",
+          "a",
+          "b",
+          "L1",
+          true
+        ],
+        [
+          "never",
+          "a",
+          "b",
+          "N1",
+          false
+        ]
+      ],
+      "contradictions": []
+    },
+    {
+      "name": "two_contradictions",
+      "assertions": [
+        [
+          "always",
+          "a",
+          "b",
+          "L1",
+          true
+        ],
+        [
+          "always",
+          "c",
+          "d",
+          "L2",
+          true
+        ],
+        [
+          "never",
+          "a",
+          "b",
+          "N1",
+          true
+        ],
+        [
+          "never",
+          "c",
+          "d",
+          "N2",
+          true
+        ]
+      ],
+      "contradictions": [
+        {
+          "rec_a_key": "a",
+          "rec_b_key": "b",
+          "never_assertion_id": "N1",
+          "always_assertion_ids": [
+            "L1"
+          ],
+          "component": [
+            "a",
+            "b"
+          ]
+        },
+        {
+          "rec_a_key": "c",
+          "rec_b_key": "d",
+          "never_assertion_id": "N2",
+          "always_assertion_ids": [
+            "L2"
+          ],
+          "component": [
+            "c",
+            "d"
+          ]
+        }
+      ]
+    }
+  ]
+}

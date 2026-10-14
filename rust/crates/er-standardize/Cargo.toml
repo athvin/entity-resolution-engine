@@ -1,0 +1,21 @@
+[package]
+name = "er-standardize"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+er-std = { path = "../er-std" }
+er-config = { path = "../er-config" }
+er-hash = { path = "../er-hash" }
+dedupe-core = { path = "../dedupe-core" }
+anyhow.workspace = true
+
+[dev-dependencies]
+er-ingest = { path = "../er-ingest" }
+serde_json.workspace = true
+
+[lints]
+workspace = true

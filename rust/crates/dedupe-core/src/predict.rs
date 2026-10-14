@@ -294,6 +294,35 @@ pub fn run_predict(
     session.materialize(&pipeline)
 }
 
+/// As [`run_predict`], but scoring against caller-supplied TF tables instead of
+/// recomputing term frequencies from the input corpus — the FROZEN-TF entry
+/// point (D4/INV-SCORE). The ER matching contract registers term frequencies
+/// from a frozen `tf_lookup` snapshot and never recomputes them from the live
+/// corpus, so a record's score is independent of which other records happen to
+/// be present in the batch. `tf_tables` must have [`materialize_tf_tables`]'s
+/// shape: one table per [`Settings::tf_columns`], named [`tf::tf_table_name`],
+/// with columns `"{column}"` (the raw value, joined on the concat) and
+/// `"{tf_prefix}{column}"` (the frozen TF value). Existing [`run_predict`]
+/// behavior is unchanged; this only swaps the TF source.
+pub fn run_predict_with_tf(
+    session: &Session,
+    settings: &Settings,
+    input: &TableHandle,
+    tf_tables: &[TableHandle],
+    threshold_match_weight: Option<f64>,
+) -> Result<TableHandle> {
+    let concat = materialize_concat(session, input)?;
+    let blocked = materialize_blocked_pairs(session, settings, &concat)?;
+    let pipeline = predict_pipeline(
+        settings,
+        &concat,
+        tf_tables,
+        &blocked,
+        threshold_match_weight,
+    )?;
+    session.materialize(&pipeline)
+}
+
 /// Run predict in `num_chunks` bounded-memory passes. Pass `i` scores only the
 /// candidate pairs whose *right* record hashes to chunk `i` (`hash(uid_r) % n ==
 /// i`); the passes are unioned into one result. The output is identical to

@@ -1,0 +1,65 @@
+{
+  "_comment": "dbt name_norm via MacroHarness. Regen: uv run python rust/crates/er-std/tests/gen_std_golden.py",
+  "cases": [
+    {
+      "input": null,
+      "name": null
+    },
+    {
+      "input": "",
+      "name": null
+    },
+    {
+      "input": "  Smith  ",
+      "name": "smith"
+    },
+    {
+      "input": "O'Brien",
+      "name": "obrien"
+    },
+    {
+      "input": "Mary-Jane",
+      "name": "mary jane"
+    },
+    {
+      "input": "José",
+      "name": "jose"
+    },
+    {
+      "input": "José",
+      "name": "jose"
+    },
+    {
+      "input": "Anne_Marie",
+      "name": "anne marie"
+    },
+    {
+      "input": "D'Angelo-Smith",
+      "name": "dangelo smith"
+    },
+    {
+      "input": "van der Berg",
+      "name": "van der berg"
+    },
+    {
+      "input": "N/A",
+      "name": null
+    },
+    {
+      "input": "null",
+      "name": null
+    },
+    {
+      "input": "McDonald’s",
+      "name": "mcdonalds"
+    },
+    {
+      "input": "J.R.R.",
+      "name": "jrr"
+    },
+    {
+      "input": "José María",
+      "name": "jose maria"
+    }
+  ]
+}

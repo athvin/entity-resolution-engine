@@ -1,0 +1,402 @@
+{
+  "_comment": "reconcile_plan golden from er.entities.reconcile (CountingIdFactory start=0). Regen: uv run python rust/crates/er-reconcile/tests/gen_reconcile_golden.py",
+  "cases": [
+    {
+      "name": "all_create",
+      "p_old": {},
+      "p_new": [
+        [
+          "a",
+          "b"
+        ],
+        [
+          "c"
+        ]
+      ],
+      "assignments": [
+        [
+          "a",
+          "00000000000000000000000000"
+        ],
+        [
+          "b",
+          "00000000000000000000000000"
+        ],
+        [
+          "c",
+          "00000000000000000000000001"
+        ]
+      ],
+      "transitions": [
+        {
+          "entity_id": "00000000000000000000000000",
+          "status": "active",
+          "merged_into": null,
+          "is_new": true
+        },
+        {
+          "entity_id": "00000000000000000000000001",
+          "status": "active",
+          "merged_into": null,
+          "is_new": true
+        }
+      ],
+      "events": [
+        {
+          "entity_id": "00000000000000000000000000",
+          "event_type": "created",
+          "details": {
+            "member_keys": [
+              "a",
+              "b"
+            ]
+          },
+          "details_hash": "340ba2713e5db6ed03ff78f63ad5bffe5930d65edb6f9aac02cc47afc3dae5cd"
+        },
+        {
+          "entity_id": "00000000000000000000000001",
+          "event_type": "created",
+          "details": {
+            "member_keys": [
+              "c"
+            ]
+          },
+          "details_hash": "20c303ca06207950c1f408886fbb2fe4796209454f2477f920743b946938f0c1"
+        }
+      ],
+      "minted": [
+        "00000000000000000000000000",
+        "00000000000000000000000001"
+      ]
+    },
+    {
+      "name": "noop",
+      "p_old": {
+        "E1": [
+          "a",
+          "b"
+        ]
+      },
+      "p_new": [
+        [
+          "a",
+          "b"
+        ]
+      ],
+      "assignments": [],
+      "transitions": [],
+      "events": [],
+      "minted": []
+    },
+    {
+      "name": "merge",
+      "p_old": {
+        "E1": [
+          "a",
+          "b"
+        ],
+        "E2": [
+          "c",
+          "d"
+        ]
+      },
+      "p_new": [
+        [
+          "a",
+          "b",
+          "c",
+          "d"
+        ]
+      ],
+      "assignments": [
+        [
+          "c",
+          "E1"
+        ],
+        [
+          "d",
+          "E1"
+        ]
+      ],
+      "transitions": [
+        {
+          "entity_id": "E1",
+          "status": "active",
+          "merged_into": null,
+          "is_new": false
+        },
+        {
+          "entity_id": "E2",
+          "status": "merged",
+          "merged_into": "E1",
+          "is_new": false
+        }
+      ],
+      "events": [
+        {
+          "entity_id": "E2",
+          "event_type": "merged",
+          "details": {
+            "member_keys": [
+              "c",
+              "d"
+            ],
+            "merged_into": "E1"
+          },
+          "details_hash": "dc71e293d3c8dd76063c2da3b8d350b86c38db64348b328938dbcb92198dfaa4"
+        }
+      ],
+      "minted": []
+    },
+    {
+      "name": "split",
+      "p_old": {
+        "E1": [
+          "a",
+          "b",
+          "c",
+          "d"
+        ]
+      },
+      "p_new": [
+        [
+          "a",
+          "b"
+        ],
+        [
+          "c",
+          "d"
+        ]
+      ],
+      "assignments": [
+        [
+          "c",
+          "00000000000000000000000000"
+        ],
+        [
+          "d",
+          "00000000000000000000000000"
+        ]
+      ],
+      "transitions": [
+        {
+          "entity_id": "00000000000000000000000000",
+          "status": "active",
+          "merged_into": null,
+          "is_new": true
+        },
+        {
+          "entity_id": "E1",
+          "status": "active",
+          "merged_into": null,
+          "is_new": false
+        }
+      ],
+      "events": [
+        {
+          "entity_id": "00000000000000000000000000",
+          "event_type": "created",
+          "details": {
+            "member_keys": [
+              "c",
+              "d"
+            ]
+          },
+          "details_hash": "b044ba91a92afb0695384a78ea138c408bbda4f70be881c6be9f27f94d25ffd4"
+        },
+        {
+          "entity_id": "E1",
+          "event_type": "member_removed",
+          "details": {
+            "member_keys": [
+              "c",
+              "d"
+            ],
+            "cause": "recluster"
+          },
+          "details_hash": "8044484025a02fe15a09383b135cd4d36ca17c6289f4e6e79f6cd97b0c103b8e"
+        },
+        {
+          "entity_id": "00000000000000000000000000",
+          "event_type": "split",
+          "details": {
+            "member_keys": [
+              "c",
+              "d"
+            ],
+            "split_from": "E1"
+          },
+          "details_hash": "f8d6894c7ad089cc99178c7097e1ee4652e0e4597ace81ba530763b02682e7ca"
+        }
+      ],
+      "minted": [
+        "00000000000000000000000000"
+      ]
+    },
+    {
+      "name": "tie_min_key",
+      "p_old": {
+        "E1": [
+          "a"
+        ],
+        "E2": [
+          "b"
+        ]
+      },
+      "p_new": [
+        [
+          "a",
+          "b"
+        ]
+      ],
+      "assignments": [
+        [
+          "b",
+          "E1"
+        ]
+      ],
+      "transitions": [
+        {
+          "entity_id": "E1",
+          "status": "active",
+          "merged_into": null,
+          "is_new": false
+        },
+        {
+          "entity_id": "E2",
+          "status": "merged",
+          "merged_into": "E1",
+          "is_new": false
+        }
+      ],
+      "events": [
+        {
+          "entity_id": "E2",
+          "event_type": "merged",
+          "details": {
+            "member_keys": [
+              "b"
+            ],
+            "merged_into": "E1"
+          },
+          "details_hash": "289e5a46026842196f75c03025ec7fc6bd244fb9eb90d77447bb7bffc7b02afd"
+        }
+      ],
+      "minted": []
+    },
+    {
+      "name": "retire_and_orphan",
+      "p_old": {
+        "E1": [
+          "a"
+        ],
+        "E2": [
+          "b"
+        ]
+      },
+      "p_new": [
+        [
+          "b"
+        ]
+      ],
+      "assignments": [
+        [
+          "a",
+          "00000000000000000000000000"
+        ]
+      ],
+      "transitions": [
+        {
+          "entity_id": "00000000000000000000000000",
+          "status": "active",
+          "merged_into": null,
+          "is_new": true
+        },
+        {
+          "entity_id": "E1",
+          "status": "retired",
+          "merged_into": null,
+          "is_new": false
+        }
+      ],
+      "events": [
+        {
+          "entity_id": "00000000000000000000000000",
+          "event_type": "created",
+          "details": {
+            "member_keys": [
+              "a"
+            ]
+          },
+          "details_hash": "34231b70d5e027d0fcedb4d9024bd28f579470b8d0ae05724a7a9dc0c8dae8ca"
+        },
+        {
+          "entity_id": "E1",
+          "event_type": "retired",
+          "details": {
+            "member_keys": [
+              "a"
+            ]
+          },
+          "details_hash": "34231b70d5e027d0fcedb4d9024bd28f579470b8d0ae05724a7a9dc0c8dae8ca"
+        }
+      ],
+      "minted": [
+        "00000000000000000000000000"
+      ]
+    },
+    {
+      "name": "absorb_smaller",
+      "p_old": {
+        "E1": [
+          "a",
+          "b"
+        ],
+        "E2": [
+          "c"
+        ]
+      },
+      "p_new": [
+        [
+          "a",
+          "b",
+          "c"
+        ]
+      ],
+      "assignments": [
+        [
+          "c",
+          "E1"
+        ]
+      ],
+      "transitions": [
+        {
+          "entity_id": "E1",
+          "status": "active",
+          "merged_into": null,
+          "is_new": false
+        },
+        {
+          "entity_id": "E2",
+          "status": "merged",
+          "merged_into": "E1",
+          "is_new": false
+        }
+      ],
+      "events": [
+        {
+          "entity_id": "E2",
+          "event_type": "merged",
+          "details": {
+            "member_keys": [
+              "c"
+            ],
+            "merged_into": "E1"
+          },
+          "details_hash": "5685a2fbd51c72d22326f906c8804ca708cf0d68acbac8f4e684f22269133821"
+        }
+      ],
+      "minted": []
+    }
+  ]
+}

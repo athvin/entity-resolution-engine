@@ -1,0 +1,22 @@
+[package]
+name = "er-match"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+dedupe-core = { path = "../dedupe-core" }
+
+[dev-dependencies]
+er-config = { path = "../er-config" }
+er-ingest = { path = "../er-ingest" }
+er-standardize = { path = "../er-standardize" }
+er-reconcile = { path = "../er-reconcile" }
+er-ids = { path = "../er-ids" }
+er-golden = { path = "../er-golden" }
+serde_json.workspace = true
+
+[lints]
+workspace = true
