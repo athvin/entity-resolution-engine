@@ -1,5 +1,7 @@
-# ClusterIP only, both of them: er-api is on no load balancer in any
-# environment (§4.1) and er-web is reached through the (flag-gated) Ingress.
+# Both ClusterIP, both selecting the merged web-api pod. er-api is on no load
+# balancer in any environment (§4.1); er-web is reached through the Ingress.
+# The Service names are unchanged so the Ingress and any er-api DNS references
+# keep resolving — they just both point at the one web-api pod now.
 apiVersion: v1
 kind: Service
 metadata:
@@ -7,16 +9,16 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: er-api
-    app.kubernetes.io/component: api
+    app.kubernetes.io/component: web-api
     {{- include "er-platform.labels" . | nindent 4 }}
 spec:
   type: ClusterIP
   selector:
-    {{- include "er-platform.selectorLabels" (dict "root" . "name" "er-api") | nindent 4 }}
+    {{- include "er-platform.selectorLabels" (dict "root" . "name" "web-api") | nindent 4 }}
   ports:
     - name: http
       port: 8000
-      targetPort: http
+      targetPort: api
 ---
 apiVersion: v1
 kind: Service
@@ -25,12 +27,12 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: er-web
-    app.kubernetes.io/component: web
+    app.kubernetes.io/component: web-api
     {{- include "er-platform.labels" . | nindent 4 }}
 spec:
   type: ClusterIP
   selector:
-    {{- include "er-platform.selectorLabels" (dict "root" . "name" "er-web") | nindent 4 }}
+    {{- include "er-platform.selectorLabels" (dict "root" . "name" "web-api") | nindent 4 }}
   ports:
     - name: http
       port: 3000

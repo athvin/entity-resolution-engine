@@ -1,0 +1,112 @@
+# web-api: the merged service — everything except Postgres in one pod.
+#   - er-server (Rust): the control-plane API on :8000 AND the job dispatcher
+#     IN-PROCESS (ER_DISPATCH_IN_PROCESS=1). Internal only (localhost).
+#   - er-web (Next.js BFF): the browser-facing tier on :3000, talking to the
+#     API over localhost. The only container exposed via the Ingress.
+# One Deployment replaces the former er-api + er-dispatcher + er-web. Postgres
+# stays its own StatefulSet. At replicas 1 the single-dispatcher model holds, so
+# the strategy is Recreate (never two dispatchers mid-rollout).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: web-api
+    app.kubernetes.io/component: web-api
+    {{- include "er-platform.labels" . | nindent 4 }}
+  annotations:
+    reloader.stakater.com/auto: "true" # §9.1 — roll on secret rotation
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "er-platform.selectorLabels" (dict "root" . "name" "web-api") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: web-api
+        {{- include "er-platform.selectorLabels" (dict "root" . "name" "web-api") | nindent 8 }}
+        {{- include "er-platform.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: er-api
+      securityContext:
+        {{- include "er-platform.podSecurityContext" . | nindent 8 }}
+      containers:
+        # --- the Rust control plane + in-process dispatcher ---
+        - name: er-server
+          image: {{ include "er-platform.image" (dict "root" . "image" .Values.images.api) }}
+          securityContext:
+            {{- include "er-platform.containerSecurityContext" . | nindent 12 }}
+            runAsUser: 1001
+            runAsGroup: 1001
+          ports:
+            - name: api
+              containerPort: 8000
+          env:
+            {{- include "er-platform.erserverEnv" . | nindent 12 }}
+            - name: ER_DISPATCH_IN_PROCESS
+              value: "1"
+          envFrom:
+            - secretRef:
+                name: er-erserver-env
+          readinessProbe:
+            httpGet: { path: /healthz, port: api }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: api }
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+          volumeMounts:
+            - name: er-efs
+              mountPath: {{ .Values.efs.mountPath }}
+            - name: duckdb-tmp
+              mountPath: /app/.tmp
+        # --- the Next.js BFF (browser-facing) ---
+        - name: er-web
+          image: {{ include "er-platform.image" (dict "root" . "image" .Values.images.web) }}
+          securityContext:
+            {{- include "er-platform.containerSecurityContext" . | nindent 12 }}
+            runAsUser: 1000
+            runAsGroup: 1000
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            # Same pod — reach the API over localhost, no Service hop.
+            - name: ERSERVER_BASE_URL
+              value: http://localhost:8000
+            {{- if .Values.ingress.enabled }}
+            - name: ERWEB_PUBLIC_BASE_URL
+              value: https://{{ include "er-platform.host" . }}
+            {{- end }}
+            - name: ERSERVER_OPERATOR_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: er-erserver-env
+                  key: ERSERVER_OPERATOR_TOKEN
+          envFrom:
+            - secretRef:
+                name: er-erweb-env
+          readinessProbe:
+            httpGet: { path: /, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /, port: http }
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.web.resources | nindent 12 }}
+      volumes:
+        - name: er-efs
+          persistentVolumeClaim:
+            claimName: er-efs
+        - name: duckdb-tmp
+          emptyDir:
+            sizeLimit: 2Gi
