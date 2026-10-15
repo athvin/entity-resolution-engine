@@ -11,7 +11,7 @@ export default async function Home() {
   if (identity.user.isSuperAdmin) {
     const database = await db();
     const registered = await database.select().from(schema.orgsRegistry).limit(1);
-    if (registered[0]) redirect(`/${registered[0].org}/dashboard`);
+    redirect(registered[0] ? `/${registered[0].org}/dashboard` : "/admin");
   }
   redirect("/login?error=no-workspace");
 }
