@@ -75,8 +75,7 @@ dev-up:
 	kubectl --context $(ER_DEV_CONTEXT) apply -f infra/k8s/storage/ebs-gp3.yaml
 	set -e; eval "$$(bash scripts/dev_env.sh up $(DEV))"; \
 	helm --kube-context $(ER_DEV_CONTEXT) upgrade --install $(DEV) infra/k8s/charts/er-dev-namespace \
-	  --namespace default --set developer=$(DEV); \
-	kubectl --context $(ER_DEV_CONTEXT) -n $(DEV) rollout status statefulset/er-postgres --timeout=300s; \
+	  --namespace default --set developer=$(DEV) --wait; \
 	helm --kube-context $(ER_DEV_CONTEXT) upgrade --install er-platform infra/k8s/charts/er-platform \
 	  --namespace $(DEV) --set developer=$(DEV) \
 	  --set images.tag=$(TAG) \
@@ -85,24 +84,21 @@ dev-up:
 	  --set efs.fileSystemId=$$ER_EFS_FS_ID --set efs.accessPointId=$$ER_EFS_AP_ID \
 	  --wait --timeout 10m
 
-# §5.2: everything to zero — Karpenter reclaims the app node, the leader
-# connection goes away, Postgres stops billing compute. PVC and S3 kept.
+# §5.2: scale the workload to zero — Karpenter reclaims the app node. The
+# control-plane DB is Aurora now, which auto-pauses to 0 ACU on its own once the
+# last connection drops, so there is no StatefulSet to scale. S3 + the DB kept.
 dev-suspend:
 	@test -n "$(DEV)" || { echo "usage: make dev-suspend DEV=<name>"; exit 2; }
 	kubectl --context $(ER_DEV_CONTEXT) -n $(DEV) scale deployment --all --replicas=0
-	kubectl --context $(ER_DEV_CONTEXT) -n $(DEV) scale statefulset er-postgres --replicas=0
 
 # Back up in under a minute. kubectl, not `helm upgrade`: helm's three-way
 # merge sees no manifest diff after a kubectl scale, so it would leave the
-# replica counts at zero. Postgres first, then the API (its dispatcher is
-# init-gated on /healthz regardless — the ordering just avoids a long wait).
+# replica counts at zero. One merged web-api deployment (API + in-process
+# dispatcher + BFF); Aurora resumes from 0 ACU on the first connection (~15s).
 dev-resume:
 	@test -n "$(DEV)" || { echo "usage: make dev-resume DEV=<name>"; exit 2; }
-	kubectl --context $(ER_DEV_CONTEXT) -n $(DEV) scale statefulset er-postgres --replicas=1
-	kubectl --context $(ER_DEV_CONTEXT) -n $(DEV) rollout status statefulset/er-postgres --timeout=300s
-	kubectl --context $(ER_DEV_CONTEXT) -n $(DEV) scale deployment er-api er-web --replicas=1
-	kubectl --context $(ER_DEV_CONTEXT) -n $(DEV) rollout status deployment/er-api --timeout=300s
-	kubectl --context $(ER_DEV_CONTEXT) -n $(DEV) scale deployment er-dispatcher --replicas=1
+	kubectl --context $(ER_DEV_CONTEXT) -n $(DEV) scale deployment web-api --replicas=1
+	kubectl --context $(ER_DEV_CONTEXT) -n $(DEV) rollout status deployment/web-api --timeout=300s
 
 # The purge path (§12): releases gone, namespace (and with it the Postgres PVC,
 # hence the EBS volume) gone, then the AWS side — access point, secrets, lake
