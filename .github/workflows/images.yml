@@ -1,0 +1,58 @@
+# Build + push the Rust control-plane image (er-api) to ECR by commit sha.
+# Runs on GitHub's amd64 runners (the EKS nodes are amd64) and authenticates to
+# ECR via OIDC — no stored credentials. The one image serves er-api (server),
+# er-dispatcher (CMD override), and the `er` pipeline CLI (see rust/Dockerfile).
+#
+# This replaces the image-build job of the removed ci.yaml. It builds the Rust
+# backend only; er-web is built by the frontend pipeline, and er-pipeline is
+# gone (the in-process dispatcher runs the pipeline itself). main is branch-
+# protected, so a push here is already a green state.
+name: images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "rust/**"
+      - ".github/workflows/images.yml"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "git ref/sha to build (defaults to the triggering commit)"
+        required: false
+
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  er-api:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC token exchange for the ECR-push role
+    env:
+      ECR: 797781631727.dkr.ecr.us-east-2.amazonaws.com
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.inputs.ref || github.sha }}
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          role-to-assume: arn:aws:iam::797781631727:role/er-ci-ecr-push
+          aws-region: us-east-2
+      - uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
+      - name: Resolve the image tag (full sha of the built ref)
+        id: tag
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Build + push er-api
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: rust
+          file: rust/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.ECR }}/er-api:${{ steps.tag.outputs.sha }}
+          cache-from: "type=gha,scope=er-api"
+          cache-to: "type=gha,mode=max,scope=er-api"

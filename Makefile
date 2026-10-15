@@ -47,12 +47,15 @@ frontend:
 ECR_REGISTRY ?= 797781631727.dkr.ecr.us-east-2.amazonaws.com
 ECR_REGION ?= us-east-2
 
+# --platform linux/amd64: the EKS nodes are amd64, so pin it (a build on an
+# arm64 workstation would otherwise push an unpullable image). buildx builds +
+# pushes in one step.
 image-api:
 	@test -n "$(TAG)" || { echo "usage: make image-api TAG=<git sha>"; exit 2; }
 	aws ecr get-login-password --region $(ECR_REGION) \
 	  | docker login --username AWS --password-stdin $(ECR_REGISTRY)
-	docker build -t $(ECR_REGISTRY)/er-api:$(TAG) -f rust/Dockerfile rust
-	docker push $(ECR_REGISTRY)/er-api:$(TAG)
+	docker buildx build --platform linux/amd64 \
+	  -t $(ECR_REGISTRY)/er-api:$(TAG) -f rust/Dockerfile rust --push
 
 # --- developer environments (infrastructure.md §12, plan-to-aws 2.1/2.2) ---
 #
