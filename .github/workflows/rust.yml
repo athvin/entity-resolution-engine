@@ -5,12 +5,21 @@
 # The toolchain is installed with `rustup` rather than an action: dtolnay's
 # rust-toolchain selects the channel through its ref (`@stable`), which cannot
 # also carry the S9 `@<sha> # vTAG` pin the repo requires of every `uses:`.
+#
+# SPEED: every compile job shares an sccache compilation cache (GHA backend) and
+# links with mold, so the 6 jobs stop re-compiling the same crate-units cold and
+# the DuckDB static link is far cheaper. The heavy perf jobs (bench compile,
+# 50k scale) run only on main + nightly, not on every PR — the PR gate is
+# lint + test + the DuckLake integration e2e + cargo-deny.
 name: rust
 
 on:
   pull_request:
   push:
     branches: [main]
+  schedule:
+    # Nightly full run (incl. the heavy perf jobs) at 07:00 UTC.
+    - cron: "0 7 * * *"
 
 permissions:
   contents: read
@@ -23,15 +32,28 @@ defaults:
   run:
     working-directory: rust
 
+# Incremental compilation is pointless in CI and conflicts with sccache; mold is
+# the linker for every rustc invocation. RUSTC_WRAPPER/sccache are set per
+# compile job (the cargo-deny job must not inherit a wrapper it never installs).
+env:
+  CARGO_INCREMENTAL: "0"
+  RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
+  SCCACHE_GHA_ENABLED: "true"
+
 jobs:
   lint:
     name: fmt + clippy + docs
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      RUSTC_WRAPPER: sccache
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install stable toolchain
         run: rustup update stable --no-self-update && rustup default stable && rustup component add rustfmt clippy
+      - name: Install mold
+        run: sudo apt-get update && sudo apt-get install -y mold
+      - uses: mozilla-actions/sccache-action@d651010b8da762cde178750d8eda7b5febfe147a # v0.0.9
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: rust
@@ -47,30 +69,20 @@ jobs:
     name: test
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      RUSTC_WRAPPER: sccache
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install stable toolchain
         run: rustup update stable --no-self-update && rustup default stable
+      - name: Install mold
+        run: sudo apt-get update && sudo apt-get install -y mold
+      - uses: mozilla-actions/sccache-action@d651010b8da762cde178750d8eda7b5febfe147a # v0.0.9
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: rust
           shared-key: rust
       - run: cargo test --workspace
-
-  bench-compile:
-    name: benchmarks (compile)
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install stable toolchain
-        run: rustup update stable --no-self-update && rustup default stable
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          workspaces: rust
-          shared-key: rust
-      # Keep benches building; running them is manual (they take minutes).
-      - run: cargo bench -p dedupe-core --no-run
 
   security:
     name: cargo-deny (advisories + licenses + bans)
@@ -88,6 +100,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
+      RUSTC_WRAPPER: sccache
       DEDUPE_E2E_DUCKLAKE: "1"
       DEDUPE_E2E_EXTENSIONS: "1"
       # The er-server control-plane queue gate runs against this service.
@@ -110,6 +123,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install stable toolchain
         run: rustup update stable --no-self-update && rustup default stable
+      - name: Install mold
+        run: sudo apt-get update && sudo apt-get install -y mold
+      - uses: mozilla-actions/sccache-action@d651010b8da762cde178750d8eda7b5febfe147a # v0.0.9
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: rust
@@ -129,16 +145,44 @@ jobs:
       - name: Extension loading (rapidfuzz)
         run: cargo test -p dedupe-core --test extensions
 
+  # --- heavy perf jobs: main + nightly only (skipped on PRs for latency) ---
+
+  bench-compile:
+    name: benchmarks (compile)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event_name != 'pull_request'
+    env:
+      RUSTC_WRAPPER: sccache
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install stable toolchain
+        run: rustup update stable --no-self-update && rustup default stable
+      - name: Install mold
+        run: sudo apt-get update && sudo apt-get install -y mold
+      - uses: mozilla-actions/sccache-action@d651010b8da762cde178750d8eda7b5febfe147a # v0.0.9
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: rust
+          shared-key: rust
+      # Keep benches building; running them is manual (they take minutes).
+      - run: cargo bench -p dedupe-core --no-run
+
   scale-tests:
     name: scale golden (50k)
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    if: github.event_name != 'pull_request'
     env:
+      RUSTC_WRAPPER: sccache
       DEDUPE_SCALE_TESTS: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install stable toolchain
         run: rustup update stable --no-self-update && rustup default stable
+      - name: Install mold
+        run: sudo apt-get update && sudo apt-get install -y mold
+      - uses: mozilla-actions/sccache-action@d651010b8da762cde178750d8eda7b5febfe147a # v0.0.9
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: rust
