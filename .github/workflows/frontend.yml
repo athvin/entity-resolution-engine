@@ -1,0 +1,83 @@
+# The frontend's CI gate. The backend (Rust) is gated by rust.yml; this adds the
+# equivalent gate for the Next.js app under frontend/, so a merge to main is
+# known to lint, type-check, unit-test, build, and pass the Playwright functional
+# tier. Without this the frontend only ran locally via `make frontend` — the
+# single biggest hole in "merge to master and it works".
+#
+# Two jobs run in parallel:
+#   - check: eslint + prettier + tsc + vitest (no browser) on the plain runner.
+#   - e2e:   the fast Playwright tier (mock-erserver + PGlite, all three device
+#            projects, incl. the @visual baselines). It runs INSIDE the pinned
+#            Playwright image v1.63.0-jammy so the browsers are preinstalled and,
+#            crucially, the visual snapshots compare against the same
+#            font-rendering environment the committed baselines were generated in
+#            (frontend/dev/update-baselines.sh uses this exact image).
+#
+# The heavy full-stack e2e tier (playwright.e2e.config.ts, real backend) stays
+# out of CI. Action refs are SHA-pinned with a `# vTAG` comment, per repo policy.
+name: frontend
+
+on:
+  pull_request:
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend.yml"
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    working-directory: frontend
+
+jobs:
+  check:
+    name: lint + types + unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+      - name: Enable corepack (pnpm from packageManager)
+        run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+
+  e2e:
+    name: playwright functional tier
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # The same image the committed visual baselines were rendered in; browsers
+    # are preinstalled, so there is no `playwright install` step.
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-jammy
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+      - name: Enable corepack (pnpm from packageManager)
+        run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      # CI=true (set by Actions) makes playwright.config.ts take the `next start`
+      # branch, so we build explicitly first; `next start` then serves `.next/`.
+      - run: pnpm build
+      - run: pnpm test:e2e
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7
