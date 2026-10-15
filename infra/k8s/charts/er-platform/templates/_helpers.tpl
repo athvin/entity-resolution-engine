@@ -62,6 +62,19 @@ app.kubernetes.io/instance: {{ .root.Release.Name }}
 - name: ERSERVER_TENANT_DB_PREFIX
   value: {{ . | quote }}
 {{- end }}
+# The Rust control plane reads its own env names; map the deployed (Python-era)
+# secret keys onto them. Per-org lake/config is carried in each org's row
+# (POST /v1/orgs with ER_LAKE_* / ER_CONFIG_PATH), not the ERSERVER_* templates.
+- name: ER_PG_DSN
+  valueFrom:
+    secretKeyRef:
+      name: er-erserver-env
+      key: ERSERVER_DSN
+- name: ER_OPERATOR_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: er-erserver-env
+      key: ERSERVER_OPERATOR_TOKEN
 {{- with .Values.erserver.email.from }}
 - name: ERSERVER_EMAIL_FROM
   value: {{ . | quote }}
