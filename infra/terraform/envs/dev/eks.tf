@@ -14,6 +14,15 @@ module "eks" {
   }
 }
 
+# metrics-server: EKS doesn't ship it, so `kubectl top`, k9s CPU/MEM, and HPAs
+# have no metrics source without it. The AWS-managed add-on keeps the manifests
+# patched in kube-system. (Adopt the already-created add-on into state with:
+#   terraform import aws_eks_addon.metrics_server er-dev:metrics-server )
+resource "aws_eks_addon" "metrics_server" {
+  cluster_name = module.eks.cluster_name
+  addon_name   = "metrics-server"
+}
+
 output "cluster_name" {
   value = module.eks.cluster_name
 }
