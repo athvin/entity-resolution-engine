@@ -41,7 +41,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     });
 
     // Default landing: the first membership; super admins fall back to the
-    // first registered workspace (the console proper arrives in M2).
+    // first registered workspace, or the admin console on a fresh install.
     const memberships = await database
       .select({ org: schema.orgMembers.org })
       .from(schema.orgMembers)
@@ -51,7 +51,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     let target = memberships[0] ? `/${memberships[0].org}/dashboard` : null;
     if (!target && user.isSuperAdmin) {
       const registered = await database.select().from(schema.orgsRegistry).limit(1);
-      target = registered[0] ? `/${registered[0].org}/dashboard` : null;
+      target = registered[0] ? `/${registered[0].org}/dashboard` : "/admin";
     }
 
     const response = NextResponse.json({

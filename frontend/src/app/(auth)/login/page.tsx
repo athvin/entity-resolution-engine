@@ -9,10 +9,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { bffFetch, BffRequestError } from "@/lib/api/client";
 
+const NO_WORKSPACE_MESSAGE = "this account has no workspace yet — ask an admin for an invite";
+
+function errorFromParam(param: string | null): string | null {
+  return param === "no-workspace" ? NO_WORKSPACE_MESSAGE : null;
+}
+
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(() =>
+    errorFromParam(searchParams.get("error")),
+  );
   const [pending, setPending] = useState(false);
 
   async function onSubmit(event: React.SyntheticEvent<HTMLFormElement, SubmitEvent>) {
@@ -26,7 +34,18 @@ function LoginForm() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ email: form.get("email"), password: form.get("password") }),
       });
-      router.push(searchParams.get("next") ?? result.redirect);
+      const target = searchParams.get("next") ?? result.redirect;
+      // A redirect back to /login means the session is live but there is
+      // nowhere to land; pushing the same route would leave the spinner on.
+      if (target.startsWith("/login")) {
+        setError(
+          errorFromParam(new URL(target, window.location.origin).searchParams.get("error")) ??
+            NO_WORKSPACE_MESSAGE,
+        );
+        setPending(false);
+        return;
+      }
+      router.push(target);
       router.refresh();
     } catch (cause) {
       setError(
