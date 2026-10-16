@@ -83,6 +83,76 @@ impl Job {
     }
 }
 
+pub mod create {
+    //! @generated query functions for this entity + operation.
+    /// Queue a job (idempotent on the org idempotency key); returns the inserted row, or none when the key already exists.
+    pub async fn enqueue(
+        client: &::tokio_postgres::Client,
+        job_id: &str,
+        org: &str,
+        kind: &str,
+        priority: i64,
+        idempotency_key: Option<&str>,
+        params: Option<&::serde_json::Value>,
+    ) -> ::std::result::Result<Vec<super::Job>, ::tokio_postgres::Error> {
+        const SQL: &str =
+            "INSERT INTO public.jobs (job_id, org, kind, priority, idempotency_key, params)
+VALUES ($1, $2, $3, $4, $5, coalesce($6, '{}'::jsonb))
+ON CONFLICT (org, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
+RETURNING
+  job_id,
+  org,
+  kind,
+  params,
+  state,
+  priority,
+  idempotency_key,
+  run_id,
+  attempt,
+  max_attempts,
+  not_before,
+  created_by,
+  schedule_id,
+  resource_class,
+  trace_context,
+  created_at,
+  updated_at,
+  started_at,
+  finished_at
+";
+        let rows = client
+            .query(
+                SQL,
+                &[&job_id, &org, &kind, &priority, &idempotency_key, &params],
+            )
+            .await?;
+        Ok(rows
+            .iter()
+            .map(|row| super::Job {
+                job_id: row.get("job_id"),
+                org: row.get("org"),
+                kind: row.get("kind"),
+                params: row.get("params"),
+                state: row.get("state"),
+                priority: row.get("priority"),
+                idempotency_key: row.get("idempotency_key"),
+                run_id: row.get("run_id"),
+                attempt: row.get("attempt"),
+                max_attempts: row.get("max_attempts"),
+                not_before: row.get("not_before"),
+                created_by: row.get("created_by"),
+                schedule_id: row.get("schedule_id"),
+                resource_class: row.get("resource_class"),
+                trace_context: row.get("trace_context"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+                started_at: row.get("started_at"),
+                finished_at: row.get("finished_at"),
+            })
+            .collect())
+    }
+}
+
 pub mod read {
     //! @generated query functions for this entity + operation.
     /// One job by id, scoped to its org (the job detail view).
@@ -199,5 +269,86 @@ LIMIT $3
                 finished_at: row.get("finished_at"),
             })
             .collect())
+    }
+}
+
+pub mod update {
+    //! @generated query functions for this entity + operation.
+    /// Claim the highest-priority runnable job whose org has no active job (FOR UPDATE SKIP LOCKED); returns the claimed row, or none.
+    pub async fn claim(
+        client: &::tokio_postgres::Client,
+    ) -> ::std::result::Result<Vec<super::Job>, ::tokio_postgres::Error> {
+        const SQL: &str = "UPDATE public.jobs
+SET state = 'dispatching', started_at = now(), updated_at = now()
+WHERE job_id = (
+  SELECT j.job_id FROM public.jobs j
+  WHERE j.state = 'queued' AND (j.not_before IS NULL OR j.not_before <= now())
+    AND NOT EXISTS (
+      SELECT 1 FROM public.jobs a
+      WHERE a.org = j.org AND a.state IN ('dispatching', 'running', 'canceling'))
+  ORDER BY j.priority DESC, j.job_id
+  FOR UPDATE SKIP LOCKED
+  LIMIT 1)
+RETURNING
+  job_id,
+  org,
+  kind,
+  params,
+  state,
+  priority,
+  idempotency_key,
+  run_id,
+  attempt,
+  max_attempts,
+  not_before,
+  created_by,
+  schedule_id,
+  resource_class,
+  trace_context,
+  created_at,
+  updated_at,
+  started_at,
+  finished_at
+";
+        let rows = client.query(SQL, &[]).await?;
+        Ok(rows
+            .iter()
+            .map(|row| super::Job {
+                job_id: row.get("job_id"),
+                org: row.get("org"),
+                kind: row.get("kind"),
+                params: row.get("params"),
+                state: row.get("state"),
+                priority: row.get("priority"),
+                idempotency_key: row.get("idempotency_key"),
+                run_id: row.get("run_id"),
+                attempt: row.get("attempt"),
+                max_attempts: row.get("max_attempts"),
+                not_before: row.get("not_before"),
+                created_by: row.get("created_by"),
+                schedule_id: row.get("schedule_id"),
+                resource_class: row.get("resource_class"),
+                trace_context: row.get("trace_context"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+                started_at: row.get("started_at"),
+                finished_at: row.get("finished_at"),
+            })
+            .collect())
+    }
+
+    /// Record a job's next/terminal state, stamping finished_at for terminal states.
+    pub async fn mark(
+        client: &::tokio_postgres::Client,
+        state: &str,
+        job_id: &str,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str = "UPDATE public.jobs
+SET state = $1,
+    updated_at = now(),
+    finished_at = CASE WHEN $1 IN ('succeeded', 'failed', 'canceled') THEN now() ELSE finished_at END
+WHERE job_id = $2
+";
+        client.execute(SQL, &[&state, &job_id]).await
     }
 }

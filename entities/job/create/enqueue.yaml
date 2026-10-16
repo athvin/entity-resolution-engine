@@ -1,0 +1,12 @@
+kind: statement
+operation: create
+mode: partial
+description: "Queue a job (idempotent on the org idempotency key); returns the inserted row, or none when the key already exists."
+params:
+  - { name: job_id, type: varchar }
+  - { name: org, type: varchar }
+  - { name: kind, type: varchar }
+  - { name: priority, type: bigint }
+  - { name: idempotency_key, type: varchar, nullable: true }
+  - { name: params, type: json, nullable: true }
+returns: entity

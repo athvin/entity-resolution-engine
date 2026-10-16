@@ -14,7 +14,7 @@ use ff_analysis::{FeatherFlowProvider, FunctionRegistry};
 
 use crate::catalog::build_store_catalog;
 use crate::rewrite::rewrite_lake;
-use crate::statement::{LoadedStatement, Operation, Returns, StmtError, load_statements};
+use crate::statement::{LoadedStatement, Mode, Operation, Returns, StmtError, load_statements};
 
 /// One analysis finding: a stable `E0xx` code, the offending statement, and why.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,6 +70,41 @@ pub fn analyze_statement(
             &stmt.path,
             "a lake read must carry AT (VERSION => $snapshot); the read API's MVCC rule",
         ));
+    }
+
+    // Partial mode: the visible exception DataFusion's parser cannot even read (a
+    // write with ON CONFLICT ... WHERE, FOR UPDATE SKIP LOCKED, and the like).
+    // Checked by text — the SQL's leading verb against its folder (E012), no
+    // `SELECT *` (E011), and the declared parameters cover the `$placeholders`
+    // (E002). The oracle supplies the output schema and the E004/E005 type checks.
+    if stmt.mode == Mode::Partial {
+        if let Some(code) = leading_verb_mismatch_text(&stmt.sql, stmt.operation) {
+            diags.push(Diagnostic::new("E012", &stmt.path, code));
+        }
+        if regex::Regex::new(r"(?i)SELECT\s+\*")
+            .unwrap()
+            .is_match(&stmt.sql)
+        {
+            diags.push(Diagnostic::new(
+                "E011",
+                &stmt.path,
+                "SELECT * is forbidden; name every column",
+            ));
+        }
+        let declared: std::collections::BTreeSet<&str> =
+            stmt.params.iter().map(|p| p.name.as_str()).collect();
+        let placeholder = regex::Regex::new(r"\$([A-Za-z_]\w*)").unwrap();
+        for caps in placeholder.captures_iter(&stmt.sql) {
+            let name = &caps[1];
+            if !declared.contains(name) {
+                diags.push(Diagnostic::new(
+                    "E002",
+                    &stmt.path,
+                    format!("statement uses ${name} but the yaml does not declare it"),
+                ));
+            }
+        }
+        return diags;
     }
 
     // Parse once for the structural checks, then plan.
@@ -205,6 +240,30 @@ pub fn analyze_catalog(
 }
 
 // ── structural helpers over the sqlparser AST ──────────────────────────────
+
+/// Text-based leading-verb check for partial statements (which do not parse): the
+/// first SQL keyword must match the folder. Returns a message on mismatch.
+fn leading_verb_mismatch_text(sql: &str, op: Operation) -> Option<String> {
+    let first = sql
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .to_ascii_uppercase();
+    let ok = match op {
+        Operation::Read => first == "SELECT" || first == "WITH" || first == "COPY",
+        Operation::Create => first == "INSERT" || first == "COPY" || first == "MERGE",
+        Operation::Update => first == "UPDATE" || first == "MERGE",
+        Operation::Delete => first == "DELETE",
+    };
+    if ok {
+        None
+    } else {
+        Some(format!(
+            "statement verb {first:?} does not match its {:?} folder",
+            op.folder()
+        ))
+    }
+}
 
 /// The leading verb does not match the folder. Returns an explanatory message
 /// when it mismatches, `None` when it is fine.

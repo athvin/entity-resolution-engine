@@ -19,12 +19,14 @@ use er_entity_spec::{ColumnType, Entity, Store};
 use regex::{NoExpand, Regex};
 
 use crate::rewrite::rewrite_lake;
-use crate::statement::{LoadedStatement, Operation, StatementParam};
+use crate::statement::{LoadedStatement, Operation, Returns, StatementParam};
 
 /// The Rust argument type for a declared parameter (references for strings).
 fn param_arg_type(param: &StatementParam) -> String {
     let base = match param.param_type {
-        ColumnType::Varchar | ColumnType::Json => "&str",
+        ColumnType::Varchar => "&str",
+        // A JSON parameter binds as jsonb (tokio_postgres) / JSON value, not text.
+        ColumnType::Json => "&::serde_json::Value",
         ColumnType::Bigint => "i64",
         ColumnType::Double => "f64",
         ColumnType::Boolean => "bool",
@@ -127,10 +129,14 @@ fn to_pascal_case(name: &str) -> String {
         .collect()
 }
 
-/// Emit one control-plane read function returning `Vec<Entity>`, mapping each
-/// `tokio_postgres::Row` into the entity struct by column name. Every declared
-/// parameter is bound positionally as `$1`, `$2`, … in yaml order.
-fn emit_control_read_fn(entity: &Entity, stmt: &LoadedStatement) -> String {
+/// Emit one control-plane function. A statement that returns the entity (a read,
+/// or a write with `RETURNING`) runs `client.query` and maps each
+/// `tokio_postgres::Row` into the entity struct by column name, returning
+/// `Vec<Entity>`. A `returns: none` write runs `client.execute` and returns the
+/// affected-row count. Every declared parameter is bound positionally as `$1`,
+/// `$2`, … in yaml order; the real SQL (incl. RETURNING / ON CONFLICT / FOR
+/// UPDATE) is run verbatim.
+fn emit_control_fn(entity: &Entity, stmt: &LoadedStatement) -> String {
     let fn_name = stmt
         .path
         .file_stem()
@@ -150,18 +156,32 @@ fn emit_control_read_fn(entity: &Entity, stmt: &LoadedStatement) -> String {
         .map(|p| format!("&{}", p.name))
         .collect::<Vec<_>>()
         .join(", ");
-    let field_map = entity
-        .columns
-        .iter()
-        .map(|c| format!("                {}: row.get(\"{}\"),", c.name, c.name))
-        .collect::<Vec<_>>()
-        .join("\n");
 
     let mut out = String::new();
     out.push_str(&format!(
         "    /// {}\n",
         stmt.description.replace(['\n', '\r'], " ").trim()
     ));
+
+    if stmt.returns == Returns::None {
+        // A write with no result rows: return the affected-row count.
+        out.push_str(&format!(
+            "    pub async fn {fn_name}(\n{args}    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {{\n"
+        ));
+        out.push_str(&format!("        const SQL: &str = \"{escaped}\";\n"));
+        out.push_str(&format!(
+            "        client.execute(SQL, &[{bind_list}]).await\n"
+        ));
+        out.push_str("    }\n");
+        return out;
+    }
+
+    let field_map = entity
+        .columns
+        .iter()
+        .map(|c| format!("                {}: row.get(\"{}\"),", c.name, c.name))
+        .collect::<Vec<_>>()
+        .join("\n");
     out.push_str(&format!(
         "    pub async fn {fn_name}(\n{args}    ) -> ::std::result::Result<Vec<super::{struct_name}>, ::tokio_postgres::Error> {{\n"
     ));
@@ -186,13 +206,18 @@ fn emit_control_read_fn(entity: &Entity, stmt: &LoadedStatement) -> String {
 pub fn emit_query_modules(entity: &Entity, statements: &[LoadedStatement]) -> Option<String> {
     let mut by_op: BTreeMap<&'static str, Vec<String>> = BTreeMap::new();
     for stmt in statements {
-        if stmt.entity != entity.name || stmt.operation != Operation::Read {
+        if stmt.entity != entity.name {
             continue;
         }
         let f = if entity.has_store(Store::Duckdb) {
+            // Lake: only reads are emitted today; the engine's stage writes land later.
+            if stmt.operation != Operation::Read {
+                continue;
+            }
             emit_lake_read_fn(stmt)
         } else if entity.has_store(Store::Postgres) {
-            emit_control_read_fn(entity, stmt)
+            // Control: reads and writes (create/update/delete), including RETURNING.
+            emit_control_fn(entity, stmt)
         } else {
             continue;
         };
@@ -246,6 +271,26 @@ mod tests {
         assert!(module.contains("job_id: row.get(\"job_id\"),"));
         assert!(module.contains("WHERE org = $1 AND job_id = $2"));
         assert!(module.contains("client.query(SQL, &[&org, &job_id]).await?"));
+    }
+
+    #[test]
+    fn emits_job_control_write_modules() {
+        let cat = Catalog::load_dir(entities_dir()).unwrap();
+        let stmts = load_statements(&entities_dir(), &cat).unwrap();
+        let entity = cat.by_name("job").unwrap();
+        let module = emit_query_modules(entity, &stmts).expect("job has statements");
+
+        // create: enqueue returns the entity via RETURNING (query), jsonb param typed.
+        assert!(module.contains("pub mod create {"));
+        assert!(module.contains("pub async fn enqueue("));
+        assert!(module.contains("params: Option<&::serde_json::Value>"));
+        assert!(module.contains("ON CONFLICT"));
+        // update: claim returns the entity; mark returns none -> execute -> u64.
+        assert!(module.contains("pub mod update {"));
+        assert!(module.contains("pub async fn claim("));
+        assert!(module.contains("pub async fn mark("));
+        assert!(module.contains("-> ::std::result::Result<u64, ::tokio_postgres::Error>"));
+        assert!(module.contains("client.execute(SQL,"));
     }
 
     #[test]
