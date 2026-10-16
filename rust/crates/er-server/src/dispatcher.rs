@@ -69,13 +69,20 @@ async fn dispatch_once(
     };
 
     // The pipeline is synchronous and holds a !Send DuckDB Session, so run it on
-    // a blocking thread with owned inputs.
-    let jb = job.clone();
+    // a blocking thread with owned inputs. The steward apply path is special: it
+    // drains the org's pending staged actions into the lake and corrects (reusing
+    // the existing scores), which needs the async Postgres client, so it does not
+    // go through the blocking `run_job`.
     let env = org.env.clone();
-    let drop_root = org.drop_root.clone();
-    let outcome = tokio::task::spawn_blocking(move || run_job(&jb, &env, drop_root.as_deref()))
-        .await
-        .unwrap_or_else(|e| Err(format!("dispatcher task panicked: {e}")));
+    let outcome = if job.kind == "apply_corrections" {
+        drain_and_correct(client, &job.org, &env, &job.job_id).await
+    } else {
+        let jb = job.clone();
+        let drop_root = org.drop_root.clone();
+        tokio::task::spawn_blocking(move || run_job(&jb, &env, drop_root.as_deref()))
+            .await
+            .unwrap_or_else(|e| Err(format!("dispatcher task panicked: {e}")))
+    };
 
     let state = if outcome.is_ok() {
         "succeeded"
@@ -212,6 +219,94 @@ fn run_job(job: &Job, env: &Value, drop_root: Option<&str>) -> Result<(), String
         }
         other => Err(format!("dispatcher does not handle job kind '{other}'")),
     }
+}
+
+/// The steward apply path (`apply_corrections` jobs; enqueued by the assertion,
+/// unmerge, and bulk-resolve endpoints with `apply_now`). Drains the org's
+/// pending staged actions into the lake, then `run_correct` so they take effect
+/// over the EXISTING scores — no re-ingest, no re-score. This replaces the old
+/// Python `steward.drain_org`, which the all-Rust rebuild left unported: before
+/// this, those jobs ran a full re-run that never applied the staged actions.
+///
+/// Split across the async/sync boundary: the Postgres read/mark are async; the
+/// lake apply + correct run on a blocking thread holding the !Send DuckDB
+/// session. Idempotent under retry — only actions that actually applied are
+/// marked, so a re-drain after a `run_correct` failure finds nothing pending and
+/// simply re-corrects.
+///
+/// # Errors
+/// Propagates a Postgres read/mark failure, a lake open/apply failure, or a
+/// `run_correct` failure (as a human string, like `run_job` returns).
+pub async fn drain_and_correct(
+    client: &tokio_postgres::Client,
+    org_name: &str,
+    env: &Value,
+    run_id: &str,
+) -> Result<(), String> {
+    let pending = pg::pending_actions(client, org_name)
+        .await
+        .map_err(|e| format!("read pending actions: {e}"))?;
+    let env = env.clone();
+    let run_id_owned = run_id.to_string();
+    let now = fmt_epoch(unix_now());
+    let (applied, correct): (Vec<String>, Result<(), String>) =
+        tokio::task::spawn_blocking(move || apply_and_correct(&env, &pending, &run_id_owned, &now))
+            .await
+            .unwrap_or_else(|e| (Vec::new(), Err(format!("drain task panicked: {e}"))));
+    for id in &applied {
+        pg::mark_action_applied(client, id)
+            .await
+            .map_err(|e| format!("mark action applied {id}: {e}"))?;
+    }
+    correct
+}
+
+/// Blocking half of [`drain_and_correct`]: apply each pending action to the lake,
+/// then correct. Returns the action ids that applied (for the caller to mark)
+/// plus the correct outcome. Applying stops at the first failing action (it and
+/// the rest stay pending for a later retry); ids that already applied are still
+/// returned so they are not re-applied.
+fn apply_and_correct(
+    env: &Value,
+    pending: &[(String, Value)],
+    run_id: &str,
+    now: &str,
+) -> (Vec<String>, Result<(), String>) {
+    let Some(catalog) = env_str(env, "ER_LAKE_CATALOG") else {
+        return (
+            Vec::new(),
+            Err("org env missing ER_LAKE_CATALOG".to_string()),
+        );
+    };
+    let Some(data_path) = env_str(env, "ER_LAKE_DATA_PATH") else {
+        return (
+            Vec::new(),
+            Err("org env missing ER_LAKE_DATA_PATH".to_string()),
+        );
+    };
+    let session = match er_cli::open_lake(catalog, data_path) {
+        Ok(s) => s,
+        Err(e) => return (Vec::new(), Err(format!("open lake: {e}"))),
+    };
+    let mut applied = Vec::new();
+    for (action_id, action) in pending {
+        if let Err(e) = er_cli::apply_staged_action(&session, action_id, action, now) {
+            return (applied, Err(format!("apply {action_id}: {e}")));
+        }
+        applied.push(action_id.clone());
+    }
+    let config = match env_str(env, "ER_CONFIG_PATH")
+        .ok_or_else(|| "org env missing ER_CONFIG_PATH".to_string())
+        .and_then(|path| {
+            std::fs::read_to_string(path).map_err(|e| format!("read config {path}: {e}"))
+        })
+        .and_then(|text| er_config::load_config_str(&text).map_err(|e| format!("config: {e}")))
+    {
+        Ok(c) => c,
+        Err(e) => return (applied, Err(e)),
+    };
+    let correct = er_cli::run_correct(&session, &config, run_id, now).map_err(|e| e.to_string());
+    (applied, correct)
 }
 
 #[cfg(test)]
