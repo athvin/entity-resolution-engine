@@ -41,7 +41,23 @@ export const SURVIVORSHIP_RULES = [
   "recency",
   "frequency",
   "completeness",
+  "most_common",
+  "longest",
+  "shortest",
+  "numeric_max",
+  "numeric_min",
 ] as const;
+
+/** The one parameterized survivorship rule: `prioritized:<v1|v2|...>` (ranked
+ * value list, earlier = higher priority). Mirrors `jaro_winkler:<T>`. */
+export const PRIORITIZED_PREFIX = "prioritized:";
+
+/** Whether a token is a valid survivorship rule the editor can render. */
+export function isSurvivorshipRule(token: string): boolean {
+  if ((SURVIVORSHIP_RULES as readonly string[]).includes(token)) return true;
+  if (!token.startsWith(PRIORITIZED_PREFIX)) return false;
+  return token.slice(PRIORITIZED_PREFIX.length).length > 0;
+}
 
 /** The engine's non-parametric comparison level tokens (S4.3.1). */
 export const COMPARISON_LEVELS = [

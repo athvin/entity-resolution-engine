@@ -25,7 +25,9 @@ fn rule_terms(rule: &str, attribute: &str) -> Result<Vec<(String, String)>> {
             "COALESCE(updated_at_source, ingested_at)".to_string(),
             "DESC".to_string(),
         )],
-        "frequency" => vec![(
+        // `most_common` is a clearer alias of `frequency` (same ORDER BY term);
+        // both tokens stay valid and keep their own lineage attribution.
+        "frequency" | "most_common" => vec![(
             "count(*) OVER (PARTITION BY entity_id, value)".to_string(),
             "DESC".to_string(),
         )],
@@ -34,12 +36,63 @@ fn rule_terms(rule: &str, attribute: &str) -> Result<Vec<(String, String)>> {
             ("length(value)".to_string(), "DESC".to_string()),
         ],
         "validated" => vec![(format!("{attribute}_valid"), "DESC NULLS LAST".to_string())],
+        // --- Deep field-level rules (PR 1.6, Bucket A). Each is additive: it
+        // only renders when a chain names it, so configs using the five rules
+        // above are byte-identical. All are single-winner ORDER BY terms, so
+        // lineage attribution + record assembly are unchanged. ---
+        // Longest / shortest value (Cloudingo "most characters").
+        "longest" => vec![("length(value)".to_string(), "DESC".to_string())],
+        "shortest" => vec![("length(value)".to_string(), "ASC".to_string())],
+        // Numeric extremes; non-numeric values cast to NULL and sort last.
+        "numeric_max" => vec![(
+            "try_cast(value AS DOUBLE)".to_string(),
+            "DESC NULLS LAST".to_string(),
+        )],
+        "numeric_min" => vec![(
+            "try_cast(value AS DOUBLE)".to_string(),
+            "ASC NULLS LAST".to_string(),
+        )],
+        // Ranked value list, token-encoded `prioritized:v1|v2|v3` (precedent:
+        // the `jaro_winkler:<T>` comparison level). Earlier = higher priority;
+        // unlisted values sort last.
+        p if p.starts_with("prioritized:") => {
+            let cases = p["prioritized:".len()..]
+                .split('|')
+                .filter(|v| !v.is_empty())
+                .enumerate()
+                .map(|(i, v)| format!("WHEN '{}' THEN {i}", v.replace('\'', "''")))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let expr = if cases.is_empty() {
+                "2147483647".to_string()
+            } else {
+                format!("CASE value {cases} ELSE 2147483647 END")
+            };
+            vec![(expr, "ASC".to_string())]
+        }
         other => bail!(
             "survivorship: unknown rule {other:?} (S4.6 defines source_priority, recency, \
-             frequency, completeness, validated)"
+             frequency, completeness, validated; PR 1.6 adds longest, shortest, numeric_max, \
+             numeric_min, most_common, prioritized:<v1|v2|...>)"
         ),
     };
     Ok(terms)
+}
+
+/// A SQL-identifier-safe alias fragment for a rule token: non-`[A-Za-z0-9_]`
+/// become `_`. Existing simple rules (`source_priority`, …) are unchanged, so
+/// their generated SQL stays byte-identical; parameterized tokens like
+/// `prioritized:a|b` become `prioritized_a_b`.
+fn alias_key(rule: &str) -> String {
+    rule.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 /// The chain's rule names with any terminal element removed, matching
@@ -72,13 +125,18 @@ pub fn survivorship_decision_sql(
     for rule in &rules {
         let terms = rule_terms(rule, attribute)?;
         let mut differs: Vec<String> = Vec::new();
+        let key = alias_key(rule);
         for (idx, (expr, dir)) in terms.iter().enumerate() {
-            let alias = format!("_k_{rule}_{idx}");
+            let alias = format!("_k_{key}_{idx}");
             projections.push(format!("{expr} AS {alias}"));
             ordering.push(format!("{alias} {dir}"));
             differs.push(format!("_w.{alias} IS DISTINCT FROM _r.{alias}"));
         }
-        comparisons.push(format!("WHEN {} THEN '{rule}'", differs.join(" OR ")));
+        comparisons.push(format!(
+            "WHEN {} THEN '{}'",
+            differs.join(" OR "),
+            rule.replace('\'', "''")
+        ));
     }
     ordering.push(TERMINAL_SURVIVORSHIP_RULE.to_string());
 

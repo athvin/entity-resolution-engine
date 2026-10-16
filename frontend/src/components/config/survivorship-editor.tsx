@@ -2,8 +2,12 @@
 
 import { ChevronLeft, ChevronRight, Plus, X } from "lucide-react";
 
-import { SURVIVORSHIP_RULES } from "@/lib/domain/config";
+import { PRIORITIZED_PREFIX, SURVIVORSHIP_RULES } from "@/lib/domain/config";
 import { cn } from "@/lib/utils";
+
+// Dropdown sentinel for the parameterized `prioritized:<v1|v2|...>` rule — not a
+// real token; selecting it prompts for the ranked list, then encodes the token.
+const PRIORITIZED_SENTINEL = "__prioritized__";
 
 interface SurvivorshipEditorProps {
   chains: Record<string, string[]>;
@@ -35,14 +39,31 @@ export function SurvivorshipEditor({ chains, onChange, disabled }: SurvivorshipE
 
   function add(attribute: string, rule: string) {
     const chain = chains[attribute] ?? [];
-    if (chain.includes(rule)) return;
-    onChange(attribute, [...chain, rule]);
+    let token = rule;
+    if (rule === PRIORITIZED_SENTINEL) {
+      const raw =
+        typeof window !== "undefined"
+          ? window.prompt(
+              "Ranked values, highest priority first, separated by | (e.g. Active|Inactive)",
+            )
+          : null;
+      const cleaned = (raw ?? "")
+        .split("|")
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .join("|");
+      if (!cleaned) return;
+      token = `${PRIORITIZED_PREFIX}${cleaned}`;
+    }
+    if (chain.includes(token)) return;
+    onChange(attribute, [...chain, token]);
   }
 
   return (
     <div className="flex flex-col gap-3" data-testid="survivorship-editor">
       {Object.entries(chains).map(([attribute, chain]) => {
         const unused = SURVIVORSHIP_RULES.filter((rule) => !chain.includes(rule));
+        const canPrioritize = !chain.some((r) => r.startsWith(PRIORITIZED_PREFIX));
         return (
           <div key={attribute} className="flex flex-wrap items-center gap-2">
             <span className="w-28 shrink-0 text-sm font-medium">{attribute}</span>
@@ -98,7 +119,7 @@ export function SurvivorshipEditor({ chains, onChange, disabled }: SurvivorshipE
                   )}
                 </span>
               ))}
-              {!disabled && unused.length > 0 && (
+              {!disabled && (unused.length > 0 || canPrioritize) && (
                 <span className="relative inline-flex">
                   <select
                     aria-label={`Add rule to ${attribute}`}
@@ -115,6 +136,11 @@ export function SurvivorshipEditor({ chains, onChange, disabled }: SurvivorshipE
                         {rule}
                       </option>
                     ))}
+                    {canPrioritize && (
+                      <option value={PRIORITIZED_SENTINEL} className="text-foreground">
+                        prioritized…
+                      </option>
+                    )}
                   </select>
                   <Plus className="text-muted-foreground pointer-events-none absolute top-1 left-1 size-4" />
                 </span>
