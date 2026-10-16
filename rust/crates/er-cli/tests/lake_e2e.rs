@@ -823,6 +823,116 @@ fn assertions_enforce_clustering_through_ducklake() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
+/// PR 1.3c through the lake: a protected record is never-cut, and the resulting
+/// unsatisfiable `never` surfaces as an open `never_unsatisfiable` review. Three
+/// records from distinct entities are chained A=B=C by two `always` edges; the
+/// middle (B) is protected and a `never(A, C)` is added. The only A↔C path is the
+/// always chain — uncuttable by probability AND blocked by B's protection — so the
+/// fixpoint escalates instead of severing anything: A, B, C stay co-clustered and
+/// a review is written. (The pure cut-vs-escalate logic is unit-tested in
+/// er-reconcile; this exercises `load_protected_keys` + the review surfacing wired
+/// through DuckLake.)
+#[test]
+fn protected_record_is_never_cut_and_escalates_through_ducklake() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let (session, config, tmp) = standardized_lake("protect");
+    match_model(&session);
+    er_cli::run_reconcile(
+        &session,
+        &config,
+        "01RUNPBASE0000000000000000",
+        "2026-01-03 00:00:00",
+    )
+    .unwrap();
+
+    // One record from each of three distinct entities (deterministic by sort).
+    let base = membership_rows(&session);
+    let mut by_entity: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (e, r) in &base {
+        by_entity.entry(e.clone()).or_default().push(r.clone());
+    }
+    let mut ents: Vec<(String, Vec<String>)> = by_entity.into_iter().collect();
+    ents.sort();
+    assert!(ents.len() >= 3, "need three entities to chain");
+    for e in &mut ents {
+        e.1.sort();
+    }
+    let (ra, rb, rc) = (
+        ents[0].1[0].clone(),
+        ents[1].1[0].clone(),
+        ents[2].1[0].clone(),
+    );
+    assert!(ra != rb && rb != rc && ra != rc, "three distinct records");
+
+    // Chain A=B=C with two `always` edges (prob 1.0, model-independent).
+    for (i, (x, y)) in [(&ra, &rb), (&rb, &rc)].iter().enumerate() {
+        let always =
+            serde_json::json!({ "type": "add_assertion", "kind": "always", "a": x, "b": y });
+        er_cli::apply_staged_action(
+            &session,
+            &format!("act-always-{i}"),
+            &always,
+            "2026-01-04 00:00:00",
+        )
+        .unwrap();
+    }
+    // Protect the middle record and forbid the endpoints.
+    let protect =
+        serde_json::json!({ "type": "protect_record", "record_key": rb, "created_by": "steward" });
+    er_cli::apply_staged_action(&session, "act-protect", &protect, "2026-01-04 12:00:00").unwrap();
+    let never = serde_json::json!({ "type": "add_assertion", "kind": "never", "a": ra, "b": rc });
+    er_cli::apply_staged_action(&session, "act-never", &never, "2026-01-05 00:00:00").unwrap();
+
+    er_cli::run_reconcile(
+        &session,
+        &config,
+        "01RUNPROT00000000000000000",
+        "2026-01-06 00:00:00",
+    )
+    .unwrap();
+
+    // Nothing was cut: A, B, C remain in one entity (B, protected, never severed).
+    let after = membership_rows(&session);
+    let entity_of = |rec: &str| -> Option<String> {
+        after.iter().find(|(_, r)| r == rec).map(|(e, _)| e.clone())
+    };
+    let ea = entity_of(&ra).expect("A present after reconcile");
+    assert_eq!(
+        entity_of(&rb),
+        Some(ea.clone()),
+        "the protected middle record is never cut out"
+    );
+    assert_eq!(
+        entity_of(&rc),
+        Some(ea),
+        "the endpoint stays co-clustered — the never escalated, nothing was cut"
+    );
+
+    // The unsatisfiable never surfaced as an open `never_unsatisfiable` review.
+    let (ca, cb) = if ra <= rc {
+        (ra.clone(), rc.clone())
+    } else {
+        (rc.clone(), ra.clone())
+    };
+    let reviews = session
+        .query_strings(
+            "select rec_a_key, rec_b_key, status from lake.main.review_queue \
+             where reason = 'never_unsatisfiable'",
+        )
+        .unwrap();
+    assert!(
+        reviews
+            .iter()
+            .any(|r| r[0] == ca && r[1] == cb && r[2] == "open"),
+        "expected an open never_unsatisfiable review for ({ca}, {cb}), got {reviews:?}"
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
 #[test]
 fn preview_match_scores_without_committing() {
     if !enabled() {

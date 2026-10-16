@@ -106,14 +106,21 @@ pub fn shortest_path(source: &str, target: &str, edges: &[PathEdge]) -> Option<V
     best.get(target).cloned()
 }
 
-/// The minimum-probability unprotected edge on `path` (`< cut_protect_probability`),
-/// tiebroken by `(probability ASC, rec_a_key ASC, rec_b_key ASC)`; `None` when every
-/// hop is protected (the escalation condition).
+/// The minimum-probability cuttable edge on `path`, tiebroken by
+/// `(probability ASC, rec_a_key ASC, rec_b_key ASC)`; `None` when every hop is
+/// uncuttable (the escalation condition). An edge is uncuttable when its
+/// probability is `>= cut_protect_probability` (an `always`/high-confidence edge)
+/// OR either endpoint is a protected record (PR 1.3c): never-cut must never sever
+/// a protected record's membership, so such an edge is off-limits exactly like a
+/// protected-probability one, and a pair reachable only through protected records
+/// escalates instead of cutting. `protected` is empty on the base path, so this is
+/// byte-identical to the pre-1.3c behaviour.
 #[must_use]
 pub fn choose_cut_edge(
     path: &[String],
     edges: &[PathEdge],
     cut_protect_probability: f64,
+    protected: &BTreeSet<String>,
 ) -> Option<PathEdge> {
     let probability: BTreeMap<(String, String), f64> =
         edges.iter().map(|(l, r, v)| (canon(l, r), *v)).collect();
@@ -121,7 +128,10 @@ pub fn choose_cut_edge(
     for window in path.windows(2) {
         let pair = canon(&window[0], &window[1]);
         if let Some(&value) = probability.get(&pair) {
-            if value < cut_protect_probability {
+            if value < cut_protect_probability
+                && !protected.contains(&pair.0)
+                && !protected.contains(&pair.1)
+            {
                 candidates.push((pair.0, pair.1, value));
             }
         }
@@ -168,11 +178,17 @@ fn components(edges: &[PathEdge], nodes: &BTreeSet<String>) -> BTreeMap<String, 
 }
 
 /// Cut until no active `never` pair is co-clustered (S4.4.2 step 6).
+///
+/// `protected` (PR 1.3c) is the set of record keys a steward has pinned as
+/// never-cut: an edge touching one is off-limits to the cut, so a `never` pair
+/// reachable only through protected records escalates rather than severing the
+/// protected record. Empty on the base path ⇒ byte-identical to pre-1.3c.
 pub fn never_cut_fixpoint(
     edges: &[PathEdge],
     assertions: &[Assertion],
     nodes: &[String],
     cut_protect_probability: f64,
+    protected: &BTreeSet<String>,
     max_iterations: usize,
 ) -> Result<CutResult, NeverCutError> {
     let mut live: Vec<PathEdge> = edges.to_vec();
@@ -229,7 +245,7 @@ pub fn never_cut_fixpoint(
             else {
                 continue;
             };
-            match choose_cut_edge(&path, &live, cut_protect_probability) {
+            match choose_cut_edge(&path, &live, cut_protect_probability, protected) {
                 None => {
                     let pair = canon(&assertion.rec_a_key, &assertion.rec_b_key);
                     escalated.push((

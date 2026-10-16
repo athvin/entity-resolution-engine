@@ -2,6 +2,8 @@
 //! Python `er.review.never_cut.never_cut_fixpoint`. Regenerate with
 //! `uv run python rust/crates/er-reconcile/tests/gen_never_cut_golden.py`.
 
+use std::collections::BTreeSet;
+
 use er_reconcile::assertions::{Assertion, AssertionKind};
 use er_reconcile::never_cut::{PathEdge, never_cut_fixpoint};
 
@@ -53,8 +55,16 @@ fn never_cut_fixpoint_matches_python_golden() {
             })
             .collect();
         let cut_protect = case["cut_protect"].as_f64().unwrap();
+        // `protected` (PR 1.3c) is absent in every Python-parity case ⇒ an empty
+        // set ⇒ byte-identical to the pre-1.3c fixpoint. The protection behaviour
+        // itself has no Python equivalent and is covered by the Rust-only test below.
+        let protected: BTreeSet<String> = case
+            .get("protected")
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().map(|k| k.as_str().unwrap().to_string()).collect())
+            .unwrap_or_default();
 
-        let result = never_cut_fixpoint(&edges, &assertions, &[], cut_protect, 50)
+        let result = never_cut_fixpoint(&edges, &assertions, &[], cut_protect, &protected, 50)
             .unwrap_or_else(|e| panic!("{name}: {e}"));
 
         let got_cuts: Vec<(String, String, f64, String)> = result
@@ -107,4 +117,94 @@ fn never_cut_fixpoint_matches_python_golden() {
             "{name}: iterations differ",
         );
     }
+}
+
+/// PR 1.3c: a protected record is never-cut. On the path a—b—c with a `never`
+/// rule on (a, c) and a high `cut_protect` so neither 0.9 edge is protected by
+/// probability, the fixpoint normally cuts the lexicographically-first minimum
+/// edge (a—b). When `b` is protected, every edge on the only path touches `b`
+/// and is therefore off-limits, so the pair escalates instead of severing `b`.
+/// An empty protected set must reproduce the pre-1.3c cut exactly.
+#[test]
+fn protected_record_escalates_instead_of_being_cut() {
+    let edges: Vec<PathEdge> = vec![
+        ("a".to_string(), "b".to_string(), 0.9),
+        ("b".to_string(), "c".to_string(), 0.9),
+    ];
+    let assertions = vec![Assertion {
+        assertion_id: "n1".to_string(),
+        rec_a_key: "a".to_string(),
+        rec_b_key: "c".to_string(),
+        kind: AssertionKind::Never,
+        active: true,
+    }];
+    let nodes: Vec<String> = vec!["a".into(), "b".into(), "c".into()];
+    let cut_protect = 1.0;
+
+    // Baseline: no protection cuts the minimum lexicographic edge a—b.
+    let baseline = never_cut_fixpoint(
+        &edges,
+        &assertions,
+        &nodes,
+        cut_protect,
+        &BTreeSet::new(),
+        50,
+    )
+    .unwrap();
+    assert_eq!(
+        baseline
+            .cuts
+            .iter()
+            .map(|c| (c.rec_a_key.as_str(), c.rec_b_key.as_str()))
+            .collect::<Vec<_>>(),
+        vec![("a", "b")],
+        "unprotected run should cut a—b",
+    );
+    let no_escalations: Vec<(String, String, String)> = vec![];
+    assert_eq!(baseline.escalations, no_escalations);
+
+    // Protecting b makes both of its edges uncuttable ⇒ the never pair escalates.
+    let protected: BTreeSet<String> = ["b".to_string()].into_iter().collect();
+    let got = never_cut_fixpoint(&edges, &assertions, &nodes, cut_protect, &protected, 50).unwrap();
+    assert!(
+        got.cuts.is_empty(),
+        "no edge touching the protected record may be cut, got {:?}",
+        got.cuts,
+    );
+    assert_eq!(
+        got.escalations,
+        vec![("a".to_string(), "c".to_string(), "n1".to_string())],
+        "the unsatisfiable never pair should escalate",
+    );
+}
+
+/// PR 1.3c: protecting a record that is *not* on the cut path leaves the cut
+/// unchanged — protection is scoped to edges touching the protected record.
+#[test]
+fn protecting_an_offpath_record_does_not_change_the_cut() {
+    let edges: Vec<PathEdge> = vec![
+        ("a".to_string(), "b".to_string(), 0.9),
+        ("b".to_string(), "c".to_string(), 0.9),
+    ];
+    let assertions = vec![Assertion {
+        assertion_id: "n1".to_string(),
+        rec_a_key: "a".to_string(),
+        rec_b_key: "c".to_string(),
+        kind: AssertionKind::Never,
+        active: true,
+    }];
+    let nodes: Vec<String> = vec!["a".into(), "b".into(), "c".into(), "z".into()];
+    // `z` is isolated (no edges) and protected — it must not perturb the cut.
+    let protected: BTreeSet<String> = ["z".to_string()].into_iter().collect();
+    let got = never_cut_fixpoint(&edges, &assertions, &nodes, 1.0, &protected, 50).unwrap();
+    assert_eq!(
+        got.cuts
+            .iter()
+            .map(|c| (c.rec_a_key.as_str(), c.rec_b_key.as_str()))
+            .collect::<Vec<_>>(),
+        vec![("a", "b")],
+        "off-path protection must not change the chosen cut",
+    );
+    let no_escalations: Vec<(String, String, String)> = vec![];
+    assert_eq!(got.escalations, no_escalations);
 }

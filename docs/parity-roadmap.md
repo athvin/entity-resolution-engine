@@ -135,6 +135,22 @@ assistant. Tenant username/password auth is fully built (argon2id). M6 (PR #56) 
       contract). Endpoints `POST /records/{protect,unprotect}` (suppress generalised to `record_overlay_action`) + a steward
       "Protect" entity-view action. Proven by `pg_protect_master` e2e (real merge_scenario, since base_10 emits only
       `created`) + Playwright. *Follow-up → 1.3c: never-cut guarantee + contradiction precheck (the write-path half).*
+- [x] **1.3c Protect NEVER-CUT + contradiction surfacing** (the write-path half of 1.3b) — the reconcile never-cut
+      fixpoint now treats any edge incident to a protected record as uncuttable, exactly like a `cut_protect`-probability
+      edge: a `never` rule that could be satisfied only by severing a protected record escalates instead of cutting it.
+      `er_cli::load_protected_keys` (sibling of `load_suppressed_keys`, `kind='protect'`, missing-table-tolerant) threads a
+      `protected` set into `never_cut_fixpoint`/`choose_cut_edge`. The escalation (previously discarded) is **surfaced** as
+      an open **`never_unsatisfiable`** review-queue item — the reason code already in the schema + the existing review UI,
+      so no new table/enum/UI. Design choice: surface via the designed `review_queue` channel (not the reserved `cut_edges`
+      relational-cut table, whose NOT-NULL `match_probability`/lifecycle are for a different future feature). The
+      synchronous **409 precheck** was NOT added — `protect` is a *staged* overlay drained at reconcile, not a cheap
+      synchronous request like `unmerge_entity`, so forcing a 409 there would be awkward; the contradiction instead
+      surfaces at reconcile time via the review item (a more robust, source-agnostic catch). Determinism-safe: the review
+      write is gated on a protect overlay existing AND an escalation occurring, so the base path never touches
+      `review_queue` — base_10 + all golden e2e byte-identical, **no fixture changed**. Proven by two er-reconcile unit
+      tests (protected-record escalates; off-path protection is a no-op; empty set reproduces the prior cut) + a gated
+      `protected_record_is_never_cut_and_escalates_through_ducklake` DuckLake e2e. *(High-confidence escalations, possible
+      pre-1.3c, stay silent until a future rebaseline — noted in code.)*
 - [x] **1.4 Score-only match preview** (frontend-design §7.16) — `er_cli::preview_match` runs the committed model
       read-only (pairs + bucket counts + evidence waterfall) via a session-local temp table, committing NOTHING
       (no match_scores/reviews/golden; determinism contract untouched). New `GET /v1/orgs/{org}/match-preview`
