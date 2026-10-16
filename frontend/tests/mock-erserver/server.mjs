@@ -37,6 +37,37 @@ function goldenRecord(index) {
   };
 }
 
+const COMPANIES = [
+  "Acme Inc.",
+  "Globex Corporation",
+  "Initech",
+  "Umbrella Corp",
+  "Hooli",
+  "Stark Industries",
+  "Wayne Enterprises",
+  "Wonka Industries",
+];
+
+/** An Account/Org golden record, as an `entity_type: account` org's read API
+ * returns it: company_name/domain in place of the person given/family/email. */
+function accountGoldenRecord(index) {
+  const id = `01jm0a${String(index).padStart(6, "0")}`;
+  const company = COMPANIES[index % COMPANIES.length];
+  const slug = company.toLowerCase().replaceAll(/[^a-z0-9]+/g, "");
+  return {
+    entity_id: id,
+    company_name: company,
+    domain: `${slug}.example`,
+    phone_e164: `+1415555${String(2000 + index)}`,
+    addr_street: `${String(100 + index)} Market St`,
+    addr_city: "San Francisco",
+    addr_region: "CA",
+    addr_postal: "94103",
+    survivorship_version: 1,
+    assembled_at: "2026-09-24T06:01:00Z",
+  };
+}
+
 /**
  * A standardized source record, as `GET /v1/orgs/{org}/records` returns it.
  * Derived from the key so any pair the review fixtures name resolves, and the
@@ -97,6 +128,18 @@ export function initialState() {
         created_at: "2026-09-21T12:00:00Z",
         resources: { duckdb_threads: 2, duckdb_memory_limit: "4GB" },
       },
+      // An account/org-entity tenant: the read API serves company_name/domain,
+      // and the UI (wizard canonical attributes, duplicates preview, display
+      // names) switches to the account vocabulary off its `entity_type: account`
+      // config. Never pixel-compared.
+      "orgs-dev": {
+        name: "orgs-dev",
+        state: "active",
+        active_config_version: 1,
+        drop_root: "/dev/drop/orgs-dev",
+        created_at: "2026-09-22T12:00:00Z",
+        resources: { duckdb_threads: 2, duckdb_memory_limit: "4GB" },
+      },
     },
     pollsUntilActive: {},
     metrics: {
@@ -116,10 +159,19 @@ export function initialState() {
         open_reviews: 3,
         snapshot: 3,
       },
+      "orgs-dev": {
+        records: 44,
+        entities: 24,
+        duplicate_groups: 8,
+        records_in_duplicate_groups: 16,
+        open_reviews: 0,
+        snapshot: 12,
+      },
     },
     golden: {
       "acme-dev": Array.from({ length: 230 }, (_, index) => goldenRecord(index)),
       "mutable-dev": [],
+      "orgs-dev": Array.from({ length: 24 }, (_, index) => accountGoldenRecord(index)),
     },
     runs: {
       "acme-dev": [
@@ -439,6 +491,29 @@ export function initialState() {
         created_at: "2026-09-21T12:00:00Z",
         published_at: "2026-09-21T12:00:00Z",
       },
+      "orgs-dev": {
+        version: 1,
+        yaml: [
+          "tenant: account",
+          "entity_type: account",
+          "thresholds:",
+          "  auto_merge: 0.95",
+          "  review_low: 0.60",
+          "survivorship:",
+          "  company_name: [source_priority, frequency, completeness]",
+          "sources:",
+          "  crm:",
+          "    priority_rank: 1",
+          "  vendors:",
+          "    priority_rank: 2",
+        ].join("\n"),
+        config_hash: "mockhash-acct",
+        state: "published",
+        tier: null,
+        created_by: "operator",
+        created_at: "2026-09-22T12:00:00Z",
+        published_at: "2026-09-22T12:00:00Z",
+      },
     },
   };
 
@@ -670,6 +745,12 @@ function sourcesBlock(yaml) {
 /** The source names a config yaml declares, mirroring erserver's import check. */
 function sourceNames(yaml) {
   return [...sourcesBlock(yaml).matchAll(/^ {2}(\w+):/gm)].map((found) => found[1]);
+}
+
+/** True when the org's active config declares the account entity type — the
+ * read API then serves the company/domain projection instead of person fields. */
+function isAccountOrg(org) {
+  return /(^|\n)entity_type:\s*account\b/.test(state.configs[org]?.yaml ?? "");
 }
 
 function entityDetail(org, entityId) {
@@ -1083,8 +1164,11 @@ const server = http.createServer((req, res) => {
       const cursor = url.searchParams.get("cursor");
       let filtered = rows;
       if (q) {
+        // The person fields and the account fields both feed the search: account
+        // rows carry company_name/domain (and no given_name), person rows the
+        // reverse, so one filter serves either projection.
         filtered = rows.filter((row) =>
-          [row.given_name, row.family_name, row.email].some((value) =>
+          [row.given_name, row.family_name, row.email, row.company_name, row.domain].some((value) =>
             String(value ?? "")
               .toLowerCase()
               .includes(q),
@@ -1329,16 +1413,22 @@ const server = http.createServer((req, res) => {
     if ((match = /^\/v1\/orgs\/([^/]+)\/duplicates$/.exec(path)) && req.method === "GET") {
       // Every third golden entity is a two-member group, matching entityDetail.
       const rows = (state.golden[match[1]] ?? []).filter((_, index) => index % 3 === 0);
+      // Account orgs pair crm with vendors and preview company_name/domain; person
+      // orgs pair crm with webforms and preview name+email — the same entity-switch
+      // the real read API makes off the org's `entity_type`.
+      const account = isAccountOrg(match[1]);
       return send(res, 200, {
         items: rows.slice(0, Number(url.searchParams.get("limit") ?? 50)).map((row, index) => ({
           entity_id: row.entity_id,
           member_count: 2,
-          members: [`crm:C-${String(5000 + index * 3)}`, `webforms:W-${String(7000 + index * 3)}`],
-          given_name: row.given_name,
-          family_name: row.family_name,
-          email: row.email,
+          members: account
+            ? [`crm:C-${String(5000 + index * 3)}`, `vendors:V-${String(7000 + index * 3)}`]
+            : [`crm:C-${String(5000 + index * 3)}`, `webforms:W-${String(7000 + index * 3)}`],
+          ...(account
+            ? { company_name: row.company_name, domain: row.domain }
+            : { given_name: row.given_name, family_name: row.family_name, email: row.email }),
         })),
-        snapshot: 42,
+        snapshot: account ? 12 : 42,
         next_cursor: null,
       });
     }

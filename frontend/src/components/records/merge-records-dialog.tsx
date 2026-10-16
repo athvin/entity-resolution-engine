@@ -6,7 +6,8 @@ import { GitMerge, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { GOLDEN_ATTRIBUTES, displayName } from "@/lib/domain/attributes";
+import { goldenAttributes, displayName } from "@/lib/domain/attributes";
+import { useOrgEntityType } from "@/lib/query/config";
 import { diffFields } from "@/lib/domain/field-diff";
 import { useAddAssertion } from "@/lib/query/duplicates";
 import {
@@ -60,6 +61,7 @@ export function MergeRecordsDialog({
     }
   }, [open]);
 
+  const entityType = useOrgEntityType(org);
   const search = useGoldenRecords(org, debounced);
   const target = useEntityDetail(org, targetId ?? "");
   const candidates = useMemo(
@@ -76,7 +78,7 @@ export function MergeRecordsDialog({
   const comparison =
     targetId !== null && target.data
       ? diffFields(
-          GOLDEN_ATTRIBUTES,
+          goldenAttributes(entityType),
           source.golden as unknown as Record<string, unknown>,
           target.data.golden as unknown as Record<string, unknown>,
         )
@@ -120,7 +122,7 @@ export function MergeRecordsDialog({
       >
         <h2 id={headingId} className="flex items-center gap-2 text-base font-semibold">
           <GitMerge className="size-4" /> Merge{" "}
-          {displayName(source.golden) || source.golden.entity_id} with…
+          {displayName(source.golden, entityType) || source.golden.entity_id} with…
         </h2>
 
         {targetId === null ? (
@@ -158,7 +160,7 @@ export function MergeRecordsDialog({
                       data-testid={`merge-candidate-${row.entity_id}`}
                     >
                       <span className="min-w-0 flex-1 truncate">
-                        {displayName(row) || row.entity_id}
+                        {displayName(row, entityType) || row.entity_id}
                       </span>
                       <span className="text-muted-foreground truncate text-xs">
                         {row.email ?? ""}
@@ -176,9 +178,11 @@ export function MergeRecordsDialog({
             <div className="overflow-hidden rounded-md border text-sm" data-testid="merge-compare">
               <div className="bg-muted/50 grid grid-cols-[8rem_1fr_1fr] gap-2 border-b px-3 py-2 text-xs font-medium">
                 <span>Field</span>
-                <span className="truncate">{displayName(source.golden) || "this entity"}</span>
                 <span className="truncate">
-                  {target.data ? displayName(target.data.golden) || "target" : "target"}
+                  {displayName(source.golden, entityType) || "this entity"}
+                </span>
+                <span className="truncate">
+                  {target.data ? displayName(target.data.golden, entityType) || "target" : "target"}
                 </span>
               </div>
               {comparison.map((row) => (

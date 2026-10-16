@@ -10,9 +10,11 @@ import { Building2, Eye, LogOut, Moon, Play, ShieldCheck, Sun, User } from "luci
 import { bffFetch } from "@/lib/api/client";
 import type { Membership, SessionUser } from "@/lib/auth/types";
 import { useToast } from "@/components/ui/toaster";
+import { displayName } from "@/lib/domain/attributes";
 import { RUN_KINDS, type RunKind } from "@/lib/domain/run-kinds";
 import { NAV_ITEMS } from "@/lib/nav";
 import { useImpersonation, type AdminOrgRow } from "@/lib/query/admin";
+import { useOrgEntityType } from "@/lib/query/config";
 import { effectiveRole, useSession, type GoldenPage } from "@/lib/query/hooks";
 import { useSubmitJob } from "@/lib/query/steward";
 
@@ -63,6 +65,7 @@ export function CommandPalette({
   const [input, setInput] = useState("");
   const q = useDebounced(input.trim(), 200);
   const submit = useSubmitJob(org);
+  const entityType = useOrgEntityType(org);
   const toast = useToast();
   // Through `effectiveRole` and the session, not the `memberships` prop: that
   // prop carries real memberships, and under impersonation the role that
@@ -153,13 +156,13 @@ export function CommandPalette({
         {(records.data?.items.length ?? 0) > 0 && (
           <Command.Group heading="Records" className={GROUP_CLASS}>
             {records.data?.items.map((record) => {
-              const name =
-                [record.given_name, record.family_name].filter(Boolean).join(" ") ||
-                record.entity_id;
+              const name = displayName(record, entityType) || record.entity_id;
+              const secondary =
+                entityType === "account" ? (record.domain ?? "") : (record.email ?? "");
               return (
                 <Command.Item
                   key={record.entity_id}
-                  value={`record ${name} ${record.email ?? ""} ${record.entity_id}`}
+                  value={`record ${name} ${secondary} ${record.entity_id}`}
                   onSelect={() => {
                     run(() => {
                       router.push(`/${org}/records/${record.entity_id}`);
@@ -167,10 +170,14 @@ export function CommandPalette({
                   }}
                   className={ITEM_CLASS}
                 >
-                  <User className="size-4" />
+                  {entityType === "account" ? (
+                    <Building2 className="size-4" />
+                  ) : (
+                    <User className="size-4" />
+                  )}
                   <span className="min-w-0 truncate">{name}</span>
                   <span className="text-muted-foreground ml-auto truncate text-xs">
-                    {record.email ?? ""}
+                    {secondary}
                   </span>
                 </Command.Item>
               );
