@@ -49,7 +49,11 @@ assistant. Tenant username/password auth is fully built (argon2id). M6 (PR #56) 
       `DenyAccessKeyCreation`, which the dev loop needs for `lake.tf`); **applied + behaviorally verified** on the live
       key (prod mutation → AccessDenied, dev mutation → NotFound). Key is now dev-scoped/prod-guarded, not a prod-gate
       blocker. Committed into the repo.
-- [ ] **0.5 Promote-on-merge → prod** — digest-pinned prod rollout on merge to main via CI github-oidc role.
+- [x] **0.5 Infra gate (fmt + validate) on merge to main** — per the prod-apply decision (prod stays plan-only until a
+      tenant), 0.5 is a **credential-free** `terraform fmt -check` + per-env `terraform validate` gate on every
+      infra change (`.github/workflows/infra.yml`), proving the config stays valid + apply-ready without an IAM role.
+      The heavier state-diff `terraform plan` gate (needs a read-only OIDC plan role + state access) → **0.5b**, to do
+      when prod is actually applied. Also cleaned the pre-existing `envs/dev/rds.tf` fmt debt so the gate is green.
       *Blocked on the prod apply decision: prod EKS isn't applied (cost-deferred), so a real rollout has no target.
       Needs the deploy-mechanism pass + a go-ahead to apply prod (or a plan-gate-only interim). Revisit with user.*
 - [x] **0.6 Password-reset page** — added `(auth)/reset` (request) + `(auth)/reset/[token]` (confirm), fixed the

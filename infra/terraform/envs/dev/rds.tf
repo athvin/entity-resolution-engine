@@ -56,7 +56,7 @@ resource "aws_rds_cluster" "dev" {
   master_username = "er"
   master_password = random_password.db.result
 
-  db_subnet_group_name   = aws_db_subnet_group.dev.name
+  db_subnet_group_name    = aws_db_subnet_group.dev.name
   vpc_security_group_ids  = [aws_security_group.db.id]
   storage_encrypted       = true
   backup_retention_period = 1 # dev: a day is plenty
