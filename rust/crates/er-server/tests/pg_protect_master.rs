@@ -28,9 +28,10 @@ async fn golden_entity_ids(app: &axum::Router) -> Vec<String> {
         .await
         .unwrap();
     let mut ids = Vec::new();
-    for batch in arrow::ipc::reader::StreamReader::try_new(std::io::Cursor::new(bytes.to_vec()), None)
-        .unwrap()
-        .map(Result::unwrap)
+    for batch in
+        arrow::ipc::reader::StreamReader::try_new(std::io::Cursor::new(bytes.to_vec()), None)
+            .unwrap()
+            .map(Result::unwrap)
     {
         let idx = batch.schema().index_of("entity_id").unwrap();
         let col = batch
