@@ -12,14 +12,12 @@
 //! `tests/pg_e2e.rs` (the queue directly) and `tests/pg_http.rs` (the queue
 //! through the HTTP surface), both behind `ER_TEST_PG_DSN`.
 
-use tokio_postgres::{Client, Error as PgError, NoTls, Row};
+use tokio_postgres::{Client, Error as PgError, NoTls};
 
 use crate::Job;
 
 pub const QUEUED: &str = "queued";
 pub const DISPATCHING: &str = "dispatching";
-/// States that hold an org's single-writer slot (jobs_one_active_per_org).
-const ACTIVE_STATES: [&str; 3] = ["dispatching", "running", "canceling"];
 
 /// The control-plane schema (orgs + jobs + api_keys + config_versions + the
 /// load-bearing indexes). The `jobs`/`orgs` columns fold in the DDL that db.py
@@ -40,11 +38,11 @@ CREATE TABLE IF NOT EXISTS jobs (\
   kind text NOT NULL,\
   params jsonb NOT NULL DEFAULT '{}'::jsonb,\
   state text NOT NULL DEFAULT 'queued',\
-  priority integer NOT NULL DEFAULT 0,\
+  priority bigint NOT NULL DEFAULT 0,\
   idempotency_key text,\
   run_id text,\
-  attempt integer NOT NULL DEFAULT 0,\
-  max_attempts integer NOT NULL DEFAULT 3,\
+  attempt bigint NOT NULL DEFAULT 0,\
+  max_attempts bigint NOT NULL DEFAULT 3,\
   not_before timestamptz,\
   created_by text,\
   schedule_id text,\
@@ -121,17 +119,8 @@ CREATE TABLE IF NOT EXISTS staged_steward_actions (\
 );\
 CREATE INDEX IF NOT EXISTS staged_pending ON staged_steward_actions (org, state);";
 
-const JOB_COLS: &str = "job_id, org, kind, state, priority";
-
-fn job_from_row(row: &Row) -> Job {
-    Job {
-        job_id: row.get("job_id"),
-        org: row.get("org"),
-        kind: row.get("kind"),
-        state: row.get("state"),
-        priority: i64::from(row.get::<_, i32>("priority")),
-    }
-}
+// The job queue's SQL and row mapping are generated from entities/job/ — the five
+// functions below are thin wrappers over `er_entities::job::*`.
 
 /// Connect to the control-plane database, spawning the connection driver.
 ///
@@ -188,33 +177,27 @@ pub async fn enqueue(
     client: &Client,
     org: &str,
     kind: &str,
-    priority: i32,
+    priority: i64,
     idempotency_key: Option<&str>,
     params: Option<&serde_json::Value>,
 ) -> Result<Job, PgError> {
     let job_id = ulid::Ulid::new().to_string();
-    let inserted = client
-        .query_opt(
-            &format!(
-                "INSERT INTO jobs (job_id, org, kind, priority, idempotency_key, params) \
-                 VALUES ($1, $2, $3, $4, $5, COALESCE($6, '{{}}'::jsonb)) \
-                 ON CONFLICT (org, idempotency_key) WHERE idempotency_key IS NOT NULL \
-                 DO NOTHING RETURNING {JOB_COLS}"
-            ),
-            &[&job_id, &org, &kind, &priority, &idempotency_key, &params],
-        )
-        .await?;
-    if let Some(row) = inserted {
-        return Ok(job_from_row(&row));
-    }
-    // The key was already used: return the original submission's job.
-    let row = client
-        .query_one(
-            &format!("SELECT {JOB_COLS} FROM jobs WHERE org = $1 AND idempotency_key = $2"),
-            &[&org, &idempotency_key],
-        )
-        .await?;
-    Ok(job_from_row(&row))
+    // The statement is an idempotent upsert: a repeat idempotency key returns the
+    // original row via a no-op ON CONFLICT DO UPDATE, so exactly one row comes back.
+    let jobs = er_entities::job::create::enqueue(
+        client,
+        &job_id,
+        org,
+        kind,
+        priority,
+        idempotency_key,
+        params,
+    )
+    .await?;
+    Ok(jobs
+        .into_iter()
+        .next()
+        .expect("enqueue RETURNING yields exactly one row"))
 }
 
 /// Claim the next runnable job (queue.py `claim`): the highest-priority `queued`
@@ -225,25 +208,9 @@ pub async fn enqueue(
 /// # Errors
 /// Propagates a non-unique-violation query error.
 pub async fn claim(client: &Client) -> Result<Option<Job>, PgError> {
-    let active: Vec<&str> = ACTIVE_STATES.to_vec();
-    let res = client
-        .query_opt(
-            &format!(
-                "UPDATE jobs SET state = $1, started_at = now(), updated_at = now() \
-                 WHERE job_id = ( \
-                   SELECT j.job_id FROM jobs j \
-                   WHERE j.state = $2 AND (j.not_before IS NULL OR j.not_before <= now()) \
-                     AND NOT EXISTS ( \
-                       SELECT 1 FROM jobs a WHERE a.org = j.org AND a.state = ANY($3)) \
-                   ORDER BY j.priority DESC, j.job_id FOR UPDATE SKIP LOCKED LIMIT 1) \
-                 RETURNING {JOB_COLS}"
-            ),
-            &[&DISPATCHING, &QUEUED, &active],
-        )
-        .await;
-    match res {
-        Ok(Some(row)) => Ok(Some(job_from_row(&row))),
-        Ok(None) => Ok(None),
+    match er_entities::job::update::claim(client).await {
+        Ok(jobs) => Ok(jobs.into_iter().next()),
+        // A lost one-active-per-org race surfaces as a unique violation -> None.
         Err(e) if e.code() == Some(&tokio_postgres::error::SqlState::UNIQUE_VIOLATION) => Ok(None),
         Err(e) => Err(e),
     }
@@ -255,15 +222,7 @@ pub async fn claim(client: &Client) -> Result<Option<Job>, PgError> {
 /// # Errors
 /// Propagates the update error.
 pub async fn mark(client: &Client, job_id: &str, state: &str) -> Result<(), PgError> {
-    client
-        .execute(
-            "UPDATE jobs SET state = $1, updated_at = now(), \
-             finished_at = CASE WHEN $1 IN ('succeeded','failed','canceled') THEN now() \
-                                ELSE finished_at END \
-             WHERE job_id = $2",
-            &[&state, &job_id],
-        )
-        .await?;
+    er_entities::job::update::mark(client, state, job_id).await?;
     Ok(())
 }
 
@@ -293,13 +252,10 @@ pub async fn resume_job(client: &Client, org: &str, job_id: &str) -> Result<bool
 /// # Errors
 /// Propagates the query error.
 pub async fn get_job(client: &Client, org: &str, job_id: &str) -> Result<Option<Job>, PgError> {
-    let row = client
-        .query_opt(
-            &format!("SELECT {JOB_COLS} FROM jobs WHERE org = $1 AND job_id = $2"),
-            &[&org, &job_id],
-        )
-        .await?;
-    Ok(row.as_ref().map(job_from_row))
+    Ok(er_entities::job::read::by_id(client, org, job_id)
+        .await?
+        .into_iter()
+        .next())
 }
 
 /// The cross-org queue view for the operator console (`queue.py`
@@ -313,26 +269,7 @@ pub async fn list_jobs_all(
     state: Option<&str>,
     limit: i64,
 ) -> Result<Vec<Job>, PgError> {
-    let limit = limit.clamp(1, 200);
-    let mut clauses = vec!["TRUE".to_string()];
-    let mut params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = Vec::new();
-    // Push references to the `&str` values (tokio-postgres impls ToSql on &str).
-    if let Some(o) = org.as_ref() {
-        clauses.push(format!("org = ${}", params.len() + 1));
-        params.push(o);
-    }
-    if let Some(s) = state.as_ref() {
-        clauses.push(format!("state = ${}", params.len() + 1));
-        params.push(s);
-    }
-    params.push(&limit);
-    let sql = format!(
-        "SELECT {JOB_COLS} FROM jobs WHERE {} ORDER BY job_id DESC LIMIT ${}",
-        clauses.join(" AND "),
-        params.len()
-    );
-    let rows = client.query(&sql, &params).await?;
-    Ok(rows.iter().map(job_from_row).collect())
+    er_entities::job::read::list(client, org, state, limit.clamp(1, 200)).await
 }
 
 /// Merge DuckDB resource knobs into an org's `env` (`queue.py` `merge_org_env`):
@@ -359,13 +296,8 @@ pub async fn merge_org_env(
 /// # Errors
 /// Propagates the query error.
 pub async fn list_jobs(client: &Client, org: &str) -> Result<Vec<Job>, PgError> {
-    let rows = client
-        .query(
-            &format!("SELECT {JOB_COLS} FROM jobs WHERE org = $1 ORDER BY job_id DESC"),
-            &[&org],
-        )
-        .await?;
-    Ok(rows.iter().map(job_from_row).collect())
+    // Newest first, all of the org's jobs (no page cap on the per-org view).
+    er_entities::job::read::list(client, Some(org), None, i64::MAX).await
 }
 
 /// SHA-256 hex of `secret` — the exact at-rest key representation (`auth.py`

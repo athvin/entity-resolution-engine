@@ -1518,9 +1518,11 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
+ "chrono",
  "dedupe-core",
  "er-cli",
  "er-config",
+ "er-entities",
  "er-golden",
  "er-reconcile",
  "er-std",

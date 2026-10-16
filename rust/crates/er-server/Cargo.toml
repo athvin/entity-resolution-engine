@@ -18,6 +18,10 @@ path = "src/bin/er-dispatcher.rs"
 [dependencies]
 er-config = { path = "../er-config" }
 er-std = { path = "../er-std" }
+# The generated entity structs + typed control query functions (job, org, …): the
+# read/write path no longer hand-writes SQL or row mapping.
+er-entities = { path = "../er-entities" }
+chrono = { workspace = true }
 # The in-process dispatcher runs the whole pipeline over the claimed job's
 # DuckLake (run_all / correct / maintain / train) — no per-run k8s Jobs.
 er-cli = { path = "../er-cli" }

@@ -85,7 +85,7 @@ impl Job {
 
 pub mod create {
     //! @generated query functions for this entity + operation.
-    /// Queue a job (idempotent on the org idempotency key); returns the inserted row, or none when the key already exists.
+    /// Queue a job, idempotent on the org idempotency key (a repeat key returns the original row via a no-op upsert).
     pub async fn enqueue(
         client: &::tokio_postgres::Client,
         job_id: &str,
@@ -98,7 +98,8 @@ pub mod create {
         const SQL: &str =
             "INSERT INTO public.jobs (job_id, org, kind, priority, idempotency_key, params)
 VALUES ($1, $2, $3, $4, $5, coalesce($6, '{}'::jsonb))
-ON CONFLICT (org, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
+ON CONFLICT (org, idempotency_key) WHERE idempotency_key IS NOT NULL
+  DO UPDATE SET kind = jobs.kind
 RETURNING
   job_id,
   org,
@@ -211,6 +212,62 @@ WHERE org = $1 AND job_id = $2
             .collect())
     }
 
+    /// The job a given idempotency key already created (enqueue's dedup fallback).
+    pub async fn by_idempotency_key(
+        client: &::tokio_postgres::Client,
+        org: &str,
+        idempotency_key: &str,
+    ) -> ::std::result::Result<Vec<super::Job>, ::tokio_postgres::Error> {
+        const SQL: &str = "SELECT
+  job_id,
+  org,
+  kind,
+  params,
+  state,
+  priority,
+  idempotency_key,
+  run_id,
+  attempt,
+  max_attempts,
+  not_before,
+  created_by,
+  schedule_id,
+  resource_class,
+  trace_context,
+  created_at,
+  updated_at,
+  started_at,
+  finished_at
+FROM public.jobs
+WHERE org = $1 AND idempotency_key = $2
+";
+        let rows = client.query(SQL, &[&org, &idempotency_key]).await?;
+        Ok(rows
+            .iter()
+            .map(|row| super::Job {
+                job_id: row.get("job_id"),
+                org: row.get("org"),
+                kind: row.get("kind"),
+                params: row.get("params"),
+                state: row.get("state"),
+                priority: row.get("priority"),
+                idempotency_key: row.get("idempotency_key"),
+                run_id: row.get("run_id"),
+                attempt: row.get("attempt"),
+                max_attempts: row.get("max_attempts"),
+                not_before: row.get("not_before"),
+                created_by: row.get("created_by"),
+                schedule_id: row.get("schedule_id"),
+                resource_class: row.get("resource_class"),
+                trace_context: row.get("trace_context"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+                started_at: row.get("started_at"),
+                finished_at: row.get("finished_at"),
+            })
+            .collect())
+    }
+
     /// The queue view, newest first, optionally filtered by org and/or state (the operator console).
     pub async fn list(
         client: &::tokio_postgres::Client,
@@ -239,8 +296,11 @@ WHERE org = $1 AND job_id = $2
   started_at,
   finished_at
 FROM public.jobs
-WHERE ($1 IS NULL OR org = $1)
-  AND ($2 IS NULL OR state = $2)
+-- The `::text` casts let Postgres infer the optional-filter params' type (an
+-- `$x IS NULL` use alone is ambiguous to its planner; DuckDB infers it, Postgres
+-- does not). Casts are planned by DataFusion unchanged.
+WHERE ($1::text IS NULL OR org = $1)
+  AND ($2::text IS NULL OR state = $2)
 ORDER BY job_id DESC
 LIMIT $3
 ";
