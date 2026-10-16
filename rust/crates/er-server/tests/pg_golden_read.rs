@@ -102,6 +102,11 @@ async fn golden_records_read_over_ducklake() {
     std::fs::create_dir_all(tmp.join("data")).unwrap();
     let catalog = tmp.join("catalog.ducklake").to_string_lossy().into_owned();
     let data_path = tmp.join("data").to_string_lossy().into_owned();
+    // The org's config on disk, so the read API can resolve the auto-merge
+    // threshold for the run ledger's per-run auto-merge count (PR 1.5b).
+    let config_path = tmp.join("config.yaml");
+    std::fs::write(&config_path, TEST_YAML).unwrap();
+    let config_path = config_path.to_string_lossy().into_owned();
     populate_lake(&catalog, &data_path);
 
     // An org whose env points the read API at that lake.
@@ -118,7 +123,7 @@ async fn golden_records_read_over_ducklake() {
     let create = serde_json::json!({
         "name": "acme",
         "config_path": "/configs/acme.yaml",
-        "env": { "ER_LAKE_CATALOG": catalog, "ER_LAKE_DATA_PATH": data_path },
+        "env": { "ER_LAKE_CATALOG": catalog, "ER_LAKE_DATA_PATH": data_path, "ER_CONFIG_PATH": config_path },
     });
     let resp = app
         .clone()
@@ -413,6 +418,16 @@ async fn golden_records_read_over_ducklake() {
     assert_eq!(run_arr[0]["mode"], "full");
     assert_eq!(run_arr[0]["status"], "succeeded");
     assert!(run_arr[0]["config_hash"].as_str().is_some());
+    // PR 1.5b: the per-run auto-merge count. base_10 resolves 23 records to 10
+    // entities purely by score (no assertions), so the full run scored at least
+    // one pair at or above the auto-merge threshold and it attributes to this run.
+    let auto_merged = run_arr[0]["auto_merged_pairs"]
+        .as_u64()
+        .expect("runs row carries a numeric auto_merged_pairs");
+    assert!(
+        auto_merged >= 1,
+        "the full run auto-merged at least one scored pair, got {auto_merged}"
+    );
 
     // A review by id is a 404 when there's no review_queue / no such review.
     let resp = app

@@ -770,22 +770,76 @@ pub fn imports_list(
 ///
 /// # Errors
 /// Propagates a non-missing-table lake query error.
-pub fn runs_list(session: &Session, snapshot: i64) -> Result<Vec<Value>, String> {
+pub fn runs_list(
+    session: &Session,
+    snapshot: i64,
+    auto_merge: Option<f64>,
+) -> Result<Vec<Value>, String> {
     let sql = format!(
         "SELECT to_json(t) FROM ( \
            SELECT {RUN_COLUMNS} FROM lake.main.runs AT (VERSION => {snapshot}) \
            ORDER BY started_at DESC LIMIT 20 \
          ) t"
     );
+    let mut runs: Vec<Value> = match session.query_strings(&sql) {
+        Ok(rows) => rows
+            .iter()
+            .map(|r| serde_json::from_str(&r[0]).unwrap_or(Value::Null))
+            .collect(),
+        Err(e) => {
+            let s = e.to_string();
+            return if is_missing_table(&s) {
+                Ok(Vec::new())
+            } else {
+                Err(s)
+            };
+        }
+    };
+    // Per-run auto-merge count (PR 1.5b): pairs this run scored at or above the
+    // auto-merge threshold. `match_scores.run_id` is the pipeline run that scored
+    // them — a full/incremental run shares one run_id across match + reconcile
+    // (`run_all`), so the count attributes to the correct ledger row. Omitted when
+    // the threshold is unknown (org has no readable config) so we never report a
+    // count against the wrong threshold; tolerant of a lake that never matched.
+    if let Some(threshold) = auto_merge {
+        let counts = run_auto_merge_counts(session, snapshot, threshold)?;
+        for run in &mut runs {
+            if let Value::Object(map) = run {
+                if let Some(id) = map.get("run_id").and_then(Value::as_str) {
+                    let n = counts.get(id).copied().unwrap_or(0);
+                    map.insert("auto_merged_pairs".to_string(), Value::from(n));
+                }
+            }
+        }
+    }
+    Ok(runs)
+}
+
+/// `run_id -> count of active `match_scores` at or above `auto_merge`` for that
+/// run, pinned to `snapshot`. Empty when `match_scores` is absent (a lake that
+/// never matched), so the run list still renders with a zero count.
+fn run_auto_merge_counts(
+    session: &Session,
+    snapshot: i64,
+    auto_merge: f64,
+) -> Result<std::collections::BTreeMap<String, u64>, String> {
+    let sql = format!(
+        "SELECT run_id, count(*) FROM lake.main.match_scores AT (VERSION => {snapshot}) \
+         WHERE is_active AND match_probability >= {auto_merge} GROUP BY run_id"
+    );
     match session.query_strings(&sql) {
         Ok(rows) => Ok(rows
             .iter()
-            .map(|r| serde_json::from_str(&r[0]).unwrap_or(Value::Null))
+            .filter_map(|r| {
+                let id = r.first()?.clone();
+                let n = r.get(1)?.parse::<u64>().ok()?;
+                Some((id, n))
+            })
             .collect()),
         Err(e) => {
             let s = e.to_string();
             if is_missing_table(&s) {
-                Ok(Vec::new())
+                Ok(std::collections::BTreeMap::new())
             } else {
                 Err(s)
             }
