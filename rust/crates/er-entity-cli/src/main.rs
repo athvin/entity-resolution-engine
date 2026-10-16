@@ -69,8 +69,36 @@ fn load_tree(root: &Path) -> Result<GeneratedTree> {
     let entities_dir = root.join("entities");
     let catalog = Catalog::load_dir(&entities_dir)
         .with_context(|| format!("loading entities from {}", entities_dir.display()))?;
-    let tree = generate(&catalog).context("generating artifacts")?;
+    let mut tree = generate(&catalog).context("generating artifacts")?;
+    append_query_modules(&entities_dir, &catalog, &mut tree)?;
     Ok(tree)
+}
+
+/// Append the generated typed query functions (from the analyser) to each entity's
+/// Rust module. The struct + arrow_schema() come from er-entity-gen; the query
+/// functions come from er-sql-check (a text transform of the validated SQL). The
+/// result is one `src/<entity>.rs` carrying the struct and its `read`/`create`/…
+/// query modules, so a call site reads as `golden_record::read::list_page`.
+fn append_query_modules(
+    entities_dir: &Path,
+    catalog: &er_entity_spec::Catalog,
+    tree: &mut GeneratedTree,
+) -> Result<()> {
+    let statements = er_sql_check::load_statements(entities_dir, catalog)
+        .context("loading statements for the query emitter")?;
+    for entity in catalog.entities() {
+        let Some(module) = er_sql_check::emit_query_modules(entity, &statements) else {
+            continue;
+        };
+        let rel = format!("rust/crates/er-entities/src/{}.rs", entity.name);
+        let file = tree
+            .files
+            .iter_mut()
+            .find(|f| f.path == Path::new(&rel))
+            .with_context(|| format!("no generated Rust module for entity {}", entity.name))?;
+        file.contents.push_str(&module);
+    }
+    Ok(())
 }
 
 fn run_gen(root: &Path) -> Result<()> {

@@ -16,6 +16,9 @@ serde_json = { workspace = true }
 chrono = { workspace = true }
 arrow = { workspace = true }
 utoipa = { workspace = true }
+# The generated lake query functions run through DuckDB's query_arrow and return
+# arrow RecordBatch. tokio-postgres lands with the control-plane query functions.
+duckdb = { workspace = true }
 
 # No `[lints]` block: the generated crate root carries its own clippy suppressions,
 # since generated code is not written to the workspace's pedantic style.

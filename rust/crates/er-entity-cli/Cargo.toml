@@ -16,6 +16,7 @@ path = "src/main.rs"
 [dependencies]
 er-entity-spec = { path = "../er-entity-spec" }
 er-entity-gen = { path = "../er-entity-gen" }
+er-sql-check = { path = "../er-sql-check" }
 clap = { workspace = true }
 anyhow = { workspace = true }
 

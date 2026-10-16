@@ -30,5 +30,13 @@ serde = { workspace = true }
 serde_norway = { workspace = true }
 thiserror = { workspace = true }
 
+[dev-dependencies]
+# The oracle proves the type map against a real DuckDB: it builds a table from the
+# generated DDL and compares DuckDB's DESCRIBE to the entity. duckdb brings arrow
+# 58 (vs the analyser's arrow 57), but the oracle compares type-name strings, so
+# the two never meet. er-entity-gen renders the lake DDL the oracle loads.
+duckdb = { workspace = true }
+er-entity-gen = { path = "../er-entity-gen" }
+
 [lints]
 workspace = true
