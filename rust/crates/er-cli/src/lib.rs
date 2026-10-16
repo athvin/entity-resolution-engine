@@ -773,6 +773,65 @@ pub fn write_reviews(session: &Session, config: &Config, run_id: &str) -> Result
     Ok(())
 }
 
+/// Surface never-cut escalations (PR 1.3c) as open `never_unsatisfiable` pair
+/// reviews — a `never` pair the fixpoint could not separate without cutting a
+/// protected record. Idempotent via a MERGE on the pair + reason, like the
+/// gray-band writer, so a re-run keeps the same `review_id`/`first_seen_run_id`
+/// and only refreshes `last_seen_run_id`. Called only when a protect overlay is
+/// active AND escalations exist, so the base path never touches `review_queue`
+/// (the determinism contract holds). `escalations` carries canonicalized
+/// (`rec_a_key < rec_b_key`) pairs, matching the review_queue pair invariant.
+///
+/// # Errors
+/// Propagates lake DDL / MERGE errors.
+fn write_never_unsatisfiable_reviews(
+    session: &Session,
+    run_id: &str,
+    escalations: &[(String, String, String)],
+) -> Result<()> {
+    if escalations.is_empty() {
+        return Ok(());
+    }
+    create_ddl_table(session, "review_queue")?;
+    let run_id = esc(run_id);
+    let rows: Vec<String> = escalations
+        .iter()
+        .map(|(a, b, _assertion_id)| {
+            let (a, b) = (esc(a), esc(b));
+            format!(
+                "('never_unsatisfiable:{a}:{b}', 'pair', '{a}', '{b}', \
+                  cast(null as varchar), 'never_unsatisfiable', cast(null as double), \
+                  cast(null as json), 'open', '{run_id}', '{run_id}', \
+                  cast(null as varchar), cast(null as timestamp))"
+            )
+        })
+        .collect();
+    session.execute_batch(&format!(
+        "create temp table __nu_src as select * from (values {}) \
+         as t(review_id, subject_type, rec_a_key, rec_b_key, entity_id, reason, \
+              match_probability, waterfall, status, first_seen_run_id, last_seen_run_id, \
+              resolved_by, resolved_at)",
+        rows.join(", ")
+    ))?;
+    session.execute_batch(&format!(
+        "merge into {REVIEW_QUEUE} as target using __nu_src as source \
+           on target.rec_a_key = source.rec_a_key and target.rec_b_key = source.rec_b_key \
+          and target.reason = source.reason \
+         when matched then update set last_seen_run_id = source.last_seen_run_id \
+         when not matched then insert \
+             (review_id, subject_type, rec_a_key, rec_b_key, entity_id, reason, \
+              match_probability, waterfall, status, first_seen_run_id, last_seen_run_id, \
+              resolved_by, resolved_at) \
+             values \
+             (source.review_id, source.subject_type, source.rec_a_key, source.rec_b_key, \
+              source.entity_id, source.reason, source.match_probability, source.waterfall, \
+              source.status, source.first_seen_run_id, source.last_seen_run_id, \
+              source.resolved_by, source.resolved_at)"
+    ))?;
+    session.execute_batch("drop table __nu_src")?;
+    Ok(())
+}
+
 /// The canonical (smaller, larger) ordering of a record pair.
 fn canon(a: &str, b: &str) -> (String, String) {
     if a <= b {
@@ -828,6 +887,30 @@ fn load_active_assertions(session: &Session) -> Result<Vec<Assertion>> {
 fn load_suppressed_keys(session: &Session) -> Result<BTreeSet<String>> {
     match session.query_strings(&format!(
         "select record_key from {RECORD_OVERLAYS} where kind = 'suppress' and active"
+    )) {
+        Ok(rows) => Ok(rows.into_iter().map(|r| r[0].clone()).collect()),
+        Err(e) => {
+            if is_missing_table(&e.to_string()) {
+                Ok(BTreeSet::new())
+            } else {
+                Err(e.into())
+            }
+        }
+    }
+}
+
+/// Active protected `record_key`s from `lake.main.record_overlays` (empty if the
+/// table isn't there yet — the same missing-table tolerance as suppress). A
+/// protected record is pinned master on the read path (PR 1.3b) AND is never-cut
+/// by the reconcile never-cut fixpoint (PR 1.3c): no `never` rule may sever its
+/// membership. Empty/absent overlay ⇒ reconcile is byte-identical to a run with
+/// no protections (the determinism contract holds).
+///
+/// # Errors
+/// Propagates a non-missing-table query error.
+fn load_protected_keys(session: &Session) -> Result<BTreeSet<String>> {
+    match session.query_strings(&format!(
+        "select record_key from {RECORD_OVERLAYS} where kind = 'protect' and active"
     )) {
         Ok(rows) => Ok(rows.into_iter().map(|r| r[0].clone()).collect()),
         Err(e) => {
@@ -931,23 +1014,40 @@ pub fn run_reconcile(session: &Session, config: &Config, run_id: &str, run_at: &
         .map(|a| (a.rec_a_key.clone(), a.rec_b_key.clone()))
         .collect();
     edges.retain(|(a, b, _)| !never_pairs.contains(&(a.clone(), b.clone())));
+    // Protected records (PR 1.3c steward overlay): never-cut may not sever a
+    // protected record's membership. Empty/absent overlay ⇒ never-cut is
+    // byte-identical to a run with no protections. Loaded once here so the
+    // never-cut fixpoint and the escalation surfacing below share the set.
+    let protected = load_protected_keys(session)?;
     // never-cut: sever the lowest-probability edge on any path still
-    // co-clustering a never pair through OTHER records (S4.4.2).
+    // co-clustering a never pair through OTHER records (S4.4.2). An edge
+    // touching a protected record is off-limits; a never pair reachable only
+    // through protected records escalates instead (surfaced below).
     if !nevers.is_empty() {
-        let cuts = never_cut_fixpoint(
+        let result = never_cut_fixpoint(
             &edges,
             &nevers,
             &nodes,
             config.clustering.cut_protect_probability,
+            &protected,
             usize::try_from(config.clustering.max_iterations).unwrap_or(50),
         )
-        .map_err(|e| anyhow::anyhow!("never-cut: {e:?}"))?
-        .cuts;
-        let cutset: BTreeSet<(String, String)> = cuts
+        .map_err(|e| anyhow::anyhow!("never-cut: {e:?}"))?;
+        let cutset: BTreeSet<(String, String)> = result
+            .cuts
             .iter()
             .map(|c| (c.rec_a_key.clone(), c.rec_b_key.clone()))
             .collect();
         edges.retain(|(a, b, _)| !cutset.contains(&(a.clone(), b.clone())));
+        // Surface protect-induced contradictions: a never pair that could not be
+        // separated without cutting a protected record is a `never_unsatisfiable`
+        // review item (the designed reason code, already shown in the review UI).
+        // Gated on a protect overlay existing so the review_queue — and the
+        // determinism contract — is untouched on the base path. (High-confidence
+        // escalations, possible pre-1.3c, stay silent until we rebaseline.)
+        if !protected.is_empty() && !result.escalations.is_empty() {
+            write_never_unsatisfiable_reviews(session, run_id, &result.escalations)?;
+        }
     }
     let edges: Vec<(String, String)> = edges.into_iter().map(|(a, b, _)| (a, b)).collect();
 

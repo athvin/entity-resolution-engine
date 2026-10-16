@@ -224,6 +224,7 @@ pub fn resolve_with_prior(
             &nevers,
             &nodes,
             config.clustering.cut_protect_probability,
+            &BTreeSet::new(),
             config.clustering.max_iterations.try_into().unwrap(),
         )
         .unwrap()
