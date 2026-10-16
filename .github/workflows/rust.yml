@@ -149,7 +149,7 @@ jobs:
           key: duckdb-extensions-${{ hashFiles('rust/Cargo.lock') }}
           restore-keys: |
             duckdb-extensions-
-      - run: cargo test -p dedupe-cli -p er-cli -p er-server
+      - run: cargo test -p dedupe-cli -p er-cli -p er-server -p er-entity-diff
       - name: Extension loading (rapidfuzz)
         run: cargo test -p dedupe-core --test extensions
 

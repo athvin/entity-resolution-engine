@@ -34,7 +34,7 @@ check: fmt lint entities-check test
 #   make check-e2e ER_TEST_PG_DSN='host=localhost port=5433 user=er password=er dbname=er'
 check-e2e:
 	cd rust && DEDUPE_E2E_DUCKLAKE=1 DEDUPE_E2E_EXTENSIONS=1 ER_TEST_PG_DSN="$(ER_TEST_PG_DSN)" \
-	  cargo test -p dedupe-cli -p er-cli -p er-server
+	  cargo test -p dedupe-cli -p er-cli -p er-server -p er-entity-diff
 
 # --- frontend (standalone pnpm project; keeps its own gate) ---
 

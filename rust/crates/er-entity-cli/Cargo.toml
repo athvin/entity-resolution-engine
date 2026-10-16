@@ -17,8 +17,13 @@ path = "src/main.rs"
 er-entity-spec = { path = "../er-entity-spec" }
 er-entity-gen = { path = "../er-entity-gen" }
 er-sql-check = { path = "../er-sql-check" }
+er-entity-diff = { path = "../er-entity-diff" }
 clap = { workspace = true }
 anyhow = { workspace = true }
+# `diff`/`migrate` connect to the live stores; a small current-thread runtime
+# drives the async Postgres read from the otherwise-sync CLI.
+tokio = { workspace = true }
+tokio-postgres = { workspace = true }
 
 [lints]
 workspace = true
