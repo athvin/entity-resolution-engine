@@ -1,0 +1,7 @@
+kind: statement
+operation: read
+description: "A single golden record by entity id at a pinned snapshot (the entity detail page's master row)."
+params:
+  - { name: snapshot, type: bigint }
+  - { name: entity_id, type: varchar }
+returns: entity
