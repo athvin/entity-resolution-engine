@@ -1083,6 +1083,13 @@ const server = http.createServer((req, res) => {
       const detail = entityDetail(match[1], match[2]);
       return detail ? send(res, 200, detail) : send(res, 404, { detail: "not found" });
     }
+    if ((match = /^\/v1\/orgs\/([^/]+)\/mass-update$/.exec(path)) && req.method === "POST") {
+      return send(res, 200, {
+        status: "staged",
+        action_ids: ["mock-override"],
+        apply_job: "mock-mass-update-job",
+      });
+    }
     if ((match = /^\/v1\/orgs\/([^/]+)\/runs$/.exec(path)) && req.method === "GET") {
       return send(res, 200, state.runs[match[1]] ?? []);
     }

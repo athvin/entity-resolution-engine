@@ -622,6 +622,23 @@ fn ddl_specs() -> Vec<TableSpec> {
             ],
             BTreeMap::new(),
         ),
+        // Steward golden field overrides (mass-update): one latest-wins row per
+        // (entity_id, attribute); `value` NULL means the steward cleared the
+        // field. Applied as a post-assembly UPDATE over golden_records, so an
+        // empty table is a byte-exact no-op (the determinism contract holds).
+        tspec(
+            "golden_overrides",
+            vec![
+                nn("entity_id", VARCHAR),
+                nn("attribute", VARCHAR),
+                col("value", VARCHAR),
+                nn("created_by", VARCHAR),
+                nn("created_at", TIMESTAMP),
+                nn("source_action_id", VARCHAR),
+            ],
+            vec![key(&["entity_id", "attribute"])],
+            BTreeMap::new(),
+        ),
     ]
 }
 

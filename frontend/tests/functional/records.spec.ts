@@ -63,3 +63,28 @@ test.describe("golden records", () => {
     await expect(page).toHaveScreenshot("entity-detail.png", { fullPage: true });
   });
 });
+
+test.describe("mass update (steward)", () => {
+  test.beforeEach(async ({ page }) => {
+    await login(page, USERS.steward);
+    await page.goto(`/${ORG}/records`);
+  });
+
+  test("sets a golden field across matching records with a typed confirm", async ({ page }) => {
+    await page.getByTestId("mass-edit-open").click();
+    await page.getByTestId("mass-edit-field").selectOption("email");
+    await page.getByTestId("mass-edit-value").fill("bulk@example.test");
+    await page.getByTestId("mass-edit-review").click();
+
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    // The confirm restates the blast radius; type that exact count to proceed.
+    const description = (await dialog.textContent()) ?? "";
+    const count = /on (\d+) record/.exec(description)?.[1] ?? "";
+    expect(count).not.toBe("");
+    await dialog.getByRole("textbox").fill(count);
+    await dialog.getByRole("button", { name: "Set field" }).click();
+
+    await expect(page.getByTestId("mass-edit-done")).toContainText("Updated email");
+  });
+});

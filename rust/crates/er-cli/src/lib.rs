@@ -43,6 +43,8 @@ pub const ENTITIES: &str = "lake.main.entities";
 pub const ENTITY_EVENTS: &str = "lake.main.entity_events";
 pub const GOLDEN_LINEAGE: &str = "lake.main.golden_lineage";
 pub const GOLDEN_RECORDS: &str = "lake.main.golden_records";
+/// Steward golden field overrides (mass-update); applied over golden_records.
+pub const GOLDEN_OVERRIDES: &str = "lake.main.golden_overrides";
 pub const RUNS: &str = "lake.main.runs";
 pub const REVIEW_QUEUE: &str = "lake.main.review_queue";
 pub const ASSERTIONS: &str = "lake.main.assertions";
@@ -592,6 +594,53 @@ pub fn apply_staged_action(
                 ))?;
             }
         }
+        // Mass-update: set (override_field) or clear (clear_field) one golden
+        // field for one entity. Latest-wins per (entity_id, attribute); the
+        // override is applied over golden_records on the next assemble.
+        Some(kind @ ("override_field" | "clear_field")) => {
+            create_ddl_table(session, "golden_overrides")?;
+            let entity_id = field("entity_id");
+            let attribute = field("attribute");
+            // The 11 overridable golden columns (er-golden SCALAR + ADDRESS).
+            const OVERRIDABLE: [&str; 11] = [
+                "given_name",
+                "family_name",
+                "email",
+                "phone_e164",
+                "birth_date",
+                "addr_number",
+                "addr_street",
+                "addr_unit",
+                "addr_city",
+                "addr_region",
+                "addr_postal",
+            ];
+            if !entity_id.is_empty() && OVERRIDABLE.contains(&attribute) {
+                let value = if kind == "clear_field" {
+                    "NULL".to_string()
+                } else {
+                    action
+                        .get("value")
+                        .and_then(serde_json::Value::as_str)
+                        .map_or_else(|| "NULL".to_string(), |v| format!("'{}'", esc(v)))
+                };
+                session.execute_batch(&format!(
+                    "DELETE FROM {GOLDEN_OVERRIDES} WHERE entity_id = '{eid}' AND attribute = '{attr}'",
+                    eid = esc(entity_id),
+                    attr = esc(attribute),
+                ))?;
+                session.execute_batch(&format!(
+                    "INSERT INTO {GOLDEN_OVERRIDES} \
+                       (entity_id, attribute, value, created_by, created_at, source_action_id) \
+                     VALUES ('{eid}', '{attr}', {value}, '{by}', '{at}', '{aid}')",
+                    eid = esc(entity_id),
+                    attr = esc(attribute),
+                    by = esc(field("created_by")),
+                    at = esc(applied_at),
+                    aid = esc(action_id),
+                ))?;
+            }
+        }
         _ => {}
     }
     Ok(())
@@ -926,6 +975,31 @@ pub fn run_golden(session: &Session, config: &Config) -> Result<()> {
         ENTITIES,
     );
     session.execute_batch(&format!("create table {GOLDEN_RECORDS} as\n{records_sql}"))?;
+
+    // Apply steward golden field overrides (mass-update) — but ONLY if any have
+    // been staged. The table is created lazily by the first override action
+    // (apply_staged_action), so an org that never used the feature has no
+    // golden_overrides table, nothing runs, and golden_records is byte-identical
+    // (the determinism contract holds — base fixtures are untouched).
+    let overrides_present = session
+        .query_strings(
+            "select count(*) from duckdb_tables() \
+             where database_name = 'lake' and schema_name = 'main' \
+               and table_name = 'golden_overrides'",
+        )
+        .ok()
+        .and_then(|rows| {
+            rows.first()
+                .and_then(|r| r.first())
+                .and_then(|s| s.parse::<i64>().ok())
+        })
+        .unwrap_or(0)
+        > 0;
+    if overrides_present {
+        for stmt in er_golden::golden_overrides_update_sql(GOLDEN_RECORDS, GOLDEN_OVERRIDES) {
+            session.execute_batch(&stmt)?;
+        }
+    }
     Ok(())
 }
 
