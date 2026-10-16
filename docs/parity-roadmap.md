@@ -35,12 +35,20 @@ assistant. Tenant username/password auth is fully built (argon2id). M6 (PR #56) 
 ### Phase 0 — Delivery foundations (make "merge to master → it works" literal)
 - [x] **0.1 Frontend CI + this roadmap** — `.github/workflows/frontend.yml` (lint+types+unit, and the Playwright
       functional tier in the pinned image). *Merged — PR #97.*
-- [ ] **0.2 Coverage (nightly)** — cargo-llvm-cov (rust.yml) + vitest `--coverage` (frontend.yml), **nightly +
+- [x] **0.2 Coverage (nightly)** — cargo-llvm-cov (rust.yml) + vitest `--coverage` (frontend.yml), **nightly +
       workflow_dispatch only** (off the PR/main-push hot path). Non-regression floor via `--fail-under-lines`
       (Rust, initial 45) and `coverage.thresholds` (frontend, lines 28/fn 15/stmt 29/br 35, measured just-above).
-      Floors are a regression backstop and ratchet UP over time; the real gate is per-PR behavioral tests. *In progress.*
-- [ ] **0.3 `envs/prod` foundation** — network/EKS/Aurora-multi-AZ/lake/CloudTrail with `er-prod-*` names; ALB/WAF+SES stubbed (domain-blocked).
-- [ ] **0.4 Builder-key prod guard** — §8.2 `DenyProd*` denies on `builder.tf`; commit it into the repo.
+      Floors are a regression backstop and ratchet UP over time; the real gate is per-PR behavioral tests. *Merged — PR #98.*
+- [x] **0.3 `envs/prod` foundation (+ 0.4 combined)** — `infra/terraform/envs/prod/` reuses modules/{network,eks,
+      lake,efs} + prod Aurora (multi-AZ, warm floor, deletion-protected) with `er-prod-*` names, Environment=prod.
+      `terraform plan`-validated: **61 to add, 0 change** — apply-ready. **Not applied** (cost-smart: no idle prod
+      compute until there's a reason; one command applies it). CloudTrail deferred — the `core` org-trail already
+      covers prod management events; only prod-lake S3 *data-event* logging remains (needs a core audit-bucket-policy
+      change → its own PR). ALB/WAF + SES stay deferred (domain-blocked).
+- [x] **0.4 Builder-key prod guard** — `builder.tf` now carries the §8.2 `DenyProd*` denies (omitting
+      `DenyAccessKeyCreation`, which the dev loop needs for `lake.tf`); **applied + behaviorally verified** on the live
+      key (prod mutation → AccessDenied, dev mutation → NotFound). Key is now dev-scoped/prod-guarded, not a prod-gate
+      blocker. Committed into the repo.
 - [ ] **0.5 Promote-on-merge → prod** — digest-pinned prod rollout on merge to main via CI github-oidc role.
 - [ ] **0.6 Password-reset page** — add `(auth)/reset`; closes the self-serve username/password workflow.
 
@@ -68,3 +76,5 @@ assistant. Tenant username/password auth is fully built (argon2id). M6 (PR #56) 
 - 2026-10-15 — Program kicked off; plan approved; PR 0.1 opened (frontend CI gate + this tracker).
 - 2026-10-15 — PR 0.1 merged (#97): frontend CI gate green (incl. pinned-image visual baselines).
 - 2026-10-15 — PR 0.2 opened: nightly coverage (cargo-llvm-cov + vitest), floors as a non-regression backstop.
+- 2026-10-15 — PR 0.2 merged (#98). PR 0.3+0.4 opened: envs/prod (plan-validated 61-to-add, not applied) + builder
+  key §8.2 prod-guard (applied + verified live). Prod is apply-ready; builder key can no longer touch er-prod-*.
