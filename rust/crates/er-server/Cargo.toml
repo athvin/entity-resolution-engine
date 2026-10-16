@@ -17,6 +17,7 @@ path = "src/bin/er-dispatcher.rs"
 
 [dependencies]
 er-config = { path = "../er-config" }
+er-std = { path = "../er-std" }
 # The in-process dispatcher runs the whole pipeline over the claimed job's
 # DuckLake (run_all / correct / maintain / train) — no per-run k8s Jobs.
 er-cli = { path = "../er-cli" }

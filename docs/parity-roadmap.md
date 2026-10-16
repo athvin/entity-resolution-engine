@@ -77,7 +77,10 @@ assistant. Tenant username/password auth is fully built (argon2id). M6 (PR #56) 
       (match_scores absent + snapshot unchanged after preview).
 - [ ] **1.5 Confidence-threshold auto-merge / point-of-entry dedupe**.
 - [ ] **1.6 Deep field-level survivorship** — grouped/controlling fields, combined-list, prioritized, sum, max-chars.
-- [ ] **1.7 Nickname/synonym lexicon editing** — finish the M6 partial.
+- [x] **1.7 Nickname/synonym lexicon editing** — finished the M6 partial: `GET`/`PUT /v1/orgs/{org}/lexicon`
+      (per-org CSV at `ER_LEXICON_PATH`, canonicalised via `er_std::lexicon`, PUT enqueues a `run_all_full` to
+      apply), + a monochrome `LexiconEditor` on the config page. Determinism-safe (per-org file; not in
+      `config_hash`, no DDL/fixture/golden change). e2e `pg_lexicon` + viewer/admin functional tests.
 
 ### Phase 2 — Top 2 differentiators
 - [x] **2.1 Data-quality scoring models** — read-only `GET /data-quality` (Completeness / Junk / Stale /
