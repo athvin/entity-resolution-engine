@@ -91,3 +91,72 @@ impl AcctGoldenRecord {
         Schema::new(fields).with_metadata(metadata)
     }
 }
+
+pub mod read {
+    //! @generated query functions for this entity + operation.
+    /// A single account golden record by entity id at a pinned snapshot (the account detail page's master row).
+    pub fn by_id(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+        entity_id: &str,
+    ) -> ::duckdb::Result<Vec<::arrow::record_batch::RecordBatch>> {
+        const SQL: &str = "SELECT
+  entity_id,
+  company_name,
+  domain,
+  phone_e164,
+  addr_street,
+  addr_city,
+  addr_region,
+  addr_postal,
+  metadata,
+  survivorship_version,
+  assembled_at
+FROM lake.main.acct_golden_records AT (VERSION => {snapshot})
+WHERE entity_id = $1
+";
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = conn.prepare(&sql)?;
+        let batches = stmt
+            .query_arrow(::duckdb::params![entity_id])?
+            .collect::<Vec<_>>();
+        Ok(batches)
+    }
+
+    /// One keyset page of account golden records at a pinned snapshot, optionally filtered by a company/domain contains-search.
+    pub fn list_page(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+        after: Option<&str>,
+        q: Option<&str>,
+        limit: i64,
+    ) -> ::duckdb::Result<Vec<::arrow::record_batch::RecordBatch>> {
+        const SQL: &str = "SELECT
+  entity_id,
+  company_name,
+  domain,
+  phone_e164,
+  addr_street,
+  addr_city,
+  addr_region,
+  addr_postal,
+  metadata,
+  survivorship_version,
+  assembled_at
+FROM lake.main.acct_golden_records AT (VERSION => {snapshot})
+WHERE ($1 IS NULL OR entity_id > $1)
+  AND (
+    $2 IS NULL
+    OR (coalesce(company_name, '') || ' ' || coalesce(domain, '')) ILIKE $2 ESCAPE '\\'
+  )
+ORDER BY entity_id
+LIMIT $3
+";
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = conn.prepare(&sql)?;
+        let batches = stmt
+            .query_arrow(::duckdb::params![after, q, limit])?
+            .collect::<Vec<_>>();
+        Ok(batches)
+    }
+}
