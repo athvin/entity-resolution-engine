@@ -67,7 +67,7 @@ assistant. Tenant username/password auth is fully built (argon2id). M6 (PR #56) 
       path in the e2e tier.
 
 ### Phase 1 — Stable-core parity (generic; no external deps)
-- [~] **1.1 Account/Org entity type [EPIC]** — hand-written parallel schema behind an `entity_type` discriminator
+- [x] **1.1 Account/Org entity type [EPIC]** — hand-written parallel schema behind an `entity_type` discriminator
       (user-chosen over the `entity-framework-design.md` generator; the generator would later supersede — accepted).
       Decomposed:
   - [x] **1.1a foundation** — `EntityType` discriminator on `Config` (`#[serde(default, skip_serializing_if)]` →
@@ -86,8 +86,20 @@ assistant. Tenant username/password auth is fully built (argon2id). M6 (PR #56) 
         (match_scores/entity_membership/entities — one lake = one entity_type); parallel `acct_golden_*_sql` builders
         (person builders untouched → byte-identical). New `acct_base` fixture + `acct_e2e` behavioural test (3 dup pairs
         cluster, Umbrella singleton, 4 entities, golden assembles). seed_lexicon handles the empty (account) lexicon.
-  - [ ] **1.1d frontend** — Account attribute descriptors behind the `attributes.ts` seam + new-source wizard
-        `entity_type` selection + Account records/golden UI.
+  - [x] **1.1d frontend (browse + view)** — read API `golden_list`/`entity_detail` parameterized by a `GoldenView`
+        (`read.rs`), selected per request via `org_lake_golden` + `entity_type_from_env` (default Person →
+        person responses byte-identical); `acct_read.rs` e2e asserts the Account projection (company_name, no
+        given_name, "acme" search, detail golden). Frontend seam filled: `goldenAttributes`/`recordAttributes`/
+        `displayName`/`EntityType` in `attributes.ts` + `ACCOUNT_GOLDEN_ATTRIBUTES`; `useOrgEntityType` reads
+        `entity_type` from the active config (default person, parse-error-safe); `GoldenRecord` widened to the
+        person+account superset; records browser + entity detail render entity-aware columns/attributes. Person
+        DOM is byte-identical (per-column `className` carried so the Phone cell keeps its no-`truncate` class) →
+        `@visual` baselines unchanged. 8 vitest selector units + the account read e2e; all determinism fixtures
+        (config_hash/content_hash/std_hash/golden vectors) byte-identical.
+  - [ ] **1.1e frontend follow-ups** — entity-aware **new-source wizard** (`csv-profile.ts` Account canonical set +
+        typed mapping) and the secondary display surfaces (duplicates list, merge dialog, enrich labels,
+        field-compare grid, command palette, campaigns). All currently default-to-person → person-safe, Account
+        renders person-shaped there; several (e.g. duplicates) also need their own read-API `GoldenView` switch.
 - [x] **1.2 Mass UPDATE** — durable golden field overrides across a filtered set. New `golden_overrides` lake
       table + `override_field`/`clear_field` steward actions (ride the drain) + a post-assembly UPDATE over
       golden_records that is a byte-exact **no-op when unused** (base fixtures untouched; only the model_registry +
@@ -159,3 +171,9 @@ assistant. Tenant username/password auth is fully built (argon2id). M6 (PR #56) 
 - 2026-10-16 — Account epic 1.1a (hand-written approach chosen; prod stays plan-only): `entity_type` discriminator
   (hash-safe) + Account attribute set + parallel Account dbt tables. Full `cargo test --workspace` green; only
   `model_registry_golden.json` changed (config_golden + dbt_sources + base_10 person fixtures byte-identical).
+- 2026-10-16 — Account epic 1.1d (frontend browse + view) closes the epic for the read path. Read API serves either
+  entity via a request-selected `GoldenView` (default Person → person responses byte-identical); UI reads the org's
+  `entity_type` from config and renders entity-aware records/detail with person DOM byte-identical (Phone cell keeps
+  its no-`truncate` class → `@visual` unchanged). Gate: `pnpm check` (lint+prettier+tsc + 56 vitest incl. 8 new),
+  er-server tests (new `acct_read` + person `pg_golden_read`), fmt/clippy/doc clean, all determinism fixtures
+  byte-identical. Deferred to 1.1e: entity-aware new-source wizard + secondary display surfaces (person-safe today).

@@ -27,6 +27,8 @@ export interface ComparisonSpec {
 
 export interface ConfigView {
   tenant: string | null;
+  /** The tenant's entity type; "person" when the config omits `entity_type`. */
+  entityType: "person" | "account";
   thresholds: Thresholds | null;
   survivorship: Record<string, string[]>;
   blocking: BlockingRule[];
@@ -206,6 +208,7 @@ export function parseConfig(yamlText: string): ConfigView {
 
   return {
     tenant: typeof root.tenant === "string" ? root.tenant : null,
+    entityType: root.entity_type === "account" ? "account" : "person",
     thresholds,
     survivorship,
     blocking,
