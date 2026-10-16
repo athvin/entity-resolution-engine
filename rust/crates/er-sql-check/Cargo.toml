@@ -26,10 +26,9 @@ ff-analysis = { git = "https://github.com/athvin/feather-flow", rev = "23e24180e
 datafusion-common = "52"
 datafusion-expr = "52"
 regex = { workspace = true }
-thiserror = { workspace = true }
-
-[dev-dependencies]
+serde = { workspace = true }
 serde_norway = { workspace = true }
+thiserror = { workspace = true }
 
 [lints]
 workspace = true

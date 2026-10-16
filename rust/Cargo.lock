@@ -1544,6 +1544,7 @@ dependencies = [
  "er-entity-spec",
  "ff-analysis",
  "regex",
+ "serde",
  "serde_norway",
  "thiserror",
 ]

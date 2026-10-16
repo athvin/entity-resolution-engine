@@ -1,0 +1,9 @@
+kind: statement
+operation: read
+description: "One keyset page of golden records at a pinned snapshot, optionally filtered by a name/email contains-search."
+params:
+  - { name: snapshot, type: bigint }
+  - { name: after, type: varchar, nullable: true }
+  - { name: q, type: varchar, nullable: true }
+  - { name: limit, type: bigint }
+returns: entity
