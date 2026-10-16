@@ -1732,6 +1732,45 @@ async fn org_lake(
     })
 }
 
+/// Like [`org_lake`], but also resolves the org's auto-merge threshold from its
+/// config (for the run ledger's per-run auto-merge count, PR 1.5b). One
+/// `get_org`. The threshold is `None` when the org has no readable config.
+async fn org_lake_auto_merge(
+    state: &AppState,
+    org: &str,
+) -> Result<(dedupe_core::Session, Option<f64>), Box<axum::response::Response>> {
+    let Some(dsn) = &state.dsn else {
+        return Err(Box::new(detail_err(
+            StatusCode::NOT_IMPLEMENTED,
+            "read API requires Postgres",
+        )));
+    };
+    let client = connect_pg(dsn).await.map_err(|r| Box::new(*r))?;
+    let env = match pg::get_org(&client, org).await {
+        Ok(Some(o)) => o.env,
+        Ok(None) => {
+            return Err(Box::new(detail_err(
+                StatusCode::NOT_FOUND,
+                format!("no org '{org}'"),
+            )));
+        }
+        Err(e) => {
+            return Err(Box::new(detail_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("db: {e}"),
+            )));
+        }
+    };
+    let auto_merge = auto_merge_from_env(&env);
+    let session = read::open_org_lake(&env).map_err(|e| {
+        Box::new(detail_err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!("lake unavailable: {e}"),
+        ))
+    })?;
+    Ok((session, auto_merge))
+}
+
 /// The org's entity type, from its `ER_CONFIG_PATH` yaml. Person when the key is
 /// absent, the file is unreadable, or the config omits `entity_type` — so person
 /// orgs read exactly as before.
@@ -1742,6 +1781,18 @@ fn entity_type_from_env(env: &Value) -> er_config::EntityType {
         .and_then(|t| load_config_str(&t).ok())
         .map(|c| c.entity_type)
         .unwrap_or_default()
+}
+
+/// The org's auto-merge probability threshold, from its `ER_CONFIG_PATH` yaml.
+/// `None` when the key is absent or the file/config is unreadable — the run
+/// ledger then omits the per-run auto-merge count rather than report it against a
+/// guessed threshold (Thresholds has no Default to fall back to).
+fn auto_merge_from_env(env: &Value) -> Option<f64> {
+    env.get("ER_CONFIG_PATH")
+        .and_then(Value::as_str)
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|t| load_config_str(&t).ok())
+        .map(|c| c.thresholds.auto_merge)
 }
 
 /// Like [`org_lake`], but also resolves the org's [`read::GoldenView`] from its
@@ -2268,15 +2319,15 @@ async fn runs_list(
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let session = match org_lake(&state, &org).await {
-        Ok(s) => s,
+    let (session, auto_merge) = match org_lake_auto_merge(&state, &org).await {
+        Ok(pair) => pair,
         Err(r) => return *r,
     };
     let snapshot = match read::latest_snapshot(&session) {
         Ok(s) => s,
         Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
     };
-    match read::runs_list(&session, snapshot) {
+    match read::runs_list(&session, snapshot, auto_merge) {
         Ok(items) => Json(json!(items)).into_response(),
         Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
     }

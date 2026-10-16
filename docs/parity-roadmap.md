@@ -156,7 +156,20 @@ assistant. Tenant username/password auth is fully built (argon2id). M6 (PR #56) 
       (no match_scores/reviews/golden; determinism contract untouched). New `GET /v1/orgs/{org}/match-preview`
       (steward, spawn_blocking) + a "Preview matches" card on the duplicates page. e2e test proves read-only
       (match_scores absent + snapshot unchanged after preview).
-- [ ] **1.5 Confidence-threshold auto-merge / point-of-entry dedupe**.
+- [x] **1.5 Confidence-threshold auto-merge / point-of-entry dedupe** — already satisfied by the existing reconcile
+      path: `run_reconcile` clusters exactly the active `match_scores` at or above `config.thresholds.auto_merge`
+      (`er-cli/src/lib.rs`), and incremental link-new applies it at point-of-entry. No new code was needed; the gray band
+      `[review_low, auto_merge)` already routes to the review queue. The threshold IS the auto-merge policy.
+- [x] **1.5b Surface per-run auto-merge count** — the run ledger now shows, per run, how many pairs that run scored
+      at or above the auto-merge threshold. Derived at **read time** in `read::runs_list` via a `match_scores` count
+      grouped by `run_id` (a full/incremental run shares one `run_id` across match+reconcile, so it attributes to the
+      right ledger row), pinned to the same snapshot; the threshold is loaded from the org's `ER_CONFIG_PATH`
+      (`auto_merge_from_env`, `Option` — the count is omitted, not guessed, when no config is readable). **No persistence,
+      no schema migration** (avoided a `runs` column — CREATE-IF-NOT-EXISTS DDL makes that a de-facto migration — and the
+      unwritten `run_stages` counter path); tolerant of a lake that never matched. Determinism untouched (runtime
+      reporting read from a snapshot, not in the golden set). New `auto_merged_pairs` field on each `/v1/orgs/{org}/runs`
+      row + an "Auto-merged" column on the run-history table. Proven by a `pg_golden_read` assertion (base_10 full run
+      auto-merged ≥1 scored pair) + a `runs.spec` functional assertion + refreshed `runs.png` visual baselines.
 - [x] **1.6 Deep field-level survivorship (Bucket A)** — added single-winner rule tokens: `longest`, `shortest`,
       `numeric_max`, `numeric_min`, `most_common` (alias of `frequency`), and `prioritized:<v1|v2|...>` (ranked list).
       Additive `rule_terms` arms + palette entries only — NO config/DDL change, so every golden fixture is byte-identical

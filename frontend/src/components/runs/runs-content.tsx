@@ -242,6 +242,7 @@ export function RunsContent({ org }: { org: string }) {
                   <th className="py-1.5 pr-4 font-medium">Mode</th>
                   <th className="py-1.5 pr-4 font-medium">Status</th>
                   <th className="py-1.5 pr-4 font-medium">Duration</th>
+                  <th className="py-1.5 pr-4 font-medium">Auto-merged</th>
                   <th className="py-1.5 pr-4 font-medium">Model</th>
                   <th className="py-1.5 font-medium">Reason</th>
                 </tr>
@@ -254,6 +255,14 @@ export function RunsContent({ org }: { org: string }) {
                       <StateChip state={run.status ?? "unknown"} />
                     </td>
                     <td className="text-muted-foreground py-2 pr-4">{duration(run)}</td>
+                    <td
+                      className="text-muted-foreground py-2 pr-4 tabular-nums"
+                      data-testid="run-automerge"
+                    >
+                      {typeof run.auto_merged_pairs === "number"
+                        ? run.auto_merged_pairs.toLocaleString()
+                        : "—"}
+                    </td>
                     <td className="text-muted-foreground py-2 pr-4 font-mono text-xs">
                       {run.model_version ?? "—"}
                     </td>

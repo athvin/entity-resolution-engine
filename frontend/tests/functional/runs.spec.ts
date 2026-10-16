@@ -15,6 +15,9 @@ test.describe("runs monitor", () => {
     await expect(page.getByTestId("jobs-table")).toContainText("transient_io");
     await expect(page.getByTestId("runs-table")).toContainText("incremental");
     await expect(page.getByTestId("runs-table")).toContainText("72s");
+    // PR 1.5b: the per-run auto-merge count column.
+    await expect(page.getByTestId("runs-table")).toContainText("Auto-merged");
+    await expect(page.getByTestId("runs-table")).toContainText("148");
   });
 
   test("job detail shows live stages and the failure disposition", async ({ page }) => {

@@ -35,6 +35,8 @@ export interface RunRow {
   config_hash?: string;
   model_version?: string;
   rebuild_reason?: string;
+  /** PR 1.5b: pairs this run scored at or above the auto-merge threshold. */
+  auto_merged_pairs?: number;
   [key: string]: unknown;
 }
 

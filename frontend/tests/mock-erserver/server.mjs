@@ -183,6 +183,7 @@ export function initialState() {
           ended_at: "2026-09-24T06:01:16Z",
           model_version: "mv-2026-09-23",
           rebuild_reason: null,
+          auto_merged_pairs: 12,
         },
         {
           run_id: "01jm0000000000000000000001",
@@ -192,6 +193,7 @@ export function initialState() {
           ended_at: "2026-09-23T06:03:41Z",
           model_version: "mv-2026-09-23",
           rebuild_reason: "initial",
+          auto_merged_pairs: 148,
         },
       ],
     },
