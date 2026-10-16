@@ -5,6 +5,12 @@
 # Fail on any security advisory or unmaintained/yanked crate.
 yanked = "deny"
 version = 2
+# zip 6.0.0 was yanked upstream with no 6.x replacement published, and it is pinned
+# transitively by libduckdb-sys (=1.10505.0) — the exact DuckDB our determinism/golden
+# baselines depend on, which we deliberately do not bump. A yank is a registry
+# withdrawal, not a vulnerability; this is a narrow exception (yanked = "deny" still
+# applies to every other crate) until a replacement 6.x publishes.
+ignore = ["zip@6.0.0"]
 
 [licenses]
 # Allow only permissive licenses typical for this dependency tree.
