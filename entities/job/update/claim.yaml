@@ -1,0 +1,6 @@
+kind: statement
+operation: update
+mode: partial
+description: "Claim the highest-priority runnable job whose org has no active job (FOR UPDATE SKIP LOCKED); returns the claimed row, or none."
+params: []
+returns: entity

@@ -1,0 +1,8 @@
+kind: statement
+operation: update
+mode: partial
+description: "Record a job's next/terminal state, stamping finished_at for terminal states."
+params:
+  - { name: state, type: varchar }
+  - { name: job_id, type: varchar }
+returns: none
