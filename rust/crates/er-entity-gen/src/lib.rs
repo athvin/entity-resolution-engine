@@ -246,6 +246,21 @@ mod tests {
     }
 
     #[test]
+    fn audit_log_serial_id_renders_bigserial_but_the_struct_is_i64() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../entities");
+        let catalog = er_entity_spec::Catalog::load_dir(dir).expect("entities load");
+        let audit = catalog.by_name("audit_log").expect("audit_log entity");
+        // Postgres DDL: the serial bigint renders as bigserial.
+        let ddl = emit_postgres_ddl(audit).expect("renders Postgres DDL");
+        assert!(ddl.contains("id bigserial NOT NULL"), "{ddl}");
+        assert!(ddl.contains("PRIMARY KEY (id)"));
+        assert!(ddl.contains("detail jsonb NOT NULL DEFAULT '{}'::jsonb"));
+        // The struct keeps the plain bigint (i64) — serial is a DDL-only decoration.
+        let module = emit_rust_module(audit);
+        assert!(module.contains("pub id: i64,"), "{module}");
+    }
+
+    #[test]
     fn golden_record_lake_ddl_renders() {
         let ddl = emit_lake_ddl(&golden()).expect("renders DDL");
         assert!(ddl.starts_with("CREATE TABLE IF NOT EXISTS lake.main.golden_records ("));

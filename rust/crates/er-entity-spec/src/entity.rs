@@ -53,6 +53,12 @@ pub struct Column {
     /// Control-plane only: a SQL default expression.
     #[serde(default)]
     pub default: Option<String>,
+    /// Control-plane only: render this `bigint` column as `bigserial` (an
+    /// auto-incrementing identity). Affects the Postgres DDL *only* — the column
+    /// type stays `bigint` for the struct, the Arrow/JSON wire and the differ
+    /// (which `information_schema` also reports as `bigint`).
+    #[serde(default)]
+    pub serial: bool,
     /// Control-plane only: a foreign-key reference.
     #[serde(default)]
     pub references: Option<Reference>,

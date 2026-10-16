@@ -21,7 +21,14 @@ pub fn emit_postgres_ddl(entity: &Entity) -> Result<String, ConvertError> {
 
     let mut lines: Vec<String> = Vec::new();
     for column in &entity.columns {
-        let mut col = format!("  {} {}", column.name, column.col_type.postgres_type());
+        // A `serial` bigint renders as `bigserial` (identity) in Postgres DDL only;
+        // everywhere else it is a plain bigint.
+        let pg_type = if column.serial {
+            "bigserial"
+        } else {
+            column.col_type.postgres_type()
+        };
+        let mut col = format!("  {} {}", column.name, pg_type);
         if !column.nullable {
             col.push_str(" NOT NULL");
         }

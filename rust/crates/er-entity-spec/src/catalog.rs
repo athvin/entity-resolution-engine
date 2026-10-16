@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::entity::Entity;
-use crate::types::{Language, Store};
+use crate::types::{ColumnType, Language, Store};
 
 /// A spec validation or load failure, always naming the offending entity/file.
 #[derive(Debug, thiserror::Error)]
@@ -191,6 +191,13 @@ fn validate(entity: &Entity) -> Result<(), SpecError> {
                 format!("column {:?} needs a description", column.name),
             ));
         }
+        // `serial` is a bigint-only decoration (it renders bigserial).
+        if column.serial && column.col_type != ColumnType::Bigint {
+            return Err(invalid(
+                entity,
+                format!("serial column {:?} must be of type bigint", column.name),
+            ));
+        }
     }
 
     // The key is non-empty and every key column exists.
@@ -227,11 +234,12 @@ fn validate(entity: &Entity) -> Result<(), SpecError> {
             if column.default.is_some()
                 || column.references.is_some()
                 || column.accepted_values.is_some()
+                || column.serial
             {
                 return Err(invalid(
                     entity,
                     format!(
-                        "column {:?} carries a control-plane feature (default/references/accepted_values) but the entity is on the lake, which enforces only NOT NULL",
+                        "column {:?} carries a control-plane feature (default/references/accepted_values/serial) but the entity is on the lake, which enforces only NOT NULL",
                         column.name
                     ),
                 ));

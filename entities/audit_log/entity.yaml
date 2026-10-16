@@ -1,0 +1,38 @@
+kind: entity
+version: 1
+name: audit_log
+relation: audit_log
+description: "The append-only audit ledger: one row per authenticated mutation (actor, action, optional org scope, and structured detail)."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+  wire: [json]
+columns:
+  - name: id
+    type: bigint
+    nullable: false
+    serial: true
+    description: "Monotonic ledger id (bigserial); the primary key."
+  - name: at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the audited action occurred."
+  - name: actor
+    type: varchar
+    nullable: false
+    description: "The principal that performed the action (user:<email> or key:<id>)."
+  - name: org
+    type: varchar
+    description: "The tenant the action applies to, if the action is org-scoped."
+  - name: action
+    type: varchar
+    nullable: false
+    description: "The action name (e.g. steward.mass_update)."
+  - name: detail
+    type: json
+    nullable: false
+    default: "'{}'::jsonb"
+    description: "Structured detail for the action."
