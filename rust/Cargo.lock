@@ -1539,8 +1539,11 @@ dependencies = [
 name = "er-sql-check"
 version = "0.1.0"
 dependencies = [
+ "datafusion-common",
+ "datafusion-expr",
  "er-entity-spec",
  "ff-analysis",
+ "regex",
  "serde_norway",
  "thiserror",
 ]

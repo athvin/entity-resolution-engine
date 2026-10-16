@@ -19,6 +19,13 @@ repository.workspace = true
 [dependencies]
 er-entity-spec = { path = "../er-entity-spec" }
 ff-analysis = { git = "https://github.com/athvin/feather-flow", rev = "23e24180e009ddb91ec8f768f2f1496d17f5c70e" }
+# Pinned to the same major ff-analysis resolves (52), so the LogicalPlan this crate
+# inspects and the plan ff-analysis produces are the same types. sqlparser is used
+# only through ff_analysis::sqlparser (DataFusion's bundled 0.59), never the
+# standalone crate.
+datafusion-common = "52"
+datafusion-expr = "52"
+regex = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

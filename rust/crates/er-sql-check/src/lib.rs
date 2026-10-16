@@ -8,5 +8,9 @@
 //! ready for the planner.
 
 mod catalog;
+mod plan;
+mod rewrite;
 
 pub use catalog::build_store_catalog;
+pub use plan::parse_and_plan;
+pub use rewrite::{Rewritten, rewrite_lake};
