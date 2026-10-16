@@ -8,4 +8,5 @@ drizzle/
 pnpm-lock.yaml
 src/lib/api/openapi.json
 src/lib/api/schema.d.ts
+src/lib/entities/
 tests/functional/*-snapshots/

@@ -21,7 +21,7 @@ mod typescript;
 
 use std::path::PathBuf;
 
-use er_entity_spec::{Catalog, Entity, Language, Store};
+use er_entity_spec::{Catalog, Entity, Language, Store, Wire};
 
 pub use convert::{ConvertError, to_lake_table_spec};
 
@@ -54,8 +54,8 @@ impl GeneratedTree {
 const RUST_ENTITIES_DIR: &str = "rust/crates/er-entities/src";
 const LAKE_DDL_DIR: &str = "rust/crates/er-entities/ddl/lake";
 const PG_DDL_DIR: &str = "rust/crates/er-entities/ddl/postgres";
-// TS_BINDINGS_DIR / TS_READERS_DIR are introduced in Phase 2 when the TS artifacts
-// are written into the frontend tree.
+const TS_BINDINGS_DIR: &str = "frontend/src/lib/entities/bindings";
+const TS_READERS_DIR: &str = "frontend/src/lib/entities/readers";
 
 /// Generate every artifact the catalog's entities ask for, as an in-memory tree.
 /// Writing it to disk (and the stale-output check) is the CLI's job.
@@ -83,13 +83,28 @@ pub fn generate(catalog: &Catalog) -> Result<GeneratedTree, ConvertError> {
                 pg_ddl::emit_postgres_ddl(entity)?,
             );
         }
-        // The TypeScript binding and reader are emitted by `emit_ts_binding` /
-        // `emit_ts_reader` (unit-tested), but they are not written into the
-        // frontend tree yet: the reader imports `apache-arrow`, which the frontend
-        // does not depend on until the data lane moves to Arrow IPC (Phase 2). They
-        // land there in that phase, with `apache-arrow` installed and the generated
-        // directory exempted from the strict frontend lint, the same way the
-        // generated Rust crate is exempted from pedantic clippy.
+        // The TypeScript binding (the type) is emitted for every entity that lists
+        // `typescript`; the Arrow reader additionally for entities on the Arrow
+        // wire (the data lane). Control entities (json wire) get a binding only —
+        // their control-lane routes are typed through schema.d.ts as well. The
+        // generated `src/lib/entities/` directory is exempt from the frontend's
+        // strict eslint/prettier, the way the generated Rust crate is exempt from
+        // pedantic clippy.
+        if entity.has_language(Language::Typescript)
+            && (entity.has_wire(Wire::Arrow) || entity.has_wire(Wire::Json))
+        {
+            let type_name = casing::to_pascal_case(&entity.name);
+            tree.push(
+                format!("{TS_BINDINGS_DIR}/{type_name}.ts"),
+                typescript::emit_binding(entity),
+            );
+            if entity.has_wire(Wire::Arrow) {
+                tree.push(
+                    format!("{TS_READERS_DIR}/{type_name}.ts"),
+                    typescript::emit_reader(entity),
+                );
+            }
+        }
     }
 
     // The generated crate root, so `er-entities` is 100% generated: the clippy
@@ -298,9 +313,16 @@ mod tests {
                 .any(|p| p.ends_with("er-entities/ddl/lake/golden_records.sql"))
         );
         assert!(paths.iter().any(|p| p.ends_with("er-entities/src/lib.rs")));
-        // TS artifacts are emitted by the `emit_ts_*` functions but not written into
-        // the frontend tree until Phase 2 (the reader imports apache-arrow).
-        assert!(!paths.iter().any(|p| p.contains("bindings/")));
-        assert!(!paths.iter().any(|p| p.contains("readers/")));
+        // The data-lane golden_record gets both a binding and an Arrow reader.
+        assert!(
+            paths
+                .iter()
+                .any(|p| p.ends_with("entities/bindings/GoldenRecord.ts"))
+        );
+        assert!(
+            paths
+                .iter()
+                .any(|p| p.ends_with("entities/readers/GoldenRecord.ts"))
+        );
     }
 }
