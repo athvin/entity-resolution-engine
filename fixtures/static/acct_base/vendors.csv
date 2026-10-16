@@ -1,0 +1,4 @@
+vendor_id,name,url,tel,addr1,town,region,postcode,modified
+v1,"ACME, LLC",acme.com,+14155550100,1 Main Street,Springfield,CA,90001,2026-02-01
+v2,Globex Corp,www.globex.com,4155550200,2 Oak Avenue,Metropolis,NY,10001,2026-02-02
+v3,Initech Ltd,https://initech.io/about,415.555.0300,3 Pine Road,Gotham,IL,60601,2026-02-03

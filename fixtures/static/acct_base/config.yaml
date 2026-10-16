@@ -1,0 +1,91 @@
+tenant: acct_base
+entity_type: account
+
+thresholds:
+  auto_merge: 0.95
+  review_low: 0.60
+
+standardization:
+  email_strip_plus_addressing: false
+  email_placeholders: []
+  phone_default_region: US
+
+sources:
+  crm:
+    adapter: csv
+    priority_rank: 1
+    record_id_column: crm_id
+    updated_at_column: last_modified
+    date_format: "%Y-%m-%d"
+    columns:
+      company_name: company
+      domain:       website
+      phone:        phone
+      addr_street:  street
+      addr_city:    city
+      addr_region:  state
+      addr_postal:  zip
+  vendors:
+    adapter: csv
+    priority_rank: 2
+    record_id_column: vendor_id
+    updated_at_column: modified
+    date_format: "%Y-%m-%d"
+    columns:
+      company_name: name
+      domain:       url
+      phone:        tel
+      addr_street:  addr1
+      addr_city:    town
+      addr_region:  region
+      addr_postal:  postcode
+
+blocking:
+  - { key_type: domain_exact, expr: "domain_norm" }
+
+comparisons:
+  company_name: { levels: [exact, null] }
+
+survivorship:
+  company_name: [source_priority, recency]
+  domain:       [source_priority, recency]
+  phone_e164:   [validated, source_priority, recency]
+  address:      [source_priority, recency]
+
+training:
+  deterministic_rules:
+    - "l.domain_norm = r.domain_norm"
+  recall: 0.85
+  u_max_pairs: 1000000
+  u_seed: 20260101
+  u_sampling_method: bernoulli
+  u_min_count_per_level: null
+  u_num_chunks: 10
+  em_blocking_rules:
+    - "l.domain_norm = r.domain_norm"
+  em:
+    fix_u_probabilities: true
+    max_pairs: null
+
+storage:
+  data_path: "s3://lake/er/"
+  drop_dir: "/app/drop"
+  model_uri_prefix: "s3://lake/models/acct/"
+
+versions:
+  std_version: "1"
+  survivorship_version: "1"
+  address_parser_version: "1"
+
+generator:
+  seed: 42
+
+clustering:
+  max_iterations: 50
+  cut_protect_probability: 1.0
+
+coherence:
+  scorer: noop
+
+correction_pass:
+  cadence: "0 3 * * 0"

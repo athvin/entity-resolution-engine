@@ -81,8 +81,11 @@ assistant. Tenant username/password auth is fully built (argon2id). M6 (PR #56) 
         oracles; additive `acct_stg_arm` + `build_acct_int_std_records`; `run_standardize` branches on `entity_type`.
         R1 fix: `metadata_excluded`/`metadata_columns` now iterate `spec.columns.values()` (entity-agnostic;
         person set-identical). Person fixtures byte-identical; only NEW account/company/domain files added.
-  - [ ] **1.1c matching + pipeline** — hand-authored Account Splink model JSON (the config→SQL comparison builder is
-        NOT in Rust), wire match/reconcile/golden to pick model+attrs by `entity_type`.
+  - [x] **1.1c matching + pipeline** — hand-authored `acct_model_v1.json` (no TF-adjustment → deterministic); `run_match`/
+        `run_reconcile`/`run_golden` branch corpus + golden by `entity_type`; shared entity-agnostic tables reused
+        (match_scores/entity_membership/entities — one lake = one entity_type); parallel `acct_golden_*_sql` builders
+        (person builders untouched → byte-identical). New `acct_base` fixture + `acct_e2e` behavioural test (3 dup pairs
+        cluster, Umbrella singleton, 4 entities, golden assembles). seed_lexicon handles the empty (account) lexicon.
   - [ ] **1.1d frontend** — Account attribute descriptors behind the `attributes.ts` seam + new-source wizard
         `entity_type` selection + Account records/golden UI.
 - [x] **1.2 Mass UPDATE** — durable golden field overrides across a filtered set. New `golden_overrides` lake

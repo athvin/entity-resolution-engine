@@ -13,10 +13,12 @@ use er_hash::std_hash::{STD_HASH_COLUMNS, StdValue, table_content_hash};
 
 /// base_10's committed match model (frozen settings + TF snapshot).
 fn match_model(session: &Session) {
+    let config = load_config_str(include_str!("fixtures/test.yaml")).unwrap();
     let model_json = std::fs::read_to_string(repo_fixture("model_test_v1.json")).unwrap();
     let tf_csv = repo_fixture("model_test_v1.tf.csv");
     er_cli::run_match(
         session,
+        &config,
         &er_cli::MatchModel {
             settings_json: &model_json,
             tf_csv_path: std::path::Path::new(&tf_csv),
@@ -206,12 +208,13 @@ fn match_through_ducklake_matches_golden() {
         eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
         return;
     }
-    let (session, _config, tmp) = standardized_lake("match");
+    let (session, config, tmp) = standardized_lake("match");
 
     let model_json = std::fs::read_to_string(repo_fixture("model_test_v1.json")).unwrap();
     let tf_csv = repo_fixture("model_test_v1.tf.csv");
     er_cli::run_match(
         &session,
+        &config,
         &er_cli::MatchModel {
             settings_json: &model_json,
             tf_csv_path: std::path::Path::new(&tf_csv),
@@ -712,6 +715,7 @@ fn train_produces_a_scorable_model() {
     let trained = std::fs::read_to_string(&out_model).unwrap();
     er_cli::run_match(
         &session,
+        &load_config_str(include_str!("fixtures/test.yaml")).unwrap(),
         &er_cli::MatchModel {
             settings_json: &trained,
             tf_csv_path: &out_tf,

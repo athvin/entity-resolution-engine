@@ -196,6 +196,7 @@ fn main() -> Result<()> {
                 .with_context(|| format!("reading {}", model.display()))?;
             er_cli::run_match(
                 &session,
+                &config,
                 &er_cli::MatchModel {
                     settings_json: &settings,
                     tf_csv_path: &tf,

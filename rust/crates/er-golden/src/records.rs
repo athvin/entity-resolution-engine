@@ -7,7 +7,9 @@
 
 use er_config::Config;
 
-use crate::lineage::{ADDRESS_COLUMNS, SCALAR_ATTRIBUTES};
+use crate::lineage::{
+    ACCT_ADDRESS_COLUMNS, ACCT_SCALAR_ATTRIBUTES, ADDRESS_COLUMNS, SCALAR_ATTRIBUTES,
+};
 
 /// Apply steward golden field overrides (the mass-update feature) as a
 /// post-assembly UPDATE over `golden_table` from `overrides_table`: one UPDATE
@@ -60,6 +62,72 @@ pub fn golden_records_sql(
         .collect::<Vec<_>>()
         .join(",\n");
     let address_select = ADDRESS_COLUMNS
+        .iter()
+        .map(|c| format!("    max(r.{c}) filter (where l.attribute = 'address') as {c}"))
+        .collect::<Vec<_>>()
+        .join(",\n");
+
+    format!(
+        "with source_metadata as (
+    select
+        m.entity_id,
+        r.source_system,
+        to_json(map_from_entries(list(
+            struct_pack(key := r.source_record_id, value := r.metadata)
+            order by r.source_record_id
+        ))) as metadata
+    from {membership_table} as m
+    join {std_table} as r on r.record_key = m.record_key
+    join {entities_table} as e on e.entity_id = m.entity_id and e.status = 'active'
+    where coalesce(array_length(json_keys(r.metadata)), 0) > 0
+    group by m.entity_id, r.source_system
+),
+entity_metadata as (
+    select
+        entity_id,
+        to_json(map_from_entries(list(
+            struct_pack(key := source_system, value := metadata) order by source_system
+        ))) as metadata
+    from source_metadata
+    group by entity_id
+),
+survived as (
+    select
+        l.entity_id,
+{scalar_select},
+{address_select},
+        cast('{version}' as VARCHAR) as survivorship_version
+    from {lineage_table} as l
+    join {std_table} as r on r.record_key = l.record_key
+    join {entities_table} as e on e.entity_id = l.entity_id and e.status = 'active'
+    group by l.entity_id
+)
+select s.*, coalesce(m.metadata, '{{}}'::json) as metadata
+from survived as s
+left join entity_metadata as m using (entity_id)"
+    )
+}
+
+/// The Account `acct_golden_records` assembly — parallel to [`golden_records_sql`]
+/// over the Account survivable columns (`company_name, domain, phone_e164` +
+/// the four `addr_*` under the `address` token). The person builder above is
+/// left byte-for-byte untouched so its golden fixtures do not move.
+#[must_use]
+pub fn acct_golden_records_sql(
+    config: &Config,
+    lineage_table: &str,
+    std_table: &str,
+    membership_table: &str,
+    entities_table: &str,
+) -> String {
+    let version = config.versions.survivorship_version.replace('\'', "''");
+
+    let scalar_select = ACCT_SCALAR_ATTRIBUTES
+        .iter()
+        .map(|a| format!("    max(r.{a}) filter (where l.attribute = '{a}') as {a}"))
+        .collect::<Vec<_>>()
+        .join(",\n");
+    let address_select = ACCT_ADDRESS_COLUMNS
         .iter()
         .map(|c| format!("    max(r.{c}) filter (where l.attribute = 'address') as {c}"))
         .collect::<Vec<_>>()
