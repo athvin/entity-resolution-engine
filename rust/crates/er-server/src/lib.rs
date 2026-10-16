@@ -2419,13 +2419,14 @@ async fn add_assertion(
     if !body.apply_now {
         return staged_response(StatusCode::CREATED, &action_id);
     }
-    // apply_now: enqueue the incremental rebuild that drains the staged action.
+    // apply_now: enqueue the steward drain — apply the staged actions into the
+    // lake, then correct (reconcile/golden/reviews over the existing scores).
     let idem = format!("assert-apply:{}", ulid::Ulid::new());
     let params = json!({ "skip_ingest": true });
     match pg::enqueue(
         &client,
         &org,
-        "run_all_incremental",
+        "apply_corrections",
         0,
         Some(&idem),
         Some(&params),
@@ -2706,13 +2707,14 @@ async fn unmerge_entity(
         )
             .into_response();
     }
-    // apply_now: enqueue the incremental rebuild that drains + re-reconciles.
+    // apply_now: enqueue the steward drain — apply the staged never-assertions
+    // into the lake, then correct (re-reconcile over the existing scores).
     let idem = format!("unmerge-apply:{}", ulid::Ulid::new());
     let params = json!({ "skip_ingest": true });
     match pg::enqueue(
         &client,
         &org,
-        "run_all_incremental",
+        "apply_corrections",
         0,
         Some(&idem),
         Some(&params),
@@ -2893,7 +2895,7 @@ async fn bulk_resolve_reviews(
         match pg::enqueue(
             &client,
             &org,
-            "run_all_incremental",
+            "apply_corrections",
             0,
             Some(&idem),
             Some(&params),

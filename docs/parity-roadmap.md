@@ -57,6 +57,15 @@ assistant. Tenant username/password auth is fully built (argon2id). M6 (PR #56) 
       password?" link on login. Functional tests (5) + regenerated login visual baselines. Completes the self-serve
       tenant username/password workflow.
 
+### Prerequisite fixes (discovered during Phase 1 scoping)
+- [x] **P1 Dispatcher staged-action drain** — the all-Rust rebuild never ported the Python `steward.drain_org`,
+      so in production the dispatcher **never applied staged steward actions** (bulk-resolve, assertions, unmerge
+      all staged intent that never took effect; e2e tests masked it by calling `apply_staged_action` directly).
+      Added `dispatcher::drain_and_correct` + an `apply_corrections` job kind (the steward apply_now path now
+      enqueues it): drain pending actions into the lake → `run_correct`. Idempotent under retry. Un-breaks M6
+      steward and is the prerequisite for PR 1.2 (mass ops) + 1.3 (exceptions). Regression test drives the real
+      path in the e2e tier.
+
 ### Phase 1 — Stable-core parity (generic; no external deps)
 - [ ] **1.1 Account/Org entity type** — generalize the person-centric schema across standardize/block/match/survivorship.
 - [ ] **1.2 Mass update / mass delete** — filtered mass field-update + mass-delete with preview + audit.
@@ -85,3 +94,5 @@ assistant. Tenant username/password auth is fully built (argon2id). M6 (PR #56) 
   key §8.2 prod-guard (applied + verified live). Prod is apply-ready; builder key can no longer touch er-prod-*.
 - 2026-10-15 — PR 0.3+0.4 merged (#99). Phase 0 nearly done (0.5 blocked on the prod-apply decision). PR 0.6 opened:
   password-reset pages + PUBLIC_PATHS fix + login link; completes the tenant username/password workflow.
+- 2026-10-15 — PR 0.6 merged (#100). Phase 1 scoping found a prod bug: steward-action drain was never wired into the
+  Rust dispatcher. Opened PR P1 (fix) to wire it before building mass-ops on that path.
