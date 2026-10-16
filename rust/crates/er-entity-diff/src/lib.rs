@@ -6,8 +6,12 @@
 //! column in declaration order. Each difference is classified safe (a plan can
 //! auto-apply it) or breaking (it needs an explicit, human-written migration).
 
+mod lake;
+mod migrate;
 mod postgres;
 
+pub use lake::read_lake_columns;
+pub use migrate::{MigrationPlan, plan_migration};
 pub use postgres::read_postgres_columns;
 
 use er_entity_spec::{Catalog, Entity, Store};

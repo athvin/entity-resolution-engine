@@ -1395,6 +1395,7 @@ name = "er-entity-diff"
 version = "0.1.0"
 dependencies = [
  "duckdb",
+ "er-entity-gen",
  "er-entity-spec",
  "serde_norway",
  "thiserror",

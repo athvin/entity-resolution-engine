@@ -12,6 +12,8 @@ repository.workspace = true
 # and the boot-time applier build on this.
 [dependencies]
 er-entity-spec = { path = "../er-entity-spec" }
+# The migration-plan writer renders CREATE TABLE / ADD COLUMN from the catalog.
+er-entity-gen = { path = "../er-entity-gen" }
 tokio-postgres = { workspace = true }
 duckdb = { workspace = true }
 thiserror = { workspace = true }
