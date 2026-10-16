@@ -18,7 +18,7 @@ import {
   type GoldenRecord,
   type LineageRow,
 } from "@/lib/query/hooks";
-import { useSuppressRecords, useUnmerge } from "@/lib/query/reviews";
+import { useProtectRecords, useSuppressRecords, useUnmerge } from "@/lib/query/reviews";
 import { EnrichPanel } from "./enrich-panel";
 import { MergeRecordsDialog } from "./merge-records-dialog";
 
@@ -39,9 +39,11 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
   const session = useSession();
   const unmerge = useUnmerge(org, entityId);
   const suppress = useSuppressRecords(org, entityId);
+  const protect = useProtectRecords(org, entityId);
   const [marked, setMarked] = useState<ReadonlySet<string>>(new Set());
   const [unmergeMessage, setUnmergeMessage] = useState<string | null>(null);
   const [suppressMessage, setSuppressMessage] = useState<string | null>(null);
+  const [protectMessage, setProtectMessage] = useState<string | null>(null);
   const [mergeOpen, setMergeOpen] = useState(false);
   const [mergeMessage, setMergeMessage] = useState<string | null>(null);
   const role = effectiveRole(session.data, org);
@@ -163,12 +165,12 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
       {isSteward && <EnrichPanel org={org} entityId={entityId} golden={golden} />}
 
       <Card data-testid="entity-members">
-        <CardHeader className="flex-row items-center justify-between space-y-0 p-4 pb-1 lg:p-6 lg:pb-2">
+        <CardHeader className="flex-col items-start gap-2 space-y-0 p-4 pb-1 sm:flex-row sm:items-center sm:justify-between lg:p-6 lg:pb-2">
           <CardTitle className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
             Members
           </CardTitle>
           {isSteward && members.length > 1 && (
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button
                 size="sm"
                 variant="outline"
@@ -220,6 +222,30 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
               >
                 Exclude {marked.size > 0 ? `${String(marked.size)} ` : ""}selected
               </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={marked.size === 0 || protect.isPending}
+                data-testid="protect-button"
+                onClick={() => {
+                  setProtectMessage(null);
+                  protect.mutate([...marked], {
+                    onSuccess: (result) => {
+                      setMarked(new Set());
+                      setProtectMessage(
+                        `protected ${String(result.protected)} record${result.protected === 1 ? "" : "s"} — ${result.protected === 1 ? "it stays" : "they stay"} the surviving master when the current run finishes`,
+                      );
+                    },
+                    onError: (error) => {
+                      setProtectMessage(
+                        error instanceof BffRequestError ? error.message : "protect failed",
+                      );
+                    },
+                  });
+                }}
+              >
+                Protect {marked.size > 0 ? `${String(marked.size)} ` : ""}selected
+              </Button>
             </div>
           )}
         </CardHeader>
@@ -232,6 +258,11 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
           {suppressMessage && (
             <p className="text-muted-foreground mb-2 text-xs" data-testid="suppress-status">
               {suppressMessage}
+            </p>
+          )}
+          {protectMessage && (
+            <p className="text-muted-foreground mb-2 text-xs" data-testid="protect-status">
+              {protectMessage}
             </p>
           )}
           <table className="w-full min-w-[28rem] text-sm">

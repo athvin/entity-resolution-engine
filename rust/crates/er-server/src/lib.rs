@@ -2863,16 +2863,18 @@ struct SuppressIn {
     apply_now: bool,
 }
 
-/// Steward+: suppress (exclude) a record from entity assembly, or retract that
-/// suppression. `retract=false` stages `suppress_record`; `retract=true` stages
-/// `retract_record_overlay` (kind `suppress`). Unlike a source tombstone, a
-/// suppression overlay survives re-ingest (reconcile re-reads it every run). With
-/// `apply_now` it enqueues the steward drain + correct.
-async fn suppress_record_action(
+/// Steward+: stage a record overlay (`overlay` = `"suppress"` or `"protect"`), or
+/// retract one. `retract=false` stages `{overlay}_record`; `retract=true` stages
+/// `retract_record_overlay` (carrying `kind`). A `suppress` overlay drops the
+/// record from reconcile clustering; a `protect` overlay forces it master on the
+/// read path. Unlike a source tombstone, an overlay survives re-ingest (every run
+/// re-reads it). With `apply_now` it enqueues the steward drain + correct.
+async fn record_overlay_action(
     principal: Principal,
     state: AppState,
     org: String,
     body: SuppressIn,
+    overlay: &'static str,
     retract: bool,
 ) -> axum::response::Response {
     if let Err(e) = guard(&principal, &org, Role::Steward) {
@@ -2895,12 +2897,12 @@ async fn suppress_record_action(
         json!({
             "type": "retract_record_overlay",
             "record_key": body.record_key,
-            "kind": "suppress",
+            "kind": overlay,
             "created_by": principal.actor,
         })
     } else {
         json!({
-            "type": "suppress_record",
+            "type": format!("{overlay}_record"),
             "record_key": body.record_key,
             "created_by": principal.actor,
         })
@@ -2912,7 +2914,7 @@ async fn suppress_record_action(
     if !body.apply_now {
         return staged_response(StatusCode::CREATED, &action_id);
     }
-    let idem = format!("suppress-apply:{}", ulid::Ulid::new());
+    let idem = format!("{overlay}-apply:{}", ulid::Ulid::new());
     let params = json!({ "skip_ingest": true });
     match pg::enqueue(
         &client,
@@ -2945,7 +2947,7 @@ async fn suppress_record_route(
     Path(org): Path<String>,
     Json(body): Json<SuppressIn>,
 ) -> impl IntoResponse {
-    suppress_record_action(principal, state, org, body, false).await
+    record_overlay_action(principal, state, org, body, "suppress", false).await
 }
 
 /// `POST /v1/orgs/{org}/records/unsuppress` — retract a record suppression.
@@ -2955,7 +2957,27 @@ async fn unsuppress_record_route(
     Path(org): Path<String>,
     Json(body): Json<SuppressIn>,
 ) -> impl IntoResponse {
-    suppress_record_action(principal, state, org, body, true).await
+    record_overlay_action(principal, state, org, body, "suppress", true).await
+}
+
+/// `POST /v1/orgs/{org}/records/protect` — pin a record master for its entity.
+async fn protect_record_route(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Json(body): Json<SuppressIn>,
+) -> impl IntoResponse {
+    record_overlay_action(principal, state, org, body, "protect", false).await
+}
+
+/// `POST /v1/orgs/{org}/records/unprotect` — retract a record protection.
+async fn unprotect_record_route(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Json(body): Json<SuppressIn>,
+) -> impl IntoResponse {
+    record_overlay_action(principal, state, org, body, "protect", true).await
 }
 
 /// Steward+: stage an assertion retraction
@@ -3723,6 +3745,11 @@ fn build_routes(state: AppState) -> Router {
         .route(
             "/v1/orgs/{org}/records/unsuppress",
             post(unsuppress_record_route),
+        )
+        .route("/v1/orgs/{org}/records/protect", post(protect_record_route))
+        .route(
+            "/v1/orgs/{org}/records/unprotect",
+            post(unprotect_record_route),
         )
         .route("/v1/orgs/{org}/reviews/{review_id}", get(review_detail))
         .route(

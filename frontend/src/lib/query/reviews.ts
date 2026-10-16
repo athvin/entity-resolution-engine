@@ -322,3 +322,26 @@ export function useSuppressRecords(org: string, entityId: string) {
     },
   });
 }
+
+/** Steward: protect member records — pin them as the surviving master for their
+ *  entity, overriding the survivorship policy. A per-record overlay that survives
+ *  re-ingest; applied on the read path so it takes effect next correction run. */
+export function useProtectRecords(org: string, entityId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (records: string[]) => {
+      for (const record_key of records) {
+        await bffFetch(`/api/orgs/${org}/records/protect`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ record_key }),
+        });
+      }
+      return { protected: records.length };
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.entity(org, entityId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs(org) });
+    },
+  });
+}
