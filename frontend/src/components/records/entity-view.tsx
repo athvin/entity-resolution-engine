@@ -18,6 +18,7 @@ import {
   type LineageRow,
 } from "@/lib/query/hooks";
 import { useSuppressRecords, useUnmerge } from "@/lib/query/reviews";
+import { EnrichPanel } from "./enrich-panel";
 import { MergeRecordsDialog } from "./merge-records-dialog";
 
 const ROLE_RANK = { viewer: 0, steward: 1, admin: 2 } as const;
@@ -161,6 +162,8 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
           </div>
         </CardContent>
       </Card>
+
+      {isSteward && <EnrichPanel org={org} entityId={entityId} golden={golden} />}
 
       <Card data-testid="entity-members">
         <CardHeader className="flex-row items-center justify-between space-y-0 p-4 pb-1 lg:p-6 lg:pb-2">
