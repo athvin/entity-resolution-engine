@@ -83,6 +83,22 @@ enum Command {
         #[arg(long)]
         dsn: Option<String>,
     },
+    /// Plan (or `--apply`) the safe migration that reconciles a live store to the
+    /// catalog; a breaking difference is refused for a hand-written migration.
+    Migrate {
+        /// The repository root (holds `entities/`). Defaults to the current dir.
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+        /// The store (only `postgres` is wired today).
+        #[arg(long, default_value = "postgres")]
+        store: String,
+        /// The Postgres DSN (defaults to the `ER_PG_DSN` env var).
+        #[arg(long)]
+        dsn: Option<String>,
+        /// Apply the safe statements instead of only printing them.
+        #[arg(long)]
+        apply: bool,
+    },
 }
 
 fn load_tree(root: &Path) -> Result<GeneratedTree> {
@@ -238,12 +254,99 @@ fn run_diff(root: &Path, store: &str, dsn: Option<&str>) -> Result<bool> {
     }
 }
 
+/// Plan — or, with `apply`, apply — the safe migration reconciling Postgres to the
+/// catalog. A breaking difference is refused (ERR_SCHEMA_BREAKING).
+fn run_migrate(root: &Path, store: &str, dsn: Option<&str>, apply: bool) -> Result<bool> {
+    use er_entity_spec::Store;
+    if store != "postgres" {
+        anyhow::bail!("only --store postgres is wired today (got {store:?})");
+    }
+    let entities_dir = root.join("entities");
+    let catalog = er_entity_spec::Catalog::load_dir(&entities_dir)
+        .with_context(|| format!("loading entities from {}", entities_dir.display()))?;
+    let dsn = dsn
+        .map(ToString::to_string)
+        .or_else(|| std::env::var("ER_PG_DSN").ok())
+        .context("a Postgres DSN is required (--dsn or ER_PG_DSN)")?;
+    let relations: Vec<String> = catalog
+        .for_store(Store::Postgres)
+        .iter()
+        .map(|e| e.relation.clone())
+        .collect();
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("building the tokio runtime")?;
+    runtime.block_on(async {
+        let (mut client, connection) = tokio_postgres::connect(&dsn, tokio_postgres::NoTls)
+            .await
+            .context("connecting to Postgres")?;
+        let handle = tokio::spawn(connection);
+        let live = er_entity_diff::read_postgres_columns(&client, &relations)
+            .await
+            .context("reading the live schema")?;
+        let plan = er_entity_diff::plan_migration(&catalog, Store::Postgres, &live);
+
+        if !plan.breaking.is_empty() {
+            eprintln!(
+                "ERR_SCHEMA_BREAKING: {} change(s) need a hand-written migration:",
+                plan.breaking.len()
+            );
+            for d in &plan.breaking {
+                eprintln!("  {}: {}", d.relation, d.message);
+            }
+            handle.abort();
+            return anyhow::Ok(false);
+        }
+        if plan.statements.is_empty() {
+            println!("er-entity migrate: the Postgres schema is already current");
+            handle.abort();
+            return anyhow::Ok(true);
+        }
+        if apply {
+            // Apply the safe statements under the schema advisory lock, in one txn.
+            let tx = client.transaction().await.context("begin")?;
+            tx.execute(
+                "SELECT pg_advisory_xact_lock(hashtext('erserver.ensure_schema'), 0)",
+                &[],
+            )
+            .await
+            .context("advisory lock")?;
+            for stmt in &plan.statements {
+                tx.batch_execute(stmt).await.with_context(|| stmt.clone())?;
+            }
+            tx.commit().await.context("commit")?;
+            println!(
+                "er-entity migrate: applied {} statement(s)",
+                plan.statements.len()
+            );
+        } else {
+            println!(
+                "-- er-entity migrate plan ({} statement(s)):",
+                plan.statements.len()
+            );
+            for stmt in &plan.statements {
+                println!("{stmt}");
+            }
+        }
+        handle.abort();
+        anyhow::Ok(true)
+    })
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match &cli.command {
         Command::Gen { root } => run_gen(root).map(|()| true),
         Command::Check { root } | Command::Verify { root } => run_verify(root),
         Command::Diff { root, store, dsn } => run_diff(root, store, dsn.as_deref()),
+        Command::Migrate {
+            root,
+            store,
+            dsn,
+            apply,
+        } => run_migrate(root, store, dsn.as_deref(), *apply),
     };
     match result {
         Ok(true) => ExitCode::SUCCESS,
