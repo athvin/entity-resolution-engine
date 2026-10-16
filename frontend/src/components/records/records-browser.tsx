@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useGoldenRecords, type GoldenRecord } from "@/lib/query/hooks";
+import { useOrgEntityType } from "@/lib/query/config";
+import { displayName, type EntityType } from "@/lib/domain/attributes";
 import { MassEditPanel } from "./mass-edit-panel";
 
 function useDebounced(value: string, ms: number): string {
@@ -24,10 +26,43 @@ function useDebounced(value: string, ms: number): string {
   return debounced;
 }
 
-function address(record: GoldenRecord): string {
-  return [record.addr_number, record.addr_street, record.addr_unit, record.addr_city]
-    .filter(Boolean)
-    .join(" ");
+interface Column {
+  readonly label: string;
+  readonly value: (record: GoldenRecord) => string;
+  /** The cell's class. Carried per column so the person path stays
+   * byte-identical to the pre-parameterization markup (Phone has no truncate). */
+  readonly className: string;
+}
+
+const NAME_CLASS = "font-medium";
+const TEXT_CLASS = "text-muted-foreground truncate text-sm";
+const PHONE_CLASS = "text-muted-foreground text-sm";
+
+/** The four browser columns for an org's entity type (Person default). */
+function columnsFor(entityType: EntityType): Column[] {
+  if (entityType === "account") {
+    return [
+      { label: "Company", value: (r) => displayName(r, "account"), className: NAME_CLASS },
+      { label: "Domain", value: (r) => r.domain ?? "", className: TEXT_CLASS },
+      { label: "Phone", value: (r) => r.phone_e164 ?? "", className: PHONE_CLASS },
+      {
+        label: "Address",
+        value: (r) => [r.addr_street, r.addr_city, r.addr_region].filter(Boolean).join(" "),
+        className: TEXT_CLASS,
+      },
+    ];
+  }
+  return [
+    { label: "Name", value: (r) => displayName(r, "person"), className: NAME_CLASS },
+    { label: "Email", value: (r) => r.email ?? "", className: TEXT_CLASS },
+    { label: "Phone", value: (r) => r.phone_e164 ?? "", className: PHONE_CLASS },
+    {
+      label: "Address",
+      value: (r) =>
+        [r.addr_number, r.addr_street, r.addr_unit, r.addr_city].filter(Boolean).join(" "),
+      className: TEXT_CLASS,
+    },
+  ];
 }
 
 /**
@@ -38,6 +73,8 @@ function address(record: GoldenRecord): string {
 export function RecordsBrowser({ org }: { org: string }) {
   const [search, setSearch] = useState("");
   const q = useDebounced(search, 250);
+  const entityType = useOrgEntityType(org);
+  const columns = columnsFor(entityType);
   const query = useGoldenRecords(org, q);
   const rows = useMemo(() => (query.data?.pages ?? []).flatMap((page) => page.items), [query.data]);
   const snapshot = query.data?.pages[0]?.snapshot;
@@ -90,7 +127,9 @@ export function RecordsBrowser({ org }: { org: string }) {
           onChange={(event) => {
             setSearch(event.target.value);
           }}
-          placeholder="Search by name or email…"
+          placeholder={
+            entityType === "account" ? "Search by company or domain…" : "Search by name or email…"
+          }
           className="pl-9"
           data-testid="records-search"
         />
@@ -100,10 +139,9 @@ export function RecordsBrowser({ org }: { org: string }) {
 
       {/* Header row, desktop only — the virtual rows below mirror these columns. */}
       <div className="text-muted-foreground hidden grid-cols-[1.2fr_1.6fr_1fr_1.4fr] gap-3 border-b px-3 pb-2 text-xs font-medium tracking-wide uppercase lg:grid">
-        <span>Name</span>
-        <span>Email</span>
-        <span>Phone</span>
-        <span>Address</span>
+        {columns.map((column) => (
+          <span key={column.label}>{column.label}</span>
+        ))}
       </div>
 
       {query.isPending ? (
@@ -135,16 +173,11 @@ export function RecordsBrowser({ org }: { org: string }) {
                   style={{ "--row-y": `${String(item.start)}px` } as React.CSSProperties}
                 >
                   <div className="lg:grid lg:grid-cols-[1.2fr_1.6fr_1fr_1.4fr] lg:items-center lg:gap-3">
-                    <div className="font-medium">
-                      {[record.given_name, record.family_name].filter(Boolean).join(" ") || "—"}
-                    </div>
-                    <div className="text-muted-foreground truncate text-sm">
-                      {record.email ?? "—"}
-                    </div>
-                    <div className="text-muted-foreground text-sm">{record.phone_e164 ?? "—"}</div>
-                    <div className="text-muted-foreground truncate text-sm">
-                      {address(record) || "—"}
-                    </div>
+                    {columns.map((column) => (
+                      <div key={column.label} className={column.className}>
+                        {column.value(record) || "—"}
+                      </div>
+                    ))}
                   </div>
                 </Link>
               );

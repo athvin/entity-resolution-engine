@@ -38,20 +38,32 @@ export interface RunRow {
   [key: string]: unknown;
 }
 
-/** One golden record as the read API serves it (the nine canonical attributes+). */
+/**
+ * One golden record as the read API serves it — a superset over both entity
+ * types. Person attributes (given_name…birth_date) and Account attributes
+ * (company_name, domain) are all optional because a given row carries only its
+ * entity type's projection; `entity_id` is always present. Render through the
+ * entity-type attribute selectors (`goldenAttributes`/`displayName`), not these
+ * fields directly.
+ */
 export interface GoldenRecord {
   entity_id: string;
-  given_name: string | null;
-  family_name: string | null;
-  email: string | null;
-  phone_e164: string | null;
-  addr_number: string | null;
-  addr_street: string | null;
-  addr_unit: string | null;
-  addr_city: string | null;
-  addr_region: string | null;
-  addr_postal: string | null;
-  birth_date: string | null;
+  // person
+  given_name?: string | null;
+  family_name?: string | null;
+  email?: string | null;
+  birth_date?: string | null;
+  addr_number?: string | null;
+  addr_unit?: string | null;
+  // account
+  company_name?: string | null;
+  domain?: string | null;
+  // shared
+  phone_e164?: string | null;
+  addr_street?: string | null;
+  addr_city?: string | null;
+  addr_region?: string | null;
+  addr_postal?: string | null;
   survivorship_version?: number;
   assembled_at?: string;
 }

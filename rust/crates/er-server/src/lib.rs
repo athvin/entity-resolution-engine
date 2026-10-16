@@ -1732,6 +1732,57 @@ async fn org_lake(
     })
 }
 
+/// The org's entity type, from its `ER_CONFIG_PATH` yaml. Person when the key is
+/// absent, the file is unreadable, or the config omits `entity_type` — so person
+/// orgs read exactly as before.
+fn entity_type_from_env(env: &Value) -> er_config::EntityType {
+    env.get("ER_CONFIG_PATH")
+        .and_then(Value::as_str)
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|t| load_config_str(&t).ok())
+        .map(|c| c.entity_type)
+        .unwrap_or_default()
+}
+
+/// Like [`org_lake`], but also resolves the org's [`read::GoldenView`] from its
+/// configured `entity_type` (one `get_org`). The golden/entity reads use this so
+/// an Account org reads its `acct_golden_*` projection; a person org is unchanged.
+async fn org_lake_golden(
+    state: &AppState,
+    org: &str,
+) -> Result<(dedupe_core::Session, read::GoldenView), Box<axum::response::Response>> {
+    let Some(dsn) = &state.dsn else {
+        return Err(Box::new(detail_err(
+            StatusCode::NOT_IMPLEMENTED,
+            "read API requires Postgres",
+        )));
+    };
+    let client = connect_pg(dsn).await.map_err(|r| Box::new(*r))?;
+    let env = match pg::get_org(&client, org).await {
+        Ok(Some(o)) => o.env,
+        Ok(None) => {
+            return Err(Box::new(detail_err(
+                StatusCode::NOT_FOUND,
+                format!("no org '{org}'"),
+            )));
+        }
+        Err(e) => {
+            return Err(Box::new(detail_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("db: {e}"),
+            )));
+        }
+    };
+    let view = read::GoldenView::for_entity_type(entity_type_from_env(&env));
+    let session = read::open_org_lake(&env).map_err(|e| {
+        Box::new(detail_err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!("lake unavailable: {e}"),
+        ))
+    })?;
+    Ok((session, view))
+}
+
 /// Viewer+: a keyset page of the org's golden (resolved) records
 /// (`GET /v1/orgs/{org}/golden-records`). Query: `q` (contains-search), `cursor`
 /// (opaque), `limit` (<=200). Reads the org's DuckLake at a pinned snapshot.
@@ -1744,7 +1795,7 @@ async fn golden_records_list(
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let session = match org_lake(&state, &org).await {
+    let (session, view) = match org_lake_golden(&state, &org).await {
         Ok(s) => s,
         Err(r) => return *r,
     };
@@ -1761,6 +1812,7 @@ async fn golden_records_list(
     let limit = read::parse_limit(params.get("limit").map(String::as_str));
     match read::golden_list(
         &session,
+        &view,
         snapshot,
         params.get("q").map(String::as_str),
         after.as_deref(),
@@ -1786,7 +1838,7 @@ async fn golden_record_detail(
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let session = match org_lake(&state, &org).await {
+    let (session, view) = match org_lake_golden(&state, &org).await {
         Ok(s) => s,
         Err(r) => return *r,
     };
@@ -1794,7 +1846,7 @@ async fn golden_record_detail(
         Ok(s) => s,
         Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
     };
-    match read::entity_detail(&session, snapshot, &entity_id) {
+    match read::entity_detail(&session, &view, snapshot, &entity_id) {
         Ok(Some(detail)) => Json(detail).into_response(),
         Ok(None) => detail_err(StatusCode::NOT_FOUND, format!("no entity '{entity_id}'")),
         Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),

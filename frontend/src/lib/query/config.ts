@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { bffFetch } from "@/lib/api/client";
+import { parseConfig } from "@/lib/domain/config";
 import { queryKeys } from "./keys";
 
 export interface ConfigVersionRow {
@@ -34,6 +35,21 @@ export function useActiveConfig(org: string) {
     queryKey: [...configKey(org), "active"],
     queryFn: () => bffFetch<ConfigVersionDetail>(`/api/orgs/${org}/config`),
   });
+}
+
+/**
+ * The org's entity type, read from its active config. "person" until the config
+ * loads, if it omits `entity_type`, or on a parse error — so person tenants and
+ * the loading state render exactly as before.
+ */
+export function useOrgEntityType(org: string): "person" | "account" {
+  const { data } = useActiveConfig(org);
+  if (!data?.yaml) return "person";
+  try {
+    return parseConfig(data.yaml).entityType;
+  } catch {
+    return "person";
+  }
 }
 
 export function useConfigVersions(org: string) {

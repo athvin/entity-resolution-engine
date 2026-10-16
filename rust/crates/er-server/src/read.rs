@@ -17,6 +17,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use dedupe_core::Session;
 use dedupe_core::session::SessionOptions;
 use dedupe_core::session::ducklake::DuckLakeConfig;
+use er_config::EntityType;
 use serde_json::{Value, json};
 
 /// The golden-records list page size when the caller gives none, and the cap
@@ -29,6 +30,60 @@ const MAX_LIMIT: i64 = 200;
 const GOLDEN_COLUMNS: &str = "entity_id, given_name, family_name, email, phone_e164, \
      addr_number, addr_street, addr_unit, addr_city, addr_region, addr_postal, \
      birth_date, metadata, survivorship_version";
+
+/// The Account/Org golden columns (`acct_golden_records`), display order.
+const ACCT_GOLDEN_COLUMNS: &str = "entity_id, company_name, domain, phone_e164, \
+     addr_street, addr_city, addr_region, addr_postal, metadata, survivorship_version";
+
+/// Which golden projection a read serves, selected by the org's entity type.
+/// Person is the default, so an org that never declares `entity_type` reads the
+/// exact same tables/columns/search as before (byte-for-byte unchanged).
+pub struct GoldenView {
+    pub golden_table: &'static str,
+    pub lineage_table: &'static str,
+    pub columns: &'static str,
+    /// The `coalesce(..) || ' ' || ..` expression the `q` contains-search runs over.
+    pub search_expr: &'static str,
+}
+
+impl GoldenView {
+    /// The person projection (`golden_records`/`golden_lineage`, name+email search).
+    #[must_use]
+    pub fn person() -> Self {
+        GoldenView {
+            golden_table: "lake.main.golden_records",
+            lineage_table: "lake.main.golden_lineage",
+            columns: GOLDEN_COLUMNS,
+            search_expr: "coalesce(given_name,'') || ' ' || coalesce(family_name,'') || ' ' || coalesce(email,'')",
+        }
+    }
+
+    /// The Account/Org projection (`acct_golden_records`, company+domain search).
+    #[must_use]
+    pub fn account() -> Self {
+        GoldenView {
+            golden_table: "lake.main.acct_golden_records",
+            lineage_table: "lake.main.acct_golden_lineage",
+            columns: ACCT_GOLDEN_COLUMNS,
+            search_expr: "coalesce(company_name,'') || ' ' || coalesce(domain,'')",
+        }
+    }
+
+    /// Pick the projection for an org's entity type.
+    #[must_use]
+    pub fn for_entity_type(entity_type: EntityType) -> Self {
+        match entity_type {
+            EntityType::Account => GoldenView::account(),
+            EntityType::Person => GoldenView::person(),
+        }
+    }
+}
+
+impl Default for GoldenView {
+    fn default() -> Self {
+        GoldenView::person()
+    }
+}
 
 /// A decoded keyset cursor: the pinned snapshot and the last key emitted.
 pub struct Cursor {
@@ -112,6 +167,7 @@ pub fn open_org_lake(env: &Value) -> Result<Session, String> {
 /// Propagates the lake query error.
 pub fn golden_list(
     session: &Session,
+    view: &GoldenView,
     snapshot: i64,
     q: Option<&str>,
     after: Option<&str>,
@@ -124,8 +180,8 @@ pub fn golden_list(
     }
     if let Some(q) = q.filter(|s| !s.is_empty()) {
         filters.push(format!(
-            "(coalesce(given_name,'') || ' ' || coalesce(family_name,'') || ' ' || \
-             coalesce(email,'')) ILIKE {} ESCAPE '\\'",
+            "({}) ILIKE {} ESCAPE '\\'",
+            view.search_expr,
             like_contains(q)
         ));
     }
@@ -137,10 +193,12 @@ pub fn golden_list(
     // Fetch one extra row to decide whether a next page exists.
     let sql = format!(
         "SELECT entity_id, to_json(t) FROM ( \
-           SELECT {GOLDEN_COLUMNS} FROM lake.main.golden_records AT (VERSION => {snapshot}) \
+           SELECT {cols} FROM {table} AT (VERSION => {snapshot}) \
            {where_sql} ORDER BY entity_id LIMIT {} \
          ) t ORDER BY entity_id",
-        limit + 1
+        limit + 1,
+        cols = view.columns,
+        table = view.golden_table,
     );
     let rows = session.query_strings(&sql).map_err(|e| e.to_string())?;
     let has_more = rows.len() as i64 > limit;
@@ -222,6 +280,7 @@ fn json_rows(session: &Session, inner_sql: &str) -> Result<Vec<Value>, String> {
 /// Propagates a lake query error.
 pub fn entity_detail(
     session: &Session,
+    view: &GoldenView,
     snapshot: i64,
     entity_id: &str,
 ) -> Result<Option<Value>, String> {
@@ -230,7 +289,9 @@ pub fn entity_detail(
     let golden = json_rows(
         session,
         &format!(
-            "SELECT {GOLDEN_COLUMNS} FROM lake.main.golden_records {at} WHERE entity_id = {eid}"
+            "SELECT {cols} FROM {table} {at} WHERE entity_id = {eid}",
+            cols = view.columns,
+            table = view.golden_table,
         ),
     )?;
     let Some(golden_row) = golden.into_iter().next() else {
@@ -247,8 +308,9 @@ pub fn entity_detail(
         session,
         &format!(
             "SELECT attribute, record_key, source_system, source_record_id, rule \
-             FROM lake.main.golden_lineage {at} WHERE entity_id = {eid} \
-             ORDER BY attribute, record_key"
+             FROM {lineage} {at} WHERE entity_id = {eid} \
+             ORDER BY attribute, record_key",
+            lineage = view.lineage_table,
         ),
     )?;
     let events = json_rows(

@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BffRequestError } from "@/lib/api/client";
-import { GOLDEN_ATTRIBUTES } from "@/lib/domain/attributes";
+import { goldenAttributes, displayName } from "@/lib/domain/attributes";
+import { useOrgEntityType } from "@/lib/query/config";
 import {
   effectiveRole,
   useEntityDetail,
@@ -23,12 +24,6 @@ import { MergeRecordsDialog } from "./merge-records-dialog";
 
 const ROLE_RANK = { viewer: 0, steward: 1, admin: 2 } as const;
 
-// The shared descriptor list, narrowed to this screen's record type: the seam
-// entity-type generalization parameterizes without this file changing shape.
-const ATTRIBUTES: { key: keyof GoldenRecord; label: string }[] = GOLDEN_ATTRIBUTES.map(
-  ({ key, label }) => ({ key, label }),
-);
-
 function describeEvent(event: EntityEvent): string {
   const type = event.event_type.replaceAll("_", " ");
   return `${type} — run ${event.run_id}`;
@@ -40,6 +35,7 @@ function describeEvent(event: EntityEvent): string {
  */
 export function EntityView({ org, entityId }: { org: string; entityId: string }) {
   const query = useEntityDetail(org, entityId);
+  const entityType = useOrgEntityType(org);
   const session = useSession();
   const unmerge = useUnmerge(org, entityId);
   const suppress = useSuppressRecords(org, entityId);
@@ -72,10 +68,11 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
   }
 
   const { golden, members, lineage, events } = query.data;
+  const attributes = goldenAttributes(entityType);
   const lineageByAttribute = new Map<string, LineageRow>(
     lineage.map((row) => [row.attribute, row]),
   );
-  const name = [golden.given_name, golden.family_name].filter(Boolean).join(" ") || entityId;
+  const name = displayName(golden, entityType) || entityId;
 
   return (
     <div
@@ -139,8 +136,8 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
         </CardHeader>
         <CardContent className="p-4 pt-2 lg:p-6 lg:pt-2">
           <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
-            {ATTRIBUTES.map(({ key, label }) => {
-              const value = golden[key];
+            {attributes.map(({ key, label }) => {
+              const value = golden[key as keyof GoldenRecord];
               if (value === null || value === undefined || value === "") return null;
               const provenance = lineageByAttribute.get(key);
               return (
