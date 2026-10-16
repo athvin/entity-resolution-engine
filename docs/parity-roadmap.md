@@ -76,8 +76,11 @@ assistant. Tenant username/password auth is fully built (argon2id). M6 (PR #56) 
         `acct_golden_records`/`acct_golden_lineage`/`acct_golden_display`). Determinism-gated: full `cargo test
         --workspace` green, ONLY `model_registry_golden.json` changed (config_golden + dbt_sources + all base_10
         person fixtures byte-identical).
-  - [ ] **1.1b standardizers** — entity-aware `stg_arm` + Account `er-std` normalizers (company-name, domain/URL;
-        reuse email/phone/address). Makes the person index sites in er-standardize/er-ingest entity-aware.
+  - [x] **1.1b standardizers** — Account `er-std` normalizers (`company_name`/`company_name_norm`/`company_variants`,
+        `domain`/`domain_norm`; reuse `phone_e164` + `null_semantics(lowercase_trim)` for addr_*) with own golden
+        oracles; additive `acct_stg_arm` + `build_acct_int_std_records`; `run_standardize` branches on `entity_type`.
+        R1 fix: `metadata_excluded`/`metadata_columns` now iterate `spec.columns.values()` (entity-agnostic;
+        person set-identical). Person fixtures byte-identical; only NEW account/company/domain files added.
   - [ ] **1.1c matching + pipeline** — hand-authored Account Splink model JSON (the config→SQL comparison builder is
         NOT in Rust), wire match/reconcile/golden to pick model+attrs by `entity_type`.
   - [ ] **1.1d frontend** — Account attribute descriptors behind the `attributes.ts` seam + new-source wizard

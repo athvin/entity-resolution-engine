@@ -1,0 +1,15 @@
+{
+  "_comment": "Hand-authored oracle for er_std::sql::domain / domain_norm. domain = light (lowercase/trim/sentinel, verbatim), norm = strip scheme + leading www. + path/query + trailing dot.",
+  "cases": [
+    { "input": "https://www.Example.com/path?q=1", "domain": "https://www.example.com/path?q=1", "norm": "example.com" },
+    { "input": "WWW.Foo.COM", "domain": "www.foo.com", "norm": "foo.com" },
+    { "input": "http://bar.io/", "domain": "http://bar.io/", "norm": "bar.io" },
+    { "input": "baz.co.uk", "domain": "baz.co.uk", "norm": "baz.co.uk" },
+    { "input": "sub.domain.example.com", "domain": "sub.domain.example.com", "norm": "sub.domain.example.com" },
+    { "input": "Example.com.", "domain": "example.com.", "norm": "example.com" },
+    { "input": "https://acme.org", "domain": "https://acme.org", "norm": "acme.org" },
+    { "input": "n/a", "domain": null, "norm": "n" },
+    { "input": "-", "domain": null, "norm": null },
+    { "input": null, "domain": null, "norm": null }
+  ]
+}

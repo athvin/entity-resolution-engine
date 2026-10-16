@@ -219,6 +219,61 @@ pub fn name_variants(col: &str, lexicon: &str) -> String {
     )
 }
 
+/// Account `company_name` (light): lowercase/trim + sentinel NULLing, value kept
+/// VERBATIM otherwise (the display-ish form; `company_name_norm` is the
+/// match key).
+#[must_use]
+pub fn company_name(col: &str) -> String {
+    null_semantics(&lowercase_trim(col))
+}
+
+/// Account `company_name_norm` (aggressive match key): lowercase/trim, diacritic
+/// fold, drop `. , ' ’ &`, map `- / _` to space, collapse whitespace, then strip
+/// ONE trailing legal-suffix token (inc/llc/corp/ltd/co/…). `null_semantics` LAST
+/// so the macro is idempotent. NULL in → NULL out.
+#[must_use]
+pub fn company_name_norm(col: &str) -> String {
+    let lowered = lowercase_trim(col);
+    let folded = format!("nfc_normalize(strip_accents({lowered}))");
+    let depunct = format!("regexp_replace({folded}, '[.,''’&]', '', 'g')");
+    let spaced = format!("regexp_replace({depunct}, '[-/_]', ' ', 'g')");
+    let collapsed = format!("trim(regexp_replace({spaced}, '[[:space:]]+', ' ', 'g'))");
+    let suffix = "(inc|incorporated|llc|corp|corporation|ltd|limited|co|company|gmbh|plc|llp|lp)";
+    let desuffixed = format!("trim(regexp_replace({collapsed}, '[[:space:]]{suffix}$', ''))");
+    null_semantics(&format!("nullif({desuffixed}, '')"))
+}
+
+/// Account `company_variants`: the `LIST(VARCHAR) NOT NULL` column. Never SQL NULL
+/// — the EMPTY list when [`company_name_norm`] is NULL, else a one-element list of
+/// the norm (no lexicon; the Account analogue of `name_variants`' non-null
+/// contract, without synonym expansion).
+#[must_use]
+pub fn company_variants(col: &str) -> String {
+    let normalized = company_name_norm(col);
+    format!(
+        "case when {normalized} is null then cast([] as varchar[]) else list_value({normalized}) end"
+    )
+}
+
+/// Account `domain` (light): lowercase/trim + sentinel NULLing, verbatim otherwise.
+#[must_use]
+pub fn domain(col: &str) -> String {
+    null_semantics(&lowercase_trim(col))
+}
+
+/// Account `domain_norm`: lowercase/trim, strip `https?://` scheme, a leading
+/// `www.`, any path/query (from the first `/` or `?`), and a trailing dot.
+/// `null_semantics` LAST. NULL in → NULL out.
+#[must_use]
+pub fn domain_norm(col: &str) -> String {
+    let lowered = lowercase_trim(col);
+    let noscheme = format!("regexp_replace({lowered}, '^https?://', '')");
+    let nowww = format!("regexp_replace({noscheme}, '^www[.]', '')");
+    let nopath = format!("regexp_replace({nowww}, '[/?].*$', '')");
+    let notrail = format!("regexp_replace({nopath}, '[.]+$', '')");
+    null_semantics(&format!("nullif({notrail}, '')"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

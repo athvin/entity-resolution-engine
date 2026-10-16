@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use dedupe_core::session::Session;
-use er_config::{CANONICAL_ATTRIBUTES, SourceSpec};
+use er_config::SourceSpec;
 
 /// The `raw_records` columns (S4.1), in S5 DDL order.
 pub const RAW_RECORDS_COLUMNS: [&str; 8] = [
@@ -23,16 +23,16 @@ pub const RAW_RECORDS_COLUMNS: [&str; 8] = [
 pub const TOMBSTONE_CONTENT_HASH: &str =
     "0000000000000000000000000000000000000000000000000000000000000000";
 
-/// The unmapped delivered fields, sorted (S4.2): the delivered keys minus the nine
+/// The unmapped delivered fields, sorted (S4.2): the delivered keys minus the
 /// mapped canonical columns, the record-id column, the updated-at column, and the
 /// reserved `persona_id`. This is both `source_metadata`'s retained set and the
-/// `metadata-v1` extension of [`row_content_hash`].
+/// `metadata-v1` extension of [`row_content_hash`]. Entity-agnostic:
+/// `spec.columns.values()` is exactly the mapped canonical source columns for the
+/// source's entity type (person nine or Account seven); a person spec yields the
+/// identical set as before (this is a sorted membership set, order-independent).
 #[must_use]
 pub fn metadata_columns(delivered: &[&str], spec: &SourceSpec) -> Vec<String> {
-    let mut excluded: BTreeSet<&str> = CANONICAL_ATTRIBUTES
-        .iter()
-        .map(|attr| spec.columns[*attr].as_str())
-        .collect();
+    let mut excluded: BTreeSet<&str> = spec.columns.values().map(String::as_str).collect();
     excluded.insert(spec.record_id_column.as_str());
     excluded.insert(spec.updated_at_column.as_str());
     excluded.insert("persona_id");

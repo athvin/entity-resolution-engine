@@ -8,9 +8,11 @@
 //! as DuckDB SQL (no dbt) and run through a dedupe-core session.
 
 use dedupe_core::session::Session;
-use er_config::{CANONICAL_ATTRIBUTES, Config, SourceSpec};
+use er_config::{Config, SourceSpec};
 use er_std::sql::{
-    address_parse, email_norm, name_norm, name_variants, parse_date, phone_e164, source_metadata,
+    address_parse, company_name, company_name_norm, company_variants, domain, domain_norm,
+    email_norm, lowercase_trim, name_norm, name_variants, null_semantics, parse_date, phone_e164,
+    source_metadata,
 };
 
 /// The `int_std_records` payload columns, in S5 order (`record_key` is computed
@@ -54,16 +56,18 @@ fn field(col: &str) -> String {
 }
 
 /// The keys `source_metadata` excludes: the record-id and updated-at columns,
-/// reserved `persona_id`, and every mapped canonical column.
+/// reserved `persona_id`, and every mapped canonical column. Entity-agnostic:
+/// `spec.columns.values()` is exactly the mapped canonical source columns for
+/// whichever entity type the source belongs to (person nine or Account seven), so
+/// a person spec yields the identical set as before — `source_metadata` uses this
+/// only as a membership filter, so order does not matter.
 fn metadata_excluded(spec: &SourceSpec) -> Vec<String> {
     let mut excluded = vec![
         spec.record_id_column.clone(),
         spec.updated_at_column.clone(),
         "persona_id".to_string(),
     ];
-    for attr in CANONICAL_ATTRIBUTES {
-        excluded.push(spec.columns[attr].clone());
-    }
+    excluded.extend(spec.columns.values().cloned());
     excluded
 }
 
@@ -149,6 +153,117 @@ pub fn build_int_std_records(
     out_table: &str,
 ) -> anyhow::Result<()> {
     let sql = int_std_records_sql(config, raw_table, lexicon);
+    session
+        .execute_batch(&format!("create table {out_table} as\n{sql}"))
+        .map_err(|e| anyhow::anyhow!("build {out_table}: {e}"))?;
+    Ok(())
+}
+
+// ---- Account entity type (1.1b) --------------------------------------------
+// A parallel standardization projection for `entity_type: account`. Additive:
+// person functions above are untouched; `run_standardize` picks this path only
+// when `config.entity_type == Account`. Mirrors the person shape (supersession +
+// tombstone + computed record_key) over the Account attribute set, writing
+// `acct_int_std_records` (er-schema `acct_std_payload`). No lexicon — company
+// variants carry no synonym expansion.
+
+/// The `acct_int_std_records` payload columns, in S5 order (mirror of
+/// `er_schema::model::acct_std_payload`; `record_key` is computed + prepended).
+pub const ACCT_STD_PAYLOAD: [&str; 19] = [
+    "source_system",
+    "source_record_id",
+    "content_hash",
+    "std_version",
+    "company_name",
+    "company_name_norm",
+    "company_variants",
+    "domain",
+    "domain_norm",
+    "phone_e164",
+    "phone_valid",
+    "addr_street",
+    "addr_city",
+    "addr_region",
+    "addr_postal",
+    "metadata",
+    "updated_at_source",
+    "ingest_batch_id",
+    "ingested_at",
+];
+
+/// `null_semantics(lowercase_trim(field))` — the directly-mapped Account address
+/// columns (no `address_line` parse; the Account schema has no addr_number/unit).
+fn addr_passthrough(col: &str) -> String {
+    null_semantics(&lowercase_trim(col))
+}
+
+/// One Account `stg_records` union arm: projects `raw_records` through the Account
+/// S4.2 macros into the Account staging shape.
+fn acct_stg_arm(source: &str, spec: &SourceSpec, config: &Config, raw_table: &str) -> String {
+    let std_version = single_quote(&config.versions.std_version);
+    let region = &config.standardization.phone_default_region;
+    let excluded = metadata_excluded(spec);
+    let excluded_refs: Vec<&str> = excluded.iter().map(String::as_str).collect();
+    let company = field(&spec.columns["company_name"]);
+    format!(
+        "select\n    source_system,\n    source_record_id,\n    content_hash,\n    '{std_version}' as std_version,\n    \
+         {} as company_name,\n    {} as company_name_norm,\n    {} as company_variants,\n    \
+         {} as domain,\n    {} as domain_norm,\n    {},\n    \
+         {} as addr_street,\n    {} as addr_city,\n    {} as addr_region,\n    {} as addr_postal,\n    \
+         {} as metadata,\n    try_cast({} as timestamp) as updated_at_source,\n    \
+         ingest_batch_id,\n    ingested_at\nfrom {raw_table}\nwhere source_system = '{}'",
+        company_name(&company),
+        company_name_norm(&company),
+        company_variants(&company),
+        domain(&field(&spec.columns["domain"])),
+        domain_norm(&field(&spec.columns["domain"])),
+        phone_e164(&field(&spec.columns["phone"]), region),
+        addr_passthrough(&field(&spec.columns["addr_street"])),
+        addr_passthrough(&field(&spec.columns["addr_city"])),
+        addr_passthrough(&field(&spec.columns["addr_region"])),
+        addr_passthrough(&field(&spec.columns["addr_postal"])),
+        source_metadata("payload", &excluded_refs),
+        field(&spec.updated_at_column),
+        single_quote(source),
+    )
+}
+
+/// The Account `stg_records` SQL: one union arm per source, sorted source order.
+#[must_use]
+pub fn acct_stg_records_sql(config: &Config, raw_table: &str) -> String {
+    let mut sources: Vec<&String> = config.sources.keys().collect();
+    sources.sort();
+    sources
+        .iter()
+        .map(|source| acct_stg_arm(source, &config.sources[*source], config, raw_table))
+        .collect::<Vec<_>>()
+        .join("\nunion all\n")
+}
+
+/// The `acct_int_std_records` SQL: supersession + tombstone + computed record_key
+/// over the Account staging rows (mirror of [`int_std_records_sql`]).
+#[must_use]
+pub fn acct_int_std_records_sql(config: &Config, raw_table: &str) -> String {
+    let payload = ACCT_STD_PAYLOAD.join(", ");
+    let stg = acct_stg_records_sql(config, raw_table);
+    format!(
+        "with versions as (\n{stg}\n),\n\
+         current_version as (\n  select {payload} from versions\n  \
+         qualify row_number() over (partition by source_system, source_record_id \
+         order by ingested_at desc, ingest_batch_id desc) = 1\n)\n\
+         select source_system || ':' || source_record_id as record_key, {payload}\n\
+         from current_version\nwhere content_hash <> '{TOMBSTONE_CONTENT_HASH}'"
+    )
+}
+
+/// Materialise `acct_int_std_records` into `out_table` from the landed `raw_table`.
+pub fn build_acct_int_std_records(
+    session: &Session,
+    config: &Config,
+    raw_table: &str,
+    out_table: &str,
+) -> anyhow::Result<()> {
+    let sql = acct_int_std_records_sql(config, raw_table);
     session
         .execute_batch(&format!("create table {out_table} as\n{sql}"))
         .map_err(|e| anyhow::anyhow!("build {out_table}: {e}"))?;
