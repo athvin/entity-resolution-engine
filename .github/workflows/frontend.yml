@@ -27,6 +27,11 @@ on:
     paths:
       - "frontend/**"
       - ".github/workflows/frontend.yml"
+  schedule:
+    # Nightly coverage at 07:00 UTC (matches rust.yml).
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+    # On-demand trigger for the nightly-only coverage job.
 
 permissions:
   contents: read
@@ -81,3 +86,29 @@ jobs:
           name: playwright-report
           path: frontend/playwright-report/
           retention-days: 7
+
+  # Nightly + on-demand only (never on PRs or main pushes, to keep those fast).
+  # vitest coverage over src/lib/** (the logic the unit tier owns); the floor is
+  # enforced by `coverage.thresholds` in vitest.config.ts. A regression backstop,
+  # not the quality bar — the Playwright functional tier is the real UI gate.
+  coverage:
+    name: coverage (vitest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+      - name: Enable corepack (pnpm from packageManager)
+        run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec vitest run --coverage
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frontend-coverage
+          path: frontend/coverage/
+          retention-days: 14

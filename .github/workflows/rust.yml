@@ -18,8 +18,10 @@ on:
   push:
     branches: [main]
   schedule:
-    # Nightly full run (incl. the heavy perf jobs) at 07:00 UTC.
+    # Nightly full run (incl. the heavy perf jobs + coverage) at 07:00 UTC.
     - cron: "0 7 * * *"
+  workflow_dispatch:
+    # On-demand trigger for the nightly-only jobs (coverage, perf).
 
 permissions:
   contents: read
@@ -188,3 +190,56 @@ jobs:
           workspaces: rust
           shared-key: rust
       - run: cargo test -p dedupe-core --test golden_historical_50k
+
+  # --- coverage: nightly + on-demand only (never on PRs or main pushes) ---
+  #
+  # Measures line coverage with cargo-llvm-cov over the default + DuckLake/PG
+  # e2e paths (the 50k scale test stays off). `--fail-under-lines` is the
+  # non-regression floor: ratchet it UP as coverage grows, never down. It is a
+  # backstop against regressions — the primary quality gate is the behavioral
+  # tests the other jobs run. No sccache/mold here: llvm-cov owns RUSTFLAGS for
+  # instrumentation and instrumented builds don't cache usefully; nightly
+  # latency is not a concern.
+  coverage:
+    name: coverage (llvm-cov)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    env:
+      RUSTFLAGS: ""
+      DEDUPE_E2E_DUCKLAKE: "1"
+      DEDUPE_E2E_EXTENSIONS: "1"
+      ER_TEST_PG_DSN: "host=localhost port=5432 user=er password=er dbname=er"
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: er
+          POSTGRES_PASSWORD: er
+          POSTGRES_DB: er
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install stable toolchain
+        run: rustup update stable --no-self-update && rustup default stable && rustup component add llvm-tools-preview
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: rust
+          shared-key: coverage
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: cargo-llvm-cov
+      - name: Cache DuckDB extensions
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.duckdb/extensions
+          key: duckdb-extensions-${{ hashFiles('rust/Cargo.lock') }}
+          restore-keys: |
+            duckdb-extensions-
+      - run: cargo llvm-cov --workspace --summary-only --fail-under-lines 45
