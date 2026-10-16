@@ -1532,6 +1532,7 @@ dependencies = [
 name = "er-server"
 version = "0.1.0"
 dependencies = [
+ "arrow 58.4.0",
  "axum",
  "base64 0.22.1",
  "chrono",

@@ -1810,7 +1810,14 @@ fn auto_merge_from_env(env: &Value) -> Option<f64> {
 async fn org_lake_golden(
     state: &AppState,
     org: &str,
-) -> Result<(dedupe_core::Session, read::GoldenView), Box<axum::response::Response>> {
+) -> Result<
+    (
+        dedupe_core::Session,
+        er_config::EntityType,
+        read::GoldenView,
+    ),
+    Box<axum::response::Response>,
+> {
     let Some(dsn) = &state.dsn else {
         return Err(Box::new(detail_err(
             StatusCode::NOT_IMPLEMENTED,
@@ -1833,14 +1840,15 @@ async fn org_lake_golden(
             )));
         }
     };
-    let view = read::GoldenView::for_entity_type(entity_type_from_env(&env));
+    let entity_type = entity_type_from_env(&env);
+    let view = read::GoldenView::for_entity_type(entity_type);
     let session = read::open_org_lake(&env).map_err(|e| {
         Box::new(detail_err(
             StatusCode::SERVICE_UNAVAILABLE,
             format!("lake unavailable: {e}"),
         ))
     })?;
-    Ok((session, view))
+    Ok((session, entity_type, view))
 }
 
 /// Viewer+: a keyset page of the org's golden (resolved) records
@@ -1855,7 +1863,7 @@ async fn golden_records_list(
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let (session, view) = match org_lake_golden(&state, &org).await {
+    let (session, entity_type, _view) = match org_lake_golden(&state, &org).await {
         Ok(s) => s,
         Err(r) => return *r,
     };
@@ -1870,22 +1878,50 @@ async fn golden_records_list(
             }
         };
     let limit = read::parse_limit(params.get("limit").map(String::as_str));
-    match read::golden_list(
+    let page = match read::golden_arrow_page(
         &session,
-        &view,
+        entity_type,
         snapshot,
         params.get("q").map(String::as_str),
         after.as_deref(),
         limit,
     ) {
-        Ok((items, next_cursor)) => Json(json!({
-            "items": items,
-            "snapshot": snapshot,
-            "next_cursor": next_cursor,
-        }))
-        .into_response(),
-        Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
+        Ok(p) => p,
+        Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
+    };
+
+    // Serialise the page as an Arrow IPC stream (schema message then batches); the
+    // snapshot and the next cursor travel in response headers.
+    let mut buf: Vec<u8> = Vec::new();
+    match arrow::ipc::writer::StreamWriter::try_new(&mut buf, &page.schema) {
+        Ok(mut writer) => {
+            for batch in &page.batches {
+                if let Err(e) = writer.write(batch) {
+                    return detail_err(StatusCode::INTERNAL_SERVER_ERROR, format!("arrow: {e}"));
+                }
+            }
+            if let Err(e) = writer.finish() {
+                return detail_err(StatusCode::INTERNAL_SERVER_ERROR, format!("arrow: {e}"));
+            }
+        }
+        Err(e) => return detail_err(StatusCode::INTERNAL_SERVER_ERROR, format!("arrow: {e}")),
     }
+
+    let mut response = axum::response::Response::new(axum::body::Body::from(buf));
+    let headers = response.headers_mut();
+    headers.insert(
+        axum::http::header::CONTENT_TYPE,
+        axum::http::HeaderValue::from_static("application/vnd.apache.arrow.stream"),
+    );
+    if let Ok(v) = axum::http::HeaderValue::from_str(&snapshot.to_string()) {
+        headers.insert("x-er-snapshot", v);
+    }
+    if let Some(cursor) = &page.next_cursor {
+        if let Ok(v) = axum::http::HeaderValue::from_str(cursor) {
+            headers.insert("x-er-next-cursor", v);
+        }
+    }
+    response
 }
 
 /// Viewer+: one resolved entity with members/lineage/events
@@ -1898,7 +1934,7 @@ async fn golden_record_detail(
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let (session, view) = match org_lake_golden(&state, &org).await {
+    let (session, _entity_type, view) = match org_lake_golden(&state, &org).await {
         Ok(s) => s,
         Err(r) => return *r,
     };
@@ -1978,7 +2014,7 @@ async fn duplicates_list(
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let (session, view) = match org_lake_golden(&state, &org).await {
+    let (session, _entity_type, view) = match org_lake_golden(&state, &org).await {
         Ok(sv) => sv,
         Err(r) => return *r,
     };

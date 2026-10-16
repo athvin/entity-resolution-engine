@@ -1,18 +1,48 @@
 //! The read-API entity-switch for Account orgs (behind `DEDUPE_E2E_DUCKLAKE=1`).
 //! Builds a tiny Account lake with `er_cli::run_all` (the same corpus/model as
-//! the er-cli `acct_e2e` gate), then exercises `read::golden_list` /
-//! `read::entity_detail` through `GoldenView::account()` — proving the read layer
-//! serves the `acct_golden_records`/`acct_golden_lineage` projection + the
-//! company/domain search when an org is `entity_type = account`. The person
-//! `GoldenView` is the default and is covered by the existing person read tests.
+//! the er-cli `acct_e2e` gate), then exercises `read::golden_arrow_page` (the Arrow
+//! list), `read::entity_detail` and `read::duplicates` through the Account entity —
+//! proving the read layer serves the `acct_golden_records`/`acct_golden_lineage`
+//! projection + the company/domain search when an org is `entity_type = account`.
+//! The person projection is the default and is covered by `pg_golden_read`.
 
 use std::path::{Path, PathBuf};
 
-use er_config::load_config_str;
-use er_server::read::{self, GoldenView};
+use arrow::array::{Array, StringArray};
+use arrow::record_batch::RecordBatch;
+use er_config::{EntityType, load_config_str};
+use er_server::read::{self, GoldenArrowPage, GoldenView};
 
 fn enabled() -> bool {
     std::env::var("DEDUPE_E2E_DUCKLAKE").as_deref() == Ok("1")
+}
+
+/// Total rows across an Arrow page's batches.
+fn total_rows(batches: &[RecordBatch]) -> usize {
+    batches.iter().map(RecordBatch::num_rows).sum()
+}
+
+/// Whether the page's schema declares a column by name.
+fn has_field(page: &GoldenArrowPage, name: &str) -> bool {
+    page.schema.fields().iter().any(|f| f.name() == name)
+}
+
+/// The non-null string values of a Utf8 column across a page's batches, in order.
+fn string_values(batches: &[RecordBatch], col: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for batch in batches {
+        let Ok(idx) = batch.schema().index_of(col) else {
+            continue;
+        };
+        if let Some(arr) = batch.column(idx).as_any().downcast_ref::<StringArray>() {
+            for i in 0..arr.len() {
+                if arr.is_valid(i) {
+                    out.push(arr.value(i).to_string());
+                }
+            }
+        }
+    }
+    out
 }
 
 fn repo_fixture(rel: &str) -> String {
@@ -72,39 +102,58 @@ fn account_golden_read_serves_acct_projection() {
     let view = GoldenView::account();
     let snapshot = read::latest_snapshot(&session).unwrap();
 
-    // List: the 4 account entities, each carrying a company_name (NOT a person
-    // given_name), proving the read selected acct_golden_records.
-    let (items, _next) = read::golden_list(&session, &view, snapshot, None, None, 50).unwrap();
-    assert_eq!(items.len(), 4, "4 account entities from the read API");
-    assert!(
-        items
-            .iter()
-            .all(|it| it.get("company_name").and_then(|v| v.as_str()).is_some()),
-        "every account row has a company_name"
+    // List: the 4 account entities, served as an Arrow page whose schema is the
+    // acct_golden_records projection — it carries company_name and NOT a person
+    // given_name, proving the read selected acct_golden_records.
+    let page =
+        read::golden_arrow_page(&session, EntityType::Account, snapshot, None, None, 50).unwrap();
+    assert_eq!(
+        total_rows(&page.batches),
+        4,
+        "4 account entities from the read API"
     );
     assert!(
-        items.iter().all(|it| it.get("given_name").is_none()),
+        has_field(&page, "company_name"),
+        "account projection carries company_name"
+    );
+    assert!(
+        !has_field(&page, "given_name"),
         "account rows carry no person given_name column"
+    );
+    assert_eq!(
+        string_values(&page.batches, "company_name").len(),
+        4,
+        "every account row has a company_name"
     );
 
     // Company/domain contains-search finds Acme (the person search over
     // given_name/family_name/email would never match a company name).
-    let (hits, _) = read::golden_list(&session, &view, snapshot, Some("acme"), None, 50).unwrap();
-    assert_eq!(hits.len(), 1, "company_name search matches exactly Acme");
+    let hits = read::golden_arrow_page(
+        &session,
+        EntityType::Account,
+        snapshot,
+        Some("acme"),
+        None,
+        50,
+    )
+    .unwrap();
+    assert_eq!(
+        total_rows(&hits.batches),
+        1,
+        "company_name search matches exactly Acme"
+    );
     assert!(
-        hits[0]
-            .get("company_name")
-            .and_then(|v| v.as_str())
-            .is_some_and(|c| c.to_lowercase().contains("acme"))
+        string_values(&hits.batches, "company_name")
+            .iter()
+            .any(|c| c.to_lowercase().contains("acme"))
     );
 
-    // Detail: resolve one entity_id from the list, assert the Account golden +
-    // lineage (from acct_golden_lineage) come back.
-    let entity_id = items[0]
-        .get("entity_id")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    // Detail: resolve one entity_id from the Arrow page, assert the Account golden
+    // + lineage (from acct_golden_lineage) come back.
+    let entity_id = string_values(&page.batches, "entity_id")
+        .into_iter()
+        .next()
+        .expect("an entity_id in the account page");
     let detail = read::entity_detail(&session, &view, snapshot, &entity_id)
         .unwrap()
         .expect("entity detail present");

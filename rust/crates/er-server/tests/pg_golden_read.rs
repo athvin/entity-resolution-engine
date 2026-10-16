@@ -9,10 +9,89 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
+use arrow::array::{Array, StringArray};
+use arrow::datatypes::SchemaRef;
+use arrow::record_batch::RecordBatch;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use er_server::{AppState, app, pg};
 use tower::ServiceExt;
+
+/// A decoded golden-records Arrow page: the IPC schema, the batches, and the
+/// snapshot / next-cursor that travel in response headers.
+struct ArrowPage {
+    schema: SchemaRef,
+    batches: Vec<RecordBatch>,
+    snapshot: Option<i64>,
+    next_cursor: Option<String>,
+}
+
+impl ArrowPage {
+    fn total_rows(&self) -> usize {
+        self.batches.iter().map(RecordBatch::num_rows).sum()
+    }
+
+    fn has_field(&self, name: &str) -> bool {
+        self.schema.fields().iter().any(|f| f.name() == name)
+    }
+
+    /// The non-null values of a Utf8 column across all batches, in order.
+    fn string_values(&self, col: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        for batch in &self.batches {
+            let Ok(idx) = batch.schema().index_of(col) else {
+                continue;
+            };
+            if let Some(arr) = batch.column(idx).as_any().downcast_ref::<StringArray>() {
+                for i in 0..arr.len() {
+                    if arr.is_valid(i) {
+                        out.push(arr.value(i).to_string());
+                    }
+                }
+            }
+        }
+        out
+    }
+}
+
+/// Decode an `application/vnd.apache.arrow.stream` response: the headers carry the
+/// snapshot and the next cursor; the body is an Arrow IPC stream.
+async fn arrow_page(resp: axum::response::Response) -> ArrowPage {
+    let ct = resp
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        ct.starts_with("application/vnd.apache.arrow.stream"),
+        "golden-records is an Arrow stream, got {ct}"
+    );
+    let snapshot = resp
+        .headers()
+        .get("x-er-snapshot")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<i64>().ok());
+    let next_cursor = resp
+        .headers()
+        .get("x-er-next-cursor")
+        .and_then(|v| v.to_str().ok())
+        .map(ToString::to_string);
+    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    let reader =
+        arrow::ipc::reader::StreamReader::try_new(std::io::Cursor::new(bytes.to_vec()), None)
+            .unwrap();
+    let schema = reader.schema();
+    let batches: Vec<RecordBatch> = reader.map(Result::unwrap).collect();
+    ArrowPage {
+        schema,
+        batches,
+        snapshot,
+        next_cursor,
+    }
+}
 
 const TEST_YAML: &str = include_str!("../../er-cli/tests/fixtures/test.yaml");
 const NICKNAMES: &str = include_str!("../../er-cli/tests/fixtures/nickname_variants.csv");
@@ -140,36 +219,44 @@ async fn golden_records_read_over_ducklake() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
 
-    // Full list: all 10 entities, a pinned snapshot, no next page.
+    // Full list: all 10 entities as an Arrow stream, a pinned snapshot header, no
+    // next-cursor header.
     let resp = app
         .clone()
         .oneshot(op_get("/v1/orgs/acme/golden-records"))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    let page = json_body(resp).await;
-    let items = page["items"].as_array().unwrap();
-    assert_eq!(items.len(), 10, "base_10 resolves to 10 golden records");
-    assert!(page["snapshot"].as_i64().unwrap() >= 1);
-    assert!(page["next_cursor"].is_null());
-    assert!(items[0].get("entity_id").is_some());
-    assert!(items[0].get("given_name").is_some());
-    let some_entity = items[0]["entity_id"].as_str().unwrap().to_string();
+    let page = arrow_page(resp).await;
+    assert_eq!(
+        page.total_rows(),
+        10,
+        "base_10 resolves to 10 golden records"
+    );
+    assert!(page.snapshot.unwrap() >= 1);
+    assert!(page.next_cursor.is_none());
+    assert!(page.has_field("entity_id"));
+    assert!(page.has_field("given_name"));
+    let some_entity = page
+        .string_values("entity_id")
+        .into_iter()
+        .next()
+        .expect("at least one entity_id");
 
-    // Keyset paging: limit=4 walks all 10 in 3 pages with no dup/missing.
+    // Keyset paging: limit=4 walks all 10 in 3 pages with no dup/missing. The next
+    // cursor rides the x-er-next-cursor header.
     let mut seen: BTreeSet<String> = BTreeSet::new();
     let mut uri = "/v1/orgs/acme/golden-records?limit=4".to_string();
     let mut pages = 0;
     loop {
         let resp = app.clone().oneshot(op_get(&uri)).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let page = json_body(resp).await;
-        for item in page["items"].as_array().unwrap() {
-            let id = item["entity_id"].as_str().unwrap().to_string();
+        let page = arrow_page(resp).await;
+        for id in page.string_values("entity_id") {
             assert!(seen.insert(id), "entity_id must not repeat across pages");
         }
         pages += 1;
-        match page["next_cursor"].as_str() {
+        match page.next_cursor {
             Some(c) => uri = format!("/v1/orgs/acme/golden-records?limit=4&cursor={c}"),
             None => break,
         }
@@ -178,14 +265,14 @@ async fn golden_records_read_over_ducklake() {
     assert_eq!(seen.len(), 10, "paging covered every entity");
     assert_eq!(pages, 3, "10 records at limit 4 => 3 pages");
 
-    // Contains-search: a term in no name yields an empty page.
+    // Contains-search: a term in no name yields an empty page (schema, no rows).
     let resp = app
         .clone()
         .oneshot(op_get("/v1/orgs/acme/golden-records?q=zzzznotarealname"))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_eq!(json_body(resp).await["items"].as_array().unwrap().len(), 0);
+    assert_eq!(arrow_page(resp).await.total_rows(), 0);
 
     // A malformed cursor is a 422.
     let resp = app
