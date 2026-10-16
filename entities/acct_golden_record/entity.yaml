@@ -1,0 +1,48 @@
+kind: entity
+version: 1
+name: acct_golden_record
+relation: acct_golden_records
+description: "One resolved account/organization: the surviving value per attribute, at a snapshot."
+key: [entity_id]
+generate:
+  stores: [duckdb]
+  languages: [rust, typescript]
+  wire: [arrow, json]
+columns:
+  - name: entity_id
+    type: varchar
+    nullable: false
+    description: "Persistent entity id (ULID); the survivorship key."
+  - name: company_name
+    type: varchar
+    description: "Surviving company name."
+  - name: domain
+    type: varchar
+    description: "Surviving web domain."
+  - name: phone_e164
+    type: varchar
+    description: "Surviving phone number in E.164 form."
+  - name: addr_street
+    type: varchar
+    description: "Surviving street of the address."
+  - name: addr_city
+    type: varchar
+    description: "Surviving city of the address."
+  - name: addr_region
+    type: varchar
+    description: "Surviving region/state of the address."
+  - name: addr_postal
+    type: varchar
+    description: "Surviving postal code of the address."
+  - name: metadata
+    type: json
+    description: "Surviving opaque per-source metadata object."
+  - name: survivorship_version
+    type: varchar
+    nullable: false
+    description: "Survivorship policy version that produced this row."
+  - name: assembled_at
+    type: timestamp
+    nullable: false
+    volatile: true
+    description: "Assembly time of this row (volatile)."

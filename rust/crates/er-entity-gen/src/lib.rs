@@ -160,6 +160,32 @@ mod tests {
         );
     }
 
+    /// Every committed lake entity must match the live er-schema registry for the
+    /// relation of the same name — the oracle that keeps the entity YAML and the
+    /// hand-built registry from drifting as the golden marts move to entity
+    /// ownership.
+    #[test]
+    fn every_lake_entity_matches_the_registry() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../entities");
+        let catalog = er_entity_spec::Catalog::load_dir(dir).expect("entities load");
+        let specs = er_schema::model::all_specs();
+        for entity in catalog.entities() {
+            if !entity.has_store(er_entity_spec::Store::Duckdb) {
+                continue;
+            }
+            let spec = to_lake_table_spec(entity).expect("converts to a lake spec");
+            let registry = specs
+                .iter()
+                .find(|s| s.name == entity.relation)
+                .unwrap_or_else(|| panic!("relation {} is not in the registry", entity.relation));
+            assert_eq!(
+                spec.columns, registry.columns,
+                "entity {} columns differ from the registry's {}",
+                entity.name, entity.relation
+            );
+        }
+    }
+
     #[test]
     fn golden_record_lake_ddl_renders() {
         let ddl = emit_lake_ddl(&golden()).expect("renders DDL");

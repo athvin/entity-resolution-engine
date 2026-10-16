@@ -1,0 +1,32 @@
+kind: entity
+version: 1
+name: acct_golden_display
+relation: acct_golden_display
+description: "Pre-rendered display strings for a resolved account, for list and detail views."
+key: [entity_id]
+generate:
+  stores: [duckdb]
+  languages: [rust, typescript]
+  wire: [arrow, json]
+columns:
+  - name: entity_id
+    type: varchar
+    nullable: false
+    description: "The resolved account these display strings belong to."
+  - name: display_name
+    type: varchar
+    description: "Rendered display name."
+  - name: display_domain
+    type: varchar
+    description: "Rendered display domain."
+  - name: display_phone
+    type: varchar
+    description: "Rendered display phone."
+  - name: display_address
+    type: varchar
+    description: "Rendered display address."
+  - name: assembled_at
+    type: timestamp
+    nullable: false
+    volatile: true
+    description: "Assembly time of this row (volatile)."
