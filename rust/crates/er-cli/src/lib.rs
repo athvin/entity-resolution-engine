@@ -46,6 +46,13 @@ pub const ENTITIES: &str = "lake.main.entities";
 pub const ENTITY_EVENTS: &str = "lake.main.entity_events";
 pub const GOLDEN_LINEAGE: &str = "lake.main.golden_lineage";
 pub const GOLDEN_RECORDS: &str = "lake.main.golden_records";
+/// Account golden projections (`entity_type: account`), analogues of
+/// [`GOLDEN_LINEAGE`]/[`GOLDEN_RECORDS`]. The scoring + entity tables
+/// (match_scores, entity_membership, entities) are SHARED and entity-agnostic —
+/// one lake holds one entity_type (the config carries exactly one), so there is
+/// no `acct_match_scores`/`acct_entities`.
+pub const ACCT_GOLDEN_LINEAGE: &str = "lake.main.acct_golden_lineage";
+pub const ACCT_GOLDEN_RECORDS: &str = "lake.main.acct_golden_records";
 /// Steward golden field overrides (mass-update); applied over golden_records.
 pub const GOLDEN_OVERRIDES: &str = "lake.main.golden_overrides";
 /// Steward record overlays (protect/suppress), keyed `(record_key, kind)`.
@@ -79,6 +86,15 @@ pub fn open_lake(catalog: &str, data_path: &str) -> Result<Session> {
 /// # Errors
 /// Propagates the session SQL error.
 pub fn seed_lexicon(session: &Session, rows: &[(String, String)]) -> Result<()> {
+    if rows.is_empty() {
+        // Empty VALUES is a syntax error; an entity type with no nickname lexicon
+        // (e.g. accounts) seeds an empty typed table instead. The non-empty path
+        // below is unchanged, so the person corpus is byte-identical.
+        session.execute_batch(&format!(
+            "create table {LEXICON} (variant_a varchar, variant_b varchar, active boolean)"
+        ))?;
+        return Ok(());
+    }
     let values: Vec<String> = rows
         .iter()
         .map(|(a, b)| {
@@ -192,6 +208,7 @@ fn evidence_json(settings: &Settings) -> String {
 /// Propagates model-load / predict / lake DDL+MERGE errors.
 pub fn run_match(
     session: &Session,
+    config: &Config,
     model: &MatchModel,
     review_low: f64,
     run_id: &str,
@@ -200,7 +217,14 @@ pub fn run_match(
     let mut settings = load_model(model.settings_json)?;
     settings.retain_intermediate = true;
 
-    let input = session.register_lake_table("int_std_records", "int_std_records")?;
+    // The matched corpus is the person or Account standardized table, by
+    // entity_type. MATCH_SCORES (the merge target below) is shared + entity-agnostic.
+    let (std_unqual, std_qual) = if config.entity_type.is_person() {
+        ("int_std_records", INT_STD_RECORDS)
+    } else {
+        ("acct_int_std_records", ACCT_INT_STD_RECORDS)
+    };
+    let input = session.register_lake_table(std_unqual, std_unqual)?;
     let tf_tables = build_frozen_tf_tables(
         session,
         &settings,
@@ -250,8 +274,8 @@ pub fn run_match(
                 cast(null as timestamp) as invalidated_at, cast(null as varchar) as invalidated_run_id,
                 '{run_id}' as run_id, cast('{scored_at}' as timestamp) as scored_at
          from scored s
-         join {INT_STD_RECORDS} ra on ra.record_key = s.rec_a_key
-         join {INT_STD_RECORDS} rb on rb.record_key = s.rec_b_key",
+         join {std_qual} ra on ra.record_key = s.rec_a_key
+         join {std_qual} rb on rb.record_key = s.rec_b_key",
         preds = predictions.physical,
     ))?;
 
@@ -849,9 +873,17 @@ pub fn run_reconcile(session: &Session, config: &Config, run_id: &str, run_at: &
             )
         })
         .collect();
+    // The node universe is the person or Account standardized corpus, by
+    // entity_type; everything else in reconcile (match_scores edges, assertions,
+    // membership/entities/events) is shared + entity-agnostic.
+    let std_table = if config.entity_type.is_person() {
+        INT_STD_RECORDS
+    } else {
+        ACCT_INT_STD_RECORDS
+    };
     let nodes: Vec<String> = session
         .query_strings(&format!(
-            "select record_key from {INT_STD_RECORDS} order by record_key"
+            "select record_key from {std_table} order by record_key"
         ))?
         .into_iter()
         .map(|r| r[0].clone())
@@ -1057,6 +1089,34 @@ pub fn run_reconcile(session: &Session, config: &Config, run_id: &str, run_at: &
 /// # Errors
 /// Propagates the survivorship SQL / lake write errors.
 pub fn run_golden(session: &Session, config: &Config) -> Result<()> {
+    if !config.entity_type.is_person() {
+        // Account golden assembly over the shared entity tables + the Account
+        // standardized corpus. (Steward golden overrides are a person-only path
+        // today; not wired for Account.)
+        session.execute_batch(&format!("drop table if exists {ACCT_GOLDEN_LINEAGE}"))?;
+        let lineage_sql = er_golden::acct_golden_lineage_sql(
+            config,
+            ACCT_INT_STD_RECORDS,
+            ENTITY_MEMBERSHIP,
+            ENTITIES,
+        )?;
+        session.execute_batch(&format!(
+            "create table {ACCT_GOLDEN_LINEAGE} as\n{lineage_sql}"
+        ))?;
+
+        session.execute_batch(&format!("drop table if exists {ACCT_GOLDEN_RECORDS}"))?;
+        let records_sql = er_golden::acct_golden_records_sql(
+            config,
+            ACCT_GOLDEN_LINEAGE,
+            ACCT_INT_STD_RECORDS,
+            ENTITY_MEMBERSHIP,
+            ENTITIES,
+        );
+        session.execute_batch(&format!(
+            "create table {ACCT_GOLDEN_RECORDS} as\n{records_sql}"
+        ))?;
+        return Ok(());
+    }
     session.execute_batch(&format!("drop table if exists {GOLDEN_LINEAGE}"))?;
     let lineage_sql =
         er_golden::golden_lineage_sql(config, INT_STD_RECORDS, ENTITY_MEMBERSHIP, ENTITIES)?;
@@ -1272,6 +1332,7 @@ pub fn run_all(session: &Session, config: &Config, inputs: &PipelineInputs) -> R
     run_standardize(session, config)?;
     run_match(
         session,
+        config,
         inputs.model,
         config.thresholds.review_low,
         inputs.run_id,

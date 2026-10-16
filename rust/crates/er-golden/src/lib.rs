@@ -17,7 +17,7 @@ pub mod master;
 pub mod records;
 pub mod survivorship;
 
-pub use lineage::golden_lineage_sql;
+pub use lineage::{acct_golden_lineage_sql, golden_lineage_sql};
 pub use master::{DEFAULT_MASTER_ELECTION_POLICY, MASTER_ELECTION_POLICIES, masters_cte_sql};
-pub use records::{golden_overrides_update_sql, golden_records_sql};
+pub use records::{acct_golden_records_sql, golden_overrides_update_sql, golden_records_sql};
 pub use survivorship::survivorship_decision_sql;

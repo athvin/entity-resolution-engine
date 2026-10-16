@@ -1,0 +1,5 @@
+crm_id,company,website,phone,street,city,state,zip,last_modified
+c1,Acme Inc.,https://www.acme.com,(415) 555-0100,1 Main St,Springfield,CA,90001,2026-01-01
+c2,Globex Corporation,http://globex.com,415-555-0200,2 Oak Ave,Metropolis,NY,10001,2026-01-02
+c3,Initech,https://initech.io,415-555-0300,3 Pine Rd,Gotham,IL,60601,2026-01-03
+c4,Umbrella Corp,https://umbrella.example,415-555-0400,9 Elm St,Raccoon City,OH,44101,2026-01-04
