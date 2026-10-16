@@ -145,3 +145,24 @@ test.describe("unmerge", () => {
     await expect(page.getByTestId("unmerge-button")).toHaveCount(0);
   });
 });
+
+test.describe("protect", () => {
+  // Protect pins a record as the surviving master; unlike unmerge it does not
+  // change membership, so the entity is read-shared (no mock mutation) and all
+  // projects can target the same multi-member entity without racing.
+  test("a steward pins a record as the surviving master", async ({ page }) => {
+    await login(page, USERS.steward);
+    await page.goto(`/${ORG}/records/01jm0e000000`);
+    await expect(page.getByTestId("entity-view")).toContainText("source records");
+    await page.locator("[data-testid^=mark-]").first().check();
+    await page.getByTestId("protect-button").click();
+    await expect(page.getByTestId("protect-status")).toContainText("protected 1 record");
+  });
+
+  test("viewers see no protect controls", async ({ page }) => {
+    await login(page, USERS.viewer);
+    await page.goto(`/${ORG}/records/01jm0e000000`);
+    await expect(page.getByTestId("entity-members")).toBeVisible();
+    await expect(page.getByTestId("protect-button")).toHaveCount(0);
+  });
+});

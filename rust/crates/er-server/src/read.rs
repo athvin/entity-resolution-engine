@@ -818,12 +818,54 @@ pub fn merge_plans(
         .filter(|s| !s.is_empty())
         .map(|s| format!("AND occurred_at >= {}::timestamp", lit(s)))
         .unwrap_or_default();
+    // Protect enforcement (PR 1.3b): a member record with an active `protect`
+    // overlay forces itself master for its entity, overriding the policy
+    // election. Read-path only — no golden/fixture touched. Gated on the overlay
+    // table existing AND holding at least one active protect row, so when no
+    // records are protected (or the steward drain never created the table) the
+    // CTE collapses to today's exact `masters AS ( {masters_sql} )` — byte-exact.
+    let protect_active = match session.query_strings(
+        "SELECT 1 FROM lake.main.record_overlays WHERE kind = 'protect' AND active LIMIT 1",
+    ) {
+        Ok(rows) => !rows.is_empty(),
+        Err(e) => {
+            let s = e.to_string();
+            if is_missing_table(&s) {
+                false
+            } else {
+                return Err(s);
+            }
+        }
+    };
+    let masters_cte = if protect_active {
+        // `protected` picks, per affected entity, the active-protected member
+        // (min(record_key) is a deterministic tie-break when several members of
+        // one entity are protected). COALESCE lets it win over the policy master.
+        format!(
+            "masters_policy AS ( {masters_sql} ), \
+             protected AS ( \
+               SELECT m.entity_id, min(m.record_key) AS master_key \
+               FROM lake.main.entity_membership m \
+               JOIN affected a ON a.entity_id = m.entity_id \
+               JOIN lake.main.record_overlays o \
+                 ON o.record_key = m.record_key AND o.kind = 'protect' AND o.active \
+               GROUP BY m.entity_id \
+             ), \
+             masters AS ( \
+               SELECT p.entity_id, COALESCE(pr.master_key, p.master_key) AS master_key \
+               FROM masters_policy p \
+               LEFT JOIN protected pr ON pr.entity_id = p.entity_id \
+             )"
+        )
+    } else {
+        format!("masters AS ( {masters_sql} )")
+    };
     let sql = format!(
         "WITH affected AS ( \
            SELECT DISTINCT entity_id FROM lake.main.entity_events \
            WHERE event_type IN ('merged', 'member_added') {since_filter} \
          ), \
-         masters AS ( {masters_sql} ) \
+         {masters_cte} \
          SELECT to_json(t) FROM ( \
            SELECT m.entity_id, ms.master_key, \
                   list(m.source_system || ':' || m.source_record_id ORDER BY m.record_key) \

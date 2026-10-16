@@ -125,8 +125,16 @@ assistant. Tenant username/password auth is fully built (argon2id). M6 (PR #56) 
       tombstone). This is the generic **"exclusion" that replaces literal mass-delete**. Determinism-safe: no-op when
       empty (only the schema-registry + dbt-sources goldens changed for the new table; base_10 output byte-identical),
       proven by `pg_record_overlays` e2e + the full golden suite. Endpoints `POST /records/{suppress,unsuppress}` +
-      entity-view "Exclude" action. *Follow-ups (noted): protect ENFORCEMENT (force-master in merge_plans + never-cut)
-      — the `protect` overlay is stored but not yet enforced; and exception-group UI (reuses existing `never` assertions).*
+      entity-view "Exclude" action. *Follow-up (noted): exception-group UI (reuses existing `never` assertions).*
+- [x] **1.3b Protect ENFORCEMENT** (PR #116) — the `protect` overlay was inert storage in 1.3; now a member with an
+      active `protect` overlay is elected the surviving **master** for its entity, overriding the survivorship policy, on
+      the READ path. A `protected` CTE (active `record_overlays kind='protect'` ∩ affected members) `COALESCE`'d ahead of
+      the policy election in `read::merge_plans`. Gated on the overlay table existing AND ≥1 active protect row, so when
+      nothing is protected the SQL collapses to the exact prior `masters AS (…)` — **byte-exact**, no fixture touched
+      (merge_plans has no committed golden; chose the read path over golden assembly precisely to stay off the determinism
+      contract). Endpoints `POST /records/{protect,unprotect}` (suppress generalised to `record_overlay_action`) + a steward
+      "Protect" entity-view action. Proven by `pg_protect_master` e2e (real merge_scenario, since base_10 emits only
+      `created`) + Playwright. *Follow-up → 1.3c: never-cut guarantee + contradiction precheck (the write-path half).*
 - [x] **1.4 Score-only match preview** (frontend-design §7.16) — `er_cli::preview_match` runs the committed model
       read-only (pairs + bucket counts + evidence waterfall) via a session-local temp table, committing NOTHING
       (no match_scores/reviews/golden; determinism contract untouched). New `GET /v1/orgs/{org}/match-preview`

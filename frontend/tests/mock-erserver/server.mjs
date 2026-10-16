@@ -1204,6 +1204,20 @@ const server = http.createServer((req, res) => {
         apply_job: "mock-mass-update-job",
       });
     }
+    // Record overlays: protect (pin master) / unprotect, staged like the real
+    // steward path. The read-path master override is exercised by the Rust e2e;
+    // here we just confirm the staged acknowledgement the UI reports.
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/records\/(protect|unprotect)$/.exec(path)) &&
+      req.method === "POST"
+    ) {
+      return send(res, 201, {
+        status: "staged",
+        action_id: `mock-${match[2]}`,
+        pending_until_next_reconcile: false,
+        apply_job: `mock-${match[2]}-job`,
+      });
+    }
     if ((match = /^\/v1\/orgs\/([^/]+)\/runs$/.exec(path)) && req.method === "GET") {
       return send(res, 200, state.runs[match[1]] ?? []);
     }
