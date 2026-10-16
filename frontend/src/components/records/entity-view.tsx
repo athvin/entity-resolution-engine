@@ -17,7 +17,7 @@ import {
   type GoldenRecord,
   type LineageRow,
 } from "@/lib/query/hooks";
-import { useUnmerge } from "@/lib/query/reviews";
+import { useSuppressRecords, useUnmerge } from "@/lib/query/reviews";
 import { MergeRecordsDialog } from "./merge-records-dialog";
 
 const ROLE_RANK = { viewer: 0, steward: 1, admin: 2 } as const;
@@ -41,8 +41,10 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
   const query = useEntityDetail(org, entityId);
   const session = useSession();
   const unmerge = useUnmerge(org, entityId);
+  const suppress = useSuppressRecords(org, entityId);
   const [marked, setMarked] = useState<ReadonlySet<string>>(new Set());
   const [unmergeMessage, setUnmergeMessage] = useState<string | null>(null);
+  const [suppressMessage, setSuppressMessage] = useState<string | null>(null);
   const [mergeOpen, setMergeOpen] = useState(false);
   const [mergeMessage, setMergeMessage] = useState<string | null>(null);
   const role = effectiveRole(session.data, org);
@@ -166,39 +168,70 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
             Members
           </CardTitle>
           {isSteward && members.length > 1 && (
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={marked.size === 0 || marked.size >= members.length || unmerge.isPending}
-              data-testid="unmerge-button"
-              onClick={() => {
-                setUnmergeMessage(null);
-                unmerge.mutate([...marked], {
-                  onSuccess: (result) => {
-                    setMarked(new Set());
-                    setUnmergeMessage(
-                      result.status === "applied"
-                        ? `unmerge applied — ${String(result.pairs)} never-rule${result.pairs === 1 ? "" : "s"} written; the split lands with the reconcile job`
-                        : "unmerge staged — it applies when the current run finishes",
-                    );
-                  },
-                  onError: (error) => {
-                    setUnmergeMessage(
-                      error instanceof BffRequestError ? error.message : "unmerge failed",
-                    );
-                  },
-                });
-              }}
-            >
-              <Split />
-              Unmerge {marked.size > 0 ? `${String(marked.size)} ` : ""}selected
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={marked.size === 0 || marked.size >= members.length || unmerge.isPending}
+                data-testid="unmerge-button"
+                onClick={() => {
+                  setUnmergeMessage(null);
+                  unmerge.mutate([...marked], {
+                    onSuccess: (result) => {
+                      setMarked(new Set());
+                      setUnmergeMessage(
+                        result.status === "applied"
+                          ? `unmerge applied — ${String(result.pairs)} never-rule${result.pairs === 1 ? "" : "s"} written; the split lands with the reconcile job`
+                          : "unmerge staged — it applies when the current run finishes",
+                      );
+                    },
+                    onError: (error) => {
+                      setUnmergeMessage(
+                        error instanceof BffRequestError ? error.message : "unmerge failed",
+                      );
+                    },
+                  });
+                }}
+              >
+                <Split />
+                Unmerge {marked.size > 0 ? `${String(marked.size)} ` : ""}selected
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={marked.size === 0 || suppress.isPending}
+                data-testid="suppress-button"
+                onClick={() => {
+                  setSuppressMessage(null);
+                  suppress.mutate([...marked], {
+                    onSuccess: (result) => {
+                      setMarked(new Set());
+                      setSuppressMessage(
+                        `excluded ${String(result.suppressed)} record${result.suppressed === 1 ? "" : "s"} — they drop out when the current run finishes`,
+                      );
+                    },
+                    onError: (error) => {
+                      setSuppressMessage(
+                        error instanceof BffRequestError ? error.message : "exclude failed",
+                      );
+                    },
+                  });
+                }}
+              >
+                Exclude {marked.size > 0 ? `${String(marked.size)} ` : ""}selected
+              </Button>
+            </div>
           )}
         </CardHeader>
         <CardContent className="overflow-x-auto p-4 pt-2 lg:p-6 lg:pt-2">
           {unmergeMessage && (
             <p className="text-muted-foreground mb-2 text-xs" data-testid="unmerge-status">
               {unmergeMessage}
+            </p>
+          )}
+          {suppressMessage && (
+            <p className="text-muted-foreground mb-2 text-xs" data-testid="suppress-status">
+              {suppressMessage}
             </p>
           )}
           <table className="w-full min-w-[28rem] text-sm">

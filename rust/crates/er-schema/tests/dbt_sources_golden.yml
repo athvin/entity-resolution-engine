@@ -634,3 +634,30 @@ sources:
                 combination_of_columns: ['entity_id', 'attribute']
               config:
                 tags: ['keys']
+      - name: record_overlays
+        columns:
+          - name: record_key
+            data_tests:
+              - not_null
+          - name: kind
+            data_tests:
+              - not_null
+          - name: active
+            data_tests:
+              - not_null
+          - name: created_by
+            data_tests:
+              - not_null
+          - name: created_at
+            data_tests:
+              - not_null
+          - name: source_action_id
+            data_tests:
+              - not_null
+          - name: retracted_at
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: ['record_key', 'kind']
+              config:
+                tags: ['keys']

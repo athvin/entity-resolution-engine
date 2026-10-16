@@ -74,7 +74,14 @@ assistant. Tenant username/password auth is fully built (argon2id). M6 (PR #56) 
       dbt_sources goldens change, for the new table). `POST /v1/orgs/{org}/mass-update` + a monochrome records-page
       panel (typed-count confirm). Mass **DELETE** is reframed as steward exclusion/suppression (→ 1.3): a literal
       delete doesn't fit the source-driven model (re-ingest resurrects the record).
-- [ ] **1.3 Protected/excluded flag + survivorship exception rules**.
+- [x] **1.3 Record suppression (exclusion)** — new `record_overlays` lake table + `suppress_record`/`protect_record`/
+      `retract_record_overlay` steward actions on the drain; `suppress` drops a record from reconcile clustering (all
+      three inputs: nodes + match edges + always edges, suppress-wins-over-always), survives re-ingest (unlike a
+      tombstone). This is the generic **"exclusion" that replaces literal mass-delete**. Determinism-safe: no-op when
+      empty (only the schema-registry + dbt-sources goldens changed for the new table; base_10 output byte-identical),
+      proven by `pg_record_overlays` e2e + the full golden suite. Endpoints `POST /records/{suppress,unsuppress}` +
+      entity-view "Exclude" action. *Follow-ups (noted): protect ENFORCEMENT (force-master in merge_plans + never-cut)
+      — the `protect` overlay is stored but not yet enforced; and exception-group UI (reuses existing `never` assertions).*
 - [x] **1.4 Score-only match preview** (frontend-design §7.16) — `er_cli::preview_match` runs the committed model
       read-only (pairs + bucket counts + evidence waterfall) via a session-local temp table, committing NOTHING
       (no match_scores/reviews/golden; determinism contract untouched). New `GET /v1/orgs/{org}/match-preview`

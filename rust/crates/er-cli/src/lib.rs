@@ -45,6 +45,8 @@ pub const GOLDEN_LINEAGE: &str = "lake.main.golden_lineage";
 pub const GOLDEN_RECORDS: &str = "lake.main.golden_records";
 /// Steward golden field overrides (mass-update); applied over golden_records.
 pub const GOLDEN_OVERRIDES: &str = "lake.main.golden_overrides";
+/// Steward record overlays (protect/suppress), keyed `(record_key, kind)`.
+pub const RECORD_OVERLAYS: &str = "lake.main.record_overlays";
 pub const RUNS: &str = "lake.main.runs";
 pub const REVIEW_QUEUE: &str = "lake.main.review_queue";
 pub const ASSERTIONS: &str = "lake.main.assertions";
@@ -641,6 +643,50 @@ pub fn apply_staged_action(
                 ))?;
             }
         }
+        // Protect/suppress a record (PR 1.3): one latest-wins active row per
+        // (record_key, kind). `suppress` drops the record from reconcile
+        // clustering; `protect` forces it master on the read path. Applied only
+        // when the overlay table exists, so an empty table is a byte-exact no-op.
+        Some(kind @ ("protect_record" | "suppress_record")) => {
+            create_ddl_table(session, "record_overlays")?;
+            let record_key = field("record_key");
+            let overlay_kind = if kind == "protect_record" {
+                "protect"
+            } else {
+                "suppress"
+            };
+            if !record_key.is_empty() {
+                session.execute_batch(&format!(
+                    "DELETE FROM {RECORD_OVERLAYS} WHERE record_key = '{rk}' AND kind = '{k}'",
+                    rk = esc(record_key),
+                    k = overlay_kind,
+                ))?;
+                session.execute_batch(&format!(
+                    "INSERT INTO {RECORD_OVERLAYS} \
+                       (record_key, kind, active, created_by, created_at, source_action_id, retracted_at) \
+                     VALUES ('{rk}', '{k}', true, '{by}', '{at}', '{aid}', NULL)",
+                    rk = esc(record_key),
+                    k = overlay_kind,
+                    by = esc(field("created_by")),
+                    at = esc(applied_at),
+                    aid = esc(action_id),
+                ))?;
+            }
+        }
+        Some("retract_record_overlay") => {
+            create_ddl_table(session, "record_overlays")?;
+            let record_key = field("record_key");
+            let overlay_kind = field("kind"); // "protect" | "suppress"
+            if !record_key.is_empty() && matches!(overlay_kind, "protect" | "suppress") {
+                session.execute_batch(&format!(
+                    "UPDATE {RECORD_OVERLAYS} SET active = false, retracted_at = '{at}' \
+                     WHERE record_key = '{rk}' AND kind = '{k}'",
+                    at = esc(applied_at),
+                    rk = esc(record_key),
+                    k = overlay_kind,
+                ))?;
+            }
+        }
         _ => {}
     }
     Ok(())
@@ -741,6 +787,27 @@ fn load_active_assertions(session: &Session) -> Result<Vec<Assertion>> {
         .collect())
 }
 
+/// Active suppressed `record_key`s from `lake.main.record_overlays` (empty if the
+/// table isn't there yet — a lake whose steward drain hasn't created it). A
+/// suppressed record is dropped from every reconcile clustering input.
+///
+/// # Errors
+/// Propagates a non-missing-table query error.
+fn load_suppressed_keys(session: &Session) -> Result<BTreeSet<String>> {
+    match session.query_strings(&format!(
+        "select record_key from {RECORD_OVERLAYS} where kind = 'suppress' and active"
+    )) {
+        Ok(rows) => Ok(rows.into_iter().map(|r| r[0].clone()).collect()),
+        Err(e) => {
+            if is_missing_table(&e.to_string()) {
+                Ok(BTreeSet::new())
+            } else {
+                Err(e.into())
+            }
+        }
+    }
+}
+
 /// S4.5 reconcile: cluster the active auto-merge pairs in `lake.main.match_scores`
 /// into connected components, reconcile them against the prior
 /// `lake.main.entity_membership` (INV-PERM), and write the resulting
@@ -785,10 +852,31 @@ pub fn run_reconcile(session: &Session, config: &Config, run_id: &str, run_at: &
     // S4.4 assertion adjustment (identical to er-match's proven in-memory path).
     // Empty when the lake has no assertions, so the base run is unchanged.
     let assertions = load_active_assertions(session)?;
+    // Suppressed records (PR 1.3 steward overlay): drop them from EVERY
+    // clustering input — nodes, match-score edges, and the pushed `always`
+    // edges — because label_propagate rebuilds the node universe from the nodes
+    // PLUS every edge endpoint, so a surviving edge would resurrect a suppressed
+    // node. Suppress therefore wins over `always`. Empty/absent overlay ⇒ the
+    // partition is byte-identical to a run with no suppressions.
+    let suppressed = load_suppressed_keys(session)?;
+    if !suppressed.is_empty() {
+        edges.retain(|(a, b, _)| !suppressed.contains(a) && !suppressed.contains(b));
+    }
+    let nodes: Vec<String> = if suppressed.is_empty() {
+        nodes
+    } else {
+        nodes
+            .into_iter()
+            .filter(|n| !suppressed.contains(n))
+            .collect()
+    };
     for a in assertions
         .iter()
         .filter(|a| a.kind == AssertionKind::Always)
     {
+        if suppressed.contains(&a.rec_a_key) || suppressed.contains(&a.rec_b_key) {
+            continue; // suppress wins over always
+        }
         // `always`: a protected edge (prob 1.0 >= cut_protect) never-cut can't sever.
         edges.push((a.rec_a_key.clone(), a.rec_b_key.clone(), 1.0));
     }
