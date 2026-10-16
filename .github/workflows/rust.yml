@@ -62,11 +62,12 @@ jobs:
           shared-key: rust
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: entity framework generated tree is current (er-entity check)
+      - name: entity framework verify (stale-output + analyser passes)
         # Regenerate every artifact from entities/*.yaml and fail if any committed
-        # file (Rust struct, DuckLake DDL, TS binding/reader) is stale. rustfmt is
-        # already installed above, which `er-entity gen` uses to canonicalise output.
-        run: cargo run -q -p er-entity-cli -- check --root ..
+        # file (Rust struct, DuckLake/Postgres DDL, query fns) is stale; then plan
+        # every statement and run the E0xx passes. rustfmt is already installed
+        # above, which `er-entity gen` uses to canonicalise output.
+        run: cargo run -q -p er-entity-cli -- verify --root ..
       - name: rustdoc (deny warnings)
         run: cargo doc --workspace --no-deps --document-private-items
         env:

@@ -57,8 +57,16 @@ enum Command {
         #[arg(long, default_value = ".")]
         root: PathBuf,
     },
-    /// Regenerate in memory and fail if any committed file is stale or missing.
+    /// Regenerate in memory and fail if any committed file is stale or missing,
+    /// then plan every statement and run the E0xx passes.
     Check {
+        /// The repository root (holds `entities/`). Defaults to the current dir.
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+    },
+    /// The one CI command: the stale-output check plus the analyser passes. Gains
+    /// the oracle and the live-store diff in later phases.
+    Verify {
         /// The repository root (holds `entities/`). Defaults to the current dir.
         #[arg(long, default_value = ".")]
         root: PathBuf,
@@ -145,11 +153,37 @@ fn run_check(root: &Path) -> Result<bool> {
     }
 }
 
+/// Plan every statement and run the E0xx passes against the two-store catalog.
+fn run_analyze(root: &Path) -> Result<bool> {
+    let entities_dir = root.join("entities");
+    let catalog = Catalog::load_dir(&entities_dir)
+        .with_context(|| format!("loading entities from {}", entities_dir.display()))?;
+    let diags =
+        er_sql_check::analyze_catalog(&entities_dir, &catalog).context("analysing statements")?;
+    if diags.is_empty() {
+        println!("er-entity analyse: every statement plans and passes the E0xx rules");
+        Ok(true)
+    } else {
+        eprintln!("er-entity analyse: {} diagnostic(s):", diags.len());
+        for d in &diags {
+            eprintln!("  [{}] {}: {}", d.code, d.path.display(), d.message);
+        }
+        Ok(false)
+    }
+}
+
+/// The stale-output check plus the analyser passes (the `check`/`verify` body).
+fn run_verify(root: &Path) -> Result<bool> {
+    let fresh = run_check(root)?;
+    let analysed = run_analyze(root)?;
+    Ok(fresh && analysed)
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match &cli.command {
         Command::Gen { root } => run_gen(root).map(|()| true),
-        Command::Check { root } => run_check(root),
+        Command::Check { root } | Command::Verify { root } => run_verify(root),
     };
     match result {
         Ok(true) => ExitCode::SUCCESS,

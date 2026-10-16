@@ -18,11 +18,11 @@ lint:
 test:
 	cd rust && cargo test --workspace
 
-# The entity-framework stale-output gate: regenerate every artifact from
-# entities/*.yaml (Rust struct + arrow_schema(), DuckLake DDL, TS binding +
-# reader) and fail if any committed file is stale. Run `er-entity gen` to fix.
+# The entity-framework gate: regenerate every artifact from entities/*.yaml and
+# fail if any committed file is stale (run `er-entity gen` to fix), then plan every
+# statement and run the E0xx passes. This is what rust.yml runs as `er-entity verify`.
 entities-check:
-	cd rust && cargo run -q -p er-entity-cli -- check --root ..
+	cd rust && cargo run -q -p er-entity-cli -- verify --root ..
 
 # The fast PR-equivalent backend gate (mirrors rust.yml's lint + test tiers).
 check: fmt lint entities-check test
