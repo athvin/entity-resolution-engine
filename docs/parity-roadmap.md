@@ -67,7 +67,21 @@ assistant. Tenant username/password auth is fully built (argon2id). M6 (PR #56) 
       path in the e2e tier.
 
 ### Phase 1 — Stable-core parity (generic; no external deps)
-- [ ] **1.1 Account/Org entity type** — generalize the person-centric schema across standardize/block/match/survivorship.
+- [~] **1.1 Account/Org entity type [EPIC]** — hand-written parallel schema behind an `entity_type` discriminator
+      (user-chosen over the `entity-framework-design.md` generator; the generator would later supersede — accepted).
+      Decomposed:
+  - [x] **1.1a foundation** — `EntityType` discriminator on `Config` (`#[serde(default, skip_serializing_if)]` →
+        `config_hash` byte-identical for person configs), `ACCOUNT_CANONICAL_ATTRIBUTES` + `canonical_attributes()`
+        selector, and parallel Account `Owner::Dbt` lake tables (`acct_stg_records`/`acct_int_std_records`/
+        `acct_golden_records`/`acct_golden_lineage`/`acct_golden_display`). Determinism-gated: full `cargo test
+        --workspace` green, ONLY `model_registry_golden.json` changed (config_golden + dbt_sources + all base_10
+        person fixtures byte-identical).
+  - [ ] **1.1b standardizers** — entity-aware `stg_arm` + Account `er-std` normalizers (company-name, domain/URL;
+        reuse email/phone/address). Makes the person index sites in er-standardize/er-ingest entity-aware.
+  - [ ] **1.1c matching + pipeline** — hand-authored Account Splink model JSON (the config→SQL comparison builder is
+        NOT in Rust), wire match/reconcile/golden to pick model+attrs by `entity_type`.
+  - [ ] **1.1d frontend** — Account attribute descriptors behind the `attributes.ts` seam + new-source wizard
+        `entity_type` selection + Account records/golden UI.
 - [x] **1.2 Mass UPDATE** — durable golden field overrides across a filtered set. New `golden_overrides` lake
       table + `override_field`/`clear_field` steward actions (ride the drain) + a post-assembly UPDATE over
       golden_records that is a byte-exact **no-op when unused** (base fixtures untouched; only the model_registry +
@@ -136,3 +150,6 @@ assistant. Tenant username/password auth is fully built (argon2id). M6 (PR #56) 
   panel, suggestions ride the existing `override_field` path (frontend-only; determinism contract untouched).
   Local gate green (`pnpm check`: eslint+prettier+tsc + 49 vitest incl. 11 new); enrichment Playwright spec green and
   no regression in the entity-detail suite (incl. the viewer `@visual` baseline — the panel is steward-gated).
+- 2026-10-16 — Account epic 1.1a (hand-written approach chosen; prod stays plan-only): `entity_type` discriminator
+  (hash-safe) + Account attribute set + parallel Account dbt tables. Full `cargo test --workspace` green; only
+  `model_registry_golden.json` changed (config_golden + dbt_sources + base_10 person fixtures byte-identical).

@@ -708,6 +708,63 @@ fn golden_survivable() -> Vec<Column> {
         .collect()
 }
 
+/// The standardized payload for the ACCOUNT entity type (the Account analogue of
+/// [`std_payload`]): the same structural columns, the Account canonical attributes
+/// in place of the person ones. Account's `stg_records`/`int_std_records` reuse
+/// it; the person payload is untouched. The standardize stage that populates it
+/// lands in a later sub-PR (1.1b).
+fn acct_std_payload() -> Vec<Column> {
+    vec![
+        nn("source_system", VARCHAR),
+        nn("source_record_id", VARCHAR),
+        nn("content_hash", VARCHAR),
+        nn("std_version", VARCHAR),
+        col("company_name", VARCHAR),
+        col("company_name_norm", VARCHAR),
+        nn("company_variants", LIST_VARCHAR),
+        col("domain", VARCHAR),
+        col("domain_norm", VARCHAR),
+        col("phone_e164", VARCHAR),
+        col("phone_valid", BOOLEAN),
+        col("addr_street", VARCHAR),
+        col("addr_city", VARCHAR),
+        col("addr_region", VARCHAR),
+        col("addr_postal", VARCHAR),
+        col("metadata", JSON),
+        col("updated_at_source", TIMESTAMP),
+        nn("ingest_batch_id", VARCHAR),
+        nn("ingested_at", TIMESTAMP),
+    ]
+}
+
+/// The Account `golden_records` survivable columns (the Account analogue of
+/// [`golden_survivable`]): the raw canonical Account attributes, all nullable,
+/// types from the Account std payload.
+fn acct_golden_survivable() -> Vec<Column> {
+    const ACCT_SURVIVABLE: [&str; 7] = [
+        "company_name",
+        "domain",
+        "phone_e164",
+        "addr_street",
+        "addr_city",
+        "addr_region",
+        "addr_postal",
+    ];
+    let payload = acct_std_payload();
+    ACCT_SURVIVABLE
+        .iter()
+        .map(|name| {
+            let type_ = payload
+                .iter()
+                .find(|c| c.name == *name)
+                .expect("survivable column is in the account std payload")
+                .r#type
+                .clone();
+            Column::new(*name, type_, true).expect("valid type")
+        })
+        .collect()
+}
+
 fn dbt_specs() -> Vec<TableSpec> {
     let dspec = |name: &str, columns, keys, enums| {
         TableSpec::new(name, Owner::Dbt, columns, keys, enums).expect("valid dbt spec")
@@ -719,6 +776,21 @@ fn dbt_specs() -> Vec<TableSpec> {
     let mut golden_cols = vec![nn("entity_id", VARCHAR)];
     golden_cols.extend(golden_survivable());
     golden_cols.extend([
+        col("metadata", JSON),
+        nn("survivorship_version", VARCHAR),
+        nn("assembled_at", TIMESTAMP),
+    ]);
+
+    // The parallel Account entity-type relations (1.1a). Same shapes as the
+    // person std/golden relations, over the Account attributes. Account records
+    // share the entity-agnostic DDL tables (raw_records, match_scores, entities,
+    // …); only these standardized/golden projections are entity-specific.
+    let mut acct_int_std_cols = vec![nn("record_key", VARCHAR)];
+    acct_int_std_cols.extend(acct_std_payload());
+
+    let mut acct_golden_cols = vec![nn("entity_id", VARCHAR)];
+    acct_golden_cols.extend(acct_golden_survivable());
+    acct_golden_cols.extend([
         col("metadata", JSON),
         nn("survivorship_version", VARCHAR),
         nn("assembled_at", TIMESTAMP),
@@ -776,6 +848,56 @@ fn dbt_specs() -> Vec<TableSpec> {
                 nn("entity_id", VARCHAR),
                 col("display_name", VARCHAR),
                 col("display_email", VARCHAR),
+                col("display_phone", VARCHAR),
+                col("display_address", VARCHAR),
+                nn("assembled_at", TIMESTAMP),
+            ],
+            vec![key(&["entity_id"])],
+            BTreeMap::new(),
+        ),
+        // --- Account entity-type relations (1.1a) ---
+        dspec(
+            "acct_stg_records",
+            acct_std_payload(),
+            vec![key(&["source_system", "source_record_id", "content_hash"])],
+            BTreeMap::new(),
+        ),
+        dspec(
+            "acct_int_std_records",
+            acct_int_std_cols,
+            vec![key(&["record_key"])],
+            BTreeMap::new(),
+        ),
+        dspec(
+            "acct_golden_records",
+            acct_golden_cols,
+            vec![key(&["entity_id"])],
+            BTreeMap::new(),
+        ),
+        dspec(
+            "acct_golden_lineage",
+            vec![
+                nn("entity_id", VARCHAR),
+                nn("attribute", VARCHAR),
+                nn("record_key", VARCHAR),
+                nn("source_system", VARCHAR),
+                nn("source_record_id", VARCHAR),
+                nn("rule", VARCHAR),
+                nn("survivorship_version", VARCHAR),
+                nn("assembled_at", TIMESTAMP),
+            ],
+            vec![key(&["entity_id", "attribute"])],
+            enum_map(&[(
+                "attribute",
+                ["address", "company_name", "domain", "phone_e164"].as_slice(),
+            )]),
+        ),
+        dspec(
+            "acct_golden_display",
+            vec![
+                nn("entity_id", VARCHAR),
+                col("display_name", VARCHAR),
+                col("display_domain", VARCHAR),
                 col("display_phone", VARCHAR),
                 col("display_address", VARCHAR),
                 nn("assembled_at", TIMESTAMP),
