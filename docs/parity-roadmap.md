@@ -50,7 +50,12 @@ assistant. Tenant username/password auth is fully built (argon2id). M6 (PR #56) 
       key (prod mutation → AccessDenied, dev mutation → NotFound). Key is now dev-scoped/prod-guarded, not a prod-gate
       blocker. Committed into the repo.
 - [ ] **0.5 Promote-on-merge → prod** — digest-pinned prod rollout on merge to main via CI github-oidc role.
-- [ ] **0.6 Password-reset page** — add `(auth)/reset`; closes the self-serve username/password workflow.
+      *Blocked on the prod apply decision: prod EKS isn't applied (cost-deferred), so a real rollout has no target.
+      Needs the deploy-mechanism pass + a go-ahead to apply prod (or a plan-gate-only interim). Revisit with user.*
+- [x] **0.6 Password-reset page** — added `(auth)/reset` (request) + `(auth)/reset/[token]` (confirm), fixed the
+      `PUBLIC_PATHS` gap (`/reset` was missing → pages would have redirected to /login), and added a "Forgot your
+      password?" link on login. Functional tests (5) + regenerated login visual baselines. Completes the self-serve
+      tenant username/password workflow.
 
 ### Phase 1 — Stable-core parity (generic; no external deps)
 - [ ] **1.1 Account/Org entity type** — generalize the person-centric schema across standardize/block/match/survivorship.
@@ -78,3 +83,5 @@ assistant. Tenant username/password auth is fully built (argon2id). M6 (PR #56) 
 - 2026-10-15 — PR 0.2 opened: nightly coverage (cargo-llvm-cov + vitest), floors as a non-regression backstop.
 - 2026-10-15 — PR 0.2 merged (#98). PR 0.3+0.4 opened: envs/prod (plan-validated 61-to-add, not applied) + builder
   key §8.2 prod-guard (applied + verified live). Prod is apply-ready; builder key can no longer touch er-prod-*.
+- 2026-10-15 — PR 0.3+0.4 merged (#99). Phase 0 nearly done (0.5 blocked on the prod-apply decision). PR 0.6 opened:
+  password-reset pages + PUBLIC_PATHS fix + login link; completes the tenant username/password workflow.

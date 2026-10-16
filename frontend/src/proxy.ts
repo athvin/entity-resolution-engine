@@ -10,6 +10,7 @@ const PUBLIC_PATHS = [
   "/api/auth/login",
   "/invite",
   "/api/invites",
+  "/reset",
   "/api/auth/password-reset",
 ];
 
