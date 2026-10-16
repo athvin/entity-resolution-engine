@@ -1,0 +1,50 @@
+kind: entity
+version: 1
+name: config_version
+relation: config_versions
+description: "A versioned config document for a tenant: its YAML, hash and publish state."
+key: [org, version]
+generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+  wire: [json]
+columns:
+  - name: org
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: name }
+    description: "The tenant this config version belongs to."
+  - name: version
+    type: bigint
+    nullable: false
+    description: "The monotonic version number within the tenant."
+  - name: yaml
+    type: varchar
+    nullable: false
+    description: "The config document source."
+  - name: config_hash
+    type: varchar
+    nullable: false
+    description: "Hash of the canonicalized config."
+  - name: state
+    type: varchar
+    nullable: false
+    default: "'draft'"
+    accepted_values: [draft, published]
+    description: "Whether the version is a draft or published."
+  - name: tier
+    type: varchar
+    description: "Optional service tier label."
+  - name: created_by
+    type: varchar
+    nullable: false
+    description: "Principal that created the version."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the version was created."
+  - name: published_at
+    type: timestamp
+    description: "When the version was published, if it has been."

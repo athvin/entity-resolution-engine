@@ -1,0 +1,44 @@
+kind: entity
+version: 1
+name: webhook
+relation: webhooks
+description: "A tenant webhook endpoint: its URL, subscribed events and signing secret."
+key: [webhook_id]
+generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+  wire: [json]
+columns:
+  - name: webhook_id
+    type: varchar
+    nullable: false
+    description: "The webhook's unique id."
+  - name: org
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: name }
+    description: "The tenant that owns the webhook."
+  - name: url
+    type: varchar
+    nullable: false
+    description: "The delivery URL."
+  - name: events
+    type: json
+    nullable: false
+    default: "'[]'::jsonb"
+    description: "The subscribed event types."
+  - name: secret
+    type: varchar
+    nullable: false
+    description: "HMAC signing secret for deliveries."
+  - name: active
+    type: boolean
+    nullable: false
+    default: "true"
+    description: "Whether the webhook is active."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the webhook was registered."

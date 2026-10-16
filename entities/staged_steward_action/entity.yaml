@@ -1,0 +1,49 @@
+kind: entity
+version: 1
+name: staged_steward_action
+relation: staged_steward_actions
+description: "A steward action staged for review/apply: its payload, state and outcome."
+key: [action_id]
+generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+  wire: [json]
+columns:
+  - name: action_id
+    type: varchar
+    nullable: false
+    description: "The staged action's unique id."
+  - name: org
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: name }
+    description: "The tenant the action applies to."
+  - name: action
+    type: json
+    nullable: false
+    description: "The action payload."
+  - name: state
+    type: varchar
+    nullable: false
+    default: "'pending'"
+    accepted_values: [pending, applied, failed]
+    description: "Whether the action is pending, applied or failed."
+  - name: error
+    type: varchar
+    description: "The failure reason, if the action failed."
+  - name: created_by
+    type: varchar
+    nullable: false
+    description: "Principal that staged the action."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the action was staged."
+  - name: applied_at
+    type: timestamp
+    description: "When the action was applied, if it has been."
+indexes:
+  - name: staged_pending
+    columns: [org, state]

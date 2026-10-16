@@ -1,0 +1,61 @@
+kind: entity
+version: 1
+name: schedule
+relation: schedules
+description: "A recurring job schedule for a tenant: its kind, cron and source."
+key: [schedule_id]
+generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+  wire: [json]
+columns:
+  - name: schedule_id
+    type: varchar
+    nullable: false
+    description: "The schedule's unique id."
+  - name: org
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: name }
+    description: "The tenant this schedule runs for."
+  - name: kind
+    type: varchar
+    nullable: false
+    description: "The job kind the schedule enqueues."
+  - name: params
+    type: json
+    nullable: false
+    default: "'{}'::jsonb"
+    description: "Kind-specific parameters."
+  - name: cron
+    type: varchar
+    nullable: false
+    description: "The cron expression."
+  - name: enabled
+    type: boolean
+    nullable: false
+    default: "true"
+    description: "Whether the schedule is active."
+  - name: source
+    type: varchar
+    nullable: false
+    default: "'api'"
+    description: "What created the schedule (api, config:correction_pass, system:lake_maintain)."
+  - name: last_enqueued_at
+    type: timestamp
+    description: "When the schedule last enqueued a job."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the schedule was created."
+indexes:
+  - name: schedules_one_correction_per_org
+    columns: [org]
+    unique: true
+    where: "source = 'config:correction_pass'"
+  - name: schedules_one_maintenance_per_org
+    columns: [org]
+    unique: true
+    where: "source = 'system:lake_maintain'"
