@@ -81,13 +81,11 @@ pub struct StatementParam {
     /// The parameter type from the eight-type vocabulary.
     #[serde(rename = "type")]
     pub param_type: ColumnType,
-    /// Whether the parameter admits NULL (default true).
-    #[serde(default = "default_true")]
+    /// Whether the parameter admits NULL. Parameters default to NOT nullable (the
+    /// opposite of entity columns): an optional filter says `nullable: true`
+    /// explicitly, the way `golden_list`'s `after`/`q` do.
+    #[serde(default)]
     pub nullable: bool,
-}
-
-fn default_true() -> bool {
-    true
 }
 
 /// The parsed `.yaml` beside a statement's `.sql`.

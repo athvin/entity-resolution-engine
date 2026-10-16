@@ -9,12 +9,14 @@
 
 mod analyze;
 mod catalog;
+mod emit;
 mod plan;
 mod rewrite;
 mod statement;
 
 pub use analyze::{Diagnostic, analyze_catalog, analyze_statement};
 pub use catalog::build_store_catalog;
+pub use emit::emit_query_modules;
 pub use plan::parse_and_plan;
 pub use rewrite::{Rewritten, rewrite_lake};
 pub use statement::{

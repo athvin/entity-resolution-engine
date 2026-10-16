@@ -107,3 +107,80 @@ impl GoldenRecord {
         Schema::new(fields).with_metadata(metadata)
     }
 }
+
+pub mod read {
+    //! @generated query functions for this entity + operation.
+    /// A single golden record by entity id at a pinned snapshot (the entity detail page's master row).
+    pub fn by_id(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+        entity_id: &str,
+    ) -> ::duckdb::Result<Vec<::arrow::record_batch::RecordBatch>> {
+        const SQL: &str = "SELECT
+  entity_id,
+  given_name,
+  family_name,
+  email,
+  phone_e164,
+  addr_number,
+  addr_street,
+  addr_unit,
+  addr_city,
+  addr_region,
+  addr_postal,
+  birth_date,
+  metadata,
+  survivorship_version,
+  assembled_at
+FROM lake.main.golden_records AT (VERSION => {snapshot})
+WHERE entity_id = $1
+";
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = conn.prepare(&sql)?;
+        let batches = stmt
+            .query_arrow(::duckdb::params![entity_id])?
+            .collect::<Vec<_>>();
+        Ok(batches)
+    }
+
+    /// One keyset page of golden records at a pinned snapshot, optionally filtered by a name/email contains-search.
+    pub fn list_page(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+        after: Option<&str>,
+        q: Option<&str>,
+        limit: i64,
+    ) -> ::duckdb::Result<Vec<::arrow::record_batch::RecordBatch>> {
+        const SQL: &str = "SELECT
+  entity_id,
+  given_name,
+  family_name,
+  email,
+  phone_e164,
+  addr_number,
+  addr_street,
+  addr_unit,
+  addr_city,
+  addr_region,
+  addr_postal,
+  birth_date,
+  metadata,
+  survivorship_version,
+  assembled_at
+FROM lake.main.golden_records AT (VERSION => {snapshot})
+WHERE ($1 IS NULL OR entity_id > $1)
+  AND (
+    $2 IS NULL
+    OR (coalesce(given_name, '') || ' ' || coalesce(family_name, '') || ' ' || coalesce(email, '')) ILIKE $2 ESCAPE '\\'
+  )
+ORDER BY entity_id
+LIMIT $3
+";
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = conn.prepare(&sql)?;
+        let batches = stmt
+            .query_arrow(::duckdb::params![after, q, limit])?
+            .collect::<Vec<_>>();
+        Ok(batches)
+    }
+}
