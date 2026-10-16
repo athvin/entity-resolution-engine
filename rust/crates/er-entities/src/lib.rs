@@ -3,4 +3,9 @@
 //! `arrow_schema()` and (in later phases) its typed query functions.
 #![allow(clippy::all, clippy::pedantic, clippy::nursery)]
 
+pub mod acct_golden_display;
+pub mod acct_golden_lineage;
+pub mod acct_golden_record;
+pub mod golden_display;
+pub mod golden_lineage;
 pub mod golden_record;

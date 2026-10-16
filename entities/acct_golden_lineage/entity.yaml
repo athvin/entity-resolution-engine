@@ -1,0 +1,44 @@
+kind: entity
+version: 1
+name: acct_golden_lineage
+relation: acct_golden_lineage
+description: "Per-attribute survivorship provenance for a resolved account: which record each surviving value came from."
+key: [entity_id, attribute]
+generate:
+  stores: [duckdb]
+  languages: [rust, typescript]
+  wire: [arrow, json]
+columns:
+  - name: entity_id
+    type: varchar
+    nullable: false
+    description: "The resolved account this attribute decision belongs to."
+  - name: attribute
+    type: varchar
+    nullable: false
+    description: "The survivable attribute decided (e.g. company_name, domain, address)."
+  - name: record_key
+    type: varchar
+    nullable: false
+    description: "The source record that won the attribute."
+  - name: source_system
+    type: varchar
+    nullable: false
+    description: "Source system of the winning record."
+  - name: source_record_id
+    type: varchar
+    nullable: false
+    description: "Source-native id of the winning record."
+  - name: rule
+    type: varchar
+    nullable: false
+    description: "The survivorship rule that selected this value."
+  - name: survivorship_version
+    type: varchar
+    nullable: false
+    description: "Survivorship policy version that produced this row."
+  - name: assembled_at
+    type: timestamp
+    nullable: false
+    volatile: true
+    description: "Assembly time of this row (volatile)."
