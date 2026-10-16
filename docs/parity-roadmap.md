@@ -68,7 +68,12 @@ assistant. Tenant username/password auth is fully built (argon2id). M6 (PR #56) 
 
 ### Phase 1 — Stable-core parity (generic; no external deps)
 - [ ] **1.1 Account/Org entity type** — generalize the person-centric schema across standardize/block/match/survivorship.
-- [ ] **1.2 Mass update / mass delete** — filtered mass field-update + mass-delete with preview + audit.
+- [x] **1.2 Mass UPDATE** — durable golden field overrides across a filtered set. New `golden_overrides` lake
+      table + `override_field`/`clear_field` steward actions (ride the drain) + a post-assembly UPDATE over
+      golden_records that is a byte-exact **no-op when unused** (base fixtures untouched; only the model_registry +
+      dbt_sources goldens change, for the new table). `POST /v1/orgs/{org}/mass-update` + a monochrome records-page
+      panel (typed-count confirm). Mass **DELETE** is reframed as steward exclusion/suppression (→ 1.3): a literal
+      delete doesn't fit the source-driven model (re-ingest resurrects the record).
 - [ ] **1.3 Protected/excluded flag + survivorship exception rules**.
 - [x] **1.4 Score-only match preview** (frontend-design §7.16) — `er_cli::preview_match` runs the committed model
       read-only (pairs + bucket counts + evidence waterfall) via a session-local temp table, committing NOTHING

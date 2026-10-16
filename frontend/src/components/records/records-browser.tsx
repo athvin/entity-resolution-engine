@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useGoldenRecords, type GoldenRecord } from "@/lib/query/hooks";
+import { MassEditPanel } from "./mass-edit-panel";
 
 function useDebounced(value: string, ms: number): string {
   const [debounced, setDebounced] = useState(value);
@@ -94,6 +95,8 @@ export function RecordsBrowser({ org }: { org: string }) {
           data-testid="records-search"
         />
       </div>
+
+      <MassEditPanel org={org} q={q} />
 
       {/* Header row, desktop only — the virtual rows below mirror these columns. */}
       <div className="text-muted-foreground hidden grid-cols-[1.2fr_1.6fr_1fr_1.4fr] gap-3 border-b px-3 pb-2 text-xs font-medium tracking-wide uppercase lg:grid">

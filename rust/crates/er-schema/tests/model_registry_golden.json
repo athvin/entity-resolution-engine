@@ -23,7 +23,8 @@
     "ingest_batches",
     "er_standardize_work",
     "er_touched_entities",
-    "nickname_variants"
+    "nickname_variants",
+    "golden_overrides"
   ],
   "relations": {
     "assertions": {
@@ -548,6 +549,52 @@
         }
       ],
       "owner": "dbt"
+    },
+    "golden_overrides": {
+      "columns": [
+        {
+          "name": "entity_id",
+          "nullable": false,
+          "type": "VARCHAR"
+        },
+        {
+          "name": "attribute",
+          "nullable": false,
+          "type": "VARCHAR"
+        },
+        {
+          "name": "value",
+          "nullable": true,
+          "type": "VARCHAR"
+        },
+        {
+          "name": "created_by",
+          "nullable": false,
+          "type": "VARCHAR"
+        },
+        {
+          "name": "created_at",
+          "nullable": false,
+          "type": "TIMESTAMP"
+        },
+        {
+          "name": "source_action_id",
+          "nullable": false,
+          "type": "VARCHAR"
+        }
+      ],
+      "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.golden_overrides (\n  entity_id VARCHAR NOT NULL,\n  attribute VARCHAR NOT NULL,\n  value VARCHAR,\n  created_by VARCHAR NOT NULL,\n  created_at TIMESTAMP NOT NULL,\n  source_action_id VARCHAR NOT NULL\n);",
+      "enums": {},
+      "keys": [
+        {
+          "columns": [
+            "entity_id",
+            "attribute"
+          ],
+          "where": null
+        }
+      ],
+      "owner": "ddl.py"
     },
     "golden_records": {
       "columns": [

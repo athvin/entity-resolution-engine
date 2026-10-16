@@ -3266,6 +3266,140 @@ async fn bulk_resolve_reviews(
     (StatusCode::OK, Json(resp)).into_response()
 }
 
+/// The 11 overridable golden columns (er-golden SCALAR + ADDRESS); the mass-update
+/// API only accepts these.
+const OVERRIDABLE_ATTRS: [&str; 11] = [
+    "given_name",
+    "family_name",
+    "email",
+    "phone_e164",
+    "birth_date",
+    "addr_number",
+    "addr_street",
+    "addr_unit",
+    "addr_city",
+    "addr_region",
+    "addr_postal",
+];
+
+#[derive(Deserialize)]
+struct MassUpdateItem {
+    entity_id: String,
+    attribute: String,
+    #[serde(default)]
+    value: Option<String>,
+    #[serde(default)]
+    clear: bool,
+}
+
+#[derive(Deserialize)]
+struct MassUpdateIn {
+    items: Vec<MassUpdateItem>,
+    #[serde(default)]
+    apply_now: bool,
+}
+
+/// Steward+: stage golden field overrides across many entities in one window
+/// (`POST /v1/orgs/{org}/mass-update`). 1..=200 items; each sets (`value`) or
+/// clears (`clear: true`) one golden field for one entity. With `apply_now` also
+/// enqueues the drain (`apply_corrections`), which re-asssembles golden over the
+/// staged overrides. Durable + auditable; the matcher/scores are untouched.
+async fn mass_update(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Json(body): Json<MassUpdateIn>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
+    if body.items.is_empty() || body.items.len() > 200 {
+        return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "items must be 1..=200");
+    }
+    if !body
+        .items
+        .iter()
+        .all(|i| !i.entity_id.is_empty() && OVERRIDABLE_ATTRS.contains(&i.attribute.as_str()))
+    {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "each item needs an entity_id and an attribute in the golden field set",
+        );
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(
+            StatusCode::NOT_IMPLEMENTED,
+            "steward actions require Postgres",
+        );
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    match pg::get_org(&client, &org).await {
+        Ok(Some(o)) if o.state == "active" => {}
+        Ok(Some(o)) => {
+            return detail_err(
+                StatusCode::CONFLICT,
+                format!(
+                    "org '{org}' is {}; steward actions are accepted only when active",
+                    o.state
+                ),
+            );
+        }
+        Ok(None) => return detail_err(StatusCode::NOT_FOUND, format!("no org '{org}'")),
+        Err(e) => return pg_err(e),
+    }
+    let mut action_ids = Vec::new();
+    for item in &body.items {
+        let action = if item.clear {
+            json!({
+                "type": "clear_field",
+                "entity_id": item.entity_id,
+                "attribute": item.attribute,
+            })
+        } else {
+            json!({
+                "type": "override_field",
+                "entity_id": item.entity_id,
+                "attribute": item.attribute,
+                "value": item.value,
+            })
+        };
+        match pg::stage_action(&client, &org, &action, &principal.actor).await {
+            Ok(id) => action_ids.push(id),
+            Err(e) => return pg_err(e),
+        }
+    }
+    let _ = pg::audit(
+        &client,
+        &principal.actor,
+        Some(&org),
+        "steward.mass_update",
+        &json!({ "count": action_ids.len() }),
+    )
+    .await;
+    let mut resp = json!({ "status": "staged", "action_ids": action_ids });
+    if body.apply_now {
+        let idem = format!("mass-update-apply:{}", ulid::Ulid::new());
+        let params = json!({ "skip_ingest": true });
+        match pg::enqueue(
+            &client,
+            &org,
+            "apply_corrections",
+            0,
+            Some(&idem),
+            Some(&params),
+        )
+        .await
+        {
+            Ok(job) => resp["apply_job"] = json!(job.job_id),
+            Err(e) => return pg_err(e),
+        }
+    }
+    (StatusCode::OK, Json(resp)).into_response()
+}
+
 #[derive(Deserialize)]
 struct KeyIn {
     role: String,
@@ -3427,6 +3561,7 @@ fn build_routes(state: AppState) -> Router {
             "/v1/orgs/{org}/reviews/bulk-resolve",
             post(bulk_resolve_reviews),
         )
+        .route("/v1/orgs/{org}/mass-update", post(mass_update))
         .route("/v1/orgs/{org}/reviews/{review_id}", get(review_detail))
         .route(
             "/v1/orgs/{org}/reviews/{review_id}/resolve",
