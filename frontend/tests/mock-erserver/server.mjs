@@ -756,6 +756,36 @@ const server = http.createServer((req, res) => {
     if (path === "/anthropic/v1/messages" && req.method === "POST") {
       const body = await readBody(req);
       const messages = Array.isArray(body.messages) ? body.messages : [];
+      // Enrichment (PR 2.3) is a NON-streaming structured-output call: one text
+      // block whose JSON matches ENRICH_SCHEMA. The addr_unit fill always
+      // survives (seed is null); the birth_date one is a deliberate no-op (seed
+      // is 1970-01-01) that the BFF must drop — exercising the no-op filter.
+      if (body.stream !== true) {
+        const suggestions = {
+          suggestions: [
+            {
+              field: "addr_unit",
+              value: "Suite 410",
+              reason: "Unit is empty but the street address implies a multi-unit building.",
+            },
+            {
+              field: "birth_date",
+              value: "1970-01-01",
+              reason: "Already canonical — should be dropped as a no-op.",
+            },
+          ],
+        };
+        return send(res, 200, {
+          id: "msg_mock_enrich",
+          type: "message",
+          role: "assistant",
+          model: String(body.model ?? "mock"),
+          content: [{ type: "text", text: JSON.stringify(suggestions) }],
+          stop_reason: "end_turn",
+          stop_sequence: null,
+          usage: { input_tokens: 20, output_tokens: 30 },
+        });
+      }
       const hasToolResult = messages.some(
         (message) =>
           Array.isArray(message.content) &&

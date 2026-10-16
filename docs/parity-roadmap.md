@@ -104,7 +104,17 @@ assistant. Tenant username/password auth is fully built (argon2id). M6 (PR #56) 
       Duplicate-rate + composite DQ score), fixed-metrics v1 (no config change → determinism contract untouched).
 - [x] **2.2 Health dashboard / DQ-Score KPIs** — monochrome "Data quality" section on the dashboard (KPI tiles +
       per-attribute completeness bars).
-- [ ] **2.3 AI enrichment** — fill-missing / normalize via AWS Bedrock (or existing Anthropic key); cost-gated. STOP.
+- [x] **2.3 AI enrichment** — a steward "Enrich with AI" panel on the entity view suggests fill-missing /
+      normalize values for ONE golden record. The LLM call is confined to the BFF (`POST /v1/orgs/{org}/enrich`,
+      steward), reusing the existing Anthropic plumbing (`ANTHROPIC_API_KEY`/`ANTHROPIC_BASE_URL`, new
+      `ERWEB_ENRICH_MODEL` default `claude-opus-5`); the model key never reaches the browser. Suggestions are
+      **read-only** — accepting one rides the existing PR 1.2 `override_field`/mass-update write, so it is durable +
+      auditable and **no engine/DDL/golden/fixture changes** (determinism contract untouched; frontend-only PR).
+      Prompt-injection-safe: record data is framed as untrusted DATA, output is pinned by a structured-output JSON
+      schema, and the field allowlist + no-op filter are re-enforced server-side (a schema-ignoring model still can't
+      widen the write surface). Cost-gated: steward-only, one entity at a time, low effort. **Bedrock is a base-URL +
+      model-id swap** (`ANTHROPIC_BASE_URL` + `anthropic.claude-opus-5`) — noted as a follow-up, no code change here.
+      Unit tests (11, `src/lib/enrich`) + enrichment Playwright spec (steward apply + no-op drop + viewer absence).
 
 ## Explicitly skipped / deferred (not building)
 - Salesforce / Marketo / Lightning / lead-convert (decision #1).
@@ -122,3 +132,7 @@ assistant. Tenant username/password auth is fully built (argon2id). M6 (PR #56) 
   password-reset pages + PUBLIC_PATHS fix + login link; completes the tenant username/password workflow.
 - 2026-10-15 — PR 0.6 merged (#100). Phase 1 scoping found a prod bug: steward-action drain was never wired into the
   Rust dispatcher. Opened PR P1 (fix) to wire it before building mass-ops on that path.
+- 2026-10-16 — PR 2.3 (AI enrichment) implemented on `feat/ai-enrichment`: BFF enrich route + steward entity-view
+  panel, suggestions ride the existing `override_field` path (frontend-only; determinism contract untouched).
+  Local gate green (`pnpm check`: eslint+prettier+tsc + 49 vitest incl. 11 new); enrichment Playwright spec green and
+  no regression in the entity-detail suite (incl. the viewer `@visual` baseline — the panel is steward-gated).
