@@ -7,10 +7,42 @@
 
 use std::path::PathBuf;
 
+use arrow::array::{Array, StringArray};
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use er_server::{AppState, app, dispatcher, pg};
 use tower::ServiceExt;
+
+/// The golden-records list data lane is Arrow IPC; decode the page's `entity_id`
+/// column into a plain `Vec<String>`.
+async fn golden_entity_ids(app: &axum::Router) -> Vec<String> {
+    let resp = app
+        .clone()
+        .oneshot(op("GET", "/v1/orgs/acme/golden-records", Body::empty()))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    let mut ids = Vec::new();
+    for batch in
+        arrow::ipc::reader::StreamReader::try_new(std::io::Cursor::new(bytes.to_vec()), None)
+            .unwrap()
+            .map(Result::unwrap)
+    {
+        let idx = batch.schema().index_of("entity_id").unwrap();
+        let col = batch
+            .column(idx)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        for i in 0..col.len() {
+            ids.push(col.value(i).to_string());
+        }
+    }
+    ids
+}
 
 const TEST_YAML: &str = include_str!("../../er-cli/tests/fixtures/test.yaml");
 const NICKNAMES: &str = include_str!("../../er-cli/tests/fixtures/nickname_variants.csv");
@@ -151,18 +183,7 @@ async fn suppress_excludes_a_record_and_retract_restores_it() {
     );
 
     // Find a multi-member entity and pick one of its members to suppress.
-    let resp = app
-        .clone()
-        .oneshot(op("GET", "/v1/orgs/acme/golden-records", Body::empty()))
-        .await
-        .unwrap();
-    let golden = json_body(resp).await;
-    let ids: Vec<String> = golden["items"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter_map(|r| r["entity_id"].as_str().map(str::to_string))
-        .collect();
+    let ids = golden_entity_ids(&app).await;
     let mut target = None;
     for id in &ids {
         let m = members(&app, id).await;

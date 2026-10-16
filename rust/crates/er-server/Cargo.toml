@@ -22,6 +22,9 @@ er-std = { path = "../er-std" }
 # read/write path no longer hand-writes SQL or row mapping.
 er-entities = { path = "../er-entities" }
 chrono = { workspace = true }
+# The golden read path streams Arrow IPC: the generated lake query functions
+# return RecordBatch, which the handler writes with the IPC StreamWriter.
+arrow = { workspace = true }
 # The in-process dispatcher runs the whole pipeline over the claimed job's
 # DuckLake (run_all / correct / maintain / train) — no per-run k8s Jobs.
 er-cli = { path = "../er-cli" }

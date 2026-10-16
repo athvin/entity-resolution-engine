@@ -121,14 +121,15 @@ fn lit(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
 }
 
-/// A LIKE pattern literal: escape the LIKE metacharacters, then quote. Paired
-/// with `ESCAPE '\'` at the use site.
+/// A `%…%` contains-search LIKE pattern: escape the LIKE metacharacters so a user's
+/// `%`/`_`/`\` are matched literally, then wrap in wildcards. The result is a bound
+/// parameter value (not a SQL literal), paired with `ESCAPE '\'` at the use site.
 fn like_contains(s: &str) -> String {
     let escaped = s
         .replace('\\', "\\\\")
         .replace('%', "\\%")
         .replace('_', "\\_");
-    lit(&format!("%{escaped}%"))
+    format!("%{escaped}%")
 }
 
 /// Open an org's lake read-only from its stored `env`
@@ -172,54 +173,128 @@ pub fn open_org_lake(env: &Value) -> Result<Session, String> {
 ///
 /// # Errors
 /// Propagates the lake query error.
-pub fn golden_list(
+pub fn golden_arrow_page(
     session: &Session,
-    view: &GoldenView,
+    entity_type: EntityType,
     snapshot: i64,
     q: Option<&str>,
     after: Option<&str>,
     limit: i64,
-) -> Result<(Vec<Value>, Option<String>), String> {
+) -> Result<GoldenArrowPage, String> {
+    use arrow::array::StringArray;
+    use arrow::record_batch::RecordBatch;
+
     let limit = limit.clamp(1, MAX_LIMIT);
-    let mut filters = Vec::new();
-    if let Some(after) = after {
-        filters.push(format!("entity_id > {}", lit(after)));
+    let conn = session.connection();
+    // The read statements bind `$q` as a LIKE pattern (`... ILIKE $q ESCAPE '\'`),
+    // so the contains-search term is wrapped in `%…%` with its LIKE metacharacters
+    // escaped here; an empty term means "no filter" (NULL).
+    let q_pattern = q.filter(|s| !s.is_empty()).map(like_contains);
+    let q = q_pattern.as_deref();
+
+    // Fetch one extra row to decide whether a next page exists, via the generated
+    // typed query function (person or account).
+    let batches = match entity_type {
+        EntityType::Person => {
+            er_entities::golden_record::read::list_page(conn, snapshot, after, q, limit + 1)
+        }
+        EntityType::Account => {
+            er_entities::acct_golden_record::read::list_page(conn, snapshot, after, q, limit + 1)
+        }
     }
-    if let Some(q) = q.filter(|s| !s.is_empty()) {
-        filters.push(format!(
-            "({}) ILIKE {} ESCAPE '\\'",
-            view.search_expr,
-            like_contains(q)
-        ));
-    }
-    let where_sql = if filters.is_empty() {
-        String::new()
-    } else {
-        format!("WHERE {}", filters.join(" AND "))
+    .map_err(|e| e.to_string())?;
+
+    // The read API's contract: every batch is the declared shape. DuckDB's
+    // query_arrow carries no entity metadata and its own nullability, so the check
+    // is field name + type (not full Schema equality).
+    let expected = match entity_type {
+        EntityType::Person => er_entities::golden_record::GoldenRecord::arrow_schema(),
+        EntityType::Account => er_entities::acct_golden_record::AcctGoldenRecord::arrow_schema(),
     };
-    // Fetch one extra row to decide whether a next page exists.
-    let sql = format!(
-        "SELECT entity_id, to_json(t) FROM ( \
-           SELECT {cols} FROM {table} AT (VERSION => {snapshot}) \
-           {where_sql} ORDER BY entity_id LIMIT {} \
-         ) t ORDER BY entity_id",
-        limit + 1,
-        cols = view.columns,
-        table = view.golden_table,
-    );
-    let rows = session.query_strings(&sql).map_err(|e| e.to_string())?;
-    let has_more = rows.len() as i64 > limit;
-    let page = &rows[..rows.len().min(limit as usize)];
-    let items: Vec<Value> = page
-        .iter()
-        .map(|r| serde_json::from_str(&r[1]).unwrap_or(Value::Null))
-        .collect();
+    for batch in &batches {
+        assert_golden_fields(batch, &expected)?;
+    }
+
+    // Cap to `limit` rows (slicing the crossing batch) and derive the next cursor
+    // from the last kept row's entity_id (column 0 in both projections).
+    let total: i64 = batches.iter().map(|b| b.num_rows() as i64).sum();
+    let has_more = total > limit;
+    let mut kept: Vec<RecordBatch> = Vec::new();
+    let mut remaining = limit;
+    let mut last_entity_id: Option<String> = None;
+    for batch in batches {
+        if remaining <= 0 {
+            break;
+        }
+        let take = i64::min(batch.num_rows() as i64, remaining) as usize;
+        let slice = if take == batch.num_rows() {
+            batch
+        } else {
+            batch.slice(0, take)
+        };
+        if take > 0 {
+            let ids = slice
+                .column(0)
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .ok_or("entity_id column is not Utf8")?;
+            last_entity_id = Some(ids.value(take - 1).to_string());
+        }
+        remaining -= take as i64;
+        kept.push(slice);
+    }
     let next_cursor = if has_more {
-        page.last().map(|r| encode_cursor(snapshot, &r[0]))
+        last_entity_id.map(|id| encode_cursor(snapshot, &id))
     } else {
         None
     };
-    Ok((items, next_cursor))
+    // Stream with the batches' own (DuckDB) schema so the writer and batches match
+    // exactly; an empty page carries the declared schema so the reader still sees
+    // the column set.
+    let schema = kept
+        .first()
+        .map_or_else(|| std::sync::Arc::new(expected), RecordBatch::schema);
+    Ok(GoldenArrowPage {
+        schema,
+        batches: kept,
+        next_cursor,
+    })
+}
+
+/// A page of golden records as Arrow batches, capped to the page limit, with the
+/// keyset cursor for the next page and the schema to stream.
+pub struct GoldenArrowPage {
+    pub schema: arrow::datatypes::SchemaRef,
+    pub batches: Vec<arrow::record_batch::RecordBatch>,
+    pub next_cursor: Option<String>,
+}
+
+/// Assert a batch's columns match the entity's declared columns by name and type,
+/// ignoring metadata and nullability (which DuckDB's query_arrow does not carry).
+fn assert_golden_fields(
+    batch: &arrow::record_batch::RecordBatch,
+    expected: &arrow::datatypes::Schema,
+) -> Result<(), String> {
+    let actual = batch.schema();
+    if actual.fields().len() != expected.fields().len() {
+        return Err(format!(
+            "golden read: {} columns, expected {}",
+            actual.fields().len(),
+            expected.fields().len()
+        ));
+    }
+    for (got, want) in actual.fields().iter().zip(expected.fields().iter()) {
+        if got.name() != want.name() || got.data_type() != want.data_type() {
+            return Err(format!(
+                "golden read: column {}:{:?} != expected {}:{:?}",
+                got.name(),
+                got.data_type(),
+                want.name(),
+                want.data_type()
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Why resolving a page's start failed: a malformed cursor (the handler maps to

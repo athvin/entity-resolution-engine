@@ -82,7 +82,8 @@ pub fn golden_overrides_update_sql(golden_table: &str, overrides_table: &str) ->
 
 /// The `golden_records` SELECT: assemble survived attribute values + metadata per
 /// entity, reading winners from `lineage_table` and values from `std_table`.
-/// `assembled_at` (volatile) is intentionally omitted.
+/// `assembled_at` is the UTC assembly time (`volatile`: excluded from determinism
+/// comparisons, but a materialised NOT NULL column the read API streams).
 #[must_use]
 pub fn golden_records_sql(
     config: &Config,
@@ -141,7 +142,8 @@ survived as (
     join {entities_table} as e on e.entity_id = l.entity_id and e.status = 'active'
     group by l.entity_id
 )
-select s.*, coalesce(m.metadata, '{{}}'::json) as metadata
+select s.*, coalesce(m.metadata, '{{}}'::json) as metadata,
+       (now() at time zone 'UTC') as assembled_at
 from survived as s
 left join entity_metadata as m using (entity_id)"
     )
@@ -149,8 +151,9 @@ left join entity_metadata as m using (entity_id)"
 
 /// The Account `acct_golden_records` assembly — parallel to [`golden_records_sql`]
 /// over the Account survivable columns (`company_name, domain, phone_e164` +
-/// the four `addr_*` under the `address` token). The person builder above is
-/// left byte-for-byte untouched so its golden fixtures do not move.
+/// the four `addr_*` under the `address` token), including the same volatile
+/// `assembled_at`. The person builder's determinism fixtures compare explicit
+/// columns (never `assembled_at`), so they do not move.
 #[must_use]
 pub fn acct_golden_records_sql(
     config: &Config,
@@ -209,7 +212,8 @@ survived as (
     join {entities_table} as e on e.entity_id = l.entity_id and e.status = 'active'
     group by l.entity_id
 )
-select s.*, coalesce(m.metadata, '{{}}'::json) as metadata
+select s.*, coalesce(m.metadata, '{{}}'::json) as metadata,
+       (now() at time zone 'UTC') as assembled_at
 from survived as s
 left join entity_metadata as m using (entity_id)"
     )

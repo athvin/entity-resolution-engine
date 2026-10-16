@@ -7,6 +7,8 @@
 
 use std::path::PathBuf;
 
+use arrow::array::{Array, StringArray};
+use arrow::record_batch::RecordBatch;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use er_server::{AppState, app, dispatcher, pg};
@@ -81,26 +83,47 @@ fn populate_lake(catalog: &str, data_path: &str) {
     er_cli::run_all(&session, &config, &inputs).unwrap();
 }
 
-async fn golden_email(app: &axum::Router, entity_id: &str) -> Option<String> {
+/// Read the golden-records list as Arrow IPC batches (the data lane is binary Arrow,
+/// not JSON).
+async fn golden_rows(app: &axum::Router) -> Vec<RecordBatch> {
     let resp = app
         .clone()
         .oneshot(op("GET", "/v1/orgs/acme/golden-records", Body::empty()))
         .await
         .unwrap();
-    let items = json_body(resp).await;
-    items["items"]
-        .as_array()
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    arrow::ipc::reader::StreamReader::try_new(std::io::Cursor::new(bytes.to_vec()), None)
         .unwrap()
-        .iter()
-        .find(|r| r["entity_id"] == entity_id)
-        .map(|r| r["email"].clone())
-        .and_then(|v| {
-            if v.is_null() {
-                None
-            } else {
-                Some(v.as_str().unwrap().to_string())
+        .map(Result::unwrap)
+        .collect()
+}
+
+/// A Utf8 column of a batch, by name.
+fn str_col<'a>(batch: &'a RecordBatch, name: &str) -> &'a StringArray {
+    let idx = batch.schema().index_of(name).unwrap();
+    batch
+        .column(idx)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap()
+}
+
+/// The golden `email` for an entity across the Arrow page (`None` if the field is
+/// null or the entity is absent).
+async fn golden_email(app: &axum::Router, entity_id: &str) -> Option<String> {
+    for batch in &golden_rows(app).await {
+        let ids = str_col(batch, "entity_id");
+        let emails = str_col(batch, "email");
+        for i in 0..batch.num_rows() {
+            if ids.value(i) == entity_id {
+                return emails.is_valid(i).then(|| emails.value(i).to_string());
             }
-        })
+        }
+    }
+    None
 }
 
 #[tokio::test]
@@ -146,16 +169,9 @@ async fn mass_update_overrides_and_clears_golden_fields() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
 
-    // Pick an entity to edit.
-    let resp = app
-        .clone()
-        .oneshot(op("GET", "/v1/orgs/acme/golden-records", Body::empty()))
-        .await
-        .unwrap();
-    let entity_id = json_body(resp).await["items"][0]["entity_id"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    // Pick an entity to edit (first row of the Arrow page).
+    let batches = golden_rows(&app).await;
+    let entity_id = str_col(&batches[0], "entity_id").value(0).to_string();
 
     // 1) Override `email` for that entity, then drain + correct.
     let body = serde_json::json!({
