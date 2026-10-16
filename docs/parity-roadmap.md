@@ -33,9 +33,12 @@ assistant. Tenant username/password auth is fully built (argon2id). M6 (PR #56) 
 ## PR checklist
 
 ### Phase 0 — Delivery foundations (make "merge to master → it works" literal)
-- [ ] **0.1 Frontend CI + this roadmap** — `.github/workflows/frontend.yml` (lint+types+unit, and the Playwright
-      functional tier in the pinned image). *In progress.*
-- [ ] **0.2 Coverage (nightly)** — cargo-llvm-cov + vitest `--coverage`, committed baseline + non-regression check.
+- [x] **0.1 Frontend CI + this roadmap** — `.github/workflows/frontend.yml` (lint+types+unit, and the Playwright
+      functional tier in the pinned image). *Merged — PR #97.*
+- [ ] **0.2 Coverage (nightly)** — cargo-llvm-cov (rust.yml) + vitest `--coverage` (frontend.yml), **nightly +
+      workflow_dispatch only** (off the PR/main-push hot path). Non-regression floor via `--fail-under-lines`
+      (Rust, initial 45) and `coverage.thresholds` (frontend, lines 28/fn 15/stmt 29/br 35, measured just-above).
+      Floors are a regression backstop and ratchet UP over time; the real gate is per-PR behavioral tests. *In progress.*
 - [ ] **0.3 `envs/prod` foundation** — network/EKS/Aurora-multi-AZ/lake/CloudTrail with `er-prod-*` names; ALB/WAF+SES stubbed (domain-blocked).
 - [ ] **0.4 Builder-key prod guard** — §8.2 `DenyProd*` denies on `builder.tf`; commit it into the repo.
 - [ ] **0.5 Promote-on-merge → prod** — digest-pinned prod rollout on merge to main via CI github-oidc role.
@@ -63,3 +66,5 @@ assistant. Tenant username/password auth is fully built (argon2id). M6 (PR #56) 
 
 ## Change log
 - 2026-10-15 — Program kicked off; plan approved; PR 0.1 opened (frontend CI gate + this tracker).
+- 2026-10-15 — PR 0.1 merged (#97): frontend CI gate green (incl. pinned-image visual baselines).
+- 2026-10-15 — PR 0.2 opened: nightly coverage (cargo-llvm-cov + vitest), floors as a non-regression backstop.
