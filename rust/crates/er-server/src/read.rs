@@ -894,3 +894,135 @@ pub fn metrics(session: &Session, snapshot: i64) -> Result<Value, String> {
         "snapshot": snapshot,
     }))
 }
+
+/// Data-quality scores (`readapi.data_quality`), snapshot-pinned and READ-ONLY —
+/// a fixed-metrics v1 (no config, so `config_hash`/determinism is untouched).
+/// Four components, each in `[0,1]`:
+///   - `completeness`: mean over the 11 survivable golden columns of the
+///     non-null fraction in `golden_records`, plus the per-attribute breakdown;
+///   - `junk_rate`: fraction of `int_std_records` with a present-but-invalid
+///     email or phone (`email_valid`/`phone_valid` = false);
+///   - `stale_rate`: fraction whose freshness `COALESCE(updated_at_source,
+///     ingested_at)` is older than `stale_days`;
+///   - `duplicate_rate`: records in >=2-member entities / total records.
+///
+/// `dq_score` is the mean of `completeness`, `1-junk_rate`, `1-stale_rate`,
+/// `1-duplicate_rate`. SELECT-only at the pinned snapshot; commits nothing.
+///
+/// # Errors
+/// Propagates a lake query error (the core tables must exist — i.e. the org has
+/// had at least one run).
+pub fn data_quality(session: &Session, snapshot: i64, stale_days: i64) -> Result<Value, String> {
+    let at = format!("AT (VERSION => {snapshot})");
+    let records = count_at(
+        session,
+        &format!("SELECT count(*) FROM lake.main.int_std_records {at}"),
+    )?;
+    let entities = count_at(
+        session,
+        &format!("SELECT count(*) FROM lake.main.golden_records {at}"),
+    )?;
+
+    // Completeness: per-column non-null fraction over golden_records. The 11
+    // survivable columns (GOLDEN_COLUMNS minus entity_id/metadata/version).
+    let cols: [&str; 11] = [
+        "given_name",
+        "family_name",
+        "email",
+        "phone_e164",
+        "addr_number",
+        "addr_street",
+        "addr_unit",
+        "addr_city",
+        "addr_region",
+        "addr_postal",
+        "birth_date",
+    ];
+    let select_counts = cols
+        .iter()
+        .map(|c| format!("count({c}) AS c_{c}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let comp_rows = session
+        .query_strings(&format!(
+            "SELECT count(*) AS n, {select_counts} FROM lake.main.golden_records {at}"
+        ))
+        .map_err(|e| e.to_string())?;
+    let comp = comp_rows
+        .first()
+        .ok_or_else(|| "completeness query returned no row".to_string())?;
+    let n_golden = comp
+        .first()
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or(0.0);
+    let mut by_attribute = serde_json::Map::new();
+    let mut comp_sum = 0.0;
+    for (i, c) in cols.iter().enumerate() {
+        let cnt = comp
+            .get(i + 1)
+            .and_then(|s| s.parse::<f64>().ok())
+            .unwrap_or(0.0);
+        let frac = if n_golden > 0.0 { cnt / n_golden } else { 0.0 };
+        comp_sum += frac;
+        by_attribute.insert((*c).to_string(), json!(frac));
+    }
+    let completeness = comp_sum / cols.len() as f64;
+
+    // Junk + stale in one scan of int_std_records.
+    let js_rows = session
+        .query_strings(&format!(
+            "SELECT count(*) AS n, \
+               count(*) FILTER (WHERE (email IS NOT NULL AND email_valid = false) \
+                                   OR (phone_e164 IS NOT NULL AND phone_valid = false)) AS junk, \
+               count(*) FILTER (WHERE COALESCE(updated_at_source, ingested_at) \
+                                      < CAST(now() AS TIMESTAMP) - INTERVAL '{stale_days} days') AS stale \
+             FROM lake.main.int_std_records {at}"
+        ))
+        .map_err(|e| e.to_string())?;
+    let js = js_rows
+        .first()
+        .ok_or_else(|| "junk/stale query returned no row".to_string())?;
+    let n_std = js
+        .first()
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or(0.0);
+    let junk = js.get(1).and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
+    let stale = js.get(2).and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
+    let junk_rate = if n_std > 0.0 { junk / n_std } else { 0.0 };
+    let stale_rate = if n_std > 0.0 { stale / n_std } else { 0.0 };
+
+    // Duplicate rate: records in >=2-member entities / total records.
+    let dup = session
+        .query_strings(&format!(
+            "SELECT coalesce(sum(c), 0) FROM ( \
+               SELECT entity_id, count(*) AS c FROM lake.main.entity_membership {at} \
+               GROUP BY entity_id HAVING count(*) >= 2 \
+             ) g"
+        ))
+        .map_err(|e| e.to_string())?;
+    let records_in_dupes = dup
+        .first()
+        .and_then(|r| r.first())
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or(0.0);
+    let duplicate_rate = if records > 0 {
+        records_in_dupes / records as f64
+    } else {
+        0.0
+    };
+
+    let dq_score =
+        (completeness + (1.0 - junk_rate) + (1.0 - stale_rate) + (1.0 - duplicate_rate)) / 4.0;
+
+    Ok(json!({
+        "dq_score": dq_score,
+        "completeness": { "overall": completeness, "by_attribute": Value::Object(by_attribute) },
+        "junk_rate": junk_rate,
+        "stale_rate": stale_rate,
+        "duplicate_rate": duplicate_rate,
+        "records": records,
+        "entities": entities,
+        "stale_days": stale_days,
+        "snapshot": snapshot,
+    }))
+}

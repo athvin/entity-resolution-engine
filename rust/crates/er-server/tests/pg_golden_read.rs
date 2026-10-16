@@ -237,6 +237,52 @@ async fn golden_records_read_over_ducklake() {
     assert!(m["open_reviews"].as_i64().unwrap() >= 1);
     assert!(m["snapshot"].as_i64().unwrap() >= 1);
 
+    // Data quality (read-only): base_10 scores over the same lake. 23 records,
+    // 10 entities; every rate + the composite score in [0,1]; base_10 has dupes.
+    let resp = app
+        .clone()
+        .oneshot(op_get("/v1/orgs/acme/data-quality"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let dq = json_body(resp).await;
+    assert_eq!(dq["records"], 23);
+    assert_eq!(dq["entities"], 10);
+    assert_eq!(dq["stale_days"], 365);
+    let score = dq["dq_score"].as_f64().unwrap();
+    assert!((0.0..=1.0).contains(&score), "dq_score in [0,1]");
+    let comp = dq["completeness"]["overall"].as_f64().unwrap();
+    assert!((0.0..=1.0).contains(&comp), "completeness in [0,1]");
+    assert!(
+        dq["completeness"]["by_attribute"]["given_name"].is_number(),
+        "per-attribute completeness present"
+    );
+    let dup = dq["duplicate_rate"].as_f64().unwrap();
+    assert!(
+        dup > 0.0 && dup <= 1.0,
+        "base_10 has a nonzero duplicate rate"
+    );
+    assert!(dq["junk_rate"].is_number() && dq["stale_rate"].is_number());
+    // The stale_days query param is honoured (presentation parameter, not config).
+    let resp = app
+        .clone()
+        .oneshot(op_get("/v1/orgs/acme/data-quality?stale_days=1"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(json_body(resp).await["stale_days"], 1);
+    // READ-ONLY: data-quality committed nothing — the metrics snapshot is unchanged.
+    let resp = app
+        .clone()
+        .oneshot(op_get("/v1/orgs/acme/metrics"))
+        .await
+        .unwrap();
+    assert_eq!(
+        json_body(resp).await["snapshot"],
+        m["snapshot"],
+        "data-quality must not commit a new snapshot"
+    );
+
     // Duplicates: groups with >=2 members, each carrying its member list.
     let resp = app
         .clone()

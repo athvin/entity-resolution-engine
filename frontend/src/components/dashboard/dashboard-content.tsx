@@ -7,7 +7,15 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BffRequestError } from "@/lib/api/client";
-import { useJobs, useMetrics, useRuns, type JobRow, type RunRow } from "@/lib/query/hooks";
+import {
+  useDataQuality,
+  useJobs,
+  useMetrics,
+  useRuns,
+  type DataQuality,
+  type JobRow,
+  type RunRow,
+} from "@/lib/query/hooks";
 import { useSubmitJob } from "@/lib/query/steward";
 
 const ACTIVE_STATES = new Set(["queued", "dispatching", "running", "retrying", "canceling"]);
@@ -140,6 +148,79 @@ function Tile({
   );
 }
 
+/** A 0..1 fraction rendered as a whole-percent KPI. */
+function PctTile({
+  label,
+  value,
+  testId,
+}: {
+  label: string;
+  value: number | undefined;
+  testId: string;
+}) {
+  return (
+    <Card data-testid={testId}>
+      <CardHeader className="p-4 pb-1 lg:p-6 lg:pb-2">
+        <CardTitle className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+          {label}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="p-4 pt-0 lg:p-6 lg:pt-0">
+        {value === undefined ? (
+          <Skeleton className="h-8 w-20" />
+        ) : (
+          <div className="text-2xl font-semibold tabular-nums lg:text-3xl">
+            {Math.round(value * 100)}%
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Read-only data-quality scores (PR 2.1/2.2). Strictly monochrome — the
+ * completeness bars are foreground-on-muted, no colour. */
+function DataQualitySection({ dq }: { dq: DataQuality | undefined }) {
+  return (
+    <section className="flex flex-col gap-3 lg:gap-4" data-testid="data-quality">
+      <h2 className="text-muted-foreground text-sm font-medium tracking-wide uppercase">
+        Data quality
+      </h2>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
+        <PctTile label="DQ score" value={dq?.dq_score} testId="dq-score" />
+        <PctTile label="Junk rate" value={dq?.junk_rate} testId="dq-junk" />
+        <PctTile label="Stale rate" value={dq?.stale_rate} testId="dq-stale" />
+        <PctTile label="Duplicate rate" value={dq?.duplicate_rate} testId="dq-duplicate" />
+      </div>
+      {dq && (
+        <Card data-testid="dq-completeness">
+          <CardHeader className="p-4 pb-1 lg:p-6 lg:pb-2">
+            <CardTitle className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+              Completeness by attribute
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-2 p-4 pt-0 lg:p-6 lg:pt-0">
+            {Object.entries(dq.completeness.by_attribute).map(([attr, frac]) => (
+              <div key={attr} className="grid grid-cols-[9rem_1fr_3rem] items-center gap-3 text-sm">
+                <span className="truncate">{attr}</span>
+                <span className="bg-muted h-2 overflow-hidden rounded-full">
+                  <span
+                    className="bg-foreground block h-full rounded-full"
+                    style={{ width: `${String(Math.round(frac * 100))}%` }}
+                  />
+                </span>
+                <span className="text-muted-foreground text-right tabular-nums">
+                  {Math.round(frac * 100)}%
+                </span>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+    </section>
+  );
+}
+
 function describeRun(run: RunRow): string {
   const mode = typeof run.mode === "string" ? run.mode : "run";
   const status = typeof run.status === "string" ? run.status : "unknown";
@@ -175,6 +256,7 @@ export function DashboardContent({ org }: { org: string }) {
   const metrics = useMetrics(org);
   const runs = useRuns(org);
   const jobs = useJobs(org);
+  const dq = useDataQuality(org);
   const reviewCount = metrics.data?.open_reviews;
 
   if (metrics.error instanceof BffRequestError && metrics.error.error.code === "lake_unavailable") {
@@ -222,6 +304,8 @@ export function DashboardContent({ org }: { org: string }) {
         />
         <Tile label="Open reviews" value={reviewCount} testId="tile-open-reviews" />
       </div>
+
+      {(metrics.data?.records ?? 0) > 0 && <DataQualitySection dq={dq.data} />}
 
       {metrics.data?.records === 0 && <OnboardingChecklist org={org} jobs={jobs.data ?? []} />}
 

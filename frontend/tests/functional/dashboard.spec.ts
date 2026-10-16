@@ -17,6 +17,14 @@ test.describe("dashboard", () => {
     await expect(page.getByTestId("snapshot-indicator")).toContainText("snapshot 42");
   });
 
+  test("shows the data-quality section", async ({ page }) => {
+    await expect(page.getByTestId("data-quality")).toBeVisible();
+    await expect(page.getByTestId("dq-score")).toContainText("88%");
+    // duplicate rate = records_in_duplicate_groups / records = 406/800 ≈ 51%.
+    await expect(page.getByTestId("dq-duplicate")).toContainText("51%");
+    await expect(page.getByTestId("dq-completeness")).toBeVisible();
+  });
+
   test("shows the last run, the active job, and honest nudges", async ({ page }) => {
     await expect(page.getByTestId("last-run-strip")).toContainText(
       "incremental — succeeded in 72s",

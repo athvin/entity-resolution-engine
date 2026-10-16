@@ -1604,6 +1604,37 @@ async fn org_metrics(
     }
 }
 
+/// Viewer+: data-quality scores over the org's lake
+/// (`GET /v1/orgs/{org}/data-quality?stale_days=N`). Read-only analytics;
+/// `stale_days` (default 365) is a presentation parameter, never config.
+async fn org_data_quality(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let stale_days = params
+        .get("stale_days")
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(365)
+        .clamp(1, 36_500);
+    let session = match org_lake(&state, &org).await {
+        Ok(s) => s,
+        Err(r) => return *r,
+    };
+    let snapshot = match read::latest_snapshot(&session) {
+        Ok(s) => s,
+        Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
+    };
+    match read::data_quality(&session, snapshot, stale_days) {
+        Ok(m) => Json(m).into_response(),
+        Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
+    }
+}
+
 /// Viewer+: duplicate groups (entities with >=2 members)
 /// (`GET /v1/orgs/{org}/duplicates`). Keyset page; query `cursor`, `limit`.
 async fn duplicates_list(
@@ -3165,6 +3196,7 @@ fn build_routes(state: AppState) -> Router {
             post(unmerge_entity),
         )
         .route("/v1/orgs/{org}/metrics", get(org_metrics))
+        .route("/v1/orgs/{org}/data-quality", get(org_data_quality))
         .route("/v1/orgs/{org}/duplicates", get(duplicates_list))
         .route("/v1/orgs/{org}/match-scores", get(match_scores_list))
         .route("/v1/orgs/{org}/match-preview", get(match_preview))

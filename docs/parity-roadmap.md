@@ -80,8 +80,10 @@ assistant. Tenant username/password auth is fully built (argon2id). M6 (PR #56) 
 - [ ] **1.7 Nickname/synonym lexicon editing** — finish the M6 partial.
 
 ### Phase 2 — Top 2 differentiators
-- [ ] **2.1 Data-quality scoring models** — Completeness / Junk / Stale / Duplicate-rate.
-- [ ] **2.2 Health dashboard / DQ-Score KPIs**.
+- [x] **2.1 Data-quality scoring models** — read-only `GET /data-quality` (Completeness / Junk / Stale /
+      Duplicate-rate + composite DQ score), fixed-metrics v1 (no config change → determinism contract untouched).
+- [x] **2.2 Health dashboard / DQ-Score KPIs** — monochrome "Data quality" section on the dashboard (KPI tiles +
+      per-attribute completeness bars).
 - [ ] **2.3 AI enrichment** — fill-missing / normalize via AWS Bedrock (or existing Anthropic key); cost-gated. STOP.
 
 ## Explicitly skipped / deferred (not building)
