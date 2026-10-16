@@ -176,6 +176,19 @@ assistant. Tenant username/password auth is fully built (argon2id). M6 (PR #56) 
       (verified: full `cargo test --workspace` green, zero golden drift). New Session-based election test (6 cases).
       **1.6b (deferred):** Bucket B `combined_list`/`sum` (synthesize a value not tied to one record → need a new
       lineage/assembly path) + generalized grouped/controlling fields (the hardcoded `address` grouping is the precedent).
+- [x] **1.6b Bucket B survivorship (`combined_list` / `sum`)** — value-SYNTHESIZING rules: `combined_list` unions each
+      member's distinct non-empty value (sorted, `'; '`-joined); `sum` totals the numeric values (non-numeric → NULL,
+      dropped). The challenge: a synthesized value has no owning record, but the golden path re-reads every value from one
+      member's `record_key`. **Design (low-risk, zero schema change):** the survivorship *decision* still names a
+      deterministic representative member (`min(record_key)`) + the rule for lineage, and **records assembly** computes the
+      value itself via a correlated aggregate over all active members (`synthesized_value_expr`, shared with the decision).
+      So **no new `golden_lineage` column, no schema/model_registry/dbt_sources change** — the determinism surface is
+      untouched. A SOLE synthesizing rule only (bails if mixed with ranking rules or applied to the composite `address`).
+      Config is free-string chains, so adding the tokens needs no config schema change and unchanged chains hash
+      identically. base_10 uses neither token → every golden fixture **byte-identical** (verified: `er-match` base_10
+      golden gate + full `lake_e2e` green, `git status` shows no fixture/golden/schema file touched). Tests: 4 er-golden
+      decision unit tests (union/sum/`min` representative + the two bail guards) + a gated `combined_list_survivorship_…`
+      DuckLake e2e asserting the synthesized golden email equals the members' sorted distinct emails.
 - [x] **1.7 Nickname/synonym lexicon editing** — finished the M6 partial: `GET`/`PUT /v1/orgs/{org}/lexicon`
       (per-org CSV at `ER_LEXICON_PATH`, canonicalised via `er_std::lexicon`, PUT enqueues a `run_all_full` to
       apply), + a monochrome `LexiconEditor` on the config page. Determinism-safe (per-org file; not in

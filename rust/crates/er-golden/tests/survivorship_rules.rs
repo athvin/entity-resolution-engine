@@ -117,3 +117,60 @@ fn prioritized_falls_through_when_no_value_is_listed() {
         ("r1", "tiebreak_deterministic")
     );
 }
+
+// --- PR 1.6b (Bucket B): value-synthesizing rules. The decision's `value` column
+// IS the synthesized value (combined_list / sum); `record_key` is the
+// deterministic representative (`min`) so lineage still names a member, and the
+// `rule` is the synthesizing rule. (Record-assembly over the real lake reuses the
+// same aggregate via `synthesized_value_expr`.) ---
+
+#[test]
+fn combined_list_unions_distinct_sorted_values() {
+    // Duplicates collapse, blanks drop, output is sorted and '; '-joined.
+    let (value, key, rule) = elect(
+        &[
+            ("e1", "b", "r2"),
+            ("e1", "a", "r1"),
+            ("e1", "b", "r3"),
+            ("e1", "", "r4"),
+        ],
+        &["combined_list"],
+    );
+    assert_eq!(
+        (value.as_str(), key.as_str(), rule.as_str()),
+        ("a; b", "r1", "combined_list")
+    );
+}
+
+#[test]
+fn sum_totals_numeric_values_dropping_non_numeric() {
+    // 10 + 5 = 15; "x" casts to NULL and drops out; representative is min key.
+    let (value, key, rule) = elect(
+        &[("e1", "10", "r1"), ("e1", "5", "r2"), ("e1", "x", "r3")],
+        &["sum"],
+    );
+    assert_eq!(
+        (value.as_str(), key.as_str(), rule.as_str()),
+        ("15.0", "r1", "sum")
+    );
+}
+
+#[test]
+fn a_synthesizing_rule_cannot_be_mixed_with_ranking_rules() {
+    let chain = ["combined_list".to_string(), "longest".to_string()];
+    let err = survivorship_decision_sql("value", &chain, "cand").unwrap_err();
+    assert!(
+        err.to_string().contains("only"),
+        "expected a mixing error, got: {err}"
+    );
+}
+
+#[test]
+fn a_synthesizing_rule_is_rejected_on_the_composite_address() {
+    let chain = ["combined_list".to_string()];
+    let err = survivorship_decision_sql("address", &chain, "cand").unwrap_err();
+    assert!(
+        err.to_string().contains("address"),
+        "expected an address error, got: {err}"
+    );
+}
