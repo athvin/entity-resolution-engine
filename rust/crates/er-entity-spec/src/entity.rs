@@ -70,6 +70,8 @@ fn default_true() -> bool {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Index {
+    /// The index name (Postgres indexes are named objects).
+    pub name: String,
     /// The indexed columns, in order.
     pub columns: Vec<String>,
     /// Whether the index is unique.

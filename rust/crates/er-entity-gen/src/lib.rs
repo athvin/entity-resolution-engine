@@ -15,6 +15,7 @@
 mod casing;
 mod convert;
 mod ddl;
+mod pg_ddl;
 mod rust;
 mod typescript;
 
@@ -52,6 +53,7 @@ impl GeneratedTree {
 /// Where each kind of artifact is written, relative to the repository root.
 const RUST_ENTITIES_DIR: &str = "rust/crates/er-entities/src";
 const LAKE_DDL_DIR: &str = "rust/crates/er-entities/ddl/lake";
+const PG_DDL_DIR: &str = "rust/crates/er-entities/ddl/postgres";
 // TS_BINDINGS_DIR / TS_READERS_DIR are introduced in Phase 2 when the TS artifacts
 // are written into the frontend tree.
 
@@ -73,6 +75,12 @@ pub fn generate(catalog: &Catalog) -> Result<GeneratedTree, ConvertError> {
             tree.push(
                 format!("{LAKE_DDL_DIR}/{}.sql", entity.relation),
                 format!("{}\n", ddl::emit_lake_ddl(entity)?),
+            );
+        }
+        if entity.has_store(Store::Postgres) {
+            tree.push(
+                format!("{PG_DDL_DIR}/{}.sql", entity.relation),
+                pg_ddl::emit_postgres_ddl(entity)?,
             );
         }
         // The TypeScript binding and reader are emitted by `emit_ts_binding` /
@@ -132,6 +140,11 @@ pub fn emit_lake_ddl(entity: &Entity) -> Result<String, ConvertError> {
     ddl::emit_lake_ddl(entity)
 }
 
+/// Emit just the Postgres DDL for one control-plane entity.
+pub fn emit_postgres_ddl(entity: &Entity) -> Result<String, ConvertError> {
+    pg_ddl::emit_postgres_ddl(entity)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -184,6 +197,37 @@ mod tests {
                 entity.name, entity.relation
             );
         }
+    }
+
+    #[test]
+    fn job_postgres_ddl_has_constraints_and_widened_integers() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../entities");
+        let catalog = er_entity_spec::Catalog::load_dir(dir).expect("entities load");
+        let job = catalog.by_name("job").expect("job entity");
+        let ddl = emit_postgres_ddl(job).expect("renders Postgres DDL");
+        assert!(ddl.contains("CREATE TABLE IF NOT EXISTS public.jobs ("));
+        assert!(ddl.contains("org text NOT NULL REFERENCES orgs(name)"));
+        assert!(ddl.contains("params jsonb NOT NULL DEFAULT '{}'::jsonb"));
+        // The five 32-bit columns are widened to bigint (the vocabulary has no i32).
+        assert!(ddl.contains("priority bigint NOT NULL DEFAULT 0"));
+        assert!(ddl.contains("attempt bigint NOT NULL DEFAULT 0"));
+        assert!(ddl.contains("max_attempts bigint NOT NULL DEFAULT 3"));
+        assert!(ddl.contains("PRIMARY KEY (job_id)"));
+        assert!(ddl.contains(
+            "CREATE UNIQUE INDEX IF NOT EXISTS jobs_idempotency ON public.jobs (org, idempotency_key) WHERE idempotency_key IS NOT NULL;"
+        ));
+    }
+
+    #[test]
+    fn org_state_renders_an_accepted_values_check() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../entities");
+        let catalog = er_entity_spec::Catalog::load_dir(dir).expect("entities load");
+        let org = catalog.by_name("org").expect("org entity");
+        let ddl = emit_postgres_ddl(org).expect("renders Postgres DDL");
+        assert!(ddl.contains(
+            "state text NOT NULL DEFAULT 'active' CHECK (state IN ('provisioning', 'active', 'suspended', 'purging'))"
+        ));
+        assert!(ddl.contains("active_config_version bigint"));
     }
 
     #[test]

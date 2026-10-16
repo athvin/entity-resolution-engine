@@ -1,0 +1,42 @@
+kind: entity
+version: 1
+name: org
+relation: orgs
+description: "A tenant: its config pointer, lake env, lifecycle state and active config version."
+key: [name]
+generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+  wire: [json]
+columns:
+  - name: name
+    type: varchar
+    nullable: false
+    description: "The tenant's unique name (the control-plane key)."
+  - name: config_path
+    type: varchar
+    nullable: false
+    description: "Path to the tenant's config document."
+  - name: env
+    type: json
+    nullable: false
+    default: "'{}'::jsonb"
+    description: "Lake connection env (catalog, data path, metadata schema)."
+  - name: drop_root
+    type: varchar
+    description: "Optional object-store root for tenant purge."
+  - name: active_config_version
+    type: bigint
+    description: "The currently published config version, if any."
+  - name: state
+    type: varchar
+    nullable: false
+    default: "'active'"
+    accepted_values: [provisioning, active, suspended, purging]
+    description: "Tenant lifecycle state."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the tenant was created."
