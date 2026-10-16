@@ -82,3 +82,122 @@ impl Job {
         ]
     }
 }
+
+pub mod read {
+    //! @generated query functions for this entity + operation.
+    /// One job by id, scoped to its org (the job detail view).
+    pub async fn by_id(
+        client: &::tokio_postgres::Client,
+        org: &str,
+        job_id: &str,
+    ) -> ::std::result::Result<Vec<super::Job>, ::tokio_postgres::Error> {
+        const SQL: &str = "SELECT
+  job_id,
+  org,
+  kind,
+  params,
+  state,
+  priority,
+  idempotency_key,
+  run_id,
+  attempt,
+  max_attempts,
+  not_before,
+  created_by,
+  schedule_id,
+  resource_class,
+  trace_context,
+  created_at,
+  updated_at,
+  started_at,
+  finished_at
+FROM public.jobs
+WHERE org = $1 AND job_id = $2
+";
+        let rows = client.query(SQL, &[&org, &job_id]).await?;
+        Ok(rows
+            .iter()
+            .map(|row| super::Job {
+                job_id: row.get("job_id"),
+                org: row.get("org"),
+                kind: row.get("kind"),
+                params: row.get("params"),
+                state: row.get("state"),
+                priority: row.get("priority"),
+                idempotency_key: row.get("idempotency_key"),
+                run_id: row.get("run_id"),
+                attempt: row.get("attempt"),
+                max_attempts: row.get("max_attempts"),
+                not_before: row.get("not_before"),
+                created_by: row.get("created_by"),
+                schedule_id: row.get("schedule_id"),
+                resource_class: row.get("resource_class"),
+                trace_context: row.get("trace_context"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+                started_at: row.get("started_at"),
+                finished_at: row.get("finished_at"),
+            })
+            .collect())
+    }
+
+    /// The queue view, newest first, optionally filtered by org and/or state (the operator console).
+    pub async fn list(
+        client: &::tokio_postgres::Client,
+        org: Option<&str>,
+        state: Option<&str>,
+        limit: i64,
+    ) -> ::std::result::Result<Vec<super::Job>, ::tokio_postgres::Error> {
+        const SQL: &str = "SELECT
+  job_id,
+  org,
+  kind,
+  params,
+  state,
+  priority,
+  idempotency_key,
+  run_id,
+  attempt,
+  max_attempts,
+  not_before,
+  created_by,
+  schedule_id,
+  resource_class,
+  trace_context,
+  created_at,
+  updated_at,
+  started_at,
+  finished_at
+FROM public.jobs
+WHERE ($1 IS NULL OR org = $1)
+  AND ($2 IS NULL OR state = $2)
+ORDER BY job_id DESC
+LIMIT $3
+";
+        let rows = client.query(SQL, &[&org, &state, &limit]).await?;
+        Ok(rows
+            .iter()
+            .map(|row| super::Job {
+                job_id: row.get("job_id"),
+                org: row.get("org"),
+                kind: row.get("kind"),
+                params: row.get("params"),
+                state: row.get("state"),
+                priority: row.get("priority"),
+                idempotency_key: row.get("idempotency_key"),
+                run_id: row.get("run_id"),
+                attempt: row.get("attempt"),
+                max_attempts: row.get("max_attempts"),
+                not_before: row.get("not_before"),
+                created_by: row.get("created_by"),
+                schedule_id: row.get("schedule_id"),
+                resource_class: row.get("resource_class"),
+                trace_context: row.get("trace_context"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+                started_at: row.get("started_at"),
+                finished_at: row.get("finished_at"),
+            })
+            .collect())
+    }
+}

@@ -113,27 +113,90 @@ fn emit_lake_read_fn(stmt: &LoadedStatement) -> String {
     out
 }
 
-/// Emit the `pub mod <op> { .. }` query modules for an entity, grouping its
-/// statements by operation. Returns `None` when the entity has no statements that
-/// this phase emits (only lake reads are emitted today; writes land with the
-/// control plane). The text is appended to the entity's generated Rust module.
+/// `snake_case` -> `PascalCase`, matching the generated struct name in er-entity-gen.
+fn to_pascal_case(name: &str) -> String {
+    name.split(['_', '-'])
+        .filter(|s| !s.is_empty())
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect()
+}
+
+/// Emit one control-plane read function returning `Vec<Entity>`, mapping each
+/// `tokio_postgres::Row` into the entity struct by column name. Every declared
+/// parameter is bound positionally as `$1`, `$2`, … in yaml order.
+fn emit_control_read_fn(entity: &Entity, stmt: &LoadedStatement) -> String {
+    let fn_name = stmt
+        .path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("query");
+    let struct_name = to_pascal_case(&entity.name);
+    let bound: Vec<&StatementParam> = stmt.params.iter().collect();
+    let template = build_sql_template(&stmt.sql, None, &bound);
+    let escaped = rust_string_escape(&template);
+
+    let mut args = String::from("    client: &::tokio_postgres::Client,\n");
+    for param in &stmt.params {
+        args.push_str(&format!("    {}: {},\n", param.name, param_arg_type(param)));
+    }
+    let bind_list = bound
+        .iter()
+        .map(|p| format!("&{}", p.name))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let field_map = entity
+        .columns
+        .iter()
+        .map(|c| format!("                {}: row.get(\"{}\"),", c.name, c.name))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        "    /// {}\n",
+        stmt.description.replace(['\n', '\r'], " ").trim()
+    ));
+    out.push_str(&format!(
+        "    pub async fn {fn_name}(\n{args}    ) -> ::std::result::Result<Vec<super::{struct_name}>, ::tokio_postgres::Error> {{\n"
+    ));
+    out.push_str(&format!("        const SQL: &str = \"{escaped}\";\n"));
+    out.push_str(&format!(
+        "        let rows = client.query(SQL, &[{bind_list}]).await?;\n"
+    ));
+    out.push_str("        Ok(rows\n            .iter()\n            .map(|row| super::");
+    out.push_str(&format!(
+        "{struct_name} {{\n{field_map}\n            }})\n            .collect())\n"
+    ));
+    out.push_str("    }\n");
+    out
+}
+
+/// Emit the `pub mod <op> { .. }` query modules for an entity, grouping its read
+/// statements by operation: lake reads return Arrow `RecordBatch` via DuckDB,
+/// control reads map `tokio_postgres::Row` into the entity struct. Writes land
+/// with the control-plane rewrite (3c). Returns `None` when the entity has no
+/// emitted statements. The text is appended to the entity's generated module.
 #[must_use]
 pub fn emit_query_modules(entity: &Entity, statements: &[LoadedStatement]) -> Option<String> {
-    // Only lake reads are emitted in this phase.
-    if !entity.has_store(Store::Duckdb) {
-        return None;
-    }
     let mut by_op: BTreeMap<&'static str, Vec<String>> = BTreeMap::new();
     for stmt in statements {
-        if stmt.entity != entity.name {
+        if stmt.entity != entity.name || stmt.operation != Operation::Read {
             continue;
         }
-        if stmt.operation == Operation::Read {
-            by_op
-                .entry(stmt.operation.folder())
-                .or_default()
-                .push(emit_lake_read_fn(stmt));
-        }
+        let f = if entity.has_store(Store::Duckdb) {
+            emit_lake_read_fn(stmt)
+        } else if entity.has_store(Store::Postgres) {
+            emit_control_read_fn(entity, stmt)
+        } else {
+            continue;
+        };
+        by_op.entry(stmt.operation.folder()).or_default().push(f);
     }
     if by_op.is_empty() {
         return None;
@@ -163,6 +226,26 @@ mod tests {
 
     fn entities_dir() -> PathBuf {
         PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../entities"))
+    }
+
+    #[test]
+    fn emits_job_control_read_module() {
+        let cat = Catalog::load_dir(entities_dir()).unwrap();
+        let stmts = load_statements(&entities_dir(), &cat).unwrap();
+        let entity = cat.by_name("job").unwrap();
+        let module = emit_query_modules(entity, &stmts).expect("job has reads");
+
+        assert!(module.contains("pub mod read {"));
+        assert!(module.contains("pub async fn by_id("));
+        assert!(module.contains("pub async fn list("));
+        assert!(module.contains("client: &::tokio_postgres::Client"));
+        assert!(
+            module.contains("-> ::std::result::Result<Vec<super::Job>, ::tokio_postgres::Error>")
+        );
+        // Rows map into the struct by column name; params bind positionally.
+        assert!(module.contains("job_id: row.get(\"job_id\"),"));
+        assert!(module.contains("WHERE org = $1 AND job_id = $2"));
+        assert!(module.contains("client.query(SQL, &[&org, &job_id]).await?"));
     }
 
     #[test]
