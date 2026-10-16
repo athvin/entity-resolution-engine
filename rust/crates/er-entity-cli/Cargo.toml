@@ -1,0 +1,23 @@
+[package]
+name = "er-entity-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# The `er-entity` binary: gen / check (and, in later phases, diff / migrate /
+# verify). It lives in its own crate rather than beside `er` so the pipeline
+# binary's build graph never pulls in the generator (and, later, DataFusion).
+[[bin]]
+name = "er-entity"
+path = "src/main.rs"
+
+[dependencies]
+er-entity-spec = { path = "../er-entity-spec" }
+er-entity-gen = { path = "../er-entity-gen" }
+clap = { workspace = true }
+anyhow = { workspace = true }
+
+[lints]
+workspace = true

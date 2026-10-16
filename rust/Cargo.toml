@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/dedupe-core", "crates/dedupe-cli", "crates/er-eval", "crates/er-errors", "crates/er-ids", "crates/er-hash", "crates/er-schema", "crates/er-obs", "crates/er-env", "crates/er-versions", "crates/er-config", "crates/er-std", "crates/er-ingest", "crates/er-standardize", "crates/er-reconcile", "crates/er-match", "crates/er-golden", "crates/er-cli", "crates/er-server"]
+members = ["crates/dedupe-core", "crates/dedupe-cli", "crates/er-eval", "crates/er-errors", "crates/er-ids", "crates/er-hash", "crates/er-schema", "crates/er-obs", "crates/er-env", "crates/er-versions", "crates/er-config", "crates/er-std", "crates/er-ingest", "crates/er-standardize", "crates/er-reconcile", "crates/er-match", "crates/er-golden", "crates/er-cli", "crates/er-server", "crates/er-entity-spec", "crates/er-entity-gen", "crates/er-entity-cli", "crates/er-entities"]
 
 [workspace.package]
 version = "0.1.0"
@@ -79,3 +79,9 @@ rand = "0.9"
 base64 = "0.22"
 # Parse repeated query params (e.g. ?key=a&key=b) the typed Query extractor can't.
 serde_urlencoded = "0.7"
+# Entity framework generated crate (`er-entities`): Arrow schemas, chrono date/time
+# types, and the OpenAPI component derive. `arrow` is pinned to the same 58 line
+# the `duckdb` crate pulls so Arrow types unify across the read path.
+arrow = "58"
+chrono = { version = "0.4", features = ["serde"] }
+utoipa = { version = "5", features = ["chrono"] }

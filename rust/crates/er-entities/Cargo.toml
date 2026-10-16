@@ -1,0 +1,21 @@
+[package]
+name = "er-entities"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# GENERATED CRATE. Everything under `src/` is produced by `er-entity gen` from
+# `entities/*.yaml` and committed; do not edit it by hand. This manifest is the
+# only hand-written file. The crate carries no DataFusion dependency — only the
+# CLI plans SQL; this crate is plain structs, Arrow schemas and query functions.
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+arrow = { workspace = true }
+utoipa = { workspace = true }
+
+# No `[lints]` block: the generated crate root carries its own clippy suppressions,
+# since generated code is not written to the workspace's pedantic style.

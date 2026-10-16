@@ -1,0 +1,20 @@
+[package]
+name = "er-entity-spec"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# The parsed-and-validated entity YAML model: the closed eight-type vocabulary,
+# the `generate` block, and the `Catalog`. Dependency-light on purpose (serde +
+# the YAML reader only) — the conversions into `er-schema`/`ff-analysis` types
+# live in the crates that consume them, so this crate never pulls a DB or a
+# planner into its build graph.
+[dependencies]
+serde = { workspace = true }
+serde_norway = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := check
-.PHONY: build fmt lint test check check-e2e frontend image-api dev-up dev-suspend dev-resume dev-down obs-up clean
+.PHONY: build fmt lint test check check-e2e entities-check frontend image-api dev-up dev-suspend dev-resume dev-down obs-up clean
 
 # --- Rust backend: the application (engine, CLI, control plane) lives in rust/ ---
 #
@@ -18,8 +18,14 @@ lint:
 test:
 	cd rust && cargo test --workspace
 
+# The entity-framework stale-output gate: regenerate every artifact from
+# entities/*.yaml (Rust struct + arrow_schema(), DuckLake DDL, TS binding +
+# reader) and fail if any committed file is stale. Run `er-entity gen` to fix.
+entities-check:
+	cd rust && cargo run -q -p er-entity-cli -- check --root ..
+
 # The fast PR-equivalent backend gate (mirrors rust.yml's lint + test tiers).
-check: fmt lint test
+check: fmt lint entities-check test
 
 # The gated e2e tiers: the DuckLake + extension pipeline and the Postgres
 # control-plane queue/dispatch. Needs the DuckDB extensions and a local

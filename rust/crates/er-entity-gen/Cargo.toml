@@ -1,0 +1,23 @@
+[package]
+name = "er-entity-gen"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# The emitters. Given a validated `Catalog`, this crate produces every generated
+# artifact as deterministic text: the Rust module (struct + arrow_schema()), the
+# DuckLake/Postgres DDL (lake DDL via er-schema's renderer), and the TypeScript
+# binding + reader. It emits source, so it links neither `arrow` nor `ts-rs`; the
+# one shared type map lives here and nowhere else.
+[dependencies]
+er-entity-spec = { path = "../er-entity-spec" }
+er-schema = { path = "../er-schema" }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_norway = { workspace = true }
+
+[lints]
+workspace = true
