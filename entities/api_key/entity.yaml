@@ -1,0 +1,38 @@
+kind: entity
+version: 1
+name: api_key
+relation: api_keys
+description: "An org-scoped API key: its role and the at-rest hash of the secret."
+key: [key_id]
+generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+  wire: [json]
+columns:
+  - name: key_id
+    type: varchar
+    nullable: false
+    description: "The key's unique id."
+  - name: org
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: name }
+    description: "The tenant the key authenticates."
+  - name: role
+    type: varchar
+    nullable: false
+    accepted_values: [admin, steward, viewer]
+    description: "The role the key grants."
+  - name: key_hash
+    type: varchar
+    nullable: false
+    description: "SHA-256 hash of the secret (never the plaintext)."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the key was issued."
+  - name: revoked_at
+    type: timestamp
+    description: "When the key was revoked, if it has been."

@@ -6,8 +6,13 @@
 pub mod acct_golden_display;
 pub mod acct_golden_lineage;
 pub mod acct_golden_record;
+pub mod api_key;
+pub mod config_version;
 pub mod golden_display;
 pub mod golden_lineage;
 pub mod golden_record;
 pub mod job;
 pub mod org;
+pub mod schedule;
+pub mod staged_steward_action;
+pub mod webhook;
