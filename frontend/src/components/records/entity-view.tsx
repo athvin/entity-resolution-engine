@@ -165,12 +165,12 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
       {isSteward && <EnrichPanel org={org} entityId={entityId} golden={golden} />}
 
       <Card data-testid="entity-members">
-        <CardHeader className="flex-row items-center justify-between space-y-0 p-4 pb-1 lg:p-6 lg:pb-2">
+        <CardHeader className="flex-col items-start gap-2 space-y-0 p-4 pb-1 sm:flex-row sm:items-center sm:justify-between lg:p-6 lg:pb-2">
           <CardTitle className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
             Members
           </CardTitle>
           {isSteward && members.length > 1 && (
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button
                 size="sm"
                 variant="outline"
