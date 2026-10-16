@@ -1555,6 +1555,7 @@ dependencies = [
  "tokio-postgres",
  "tower",
  "ulid",
+ "utoipa",
 ]
 
 [[package]]
