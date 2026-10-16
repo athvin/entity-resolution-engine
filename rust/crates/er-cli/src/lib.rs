@@ -273,6 +273,117 @@ pub fn run_match(
     Ok(())
 }
 
+/// One candidate pair from a score-only preview: canonical endpoints, the
+/// probability the committed model gives them, and the evidence waterfall JSON.
+pub struct PreviewPair {
+    pub rec_a_key: String,
+    pub rec_b_key: String,
+    pub match_probability: f64,
+    pub evidence: String,
+}
+
+/// The result of a read-only match preview (S4.3 score-only mode, frontend §7.16):
+/// the pairs the committed model scores at/above `review_low`, bucketed by the
+/// config thresholds, plus a capped sample carrying the evidence waterfall.
+pub struct MatchPreview {
+    pub total: usize,
+    pub would_auto_merge: usize,
+    pub would_review: usize,
+    pub sample: Vec<PreviewPair>,
+}
+
+/// Score `int_std_records` with the frozen model EXACTLY as `run_match` does, but
+/// WITHOUT committing anything: no `match_scores` DDL, no MERGE, no
+/// reconcile/golden. The scored pairs live only in a session-local temp table
+/// that is dropped before return, so nothing reaches the lake catalog and no
+/// determinism-contract artifact (`config_hash` / `content_hash` / golden
+/// fixtures) is touched — this is a pure read. Pairs are canonicalised,
+/// top-probability-per-pair, thresholded at `review_low`; `would_auto_merge`
+/// counts probability >= `auto_merge`, `would_review` the `[review_low,
+/// auto_merge)` band; `sample` is the top `sample_limit` pairs by probability
+/// with the evidence waterfall.
+///
+/// # Errors
+/// Propagates model-load / predict / lake query errors.
+pub fn preview_match(
+    session: &Session,
+    model: &MatchModel,
+    review_low: f64,
+    auto_merge: f64,
+    sample_limit: usize,
+) -> Result<MatchPreview> {
+    let mut settings = load_model(model.settings_json)?;
+    settings.retain_intermediate = true;
+
+    let input = session.register_lake_table("int_std_records", "int_std_records")?;
+    let tf_tables = build_frozen_tf_tables(
+        session,
+        &settings,
+        model.tf_csv_path,
+        model.model_version,
+        model.tf_snapshot_id,
+    )?;
+    let predictions = run_predict_with_tf(session, &settings, &input, &tf_tables, None)?;
+
+    let uid = &settings.unique_id_column;
+    let evidence = evidence_json(&settings);
+    // The same canonical top-per-pair selection `run_match` commits, minus the
+    // content-hash joins and the committed CREATE/MERGE. A session-local TEMP
+    // table (never the lake catalog), dropped below — nothing is committed.
+    session.execute_batch(&format!(
+        "create temp table __preview_src as
+         with scored as (
+             select distinct on (rec_a_key, rec_b_key)
+                    rec_a_key, rec_b_key, match_probability, evidence
+             from (
+                 select least(\"{uid}_l\", \"{uid}_r\") as rec_a_key,
+                        greatest(\"{uid}_l\", \"{uid}_r\") as rec_b_key,
+                        match_probability, {evidence} as evidence, rowid as _rid
+                 from {preds}
+                 where \"{uid}_l\" <> \"{uid}_r\" and match_probability >= {review_low}
+             )
+             order by rec_a_key, rec_b_key, match_probability desc, _rid
+         )
+         select * from scored",
+        preds = predictions.physical,
+    ))?;
+
+    let counts = session.query_strings(&format!(
+        "select count(*), \
+                count(*) filter (where match_probability >= {auto_merge}), \
+                count(*) filter (where match_probability >= {review_low} and match_probability < {auto_merge}) \
+         from __preview_src"
+    ))?;
+    let row = counts
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("preview counts returned no row"))?;
+    let total = row[0].parse::<usize>().unwrap_or(0);
+    let would_auto_merge = row[1].parse::<usize>().unwrap_or(0);
+    let would_review = row[2].parse::<usize>().unwrap_or(0);
+
+    let sample = session
+        .query_strings(&format!(
+            "select rec_a_key, rec_b_key, match_probability, evidence from __preview_src \
+             order by match_probability desc, rec_a_key, rec_b_key limit {sample_limit}"
+        ))?
+        .into_iter()
+        .map(|r| PreviewPair {
+            rec_a_key: r[0].clone(),
+            rec_b_key: r[1].clone(),
+            match_probability: r[2].parse::<f64>().unwrap_or(0.0),
+            evidence: r[3].clone(),
+        })
+        .collect();
+
+    session.execute_batch("drop table __preview_src")?;
+    Ok(MatchPreview {
+        total,
+        would_auto_merge,
+        would_review,
+        sample,
+    })
+}
+
 /// SQL single-quoted literal escape.
 fn esc(s: &str) -> String {
     s.replace('\'', "''")

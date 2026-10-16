@@ -70,7 +70,11 @@ assistant. Tenant username/password auth is fully built (argon2id). M6 (PR #56) 
 - [ ] **1.1 Account/Org entity type** — generalize the person-centric schema across standardize/block/match/survivorship.
 - [ ] **1.2 Mass update / mass delete** — filtered mass field-update + mass-delete with preview + audit.
 - [ ] **1.3 Protected/excluded flag + survivorship exception rules**.
-- [ ] **1.4 Score-only match preview** (frontend-design §7.16) — no-commit match run w/ probability + waterfall.
+- [x] **1.4 Score-only match preview** (frontend-design §7.16) — `er_cli::preview_match` runs the committed model
+      read-only (pairs + bucket counts + evidence waterfall) via a session-local temp table, committing NOTHING
+      (no match_scores/reviews/golden; determinism contract untouched). New `GET /v1/orgs/{org}/match-preview`
+      (steward, spawn_blocking) + a "Preview matches" card on the duplicates page. e2e test proves read-only
+      (match_scores absent + snapshot unchanged after preview).
 - [ ] **1.5 Confidence-threshold auto-merge / point-of-entry dedupe**.
 - [ ] **1.6 Deep field-level survivorship** — grouped/controlling fields, combined-list, prioritized, sum, max-chars.
 - [ ] **1.7 Nickname/synonym lexicon editing** — finish the M6 partial.

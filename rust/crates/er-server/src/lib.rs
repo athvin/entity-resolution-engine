@@ -1680,6 +1680,112 @@ async fn match_scores_list(
     }
 }
 
+/// Steward+: a READ-ONLY score-only match preview (frontend §7.16,
+/// `GET /v1/orgs/{org}/match-preview`). Runs the committed model over the current
+/// corpus and returns the pairs it WOULD score, bucketed by the config
+/// thresholds, with a sample carrying the evidence waterfall. Writes nothing —
+/// no `match_scores` / `review_queue` / golden, no determinism-contract artifact.
+/// `?limit=` caps the sample. The matcher is heavy + holds a !Send session, so it
+/// runs on a blocking thread.
+async fn match_preview(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(
+            StatusCode::NOT_IMPLEMENTED,
+            "match preview requires Postgres",
+        );
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let env = match pg::get_org(&client, &org).await {
+        Ok(Some(o)) if o.state == "active" => o.env,
+        Ok(Some(o)) => {
+            return detail_err(
+                StatusCode::CONFLICT,
+                format!("org '{org}' is {}; preview needs an active org", o.state),
+            );
+        }
+        Ok(None) => return detail_err(StatusCode::NOT_FOUND, format!("no org '{org}'")),
+        Err(e) => return pg_err(e),
+    };
+    let limit = read::parse_limit(params.get("limit").map(String::as_str))
+        .try_into()
+        .unwrap_or(50usize);
+
+    match tokio::task::spawn_blocking(move || match_preview_blocking(&env, limit)).await {
+        Ok(Ok(body)) => Json(body).into_response(),
+        Ok(Err(msg)) => detail_err(StatusCode::CONFLICT, msg),
+        Err(e) => detail_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("preview task panicked: {e}"),
+        ),
+    }
+}
+
+/// The blocking half of [`match_preview`]: open the org lake + frozen model from
+/// its env, read the thresholds from its config, run the read-only
+/// `er_cli::preview_match`, and render the JSON body. Any missing input (no
+/// trained model yet) returns a human string the handler maps to 409.
+fn match_preview_blocking(env: &Value, limit: usize) -> Result<Value, String> {
+    let s = |k: &str| env.get(k).and_then(Value::as_str).filter(|v| !v.is_empty());
+    let catalog = s("ER_LAKE_CATALOG").ok_or("org env missing ER_LAKE_CATALOG")?;
+    let data_path = s("ER_LAKE_DATA_PATH").ok_or("org env missing ER_LAKE_DATA_PATH")?;
+    let model_path =
+        s("ER_MODEL_PATH").ok_or("no trained model yet (ER_MODEL_PATH); run a full run first")?;
+    let tf_path =
+        s("ER_TF_PATH").ok_or("no trained model yet (ER_TF_PATH); run a full run first")?;
+    let config_path = s("ER_CONFIG_PATH").ok_or("org env missing ER_CONFIG_PATH")?;
+
+    let settings_json =
+        std::fs::read_to_string(model_path).map_err(|e| format!("read model: {e}"))?;
+    let config_text =
+        std::fs::read_to_string(config_path).map_err(|e| format!("read config: {e}"))?;
+    let config = er_config::load_config_str(&config_text).map_err(|e| format!("config: {e}"))?;
+    let session = er_cli::open_lake(catalog, data_path).map_err(|e| format!("open lake: {e}"))?;
+    let model = er_cli::MatchModel {
+        settings_json: &settings_json,
+        tf_csv_path: std::path::Path::new(tf_path),
+        model_version: s("ER_MODEL_VERSION").unwrap_or("v0001"),
+        tf_snapshot_id: s("ER_TF_SNAPSHOT_ID").unwrap_or("tf"),
+    };
+    let preview = er_cli::preview_match(
+        &session,
+        &model,
+        config.thresholds.review_low,
+        config.thresholds.auto_merge,
+        limit,
+    )
+    .map_err(|e| format!("preview: {e}"))?;
+
+    let sample: Vec<Value> = preview
+        .sample
+        .iter()
+        .map(|p| {
+            json!({
+                "rec_a_key": p.rec_a_key,
+                "rec_b_key": p.rec_b_key,
+                "match_probability": p.match_probability,
+                "evidence": serde_json::from_str::<Value>(&p.evidence).unwrap_or(Value::Null),
+            })
+        })
+        .collect();
+    Ok(json!({
+        "total": preview.total,
+        "would_auto_merge": preview.would_auto_merge,
+        "would_review": preview.would_review,
+        "sample": sample,
+    }))
+}
+
 /// Viewer+: standardized source records by `record_key`
 /// (`GET /v1/orgs/{org}/records?key=…`, `key` repeats, capped at 50). Not
 /// paginated — a bounded lookup. Returns `{ items, snapshot }`.
@@ -3061,6 +3167,7 @@ fn build_routes(state: AppState) -> Router {
         .route("/v1/orgs/{org}/metrics", get(org_metrics))
         .route("/v1/orgs/{org}/duplicates", get(duplicates_list))
         .route("/v1/orgs/{org}/match-scores", get(match_scores_list))
+        .route("/v1/orgs/{org}/match-preview", get(match_preview))
         .route("/v1/orgs/{org}/records", get(records_by_key))
         .route("/v1/orgs/{org}/reviews", get(reviews_list))
         .route(

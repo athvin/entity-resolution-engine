@@ -818,3 +818,70 @@ fn assertions_enforce_clustering_through_ducklake() {
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+#[test]
+fn preview_match_scores_without_committing() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    // Standardized only — run_match is deliberately NOT called, so match_scores
+    // does not exist going in. A read-only preview must leave it that way.
+    let (session, _config, tmp) = standardized_lake("preview");
+    let snap_before = session.latest_snapshot_version().unwrap();
+
+    let model_json = std::fs::read_to_string(repo_fixture("model_test_v1.json")).unwrap();
+    let tf_csv = repo_fixture("model_test_v1.tf.csv");
+    let preview = er_cli::preview_match(
+        &session,
+        &er_cli::MatchModel {
+            settings_json: &model_json,
+            tf_csv_path: std::path::Path::new(&tf_csv),
+            model_version: "v0001",
+            tf_snapshot_id: "01JWMDTFSNAP00000000000001",
+        },
+        0.60, // review_low
+        0.90, // auto_merge
+        200,  // sample_limit
+    )
+    .unwrap();
+
+    // Same 19 canonical pairs run_match commits at review_low 0.60.
+    assert_eq!(preview.total, 19, "preview scores the 19 base_10 pairs");
+    assert_eq!(
+        preview.would_auto_merge + preview.would_review,
+        preview.total,
+        "every scored pair buckets into auto-merge or review"
+    );
+    assert_eq!(preview.sample.len(), 19, "limit 200 returns all 19 pairs");
+    assert!(
+        preview
+            .sample
+            .iter()
+            .all(|p| !p.evidence.is_empty() && p.evidence != "null"),
+        "every sample pair carries an evidence waterfall"
+    );
+    assert!(
+        preview
+            .sample
+            .windows(2)
+            .all(|w| w[0].match_probability >= w[1].match_probability),
+        "sample is ordered by descending probability"
+    );
+
+    // READ-ONLY: match_scores was never created, and no new lake snapshot was
+    // committed — the preview touched nothing durable.
+    assert!(
+        session
+            .count(&format!("(select 1 from {})", er_cli::MATCH_SCORES))
+            .is_err(),
+        "match_scores must not exist after a read-only preview"
+    );
+    assert_eq!(
+        snap_before,
+        session.latest_snapshot_version().unwrap(),
+        "preview must not commit a new lake snapshot"
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
