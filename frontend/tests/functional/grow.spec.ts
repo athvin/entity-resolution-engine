@@ -23,6 +23,28 @@ test.describe("config studio", () => {
     await expect(page.getByTestId("slider-auto-merge")).toBeDisabled();
   });
 
+  test("shows the nickname lexicon, read-only for viewers", async ({ page }) => {
+    await login(page, USERS.viewer);
+    await page.goto(`/${ORG}/settings/config`);
+    await expect(page.getByTestId("lexicon-editor")).toBeVisible();
+    await expect(page.getByTestId("lexicon-pair").first()).toBeVisible();
+    // Viewers cannot edit: no add/save controls.
+    await expect(page.getByTestId("lexicon-save")).toHaveCount(0);
+    await expect(page.getByTestId("lexicon-add")).toHaveCount(0);
+  });
+
+  test("an admin adds a nickname pair and saves", async ({ page }, testInfo) => {
+    const org = triageOrg(testInfo.project.name);
+    await login(page, USERS.admin);
+    await page.goto(`/${org}/settings/config`);
+    await expect(page.getByTestId("lexicon-editor")).toBeVisible();
+    await page.getByTestId("lexicon-a").fill("liz");
+    await page.getByTestId("lexicon-b").fill("elizabeth");
+    await page.getByTestId("lexicon-add").click();
+    await page.getByTestId("lexicon-save").click();
+    await expect(page.getByTestId("lexicon-saved")).toBeVisible();
+  });
+
   test("an admin publishes a threshold change as tier A", async ({ page, isMobile }, testInfo) => {
     test.skip(isMobile, "the publish journey runs once, on desktop");
     const org = triageOrg(testInfo.project.name);

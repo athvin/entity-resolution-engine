@@ -1053,6 +1053,7 @@ dependencies = [
  "er-config",
  "er-golden",
  "er-reconcile",
+ "er-std",
  "hex",
  "hmac 0.12.1",
  "rand 0.9.5",

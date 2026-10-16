@@ -757,6 +757,226 @@ async fn active_config(
     }
 }
 
+// ─── Nickname/synonym lexicon editing (finishing the M6 partial) ────────────
+//
+// The lexicon is a per-org matching input NOT in `er-config::Config` and NOT a
+// committed fixture, so editing it at runtime is determinism-safe: it persists
+// to the org's own `ER_LEXICON_PATH` CSV (the file the dispatcher seeds from),
+// never the packaged fixtures/goldens or any DDL. An edit takes effect on the
+// next run, so a PUT enqueues a `run_all_full` (skip_ingest) rebuild — the same
+// apply path config-publish uses.
+
+/// The packaged default lexicon returned when an org has none yet (mirrors
+/// er-cli's `tests/fixtures/nickname_variants.csv`).
+const DEFAULT_LEXICON: [(&str, &str); 12] = [
+    ("anthony", "tony"),
+    ("beth", "elizabeth"),
+    ("bob", "robert"),
+    ("bobby", "robert"),
+    ("catherine", "cathy"),
+    ("chris", "christopher"),
+    ("dave", "david"),
+    ("elizabeth", "liz"),
+    ("james", "jim"),
+    ("james", "jimmy"),
+    ("michael", "mike"),
+    ("sue", "susan"),
+];
+
+#[derive(serde::Deserialize)]
+struct LexiconPair {
+    variant_a: String,
+    variant_b: String,
+}
+
+#[derive(serde::Deserialize)]
+struct LexiconPut {
+    pairs: Vec<LexiconPair>,
+}
+
+/// Read a lexicon CSV (`variant_a,variant_b` with a header row) into pairs, as
+/// `load_lexicon`/the dispatcher do. Missing file → empty.
+fn read_lexicon_pairs(path: &str) -> Vec<(String, String)> {
+    std::fs::read_to_string(path)
+        .unwrap_or_default()
+        .lines()
+        .skip(1)
+        .filter(|l| !l.trim().is_empty())
+        .filter_map(|l| {
+            l.split_once(',')
+                .map(|(a, b)| (a.trim().to_string(), b.trim().to_string()))
+        })
+        .collect()
+}
+
+fn lexicon_pairs_json(pairs: &[(String, String)]) -> Vec<Value> {
+    pairs
+        .iter()
+        .map(|(a, b)| json!({ "variant_a": a, "variant_b": b }))
+        .collect()
+}
+
+/// A sibling file next to `path` (same directory), used to derive an
+/// `ER_LEXICON_PATH` from the org's `ER_CONFIG_PATH` when none is set yet.
+fn sibling_path(path: &str, name: &str) -> String {
+    std::path::Path::new(path).parent().map_or_else(
+        || name.to_string(),
+        |d| d.join(name).to_string_lossy().into_owned(),
+    )
+}
+
+/// Viewer+: the org's nickname lexicon (`GET /v1/orgs/{org}/lexicon`). Returns
+/// the packaged default when the org has none yet, so the editor never starts empty.
+async fn get_lexicon(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return config_registry_unavailable();
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match pg::get_org(&client, &org).await {
+        Ok(Some(o)) => o,
+        Ok(None) => return detail_err(StatusCode::NOT_FOUND, format!("no org '{org}'")),
+        Err(e) => return pg_err(e),
+    };
+    let pairs: Vec<(String, String)> =
+        match org_row.env.get("ER_LEXICON_PATH").and_then(Value::as_str) {
+            Some(p) if std::path::Path::new(p).exists() => read_lexicon_pairs(p),
+            _ => DEFAULT_LEXICON
+                .iter()
+                .map(|(a, b)| ((*a).to_string(), (*b).to_string()))
+                .collect(),
+        };
+    Json(json!({ "pairs": lexicon_pairs_json(&pairs) })).into_response()
+}
+
+/// Steward+: replace the org's nickname lexicon (`PUT /v1/orgs/{org}/lexicon`).
+/// Canonicalises + validates each pair, atomically writes the org's
+/// `ER_LEXICON_PATH` CSV (deriving + persisting one from `ER_CONFIG_PATH` if
+/// unset), then enqueues a `run_all_full` rebuild to apply it.
+async fn put_lexicon(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Json(body): Json<LexiconPut>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return config_registry_unavailable();
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match pg::get_org(&client, &org).await {
+        Ok(Some(o)) if o.state == "active" => o,
+        Ok(Some(o)) => {
+            return detail_err(
+                StatusCode::CONFLICT,
+                format!(
+                    "org '{org}' is {}; lexicon edits are accepted only when active",
+                    o.state
+                ),
+            );
+        }
+        Ok(None) => return detail_err(StatusCode::NOT_FOUND, format!("no org '{org}'")),
+        Err(e) => return pg_err(e),
+    };
+
+    // Validate + canonicalise. Commas/control chars would corrupt the CSV or the
+    // lexicon_hash separators, so reject them before canonicalising.
+    let mut set: std::collections::BTreeSet<(String, String)> = std::collections::BTreeSet::new();
+    for p in &body.pairs {
+        for v in [&p.variant_a, &p.variant_b] {
+            if v.contains(',') || v.chars().any(char::is_control) {
+                return detail_err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "variant names must not contain commas or control characters",
+                );
+            }
+        }
+        match er_std::lexicon::canonical_pair(&p.variant_a, &p.variant_b) {
+            Ok(pair) => {
+                set.insert(pair);
+            }
+            Err(e) => return detail_err(StatusCode::UNPROCESSABLE_ENTITY, e.to_string()),
+        }
+    }
+
+    // Resolve the per-org lexicon file: the existing ER_LEXICON_PATH, else a
+    // sibling of ER_CONFIG_PATH (persisted into env below).
+    let existing = org_row
+        .env
+        .get("ER_LEXICON_PATH")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let path = match &existing {
+        Some(p) => p.clone(),
+        None => match org_row.env.get("ER_CONFIG_PATH").and_then(Value::as_str) {
+            Some(cfg) => sibling_path(cfg, "lexicon.csv"),
+            None => {
+                return detail_err(
+                    StatusCode::CONFLICT,
+                    "org has no ER_LEXICON_PATH, and no ER_CONFIG_PATH to derive one from",
+                );
+            }
+        },
+    };
+
+    let mut csv = String::from("variant_a,variant_b\n");
+    for (a, b) in &set {
+        csv.push_str(a);
+        csv.push(',');
+        csv.push_str(b);
+        csv.push('\n');
+    }
+    if let Err(e) = write_config_file(&path, &csv) {
+        return detail_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("lexicon write: {e}"),
+        );
+    }
+    if existing.is_none() {
+        if let Err(e) = pg::merge_org_env(&client, &org, &json!({ "ER_LEXICON_PATH": path })).await
+        {
+            return pg_err(e);
+        }
+    }
+
+    let idem = format!("lexicon-apply:{}", ulid::Ulid::new());
+    let params = json!({ "skip_ingest": true });
+    let apply_job =
+        match pg::enqueue(&client, &org, "run_all_full", 0, Some(&idem), Some(&params)).await {
+            Ok(j) => j.job_id,
+            Err(e) => return pg_err(e),
+        };
+    let _ = pg::audit(
+        &client,
+        &principal.actor,
+        Some(&org),
+        "lexicon.update",
+        &json!({ "pairs": set.len() }),
+    )
+    .await;
+
+    let pairs: Vec<(String, String)> = set.into_iter().collect();
+    (
+        StatusCode::OK,
+        Json(json!({ "pairs": lexicon_pairs_json(&pairs), "apply_job": apply_job })),
+    )
+        .into_response()
+}
+
 /// Change tiers (`configsvc.py` `classify_tier`), biggest-blast-radius first.
 const TIER_C_BLOCKS: [&str; 3] = ["comparisons", "standardization", "sources"];
 const TIER_B_BLOCKS: [&str; 1] = ["blocking"];
@@ -3185,6 +3405,7 @@ fn build_routes(state: AppState) -> Router {
             post(publish_config_version),
         )
         .route("/v1/orgs/{org}/config", get(active_config))
+        .route("/v1/orgs/{org}/lexicon", get(get_lexicon).put(put_lexicon))
         .route("/v1/orgs/{org}/golden-records", get(golden_records_list))
         .route(
             "/v1/orgs/{org}/golden-records/{entity_id}",

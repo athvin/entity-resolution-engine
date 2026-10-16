@@ -1444,6 +1444,19 @@ const server = http.createServer((req, res) => {
       const config = state.configs[match[1]];
       return config ? send(res, 200, config) : send(res, 404, { detail: "no active config" });
     }
+    if ((match = /^\/v1\/orgs\/([^/]+)\/lexicon$/.exec(path)) && req.method === "GET") {
+      const pairs = (state.lexicons ??= {})[match[1]] ?? [
+        { variant_a: "bob", variant_b: "robert" },
+        { variant_a: "anthony", variant_b: "tony" },
+      ];
+      return send(res, 200, { pairs });
+    }
+    if ((match = /^\/v1\/orgs\/([^/]+)\/lexicon$/.exec(path)) && req.method === "PUT") {
+      const body = await readBody(req);
+      const pairs = Array.isArray(body.pairs) ? body.pairs : [];
+      (state.lexicons ??= {})[match[1]] = pairs;
+      return send(res, 200, { pairs, apply_job: "job_mocklexicon" });
+    }
     if ((match = /^\/v1\/orgs\/([^/]+)\/config\/versions$/.exec(path)) && req.method === "GET") {
       const rows = state.configVersions[match[1]] ?? [];
       return send(
