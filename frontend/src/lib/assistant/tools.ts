@@ -1,6 +1,7 @@
 import "server-only";
 import type Anthropic from "@anthropic-ai/sdk";
 
+import { forwardGoldenPage } from "@/lib/bff/golden";
 import { forward, type EffectiveOrgAccess } from "@/lib/bff/proxy";
 
 /**
@@ -98,7 +99,9 @@ export async function executeTool(
     case "search_golden_records": {
       const q = typeof input.q === "string" ? input.q : "";
       const searchParams = new URLSearchParams({ q, limit: "20" });
-      return forward(access, `/v1/orgs/${org}/golden-records`, { searchParams });
+      // The golden-records data lane is Arrow IPC; decode it server-side to the
+      // same row shape the tool previously returned as JSON.
+      return forwardGoldenPage(access, `/v1/orgs/${org}/golden-records`, { searchParams });
     }
     case "get_entity":
       return forward(

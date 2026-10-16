@@ -5,8 +5,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { arrowFetch, bffFetch } from "@/lib/api/client";
 import type { AcctGoldenRecord } from "@/lib/entities/bindings/AcctGoldenRecord";
 import type { GoldenRecord as PersonGoldenRecord } from "@/lib/entities/bindings/GoldenRecord";
-import { readAcctGoldenRecord } from "@/lib/entities/readers/AcctGoldenRecord";
-import { readGoldenRecord } from "@/lib/entities/readers/GoldenRecord";
+import { decodeGoldenTable } from "@/lib/entities/golden-page";
 import { queryKeys } from "./keys";
 
 export interface Metrics {
@@ -166,24 +165,30 @@ export function useJobs(org: string) {
   });
 }
 
+/**
+ * Fetch one golden-records page from a BFF path and decode its Arrow IPC body in
+ * place through the generated reader (person or account, by the schema's
+ * `er.relation`). The snapshot + next cursor ride response headers. Shared by the
+ * records browser, the command palette, campaign segment previews and the
+ * mass-update id walk so every consumer decodes the one binary wire identically.
+ */
+export async function fetchGoldenPage(path: string): Promise<GoldenPage> {
+  const page = await arrowFetch(path);
+  return {
+    items: decodeGoldenTable(page.table),
+    snapshot: page.snapshot ?? 0,
+    next_cursor: page.nextCursor,
+  };
+}
+
 export function useGoldenRecords(org: string, q: string) {
   return useInfiniteQuery({
     queryKey: queryKeys.goldenRecords(org, q),
-    queryFn: async ({ pageParam }): Promise<GoldenPage> => {
+    queryFn: ({ pageParam }): Promise<GoldenPage> => {
       const params = new URLSearchParams({ limit: "100" });
       if (q) params.set("q", q);
       if (pageParam) params.set("cursor", pageParam);
-      // The data lane is binary Arrow IPC; decode in place through the generated
-      // reader for the org's projection (person or account), chosen by the Arrow
-      // schema's in-band `er.relation` metadata. The snapshot + next cursor ride
-      // response headers (surfaced by arrowFetch).
-      const page = await arrowFetch(`/api/orgs/${org}/golden-records?${params.toString()}`);
-      const relation = page.table.schema.metadata.get("er.relation");
-      const items: GoldenRecord[] =
-        relation === "acct_golden_records"
-          ? readAcctGoldenRecord(page.table)
-          : readGoldenRecord(page.table);
-      return { items, snapshot: page.snapshot ?? 0, next_cursor: page.nextCursor };
+      return fetchGoldenPage(`/api/orgs/${org}/golden-records?${params.toString()}`);
     },
     initialPageParam: "",
     getNextPageParam: (last) => last.next_cursor ?? undefined,

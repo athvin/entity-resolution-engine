@@ -12,7 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { bffFetch, BffRequestError } from "@/lib/api/client";
 import { displayName } from "@/lib/domain/attributes";
 import { useOrgEntityType } from "@/lib/query/config";
-import { effectiveRole, useSession, type GoldenPage } from "@/lib/query/hooks";
+import { effectiveRole, fetchGoldenPage, useSession } from "@/lib/query/hooks";
 import { queryKeys } from "@/lib/query/keys";
 
 const ROLE_RANK = { viewer: 0, steward: 1, admin: 2 } as const;
@@ -35,7 +35,7 @@ function usePreview(org: string, q: string) {
   return useQuery({
     queryKey: [...queryKeys.org(org), "segment-preview", q],
     queryFn: () =>
-      bffFetch<GoldenPage>(
+      fetchGoldenPage(
         `/api/orgs/${org}/golden-records?limit=5${q ? `&q=${encodeURIComponent(q)}` : ""}`,
       ),
     staleTime: 15_000,
