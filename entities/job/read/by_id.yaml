@@ -1,0 +1,7 @@
+kind: statement
+operation: read
+description: "One job by id, scoped to its org (the job detail view)."
+params:
+  - { name: org, type: varchar }
+  - { name: job_id, type: varchar }
+returns: entity
