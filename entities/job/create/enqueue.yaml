@@ -1,7 +1,7 @@
 kind: statement
 operation: create
 mode: partial
-description: "Queue a job (idempotent on the org idempotency key); returns the inserted row, or none when the key already exists."
+description: "Queue a job, idempotent on the org idempotency key (a repeat key returns the original row via a no-op upsert)."
 params:
   - { name: job_id, type: varchar }
   - { name: org, type: varchar }

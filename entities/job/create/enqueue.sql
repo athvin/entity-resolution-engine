@@ -1,6 +1,7 @@
 INSERT INTO public.jobs (job_id, org, kind, priority, idempotency_key, params)
 VALUES ($job_id, $org, $kind, $priority, $idempotency_key, coalesce($params, '{}'::jsonb))
-ON CONFLICT (org, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
+ON CONFLICT (org, idempotency_key) WHERE idempotency_key IS NOT NULL
+  DO UPDATE SET kind = jobs.kind
 RETURNING
   job_id,
   org,

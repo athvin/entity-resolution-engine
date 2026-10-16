@@ -47,20 +47,15 @@ use axum::http::StatusCode;
 use axum::http::request::Parts;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{Value, json};
 use tower::ServiceExt as _;
 
 /// A queued unit of pipeline work (S-queue). `state` walks
-/// queued -> running -> {succeeded, failed, canceled}.
-#[derive(Clone, Debug, Serialize)]
-pub struct Job {
-    pub job_id: String,
-    pub org: String,
-    pub kind: String,
-    pub state: String,
-    pub priority: i64,
-}
+/// queued -> running -> {succeeded, failed, canceled}. Re-exported from the
+/// generated entity crate so the queue, handlers and dispatcher share one
+/// definition (the full `jobs` row, not a hand-picked projection).
+pub use er_entities::job::Job;
 
 /// The job queue behind the API. In-memory here; the production impl is the
 /// Postgres SKIP-LOCKED queue (`erserver/queue.py`), a drop-in backend swap.
@@ -1232,8 +1227,7 @@ async fn create_job(
             Ok(c) => c,
             Err(r) => return *r,
         };
-        let priority = i32::try_from(body.priority).unwrap_or(0);
-        return match pg::enqueue(&client, &org, &body.kind, priority, None, None).await {
+        return match pg::enqueue(&client, &org, &body.kind, body.priority, None, None).await {
             Ok(job) => {
                 let _ = pg::audit(
                     &client,
@@ -1258,12 +1252,27 @@ pub fn enqueue(state: &AppState, org: &str, kind: &str, priority: i64) -> Job {
     let mut store = state.store.lock().unwrap();
     let job_id = format!("job-{}", store.next);
     store.next += 1;
+    let now = chrono::Utc::now();
     let job = Job {
         job_id,
         org: org.to_string(),
         kind: kind.to_string(),
+        params: serde_json::json!({}),
         state: "queued".to_string(),
         priority,
+        idempotency_key: None,
+        run_id: None,
+        attempt: 0,
+        max_attempts: 3,
+        not_before: None,
+        created_by: None,
+        schedule_id: None,
+        resource_class: None,
+        trace_context: None,
+        created_at: now,
+        updated_at: now,
+        started_at: None,
+        finished_at: None,
     };
     store.jobs.push(job.clone());
     job
