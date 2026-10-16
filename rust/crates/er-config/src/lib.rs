@@ -29,8 +29,9 @@ pub const TERMINAL_SURVIVORSHIP_RULE: &str = "record_key ASC";
 /// sources and rejected in a user document (S6.1 V11).
 pub const RESERVED_SOURCE_PREFIX: &str = "_";
 
-/// The fourteen top-level blocks of S6, in document order. [`Config`]'s fields
-/// MUST equal this set.
+/// The fourteen top-level blocks of S6, in document order. [`Config`]'s S6 block
+/// fields MUST equal this set; the `entity_type` discriminator (added for the
+/// Account entity type) is a meta-field, not an S6 block, and is excluded.
 pub const CONFIG_BLOCKS: [&str; 14] = [
     "tenant",
     "thresholds",
@@ -61,6 +62,54 @@ pub const CANONICAL_ATTRIBUTES: [&str; 9] = [
     "addr_postal",
     "birth_date",
 ];
+
+/// The entity type a tenant's config resolves. `Person` is the default and the
+/// only type the existing pipeline standardizes/matches today; `Account` selects
+/// the parallel Account attribute set + schema (the standardize/match/frontend
+/// paths land in later sub-PRs). A meta-discriminator, NOT one of the fourteen
+/// S6 [`CONFIG_BLOCKS`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EntityType {
+    #[default]
+    Person,
+    Account,
+}
+
+impl EntityType {
+    /// Whether this is the default `Person` type. Used by [`Config`]'s
+    /// `skip_serializing_if` so a person config serialises byte-identically to a
+    /// pre-`entity_type` document — `config_hash` is unchanged for every existing
+    /// (person) tenant.
+    #[must_use]
+    pub fn is_person(&self) -> bool {
+        matches!(self, EntityType::Person)
+    }
+}
+
+/// The canonical attributes for the Account/Org entity type (the `Account`
+/// analogue of [`CANONICAL_ATTRIBUTES`]); every `sources.<name>.columns` mapping
+/// for an Account config must cover all of them.
+pub const ACCOUNT_CANONICAL_ATTRIBUTES: [&str; 7] = [
+    "company_name",
+    "domain",
+    "phone",
+    "addr_street",
+    "addr_city",
+    "addr_region",
+    "addr_postal",
+];
+
+/// The canonical attribute set for an entity type: the person nine or the
+/// Account seven. The source-mapping coverage contract (V11) is enforced against
+/// whichever set this returns.
+#[must_use]
+pub fn canonical_attributes(entity_type: EntityType) -> &'static [&'static str] {
+    match entity_type {
+        EntityType::Person => &CANONICAL_ATTRIBUTES,
+        EntityType::Account => &ACCOUNT_CANONICAL_ATTRIBUTES,
+    }
+}
 
 /// S6 `thresholds` (units + gray band are normative in S4.3).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -203,6 +252,11 @@ pub struct CorrectionPass {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    /// The entity type this config resolves. Defaults to `Person` and is skipped
+    /// in serialisation when `Person`, so every existing (person) config hashes
+    /// byte-identically — `config_hash` is unchanged. Not an S6 block.
+    #[serde(default, skip_serializing_if = "EntityType::is_person")]
+    pub entity_type: EntityType,
     pub tenant: String,
     pub thresholds: Thresholds,
     pub standardization: Standardization,
@@ -291,6 +345,30 @@ mod tests {
         assert_eq!(CONFIG_BLOCKS[13], "correction_pass");
         assert_eq!(CANONICAL_ATTRIBUTES.len(), 9);
         assert_eq!(TERMINAL_SURVIVORSHIP_RULE, "record_key ASC");
+    }
+
+    #[test]
+    fn account_attribute_set() {
+        assert_eq!(ACCOUNT_CANONICAL_ATTRIBUTES.len(), 7);
+        assert_eq!(
+            canonical_attributes(EntityType::Person),
+            &CANONICAL_ATTRIBUTES
+        );
+        assert_eq!(
+            canonical_attributes(EntityType::Account),
+            &ACCOUNT_CANONICAL_ATTRIBUTES
+        );
+        assert!(EntityType::default().is_person());
+        assert!(!EntityType::Account.is_person());
+    }
+
+    #[test]
+    fn person_entity_type_serialises_away() {
+        // The default (Person) entity_type must not appear in the canonical
+        // document, so every existing person config hashes byte-identically.
+        let config = load_config_str(DEFAULT_YAML).unwrap();
+        assert!(config.entity_type.is_person());
+        assert!(!canonical_document(&config).contains("entity_type"));
     }
 
     #[test]
