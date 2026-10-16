@@ -1001,6 +1001,37 @@ const server = http.createServer((req, res) => {
       const metrics = state.metrics[match[1]];
       return metrics ? send(res, 200, metrics) : send(res, 503, { detail: "lake unavailable" });
     }
+    if ((match = /^\/v1\/orgs\/([^/]+)\/data-quality$/.exec(path)) && req.method === "GET") {
+      const m = state.metrics[match[1]];
+      if (!m) return send(res, 503, { detail: "lake unavailable" });
+      const dupRate = m.records > 0 ? m.records_in_duplicate_groups / m.records : 0;
+      return send(res, 200, {
+        dq_score: 0.88,
+        completeness: {
+          overall: 0.86,
+          by_attribute: {
+            given_name: 0.99,
+            family_name: 0.98,
+            email: 0.82,
+            phone_e164: 0.74,
+            addr_number: 0.6,
+            addr_street: 0.88,
+            addr_unit: 0.2,
+            addr_city: 0.9,
+            addr_region: 0.9,
+            addr_postal: 0.87,
+            birth_date: 0.55,
+          },
+        },
+        junk_rate: 0.04,
+        stale_rate: 0.12,
+        duplicate_rate: dupRate,
+        records: m.records,
+        entities: m.entities,
+        stale_days: Number(url.searchParams.get("stale_days") ?? 365),
+        snapshot: m.snapshot ?? 1,
+      });
+    }
     if ((match = /^\/v1\/orgs\/([^/]+)\/records$/.exec(path)) && req.method === "GET") {
       if (!state.orgs[match[1]]) return send(res, 404, { detail: "not found" });
       const keys = url.searchParams.getAll("key");

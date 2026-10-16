@@ -14,6 +14,18 @@ export interface Metrics {
   snapshot?: number;
 }
 
+export interface DataQuality {
+  dq_score: number;
+  completeness: { overall: number; by_attribute: Record<string, number> };
+  junk_rate: number;
+  stale_rate: number;
+  duplicate_rate: number;
+  records: number;
+  entities: number;
+  stale_days: number;
+  snapshot?: number;
+}
+
 export interface RunRow {
   run_id: string;
   mode?: string;
@@ -125,6 +137,14 @@ export function useMetrics(org: string) {
   return useQuery({
     queryKey: queryKeys.metrics(org),
     queryFn: () => bffFetch<Metrics>(`/api/orgs/${org}/metrics`),
+    refetchInterval: 30_000,
+  });
+}
+
+export function useDataQuality(org: string) {
+  return useQuery({
+    queryKey: ["data-quality", org],
+    queryFn: () => bffFetch<DataQuality>(`/api/orgs/${org}/data-quality`),
     refetchInterval: 30_000,
   });
 }
