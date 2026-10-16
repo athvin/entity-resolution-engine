@@ -1,0 +1,24 @@
+[package]
+name = "er-entity-diff"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# The schema differ: reads a live store's actual columns (Postgres via
+# information_schema, DuckLake via duckdb_columns) and compares them to the entity
+# catalog, classifying each difference safe vs breaking. The migration-plan writer
+# and the boot-time applier build on this.
+[dependencies]
+er-entity-spec = { path = "../er-entity-spec" }
+tokio-postgres = { workspace = true }
+duckdb = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_norway = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros"] }
+
+[lints]
+workspace = true

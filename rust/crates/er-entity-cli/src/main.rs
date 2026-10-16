@@ -71,6 +71,18 @@ enum Command {
         #[arg(long, default_value = ".")]
         root: PathBuf,
     },
+    /// Compare a live store's schema to the entity catalog; non-zero if they differ.
+    Diff {
+        /// The repository root (holds `entities/`). Defaults to the current dir.
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+        /// The store to diff (only `postgres` is wired today).
+        #[arg(long, default_value = "postgres")]
+        store: String,
+        /// The Postgres DSN (defaults to the `ER_PG_DSN` env var).
+        #[arg(long)]
+        dsn: Option<String>,
+    },
 }
 
 fn load_tree(root: &Path) -> Result<GeneratedTree> {
@@ -179,11 +191,59 @@ fn run_verify(root: &Path) -> Result<bool> {
     Ok(fresh && analysed)
 }
 
+/// Diff a live store against the catalog; returns true when they match.
+fn run_diff(root: &Path, store: &str, dsn: Option<&str>) -> Result<bool> {
+    use er_entity_spec::Store;
+    if store != "postgres" {
+        anyhow::bail!("only --store postgres is wired today (got {store:?})");
+    }
+    let entities_dir = root.join("entities");
+    let catalog = er_entity_spec::Catalog::load_dir(&entities_dir)
+        .with_context(|| format!("loading entities from {}", entities_dir.display()))?;
+    let dsn = dsn
+        .map(ToString::to_string)
+        .or_else(|| std::env::var("ER_PG_DSN").ok())
+        .context("a Postgres DSN is required (--dsn or ER_PG_DSN)")?;
+    let relations: Vec<String> = catalog
+        .for_store(Store::Postgres)
+        .iter()
+        .map(|e| e.relation.clone())
+        .collect();
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("building the tokio runtime")?;
+    let diffs = runtime.block_on(async {
+        let (client, connection) = tokio_postgres::connect(&dsn, tokio_postgres::NoTls)
+            .await
+            .context("connecting to Postgres")?;
+        let handle = tokio::spawn(connection);
+        let live = er_entity_diff::read_postgres_columns(&client, &relations)
+            .await
+            .context("reading the live schema")?;
+        handle.abort();
+        anyhow::Ok(er_entity_diff::diff_store(&catalog, Store::Postgres, &live))
+    })?;
+
+    if diffs.is_empty() {
+        println!("er-entity diff: the Postgres schema matches the catalog");
+        Ok(true)
+    } else {
+        eprintln!("er-entity diff: {} difference(s):", diffs.len());
+        for d in &diffs {
+            eprintln!("  [{:?}] {}: {}", d.severity, d.relation, d.message);
+        }
+        Ok(false)
+    }
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match &cli.command {
         Command::Gen { root } => run_gen(root).map(|()| true),
         Command::Check { root } | Command::Verify { root } => run_verify(root),
+        Command::Diff { root, store, dsn } => run_diff(root, store, dsn.as_deref()),
     };
     match result {
         Ok(true) => ExitCode::SUCCESS,
