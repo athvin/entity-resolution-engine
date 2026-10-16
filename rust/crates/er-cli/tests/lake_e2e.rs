@@ -487,6 +487,84 @@ fn golden_through_ducklake_matches_golden() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
+/// PR 1.6b through the lake: a `combined_list` (Bucket B) survivorship chain
+/// SYNTHESIZES an attribute's golden value by unioning every member's distinct
+/// value, rather than electing one record's. Exercises the records-assembly
+/// correlated-aggregate path end to end (the decision + multi-value correctness
+/// are unit-tested in er-golden). base_10 is resolved, then `email`'s chain is
+/// overridden to `combined_list` and golden re-assembled; the golden email of the
+/// largest entity must equal its members' sorted distinct non-empty emails.
+#[test]
+fn combined_list_survivorship_synthesizes_golden_value_through_ducklake() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let (session, config, tmp) = standardized_lake("combinedlist");
+    match_model(&session);
+    er_cli::run_reconcile(
+        &session,
+        &config,
+        "01RUNCL0000000000000000000",
+        "2026-01-03 00:00:00",
+    )
+    .unwrap();
+
+    // Override email survivorship to the Bucket B combined_list rule, re-assemble.
+    let mut cfg = config.clone();
+    cfg.survivorship
+        .insert("email".to_string(), vec!["combined_list".to_string()]);
+    er_cli::run_golden(&session, &cfg).unwrap();
+
+    // The entity with the most distinct non-empty member emails (base_10's E1 has
+    // four members) — guarantees the union path is exercised.
+    let pick = session
+        .query_strings(&format!(
+            "select m.entity_id from {std} r \
+               join {mem} m on m.record_key = r.record_key \
+             where r.email is not null and r.email <> '' \
+             group by m.entity_id \
+             order by count(distinct r.email) desc, m.entity_id asc limit 1",
+            std = er_cli::INT_STD_RECORDS,
+            mem = er_cli::ENTITY_MEMBERSHIP,
+        ))
+        .unwrap();
+    let entity = pick[0][0].clone();
+
+    let expected: String = session
+        .query_strings(&format!(
+            "select distinct r.email from {std} r \
+               join {mem} m on m.record_key = r.record_key \
+             where m.entity_id = '{entity}' and r.email is not null and r.email <> '' \
+             order by r.email",
+            std = er_cli::INT_STD_RECORDS,
+            mem = er_cli::ENTITY_MEMBERSHIP,
+        ))
+        .unwrap()
+        .iter()
+        .map(|r| r[0].clone())
+        .collect::<Vec<_>>()
+        .join("; ");
+    assert!(
+        !expected.is_empty(),
+        "the chosen entity should carry an email"
+    );
+
+    let got = session
+        .query_strings(&format!(
+            "select email from {gr} where entity_id = '{entity}'",
+            gr = er_cli::GOLDEN_RECORDS,
+        ))
+        .unwrap();
+    assert_eq!(got.len(), 1, "one golden row for the entity");
+    assert_eq!(
+        got[0][0], expected,
+        "combined_list golden email should union the members' distinct emails"
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
 #[test]
 fn incremental_merge_through_ducklake_matches_golden() {
     if !enabled() {

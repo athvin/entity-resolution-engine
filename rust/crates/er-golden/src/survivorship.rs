@@ -73,10 +73,45 @@ fn rule_terms(rule: &str, attribute: &str) -> Result<Vec<(String, String)>> {
         other => bail!(
             "survivorship: unknown rule {other:?} (S4.6 defines source_priority, recency, \
              frequency, completeness, validated; PR 1.6 adds longest, shortest, numeric_max, \
-             numeric_min, most_common, prioritized:<v1|v2|...>)"
+             numeric_min, most_common, prioritized:<v1|v2|...>; PR 1.6b adds the value-synthesizing \
+             combined_list, sum)"
         ),
     };
     Ok(terms)
+}
+
+/// Bucket B (PR 1.6b): rules that SYNTHESIZE a value across all of an entity's
+/// members rather than electing one record's value — so they have no single
+/// owning record. Returns the DuckDB aggregate expression over `value_expr` (the
+/// value column, or a member column in records assembly), or `None` for a
+/// single-winner (base / Bucket A) rule. `combined_list` is the distinct, sorted,
+/// non-empty union joined by `'; '`; `sum` is the numeric total (non-numeric
+/// values cast to NULL and drop out).
+fn bucket_b_aggregate(rule: &str, value_expr: &str) -> Option<String> {
+    match rule {
+        "combined_list" => Some(format!(
+            "array_to_string(list_sort(list_distinct(\
+             list({value_expr}) filter (where {value_expr} is not null and {value_expr} <> ''))), '; ')"
+        )),
+        "sum" => Some(format!(
+            "CAST(sum(try_cast({value_expr} AS DOUBLE)) AS VARCHAR)"
+        )),
+        _ => None,
+    }
+}
+
+/// If `chain` is a Bucket B (value-synthesizing) survivorship chain, the DuckDB
+/// aggregate expression that computes the surviving value over `value_expr`;
+/// `None` for a single-winner chain. Records assembly calls this per attribute to
+/// synthesize the value across all members instead of re-reading one record's
+/// column — so a synthesized value needs no lineage `record_key` of its own.
+#[must_use]
+pub fn synthesized_value_expr(chain: &[String], value_expr: &str) -> Option<String> {
+    let rules = chain_without_terminal(chain);
+    if rules.len() == 1 {
+        return bucket_b_aggregate(rules[0], value_expr);
+    }
+    None
 }
 
 /// A SQL-identifier-safe alias fragment for a rule token: non-`[A-Za-z0-9_]`
@@ -118,6 +153,43 @@ pub fn survivorship_decision_sql(
     relation: &str,
 ) -> Result<String> {
     let rules = chain_without_terminal(chain);
+
+    // Bucket B (PR 1.6b): a single value-synthesizing rule produces one aggregate
+    // row per entity — the surviving value is computed across all members, not
+    // elected from one. `record_key` is the deterministic representative
+    // (`min`, matching the read-path protect tiebreak) so lineage still names a
+    // real member; `synthesized_value` carries the computed value for assembly.
+    // Only a SOLE rule may synthesize — mixing it with ranking rules is undefined.
+    if rules.len() == 1 {
+        if let Some(agg) = bucket_b_aggregate(rules[0], "value") {
+            if attribute == "address" {
+                bail!(
+                    "survivorship: rule {:?} cannot apply to the composite `address` attribute \
+                     (combined_list/sum synthesize a scalar value)",
+                    rules[0]
+                );
+            }
+            let rule = rules[0].replace('\'', "''");
+            return Ok(format!(
+                "SELECT
+    entity_id,
+    {agg} AS value,
+    min(record_key) AS record_key,
+    '{rule}' AS rule
+FROM {relation}
+GROUP BY entity_id"
+            ));
+        }
+    }
+    if let Some(bad) = rules
+        .iter()
+        .find(|r| bucket_b_aggregate(r, "value").is_some())
+    {
+        bail!(
+            "survivorship: rule {bad:?} synthesizes a value across members and must be the only \
+             rule for its attribute — it cannot be combined with ranking rules"
+        );
+    }
 
     let mut projections: Vec<String> = Vec::new();
     let mut ordering: Vec<String> = Vec::new();

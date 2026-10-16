@@ -10,6 +10,43 @@ use er_config::Config;
 use crate::lineage::{
     ACCT_ADDRESS_COLUMNS, ACCT_SCALAR_ATTRIBUTES, ADDRESS_COLUMNS, SCALAR_ATTRIBUTES,
 };
+use crate::survivorship::synthesized_value_expr;
+
+/// The per-scalar-attribute projection for the `survived` CTE. A Bucket A / base
+/// chain reads the single winning record's column (`max(... ) filter`, elected by
+/// `golden_lineage`); a Bucket B chain (PR 1.6b `combined_list`/`sum`) instead
+/// SYNTHESIZES the value across every active member via a correlated aggregate —
+/// a synthesized value has no owning record, so it is not re-read from lineage's
+/// `record_key`. With no Bucket B chain configured (e.g. base_10) every arm is the
+/// unchanged `max(... ) filter`, so the golden output is byte-identical.
+fn scalar_projection(
+    config: &Config,
+    attributes: &[&str],
+    std_table: &str,
+    membership_table: &str,
+    entities_table: &str,
+) -> String {
+    attributes
+        .iter()
+        .map(|a| {
+            let synth = config
+                .survivorship
+                .get(*a)
+                .and_then(|chain| synthesized_value_expr(chain, &format!("rr.{a}")));
+            match synth {
+                Some(agg) => format!(
+                    "    (select {agg} from {membership_table} mm \
+                       join {std_table} rr on rr.record_key = mm.record_key \
+                       join {entities_table} ee on ee.entity_id = mm.entity_id \
+                        and ee.status = 'active' \
+                     where mm.entity_id = l.entity_id) as {a}"
+                ),
+                None => format!("    max(r.{a}) filter (where l.attribute = '{a}') as {a}"),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(",\n")
+}
 
 /// Apply steward golden field overrides (the mass-update feature) as a
 /// post-assembly UPDATE over `golden_table` from `overrides_table`: one UPDATE
@@ -56,11 +93,13 @@ pub fn golden_records_sql(
 ) -> String {
     let version = config.versions.survivorship_version.replace('\'', "''");
 
-    let scalar_select = SCALAR_ATTRIBUTES
-        .iter()
-        .map(|a| format!("    max(r.{a}) filter (where l.attribute = '{a}') as {a}"))
-        .collect::<Vec<_>>()
-        .join(",\n");
+    let scalar_select = scalar_projection(
+        config,
+        &SCALAR_ATTRIBUTES,
+        std_table,
+        membership_table,
+        entities_table,
+    );
     let address_select = ADDRESS_COLUMNS
         .iter()
         .map(|c| format!("    max(r.{c}) filter (where l.attribute = 'address') as {c}"))
@@ -122,11 +161,13 @@ pub fn acct_golden_records_sql(
 ) -> String {
     let version = config.versions.survivorship_version.replace('\'', "''");
 
-    let scalar_select = ACCT_SCALAR_ATTRIBUTES
-        .iter()
-        .map(|a| format!("    max(r.{a}) filter (where l.attribute = '{a}') as {a}"))
-        .collect::<Vec<_>>()
-        .join(",\n");
+    let scalar_select = scalar_projection(
+        config,
+        &ACCT_SCALAR_ATTRIBUTES,
+        std_table,
+        membership_table,
+        entities_table,
+    );
     let address_select = ACCT_ADDRESS_COLUMNS
         .iter()
         .map(|c| format!("    max(r.{c}) filter (where l.attribute = 'address') as {c}"))
