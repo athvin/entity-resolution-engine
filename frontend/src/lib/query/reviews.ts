@@ -300,3 +300,25 @@ export function useUnmerge(org: string, entityId: string) {
     },
   });
 }
+
+/** Steward: exclude (suppress) member records from entity assembly. A per-record
+ *  overlay that survives re-ingest (unlike a source tombstone). */
+export function useSuppressRecords(org: string, entityId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (records: string[]) => {
+      for (const record_key of records) {
+        await bffFetch(`/api/orgs/${org}/records/suppress`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ record_key }),
+        });
+      }
+      return { suppressed: records.length };
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.entity(org, entityId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs(org) });
+    },
+  });
+}

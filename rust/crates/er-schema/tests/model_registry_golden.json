@@ -1,1753 +1,1805 @@
 {
-  "dbt_owned": [
-    "stg_records",
-    "int_std_records",
-    "int_blocking_keys",
-    "golden_records",
-    "golden_lineage",
-    "golden_display"
-  ],
-  "ddl_owned": [
-    "raw_records",
-    "match_scores",
-    "entity_membership",
-    "entities",
-    "entity_events",
-    "assertions",
-    "review_queue",
-    "model_registry",
-    "tf_lookup",
-    "cut_edges",
-    "runs",
-    "run_stages",
-    "ingest_batches",
-    "er_standardize_work",
-    "er_touched_entities",
-    "nickname_variants",
-    "golden_overrides"
-  ],
-  "relations": {
-    "assertions": {
-      "columns": [
-        {
-          "name": "assertion_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "rec_a_key",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "rec_b_key",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "kind",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "active",
-          "nullable": false,
-          "type": "BOOLEAN"
-        },
-        {
-          "name": "created_by",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "created_at",
-          "nullable": false,
-          "type": "TIMESTAMP"
-        },
-        {
-          "name": "retracted_by",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "retracted_at",
-          "nullable": true,
-          "type": "TIMESTAMP"
-        },
-        {
-          "name": "note",
-          "nullable": true,
-          "type": "VARCHAR"
-        }
-      ],
-      "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.assertions (\n  assertion_id VARCHAR NOT NULL,\n  rec_a_key VARCHAR NOT NULL,\n  rec_b_key VARCHAR NOT NULL,\n  kind VARCHAR NOT NULL,\n  active BOOLEAN NOT NULL,\n  created_by VARCHAR NOT NULL,\n  created_at TIMESTAMP NOT NULL,\n  retracted_by VARCHAR,\n  retracted_at TIMESTAMP,\n  note VARCHAR\n);",
-      "enums": {
-        "kind": [
-          "always",
-          "never"
-        ]
-      },
-      "keys": [
-        {
-          "columns": [
-            "assertion_id"
-          ],
-          "where": null
-        },
-        {
-          "columns": [
-            "rec_a_key",
-            "rec_b_key"
-          ],
-          "where": "active"
-        }
-      ],
-      "owner": "ddl.py"
+ "dbt_owned": [
+  "stg_records",
+  "int_std_records",
+  "int_blocking_keys",
+  "golden_records",
+  "golden_lineage",
+  "golden_display"
+ ],
+ "ddl_owned": [
+  "raw_records",
+  "match_scores",
+  "entity_membership",
+  "entities",
+  "entity_events",
+  "assertions",
+  "review_queue",
+  "model_registry",
+  "tf_lookup",
+  "cut_edges",
+  "runs",
+  "run_stages",
+  "ingest_batches",
+  "er_standardize_work",
+  "er_touched_entities",
+  "nickname_variants",
+  "golden_overrides",
+  "record_overlays"
+ ],
+ "relations": {
+  "assertions": {
+   "columns": [
+    {
+     "name": "assertion_id",
+     "nullable": false,
+     "type": "VARCHAR"
     },
-    "cut_edges": {
-      "columns": [
-        {
-          "name": "cut_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "rec_a_key",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "rec_b_key",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "match_probability",
-          "nullable": false,
-          "type": "DOUBLE"
-        },
-        {
-          "name": "model_version",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "tf_snapshot_id",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "assertion_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "active",
-          "nullable": false,
-          "type": "BOOLEAN"
-        },
-        {
-          "name": "cut_run_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "cut_at",
-          "nullable": false,
-          "type": "TIMESTAMP"
-        },
-        {
-          "name": "released_run_id",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "released_at",
-          "nullable": true,
-          "type": "TIMESTAMP"
-        }
-      ],
-      "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.cut_edges (\n  cut_id VARCHAR NOT NULL,\n  rec_a_key VARCHAR NOT NULL,\n  rec_b_key VARCHAR NOT NULL,\n  match_probability DOUBLE NOT NULL,\n  model_version VARCHAR,\n  tf_snapshot_id VARCHAR,\n  assertion_id VARCHAR NOT NULL,\n  active BOOLEAN NOT NULL,\n  cut_run_id VARCHAR NOT NULL,\n  cut_at TIMESTAMP NOT NULL,\n  released_run_id VARCHAR,\n  released_at TIMESTAMP\n);",
-      "enums": {},
-      "keys": [
-        {
-          "columns": [
-            "cut_id"
-          ],
-          "where": null
-        },
-        {
-          "columns": [
-            "rec_a_key",
-            "rec_b_key"
-          ],
-          "where": "active"
-        }
-      ],
-      "owner": "ddl.py"
+    {
+     "name": "rec_a_key",
+     "nullable": false,
+     "type": "VARCHAR"
     },
-    "entities": {
-      "columns": [
-        {
-          "name": "entity_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "status",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "merged_into",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "created_at",
-          "nullable": false,
-          "type": "TIMESTAMP"
-        },
-        {
-          "name": "updated_at",
-          "nullable": false,
-          "type": "TIMESTAMP"
-        },
-        {
-          "name": "created_run_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "updated_run_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        }
-      ],
-      "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.entities (\n  entity_id VARCHAR NOT NULL,\n  status VARCHAR NOT NULL,\n  merged_into VARCHAR,\n  created_at TIMESTAMP NOT NULL,\n  updated_at TIMESTAMP NOT NULL,\n  created_run_id VARCHAR NOT NULL,\n  updated_run_id VARCHAR NOT NULL\n);",
-      "enums": {
-        "status": [
-          "active",
-          "merged",
-          "retired"
-        ]
-      },
-      "keys": [
-        {
-          "columns": [
-            "entity_id"
-          ],
-          "where": null
-        }
-      ],
-      "owner": "ddl.py"
+    {
+     "name": "rec_b_key",
+     "nullable": false,
+     "type": "VARCHAR"
     },
-    "entity_events": {
-      "columns": [
-        {
-          "name": "event_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "seq",
-          "nullable": false,
-          "type": "BIGINT"
-        },
-        {
-          "name": "run_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "entity_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "event_type",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "details",
-          "nullable": false,
-          "type": "JSON"
-        },
-        {
-          "name": "details_hash",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "occurred_at",
-          "nullable": false,
-          "type": "TIMESTAMP"
-        }
-      ],
-      "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.entity_events (\n  event_id VARCHAR NOT NULL,\n  seq BIGINT NOT NULL,\n  run_id VARCHAR NOT NULL,\n  entity_id VARCHAR NOT NULL,\n  event_type VARCHAR NOT NULL,\n  details JSON NOT NULL,\n  details_hash VARCHAR NOT NULL,\n  occurred_at TIMESTAMP NOT NULL\n);",
-      "enums": {
-        "event_type": [
-          "created",
-          "edge_cut",
-          "member_added",
-          "member_removed",
-          "merged",
-          "retired",
-          "split"
-        ]
-      },
-      "keys": [
-        {
-          "columns": [
-            "event_id"
-          ],
-          "where": null
-        },
-        {
-          "columns": [
-            "run_id",
-            "entity_id",
-            "event_type",
-            "details_hash"
-          ],
-          "where": null
-        }
-      ],
-      "owner": "ddl.py"
+    {
+     "name": "kind",
+     "nullable": false,
+     "type": "VARCHAR"
     },
-    "entity_membership": {
-      "columns": [
-        {
-          "name": "source_system",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "source_record_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "record_key",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "entity_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "assigned_at",
-          "nullable": false,
-          "type": "TIMESTAMP"
-        },
-        {
-          "name": "run_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        }
-      ],
-      "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.entity_membership (\n  source_system VARCHAR NOT NULL,\n  source_record_id VARCHAR NOT NULL,\n  record_key VARCHAR NOT NULL,\n  entity_id VARCHAR NOT NULL,\n  assigned_at TIMESTAMP NOT NULL,\n  run_id VARCHAR NOT NULL\n);",
-      "enums": {},
-      "keys": [
-        {
-          "columns": [
-            "source_system",
-            "source_record_id"
-          ],
-          "where": null
-        }
-      ],
-      "owner": "ddl.py"
+    {
+     "name": "active",
+     "nullable": false,
+     "type": "BOOLEAN"
     },
-    "er_standardize_work": {
-      "columns": [
-        {
-          "name": "run_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "source_system",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "ingest_batch_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "full_refresh",
-          "nullable": false,
-          "type": "BOOLEAN"
-        }
-      ],
-      "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.er_standardize_work (\n  run_id VARCHAR NOT NULL,\n  source_system VARCHAR NOT NULL,\n  ingest_batch_id VARCHAR NOT NULL,\n  full_refresh BOOLEAN NOT NULL\n);",
-      "enums": {},
-      "keys": [
-        {
-          "columns": [
-            "run_id",
-            "source_system",
-            "ingest_batch_id"
-          ],
-          "where": null
-        }
-      ],
-      "owner": "ddl.py"
+    {
+     "name": "created_by",
+     "nullable": false,
+     "type": "VARCHAR"
     },
-    "er_touched_entities": {
-      "columns": [
-        {
-          "name": "run_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "entity_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "disposition",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "created_at",
-          "nullable": false,
-          "type": "TIMESTAMP"
-        }
-      ],
-      "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.er_touched_entities (\n  run_id VARCHAR NOT NULL,\n  entity_id VARCHAR NOT NULL,\n  disposition VARCHAR NOT NULL,\n  created_at TIMESTAMP NOT NULL\n);",
-      "enums": {
-        "disposition": [
-          "rebuild",
-          "retire"
-        ]
-      },
-      "keys": [
-        {
-          "columns": [
-            "run_id",
-            "entity_id"
-          ],
-          "where": null
-        }
-      ],
-      "owner": "ddl.py"
+    {
+     "name": "created_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
     },
-    "golden_display": {
-      "columns": [
-        {
-          "name": "entity_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "display_name",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "display_email",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "display_phone",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "display_address",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "assembled_at",
-          "nullable": false,
-          "type": "TIMESTAMP"
-        }
-      ],
-      "create_table_sql": null,
-      "enums": {},
-      "keys": [
-        {
-          "columns": [
-            "entity_id"
-          ],
-          "where": null
-        }
-      ],
-      "owner": "dbt"
+    {
+     "name": "retracted_by",
+     "nullable": true,
+     "type": "VARCHAR"
     },
-    "golden_lineage": {
-      "columns": [
-        {
-          "name": "entity_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "attribute",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "record_key",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "source_system",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "source_record_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "rule",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "survivorship_version",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "assembled_at",
-          "nullable": false,
-          "type": "TIMESTAMP"
-        }
-      ],
-      "create_table_sql": null,
-      "enums": {
-        "attribute": [
-          "address",
-          "birth_date",
-          "email",
-          "family_name",
-          "given_name",
-          "phone_e164"
-        ]
-      },
-      "keys": [
-        {
-          "columns": [
-            "entity_id",
-            "attribute"
-          ],
-          "where": null
-        }
-      ],
-      "owner": "dbt"
+    {
+     "name": "retracted_at",
+     "nullable": true,
+     "type": "TIMESTAMP"
     },
-    "golden_overrides": {
-      "columns": [
-        {
-          "name": "entity_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "attribute",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "value",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "created_by",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "created_at",
-          "nullable": false,
-          "type": "TIMESTAMP"
-        },
-        {
-          "name": "source_action_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        }
-      ],
-      "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.golden_overrides (\n  entity_id VARCHAR NOT NULL,\n  attribute VARCHAR NOT NULL,\n  value VARCHAR,\n  created_by VARCHAR NOT NULL,\n  created_at TIMESTAMP NOT NULL,\n  source_action_id VARCHAR NOT NULL\n);",
-      "enums": {},
-      "keys": [
-        {
-          "columns": [
-            "entity_id",
-            "attribute"
-          ],
-          "where": null
-        }
-      ],
-      "owner": "ddl.py"
-    },
-    "golden_records": {
-      "columns": [
-        {
-          "name": "entity_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "given_name",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "family_name",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "email",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "phone_e164",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "addr_number",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "addr_street",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "addr_unit",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "addr_city",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "addr_region",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "addr_postal",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "birth_date",
-          "nullable": true,
-          "type": "DATE"
-        },
-        {
-          "name": "metadata",
-          "nullable": true,
-          "type": "JSON"
-        },
-        {
-          "name": "survivorship_version",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "assembled_at",
-          "nullable": false,
-          "type": "TIMESTAMP"
-        }
-      ],
-      "create_table_sql": null,
-      "enums": {},
-      "keys": [
-        {
-          "columns": [
-            "entity_id"
-          ],
-          "where": null
-        }
-      ],
-      "owner": "dbt"
-    },
-    "ingest_batches": {
-      "columns": [
-        {
-          "name": "ingest_batch_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "run_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "source_system",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "path",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "new_count",
-          "nullable": false,
-          "type": "BIGINT"
-        },
-        {
-          "name": "changed_count",
-          "nullable": false,
-          "type": "BIGINT"
-        },
-        {
-          "name": "unchanged_count",
-          "nullable": false,
-          "type": "BIGINT"
-        },
-        {
-          "name": "tombstone_count",
-          "nullable": false,
-          "type": "BIGINT"
-        },
-        {
-          "name": "resurrected_count",
-          "nullable": false,
-          "type": "BIGINT"
-        },
-        {
-          "name": "full_refresh_keys",
-          "nullable": false,
-          "type": "BOOLEAN"
-        },
-        {
-          "name": "created_at",
-          "nullable": false,
-          "type": "TIMESTAMP"
-        }
-      ],
-      "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.ingest_batches (\n  ingest_batch_id VARCHAR NOT NULL,\n  run_id VARCHAR NOT NULL,\n  source_system VARCHAR NOT NULL,\n  path VARCHAR NOT NULL,\n  new_count BIGINT NOT NULL,\n  changed_count BIGINT NOT NULL,\n  unchanged_count BIGINT NOT NULL,\n  tombstone_count BIGINT NOT NULL,\n  resurrected_count BIGINT NOT NULL,\n  full_refresh_keys BOOLEAN NOT NULL,\n  created_at TIMESTAMP NOT NULL\n);",
-      "enums": {},
-      "keys": [
-        {
-          "columns": [
-            "ingest_batch_id"
-          ],
-          "where": null
-        }
-      ],
-      "owner": "ddl.py"
-    },
-    "int_blocking_keys": {
-      "columns": [
-        {
-          "name": "key_type",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "key_value",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "record_key",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "source_system",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "source_record_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        }
-      ],
-      "create_table_sql": null,
-      "enums": {},
-      "keys": [
-        {
-          "columns": [
-            "key_type",
-            "key_value",
-            "record_key"
-          ],
-          "where": null
-        }
-      ],
-      "owner": "dbt"
-    },
-    "int_std_records": {
-      "columns": [
-        {
-          "name": "record_key",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "source_system",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "source_record_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "content_hash",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "std_version",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "given_name",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "family_name",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "name_variants",
-          "nullable": false,
-          "type": "LIST(VARCHAR)"
-        },
-        {
-          "name": "email",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "email_valid",
-          "nullable": true,
-          "type": "BOOLEAN"
-        },
-        {
-          "name": "phone_e164",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "phone_valid",
-          "nullable": true,
-          "type": "BOOLEAN"
-        },
-        {
-          "name": "addr_number",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "addr_street",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "addr_unit",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "addr_city",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "addr_region",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "addr_postal",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "birth_date",
-          "nullable": true,
-          "type": "DATE"
-        },
-        {
-          "name": "metadata",
-          "nullable": true,
-          "type": "JSON"
-        },
-        {
-          "name": "updated_at_source",
-          "nullable": true,
-          "type": "TIMESTAMP"
-        },
-        {
-          "name": "ingest_batch_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "ingested_at",
-          "nullable": false,
-          "type": "TIMESTAMP"
-        }
-      ],
-      "create_table_sql": null,
-      "enums": {},
-      "keys": [
-        {
-          "columns": [
-            "record_key"
-          ],
-          "where": null
-        }
-      ],
-      "owner": "dbt"
-    },
-    "match_scores": {
-      "columns": [
-        {
-          "name": "rec_a_key",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "rec_b_key",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "match_probability",
-          "nullable": false,
-          "type": "DOUBLE"
-        },
-        {
-          "name": "model_version",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "tf_snapshot_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "rec_a_content_hash",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "rec_b_content_hash",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "evidence",
-          "nullable": false,
-          "type": "JSON"
-        },
-        {
-          "name": "is_active",
-          "nullable": false,
-          "type": "BOOLEAN"
-        },
-        {
-          "name": "invalidated_at",
-          "nullable": true,
-          "type": "TIMESTAMP"
-        },
-        {
-          "name": "invalidated_run_id",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "run_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "scored_at",
-          "nullable": false,
-          "type": "TIMESTAMP"
-        }
-      ],
-      "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.match_scores (\n  rec_a_key VARCHAR NOT NULL,\n  rec_b_key VARCHAR NOT NULL,\n  match_probability DOUBLE NOT NULL,\n  model_version VARCHAR NOT NULL,\n  tf_snapshot_id VARCHAR NOT NULL,\n  rec_a_content_hash VARCHAR NOT NULL,\n  rec_b_content_hash VARCHAR NOT NULL,\n  evidence JSON NOT NULL,\n  is_active BOOLEAN NOT NULL,\n  invalidated_at TIMESTAMP,\n  invalidated_run_id VARCHAR,\n  run_id VARCHAR NOT NULL,\n  scored_at TIMESTAMP NOT NULL\n);",
-      "enums": {},
-      "keys": [
-        {
-          "columns": [
-            "rec_a_key",
-            "rec_b_key",
-            "model_version",
-            "tf_snapshot_id"
-          ],
-          "where": null
-        }
-      ],
-      "owner": "ddl.py"
-    },
-    "model_registry": {
-      "columns": [
-        {
-          "name": "model_version",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "status",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "trained_at",
-          "nullable": false,
-          "type": "TIMESTAMP"
-        },
-        {
-          "name": "corpus_snapshot",
-          "nullable": false,
-          "type": "BIGINT"
-        },
-        {
-          "name": "params_path",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "tf_tables_path",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "tf_snapshot_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "config_hash",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "metrics",
-          "nullable": false,
-          "type": "JSON"
-        },
-        {
-          "name": "run_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        }
-      ],
-      "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.model_registry (\n  model_version VARCHAR NOT NULL,\n  status VARCHAR NOT NULL,\n  trained_at TIMESTAMP NOT NULL,\n  corpus_snapshot BIGINT NOT NULL,\n  params_path VARCHAR NOT NULL,\n  tf_tables_path VARCHAR NOT NULL,\n  tf_snapshot_id VARCHAR NOT NULL,\n  config_hash VARCHAR NOT NULL,\n  metrics JSON NOT NULL,\n  run_id VARCHAR NOT NULL\n);",
-      "enums": {
-        "status": [
-          "active",
-          "superseded"
-        ]
-      },
-      "keys": [
-        {
-          "columns": [
-            "model_version"
-          ],
-          "where": null
-        },
-        {
-          "columns": [],
-          "where": "status='active'"
-        }
-      ],
-      "owner": "ddl.py"
-    },
-    "nickname_variants": {
-      "columns": [
-        {
-          "name": "variant_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "variant_a",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "variant_b",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "active",
-          "nullable": false,
-          "type": "BOOLEAN"
-        },
-        {
-          "name": "created_by",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "created_at",
-          "nullable": false,
-          "type": "TIMESTAMP"
-        },
-        {
-          "name": "retracted_by",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "retracted_at",
-          "nullable": true,
-          "type": "TIMESTAMP"
-        }
-      ],
-      "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.nickname_variants (\n  variant_id VARCHAR NOT NULL,\n  variant_a VARCHAR NOT NULL,\n  variant_b VARCHAR NOT NULL,\n  active BOOLEAN NOT NULL,\n  created_by VARCHAR NOT NULL,\n  created_at TIMESTAMP NOT NULL,\n  retracted_by VARCHAR,\n  retracted_at TIMESTAMP\n);",
-      "enums": {},
-      "keys": [
-        {
-          "columns": [
-            "variant_id"
-          ],
-          "where": null
-        },
-        {
-          "columns": [
-            "variant_a",
-            "variant_b"
-          ],
-          "where": "active"
-        }
-      ],
-      "owner": "ddl.py"
-    },
-    "raw_records": {
-      "columns": [
-        {
-          "name": "source_system",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "source_record_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "payload",
-          "nullable": false,
-          "type": "JSON"
-        },
-        {
-          "name": "content_hash",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "is_deleted",
-          "nullable": false,
-          "type": "BOOLEAN"
-        },
-        {
-          "name": "deleted_at",
-          "nullable": true,
-          "type": "TIMESTAMP"
-        },
-        {
-          "name": "ingest_batch_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "ingested_at",
-          "nullable": false,
-          "type": "TIMESTAMP"
-        }
-      ],
-      "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.raw_records (\n  source_system VARCHAR NOT NULL,\n  source_record_id VARCHAR NOT NULL,\n  payload JSON NOT NULL,\n  content_hash VARCHAR NOT NULL,\n  is_deleted BOOLEAN NOT NULL,\n  deleted_at TIMESTAMP,\n  ingest_batch_id VARCHAR NOT NULL,\n  ingested_at TIMESTAMP NOT NULL\n);",
-      "enums": {},
-      "keys": [
-        {
-          "columns": [
-            "source_system",
-            "source_record_id",
-            "content_hash"
-          ],
-          "where": null
-        }
-      ],
-      "owner": "ddl.py"
-    },
-    "review_queue": {
-      "columns": [
-        {
-          "name": "review_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "subject_type",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "rec_a_key",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "rec_b_key",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "entity_id",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "reason",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "match_probability",
-          "nullable": true,
-          "type": "DOUBLE"
-        },
-        {
-          "name": "waterfall",
-          "nullable": true,
-          "type": "JSON"
-        },
-        {
-          "name": "status",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "first_seen_run_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "last_seen_run_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "resolved_by",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "resolved_at",
-          "nullable": true,
-          "type": "TIMESTAMP"
-        }
-      ],
-      "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.review_queue (\n  review_id VARCHAR NOT NULL,\n  subject_type VARCHAR NOT NULL,\n  rec_a_key VARCHAR,\n  rec_b_key VARCHAR,\n  entity_id VARCHAR,\n  reason VARCHAR NOT NULL,\n  match_probability DOUBLE,\n  waterfall JSON,\n  status VARCHAR NOT NULL,\n  first_seen_run_id VARCHAR NOT NULL,\n  last_seen_run_id VARCHAR NOT NULL,\n  resolved_by VARCHAR,\n  resolved_at TIMESTAMP\n);",
-      "enums": {
-        "reason": [
-          "coherence",
-          "gray_band",
-          "never_unsatisfiable"
-        ],
-        "status": [
-          "dismissed",
-          "open",
-          "resolved_match",
-          "resolved_no_match"
-        ],
-        "subject_type": [
-          "entity",
-          "pair"
-        ]
-      },
-      "keys": [
-        {
-          "columns": [
-            "review_id"
-          ],
-          "where": null
-        },
-        {
-          "columns": [
-            "subject_type",
-            "rec_a_key",
-            "rec_b_key",
-            "entity_id",
-            "reason"
-          ],
-          "where": "status='open'"
-        }
-      ],
-      "owner": "ddl.py"
-    },
-    "run_stages": {
-      "columns": [
-        {
-          "name": "run_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "stage",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "seq",
-          "nullable": false,
-          "type": "BIGINT"
-        },
-        {
-          "name": "status",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "started_at",
-          "nullable": false,
-          "type": "TIMESTAMP"
-        },
-        {
-          "name": "ended_at",
-          "nullable": true,
-          "type": "TIMESTAMP"
-        },
-        {
-          "name": "snapshot_start",
-          "nullable": true,
-          "type": "BIGINT"
-        },
-        {
-          "name": "snapshot_end",
-          "nullable": true,
-          "type": "BIGINT"
-        },
-        {
-          "name": "rows_in",
-          "nullable": true,
-          "type": "BIGINT"
-        },
-        {
-          "name": "rows_out",
-          "nullable": true,
-          "type": "BIGINT"
-        },
-        {
-          "name": "candidate_pairs",
-          "nullable": true,
-          "type": "BIGINT"
-        },
-        {
-          "name": "pairs_above_auto_merge",
-          "nullable": true,
-          "type": "BIGINT"
-        },
-        {
-          "name": "entities_created",
-          "nullable": true,
-          "type": "BIGINT"
-        },
-        {
-          "name": "entities_merged",
-          "nullable": true,
-          "type": "BIGINT"
-        },
-        {
-          "name": "entities_split",
-          "nullable": true,
-          "type": "BIGINT"
-        },
-        {
-          "name": "entities_retired",
-          "nullable": true,
-          "type": "BIGINT"
-        },
-        {
-          "name": "edges_cut",
-          "nullable": true,
-          "type": "BIGINT"
-        },
-        {
-          "name": "review_queue_added",
-          "nullable": true,
-          "type": "BIGINT"
-        },
-        {
-          "name": "duration_ms",
-          "nullable": true,
-          "type": "BIGINT"
-        },
-        {
-          "name": "counters",
-          "nullable": true,
-          "type": "JSON"
-        },
-        {
-          "name": "error_class",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "error_detail",
-          "nullable": true,
-          "type": "VARCHAR"
-        }
-      ],
-      "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.run_stages (\n  run_id VARCHAR NOT NULL,\n  stage VARCHAR NOT NULL,\n  seq BIGINT NOT NULL,\n  status VARCHAR NOT NULL,\n  started_at TIMESTAMP NOT NULL,\n  ended_at TIMESTAMP,\n  snapshot_start BIGINT,\n  snapshot_end BIGINT,\n  rows_in BIGINT,\n  rows_out BIGINT,\n  candidate_pairs BIGINT,\n  pairs_above_auto_merge BIGINT,\n  entities_created BIGINT,\n  entities_merged BIGINT,\n  entities_split BIGINT,\n  entities_retired BIGINT,\n  edges_cut BIGINT,\n  review_queue_added BIGINT,\n  duration_ms BIGINT,\n  counters JSON,\n  error_class VARCHAR,\n  error_detail VARCHAR\n);",
-      "enums": {
-        "stage": [
-          "assemble",
-          "ingest",
-          "init",
-          "maintain",
-          "match",
-          "reconcile",
-          "reset",
-          "standardize",
-          "train"
-        ],
-        "status": [
-          "failed",
-          "running",
-          "succeeded"
-        ]
-      },
-      "keys": [
-        {
-          "columns": [
-            "run_id",
-            "seq"
-          ],
-          "where": null
-        },
-        {
-          "columns": [
-            "run_id",
-            "stage"
-          ],
-          "where": null
-        }
-      ],
-      "owner": "ddl.py"
-    },
-    "runs": {
-      "columns": [
-        {
-          "name": "run_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "tenant",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "mode",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "status",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "started_at",
-          "nullable": false,
-          "type": "TIMESTAMP"
-        },
-        {
-          "name": "ended_at",
-          "nullable": true,
-          "type": "TIMESTAMP"
-        },
-        {
-          "name": "config_hash",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "model_version",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "tf_snapshot_id",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "std_version",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "survivorship_version",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "lexicon_hash",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "code_version",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "rebuild_reason",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "snapshot_start",
-          "nullable": true,
-          "type": "BIGINT"
-        },
-        {
-          "name": "snapshot_end",
-          "nullable": true,
-          "type": "BIGINT"
-        }
-      ],
-      "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.runs (\n  run_id VARCHAR NOT NULL,\n  tenant VARCHAR NOT NULL,\n  mode VARCHAR NOT NULL,\n  status VARCHAR NOT NULL,\n  started_at TIMESTAMP NOT NULL,\n  ended_at TIMESTAMP,\n  config_hash VARCHAR NOT NULL,\n  model_version VARCHAR,\n  tf_snapshot_id VARCHAR,\n  std_version VARCHAR NOT NULL,\n  survivorship_version VARCHAR NOT NULL,\n  lexicon_hash VARCHAR,\n  code_version VARCHAR NOT NULL,\n  rebuild_reason VARCHAR,\n  snapshot_start BIGINT,\n  snapshot_end BIGINT\n);",
-      "enums": {
-        "mode": [
-          "correction_pass",
-          "full",
-          "incremental",
-          "init",
-          "maintain",
-          "reset",
-          "stage",
-          "train"
-        ],
-        "rebuild_reason": [
-          "correction_pass",
-          "lexicon_change",
-          "operator",
-          "std_version_bump",
-          "survivorship_version_bump"
-        ],
-        "status": [
-          "failed",
-          "running",
-          "succeeded"
-        ]
-      },
-      "keys": [
-        {
-          "columns": [
-            "run_id"
-          ],
-          "where": null
-        }
-      ],
-      "owner": "ddl.py"
-    },
-    "stg_records": {
-      "columns": [
-        {
-          "name": "source_system",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "source_record_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "content_hash",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "std_version",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "given_name",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "family_name",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "name_variants",
-          "nullable": false,
-          "type": "LIST(VARCHAR)"
-        },
-        {
-          "name": "email",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "email_valid",
-          "nullable": true,
-          "type": "BOOLEAN"
-        },
-        {
-          "name": "phone_e164",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "phone_valid",
-          "nullable": true,
-          "type": "BOOLEAN"
-        },
-        {
-          "name": "addr_number",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "addr_street",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "addr_unit",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "addr_city",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "addr_region",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "addr_postal",
-          "nullable": true,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "birth_date",
-          "nullable": true,
-          "type": "DATE"
-        },
-        {
-          "name": "metadata",
-          "nullable": true,
-          "type": "JSON"
-        },
-        {
-          "name": "updated_at_source",
-          "nullable": true,
-          "type": "TIMESTAMP"
-        },
-        {
-          "name": "ingest_batch_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "ingested_at",
-          "nullable": false,
-          "type": "TIMESTAMP"
-        }
-      ],
-      "create_table_sql": null,
-      "enums": {},
-      "keys": [
-        {
-          "columns": [
-            "source_system",
-            "source_record_id",
-            "content_hash"
-          ],
-          "where": null
-        }
-      ],
-      "owner": "dbt"
-    },
-    "tf_lookup": {
-      "columns": [
-        {
-          "name": "model_version",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "tf_snapshot_id",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "column_name",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "value",
-          "nullable": false,
-          "type": "VARCHAR"
-        },
-        {
-          "name": "tf_value",
-          "nullable": false,
-          "type": "DOUBLE"
-        }
-      ],
-      "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.tf_lookup (\n  model_version VARCHAR NOT NULL,\n  tf_snapshot_id VARCHAR NOT NULL,\n  column_name VARCHAR NOT NULL,\n  value VARCHAR NOT NULL,\n  tf_value DOUBLE NOT NULL\n);",
-      "enums": {},
-      "keys": [
-        {
-          "columns": [
-            "model_version",
-            "tf_snapshot_id",
-            "column_name",
-            "value"
-          ],
-          "where": null
-        }
-      ],
-      "owner": "ddl.py"
+    {
+     "name": "note",
+     "nullable": true,
+     "type": "VARCHAR"
     }
+   ],
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.assertions (\n  assertion_id VARCHAR NOT NULL,\n  rec_a_key VARCHAR NOT NULL,\n  rec_b_key VARCHAR NOT NULL,\n  kind VARCHAR NOT NULL,\n  active BOOLEAN NOT NULL,\n  created_by VARCHAR NOT NULL,\n  created_at TIMESTAMP NOT NULL,\n  retracted_by VARCHAR,\n  retracted_at TIMESTAMP,\n  note VARCHAR\n);",
+   "enums": {
+    "kind": [
+     "always",
+     "never"
+    ]
+   },
+   "keys": [
+    {
+     "columns": [
+      "assertion_id"
+     ],
+     "where": null
+    },
+    {
+     "columns": [
+      "rec_a_key",
+      "rec_b_key"
+     ],
+     "where": "active"
+    }
+   ],
+   "owner": "ddl.py"
   },
-  "schema_qualifier": "lake.main"
+  "cut_edges": {
+   "columns": [
+    {
+     "name": "cut_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "rec_a_key",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "rec_b_key",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "match_probability",
+     "nullable": false,
+     "type": "DOUBLE"
+    },
+    {
+     "name": "model_version",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "tf_snapshot_id",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "assertion_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "active",
+     "nullable": false,
+     "type": "BOOLEAN"
+    },
+    {
+     "name": "cut_run_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "cut_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "released_run_id",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "released_at",
+     "nullable": true,
+     "type": "TIMESTAMP"
+    }
+   ],
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.cut_edges (\n  cut_id VARCHAR NOT NULL,\n  rec_a_key VARCHAR NOT NULL,\n  rec_b_key VARCHAR NOT NULL,\n  match_probability DOUBLE NOT NULL,\n  model_version VARCHAR,\n  tf_snapshot_id VARCHAR,\n  assertion_id VARCHAR NOT NULL,\n  active BOOLEAN NOT NULL,\n  cut_run_id VARCHAR NOT NULL,\n  cut_at TIMESTAMP NOT NULL,\n  released_run_id VARCHAR,\n  released_at TIMESTAMP\n);",
+   "enums": {},
+   "keys": [
+    {
+     "columns": [
+      "cut_id"
+     ],
+     "where": null
+    },
+    {
+     "columns": [
+      "rec_a_key",
+      "rec_b_key"
+     ],
+     "where": "active"
+    }
+   ],
+   "owner": "ddl.py"
+  },
+  "entities": {
+   "columns": [
+    {
+     "name": "entity_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "status",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "merged_into",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "created_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "updated_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "created_run_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "updated_run_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    }
+   ],
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.entities (\n  entity_id VARCHAR NOT NULL,\n  status VARCHAR NOT NULL,\n  merged_into VARCHAR,\n  created_at TIMESTAMP NOT NULL,\n  updated_at TIMESTAMP NOT NULL,\n  created_run_id VARCHAR NOT NULL,\n  updated_run_id VARCHAR NOT NULL\n);",
+   "enums": {
+    "status": [
+     "active",
+     "merged",
+     "retired"
+    ]
+   },
+   "keys": [
+    {
+     "columns": [
+      "entity_id"
+     ],
+     "where": null
+    }
+   ],
+   "owner": "ddl.py"
+  },
+  "entity_events": {
+   "columns": [
+    {
+     "name": "event_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "seq",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "run_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "entity_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "event_type",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "details",
+     "nullable": false,
+     "type": "JSON"
+    },
+    {
+     "name": "details_hash",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "occurred_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    }
+   ],
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.entity_events (\n  event_id VARCHAR NOT NULL,\n  seq BIGINT NOT NULL,\n  run_id VARCHAR NOT NULL,\n  entity_id VARCHAR NOT NULL,\n  event_type VARCHAR NOT NULL,\n  details JSON NOT NULL,\n  details_hash VARCHAR NOT NULL,\n  occurred_at TIMESTAMP NOT NULL\n);",
+   "enums": {
+    "event_type": [
+     "created",
+     "edge_cut",
+     "member_added",
+     "member_removed",
+     "merged",
+     "retired",
+     "split"
+    ]
+   },
+   "keys": [
+    {
+     "columns": [
+      "event_id"
+     ],
+     "where": null
+    },
+    {
+     "columns": [
+      "run_id",
+      "entity_id",
+      "event_type",
+      "details_hash"
+     ],
+     "where": null
+    }
+   ],
+   "owner": "ddl.py"
+  },
+  "entity_membership": {
+   "columns": [
+    {
+     "name": "source_system",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "source_record_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "record_key",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "entity_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "assigned_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "run_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    }
+   ],
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.entity_membership (\n  source_system VARCHAR NOT NULL,\n  source_record_id VARCHAR NOT NULL,\n  record_key VARCHAR NOT NULL,\n  entity_id VARCHAR NOT NULL,\n  assigned_at TIMESTAMP NOT NULL,\n  run_id VARCHAR NOT NULL\n);",
+   "enums": {},
+   "keys": [
+    {
+     "columns": [
+      "source_system",
+      "source_record_id"
+     ],
+     "where": null
+    }
+   ],
+   "owner": "ddl.py"
+  },
+  "er_standardize_work": {
+   "columns": [
+    {
+     "name": "run_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "source_system",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "ingest_batch_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "full_refresh",
+     "nullable": false,
+     "type": "BOOLEAN"
+    }
+   ],
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.er_standardize_work (\n  run_id VARCHAR NOT NULL,\n  source_system VARCHAR NOT NULL,\n  ingest_batch_id VARCHAR NOT NULL,\n  full_refresh BOOLEAN NOT NULL\n);",
+   "enums": {},
+   "keys": [
+    {
+     "columns": [
+      "run_id",
+      "source_system",
+      "ingest_batch_id"
+     ],
+     "where": null
+    }
+   ],
+   "owner": "ddl.py"
+  },
+  "er_touched_entities": {
+   "columns": [
+    {
+     "name": "run_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "entity_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "disposition",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "created_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    }
+   ],
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.er_touched_entities (\n  run_id VARCHAR NOT NULL,\n  entity_id VARCHAR NOT NULL,\n  disposition VARCHAR NOT NULL,\n  created_at TIMESTAMP NOT NULL\n);",
+   "enums": {
+    "disposition": [
+     "rebuild",
+     "retire"
+    ]
+   },
+   "keys": [
+    {
+     "columns": [
+      "run_id",
+      "entity_id"
+     ],
+     "where": null
+    }
+   ],
+   "owner": "ddl.py"
+  },
+  "golden_display": {
+   "columns": [
+    {
+     "name": "entity_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "display_name",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "display_email",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "display_phone",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "display_address",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "assembled_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    }
+   ],
+   "create_table_sql": null,
+   "enums": {},
+   "keys": [
+    {
+     "columns": [
+      "entity_id"
+     ],
+     "where": null
+    }
+   ],
+   "owner": "dbt"
+  },
+  "golden_lineage": {
+   "columns": [
+    {
+     "name": "entity_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "attribute",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "record_key",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "source_system",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "source_record_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "rule",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "survivorship_version",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "assembled_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    }
+   ],
+   "create_table_sql": null,
+   "enums": {
+    "attribute": [
+     "address",
+     "birth_date",
+     "email",
+     "family_name",
+     "given_name",
+     "phone_e164"
+    ]
+   },
+   "keys": [
+    {
+     "columns": [
+      "entity_id",
+      "attribute"
+     ],
+     "where": null
+    }
+   ],
+   "owner": "dbt"
+  },
+  "golden_overrides": {
+   "columns": [
+    {
+     "name": "entity_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "attribute",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "value",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "created_by",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "created_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "source_action_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    }
+   ],
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.golden_overrides (\n  entity_id VARCHAR NOT NULL,\n  attribute VARCHAR NOT NULL,\n  value VARCHAR,\n  created_by VARCHAR NOT NULL,\n  created_at TIMESTAMP NOT NULL,\n  source_action_id VARCHAR NOT NULL\n);",
+   "enums": {},
+   "keys": [
+    {
+     "columns": [
+      "entity_id",
+      "attribute"
+     ],
+     "where": null
+    }
+   ],
+   "owner": "ddl.py"
+  },
+  "golden_records": {
+   "columns": [
+    {
+     "name": "entity_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "given_name",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "family_name",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "email",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "phone_e164",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "addr_number",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "addr_street",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "addr_unit",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "addr_city",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "addr_region",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "addr_postal",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "birth_date",
+     "nullable": true,
+     "type": "DATE"
+    },
+    {
+     "name": "metadata",
+     "nullable": true,
+     "type": "JSON"
+    },
+    {
+     "name": "survivorship_version",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "assembled_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    }
+   ],
+   "create_table_sql": null,
+   "enums": {},
+   "keys": [
+    {
+     "columns": [
+      "entity_id"
+     ],
+     "where": null
+    }
+   ],
+   "owner": "dbt"
+  },
+  "ingest_batches": {
+   "columns": [
+    {
+     "name": "ingest_batch_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "run_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "source_system",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "path",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "new_count",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "changed_count",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "unchanged_count",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "tombstone_count",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "resurrected_count",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "full_refresh_keys",
+     "nullable": false,
+     "type": "BOOLEAN"
+    },
+    {
+     "name": "created_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    }
+   ],
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.ingest_batches (\n  ingest_batch_id VARCHAR NOT NULL,\n  run_id VARCHAR NOT NULL,\n  source_system VARCHAR NOT NULL,\n  path VARCHAR NOT NULL,\n  new_count BIGINT NOT NULL,\n  changed_count BIGINT NOT NULL,\n  unchanged_count BIGINT NOT NULL,\n  tombstone_count BIGINT NOT NULL,\n  resurrected_count BIGINT NOT NULL,\n  full_refresh_keys BOOLEAN NOT NULL,\n  created_at TIMESTAMP NOT NULL\n);",
+   "enums": {},
+   "keys": [
+    {
+     "columns": [
+      "ingest_batch_id"
+     ],
+     "where": null
+    }
+   ],
+   "owner": "ddl.py"
+  },
+  "int_blocking_keys": {
+   "columns": [
+    {
+     "name": "key_type",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "key_value",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "record_key",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "source_system",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "source_record_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    }
+   ],
+   "create_table_sql": null,
+   "enums": {},
+   "keys": [
+    {
+     "columns": [
+      "key_type",
+      "key_value",
+      "record_key"
+     ],
+     "where": null
+    }
+   ],
+   "owner": "dbt"
+  },
+  "int_std_records": {
+   "columns": [
+    {
+     "name": "record_key",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "source_system",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "source_record_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "content_hash",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "std_version",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "given_name",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "family_name",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "name_variants",
+     "nullable": false,
+     "type": "LIST(VARCHAR)"
+    },
+    {
+     "name": "email",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "email_valid",
+     "nullable": true,
+     "type": "BOOLEAN"
+    },
+    {
+     "name": "phone_e164",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "phone_valid",
+     "nullable": true,
+     "type": "BOOLEAN"
+    },
+    {
+     "name": "addr_number",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "addr_street",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "addr_unit",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "addr_city",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "addr_region",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "addr_postal",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "birth_date",
+     "nullable": true,
+     "type": "DATE"
+    },
+    {
+     "name": "metadata",
+     "nullable": true,
+     "type": "JSON"
+    },
+    {
+     "name": "updated_at_source",
+     "nullable": true,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "ingest_batch_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "ingested_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    }
+   ],
+   "create_table_sql": null,
+   "enums": {},
+   "keys": [
+    {
+     "columns": [
+      "record_key"
+     ],
+     "where": null
+    }
+   ],
+   "owner": "dbt"
+  },
+  "match_scores": {
+   "columns": [
+    {
+     "name": "rec_a_key",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "rec_b_key",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "match_probability",
+     "nullable": false,
+     "type": "DOUBLE"
+    },
+    {
+     "name": "model_version",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "tf_snapshot_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "rec_a_content_hash",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "rec_b_content_hash",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "evidence",
+     "nullable": false,
+     "type": "JSON"
+    },
+    {
+     "name": "is_active",
+     "nullable": false,
+     "type": "BOOLEAN"
+    },
+    {
+     "name": "invalidated_at",
+     "nullable": true,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "invalidated_run_id",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "run_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "scored_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    }
+   ],
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.match_scores (\n  rec_a_key VARCHAR NOT NULL,\n  rec_b_key VARCHAR NOT NULL,\n  match_probability DOUBLE NOT NULL,\n  model_version VARCHAR NOT NULL,\n  tf_snapshot_id VARCHAR NOT NULL,\n  rec_a_content_hash VARCHAR NOT NULL,\n  rec_b_content_hash VARCHAR NOT NULL,\n  evidence JSON NOT NULL,\n  is_active BOOLEAN NOT NULL,\n  invalidated_at TIMESTAMP,\n  invalidated_run_id VARCHAR,\n  run_id VARCHAR NOT NULL,\n  scored_at TIMESTAMP NOT NULL\n);",
+   "enums": {},
+   "keys": [
+    {
+     "columns": [
+      "rec_a_key",
+      "rec_b_key",
+      "model_version",
+      "tf_snapshot_id"
+     ],
+     "where": null
+    }
+   ],
+   "owner": "ddl.py"
+  },
+  "model_registry": {
+   "columns": [
+    {
+     "name": "model_version",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "status",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "trained_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "corpus_snapshot",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "params_path",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "tf_tables_path",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "tf_snapshot_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "config_hash",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "metrics",
+     "nullable": false,
+     "type": "JSON"
+    },
+    {
+     "name": "run_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    }
+   ],
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.model_registry (\n  model_version VARCHAR NOT NULL,\n  status VARCHAR NOT NULL,\n  trained_at TIMESTAMP NOT NULL,\n  corpus_snapshot BIGINT NOT NULL,\n  params_path VARCHAR NOT NULL,\n  tf_tables_path VARCHAR NOT NULL,\n  tf_snapshot_id VARCHAR NOT NULL,\n  config_hash VARCHAR NOT NULL,\n  metrics JSON NOT NULL,\n  run_id VARCHAR NOT NULL\n);",
+   "enums": {
+    "status": [
+     "active",
+     "superseded"
+    ]
+   },
+   "keys": [
+    {
+     "columns": [
+      "model_version"
+     ],
+     "where": null
+    },
+    {
+     "columns": [],
+     "where": "status='active'"
+    }
+   ],
+   "owner": "ddl.py"
+  },
+  "nickname_variants": {
+   "columns": [
+    {
+     "name": "variant_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "variant_a",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "variant_b",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "active",
+     "nullable": false,
+     "type": "BOOLEAN"
+    },
+    {
+     "name": "created_by",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "created_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "retracted_by",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "retracted_at",
+     "nullable": true,
+     "type": "TIMESTAMP"
+    }
+   ],
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.nickname_variants (\n  variant_id VARCHAR NOT NULL,\n  variant_a VARCHAR NOT NULL,\n  variant_b VARCHAR NOT NULL,\n  active BOOLEAN NOT NULL,\n  created_by VARCHAR NOT NULL,\n  created_at TIMESTAMP NOT NULL,\n  retracted_by VARCHAR,\n  retracted_at TIMESTAMP\n);",
+   "enums": {},
+   "keys": [
+    {
+     "columns": [
+      "variant_id"
+     ],
+     "where": null
+    },
+    {
+     "columns": [
+      "variant_a",
+      "variant_b"
+     ],
+     "where": "active"
+    }
+   ],
+   "owner": "ddl.py"
+  },
+  "raw_records": {
+   "columns": [
+    {
+     "name": "source_system",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "source_record_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "payload",
+     "nullable": false,
+     "type": "JSON"
+    },
+    {
+     "name": "content_hash",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "is_deleted",
+     "nullable": false,
+     "type": "BOOLEAN"
+    },
+    {
+     "name": "deleted_at",
+     "nullable": true,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "ingest_batch_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "ingested_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    }
+   ],
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.raw_records (\n  source_system VARCHAR NOT NULL,\n  source_record_id VARCHAR NOT NULL,\n  payload JSON NOT NULL,\n  content_hash VARCHAR NOT NULL,\n  is_deleted BOOLEAN NOT NULL,\n  deleted_at TIMESTAMP,\n  ingest_batch_id VARCHAR NOT NULL,\n  ingested_at TIMESTAMP NOT NULL\n);",
+   "enums": {},
+   "keys": [
+    {
+     "columns": [
+      "source_system",
+      "source_record_id",
+      "content_hash"
+     ],
+     "where": null
+    }
+   ],
+   "owner": "ddl.py"
+  },
+  "record_overlays": {
+   "columns": [
+    {
+     "name": "record_key",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "kind",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "active",
+     "nullable": false,
+     "type": "BOOLEAN"
+    },
+    {
+     "name": "created_by",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "created_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "source_action_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "retracted_at",
+     "nullable": true,
+     "type": "TIMESTAMP"
+    }
+   ],
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.record_overlays (\n  record_key VARCHAR NOT NULL,\n  kind VARCHAR NOT NULL,\n  active BOOLEAN NOT NULL,\n  created_by VARCHAR NOT NULL,\n  created_at TIMESTAMP NOT NULL,\n  source_action_id VARCHAR NOT NULL,\n  retracted_at TIMESTAMP\n);",
+   "enums": {},
+   "keys": [
+    {
+     "columns": [
+      "record_key",
+      "kind"
+     ],
+     "where": null
+    }
+   ],
+   "owner": "ddl.py"
+  },
+  "review_queue": {
+   "columns": [
+    {
+     "name": "review_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "subject_type",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "rec_a_key",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "rec_b_key",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "entity_id",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "reason",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "match_probability",
+     "nullable": true,
+     "type": "DOUBLE"
+    },
+    {
+     "name": "waterfall",
+     "nullable": true,
+     "type": "JSON"
+    },
+    {
+     "name": "status",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "first_seen_run_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "last_seen_run_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "resolved_by",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "resolved_at",
+     "nullable": true,
+     "type": "TIMESTAMP"
+    }
+   ],
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.review_queue (\n  review_id VARCHAR NOT NULL,\n  subject_type VARCHAR NOT NULL,\n  rec_a_key VARCHAR,\n  rec_b_key VARCHAR,\n  entity_id VARCHAR,\n  reason VARCHAR NOT NULL,\n  match_probability DOUBLE,\n  waterfall JSON,\n  status VARCHAR NOT NULL,\n  first_seen_run_id VARCHAR NOT NULL,\n  last_seen_run_id VARCHAR NOT NULL,\n  resolved_by VARCHAR,\n  resolved_at TIMESTAMP\n);",
+   "enums": {
+    "reason": [
+     "coherence",
+     "gray_band",
+     "never_unsatisfiable"
+    ],
+    "status": [
+     "dismissed",
+     "open",
+     "resolved_match",
+     "resolved_no_match"
+    ],
+    "subject_type": [
+     "entity",
+     "pair"
+    ]
+   },
+   "keys": [
+    {
+     "columns": [
+      "review_id"
+     ],
+     "where": null
+    },
+    {
+     "columns": [
+      "subject_type",
+      "rec_a_key",
+      "rec_b_key",
+      "entity_id",
+      "reason"
+     ],
+     "where": "status='open'"
+    }
+   ],
+   "owner": "ddl.py"
+  },
+  "run_stages": {
+   "columns": [
+    {
+     "name": "run_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "stage",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "seq",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "status",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "started_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "ended_at",
+     "nullable": true,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "snapshot_start",
+     "nullable": true,
+     "type": "BIGINT"
+    },
+    {
+     "name": "snapshot_end",
+     "nullable": true,
+     "type": "BIGINT"
+    },
+    {
+     "name": "rows_in",
+     "nullable": true,
+     "type": "BIGINT"
+    },
+    {
+     "name": "rows_out",
+     "nullable": true,
+     "type": "BIGINT"
+    },
+    {
+     "name": "candidate_pairs",
+     "nullable": true,
+     "type": "BIGINT"
+    },
+    {
+     "name": "pairs_above_auto_merge",
+     "nullable": true,
+     "type": "BIGINT"
+    },
+    {
+     "name": "entities_created",
+     "nullable": true,
+     "type": "BIGINT"
+    },
+    {
+     "name": "entities_merged",
+     "nullable": true,
+     "type": "BIGINT"
+    },
+    {
+     "name": "entities_split",
+     "nullable": true,
+     "type": "BIGINT"
+    },
+    {
+     "name": "entities_retired",
+     "nullable": true,
+     "type": "BIGINT"
+    },
+    {
+     "name": "edges_cut",
+     "nullable": true,
+     "type": "BIGINT"
+    },
+    {
+     "name": "review_queue_added",
+     "nullable": true,
+     "type": "BIGINT"
+    },
+    {
+     "name": "duration_ms",
+     "nullable": true,
+     "type": "BIGINT"
+    },
+    {
+     "name": "counters",
+     "nullable": true,
+     "type": "JSON"
+    },
+    {
+     "name": "error_class",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "error_detail",
+     "nullable": true,
+     "type": "VARCHAR"
+    }
+   ],
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.run_stages (\n  run_id VARCHAR NOT NULL,\n  stage VARCHAR NOT NULL,\n  seq BIGINT NOT NULL,\n  status VARCHAR NOT NULL,\n  started_at TIMESTAMP NOT NULL,\n  ended_at TIMESTAMP,\n  snapshot_start BIGINT,\n  snapshot_end BIGINT,\n  rows_in BIGINT,\n  rows_out BIGINT,\n  candidate_pairs BIGINT,\n  pairs_above_auto_merge BIGINT,\n  entities_created BIGINT,\n  entities_merged BIGINT,\n  entities_split BIGINT,\n  entities_retired BIGINT,\n  edges_cut BIGINT,\n  review_queue_added BIGINT,\n  duration_ms BIGINT,\n  counters JSON,\n  error_class VARCHAR,\n  error_detail VARCHAR\n);",
+   "enums": {
+    "stage": [
+     "assemble",
+     "ingest",
+     "init",
+     "maintain",
+     "match",
+     "reconcile",
+     "reset",
+     "standardize",
+     "train"
+    ],
+    "status": [
+     "failed",
+     "running",
+     "succeeded"
+    ]
+   },
+   "keys": [
+    {
+     "columns": [
+      "run_id",
+      "seq"
+     ],
+     "where": null
+    },
+    {
+     "columns": [
+      "run_id",
+      "stage"
+     ],
+     "where": null
+    }
+   ],
+   "owner": "ddl.py"
+  },
+  "runs": {
+   "columns": [
+    {
+     "name": "run_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "tenant",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "mode",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "status",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "started_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "ended_at",
+     "nullable": true,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "config_hash",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "model_version",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "tf_snapshot_id",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "std_version",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "survivorship_version",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "lexicon_hash",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "code_version",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "rebuild_reason",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "snapshot_start",
+     "nullable": true,
+     "type": "BIGINT"
+    },
+    {
+     "name": "snapshot_end",
+     "nullable": true,
+     "type": "BIGINT"
+    }
+   ],
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.runs (\n  run_id VARCHAR NOT NULL,\n  tenant VARCHAR NOT NULL,\n  mode VARCHAR NOT NULL,\n  status VARCHAR NOT NULL,\n  started_at TIMESTAMP NOT NULL,\n  ended_at TIMESTAMP,\n  config_hash VARCHAR NOT NULL,\n  model_version VARCHAR,\n  tf_snapshot_id VARCHAR,\n  std_version VARCHAR NOT NULL,\n  survivorship_version VARCHAR NOT NULL,\n  lexicon_hash VARCHAR,\n  code_version VARCHAR NOT NULL,\n  rebuild_reason VARCHAR,\n  snapshot_start BIGINT,\n  snapshot_end BIGINT\n);",
+   "enums": {
+    "mode": [
+     "correction_pass",
+     "full",
+     "incremental",
+     "init",
+     "maintain",
+     "reset",
+     "stage",
+     "train"
+    ],
+    "rebuild_reason": [
+     "correction_pass",
+     "lexicon_change",
+     "operator",
+     "std_version_bump",
+     "survivorship_version_bump"
+    ],
+    "status": [
+     "failed",
+     "running",
+     "succeeded"
+    ]
+   },
+   "keys": [
+    {
+     "columns": [
+      "run_id"
+     ],
+     "where": null
+    }
+   ],
+   "owner": "ddl.py"
+  },
+  "stg_records": {
+   "columns": [
+    {
+     "name": "source_system",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "source_record_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "content_hash",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "std_version",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "given_name",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "family_name",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "name_variants",
+     "nullable": false,
+     "type": "LIST(VARCHAR)"
+    },
+    {
+     "name": "email",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "email_valid",
+     "nullable": true,
+     "type": "BOOLEAN"
+    },
+    {
+     "name": "phone_e164",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "phone_valid",
+     "nullable": true,
+     "type": "BOOLEAN"
+    },
+    {
+     "name": "addr_number",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "addr_street",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "addr_unit",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "addr_city",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "addr_region",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "addr_postal",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "birth_date",
+     "nullable": true,
+     "type": "DATE"
+    },
+    {
+     "name": "metadata",
+     "nullable": true,
+     "type": "JSON"
+    },
+    {
+     "name": "updated_at_source",
+     "nullable": true,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "ingest_batch_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "ingested_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    }
+   ],
+   "create_table_sql": null,
+   "enums": {},
+   "keys": [
+    {
+     "columns": [
+      "source_system",
+      "source_record_id",
+      "content_hash"
+     ],
+     "where": null
+    }
+   ],
+   "owner": "dbt"
+  },
+  "tf_lookup": {
+   "columns": [
+    {
+     "name": "model_version",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "tf_snapshot_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "column_name",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "value",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "tf_value",
+     "nullable": false,
+     "type": "DOUBLE"
+    }
+   ],
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.tf_lookup (\n  model_version VARCHAR NOT NULL,\n  tf_snapshot_id VARCHAR NOT NULL,\n  column_name VARCHAR NOT NULL,\n  value VARCHAR NOT NULL,\n  tf_value DOUBLE NOT NULL\n);",
+   "enums": {},
+   "keys": [
+    {
+     "columns": [
+      "model_version",
+      "tf_snapshot_id",
+      "column_name",
+      "value"
+     ],
+     "where": null
+    }
+   ],
+   "owner": "ddl.py"
+  }
+ },
+ "schema_qualifier": "lake.main"
 }

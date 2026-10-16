@@ -2804,6 +2804,108 @@ async fn add_assertion(
     }
 }
 
+#[derive(Deserialize)]
+struct SuppressIn {
+    record_key: String,
+    #[serde(default)]
+    apply_now: bool,
+}
+
+/// Steward+: suppress (exclude) a record from entity assembly, or retract that
+/// suppression. `retract=false` stages `suppress_record`; `retract=true` stages
+/// `retract_record_overlay` (kind `suppress`). Unlike a source tombstone, a
+/// suppression overlay survives re-ingest (reconcile re-reads it every run). With
+/// `apply_now` it enqueues the steward drain + correct.
+async fn suppress_record_action(
+    principal: Principal,
+    state: AppState,
+    org: String,
+    body: SuppressIn,
+    retract: bool,
+) -> axum::response::Response {
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
+    if body.record_key.trim().is_empty() {
+        return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "record_key is required");
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(
+            StatusCode::NOT_IMPLEMENTED,
+            "steward actions require Postgres",
+        );
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let action = if retract {
+        json!({
+            "type": "retract_record_overlay",
+            "record_key": body.record_key,
+            "kind": "suppress",
+            "created_by": principal.actor,
+        })
+    } else {
+        json!({
+            "type": "suppress_record",
+            "record_key": body.record_key,
+            "created_by": principal.actor,
+        })
+    };
+    let action_id = match steward_stage(&client, &principal.actor, &org, &action).await {
+        Ok(id) => id,
+        Err(r) => return *r,
+    };
+    if !body.apply_now {
+        return staged_response(StatusCode::CREATED, &action_id);
+    }
+    let idem = format!("suppress-apply:{}", ulid::Ulid::new());
+    let params = json!({ "skip_ingest": true });
+    match pg::enqueue(
+        &client,
+        &org,
+        "apply_corrections",
+        0,
+        Some(&idem),
+        Some(&params),
+    )
+    .await
+    {
+        Ok(job) => (
+            StatusCode::CREATED,
+            Json(json!({
+                "status": "staged",
+                "action_id": action_id,
+                "pending_until_next_reconcile": false,
+                "apply_job": job.job_id,
+            })),
+        )
+            .into_response(),
+        Err(e) => pg_err(e),
+    }
+}
+
+/// `POST /v1/orgs/{org}/records/suppress` — exclude a record from assembly.
+async fn suppress_record_route(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Json(body): Json<SuppressIn>,
+) -> impl IntoResponse {
+    suppress_record_action(principal, state, org, body, false).await
+}
+
+/// `POST /v1/orgs/{org}/records/unsuppress` — retract a record suppression.
+async fn unsuppress_record_route(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Json(body): Json<SuppressIn>,
+) -> impl IntoResponse {
+    suppress_record_action(principal, state, org, body, true).await
+}
+
 /// Steward+: stage an assertion retraction
 /// (`DELETE /v1/orgs/{org}/assertions/{assertion_id}`).
 async fn retract_assertion(
@@ -3562,6 +3664,14 @@ fn build_routes(state: AppState) -> Router {
             post(bulk_resolve_reviews),
         )
         .route("/v1/orgs/{org}/mass-update", post(mass_update))
+        .route(
+            "/v1/orgs/{org}/records/suppress",
+            post(suppress_record_route),
+        )
+        .route(
+            "/v1/orgs/{org}/records/unsuppress",
+            post(unsuppress_record_route),
+        )
         .route("/v1/orgs/{org}/reviews/{review_id}", get(review_detail))
         .route(
             "/v1/orgs/{org}/reviews/{review_id}/resolve",

@@ -639,6 +639,25 @@ fn ddl_specs() -> Vec<TableSpec> {
             vec![key(&["entity_id", "attribute"])],
             BTreeMap::new(),
         ),
+        // Steward record overlays (PR 1.3): protect/suppress one record. One
+        // latest-wins active row per (record_key, kind). `suppress` drops the
+        // record from reconcile clustering; `protect` forces it master on the
+        // read path. Loaded only when the table exists, so an empty/absent
+        // overlay is a byte-exact no-op (the determinism contract holds).
+        tspec(
+            "record_overlays",
+            vec![
+                nn("record_key", VARCHAR),
+                nn("kind", VARCHAR),
+                nn("active", BOOLEAN),
+                nn("created_by", VARCHAR),
+                nn("created_at", TIMESTAMP),
+                nn("source_action_id", VARCHAR),
+                col("retracted_at", TIMESTAMP),
+            ],
+            vec![key(&["record_key", "kind"])],
+            BTreeMap::new(),
+        ),
     ]
 }
 
