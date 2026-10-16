@@ -1,0 +1,18 @@
+{
+  "_comment": "Hand-authored oracle for er_std::sql::company_name / company_name_norm / company_variants. No dbt macro exists for company normalization; these expected values are authoritative by construction (see std_macros.rs::company_norm_matches_oracle). name = light (lowercase/trim/sentinel), norm = aggressive match key (fold, depunct, strip legal suffix), variants_joined = company_variants array_to_string('|').",
+  "cases": [
+    { "input": "Acme Inc.", "name": "acme inc.", "norm": "acme", "variants_joined": "acme" },
+    { "input": "Acme, LLC", "name": "acme, llc", "norm": "acme", "variants_joined": "acme" },
+    { "input": "ACME Corporation", "name": "acme corporation", "norm": "acme", "variants_joined": "acme" },
+    { "input": "Foo-Bar Co", "name": "foo-bar co", "norm": "foo bar", "variants_joined": "foo bar" },
+    { "input": "Widgets Ltd", "name": "widgets ltd", "norm": "widgets", "variants_joined": "widgets" },
+    { "input": "GlobalTech GmbH", "name": "globaltech gmbh", "norm": "globaltech", "variants_joined": "globaltech" },
+    { "input": "Café & Sons", "name": "café & sons", "norm": "cafe sons", "variants_joined": "cafe sons" },
+    { "input": "Costco", "name": "costco", "norm": "costco", "variants_joined": "costco" },
+    { "input": "Smith and Co", "name": "smith and co", "norm": "smith and", "variants_joined": "smith and" },
+    { "input": "Inc", "name": "inc", "norm": "inc", "variants_joined": "inc" },
+    { "input": "n/a", "name": null, "norm": "n a", "variants_joined": "n a" },
+    { "input": "unknown", "name": null, "norm": null, "variants_joined": "" },
+    { "input": null, "name": null, "norm": null, "variants_joined": "" }
+  ]
+}

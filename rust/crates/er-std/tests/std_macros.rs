@@ -6,7 +6,8 @@
 
 use dedupe_core::session::{Session, SessionOptions};
 use er_std::sql::{
-    address_parse, email_norm, name_norm, name_variants, parse_date, source_metadata,
+    address_parse, company_name, company_name_norm, company_variants, domain, domain_norm,
+    email_norm, name_norm, name_variants, parse_date, source_metadata,
 };
 
 fn lit(value: Option<&str>) -> String {
@@ -80,6 +81,73 @@ fn name_norm_matches_dbt_macro() {
             rows[0][0],
             expected_text(&case["name"]),
             "name_norm for {input:?} differs from the dbt macro",
+        );
+    }
+}
+
+#[test]
+fn company_norm_matches_oracle() {
+    let golden: serde_json::Value =
+        serde_json::from_str(include_str!("company_golden.json")).unwrap();
+    let cases = golden["cases"].as_array().unwrap();
+    assert!(cases.len() >= 10);
+    let session = Session::open_in_memory(SessionOptions::deterministic()).unwrap();
+
+    for case in cases {
+        let input = case["input"].as_str();
+        let sql = format!(
+            "select {} as nm, {} as norm, array_to_string({}, '|') as variants \
+             from (select cast({} as varchar) as col) as input",
+            company_name("col"),
+            company_name_norm("col"),
+            company_variants("col"),
+            lit(input),
+        );
+        let rows = session.query_strings(&sql).unwrap();
+        assert_eq!(
+            rows[0][0],
+            expected_text(&case["name"]),
+            "company_name for {input:?} differs",
+        );
+        assert_eq!(
+            rows[0][1],
+            expected_text(&case["norm"]),
+            "company_name_norm for {input:?} differs",
+        );
+        assert_eq!(
+            rows[0][2],
+            expected_text(&case["variants_joined"]),
+            "company_variants for {input:?} differs",
+        );
+    }
+}
+
+#[test]
+fn domain_norm_matches_oracle() {
+    let golden: serde_json::Value =
+        serde_json::from_str(include_str!("domain_golden.json")).unwrap();
+    let cases = golden["cases"].as_array().unwrap();
+    assert!(cases.len() >= 8);
+    let session = Session::open_in_memory(SessionOptions::deterministic()).unwrap();
+
+    for case in cases {
+        let input = case["input"].as_str();
+        let sql = format!(
+            "select {} as d, {} as norm from (select cast({} as varchar) as col) as input",
+            domain("col"),
+            domain_norm("col"),
+            lit(input),
+        );
+        let rows = session.query_strings(&sql).unwrap();
+        assert_eq!(
+            rows[0][0],
+            expected_text(&case["domain"]),
+            "domain for {input:?} differs",
+        );
+        assert_eq!(
+            rows[0][1],
+            expected_text(&case["norm"]),
+            "domain_norm for {input:?} differs",
         );
     }
 }

@@ -31,12 +31,15 @@ use er_reconcile::assertions::{Assertion, AssertionKind};
 use er_reconcile::cluster::label_propagate;
 use er_reconcile::never_cut::{PathEdge, never_cut_fixpoint};
 use er_reconcile::reconcile::reconcile_plan;
-use er_standardize::build_int_std_records;
+use er_standardize::{build_acct_int_std_records, build_int_std_records};
 use std::collections::BTreeSet;
 
 /// The lake relations this crate reads/writes, fully qualified.
 pub const RAW_RECORDS: &str = "lake.main.raw_records";
 pub const INT_STD_RECORDS: &str = "lake.main.int_std_records";
+/// Account standardized records (`entity_type: account`), the Account analogue of
+/// [`INT_STD_RECORDS`].
+pub const ACCT_INT_STD_RECORDS: &str = "lake.main.acct_int_std_records";
 pub const MATCH_SCORES: &str = "lake.main.match_scores";
 pub const ENTITY_MEMBERSHIP: &str = "lake.main.entity_membership";
 pub const ENTITIES: &str = "lake.main.entities";
@@ -139,8 +142,13 @@ pub fn run_ingest(
 /// # Errors
 /// Propagates the standardization SQL error.
 pub fn run_standardize(session: &Session, config: &Config) -> Result<()> {
-    session.execute_batch(&format!("drop table if exists {INT_STD_RECORDS}"))?;
-    build_int_std_records(session, config, RAW_RECORDS, LEXICON, INT_STD_RECORDS)
+    if config.entity_type.is_person() {
+        session.execute_batch(&format!("drop table if exists {INT_STD_RECORDS}"))?;
+        build_int_std_records(session, config, RAW_RECORDS, LEXICON, INT_STD_RECORDS)
+    } else {
+        session.execute_batch(&format!("drop table if exists {ACCT_INT_STD_RECORDS}"))?;
+        build_acct_int_std_records(session, config, RAW_RECORDS, ACCT_INT_STD_RECORDS)
+    }
 }
 
 /// The committed model a `full` match scores against (S4.3.2): the frozen Splink
