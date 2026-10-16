@@ -3,8 +3,9 @@
 import { AlertTriangle } from "lucide-react";
 
 import { Skeleton } from "@/components/ui/skeleton";
-import { GOLDEN_ATTRIBUTES, RECORD_ATTRIBUTES } from "@/lib/domain/attributes";
+import { goldenAttributes, recordAttributes } from "@/lib/domain/attributes";
 import { diffFields } from "@/lib/domain/field-diff";
+import { useOrgEntityType } from "@/lib/query/config";
 import { useRecordPair, type SourceRecord } from "@/lib/query/reviews";
 import { cn } from "@/lib/utils";
 
@@ -29,6 +30,7 @@ export function FieldCompareGrid({
   /** `grid` is the desktop three-column table; `stacked` is the phone card. */
   layout?: "grid" | "stacked";
 }) {
+  const entityType = useOrgEntityType(org);
   const pair = useRecordPair(org, keyA, keyB);
 
   if (keyA === null || keyB === null) {
@@ -60,12 +62,14 @@ export function FieldCompareGrid({
     );
   }
 
-  const rows = diffFields(RECORD_ATTRIBUTES, left.attributes, right.attributes);
+  const rows = diffFields(recordAttributes(entityType), left.attributes, right.attributes);
   // The headline counts IDENTITY fields only. The validity flags and the source
   // timestamp are shown as context, but `updated_at_source` differs for almost
   // every pair by construction, and counting it would inflate every headline
   // into "these records disagree" when they may match perfectly.
-  const identityKeys = new Set<string>(GOLDEN_ATTRIBUTES.map((attribute) => attribute.key));
+  const identityKeys = new Set<string>(
+    goldenAttributes(entityType).map((attribute) => attribute.key),
+  );
   const differing = rows.filter((row) => !row.same && identityKeys.has(row.key)).length;
 
   return (

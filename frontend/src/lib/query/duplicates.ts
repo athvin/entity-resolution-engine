@@ -9,9 +9,13 @@ export interface DuplicateGroup {
   entity_id: string;
   member_count: number;
   members: string[];
-  given_name: string | null;
-  family_name: string | null;
-  email: string | null;
+  // Person preview fields (present for person-entity orgs).
+  given_name?: string | null;
+  family_name?: string | null;
+  email?: string | null;
+  // Account preview fields (present for account-entity orgs).
+  company_name?: string | null;
+  domain?: string | null;
 }
 
 export interface DuplicatesPage {

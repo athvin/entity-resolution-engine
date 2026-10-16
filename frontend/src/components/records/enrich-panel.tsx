@@ -6,12 +6,11 @@ import { Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { BffRequestError } from "@/lib/api/client";
-import { GOLDEN_ATTRIBUTES } from "@/lib/domain/attributes";
+import { goldenAttributes } from "@/lib/domain/attributes";
+import { useOrgEntityType } from "@/lib/query/config";
 import type { GoldenRecord } from "@/lib/query/hooks";
 import { useEnrich, type EnrichSuggestion } from "@/lib/query/enrich";
 import { useMassUpdate, type GoldenField } from "@/lib/query/mass-update";
-
-const LABELS = new Map<string, string>(GOLDEN_ATTRIBUTES.map(({ key, label }) => [key, label]));
 
 /**
  * AI enrichment (design §Phase 2.3): a steward asks the model to fill empty
@@ -29,6 +28,10 @@ export function EnrichPanel({
   entityId: string;
   golden: GoldenRecord;
 }) {
+  const entityType = useOrgEntityType(org);
+  const labels = new Map<string, string>(
+    goldenAttributes(entityType).map(({ key, label }) => [key, label]),
+  );
   const enrich = useEnrich(org);
   const massUpdate = useMassUpdate(org);
   const [applied, setApplied] = useState<ReadonlySet<string>>(new Set());
@@ -111,7 +114,7 @@ export function EnrichPanel({
         {result && result.suggestions.length > 0 && (
           <ul className="flex flex-col gap-3">
             {result.suggestions.map((suggestion) => {
-              const label = LABELS.get(suggestion.field) ?? suggestion.field;
+              const label = labels.get(suggestion.field) ?? suggestion.field;
               const currentRaw = (golden as unknown as Record<string, unknown>)[suggestion.field];
               const current =
                 typeof currentRaw === "string" && currentRaw !== "" ? currentRaw : null;

@@ -117,5 +117,36 @@ fn account_golden_read_serves_acct_projection() {
         "account lineage (acct_golden_lineage) returned"
     );
 
+    // Duplicates: the auto-merged groups the /duplicates endpoint serves, carrying
+    // the ACCOUNT preview (company_name/domain) rather than person name/email.
+    // Acme, Globex and Initech each pair a crm row with a vendors row; Umbrella
+    // has no vendors twin and so is single-member, not a group.
+    let (groups, _) = read::duplicates(&session, &view, snapshot, None, 50).unwrap();
+    assert_eq!(
+        groups.len(),
+        3,
+        "three cross-source account duplicate groups"
+    );
+    assert!(
+        groups
+            .iter()
+            .all(|g| g.get("member_count").and_then(serde_json::Value::as_i64) == Some(2)),
+        "each account group pairs the crm and vendors row"
+    );
+    assert!(
+        groups
+            .iter()
+            .all(|g| g.get("company_name").and_then(|v| v.as_str()).is_some()),
+        "each group carries the account company_name preview"
+    );
+    assert!(
+        groups.iter().all(|g| g.get("domain").is_some()),
+        "each group carries the account domain preview"
+    );
+    assert!(
+        groups.iter().all(|g| g.get("given_name").is_none()),
+        "account duplicate groups carry no person given_name preview"
+    );
+
     let _ = std::fs::remove_dir_all(&tmp);
 }

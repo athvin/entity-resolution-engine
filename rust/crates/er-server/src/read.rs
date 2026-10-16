@@ -44,6 +44,8 @@ pub struct GoldenView {
     pub columns: &'static str,
     /// The `coalesce(..) || ' ' || ..` expression the `q` contains-search runs over.
     pub search_expr: &'static str,
+    /// The `any_value(g.<col>) AS <col>` preview fragment for a duplicate group row.
+    pub group_preview: &'static str,
 }
 
 impl GoldenView {
@@ -55,6 +57,9 @@ impl GoldenView {
             lineage_table: "lake.main.golden_lineage",
             columns: GOLDEN_COLUMNS,
             search_expr: "coalesce(given_name,'') || ' ' || coalesce(family_name,'') || ' ' || coalesce(email,'')",
+            group_preview: "any_value(g.given_name) AS given_name, \
+                            any_value(g.family_name) AS family_name, \
+                            any_value(g.email) AS email",
         }
     }
 
@@ -66,6 +71,8 @@ impl GoldenView {
             lineage_table: "lake.main.acct_golden_lineage",
             columns: ACCT_GOLDEN_COLUMNS,
             search_expr: "coalesce(company_name,'') || ' ' || coalesce(domain,'')",
+            group_preview: "any_value(g.company_name) AS company_name, \
+                            any_value(g.domain) AS domain",
         }
     }
 
@@ -396,6 +403,7 @@ pub fn active_assertions(
 /// Propagates the lake query error.
 pub fn duplicates(
     session: &Session,
+    view: &GoldenView,
     snapshot: i64,
     after: Option<&str>,
     limit: i64,
@@ -404,23 +412,25 @@ pub fn duplicates(
     let at = format!("AT (VERSION => {snapshot})");
     let after_sql = after.map_or(String::new(), |a| format!("WHERE m.entity_id > {}", lit(a)));
     // Pin each table via a CTE (clean snapshot read) rather than aliasing a
-    // time-travelled table inline, which the grammar handles awkwardly.
+    // time-travelled table inline, which the grammar handles awkwardly. The
+    // golden table + the per-group preview columns come from the org's entity
+    // view (person: name+email; account: company+domain).
     let sql = format!(
         "SELECT entity_id, to_json(t) FROM ( \
            WITH m AS (SELECT * FROM lake.main.entity_membership {at}), \
-                g AS (SELECT * FROM lake.main.golden_records {at}) \
+                g AS (SELECT * FROM {golden} {at}) \
            SELECT m.entity_id, count(*) AS member_count, \
                   list(m.source_system || ':' || m.source_record_id ORDER BY m.record_key) \
                     AS members, \
-                  any_value(g.given_name) AS given_name, \
-                  any_value(g.family_name) AS family_name, \
-                  any_value(g.email) AS email \
+                  {preview} \
            FROM m LEFT JOIN g ON g.entity_id = m.entity_id \
            {after_sql} \
            GROUP BY m.entity_id HAVING count(*) >= 2 \
            ORDER BY m.entity_id LIMIT {} \
          ) t ORDER BY entity_id",
-        limit + 1
+        limit + 1,
+        golden = view.golden_table,
+        preview = view.group_preview,
     );
     let rows = session.query_strings(&sql).map_err(|e| e.to_string())?;
     let has_more = rows.len() as i64 > limit;

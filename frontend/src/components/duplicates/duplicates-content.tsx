@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { displayName } from "@/lib/domain/attributes";
+import { useOrgEntityType } from "@/lib/query/config";
 import { effectiveRole, useSession } from "@/lib/query/hooks";
 import { useDuplicates, type DuplicateGroup } from "@/lib/query/duplicates";
 import { cn } from "@/lib/utils";
@@ -33,6 +34,7 @@ function sourceOf(memberKey: string): string {
 
 function GroupsTab({ org }: { org: string }) {
   const query = useDuplicates(org);
+  const entityType = useOrgEntityType(org);
   const [sort, setSort] = useState<(typeof SORTS)[number]["id"]>("members");
   const [sourceFilter, setSourceFilter] = useState<string | null>(null);
 
@@ -57,7 +59,9 @@ function GroupsTab({ org }: { org: string }) {
       sorted.sort((a, b) => b.member_count - a.member_count);
     } else {
       sorted.sort((a, b) =>
-        (displayName(a) || a.entity_id).localeCompare(displayName(b) || b.entity_id),
+        (displayName(a, entityType) || a.entity_id).localeCompare(
+          displayName(b, entityType) || b.entity_id,
+        ),
       );
     }
     return sorted;
@@ -128,12 +132,16 @@ function GroupsTab({ org }: { org: string }) {
               <CardContent className="flex flex-col gap-2 p-4">
                 <div className="flex items-center gap-2">
                   <GitMerge className="text-muted-foreground size-4" />
-                  <span className="font-medium">{displayName(group) || group.entity_id}</span>
+                  <span className="font-medium">
+                    {displayName(group, entityType) || group.entity_id}
+                  </span>
                   <span className="bg-secondary text-secondary-foreground ml-auto rounded-full px-2 py-0.5 text-xs">
                     {group.member_count} records
                   </span>
                 </div>
-                <div className="text-muted-foreground truncate text-sm">{group.email ?? ""}</div>
+                <div className="text-muted-foreground truncate text-sm">
+                  {entityType === "account" ? (group.domain ?? "") : (group.email ?? "")}
+                </div>
                 <div className="text-muted-foreground flex flex-wrap gap-1.5 text-[11px]">
                   {group.members.slice(0, 4).map((member) => (
                     <span key={member} className="bg-muted rounded px-1.5 py-0.5 font-mono">

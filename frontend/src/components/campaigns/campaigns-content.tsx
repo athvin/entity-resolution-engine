@@ -10,6 +10,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { bffFetch, BffRequestError } from "@/lib/api/client";
+import { displayName } from "@/lib/domain/attributes";
+import { useOrgEntityType } from "@/lib/query/config";
 import { effectiveRole, useSession, type GoldenPage } from "@/lib/query/hooks";
 import { queryKeys } from "@/lib/query/keys";
 
@@ -67,6 +69,7 @@ export function CampaignsContent({ org }: { org: string }) {
     return role !== null && ROLE_RANK[role] >= ROLE_RANK.steward;
   })();
 
+  const entityType = useOrgEntityType(org);
   const [name, setName] = useState("");
   const [q, setQ] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -170,7 +173,7 @@ export function CampaignsContent({ org }: { org: string }) {
                 <>
                   Preview (snapshot {preview.data?.snapshot}):{" "}
                   {preview.data?.items
-                    .map((item) => [item.given_name, item.family_name].filter(Boolean).join(" "))
+                    .map((item) => displayName(item, entityType) || item.entity_id)
                     .join(" · ") || "no matches"}
                   {preview.data?.next_cursor ? " · …more" : ""}
                 </>

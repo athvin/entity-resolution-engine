@@ -100,10 +100,19 @@ assistant. Tenant username/password auth is fully built (argon2id). M6 (PR #56) 
         DOM is byte-identical (per-column `className` carried so the Phone cell keeps its no-`truncate` class) →
         `@visual` baselines unchanged. 8 vitest selector units + the account read e2e; all determinism fixtures
         (config_hash/content_hash/std_hash/golden vectors) byte-identical.
-  - [ ] **1.1e frontend follow-ups** — entity-aware **new-source wizard** (`csv-profile.ts` Account canonical set +
-        typed mapping) and the secondary display surfaces (duplicates list, merge dialog, enrich labels,
-        field-compare grid, command palette, campaigns). All currently default-to-person → person-safe, Account
-        renders person-shaped there; several (e.g. duplicates) also need their own read-API `GoldenView` switch.
+  - [x] **1.1e frontend follow-ups** — entity-aware **new-source wizard** (`csv-profile.ts` `ACCOUNT_CANONICAL_ATTRIBUTES`
+        + `canonicalAttributes(entityType)` + account `suggestMapping` hints; the wizard's Map step + completeness gate
+        read `useOrgEntityType`) and every secondary display surface migrated off the hardcoded person lists:
+        duplicates list, merge dialog, enrich labels, field-compare grid, command palette (company icon + domain),
+        campaigns preview — all via `displayName`/`goldenAttributes`/`recordAttributes`/`canonicalAttributes(entityType)`.
+        The **duplicates** read-API path got its own `GoldenView` switch: `GoldenView.group_preview` (person name+email /
+        account company+domain), `read::duplicates(session, &view, …)`, and `duplicates_list` resolves it via
+        `org_lake_golden`. `DuplicateGroup` widened to the person+account superset. Person default throughout →
+        person DOM byte-identical, `@visual` baselines unchanged. Coverage: new `canonicalAttributes`/account
+        `suggestMapping` vitest units, a functional `account.spec.ts` (duplicates company/domain preview + wizard
+        account canonical mapping) on an `account-dev` mock org (`entity_type: account`, company/domain golden +
+        entity-aware mock `/duplicates`), and the `acct_read.rs` e2e extended to assert the account `read::duplicates`
+        projection. All determinism fixtures byte-identical.
 - [x] **1.2 Mass UPDATE** — durable golden field overrides across a filtered set. New `golden_overrides` lake
       table + `override_field`/`clear_field` steward actions (ride the drain) + a post-assembly UPDATE over
       golden_records that is a byte-exact **no-op when unused** (base fixtures untouched; only the model_registry +
@@ -181,3 +190,12 @@ assistant. Tenant username/password auth is fully built (argon2id). M6 (PR #56) 
   its no-`truncate` class → `@visual` unchanged). Gate: `pnpm check` (lint+prettier+tsc + 56 vitest incl. 8 new),
   er-server tests (new `acct_read` + person `pg_golden_read`), fmt/clippy/doc clean, all determinism fixtures
   byte-identical. Deferred to 1.1e: entity-aware new-source wizard + secondary display surfaces (person-safe today).
+- 2026-10-16 — Account epic 1.1e **fully closes the epic (write/compose UI)**: the new-source wizard and every
+  secondary display surface (duplicates list, merge dialog, enrich labels, field-compare grid, command palette,
+  campaigns) now read `useOrgEntityType` and render the account vocabulary (company_name/domain) instead of the
+  hardcoded person lists; the `/duplicates` read path gained its own `GoldenView.group_preview` entity-switch
+  (`read::duplicates(…, &view, …)` via `org_lake_golden`). Person default throughout → person DOM byte-identical,
+  `@visual` baselines unchanged. Gate: `pnpm check` (lint+prettier+tsc + 59 vitest incl. new account mapping units),
+  functional `account.spec.ts` green on all 3 projects + person regressions (duplicates/wizard/palette/campaigns/
+  records/reviews/enrich) green, fmt/clippy(`--workspace --all-targets -D warnings`)/doc clean, `acct_read` e2e
+  extended for account `read::duplicates`. No determinism fixture/golden changed.

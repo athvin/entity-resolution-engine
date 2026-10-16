@@ -1918,8 +1918,8 @@ async fn duplicates_list(
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let session = match org_lake(&state, &org).await {
-        Ok(s) => s,
+    let (session, view) = match org_lake_golden(&state, &org).await {
+        Ok(sv) => sv,
         Err(r) => return *r,
     };
     let (snapshot, after) =
@@ -1933,7 +1933,7 @@ async fn duplicates_list(
             }
         };
     let limit = read::parse_limit(params.get("limit").map(String::as_str));
-    match read::duplicates(&session, snapshot, after.as_deref(), limit) {
+    match read::duplicates(&session, &view, snapshot, after.as_deref(), limit) {
         Ok((items, next_cursor)) => Json(json!({
             "items": items,
             "snapshot": snapshot,

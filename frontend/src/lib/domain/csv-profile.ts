@@ -9,7 +9,7 @@ export interface ColumnProfile {
   samples: string[];
 }
 
-/** The canonical attributes a source's columns map onto (config `columns:` keys). */
+/** The canonical attributes a PERSON source's columns map onto (config `columns:` keys). */
 export const CANONICAL_ATTRIBUTES = [
   "given_name",
   "family_name",
@@ -22,7 +22,30 @@ export const CANONICAL_ATTRIBUTES = [
   "birth_date",
 ] as const;
 
-export type CanonicalAttribute = (typeof CANONICAL_ATTRIBUTES)[number];
+/** The canonical attributes an ACCOUNT/Org source's columns map onto (mirrors the
+ * backend `ACCOUNT_CANONICAL_ATTRIBUTES`). */
+export const ACCOUNT_CANONICAL_ATTRIBUTES = [
+  "company_name",
+  "domain",
+  "phone",
+  "addr_street",
+  "addr_city",
+  "addr_region",
+  "addr_postal",
+] as const;
+
+export type CanonicalAttribute =
+  (typeof CANONICAL_ATTRIBUTES)[number] | (typeof ACCOUNT_CANONICAL_ATTRIBUTES)[number];
+
+/** The two tenant entity types (mirrors the backend `EntityType` discriminator). */
+export type EntityType = "person" | "account";
+
+/** The canonical source-mapping attributes for an org's entity type (Person default). */
+export function canonicalAttributes(
+  entityType: EntityType = "person",
+): readonly CanonicalAttribute[] {
+  return entityType === "account" ? ACCOUNT_CANONICAL_ATTRIBUTES : CANONICAL_ATTRIBUTES;
+}
 
 /** A small CSV parser: quoted fields, embedded commas/newlines, CRLF. */
 export function parseCsv(text: string, maxRows = 200): string[][] {
@@ -94,10 +117,25 @@ const MAPPING_HINTS: [CanonicalAttribute, RegExp][] = [
   ["birth_date", /birth|dob/i],
 ];
 
-/** Suggest a canonical mapping from column names; the user always confirms. */
-export function suggestMapping(columns: string[]): Partial<Record<CanonicalAttribute, string>> {
+const ACCOUNT_MAPPING_HINTS: [CanonicalAttribute, RegExp][] = [
+  ["company_name", /company|organi|org[_ ]?name|account[_ ]?name|business|legal[_ ]?name/i],
+  ["domain", /domain|website|web[_ ]?site|url|homepage/i],
+  ["phone", /phone|tel/i],
+  ["addr_street", /^(street[_ ]?address|address[_ ]?(line)?1?|addr[_ ]?line|street)$/i],
+  ["addr_city", /city|town/i],
+  ["addr_region", /region|state|province/i],
+  ["addr_postal", /postal|zip/i],
+];
+
+/** Suggest a canonical mapping from column names; the user always confirms.
+ * Entity-type-aware (Person default) so an Account source suggests company/domain. */
+export function suggestMapping(
+  columns: string[],
+  entityType: EntityType = "person",
+): Partial<Record<CanonicalAttribute, string>> {
+  const hints = entityType === "account" ? ACCOUNT_MAPPING_HINTS : MAPPING_HINTS;
   const mapping: Partial<Record<CanonicalAttribute, string>> = {};
-  for (const [attribute, pattern] of MAPPING_HINTS) {
+  for (const [attribute, pattern] of hints) {
     if (mapping[attribute]) continue;
     const hit = columns.find((column) => pattern.test(column));
     if (hit && !Object.values(mapping).includes(hit)) mapping[attribute] = hit;

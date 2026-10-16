@@ -44,6 +44,11 @@ export const TRIAGE_ORGS = [
   // it cannot share one with the Runs page's own Run-now test: whichever ran
   // second would find the button correctly disabled and fail.
   "palette-dev",
+  // The account/org-entity tenant: its config declares `entity_type: account`,
+  // so the UI reads the company/domain vocabulary. The account spec is
+  // read-only (duplicates view + wizard up to the Map step, no publish), so a
+  // single shared org is race-safe and is never pixel-compared.
+  "orgs-dev",
 ] as const;
 
 export async function installTestFixtures(db: Db): Promise<void> {

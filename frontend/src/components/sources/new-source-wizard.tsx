@@ -19,7 +19,7 @@ import { Input } from "@/components/ui/input";
 import { BffRequestError } from "@/lib/api/client";
 import { addSourceBlock } from "@/lib/domain/config";
 import {
-  CANONICAL_ATTRIBUTES,
+  canonicalAttributes,
   profileCsv,
   suggestIdColumn,
   suggestMapping,
@@ -27,7 +27,7 @@ import {
   type CanonicalAttribute,
   type ColumnProfile,
 } from "@/lib/domain/csv-profile";
-import { useActiveConfig, useCreateDraft, usePublish } from "@/lib/query/config";
+import { useActiveConfig, useCreateDraft, useOrgEntityType, usePublish } from "@/lib/query/config";
 import { useImportFile, useSources } from "@/lib/query/steward";
 import { cn } from "@/lib/utils";
 
@@ -78,6 +78,8 @@ function describeError(cause: unknown, fallback: string): string {
 export function NewSourceWizard({ org }: { org: string }) {
   const router = useRouter();
   const activeConfig = useActiveConfig(org);
+  const entityType = useOrgEntityType(org);
+  const canonical = canonicalAttributes(entityType);
   const sources = useSources(org);
   const createDraft = useCreateDraft(org);
   const publish = usePublish(org);
@@ -151,7 +153,7 @@ export function NewSourceWizard({ org }: { org: string }) {
         .replace(/\.csv$/i, "")
         .replaceAll(/[^a-z0-9_]/gi, "_")
         .toLowerCase(),
-      mapping: suggestMapping(names),
+      mapping: suggestMapping(names, entityType),
       idColumn: suggestIdColumn(names) ?? "",
       updatedAtColumn: suggestUpdatedAtColumn(names) ?? "",
       priorityRank: nextFreeRank,
@@ -483,7 +485,7 @@ export function NewSourceWizard({ org }: { org: string }) {
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3 p-4 pt-2 sm:grid-cols-2">
-            {CANONICAL_ATTRIBUTES.map((attribute) => (
+            {canonical.map((attribute) => (
               <label key={attribute} className="flex flex-col gap-1 text-sm">
                 <span className="font-medium">{attribute}</span>
                 <select
@@ -636,7 +638,7 @@ export function NewSourceWizard({ org }: { org: string }) {
           <Button
             disabled={
               step === 0 ||
-              (step === 2 && CANONICAL_ATTRIBUTES.some((attribute) => !state.mapping[attribute])) ||
+              (step === 2 && canonical.some((attribute) => !state.mapping[attribute])) ||
               (step === 3 &&
                 (!state.name ||
                   !state.idColumn ||
