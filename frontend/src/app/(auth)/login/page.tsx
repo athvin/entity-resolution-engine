@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
@@ -93,6 +94,15 @@ function LoginForm() {
             <Button type="submit" className="w-full" disabled={pending} data-testid="login-submit">
               {pending ? "Signing in…" : "Sign in"}
             </Button>
+            <p className="text-muted-foreground text-center text-sm">
+              <Link
+                href="/reset"
+                className="underline underline-offset-4"
+                data-testid="login-forgot"
+              >
+                Forgot your password?
+              </Link>
+            </p>
           </form>
         </CardContent>
       </Card>
