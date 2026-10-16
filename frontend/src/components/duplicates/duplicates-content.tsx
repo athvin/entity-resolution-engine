@@ -11,6 +11,7 @@ import { displayName } from "@/lib/domain/attributes";
 import { effectiveRole, useSession } from "@/lib/query/hooks";
 import { useDuplicates, type DuplicateGroup } from "@/lib/query/duplicates";
 import { cn } from "@/lib/utils";
+import { MatchPreviewCard } from "./match-preview-card";
 import { PreMergeReport } from "./pre-merge-report";
 import { ScoreBandBrowser } from "./score-band-browser";
 
@@ -206,6 +207,7 @@ export function DuplicatesContent({ org }: { org: string }) {
 
       {tab === "groups" ? (
         <div className="flex flex-col gap-4">
+          {isSteward && <MatchPreviewCard org={org} />}
           <PreMergeReport org={org} />
           <GroupsTab org={org} />
         </div>

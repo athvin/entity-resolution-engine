@@ -63,6 +63,35 @@ export function useMatchScores(org: string, band: { low: number; high: number })
   });
 }
 
+export interface MatchPreviewPair {
+  rec_a_key: string;
+  rec_b_key: string;
+  match_probability: number;
+  evidence: Record<string, unknown> | null;
+}
+
+export interface MatchPreviewResult {
+  total: number;
+  would_auto_merge: number;
+  would_review: number;
+  sample: MatchPreviewPair[];
+}
+
+/**
+ * Score-only match preview (frontend-design §7.16): run the committed model over
+ * the current corpus and see what it WOULD match, bucketed by the config
+ * thresholds. Read-only on the backend (writes nothing). Gated behind `enabled`
+ * so the (heavy) scoring runs only when the steward asks for it.
+ */
+export function useMatchPreview(org: string, enabled: boolean) {
+  return useQuery({
+    queryKey: [...queryKeys.org(org), "match-preview"],
+    queryFn: () => bffFetch<MatchPreviewResult>(`/api/orgs/${org}/match-preview?limit=50`),
+    enabled,
+    staleTime: 30_000,
+  });
+}
+
 export interface AssertionWrite {
   status: "applied" | "staged";
   assertion_id?: string;
