@@ -1,0 +1,123 @@
+{{- $ns := include "er-dev-namespace.name" . -}}
+{{- /* Postgres identifiers are lowercase alnum + underscore; DNS-safe dev names
+       may contain hyphens, so fold them to underscores for the role + db. */ -}}
+{{- $id := .Values.developer | replace "-" "_" -}}
+{{- $db := printf "erctl_%s" $id -}}
+{{- $role := printf "er_%s" $id -}}
+# The shared Aurora Serverless v2 master credentials + endpoint
+# (er/{env}/shared/postgres, written by infra/terraform/envs/dev/rds.tf). Used
+# only by the bootstrap Job below, to create this developer's role + database as
+# the master; nothing at runtime touches it.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: er-aurora-shared
+  namespace: {{ $ns }}
+  labels:
+    {{- include "er-dev-namespace.labels" . | nindent 4 }}
+spec:
+  refreshInterval: {{ .Values.externalSecrets.refreshInterval }}
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: {{ .Values.externalSecrets.clusterSecretStore }}
+  target:
+    name: er-aurora-shared-env
+    creationPolicy: Owner
+  dataFrom:
+    - extract:
+        key: er/{{ .Values.environment }}/shared/postgres
+---
+# This developer's own LOGIN-role password (er/{env}/{dev}/postgres, written by
+# scripts/dev_env.sh). The same password is embedded in the erserver/erweb DSNs;
+# the bootstrap Job sets it on the role so the two always agree. No helm-hook
+# dance on the ExternalSecret itself — the hook Job below tolerates ESO's
+# first-sync lag via CreateContainerConfigError retries + backoffLimit (the same
+# pattern the old StatefulSet relied on).
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: er-postgres
+  namespace: {{ $ns }}
+  labels:
+    {{- include "er-dev-namespace.labels" . | nindent 4 }}
+spec:
+  refreshInterval: {{ .Values.externalSecrets.refreshInterval }}
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: {{ .Values.externalSecrets.clusterSecretStore }}
+  target:
+    name: er-postgres-env
+    creationPolicy: Owner
+  dataFrom:
+    - extract:
+        key: er/{{ .Values.environment }}/{{ $ns }}/postgres
+---
+# Database-per-developer on the shared Aurora cluster: idempotently create this
+# dev's LOGIN role + control-plane database (erctl_{dev}) as the Aurora master.
+# A post-install/post-upgrade hook so the {dev} Namespace and the two
+# ExternalSecrets above already exist; helm blocks on the hook, so `make dev-up`
+# installs er-platform only once erctl_{dev} is present. Replaces the old
+# in-cluster er-postgres StatefulSet (git history keeps it).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: er-db-bootstrap
+  namespace: {{ $ns }}
+  labels:
+    {{- include "er-dev-namespace.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  # Tolerate ESO's first-sync lag + Aurora resuming from 0 ACU (~15s).
+  backoffLimit: 6
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        {{- include "er-dev-namespace.labels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999 # the image's postgres user
+        runAsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bootstrap
+          image: {{ .Values.postgres.image }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: HOME
+              value: /tmp
+            - name: PGSSLMODE
+              value: require
+            - name: PGHOST
+              valueFrom: { secretKeyRef: { name: er-aurora-shared-env, key: ER_PG_HOST } }
+            - name: PGUSER
+              valueFrom: { secretKeyRef: { name: er-aurora-shared-env, key: ER_PG_USER } }
+            - name: PGPASSWORD
+              valueFrom: { secretKeyRef: { name: er-aurora-shared-env, key: ER_PG_PASSWORD } }
+            - name: PGDATABASE
+              valueFrom: { secretKeyRef: { name: er-aurora-shared-env, key: ER_PG_DBNAME } }
+            - name: ROLE_PW
+              valueFrom: { secretKeyRef: { name: er-postgres-env, key: ER_ROLE_PASSWORD } }
+          command:
+            - sh
+            - -euc
+            - |
+              role='{{ $role }}'; db='{{ $db }}'
+              psql -v ON_ERROR_STOP=1 -tAc \
+                "SELECT 1 FROM pg_roles WHERE rolname='$role'" | grep -q 1 \
+                || psql -v ON_ERROR_STOP=1 -c "CREATE ROLE \"$role\" LOGIN"
+              psql -v ON_ERROR_STOP=1 -v pw="$ROLE_PW" \
+                -c "ALTER ROLE \"$role\" WITH LOGIN PASSWORD :'pw'"
+              psql -v ON_ERROR_STOP=1 -tAc \
+                "SELECT 1 FROM pg_database WHERE datname='$db'" | grep -q 1 \
+                || psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"$db\" OWNER \"$role\""
+              echo "bootstrap ok: role=$role db=$db"

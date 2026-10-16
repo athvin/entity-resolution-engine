@@ -104,17 +104,26 @@ up() {
         log "EFS access point $ap already exists"
     fi
 
-    # --- Secrets. The postgres entry is authoritative for the generated
-    # passwords; the DSNs in erserver/erweb embed them, so it is read back
-    # when it already exists (idempotent re-runs, partial prior failures).
+    # The control-plane DB is the shared Aurora cluster (rds.tf): each developer
+    # gets their own role + database (erctl_{dev}, database-per-dev). Read the
+    # master endpoint from the shared secret to embed in the per-dev DSNs.
+    # Postgres identifiers are lowercase alnum + underscore, so fold the DNS-safe
+    # developer name's hyphens.
+    DEV_ID="${DEV//-/_}"
+    aws --region "$AWS_REGION" secretsmanager get-secret-value \
+        --secret-id "er/${SECRET_ENV}/shared/postgres" \
+        --query SecretString --output text > "${SCRATCH}/shared-pg.json" 2>/dev/null \
+        || die "shared Aurora secret er/${SECRET_ENV}/shared/postgres missing — apply infra/terraform/envs/dev first"
+    AURORA_HOST="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["ER_PG_HOST"])' "${SCRATCH}/shared-pg.json")"
+
+    # --- Secrets. The postgres entry holds this dev's role password; the DSNs in
+    # erserver/erweb embed it, so it is read back when it already exists
+    # (idempotent re-runs, partial prior failures). The er-db-bootstrap Job sets
+    # this same password on the erctl_{dev} role.
     if ! secret_exists "${SECRET_BASE}/postgres"; then
         python3 - > "${SCRATCH}/postgres.json" <<'PY'
 import json, secrets
-print(json.dumps({
-    "POSTGRES_PASSWORD": secrets.token_hex(24),
-    "ER_APP_PASSWORD": secrets.token_hex(24),
-    "ER_PROVISIONER_PASSWORD": secrets.token_hex(24),
-}))
+print(json.dumps({"ER_ROLE_PASSWORD": secrets.token_hex(24)}))
 PY
         create_secret "${SECRET_BASE}/postgres" "${SCRATCH}/postgres.json"
     else
@@ -127,12 +136,15 @@ PY
     if ! secret_exists "${SECRET_BASE}/erserver"; then
         [[ -n "${ER_DEV_S3_KEY:-}" ]] \
             || log "WARNING: ER_DEV_S3_KEY/ER_DEV_S3_SECRET unset — writing CHANGEME; runs cannot reach the lake until the ${SECRET_BASE}/erserver entry is updated (§9.2)"
-        PG_JSON_FILE="${SCRATCH}/postgres.json" python3 - > "${SCRATCH}/erserver.json" <<'PY'
+        PG_JSON_FILE="${SCRATCH}/postgres.json" AURORA_HOST="$AURORA_HOST" \
+        DEV_DB="erctl_${DEV_ID}" DEV_ROLE="er_${DEV_ID}" \
+        python3 - > "${SCRATCH}/erserver.json" <<'PY'
 import json, os, secrets
 
 pg = json.load(open(os.environ["PG_JSON_FILE"]))
-app_pw, prov_pw = pg["ER_APP_PASSWORD"], pg["ER_PROVISIONER_PASSWORD"]
-host = "er-postgres:5432"  # the headless service in er-dev-namespace
+role_pw = pg["ER_ROLE_PASSWORD"]
+host, db, role = os.environ["AURORA_HOST"], os.environ["DEV_DB"], os.environ["DEV_ROLE"]
+dsn = f"postgresql://{role}:{role_pw}@{host}:5432/{db}?sslmode=require"
 
 # The cloud tenant env (§9.2 Phase 1: static keys against real S3, vhost,
 # TLS). The S3 pair rides as secret:// references resolved by erserver's
@@ -152,10 +164,10 @@ tenant_env = {
 }
 
 print(json.dumps({
-    # dev keeps sslmode=disable against the in-namespace pod (§7.1)
-    "ERSERVER_DSN": f"postgresql://er_app:{app_pw}@{host}/erctl?sslmode=disable",
-    "ERSERVER_MAINT_DSN": f"postgresql://er_provisioner:{prov_pw}@{host}/postgres?sslmode=disable",
-    "ERSERVER_TENANT_DSN_TEMPLATE": f"postgresql://er_provisioner:{prov_pw}@{host}/{{dbname}}?sslmode=disable",
+    # The Rust control plane uses a single DSN against erctl_{dev} on Aurora;
+    # per-org catalogs are DuckLake, not per-tenant Postgres DBs, so the Python
+    # MAINT_DSN / TENANT_DSN_TEMPLATE are gone.
+    "ERSERVER_DSN": dsn,
     "ERSERVER_OPERATOR_TOKEN": secrets.token_hex(32),
     "ERSERVER_SECRET_S3_KEY": os.environ.get("ER_DEV_S3_KEY", "CHANGEME"),
     "ERSERVER_SECRET_S3_SECRET": os.environ.get("ER_DEV_S3_SECRET", "CHANGEME"),
@@ -169,12 +181,15 @@ PY
     fi
 
     if ! secret_exists "${SECRET_BASE}/erweb"; then
-        PG_JSON_FILE="${SCRATCH}/postgres.json" python3 - > "${SCRATCH}/erweb.json" <<'PY'
+        PG_JSON_FILE="${SCRATCH}/postgres.json" AURORA_HOST="$AURORA_HOST" \
+        DEV_DB="erctl_${DEV_ID}" DEV_ROLE="er_${DEV_ID}" \
+        python3 - > "${SCRATCH}/erweb.json" <<'PY'
 import base64, json, os, secrets
 
 pg = json.load(open(os.environ["PG_JSON_FILE"]))
+host, db, role = os.environ["AURORA_HOST"], os.environ["DEV_DB"], os.environ["DEV_ROLE"]
 print(json.dumps({
-    "ERWEB_DATABASE_URL": f"postgresql://er_app:{pg['ER_APP_PASSWORD']}@er-postgres:5432/erctl",
+    "ERWEB_DATABASE_URL": f"postgresql://{role}:{pg['ER_ROLE_PASSWORD']}@{host}:5432/{db}?sslmode=require",
     "ERWEB_SESSION_SECRET": secrets.token_hex(32),
     # 32 bytes of base64 — frontend/src/lib/env.ts enforces the shape. Never
     # auto-rotated: it unseals erweb.org_credentials (§9.1).

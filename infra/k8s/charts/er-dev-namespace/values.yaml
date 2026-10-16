@@ -13,17 +13,13 @@ externalSecrets:
   refreshInterval: 1h
 
 postgres:
-  # Pinned by digest, matching docker/compose.yaml and frontend/dev/compose.yaml
-  # exactly — a pod is *closer* to tested parity than Aurora (§7.1).
+  # Dev's control-plane DB is the shared Aurora Serverless v2 cluster
+  # (infra/terraform/envs/dev/rds.tf), not an in-cluster StatefulSet: pay-per-use
+  # (scales to 0 ACU when idle), and database-per-developer (erctl_{dev}) gives
+  # the same isolation the per-dev pod did. templates/bootstrap.yaml creates each
+  # dev's role + database with this image's psql; scripts/dev_env.sh points the
+  # erserver/erweb DSNs at Aurora. Pinned by digest, matching docker/compose.yaml.
   image: postgres:16@sha256:11a9d238fbb48bab14599c57e41123254452b1a2d93c6c8595bce96f346bd082
-  # §7.1's dev shape: 1 vCPU / 2 GiB, 50 GiB gp3, single-AZ (pinned by EBS).
-  storage: 50Gi
-  # infra/k8s/storage/ebs-gp3.yaml — Auto Mode's built-in EBS driver; the
-  # cluster ships no usable default class. Applied by `make dev-up`.
-  storageClassName: gp3
-  resources:
-    requests: { cpu: 250m, memory: 512Mi }
-    limits: { cpu: "1", memory: 2Gi }
 
 # §12: what stops one developer's 10M-row run from starving the cluster. The
 # ephemeral-storage quota is what makes §5.3's spill sizing enforceable, and
