@@ -139,7 +139,9 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
         <CardContent className="p-4 pt-2 lg:p-6 lg:pt-2">
           <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
             {attributes.map(({ key, label }) => {
-              const value = golden[key as keyof GoldenRecord];
+              // Golden display attributes are scalar columns; narrow off the
+              // binding's `unknown` metadata so the value renders as text.
+              const value = golden[key as keyof GoldenRecord] as string | number | null | undefined;
               if (value === null || value === undefined || value === "") return null;
               const provenance = lineageByAttribute.get(key);
               return (

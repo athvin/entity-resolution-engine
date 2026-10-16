@@ -2,7 +2,11 @@
 
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { bffFetch } from "@/lib/api/client";
+import { arrowFetch, bffFetch } from "@/lib/api/client";
+import type { AcctGoldenRecord } from "@/lib/entities/bindings/AcctGoldenRecord";
+import type { GoldenRecord as PersonGoldenRecord } from "@/lib/entities/bindings/GoldenRecord";
+import { readAcctGoldenRecord } from "@/lib/entities/readers/AcctGoldenRecord";
+import { readGoldenRecord } from "@/lib/entities/readers/GoldenRecord";
 import { queryKeys } from "./keys";
 
 export interface Metrics {
@@ -42,33 +46,14 @@ export interface RunRow {
 
 /**
  * One golden record as the read API serves it — a superset over both entity
- * types. Person attributes (given_name…birth_date) and Account attributes
- * (company_name, domain) are all optional because a given row carries only its
- * entity type's projection; `entity_id` is always present. Render through the
- * entity-type attribute selectors (`goldenAttributes`/`displayName`), not these
- * fields directly.
+ * types, derived from the generated entity bindings so the column set stays in
+ * lock-step with the schema. A given row carries only its entity type's
+ * projection (person *or* account), so every attribute is optional; `entity_id`
+ * is always present. Render through the entity-type attribute selectors
+ * (`goldenAttributes`/`displayName`), not these fields directly.
  */
-export interface GoldenRecord {
-  entity_id: string;
-  // person
-  given_name?: string | null;
-  family_name?: string | null;
-  email?: string | null;
-  birth_date?: string | null;
-  addr_number?: string | null;
-  addr_unit?: string | null;
-  // account
-  company_name?: string | null;
-  domain?: string | null;
-  // shared
-  phone_e164?: string | null;
-  addr_street?: string | null;
-  addr_city?: string | null;
-  addr_region?: string | null;
-  addr_postal?: string | null;
-  survivorship_version?: number;
-  assembled_at?: string;
-}
+export type GoldenRecord = Partial<PersonGoldenRecord> &
+  Partial<AcctGoldenRecord> & { entity_id: string };
 
 export interface GoldenPage {
   items: GoldenRecord[];
@@ -184,11 +169,21 @@ export function useJobs(org: string) {
 export function useGoldenRecords(org: string, q: string) {
   return useInfiniteQuery({
     queryKey: queryKeys.goldenRecords(org, q),
-    queryFn: ({ pageParam }) => {
+    queryFn: async ({ pageParam }): Promise<GoldenPage> => {
       const params = new URLSearchParams({ limit: "100" });
       if (q) params.set("q", q);
       if (pageParam) params.set("cursor", pageParam);
-      return bffFetch<GoldenPage>(`/api/orgs/${org}/golden-records?${params.toString()}`);
+      // The data lane is binary Arrow IPC; decode in place through the generated
+      // reader for the org's projection (person or account), chosen by the Arrow
+      // schema's in-band `er.relation` metadata. The snapshot + next cursor ride
+      // response headers (surfaced by arrowFetch).
+      const page = await arrowFetch(`/api/orgs/${org}/golden-records?${params.toString()}`);
+      const relation = page.table.schema.metadata.get("er.relation");
+      const items: GoldenRecord[] =
+        relation === "acct_golden_records"
+          ? readAcctGoldenRecord(page.table)
+          : readGoldenRecord(page.table);
+      return { items, snapshot: page.snapshot ?? 0, next_cursor: page.nextCursor };
     },
     initialPageParam: "",
     getNextPageParam: (last) => last.next_cursor ?? undefined,

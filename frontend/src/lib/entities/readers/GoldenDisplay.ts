@@ -21,8 +21,9 @@ function readBool(v: unknown): boolean {
   return Boolean(v);
 }
 function readDate32(v: unknown): string {
-  // Date32 is days since the epoch; apache-arrow may hand back a Date or a number.
-  const d = v instanceof Date ? v : new Date((v as number) * 86_400_000);
+  // apache-arrow surfaces a Date32 column as epoch-milliseconds (a number) or a
+  // Date — not a day count. Normalise either to an ISO date (YYYY-MM-DD).
+  const d = v instanceof Date ? v : new Date(v as number);
   return d.toISOString().slice(0, 10);
 }
 function readTimestamp(v: unknown): string {
