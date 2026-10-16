@@ -1,0 +1,55 @@
+# The terraform gate. On every change under infra/terraform/** (and on merge to
+# main), prove the config stays valid + formatted: `terraform fmt -check` and a
+# per-env `terraform validate`. This is the infra half of "merge to main and it
+# works" — a config-validity gate, not a state diff.
+#
+# Credential-free: `validate` configures the aws provider but makes no AWS API
+# calls, so dummy creds + a disabled metadata probe keep it fully offline (no
+# OIDC role, no secrets). The heavier state-diff `terraform plan` gate (which
+# needs a read-only OIDC plan role + state access) is a deliberate follow-up
+# (roadmap 0.5b) — this gate catches the common breakage (syntax, type, module,
+# unknown-field) on every infra PR at zero cost/risk.
+name: infra
+
+on:
+  pull_request:
+    paths:
+      - "infra/terraform/**"
+      - ".github/workflows/infra.yml"
+  push:
+    branches: [main]
+    paths:
+      - "infra/terraform/**"
+      - ".github/workflows/infra.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  validate:
+    name: fmt + validate (credential-free)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_REGION: us-east-2
+      AWS_EC2_METADATA_DISABLED: "true"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_wrapper: false
+      - name: fmt -check
+        run: terraform fmt -check -recursive infra/terraform
+      - name: validate each env
+        run: |
+          for e in core dev prod; do
+            echo "== validate envs/$e =="
+            terraform -chdir="infra/terraform/envs/$e" init -backend=false -input=false
+            terraform -chdir="infra/terraform/envs/$e" validate -no-color
+          done
