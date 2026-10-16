@@ -1,0 +1,28 @@
+[package]
+name = "er-sql-check"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# The static analyser: loads the statement/function YAML, rewrites what DataFusion
+# cannot plan (DuckLake `AT (VERSION => ..)`, Postgres `RETURNING`/`ON CONFLICT`,
+# named params), plans each statement against a two-store catalog via ff-analysis,
+# runs the E0xx passes, and (later) emits the typed query functions + the oracle.
+#
+# ff-analysis is pinned by rev (feather-flow is public; a tag is cut at the end of
+# the integration). It brings datafusion 52 / arrow 57 / sqlparser 0.59 — a
+# separate arrow major from the duckdb-pulled arrow 58 the rest of the workspace
+# uses. The two never unify: the analyser works in ff_analysis::SqlType and the
+# oracle compares type-name strings, so the split is contained to this crate.
+[dependencies]
+er-entity-spec = { path = "../er-entity-spec" }
+ff-analysis = { git = "https://github.com/athvin/feather-flow", rev = "23e24180e009ddb91ec8f768f2f1496d17f5c70e" }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_norway = { workspace = true }
+
+[lints]
+workspace = true

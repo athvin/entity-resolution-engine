@@ -10,7 +10,15 @@ version = 2
 # baselines depend on, which we deliberately do not bump. A yank is a registry
 # withdrawal, not a vulnerability; this is a narrow exception (yanked = "deny" still
 # applies to every other crate) until a replacement 6.x publishes.
-ignore = ["zip@6.0.0"]
+#
+# The two RUSTSEC entries below are *unmaintained* notices (not vulnerabilities),
+# pulled transitively by the entity framework's analyser (ff-analysis's DataFusion
+# 52 + arrow 57 subtree). We do not control either and neither is a safe-upgrade:
+#   - RUSTSEC-2024-0436: `paste` (feature-complete proc-macro, via arrow/datafusion).
+#   - RUSTSEC-2024-0449: `unsafe-libyaml`, via feather-flow's `serde_yaml`. Our own
+#     crates deliberately use `serde_norway` instead; this reaches us only through
+#     ff-analysis. Retire when feather-flow moves off serde_yaml.
+ignore = ["zip@6.0.0", "RUSTSEC-2024-0436", "RUSTSEC-2024-0449"]
 
 [licenses]
 # Allow only permissive licenses typical for this dependency tree.
@@ -41,3 +49,8 @@ unknown-registry = "deny"
 unknown-git = "deny"
 # Only crates.io by default.
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# feather-flow's ff-analysis is the entity framework's SQL analyser (DataFusion
+# planning against the entity catalog). It is a sibling repo by the same author,
+# pinned by rev in er-sql-check; a tag replaces the rev once the integration
+# settles. Public repo, fetched over HTTPS in CI.
+allow-git = ["https://github.com/athvin/feather-flow"]
