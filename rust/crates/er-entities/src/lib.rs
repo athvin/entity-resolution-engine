@@ -9,3 +9,5 @@ pub mod acct_golden_record;
 pub mod golden_display;
 pub mod golden_lineage;
 pub mod golden_record;
+pub mod job;
+pub mod org;

@@ -3,7 +3,7 @@
 //! constant, `columns()`, and `arrow_schema()` built from the one type map. It
 //! emits source text; it links neither `arrow` nor `serde`.
 
-use er_entity_spec::{ColumnType, Entity, Store};
+use er_entity_spec::{ColumnType, Entity, Store, Wire};
 
 use crate::casing::to_pascal_case;
 
@@ -113,8 +113,19 @@ pub fn emit_module(entity: &Entity) -> String {
     out.push_str(&format!("        &[{col_list}]\n"));
     out.push_str("    }\n\n");
 
-    // arrow_schema()
-    out.push_str("    /// The Arrow schema this entity streams as, with key, store and\n");
+    // arrow_schema() — only when the entity crosses the Arrow wire. Control-plane
+    // entities (JSON wire only) have no Arrow schema.
+    if entity.has_wire(Wire::Arrow) {
+        emit_arrow_schema(&mut out, entity, store_qualifier);
+    }
+    out.push_str("}\n");
+
+    out
+}
+
+/// Emit the `arrow_schema()` function body for an Arrow-wire entity.
+fn emit_arrow_schema(out: &mut String, entity: &Entity, store_qualifier: &str) {
+    out.push_str("\n    /// The Arrow schema this entity streams as, with key, store and\n");
     out.push_str("    /// version carried in the schema metadata.\n");
     out.push_str("    #[must_use]\n");
     out.push_str("    pub fn arrow_schema() -> ::arrow::datatypes::Schema {\n");
@@ -154,7 +165,4 @@ pub fn emit_module(entity: &Entity) -> String {
     out.push_str("        ]);\n");
     out.push_str("        Schema::new(fields).with_metadata(metadata)\n");
     out.push_str("    }\n");
-    out.push_str("}\n");
-
-    out
 }

@@ -1,0 +1,101 @@
+kind: entity
+version: 1
+name: job
+relation: jobs
+description: "A unit of work on the dispatcher's queue: its kind, params, lifecycle state and retry bookkeeping."
+key: [job_id]
+generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+  wire: [json]
+columns:
+  - name: job_id
+    type: varchar
+    nullable: false
+    description: "The job's unique id (ULID)."
+  - name: org
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: name }
+    description: "The tenant this job runs for."
+  - name: kind
+    type: varchar
+    nullable: false
+    description: "The job kind (run_all, correct, maintain, train, ...)."
+  - name: params
+    type: json
+    nullable: false
+    default: "'{}'::jsonb"
+    description: "Kind-specific parameters."
+  - name: state
+    type: varchar
+    nullable: false
+    default: "'queued'"
+    description: "Lifecycle state (queued, dispatching, running, succeeded, failed, canceling, canceled)."
+  - name: priority
+    type: bigint
+    nullable: false
+    default: "0"
+    description: "Claim priority; higher runs first."
+  - name: idempotency_key
+    type: varchar
+    description: "Optional dedup key, unique per org."
+  - name: run_id
+    type: varchar
+    description: "The run this job produced, once dispatched."
+  - name: attempt
+    type: bigint
+    nullable: false
+    default: "0"
+    description: "Attempts made so far."
+  - name: max_attempts
+    type: bigint
+    nullable: false
+    default: "3"
+    description: "Maximum attempts before the job fails."
+  - name: not_before
+    type: timestamp
+    description: "Earliest time the job may be claimed."
+  - name: created_by
+    type: varchar
+    description: "Principal that created the job."
+  - name: schedule_id
+    type: varchar
+    description: "The schedule that enqueued the job, if any."
+  - name: resource_class
+    type: varchar
+    description: "Requested runner resource class."
+  - name: trace_context
+    type: varchar
+    description: "Propagated trace context."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the job was enqueued."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the job row was last updated."
+  - name: started_at
+    type: timestamp
+    volatile: true
+    description: "When the job started running."
+  - name: finished_at
+    type: timestamp
+    volatile: true
+    description: "When the job finished."
+indexes:
+  - name: jobs_idempotency
+    columns: [org, idempotency_key]
+    unique: true
+    where: "idempotency_key IS NOT NULL"
+  - name: jobs_one_active_per_org
+    columns: [org]
+    unique: true
+    where: "state IN ('dispatching','running','canceling')"
+  - name: jobs_claimable
+    columns: [state, not_before, priority, job_id]
