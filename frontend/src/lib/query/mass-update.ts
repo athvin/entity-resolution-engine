@@ -4,7 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { bffFetch } from "@/lib/api/client";
 
-import { type GoldenPage } from "./hooks";
+import { fetchGoldenPage } from "./hooks";
 import { queryKeys } from "./keys";
 
 /** The server's per-call ceiling (one writer-lock window). */
@@ -52,7 +52,7 @@ export async function fetchGoldenIdsMatching(
     const params = new URLSearchParams({ limit: "200" });
     if (q) params.set("q", q);
     if (cursor) params.set("cursor", cursor);
-    const page = await bffFetch<GoldenPage>(`/api/orgs/${org}/golden-records?${params.toString()}`);
+    const page = await fetchGoldenPage(`/api/orgs/${org}/golden-records?${params.toString()}`);
     for (const item of page.items) {
       if (ids.length >= MASS_UPDATE_CAP) return { ids, capped: true };
       ids.push(item.entity_id);

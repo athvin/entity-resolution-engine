@@ -98,12 +98,15 @@ export interface ForwardOptions {
   idempotencyKey?: string;
 }
 
-/** Call erserver as the effective identity; returns the parsed JSON body. */
-export async function forward<T>(
+/** Call erserver as the effective identity; returns the raw `Response` once the
+ * status is known to be OK. Shared by `forward` (JSON) and `forwardStream`
+ * (binary pass-through) so auth, credential selection and error mapping live in
+ * one place. On a non-OK status the upstream `detail` is mapped to a BffFailure. */
+async function rawFetch(
   access: EffectiveOrgAccess,
   path: string,
-  options: ForwardOptions = {},
-): Promise<T> {
+  options: ForwardOptions,
+): Promise<Response> {
   const role = options.role ?? "viewer";
   if (ROLE_RANK[access.role] < ROLE_RANK[role]) {
     throw new BffFailure(403, "forbidden", `requires the ${role} role in ${access.org}`);
@@ -149,7 +152,43 @@ export async function forward<T>(
     const { writeAudit } = await import("./audit");
     await writeAudit(access.identity, "impersonated.mutation", { method, path }, access.org);
   }
+  return response;
+}
+
+/** Call erserver as the effective identity; returns the parsed JSON body. */
+export async function forward<T>(
+  access: EffectiveOrgAccess,
+  path: string,
+  options: ForwardOptions = {},
+): Promise<T> {
+  const response = await rawFetch(access, path, options);
   return (await response.json()) as T;
+}
+
+/** An Arrow data-lane pass-through: the upstream body as a byte stream plus the
+ * content type and the snapshot / next-cursor headers the read API carries. */
+export interface StreamResponse {
+  body: ReadableStream<Uint8Array> | null;
+  contentType: string;
+  snapshot: string | null;
+  nextCursor: string | null;
+}
+
+/** Call erserver and pass its body through untouched (no JSON decode) — for the
+ * binary Arrow-IPC data lane. The route re-emits `body` with the preserved
+ * headers so the browser decodes the stream in place. */
+export async function forwardStream(
+  access: EffectiveOrgAccess,
+  path: string,
+  options: ForwardOptions = {},
+): Promise<StreamResponse> {
+  const response = await rawFetch(access, path, options);
+  return {
+    body: response.body,
+    contentType: response.headers.get("content-type") ?? "application/vnd.apache.arrow.stream",
+    snapshot: response.headers.get("x-er-snapshot"),
+    nextCursor: response.headers.get("x-er-next-cursor"),
+  };
 }
 
 /** Wrap a route handler body so every BffFailure becomes its envelope response. */

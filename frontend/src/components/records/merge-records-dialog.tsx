@@ -77,11 +77,7 @@ export function MergeRecordsDialog({
 
   const comparison =
     targetId !== null && target.data
-      ? diffFields(
-          goldenAttributes(entityType),
-          source.golden as unknown as Record<string, unknown>,
-          target.data.golden as unknown as Record<string, unknown>,
-        )
+      ? diffFields(goldenAttributes(entityType), source.golden, target.data.golden)
       : null;
 
   function confirmMerge() {

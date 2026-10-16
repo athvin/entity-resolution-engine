@@ -15,7 +15,7 @@ import { RUN_KINDS, type RunKind } from "@/lib/domain/run-kinds";
 import { NAV_ITEMS } from "@/lib/nav";
 import { useImpersonation, type AdminOrgRow } from "@/lib/query/admin";
 import { useOrgEntityType } from "@/lib/query/config";
-import { effectiveRole, useSession, type GoldenPage } from "@/lib/query/hooks";
+import { effectiveRole, fetchGoldenPage, useSession } from "@/lib/query/hooks";
 import { useSubmitJob } from "@/lib/query/steward";
 
 const ROLE_RANK = { viewer: 0, steward: 1, admin: 2 } as const;
@@ -91,7 +91,7 @@ export function CommandPalette({
   const records = useQuery({
     queryKey: ["org", org, "palette-records", q],
     queryFn: () =>
-      bffFetch<GoldenPage>(`/api/orgs/${org}/golden-records?q=${encodeURIComponent(q)}&limit=6`),
+      fetchGoldenPage(`/api/orgs/${org}/golden-records?q=${encodeURIComponent(q)}&limit=6`),
     enabled: open && q.length >= 2,
     staleTime: 10_000,
   });

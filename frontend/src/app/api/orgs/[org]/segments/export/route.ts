@@ -1,18 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { BffFailure, forward, requireOrgAccess, respond } from "@/lib/bff/proxy";
+import { forwardGoldenPage } from "@/lib/bff/golden";
+import { BffFailure, requireOrgAccess, respond } from "@/lib/bff/proxy";
 
 const exportSchema = z.object({
   q: z.string().max(200).default(""),
   limit: z.number().int().min(1).max(10_000).default(1000),
 });
-
-interface GoldenPage {
-  items: Record<string, unknown>[];
-  snapshot: number;
-  next_cursor: string | null;
-}
 
 const COLUMNS = [
   "entity_id",
@@ -64,15 +59,16 @@ export async function POST(
       });
       if (q) searchParams.set("q", q);
       if (cursor) searchParams.set("cursor", cursor);
-      const page: GoldenPage = await forward<GoldenPage>(access, `/v1/orgs/${org}/golden-records`, {
+      const page = await forwardGoldenPage(access, `/v1/orgs/${org}/golden-records`, {
         searchParams,
       });
       snapshot ??= page.snapshot;
       for (const item of page.items) {
-        lines.push(COLUMNS.map((column) => csvCell(item[column])).join(","));
+        const row = item as unknown as Record<string, unknown>;
+        lines.push(COLUMNS.map((column) => csvCell(row[column])).join(","));
       }
-      if (!page.next_cursor) break;
-      cursor = page.next_cursor;
+      if (!page.nextCursor) break;
+      cursor = page.nextCursor;
     }
 
     return new NextResponse(lines.join("\n") + "\n", {

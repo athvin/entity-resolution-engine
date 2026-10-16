@@ -10,6 +10,8 @@
  */
 import http from "node:http";
 
+import { encodeAccountGolden, encodePersonGolden } from "./arrow.mjs";
+
 const PORT = Number(process.env.MOCK_ERSERVER_PORT ?? 8010);
 
 const GIVEN = ["Ada", "Grace", "Alan", "Edsger", "Barbara", "Donald", "Radia", "Vint"];
@@ -712,6 +714,20 @@ function send(res, status, body) {
   res.end(payload);
 }
 
+/** Stream an Arrow IPC body (golden-records data lane), with the snapshot + next
+ * cursor in headers — the same binary wire the real er-server serves. */
+function sendArrow(res, bytes, snapshot, nextCursor) {
+  const buf = Buffer.from(bytes);
+  const headers = {
+    "content-type": "application/vnd.apache.arrow.stream",
+    "content-length": buf.length,
+    "x-er-snapshot": String(snapshot),
+  };
+  if (nextCursor) headers["x-er-next-cursor"] = nextCursor;
+  res.writeHead(200, headers);
+  res.end(buf);
+}
+
 function readBody(req) {
   return new Promise((resolve) => {
     let data = "";
@@ -1190,7 +1206,12 @@ const server = http.createServer((req, res) => {
       const items = filtered.slice(0, limit);
       const next_cursor =
         filtered.length > limit ? encodeCursor(snapshot, items[items.length - 1].entity_id) : null;
-      return send(res, 200, { items, snapshot, next_cursor });
+      // The data lane is binary Arrow IPC (like the real er-server). Pick the
+      // projection from the org's rows: account rows carry company_name, person
+      // rows do not; an empty lake defaults to the person projection.
+      const isAccount = rows.length > 0 && rows[0].company_name !== undefined;
+      const bytes = isAccount ? encodeAccountGolden(items) : encodePersonGolden(items);
+      return sendArrow(res, bytes, snapshot, next_cursor);
     }
     if (
       (match = /^\/v1\/orgs\/([^/]+)\/golden-records\/([^/]+)$/.exec(path)) &&
