@@ -38,11 +38,11 @@ CREATE TABLE IF NOT EXISTS jobs (\
   kind text NOT NULL,\
   params jsonb NOT NULL DEFAULT '{}'::jsonb,\
   state text NOT NULL DEFAULT 'queued',\
-  priority integer NOT NULL DEFAULT 0,\
+  priority bigint NOT NULL DEFAULT 0,\
   idempotency_key text,\
   run_id text,\
-  attempt integer NOT NULL DEFAULT 0,\
-  max_attempts integer NOT NULL DEFAULT 3,\
+  attempt bigint NOT NULL DEFAULT 0,\
+  max_attempts bigint NOT NULL DEFAULT 3,\
   not_before timestamptz,\
   created_by text,\
   schedule_id text,\

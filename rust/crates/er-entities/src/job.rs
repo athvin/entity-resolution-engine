@@ -296,8 +296,11 @@ WHERE org = $1 AND idempotency_key = $2
   started_at,
   finished_at
 FROM public.jobs
-WHERE ($1 IS NULL OR org = $1)
-  AND ($2 IS NULL OR state = $2)
+-- The `::text` casts let Postgres infer the optional-filter params' type (an
+-- `$x IS NULL` use alone is ambiguous to its planner; DuckDB infers it, Postgres
+-- does not). Casts are planned by DataFusion unchanged.
+WHERE ($1::text IS NULL OR org = $1)
+  AND ($2::text IS NULL OR state = $2)
 ORDER BY job_id DESC
 LIMIT $3
 ";
