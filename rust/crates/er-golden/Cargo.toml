@@ -11,5 +11,10 @@ er-config = { path = "../er-config" }
 er-schema = { path = "../er-schema" }
 anyhow.workspace = true
 
+[dev-dependencies]
+# For the survivorship-rule election tests (run the generated SQL over an
+# in-memory DuckDB session). Dev-only — not part of the shipped crate.
+dedupe-core = { path = "../dedupe-core" }
+
 [lints]
 workspace = true

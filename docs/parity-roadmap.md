@@ -88,7 +88,12 @@ assistant. Tenant username/password auth is fully built (argon2id). M6 (PR #56) 
       (steward, spawn_blocking) + a "Preview matches" card on the duplicates page. e2e test proves read-only
       (match_scores absent + snapshot unchanged after preview).
 - [ ] **1.5 Confidence-threshold auto-merge / point-of-entry dedupe**.
-- [ ] **1.6 Deep field-level survivorship** — grouped/controlling fields, combined-list, prioritized, sum, max-chars.
+- [x] **1.6 Deep field-level survivorship (Bucket A)** — added single-winner rule tokens: `longest`, `shortest`,
+      `numeric_max`, `numeric_min`, `most_common` (alias of `frequency`), and `prioritized:<v1|v2|...>` (ranked list).
+      Additive `rule_terms` arms + palette entries only — NO config/DDL change, so every golden fixture is byte-identical
+      (verified: full `cargo test --workspace` green, zero golden drift). New Session-based election test (6 cases).
+      **1.6b (deferred):** Bucket B `combined_list`/`sum` (synthesize a value not tied to one record → need a new
+      lineage/assembly path) + generalized grouped/controlling fields (the hardcoded `address` grouping is the precedent).
 - [x] **1.7 Nickname/synonym lexicon editing** — finished the M6 partial: `GET`/`PUT /v1/orgs/{org}/lexicon`
       (per-org CSV at `ER_LEXICON_PATH`, canonicalised via `er_std::lexicon`, PUT enqueues a `run_all_full` to
       apply), + a monochrome `LexiconEditor` on the config page. Determinism-safe (per-org file; not in
