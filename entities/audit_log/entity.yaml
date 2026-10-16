@@ -23,7 +23,7 @@ columns:
   - name: actor
     type: varchar
     nullable: false
-    description: "The principal that performed the action (user:<email> or key:<id>)."
+    description: "The principal that performed the action (the signed-in user's email, or an API key id)."
   - name: org
     type: varchar
     description: "The tenant the action applies to, if the action is org-scoped."

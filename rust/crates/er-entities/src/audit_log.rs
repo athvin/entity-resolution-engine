@@ -10,7 +10,7 @@ pub struct AuditLog {
     pub id: i64,
     /// When the audited action occurred.
     pub at: ::chrono::DateTime<::chrono::Utc>,
-    /// The principal that performed the action (user:<email> or key:<id>).
+    /// The principal that performed the action (the signed-in user's email, or an API key id).
     pub actor: String,
     /// The tenant the action applies to, if the action is org-scoped.
     pub org: Option<String>,

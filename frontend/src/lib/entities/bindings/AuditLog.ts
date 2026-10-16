@@ -7,7 +7,7 @@ export interface AuditLog {
   id: number;
   /** When the audited action occurred. */
   at: string;
-  /** The principal that performed the action (user:<email> or key:<id>). */
+  /** The principal that performed the action (the signed-in user's email, or an API key id). */
   actor: string;
   /** The tenant the action applies to, if the action is org-scoped. */
   org: string | null;
