@@ -1543,6 +1543,8 @@ version = "0.1.0"
 dependencies = [
  "datafusion-common",
  "datafusion-expr",
+ "duckdb",
+ "er-entity-gen",
  "er-entity-spec",
  "ff-analysis",
  "regex",
