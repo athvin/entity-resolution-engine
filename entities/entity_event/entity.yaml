@@ -1,0 +1,42 @@
+kind: entity
+version: 1
+name: entity_event
+relation: entity_events
+description: "One lifecycle event on an entity (S4.5.5): created/merged/split/retired and membership changes, with the run that caused it."
+key: [event_id]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: event_id
+    type: varchar
+    nullable: false
+    description: "The event id (ULID)."
+  - name: seq
+    type: bigint
+    nullable: false
+    description: "Dense per-run ordering of the entity's events."
+  - name: run_id
+    type: varchar
+    nullable: false
+    description: "The run that wrote this row."
+  - name: entity_id
+    type: varchar
+    nullable: false
+    description: "The resolved entity (ULID)."
+  - name: event_type
+    type: varchar
+    nullable: false
+    description: "The lifecycle event type."
+  - name: details
+    type: json
+    nullable: false
+    description: "The event's structured details."
+  - name: details_hash
+    type: varchar
+    nullable: false
+    description: "Hash of the details for replay idempotence."
+  - name: occurred_at
+    type: timestamp
+    nullable: false
+    description: "The run's logical timestamp for the event."

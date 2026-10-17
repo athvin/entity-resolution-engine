@@ -1,0 +1,67 @@
+kind: entity
+version: 1
+name: run
+relation: runs
+description: "The run ledger (S5.2): one row per pipeline run — mode, status, versions and the snapshot range it produced."
+key: [run_id]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: run_id
+    type: varchar
+    nullable: false
+    description: "The run that wrote this row."
+  - name: tenant
+    type: varchar
+    nullable: false
+    description: "The tenant the run belongs to."
+  - name: mode
+    type: varchar
+    nullable: false
+    description: "The run mode (full, incremental, correction_pass, ...)."
+  - name: status
+    type: varchar
+    nullable: false
+    description: "The entity's lifecycle status."
+  - name: started_at
+    type: timestamp
+    nullable: false
+    description: "When the run started (its logical timestamp)."
+  - name: ended_at
+    type: timestamp
+    description: "When the run ended; NULL while running."
+  - name: config_hash
+    type: varchar
+    nullable: false
+    description: "The published config the run executed under."
+  - name: model_version
+    type: varchar
+    description: "The trained model that scored the pair."
+  - name: tf_snapshot_id
+    type: varchar
+    description: "The frozen term-frequency snapshot the score used."
+  - name: std_version
+    type: varchar
+    nullable: false
+    description: "The standardization code version."
+  - name: survivorship_version
+    type: varchar
+    nullable: false
+    description: "The survivorship policy version."
+  - name: lexicon_hash
+    type: varchar
+    description: "SHA-256 over the active nickname lexicon pairs; NULL before the lexicon joined the fingerprint."
+  - name: code_version
+    type: varchar
+    nullable: false
+    description: "The engine crate version."
+  - name: rebuild_reason
+    type: varchar
+    description: "Why a full rebuild ran; NULL otherwise."
+  - name: snapshot_start
+    type: bigint
+    description: "First lake snapshot version the run produced."
+  - name: snapshot_end
+    type: bigint
+    description: "Last lake snapshot version the run produced."

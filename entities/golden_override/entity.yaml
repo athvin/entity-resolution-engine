@@ -1,0 +1,33 @@
+kind: entity
+version: 1
+name: golden_override
+relation: golden_overrides
+description: "One steward golden-field override (latest-wins per entity and attribute); a NULL value means the steward cleared the field."
+key: [entity_id, attribute]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: entity_id
+    type: varchar
+    nullable: false
+    description: "The resolved entity (ULID)."
+  - name: attribute
+    type: varchar
+    nullable: false
+    description: "The golden attribute the override pins."
+  - name: value
+    type: varchar
+    description: "The pinned value; NULL means the steward cleared the field."
+  - name: created_by
+    type: varchar
+    nullable: false
+    description: "The steward or system actor that created the row."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Creation stamp (the run's logical timestamp)."
+  - name: source_action_id
+    type: varchar
+    nullable: false
+    description: "The staged steward action that produced this row."

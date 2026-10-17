@@ -1,0 +1,54 @@
+kind: entity
+version: 1
+name: ingest_batch
+relation: ingest_batches
+description: "One delivery receipt (S4.1): per-source landing counts for a batch, including tombstones and resurrections."
+key: [ingest_batch_id]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: ingest_batch_id
+    type: varchar
+    nullable: false
+    description: "The delivery batch that landed this row."
+  - name: run_id
+    type: varchar
+    nullable: false
+    description: "The run that wrote this row."
+  - name: source_system
+    type: varchar
+    nullable: false
+    description: "The delivering source system."
+  - name: path
+    type: varchar
+    nullable: false
+    description: "The delivered file's path."
+  - name: new_count
+    type: bigint
+    nullable: false
+    description: "Rows landing a brand-new key."
+  - name: changed_count
+    type: bigint
+    nullable: false
+    description: "Rows superseding a key with new content."
+  - name: unchanged_count
+    type: bigint
+    nullable: false
+    description: "Rows matching the key's current content."
+  - name: tombstone_count
+    type: bigint
+    nullable: false
+    description: "Keys tombstoned by a full refresh."
+  - name: resurrected_count
+    type: bigint
+    nullable: false
+    description: "Previously tombstoned keys that returned."
+  - name: full_refresh_keys
+    type: boolean
+    nullable: false
+    description: "Whether the delivery tombstoned omitted keys."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Creation stamp (the run's logical timestamp)."

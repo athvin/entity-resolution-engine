@@ -1,0 +1,37 @@
+kind: entity
+version: 1
+name: record_overlay
+relation: record_overlays
+description: "One steward record overlay (protect/suppress): a flag on a record key, retractable, applied at assembly."
+key: [record_key, kind]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: record_key
+    type: varchar
+    nullable: false
+    description: "The standardized record key."
+  - name: kind
+    type: varchar
+    nullable: false
+    description: "always or never."
+  - name: active
+    type: boolean
+    nullable: false
+    description: "Whether the row is in force (retraction flips this; rows are never deleted)."
+  - name: created_by
+    type: varchar
+    nullable: false
+    description: "The steward or system actor that created the row."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Creation stamp (the run's logical timestamp)."
+  - name: source_action_id
+    type: varchar
+    nullable: false
+    description: "The staged steward action that produced this row."
+  - name: retracted_at
+    type: timestamp
+    description: "When it was retracted; NULL while active."

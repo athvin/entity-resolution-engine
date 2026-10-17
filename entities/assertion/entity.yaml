@@ -1,0 +1,47 @@
+kind: entity
+version: 1
+name: assertion
+relation: assertions
+description: "One steward assertion (S4.4.1): an always/never constraint on a record pair, retractable but never deleted."
+key: [assertion_id]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: assertion_id
+    type: varchar
+    nullable: false
+    description: "The assertion id (ULID)."
+  - name: rec_a_key
+    type: varchar
+    nullable: false
+    description: "The pair's lower record key (canonical order)."
+  - name: rec_b_key
+    type: varchar
+    nullable: false
+    description: "The pair's higher record key (canonical order)."
+  - name: kind
+    type: varchar
+    nullable: false
+    description: "always or never."
+  - name: active
+    type: boolean
+    nullable: false
+    description: "Whether the row is in force (retraction flips this; rows are never deleted)."
+  - name: created_by
+    type: varchar
+    nullable: false
+    description: "The steward or system actor that created the row."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Creation stamp (the run's logical timestamp)."
+  - name: retracted_by
+    type: varchar
+    description: "Who retracted it; NULL while active."
+  - name: retracted_at
+    type: timestamp
+    description: "When it was retracted; NULL while active."
+  - name: note
+    type: varchar
+    description: "Optional steward note."

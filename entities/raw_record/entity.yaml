@@ -1,0 +1,40 @@
+kind: entity
+version: 1
+name: raw_record
+relation: raw_records
+description: "One landed delivery row (S4.1): the source record's payload as delivered, content-hashed; append-only, with full-refresh tombstones."
+key: [source_system, source_record_id, content_hash]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: source_system
+    type: varchar
+    nullable: false
+    description: "The delivering source system."
+  - name: source_record_id
+    type: varchar
+    nullable: false
+    description: "The record's id in its source system."
+  - name: payload
+    type: json
+    description: "The delivered row as JSON; NULL on an S4.1.1 full-refresh tombstone."
+  - name: content_hash
+    type: varchar
+    nullable: false
+    description: "SHA-256 of the mapped values (S4.1); the tombstone sentinel is 64 zeros."
+  - name: is_deleted
+    type: boolean
+    nullable: false
+    description: "Whether this version is a tombstone."
+  - name: deleted_at
+    type: timestamp
+    description: "Tombstone stamp; NULL on live versions."
+  - name: ingest_batch_id
+    type: varchar
+    nullable: false
+    description: "The delivery batch that landed this row."
+  - name: ingested_at
+    type: timestamp
+    nullable: false
+    description: "The delivery's logical landing timestamp."
