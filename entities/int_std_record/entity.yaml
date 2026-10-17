@@ -1,0 +1,87 @@
+kind: entity
+version: 1
+name: int_std_record
+relation: int_std_records
+description: "One current standardized person record per record key: the standardization stage's output (supersession applied, tombstones excluded) and the matching stage's input."
+key: [record_key]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: record_key
+    type: varchar
+    nullable: false
+    description: "Stable record identity: `source_system:source_record_id`."
+  - name: source_system
+    type: varchar
+    nullable: false
+    description: "Source system the record was ingested from."
+  - name: source_record_id
+    type: varchar
+    nullable: false
+    description: "The record's id within its source system."
+  - name: content_hash
+    type: varchar
+    nullable: false
+    description: "Hash of the standardized payload: the change-detection identity of this version."
+  - name: std_version
+    type: varchar
+    nullable: false
+    description: "Standardization version that produced this row."
+  - name: given_name
+    type: varchar
+    description: "Standardized given name."
+  - name: family_name
+    type: varchar
+    description: "Standardized family name."
+  - name: name_variants
+    type: list<varchar>
+    nullable: false
+    description: "Nickname/variant expansions of the given name, for matching."
+  - name: email
+    type: varchar
+    description: "Standardized email address."
+  - name: email_valid
+    type: boolean
+    description: "Whether the email passed validation."
+  - name: phone_e164
+    type: varchar
+    description: "Standardized phone number in E.164 form."
+  - name: phone_valid
+    type: boolean
+    description: "Whether the phone number passed validation."
+  - name: addr_number
+    type: varchar
+    description: "Standardized street number of the address."
+  - name: addr_street
+    type: varchar
+    description: "Standardized street name of the address."
+  - name: addr_unit
+    type: varchar
+    description: "Standardized unit/apartment of the address."
+  - name: addr_city
+    type: varchar
+    description: "Standardized city of the address."
+  - name: addr_region
+    type: varchar
+    description: "Standardized region/state of the address."
+  - name: addr_postal
+    type: varchar
+    description: "Standardized postal code of the address."
+  - name: birth_date
+    type: date
+    description: "Standardized birth date."
+  - name: metadata
+    type: json
+    description: "Opaque per-source metadata object, passed through from the source."
+  - name: updated_at_source
+    type: timestamp
+    description: "When the record was last updated in its source system."
+  - name: ingest_batch_id
+    type: varchar
+    nullable: false
+    description: "Ingest batch that landed this version."
+  - name: ingested_at
+    type: timestamp
+    nullable: false
+    description: "When this version was ingested."
