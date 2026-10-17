@@ -1484,6 +1484,7 @@ dependencies = [
  "dedupe-core",
  "er-config",
  "er-hash",
+ "er-schema",
  "serde_json",
 ]
 

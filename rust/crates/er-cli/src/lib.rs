@@ -22,7 +22,7 @@ use dedupe_core::predict::run_predict_with_tf;
 use dedupe_core::session::SessionOptions;
 use dedupe_core::session::ducklake::DuckLakeConfig;
 use er_config::Config;
-use er_ingest::landing::{create_raw_records_sql, land_base_delivery, land_full_refresh};
+use er_ingest::landing::{land_base_delivery, land_full_refresh};
 use std::collections::BTreeMap;
 
 use er_ids::{CountingIdFactory, IdFactory};
@@ -126,13 +126,9 @@ pub fn run_ingest(
     ingested_at: &str,
     full_refresh: bool,
 ) -> Result<usize> {
-    // `create table if not exists` so repeated deliveries append to one relation.
-    let ddl = create_raw_records_sql(RAW_RECORDS).replacen(
-        "create table",
-        "create table if not exists",
-        1,
-    );
-    session.execute_batch(&ddl)?;
+    // The S5 registry DDL (idempotent), so repeated deliveries append to one
+    // relation and a fresh lake gets the declared NOT NULLs.
+    create_ddl_table(session, "raw_records")?;
     let spec = config
         .sources
         .get(source)

@@ -1405,7 +1405,7 @@
     },
     {
      "name": "payload",
-     "nullable": false,
+     "nullable": true,
      "type": "JSON"
     },
     {
@@ -1434,7 +1434,7 @@
      "type": "TIMESTAMP"
     }
    ],
-   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.raw_records (\n  source_system VARCHAR NOT NULL,\n  source_record_id VARCHAR NOT NULL,\n  payload JSON NOT NULL,\n  content_hash VARCHAR NOT NULL,\n  is_deleted BOOLEAN NOT NULL,\n  deleted_at TIMESTAMP,\n  ingest_batch_id VARCHAR NOT NULL,\n  ingested_at TIMESTAMP NOT NULL\n);",
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.raw_records (\n  source_system VARCHAR NOT NULL,\n  source_record_id VARCHAR NOT NULL,\n  payload JSON,\n  content_hash VARCHAR NOT NULL,\n  is_deleted BOOLEAN NOT NULL,\n  deleted_at TIMESTAMP,\n  ingest_batch_id VARCHAR NOT NULL,\n  ingested_at TIMESTAMP NOT NULL\n);",
    "enums": {},
    "keys": [
     {

@@ -286,4 +286,25 @@ mod tests {
         assert_eq!(RAW_RECORDS_COLUMNS.len(), 8);
         assert_eq!(RAW_RECORDS_COLUMNS[0], "source_system");
     }
+
+    /// The session-table DDL and column list here must stay in S5 order: the
+    /// oracle against the registry spec that owns `lake.main.raw_records` (the
+    /// lake relation itself is created from that spec by er-cli).
+    #[test]
+    fn session_ddl_matches_the_s5_registry() {
+        let spec = er_schema::model::all_specs()
+            .into_iter()
+            .find(|s| s.name == "raw_records")
+            .expect("raw_records is in the registry");
+        assert_eq!(spec.column_names(), RAW_RECORDS_COLUMNS);
+        let ddl = create_raw_records_sql("t");
+        for column in &spec.columns {
+            assert!(
+                ddl.contains(&format!("{} {}", column.name, column.r#type.to_lowercase())),
+                "session DDL is missing {} {}",
+                column.name,
+                column.r#type
+            );
+        }
+    }
 }
