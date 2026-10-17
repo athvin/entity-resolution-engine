@@ -48,6 +48,19 @@ in `er-schema`'s registry (`rust/crates/er-schema/src/model.rs`, gated by
 `tests/model_registry_golden.json`). Update
 [the reference specification](DesignDoc.md) when a contract changes.
 
+**There is no third place.** A persistent table that none of those authorities
+declares cannot ship: `er-schema`'s `declared_names` test fails on any
+`lake.main.<name>` literal the registry doesn't know, the DuckLake e2e fails if
+an undeclared relation survives a pipeline run, the Postgres e2e fails if
+`public.*` holds a table the generated baseline didn't create, and the entity
+analyser refuses statements against unknown relations. New control-plane tables
+enter through an `entities/*/entity.yaml` (never hand DDL — er-server boots only
+the generated `POSTGRES_BASELINE`); new lake relations enter through the
+registry or an entity; the frontend's `erweb` schema changes only through
+drizzle migrations. Session-temp scratch tables and `dedupe-cli`'s
+operator-named outputs are the two deliberate exemptions. `docs/erd.md` is
+generated from the same authorities and CI fails when it is stale.
+
 The fixture format is documented in
 [fixtures/static/FORMAT.md](fixtures/static/FORMAT.md). Benchmark and profiling
 changes should follow [performance.md](docs/performance.md) and
