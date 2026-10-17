@@ -1,0 +1,22 @@
+CREATE TABLE IF NOT EXISTS lake.main.acct_int_std_records (
+  record_key VARCHAR NOT NULL,
+  source_system VARCHAR NOT NULL,
+  source_record_id VARCHAR NOT NULL,
+  content_hash VARCHAR NOT NULL,
+  std_version VARCHAR NOT NULL,
+  company_name VARCHAR,
+  company_name_norm VARCHAR,
+  company_variants LIST(VARCHAR) NOT NULL,
+  domain VARCHAR,
+  domain_norm VARCHAR,
+  phone_e164 VARCHAR,
+  phone_valid BOOLEAN,
+  addr_street VARCHAR,
+  addr_city VARCHAR,
+  addr_region VARCHAR,
+  addr_postal VARCHAR,
+  metadata JSON,
+  updated_at_source TIMESTAMP,
+  ingest_batch_id VARCHAR NOT NULL,
+  ingested_at TIMESTAMP NOT NULL
+);
