@@ -344,7 +344,8 @@ fn ddl_specs() -> Vec<TableSpec> {
             vec![
                 nn("source_system", VARCHAR),
                 nn("source_record_id", VARCHAR),
-                nn("payload", JSON),
+                // Nullable: an S4.1.1 full-refresh tombstone row carries no payload.
+                col("payload", JSON),
                 nn("content_hash", VARCHAR),
                 nn("is_deleted", BOOLEAN),
                 col("deleted_at", TIMESTAMP),
