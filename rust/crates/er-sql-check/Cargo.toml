@@ -11,11 +11,13 @@ repository.workspace = true
 # named params), plans each statement against a two-store catalog via ff-analysis,
 # runs the E0xx passes, and (later) emits the typed query functions + the oracle.
 #
-# ff-analysis is pinned by the `er-entity-v0.1.1` tag on feather-flow (public):
+# ff-analysis is pinned by the `er-entity-v0.1.2` tag on feather-flow (public):
 # the integration baseline (store-qualified get_table_source + plan_statement for
-# a pre-parsed AST) plus the DuckDB json/list function stubs the engine's stage SQL
-# calls (to_json, map_from_entries, json_keys, array_length, now, list). It brings
-# datafusion 52 / arrow 57 /
+# a pre-parsed AST), the DuckDB json/list function stubs the engine's stage SQL
+# calls (to_json, map_from_entries, json_keys, array_length, now, list), and the
+# golden-lineage constructs (v0.1.2): a custom ExprPlanner for DuckDB `MAP {..}`
+# literals + subscript access, window-function stubs (row_number, rank, lag, …),
+# and concat/concat_ws/element_at. It brings datafusion 52 / arrow 57 /
 # sqlparser 0.59 — a separate arrow major from the duckdb-pulled arrow 58 the rest
 # of the workspace uses. The two never unify: the analyser works in
 # ff_analysis::SqlType and the oracle compares type-name strings, so the split is
@@ -26,7 +28,7 @@ er-entity-spec = { path = "../er-entity-spec" }
 # entity_membership, entities) are modeled from the er-schema registry so stage SQL
 # can be planned against them alongside the entity-owned marts.
 er-schema = { path = "../er-schema" }
-ff-analysis = { git = "https://github.com/athvin/feather-flow", tag = "er-entity-v0.1.1" }
+ff-analysis = { git = "https://github.com/athvin/feather-flow", tag = "er-entity-v0.1.2" }
 # Pinned to the same major ff-analysis resolves (52), so the LogicalPlan this crate
 # inspects and the plan ff-analysis produces are the same types. sqlparser is used
 # only through ff_analysis::sqlparser (DataFusion's bundled 0.59), never the

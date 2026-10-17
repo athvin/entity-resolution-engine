@@ -37,6 +37,21 @@ pub fn rewrite_json_casts(sql: &str) -> String {
     JSON_CAST.replace_all(sql, "::varchar").into_owned()
 }
 
+/// DuckDB map/struct subscript-field access `m[key].field`. DataFusion models no
+/// map type and rejects dot access on the subscript result, so it is rewritten to
+/// `element_at(m, key)` — the map + key column references stay resolved, while the
+/// (literal) field name, which has nothing to validate, is dropped.
+static MAP_SUBSCRIPT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(\w+)\s*\[\s*(\w+)\s*\]\s*\.\s*\w+").unwrap());
+
+/// Rewrite `m[key].field` subscript-field access to `element_at(m, key)`.
+#[must_use]
+pub fn rewrite_map_subscript(sql: &str) -> String {
+    MAP_SUBSCRIPT
+        .replace_all(sql, "element_at(${1}, ${2})")
+        .into_owned()
+}
+
 /// What the rewrite step removed from a statement, so later passes can check the
 /// rules those clauses stood for.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -121,5 +136,21 @@ mod tests {
             rewrite_json_casts("to_json(x)::jsonb"),
             "to_json(x)::varchar"
         );
+    }
+
+    #[test]
+    fn rewrites_map_subscript_field_access_to_element_at() {
+        assert_eq!(
+            rewrite_map_subscript("sources[source_system].priority_rank"),
+            "element_at(sources, source_system)"
+        );
+        // Whitespace-tolerant.
+        assert_eq!(rewrite_map_subscript("m [ k ] . field"), "element_at(m, k)");
+    }
+
+    #[test]
+    fn leaves_plain_sql_untouched_by_map_subscript_rewrite() {
+        let sql = "select entity_id from lake.main.golden_records";
+        assert_eq!(rewrite_map_subscript(sql), sql);
     }
 }

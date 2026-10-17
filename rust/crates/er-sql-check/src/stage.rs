@@ -6,15 +6,17 @@
 //! here from the `er-schema` registry and added to the lake catalog, keyed by the
 //! same store-qualified name, so stage SQL plans against one catalog.
 //!
-//! Coverage. The golden-record assembly SQL plans in full against this catalog
-//! (with the DuckDB json/list function stubs added to ff-analysis and the stage
-//! rewrites for named arguments + `::json` casts). The golden-*lineage* assembly,
-//! by contrast, builds DuckDB `MAP { 'k': v }` literals and reads them with
-//! map-subscript field access (`sources[source_system].priority_rank`) — forms
-//! DataFusion's planner has no representation for, so it is out of scope for the
-//! analyser until those constructs are either supported upstream or the engine
-//! expresses them differently. That boundary is why the test below plans the
-//! golden-record mart but not the lineage mart.
+//! Coverage. Both the golden-record and the golden-*lineage* mart-assembly SQL
+//! plan in full against this catalog. The record assembly needs the DuckDB
+//! json/list function stubs in ff-analysis plus the stage rewrites for named
+//! arguments and `::json` casts. The lineage assembly additionally builds DuckDB
+//! `MAP { 'k': v }` literals and reads them with map-subscript field access
+//! (`sources[source_system].priority_rank`): the literals and bare subscripts are
+//! planned by ff-analysis's custom `ExprPlanner` (which keeps their inner column
+//! references resolved), its `row_number()`/window stubs cover the ranking, and
+//! the three-part `m[key].field` access — which DataFusion's dot-handling rejects
+//! before the planner sees it — is folded to `element_at(m, key)` by
+//! [`crate::rewrite_map_subscript`]. The test below plans both marts.
 
 use std::sync::Arc;
 
@@ -120,7 +122,9 @@ mod tests {
         let provider = FeatherFlowProvider::new(catalog, &registry);
         let dialect = DuckDbDialect {};
         let rewritten = crate::rewrite_lake(sql);
-        let planar = crate::rewrite_json_casts(&crate::strip_named_args(&rewritten.sql));
+        let planar = crate::rewrite_map_subscript(&crate::rewrite_json_casts(
+            &crate::strip_named_args(&rewritten.sql),
+        ));
         let plan = crate::parse_and_plan(&planar, &dialect, &provider)
             .unwrap_or_else(|e| panic!("stage SQL did not plan: {e}\n--- sql ---\n{sql}"));
         plan.schema()
@@ -157,6 +161,24 @@ mod tests {
             assert!(
                 record_cols.contains(&required.to_string()),
                 "golden_records output missing {required}: {record_cols:?}"
+            );
+        }
+
+        // The lineage mart builds DuckDB MAP {} literals + map-subscript field
+        // access; the ExprPlanner plans those (keeping the inner column refs
+        // resolved), so it too plans against the stage catalog.
+        let lineage = er_golden::golden_lineage_sql(
+            &config,
+            "lake.main.int_std_records",
+            "lake.main.entity_membership",
+            "lake.main.entities",
+        )
+        .expect("lineage sql renders");
+        let lineage_cols = plan_stage(&catalog, &lineage);
+        for required in ["entity_id", "attribute", "record_key", "rule"] {
+            assert!(
+                lineage_cols.contains(&required.to_string()),
+                "golden_lineage output missing {required}: {lineage_cols:?}"
             );
         }
     }
