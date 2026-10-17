@@ -357,7 +357,7 @@ pub fn preview_match(
         preds = predictions.physical,
     ))?;
 
-    let counts = session.query_strings(&format!(
+    let counts = session.query_scratch_strings(&format!(
         "select count(*), \
                 count(*) filter (where match_probability >= {auto_merge}), \
                 count(*) filter (where match_probability >= {review_low} and match_probability < {auto_merge}) \
@@ -371,7 +371,7 @@ pub fn preview_match(
     let would_review = row[2].parse::<usize>().unwrap_or(0);
 
     let sample = session
-        .query_strings(&format!(
+        .query_scratch_strings(&format!(
             "select rec_a_key, rec_b_key, match_probability, evidence from __preview_src \
              order by match_probability desc, rec_a_key, rec_b_key limit {sample_limit}"
         ))?

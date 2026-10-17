@@ -717,6 +717,15 @@ impl Session {
 
     /// Run a query and return all rows rendered as strings (for diagnostics
     /// and small result sets). NULL renders as "NULL".
+    /// [`Self::query_strings`] under its scratch name: the sanctioned call for a
+    /// product read over a SESSION TEMP relation (`__preview_src` and friends) —
+    /// the CONTRIBUTING "session-temp scratch" exemption, made visible in the
+    /// call itself. Product reads over persistent lake relations use declared
+    /// entity statements instead (the `freeform_sql` gate enforces this).
+    pub fn query_scratch_strings(&self, sql: &str) -> Result<Vec<Vec<String>>> {
+        self.query_strings(sql)
+    }
+
     pub fn query_strings(&self, sql: &str) -> Result<Vec<Vec<String>>> {
         let mut stmt = self.conn.prepare(sql)?;
         let ncols = {

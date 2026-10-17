@@ -10,8 +10,9 @@
 //! and every column it references is checked against the `int_std_records` schema.
 //! A comparison's *levels* are symbolic tokens whose SQL is produced from the
 //! trained model (not available at publish), so only the comparison *key* (a
-//! standardized column name) is checked here; the level SQL is proven by the
-//! analyser + oracle on the generated side.
+//! standardized column name) is checked here; the level SQL is model-derived
+//! and governed by dedupe-core's execution-oracle golden fixtures (the captured
+//! Splink SQL/parquet baselines), not by the static analyser.
 
 use std::collections::BTreeSet;
 
