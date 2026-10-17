@@ -1566,8 +1566,11 @@ dependencies = [
  "datafusion-common",
  "datafusion-expr",
  "duckdb",
+ "er-config",
  "er-entity-gen",
  "er-entity-spec",
+ "er-golden",
+ "er-schema",
  "ff-analysis",
  "regex",
  "serde",
@@ -1615,7 +1618,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1639,7 +1642,7 @@ checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
 [[package]]
 name = "ff-analysis"
 version = "0.1.2"
-source = "git+https://github.com/athvin/feather-flow?tag=er-entity-v0.1.0#23e24180e009ddb91ec8f768f2f1496d17f5c70e"
+source = "git+https://github.com/athvin/feather-flow?tag=er-entity-v0.1.1#8fd18dd7a4cb0297d3cd2977ac0ab4cf8911186b"
 dependencies = [
  "arrow 57.3.1",
  "datafusion-common",
@@ -1657,7 +1660,7 @@ dependencies = [
 [[package]]
 name = "ff-core"
 version = "0.1.2"
-source = "git+https://github.com/athvin/feather-flow?tag=er-entity-v0.1.0#23e24180e009ddb91ec8f768f2f1496d17f5c70e"
+source = "git+https://github.com/athvin/feather-flow?tag=er-entity-v0.1.1#8fd18dd7a4cb0297d3cd2977ac0ab4cf8911186b"
 dependencies = [
  "chrono",
  "log",
@@ -1673,7 +1676,7 @@ dependencies = [
 [[package]]
 name = "ff-sql"
 version = "0.1.2"
-source = "git+https://github.com/athvin/feather-flow?tag=er-entity-v0.1.0#23e24180e009ddb91ec8f768f2f1496d17f5c70e"
+source = "git+https://github.com/athvin/feather-flow?tag=er-entity-v0.1.1#8fd18dd7a4cb0297d3cd2977ac0ab4cf8911186b"
 dependencies = [
  "log",
  "serde",
@@ -2779,7 +2782,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3026,7 +3029,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4023,7 +4026,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

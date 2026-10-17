@@ -11,16 +11,22 @@ repository.workspace = true
 # named params), plans each statement against a two-store catalog via ff-analysis,
 # runs the E0xx passes, and (later) emits the typed query functions + the oracle.
 #
-# ff-analysis is pinned by the `er-entity-v0.1.0` tag on feather-flow (public),
-# cut at the integration baseline (store-qualified get_table_source +
-# plan_statement for a pre-parsed AST). It brings datafusion 52 / arrow 57 /
+# ff-analysis is pinned by the `er-entity-v0.1.1` tag on feather-flow (public):
+# the integration baseline (store-qualified get_table_source + plan_statement for
+# a pre-parsed AST) plus the DuckDB json/list function stubs the engine's stage SQL
+# calls (to_json, map_from_entries, json_keys, array_length, now, list). It brings
+# datafusion 52 / arrow 57 /
 # sqlparser 0.59 — a separate arrow major from the duckdb-pulled arrow 58 the rest
 # of the workspace uses. The two never unify: the analyser works in
 # ff_analysis::SqlType and the oracle compares type-name strings, so the split is
 # contained to this crate.
 [dependencies]
 er-entity-spec = { path = "../er-entity-spec" }
-ff-analysis = { git = "https://github.com/athvin/feather-flow", tag = "er-entity-v0.1.0" }
+# The engine's intermediate lake tables (int_std_records, golden_lineage,
+# entity_membership, entities) are modeled from the er-schema registry so stage SQL
+# can be planned against them alongside the entity-owned marts.
+er-schema = { path = "../er-schema" }
+ff-analysis = { git = "https://github.com/athvin/feather-flow", tag = "er-entity-v0.1.1" }
 # Pinned to the same major ff-analysis resolves (52), so the LogicalPlan this crate
 # inspects and the plan ff-analysis produces are the same types. sqlparser is used
 # only through ff_analysis::sqlparser (DataFusion's bundled 0.59), never the
@@ -39,6 +45,10 @@ thiserror = { workspace = true }
 # the two never meet. er-entity-gen renders the lake DDL the oracle loads.
 duckdb = { workspace = true }
 er-entity-gen = { path = "../er-entity-gen" }
+# The stage-SQL test plans the REAL golden-mart assembly SQL (er-golden) against the
+# stage catalog, from a representative tenant config (er-config).
+er-golden = { path = "../er-golden" }
+er-config = { path = "../er-config" }
 
 [lints]
 workspace = true
