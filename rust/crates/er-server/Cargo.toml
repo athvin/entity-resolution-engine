@@ -20,6 +20,11 @@ path = "src/bin/er-dispatcher.rs"
 name = "er-openapi"
 path = "src/bin/er-openapi.rs"
 
+# The API breaking-change gate: diff the current OpenAPI document vs a base.
+[[bin]]
+name = "er-openapi-check"
+path = "src/bin/er-openapi-check.rs"
+
 [dependencies]
 er-config = { path = "../er-config" }
 er-std = { path = "../er-std" }

@@ -72,6 +72,16 @@ jobs:
         run: cargo doc --workspace --no-deps --document-private-items
         env:
           RUSTDOCFLAGS: "-D warnings"
+      - name: API breaking-change gate (advisory)
+        # Diff the control-lane OpenAPI document against main's and report breaking
+        # component-schema changes (removed schema/field, retype, dropped required).
+        # Advisory — never fails the build — until the first external org key; the
+        # release pipeline then runs `er-openapi-check --strict`. A no-op on main
+        # (no base to diff) or if main is unfetchable.
+        run: |
+          git -C .. fetch --no-tags --depth=1 origin main || exit 0
+          git -C .. show origin/main:frontend/src/lib/api/openapi.json > /tmp/base-openapi.json 2>/dev/null || exit 0
+          cargo run -q -p er-server --bin er-openapi-check -- /tmp/base-openapi.json || true
 
   test:
     name: test
