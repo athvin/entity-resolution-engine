@@ -1,0 +1,7 @@
+kind: statement
+operation: update
+mode: partial
+description: "Apply the steward addr_unit overrides over the assembled golden rows (NULL value = the steward cleared the field); zero overrides match zero rows, so the determinism contract holds."
+params: []
+reads: [golden_override]
+returns: none
