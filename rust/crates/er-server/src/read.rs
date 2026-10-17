@@ -419,10 +419,12 @@ pub fn duplicates(
     .map_err(|e| e.to_string())?;
     let has_more = groups.len() as i64 > limit;
     let page = &groups[..groups.len().min(usize::try_from(limit).unwrap_or(0))];
-    let Some((first, last)) = page
-        .first()
-        .map(|f| (f.entity_id.as_str(), page[page.len() - 1].entity_id.as_str()))
-    else {
+    let Some((first, last)) = page.first().map(|f| {
+        (
+            f.entity_id.as_str(),
+            page[page.len() - 1].entity_id.as_str(),
+        )
+    }) else {
         return Ok((Vec::new(), None));
     };
 
@@ -437,7 +439,10 @@ pub fn duplicates(
         member_lists
             .entry(m.entity_id.as_str())
             .or_default()
-            .push(Value::from(format!("{}:{}", m.source_system, m.source_record_id)));
+            .push(Value::from(format!(
+                "{}:{}",
+                m.source_system, m.source_record_id
+            )));
     }
 
     // The golden preview per entity in the range (person: name+email; account:
@@ -606,9 +611,8 @@ pub fn records_by_key(
     // The lake IN-list idiom: the keys cross as one chr(31)-delimited varchar
     // and split in SQL (duckdb-rs has no LIST binding).
     let joined = keys.join("\u{1f}");
-    let rows =
-        er_entities::int_std_record::read::by_keys(session.connection(), snapshot, &joined)
-            .map_err(|e| e.to_string())?;
+    let rows = er_entities::int_std_record::read::by_keys(session.connection(), snapshot, &joined)
+        .map_err(|e| e.to_string())?;
     // The old `struct_pack` nesting, rebuilt in Rust: the identity columns on
     // top, every other column under `attributes`. Serializing the typed row
     // first keeps the DuckDB-compatible timestamp rendering.
