@@ -11,7 +11,8 @@ fn lands_base_10_into_raw_records() {
     let config = load_config_str(include_str!("fixtures/default.yaml")).unwrap();
     let session = Session::open_in_memory(SessionOptions::deterministic()).unwrap();
     session
-        .execute_batch(&create_raw_records_sql("raw_records"))
+        .execute_batch("ATTACH ':memory:' AS lake;")
+        .and_then(|()| session.execute_batch(&create_raw_records_sql("lake.main.raw_records")))
         .unwrap();
 
     let sources = [
@@ -27,7 +28,6 @@ fn lands_base_10_into_raw_records() {
         let spec = &config.sources[source];
         total += land_base_delivery(
             &session,
-            "raw_records",
             source,
             spec,
             csv_text,
@@ -37,7 +37,7 @@ fn lands_base_10_into_raw_records() {
         .unwrap();
     }
     assert_eq!(total, 23);
-    assert_eq!(session.count("raw_records").unwrap(), 23);
+    assert_eq!(session.count("lake.main.raw_records").unwrap(), 23);
 
     // content_hash landed correctly: spot-check crm C001 against the golden.
     let golden: serde_json::Value =
@@ -52,7 +52,7 @@ fn lands_base_10_into_raw_records() {
         .unwrap();
     let got = session
         .query_strings(
-            "select content_hash from raw_records \
+            "select content_hash from lake.main.raw_records \
              where source_system = 'crm' and source_record_id = 'C001'",
         )
         .unwrap();

@@ -42,7 +42,8 @@ fn test_config() -> Config {
 /// Create `raw_records` and seed the nickname lexicon `name_variants` reads.
 pub fn init_raw(session: &Session) {
     session
-        .execute_batch(&create_raw_records_sql("raw_records"))
+        .execute_batch("ATTACH ':memory:' AS lake;")
+        .and_then(|()| session.execute_batch(&create_raw_records_sql("lake.main.raw_records")))
         .unwrap();
     let values: Vec<String> = include_str!("../fixtures/nickname_variants.csv")
         .lines()
@@ -91,7 +92,6 @@ pub fn land_phase(
         };
         land(
             session,
-            "raw_records",
             source,
             spec,
             &csv_text,
@@ -123,7 +123,7 @@ pub fn rebuild_std(session: &Session, config: &Config) {
     build_int_std_records(
         session,
         config,
-        "raw_records",
+        "lake.main.raw_records",
         "nickname_variants",
         "int_std_records",
     )

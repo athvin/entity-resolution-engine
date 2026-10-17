@@ -19,6 +19,12 @@ pub struct GenerateBlock {
     /// Any of `arrow`, `json` — decides whether `arrow_schema()` / OpenAPI emit.
     #[serde(default)]
     pub wire: Vec<Wire>,
+    /// Emit a typed bulk-append primitive for this lake relation
+    /// (`append_rows` + its `AppendRow` transport struct): variable-arity row
+    /// batches cross as chunked, bound-parameter `INSERT .. VALUES`, the shape
+    /// and casts generated from the columns — never hand-written.
+    #[serde(default)]
+    pub append: bool,
 }
 
 /// A referential expectation for a control-plane column (`postgres` only).

@@ -49,3 +49,224 @@ impl RawRecord {
         ]
     }
 }
+
+/// The bulk-append transport row: timestamps/dates/JSON cross as text
+/// with explicit casts in the generated SQL (the lake-write convention).
+#[derive(Debug, Clone, PartialEq)]
+pub struct AppendRow {
+    /// The delivering source system.
+    pub source_system: String,
+    /// The record's id in its source system.
+    pub source_record_id: String,
+    /// The delivered row as JSON; NULL on an S4.1.1 full-refresh tombstone.
+    pub payload: Option<String>,
+    /// SHA-256 of the mapped values (S4.1); the tombstone sentinel is 64 zeros.
+    pub content_hash: String,
+    /// Whether this version is a tombstone.
+    pub is_deleted: bool,
+    /// Tombstone stamp; NULL on live versions.
+    pub deleted_at: Option<String>,
+    /// The delivery batch that landed this row.
+    pub ingest_batch_id: String,
+    /// The delivery's logical landing timestamp.
+    pub ingested_at: String,
+}
+
+/// Append rows to `lake.main.raw_records` in bound-parameter chunks (the shape and
+/// casts are generated from the entity). Returns the appended row count.
+///
+/// # Errors
+/// Propagates the DuckDB prepare/execute error.
+pub fn append_rows(conn: &::duckdb::Connection, rows: &[AppendRow]) -> ::duckdb::Result<usize> {
+    const COLS: usize = 8;
+    const CHUNK: usize = 500;
+    for chunk in rows.chunks(CHUNK) {
+        let mut tuples = Vec::with_capacity(chunk.len());
+        for i in 0..chunk.len() {
+            let base = i * COLS;
+            tuples.push(format!(
+                "(${p0}, ${p1}, ${p2}::json, ${p3}, ${p4}, ${p5}::timestamp, ${p6}, ${p7}::timestamp)",
+                p0 = base + 1, p1 = base + 2, p2 = base + 3, p3 = base + 4, p4 = base + 5, p5 = base + 6, p6 = base + 7, p7 = base + 8
+            ));
+        }
+        let sql = format!(
+            "INSERT INTO lake.main.raw_records VALUES {}",
+            tuples.join(", ")
+        );
+        let mut params: Vec<&dyn ::duckdb::ToSql> = Vec::with_capacity(chunk.len() * COLS);
+        for row in chunk {
+            params.push(&row.source_system);
+            params.push(&row.source_record_id);
+            params.push(&row.payload);
+            params.push(&row.content_hash);
+            params.push(&row.is_deleted);
+            params.push(&row.deleted_at);
+            params.push(&row.ingest_batch_id);
+            params.push(&row.ingested_at);
+        }
+        conn.execute(&sql, params.as_slice())?;
+    }
+    Ok(rows.len())
+}
+
+pub mod read {
+    //! @generated query functions for this entity + operation.
+    /// One row of `batch_receipt_live`: The delivery receipt: this batch's landed keys classified against the source's prior latest state (new / resurrected / unchanged / changed / tombstoned). The tombstone sentinel crosses as a parameter.
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct BatchReceiptLiveRow {
+        pub new_count: Option<i64>,
+        pub resurrected_count: Option<i64>,
+        pub unchanged_count: Option<i64>,
+        pub changed_count: Option<i64>,
+        pub tombstone_count: Option<i64>,
+    }
+
+    impl BatchReceiptLiveRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("new_count", ::arrow::datatypes::DataType::Int64),
+                ("resurrected_count", ::arrow::datatypes::DataType::Int64),
+                ("unchanged_count", ::arrow::datatypes::DataType::Int64),
+                ("changed_count", ::arrow::datatypes::DataType::Int64),
+                ("tombstone_count", ::arrow::datatypes::DataType::Int64),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::Int64Array = crate::batch::col(batch, 0, "new_count")?;
+                let c1: &::arrow::array::Int64Array =
+                    crate::batch::col(batch, 1, "resurrected_count")?;
+                let c2: &::arrow::array::Int64Array =
+                    crate::batch::col(batch, 2, "unchanged_count")?;
+                let c3: &::arrow::array::Int64Array = crate::batch::col(batch, 3, "changed_count")?;
+                let c4: &::arrow::array::Int64Array =
+                    crate::batch::col(batch, 4, "tombstone_count")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        new_count: crate::batch::opt_i64(c0, i),
+                        resurrected_count: crate::batch::opt_i64(c1, i),
+                        unchanged_count: crate::batch::opt_i64(c2, i),
+                        changed_count: crate::batch::opt_i64(c3, i),
+                        tombstone_count: crate::batch::opt_i64(c4, i),
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// The delivery receipt: this batch's landed keys classified against the source's prior latest state (new / resurrected / unchanged / changed / tombstoned). The tombstone sentinel crosses as a parameter.
+    pub fn batch_receipt_live(
+        conn: &::duckdb::Connection,
+        source: &str,
+        batch: &str,
+        tombstone_hash: &str,
+    ) -> ::duckdb::Result<Vec<BatchReceiptLiveRow>> {
+        const SQL: &str = "WITH prior AS (
+  SELECT source_record_id, content_hash,
+         row_number() OVER (PARTITION BY source_record_id
+           ORDER BY ingested_at DESC, ingest_batch_id DESC) AS rn
+  FROM lake.main.raw_records
+  WHERE source_system = $1 AND ingest_batch_id <> $2
+),
+prior_latest AS (SELECT source_record_id, content_hash FROM prior WHERE rn = 1),
+this_batch AS (
+  SELECT source_record_id, content_hash
+  FROM lake.main.raw_records
+  WHERE source_system = $1 AND ingest_batch_id = $2
+)
+SELECT
+  count(*) FILTER (WHERE tb.content_hash <> $3
+                     AND p.source_record_id IS NULL) AS new_count,
+  count(*) FILTER (WHERE tb.content_hash <> $3
+                     AND p.content_hash = $3) AS resurrected_count,
+  count(*) FILTER (WHERE tb.content_hash <> $3
+                     AND p.content_hash = tb.content_hash) AS unchanged_count,
+  count(*) FILTER (WHERE tb.content_hash <> $3
+                     AND p.source_record_id IS NOT NULL
+                     AND p.content_hash <> $3
+                     AND p.content_hash <> tb.content_hash) AS changed_count,
+  count(*) FILTER (WHERE tb.content_hash = $3
+                     AND p.source_record_id IS NOT NULL
+                     AND p.content_hash <> $3) AS tombstone_count
+FROM this_batch tb
+LEFT JOIN prior_latest p ON tb.source_record_id = p.source_record_id
+";
+        let mut stmt = conn.prepare(SQL)?;
+        let batches = stmt
+            .query_arrow(::duckdb::params![source, batch, tombstone_hash])?
+            .collect::<Vec<_>>();
+        BatchReceiptLiveRow::from_batches(&batches)
+    }
+
+    /// One row of `omitted_keys_live`: The keys a full-refresh delivery omitted: every prior key of the source absent from this batch's landed rows (they get tombstones).
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct OmittedKeysLiveRow {
+        pub source_record_id: String,
+    }
+
+    impl OmittedKeysLiveRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![("source_record_id", ::arrow::datatypes::DataType::Utf8)]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 0, "source_record_id")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        source_record_id: crate::batch::req(
+                            crate::batch::opt_str(c0, i),
+                            "source_record_id",
+                            i,
+                        )?,
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// The keys a full-refresh delivery omitted: every prior key of the source absent from this batch's landed rows (they get tombstones).
+    pub fn omitted_keys_live(
+        conn: &::duckdb::Connection,
+        source: &str,
+        batch: &str,
+    ) -> ::duckdb::Result<Vec<OmittedKeysLiveRow>> {
+        const SQL: &str = "SELECT DISTINCT source_record_id
+FROM lake.main.raw_records
+WHERE source_system = $1 AND ingest_batch_id <> $2
+  AND source_record_id NOT IN (
+    SELECT source_record_id
+    FROM lake.main.raw_records
+    WHERE source_system = $1 AND ingest_batch_id = $2
+  )
+ORDER BY source_record_id
+";
+        let mut stmt = conn.prepare(SQL)?;
+        let batches = stmt
+            .query_arrow(::duckdb::params![source, batch])?
+            .collect::<Vec<_>>();
+        OmittedKeysLiveRow::from_batches(&batches)
+    }
+}

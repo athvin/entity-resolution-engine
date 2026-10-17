@@ -37,23 +37,15 @@ fn receipt_classifies_every_delivery_category() {
     let spec = &config.sources["crm"];
     let session = Session::open_in_memory(SessionOptions::deterministic()).unwrap();
     session
-        .execute_batch(&create_raw_records_sql("raw_records"))
+        .execute_batch("ATTACH ':memory:' AS lake;")
+        .and_then(|()| session.execute_batch(&create_raw_records_sql("lake.main.raw_records")))
         .unwrap();
 
     // b1 (base): every key is new.
-    let landed = land_base_delivery(
-        &session,
-        "raw_records",
-        "crm",
-        spec,
-        CRM_BASE,
-        "b1",
-        "2026-01-01",
-    )
-    .unwrap();
+    let landed = land_base_delivery(&session, "crm", spec, CRM_BASE, "b1", "2026-01-01").unwrap();
     let n_base = i64::try_from(landed).unwrap();
     assert_eq!(
-        batch_receipt(&session, "raw_records", "crm", "b1").unwrap(),
+        batch_receipt(&session, "crm", "b1").unwrap(),
         BatchReceipt {
             new: n_base,
             ..BatchReceipt::default()
@@ -61,18 +53,9 @@ fn receipt_classifies_every_delivery_category() {
     );
 
     // b2: re-deliver the same bytes → all unchanged.
-    land_base_delivery(
-        &session,
-        "raw_records",
-        "crm",
-        spec,
-        CRM_BASE,
-        "b2",
-        "2026-01-02",
-    )
-    .unwrap();
+    land_base_delivery(&session, "crm", spec, CRM_BASE, "b2", "2026-01-02").unwrap();
     assert_eq!(
-        batch_receipt(&session, "raw_records", "crm", "b2").unwrap(),
+        batch_receipt(&session, "crm", "b2").unwrap(),
         BatchReceipt {
             unchanged: n_base,
             ..BatchReceipt::default()
@@ -80,18 +63,9 @@ fn receipt_classifies_every_delivery_category() {
     );
 
     // b3: C001's content changes, C999 is new (the batch carries only these two).
-    land_base_delivery(
-        &session,
-        "raw_records",
-        "crm",
-        spec,
-        CRM_CHANGE,
-        "b3",
-        "2026-01-03",
-    )
-    .unwrap();
+    land_base_delivery(&session, "crm", spec, CRM_CHANGE, "b3", "2026-01-03").unwrap();
     assert_eq!(
-        batch_receipt(&session, "raw_records", "crm", "b3").unwrap(),
+        batch_receipt(&session, "crm", "b3").unwrap(),
         BatchReceipt {
             new: 1,
             changed: 1,
@@ -101,18 +75,9 @@ fn receipt_classifies_every_delivery_category() {
 
     // b4 (full refresh carrying only C002): C002 unchanged, every other live key
     // (the base keys besides C002, plus C999) is tombstoned.
-    land_full_refresh(
-        &session,
-        "raw_records",
-        "crm",
-        spec,
-        CRM_ONLY_C002,
-        "b4",
-        "2026-01-04",
-    )
-    .unwrap();
+    land_full_refresh(&session, "crm", spec, CRM_ONLY_C002, "b4", "2026-01-04").unwrap();
     assert_eq!(
-        batch_receipt(&session, "raw_records", "crm", "b4").unwrap(),
+        batch_receipt(&session, "crm", "b4").unwrap(),
         BatchReceipt {
             unchanged: 1,
             tombstone: n_base,
@@ -121,18 +86,9 @@ fn receipt_classifies_every_delivery_category() {
     );
 
     // b5: re-deliver the tombstoned C001 → resurrected.
-    land_base_delivery(
-        &session,
-        "raw_records",
-        "crm",
-        spec,
-        CRM_RESURRECT,
-        "b5",
-        "2026-01-05",
-    )
-    .unwrap();
+    land_base_delivery(&session, "crm", spec, CRM_RESURRECT, "b5", "2026-01-05").unwrap();
     assert_eq!(
-        batch_receipt(&session, "raw_records", "crm", "b5").unwrap(),
+        batch_receipt(&session, "crm", "b5").unwrap(),
         BatchReceipt {
             resurrected: 1,
             ..BatchReceipt::default()

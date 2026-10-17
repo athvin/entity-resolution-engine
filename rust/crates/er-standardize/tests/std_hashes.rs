@@ -28,7 +28,8 @@ fn base_10_std_hashes_match_fixture() {
     let config = load_config_str(include_str!("fixtures/test.yaml")).unwrap();
     let session = Session::open_in_memory(SessionOptions::deterministic()).unwrap();
     session
-        .execute_batch(&create_raw_records_sql("raw_records"))
+        .execute_batch("ATTACH ':memory:' AS lake;")
+        .and_then(|()| session.execute_batch(&create_raw_records_sql("lake.main.raw_records")))
         .unwrap();
 
     // Seed the nickname lexicon (active on every packaged row), the relation
@@ -66,7 +67,6 @@ fn base_10_std_hashes_match_fixture() {
         let spec = &config.sources[source];
         land_base_delivery(
             &session,
-            "raw_records",
             source,
             spec,
             csv_text,
@@ -80,7 +80,7 @@ fn base_10_std_hashes_match_fixture() {
     build_int_std_records(
         &session,
         &config,
-        "raw_records",
+        "lake.main.raw_records",
         "nickname_variants",
         "int_std_records",
     )

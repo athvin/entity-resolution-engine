@@ -140,7 +140,6 @@ pub fn run_ingest(
     };
     land(
         session,
-        RAW_RECORDS,
         source,
         spec,
         csv_text,
@@ -477,7 +476,7 @@ pub fn write_ingest_batch(
     full_refresh: bool,
     created_at: &str,
 ) -> Result<()> {
-    let r = er_ingest::landing::batch_receipt(session, RAW_RECORDS, source, run_id)?;
+    let r = er_ingest::landing::batch_receipt(session, source, run_id)?;
     create_ddl_table(session, "ingest_batches")?;
     er_entities::ingest_batch::create::receipt(
         session.connection(),

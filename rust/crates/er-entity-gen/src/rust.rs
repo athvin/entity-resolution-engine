@@ -120,7 +120,112 @@ pub fn emit_module(entity: &Entity) -> String {
     }
     out.push_str("}\n");
 
+    // The bulk-append primitive — only for lake entities that ask for it.
+    if entity.generate.append && entity.has_store(Store::Duckdb) {
+        emit_append_rows(&mut out, entity);
+    }
+
     out
+}
+
+/// The append transport type for a column: timestamps, dates and JSON cross as
+/// text (the lake-write convention — the cast lives in the generated SQL).
+fn append_field_type(col_type: ColumnType, nullable: bool) -> String {
+    let base = match col_type {
+        ColumnType::Varchar | ColumnType::Timestamp | ColumnType::Date | ColumnType::Json => {
+            "String"
+        }
+        ColumnType::Bigint => "i64",
+        ColumnType::Double => "f64",
+        ColumnType::Boolean => "bool",
+        ColumnType::ListVarchar => {
+            panic!("an append entity cannot carry a list column (duckdb-rs has no LIST binding)")
+        }
+    };
+    if nullable {
+        format!("Option<{base}>")
+    } else {
+        base.to_string()
+    }
+}
+
+/// The cast a bound append value needs to land in its column type.
+fn append_cast(col_type: ColumnType) -> &'static str {
+    match col_type {
+        ColumnType::Json => "::json",
+        ColumnType::Timestamp => "::timestamp",
+        ColumnType::Date => "::date",
+        _ => "",
+    }
+}
+
+/// Emit the `AppendRow` transport struct + `append_rows`: variable-arity row
+/// batches as chunked, bound-parameter `INSERT .. VALUES`, the tuple shape and
+/// casts generated from the entity's columns.
+fn emit_append_rows(out: &mut String, entity: &Entity) {
+    let cols = entity.columns.len();
+    out.push_str("\n/// The bulk-append transport row: timestamps/dates/JSON cross as text\n");
+    out.push_str("/// with explicit casts in the generated SQL (the lake-write convention).\n");
+    out.push_str("#[derive(Debug, Clone, PartialEq)]\n");
+    out.push_str("pub struct AppendRow {\n");
+    for column in &entity.columns {
+        out.push_str(&doc_line("    ", &column.description));
+        out.push_str(&format!(
+            "    pub {}: {},\n",
+            column.name,
+            append_field_type(column.col_type, column.nullable)
+        ));
+    }
+    out.push_str("}\n\n");
+
+    let tuple_template = entity
+        .columns
+        .iter()
+        .enumerate()
+        .map(|(i, c)| format!("${{p{i}}}{}", append_cast(c.col_type)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let placeholder_args = (0..cols)
+        .map(|i| format!("p{i} = base + {}", i + 1))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    out.push_str(&format!(
+        "/// Append rows to `lake.main.{}` in bound-parameter chunks (the shape and\n",
+        entity.relation
+    ));
+    out.push_str("/// casts are generated from the entity). Returns the appended row count.\n");
+    out.push_str("///\n/// # Errors\n/// Propagates the DuckDB prepare/execute error.\n");
+    out.push_str("pub fn append_rows(\n");
+    out.push_str("    conn: &::duckdb::Connection,\n");
+    out.push_str("    rows: &[AppendRow],\n");
+    out.push_str(") -> ::duckdb::Result<usize> {\n");
+    out.push_str(&format!("    const COLS: usize = {cols};\n"));
+    out.push_str("    const CHUNK: usize = 500;\n");
+    out.push_str("    for chunk in rows.chunks(CHUNK) {\n");
+    out.push_str("        let mut tuples = Vec::with_capacity(chunk.len());\n");
+    out.push_str("        for i in 0..chunk.len() {\n");
+    out.push_str("            let base = i * COLS;\n");
+    out.push_str(&format!(
+        "            tuples.push(format!(\n                \"({tuple_template})\",\n                {placeholder_args}\n            ));\n"
+    ));
+    out.push_str("        }\n");
+    out.push_str(&format!(
+        "        let sql = format!(\n            \"INSERT INTO lake.main.{} VALUES {{}}\",\n            tuples.join(\", \")\n        );\n",
+        entity.relation
+    ));
+    out.push_str(
+        "        let mut params: Vec<&dyn ::duckdb::ToSql> = Vec::with_capacity(chunk.len() * COLS);\n",
+    );
+    out.push_str("        for row in chunk {\n");
+    for column in &entity.columns {
+        out.push_str(&format!("            params.push(&row.{});\n", column.name));
+    }
+    out.push_str("        }\n");
+    out.push_str("        conn.execute(&sql, params.as_slice())?;\n");
+    out.push_str("    }\n");
+    out.push_str("    Ok(rows.len())\n");
+    out.push_str("}\n");
 }
 
 /// Emit the `arrow_schema()` function body for an Arrow-wire entity.
