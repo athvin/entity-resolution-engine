@@ -30,6 +30,7 @@
 //! Postgres + DuckLake paths are gated (`ER_TEST_PG_DSN`, `DEDUPE_E2E_DUCKLAKE`).
 
 pub mod dispatcher;
+pub mod openapi;
 pub mod pg;
 pub mod read;
 pub mod webhook;

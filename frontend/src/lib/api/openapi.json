@@ -1,331 +1,536 @@
 {
+  "openapi": "3.1.0",
+  "info": {
+    "title": "er-server",
+    "description": "Entity Resolution control + read API. Component schemas are generated from the entity definitions (entities/*/entity.yaml) via er-entity-gen; this document is their single serialized form.",
+    "license": {
+      "name": "MIT",
+      "identifier": "MIT"
+    },
+    "version": "1.0.0"
+  },
+  "paths": {},
   "components": {
     "schemas": {
-      "AssertionIn": {
+      "AcctGoldenDisplay": {
+        "type": "object",
+        "description": "Pre-rendered display strings for a resolved account, for list and detail views.",
+        "required": [
+          "entity_id",
+          "assembled_at"
+        ],
         "properties": {
-          "a": {
-            "title": "A",
-            "type": "string"
+          "assembled_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Assembly time of this row (volatile)."
           },
-          "apply_now": {
-            "default": false,
-            "title": "Apply Now",
-            "type": "boolean"
-          },
-          "b": {
-            "title": "B",
-            "type": "string"
-          },
-          "kind": {
-            "title": "Kind",
-            "type": "string"
-          },
-          "note": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+          "display_address": {
+            "type": [
+              "string",
+              "null"
             ],
-            "title": "Note"
-          }
-        },
-        "required": [
-          "kind",
-          "a",
-          "b"
-        ],
-        "title": "AssertionIn",
-        "type": "object"
-      },
-      "Body_create_import_v1_orgs__org__imports_post": {
-        "properties": {
-          "file": {
-            "contentMediaType": "application/octet-stream",
-            "title": "File",
-            "type": "string"
-          }
-        },
-        "required": [
-          "file"
-        ],
-        "title": "Body_create_import_v1_orgs__org__imports_post",
-        "type": "object"
-      },
-      "BulkResolveIn": {
-        "properties": {
-          "apply_now": {
-            "default": false,
-            "title": "Apply Now",
-            "type": "boolean"
+            "description": "Rendered display address."
           },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/BulkResolveItem"
-            },
-            "maxItems": 200,
-            "minItems": 1,
-            "title": "Items",
-            "type": "array"
-          }
-        },
-        "required": [
-          "items"
-        ],
-        "title": "BulkResolveIn",
-        "type": "object"
-      },
-      "BulkResolveItem": {
-        "properties": {
-          "resolution": {
-            "title": "Resolution",
-            "type": "string"
+          "display_domain": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Rendered display domain."
           },
-          "review_id": {
-            "title": "Review Id",
-            "type": "string"
+          "display_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Rendered display name."
+          },
+          "display_phone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Rendered display phone."
+          },
+          "entity_id": {
+            "type": "string",
+            "description": "The resolved account these display strings belong to."
           }
-        },
-        "required": [
-          "review_id",
-          "resolution"
-        ],
-        "title": "BulkResolveItem",
-        "type": "object"
+        }
       },
-      "ConfigVersionIn": {
+      "AcctGoldenLineage": {
+        "type": "object",
+        "description": "Per-attribute survivorship provenance for a resolved account: which record each surviving value came from.",
+        "required": [
+          "entity_id",
+          "attribute",
+          "record_key",
+          "source_system",
+          "source_record_id",
+          "rule",
+          "survivorship_version",
+          "assembled_at"
+        ],
         "properties": {
-          "yaml": {
-            "title": "Yaml",
-            "type": "string"
+          "assembled_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Assembly time of this row (volatile)."
+          },
+          "attribute": {
+            "type": "string",
+            "description": "The survivable attribute decided (e.g. company_name, domain, address)."
+          },
+          "entity_id": {
+            "type": "string",
+            "description": "The resolved account this attribute decision belongs to."
+          },
+          "record_key": {
+            "type": "string",
+            "description": "The source record that won the attribute."
+          },
+          "rule": {
+            "type": "string",
+            "description": "The survivorship rule that selected this value."
+          },
+          "source_record_id": {
+            "type": "string",
+            "description": "Source-native id of the winning record."
+          },
+          "source_system": {
+            "type": "string",
+            "description": "Source system of the winning record."
+          },
+          "survivorship_version": {
+            "type": "string",
+            "description": "Survivorship policy version that produced this row."
           }
-        },
-        "required": [
-          "yaml"
-        ],
-        "title": "ConfigVersionIn",
-        "type": "object"
+        }
       },
-      "EmailIn": {
+      "AcctGoldenRecord": {
+        "type": "object",
+        "description": "One resolved account/organization: the surviving value per attribute, at a snapshot.",
+        "required": [
+          "entity_id",
+          "survivorship_version",
+          "assembled_at"
+        ],
         "properties": {
+          "addr_city": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Surviving city of the address."
+          },
+          "addr_postal": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Surviving postal code of the address."
+          },
+          "addr_region": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Surviving region/state of the address."
+          },
+          "addr_street": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Surviving street of the address."
+          },
+          "assembled_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Assembly time of this row (volatile)."
+          },
+          "company_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Surviving company name."
+          },
+          "domain": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Surviving web domain."
+          },
+          "entity_id": {
+            "type": "string",
+            "description": "Persistent entity id (ULID); the survivorship key."
+          },
+          "metadata": {
+            "description": "Surviving opaque per-source metadata object."
+          },
+          "phone_e164": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Surviving phone number in E.164 form."
+          },
+          "survivorship_version": {
+            "type": "string",
+            "description": "Survivorship policy version that produced this row."
+          }
+        }
+      },
+      "ApiKey": {
+        "type": "object",
+        "description": "An org-scoped API key: its role and the at-rest hash of the secret.",
+        "required": [
+          "key_id",
+          "org",
+          "role",
+          "key_hash",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the key was issued."
+          },
+          "key_hash": {
+            "type": "string",
+            "description": "SHA-256 hash of the secret (never the plaintext)."
+          },
+          "key_id": {
+            "type": "string",
+            "description": "The key's unique id."
+          },
           "org": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+            "type": "string",
+            "description": "The tenant the key authenticates."
+          },
+          "revoked_at": {
+            "type": [
+              "string",
+              "null"
             ],
-            "title": "Org"
+            "format": "date-time",
+            "description": "When the key was revoked, if it has been."
           },
-          "params": {
-            "additionalProperties": true,
-            "title": "Params",
-            "type": "object"
-          },
-          "template": {
-            "title": "Template",
-            "type": "string"
-          },
-          "to": {
-            "minLength": 3,
-            "title": "To",
-            "type": "string"
+          "role": {
+            "type": "string",
+            "description": "The role the key grants."
           }
-        },
-        "required": [
-          "to",
-          "template"
-        ],
-        "title": "EmailIn",
-        "type": "object"
+        }
       },
-      "HTTPValidationError": {
+      "AuditLog": {
+        "type": "object",
+        "description": "The append-only audit ledger: one row per authenticated mutation (actor, action, optional org scope, and structured detail).",
+        "required": [
+          "id",
+          "at",
+          "actor",
+          "action",
+          "detail"
+        ],
         "properties": {
+          "action": {
+            "type": "string",
+            "description": "The action name (e.g. steward.mass_update)."
+          },
+          "actor": {
+            "type": "string",
+            "description": "The principal that performed the action (the signed-in user's email, or an API key id)."
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the audited action occurred."
+          },
           "detail": {
-            "items": {
-              "$ref": "#/components/schemas/ValidationError"
-            },
-            "title": "Detail",
-            "type": "array"
+            "description": "Structured detail for the action."
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Monotonic ledger id (bigserial); the primary key."
+          },
+          "org": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The tenant the action applies to, if the action is org-scoped."
           }
-        },
-        "title": "HTTPValidationError",
-        "type": "object"
+        }
       },
-      "JobIn": {
-        "properties": {
-          "kind": {
-            "title": "Kind",
-            "type": "string"
-          },
-          "max_attempts": {
-            "default": 3,
-            "maximum": 10.0,
-            "minimum": 1.0,
-            "title": "Max Attempts",
-            "type": "integer"
-          },
-          "params": {
-            "additionalProperties": true,
-            "title": "Params",
-            "type": "object"
-          },
-          "priority": {
-            "default": 0,
-            "title": "Priority",
-            "type": "integer"
-          }
-        },
+      "ConfigVersion": {
+        "type": "object",
+        "description": "A versioned config document for a tenant: its YAML, hash and publish state.",
         "required": [
-          "kind"
+          "org",
+          "version",
+          "yaml",
+          "config_hash",
+          "state",
+          "created_by",
+          "created_at"
         ],
-        "title": "JobIn",
-        "type": "object"
-      },
-      "JobOut": {
         "properties": {
-          "attempt": {
-            "title": "Attempt",
-            "type": "integer"
+          "config_hash": {
+            "type": "string",
+            "description": "Hash of the canonicalized config."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the version was created."
           },
           "created_by": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Created By"
-          },
-          "error_class": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error Class"
-          },
-          "error_detail": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error Detail"
-          },
-          "exit_code": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Exit Code"
-          },
-          "idempotency_key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Idempotency Key"
-          },
-          "job_id": {
-            "title": "Job Id",
-            "type": "string"
-          },
-          "kind": {
-            "title": "Kind",
-            "type": "string"
-          },
-          "max_attempts": {
-            "title": "Max Attempts",
-            "type": "integer"
+            "type": "string",
+            "description": "Principal that created the version."
           },
           "org": {
-            "title": "Org",
-            "type": "string"
+            "type": "string",
+            "description": "The tenant this config version belongs to."
           },
-          "outcome": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+          "published_at": {
+            "type": [
+              "string",
+              "null"
             ],
-            "title": "Outcome"
-          },
-          "params": {
-            "additionalProperties": true,
-            "title": "Params",
-            "type": "object"
-          },
-          "priority": {
-            "title": "Priority",
-            "type": "integer"
-          },
-          "progress": {
-            "additionalProperties": true,
-            "title": "Progress",
-            "type": "object"
-          },
-          "resource_class": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Resource Class"
-          },
-          "run_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Run Id"
-          },
-          "schedule_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Schedule Id"
+            "format": "date-time",
+            "description": "When the version was published, if it has been."
           },
           "state": {
-            "title": "State",
-            "type": "string"
+            "type": "string",
+            "description": "Whether the version is a draft or published."
+          },
+          "tier": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional service tier label."
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The monotonic version number within the tenant."
+          },
+          "yaml": {
+            "type": "string",
+            "description": "The config document source."
           }
-        },
+        }
+      },
+      "GoldenDisplay": {
+        "type": "object",
+        "description": "Pre-rendered display strings for a resolved person, for list and detail views.",
+        "required": [
+          "entity_id",
+          "assembled_at"
+        ],
+        "properties": {
+          "assembled_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Assembly time of this row (volatile)."
+          },
+          "display_address": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Rendered display address."
+          },
+          "display_email": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Rendered display email."
+          },
+          "display_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Rendered display name."
+          },
+          "display_phone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Rendered display phone."
+          },
+          "entity_id": {
+            "type": "string",
+            "description": "The resolved entity these display strings belong to."
+          }
+        }
+      },
+      "GoldenLineage": {
+        "type": "object",
+        "description": "Per-attribute survivorship provenance: which record each surviving golden value came from.",
+        "required": [
+          "entity_id",
+          "attribute",
+          "record_key",
+          "source_system",
+          "source_record_id",
+          "rule",
+          "survivorship_version",
+          "assembled_at"
+        ],
+        "properties": {
+          "assembled_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Assembly time of this row (volatile)."
+          },
+          "attribute": {
+            "type": "string",
+            "description": "The survivable attribute decided (e.g. given_name, email, address)."
+          },
+          "entity_id": {
+            "type": "string",
+            "description": "The resolved entity this attribute decision belongs to."
+          },
+          "record_key": {
+            "type": "string",
+            "description": "The source record that won the attribute."
+          },
+          "rule": {
+            "type": "string",
+            "description": "The survivorship rule that selected this value."
+          },
+          "source_record_id": {
+            "type": "string",
+            "description": "Source-native id of the winning record."
+          },
+          "source_system": {
+            "type": "string",
+            "description": "Source system of the winning record."
+          },
+          "survivorship_version": {
+            "type": "string",
+            "description": "Survivorship policy version that produced this row."
+          }
+        }
+      },
+      "GoldenRecord": {
+        "type": "object",
+        "description": "One resolved person: the surviving value per attribute, at a snapshot.",
+        "required": [
+          "entity_id",
+          "survivorship_version",
+          "assembled_at"
+        ],
+        "properties": {
+          "addr_city": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Surviving city of the address."
+          },
+          "addr_number": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Surviving street number of the address."
+          },
+          "addr_postal": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Surviving postal code of the address."
+          },
+          "addr_region": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Surviving region/state of the address."
+          },
+          "addr_street": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Surviving street name of the address."
+          },
+          "addr_unit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Surviving unit/apartment of the address."
+          },
+          "assembled_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Assembly time of this row (volatile; excluded from determinism comparisons)."
+          },
+          "birth_date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "description": "Surviving birth date."
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Surviving email address."
+          },
+          "entity_id": {
+            "type": "string",
+            "description": "Persistent entity id (ULID); the survivorship key."
+          },
+          "family_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Surviving family name."
+          },
+          "given_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Surviving given name."
+          },
+          "metadata": {
+            "description": "Surviving opaque per-source metadata object."
+          },
+          "phone_e164": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Surviving phone number in E.164 form."
+          },
+          "survivorship_version": {
+            "type": "string",
+            "description": "Survivorship policy version that produced this row."
+          }
+        }
+      },
+      "Job": {
+        "type": "object",
+        "description": "A unit of work on the dispatcher's queue: its kind, params, lifecycle state and retry bookkeeping.",
         "required": [
           "job_id",
           "org",
@@ -333,4772 +538,323 @@
           "params",
           "state",
           "priority",
-          "idempotency_key",
-          "run_id",
           "attempt",
           "max_attempts",
-          "exit_code",
-          "error_class",
-          "error_detail",
-          "outcome",
-          "progress"
+          "created_at",
+          "updated_at"
         ],
-        "title": "JobOut",
-        "type": "object"
-      },
-      "KeyIn": {
         "properties": {
-          "role": {
-            "title": "Role",
-            "type": "string"
-          }
-        },
-        "required": [
-          "role"
-        ],
-        "title": "KeyIn",
-        "type": "object"
-      },
-      "OrgIn": {
-        "properties": {
-          "config_path": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Config Path"
+          "attempt": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Attempts made so far."
           },
-          "drop_root": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Drop Root"
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the job was enqueued."
           },
-          "env": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Env",
-            "type": "object"
-          },
-          "name": {
-            "maxLength": 128,
-            "minLength": 1,
-            "pattern": "^[a-z0-9][a-z0-9_-]*$",
-            "title": "Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name"
-        ],
-        "title": "OrgIn",
-        "type": "object"
-      },
-      "ResourcesIn": {
-        "description": "Execution-only parallelism knobs; neither changes scoring results.",
-        "properties": {
-          "duckdb_memory_limit": {
-            "anyOf": [
-              {
-                "pattern": "^[1-9][0-9]*[MG]B$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+          "created_by": {
+            "type": [
+              "string",
+              "null"
             ],
-            "title": "Duckdb Memory Limit"
+            "description": "Principal that created the job."
           },
-          "duckdb_threads": {
-            "anyOf": [
-              {
-                "maximum": 32.0,
-                "minimum": 1.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
             ],
-            "title": "Duckdb Threads"
-          }
-        },
-        "title": "ResourcesIn",
-        "type": "object"
-      },
-      "ReviewResolveIn": {
-        "properties": {
-          "resolution": {
-            "title": "Resolution",
-            "type": "string"
-          }
-        },
-        "required": [
-          "resolution"
-        ],
-        "title": "ReviewResolveIn",
-        "type": "object"
-      },
-      "ScheduleIn": {
-        "properties": {
-          "cron": {
-            "title": "Cron",
-            "type": "string"
+            "format": "date-time",
+            "description": "When the job finished."
+          },
+          "idempotency_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional dedup key, unique per org."
+          },
+          "job_id": {
+            "type": "string",
+            "description": "The job's unique id (ULID)."
           },
           "kind": {
-            "title": "Kind",
-            "type": "string"
+            "type": "string",
+            "description": "The job kind (run_all, correct, maintain, train, ...)."
+          },
+          "max_attempts": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Maximum attempts before the job fails."
+          },
+          "not_before": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Earliest time the job may be claimed."
+          },
+          "org": {
+            "type": "string",
+            "description": "The tenant this job runs for."
           },
           "params": {
-            "additionalProperties": true,
-            "title": "Params",
-            "type": "object"
+            "description": "Kind-specific parameters."
+          },
+          "priority": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Claim priority; higher runs first."
+          },
+          "resource_class": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Requested runner resource class."
+          },
+          "run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The run this job produced, once dispatched."
+          },
+          "schedule_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The schedule that enqueued the job, if any."
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the job started running."
+          },
+          "state": {
+            "type": "string",
+            "description": "Lifecycle state (queued, dispatching, running, succeeded, failed, canceling, canceled)."
+          },
+          "trace_context": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Propagated trace context."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the job row was last updated."
           }
-        },
+        }
+      },
+      "Org": {
+        "type": "object",
+        "description": "A tenant: its config pointer, lake env, lifecycle state and active config version.",
         "required": [
+          "name",
+          "config_path",
+          "env",
+          "state",
+          "created_at"
+        ],
+        "properties": {
+          "active_config_version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The currently published config version, if any."
+          },
+          "config_path": {
+            "type": "string",
+            "description": "Path to the tenant's config document."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the tenant was created."
+          },
+          "drop_root": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional object-store root for tenant purge."
+          },
+          "env": {
+            "description": "Lake connection env (catalog, data path, metadata schema)."
+          },
+          "name": {
+            "type": "string",
+            "description": "The tenant's unique name (the control-plane key)."
+          },
+          "state": {
+            "type": "string",
+            "description": "Tenant lifecycle state."
+          }
+        }
+      },
+      "Schedule": {
+        "type": "object",
+        "description": "A recurring job schedule for a tenant: its kind, cron and source.",
+        "required": [
+          "schedule_id",
+          "org",
           "kind",
-          "cron"
+          "params",
+          "cron",
+          "enabled",
+          "source",
+          "created_at"
         ],
-        "title": "ScheduleIn",
-        "type": "object"
-      },
-      "ScheduleUpdateIn": {
         "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the schedule was created."
+          },
+          "cron": {
+            "type": "string",
+            "description": "The cron expression."
+          },
           "enabled": {
-            "title": "Enabled",
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Whether the schedule is active."
+          },
+          "kind": {
+            "type": "string",
+            "description": "The job kind the schedule enqueues."
+          },
+          "last_enqueued_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the schedule last enqueued a job."
+          },
+          "org": {
+            "type": "string",
+            "description": "The tenant this schedule runs for."
+          },
+          "params": {
+            "description": "Kind-specific parameters."
+          },
+          "schedule_id": {
+            "type": "string",
+            "description": "The schedule's unique id."
+          },
+          "source": {
+            "type": "string",
+            "description": "What created the schedule (api, config:correction_pass, system:lake_maintain)."
           }
-        },
-        "required": [
-          "enabled"
-        ],
-        "title": "ScheduleUpdateIn",
-        "type": "object"
+        }
       },
-      "UnmergeIn": {
+      "StagedStewardAction": {
+        "type": "object",
+        "description": "A steward action staged for review/apply: its payload, state and outcome.",
+        "required": [
+          "action_id",
+          "org",
+          "action",
+          "state",
+          "created_by",
+          "created_at"
+        ],
         "properties": {
-          "apply_now": {
-            "default": true,
-            "title": "Apply Now",
-            "type": "boolean"
+          "action": {
+            "description": "The action payload."
           },
-          "records": {
-            "items": {
-              "type": "string"
-            },
-            "maxItems": 100,
-            "minItems": 1,
-            "title": "Records",
-            "type": "array"
+          "action_id": {
+            "type": "string",
+            "description": "The staged action's unique id."
+          },
+          "applied_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the action was applied, if it has been."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the action was staged."
+          },
+          "created_by": {
+            "type": "string",
+            "description": "Principal that staged the action."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The failure reason, if the action failed."
+          },
+          "org": {
+            "type": "string",
+            "description": "The tenant the action applies to."
+          },
+          "state": {
+            "type": "string",
+            "description": "Whether the action is pending, applied or failed."
           }
-        },
-        "required": [
-          "records"
-        ],
-        "title": "UnmergeIn",
-        "type": "object"
+        }
       },
-      "ValidationError": {
-        "properties": {
-          "ctx": {
-            "title": "Context",
-            "type": "object"
-          },
-          "input": {
-            "title": "Input"
-          },
-          "loc": {
-            "items": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "integer"
-                }
-              ]
-            },
-            "title": "Location",
-            "type": "array"
-          },
-          "msg": {
-            "title": "Message",
-            "type": "string"
-          },
-          "type": {
-            "title": "Error Type",
-            "type": "string"
-          }
-        },
+      "Webhook": {
+        "type": "object",
+        "description": "A tenant webhook endpoint: its URL, subscribed events and signing secret.",
         "required": [
-          "loc",
-          "msg",
-          "type"
+          "webhook_id",
+          "org",
+          "url",
+          "events",
+          "secret",
+          "active",
+          "created_at"
         ],
-        "title": "ValidationError",
-        "type": "object"
-      },
-      "WebhookIn": {
         "properties": {
+          "active": {
+            "type": "boolean",
+            "description": "Whether the webhook is active."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the webhook was registered."
+          },
           "events": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Events",
-            "type": "array"
+            "description": "The subscribed event types."
+          },
+          "org": {
+            "type": "string",
+            "description": "The tenant that owns the webhook."
           },
           "secret": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Secret"
+            "type": "string",
+            "description": "HMAC signing secret for deliveries."
           },
           "url": {
-            "title": "Url",
-            "type": "string"
-          }
-        },
-        "required": [
-          "url"
-        ],
-        "title": "WebhookIn",
-        "type": "object"
-      }
-    }
-  },
-  "info": {
-    "title": "er control plane",
-    "version": "0.2.0"
-  },
-  "openapi": "3.1.0",
-  "paths": {
-    "/healthz": {
-      "get": {
-        "operationId": "healthz_healthz_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Healthz Healthz Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Healthz"
-      }
-    },
-    "/v1/audit": {
-      "get": {
-        "description": "The cross-tenant audit feed (design \u00a77.20); org-scoped reads live under the org.",
-        "operationId": "audit_global_v1_audit_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "org",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Org"
-            }
-          },
-          {
-            "in": "query",
-            "name": "action",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Action"
-            }
-          },
-          {
-            "in": "query",
-            "name": "before_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "minimum": 1,
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Before Id"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 100,
-              "maximum": 500,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "additionalProperties": true,
-                    "type": "object"
-                  },
-                  "title": "Response Audit Global V1 Audit Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Audit Global"
-      }
-    },
-    "/v1/email": {
-      "post": {
-        "description": "Queue one platform email (operator relay; docs/backend-design.md \u00a76).\n\nThe BFF's invite and password-reset flows post here so the platform has\nONE SMTP stack, one outbox and one retry policy. Durable acceptance,\nnot delivery: an unconfigured relay parks the row as ``queued``.",
-        "operationId": "relay_email_v1_email_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/EmailIn"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Relay Email V1 Email Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Relay Email"
-      }
-    },
-    "/v1/jobs": {
-      "get": {
-        "description": "The cross-org queue view for the operator console (design \u00a77.3).",
-        "operationId": "jobs_global_v1_jobs_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "org",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Org"
-            }
-          },
-          {
-            "in": "query",
-            "name": "state",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "State"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 50,
-              "maximum": 200,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/JobOut"
-                  },
-                  "title": "Response Jobs Global V1 Jobs Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Jobs Global"
-      }
-    },
-    "/v1/orgs": {
-      "get": {
-        "description": "The tenant directory for the operator console (design \u00a77.1).",
-        "operationId": "orgs_index_v1_orgs_get",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "additionalProperties": true,
-                    "type": "object"
-                  },
-                  "title": "Response Orgs Index V1 Orgs Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Orgs Index"
-      },
-      "post": {
-        "operationId": "create_org_v1_orgs_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/OrgIn"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Create Org V1 Orgs Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Create Org"
-      }
-    },
-    "/v1/orgs/{org}": {
-      "get": {
-        "description": "The onboarding poll target: is my org active yet?",
-        "operationId": "org_detail_v1_orgs__org__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Org Detail V1 Orgs  Org  Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Org Detail"
-      }
-    },
-    "/v1/orgs/{org}/api-keys": {
-      "post": {
-        "operationId": "create_key_v1_orgs__org__api_keys_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/KeyIn"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Create Key V1 Orgs  Org  Api Keys Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Create Key"
-      }
-    },
-    "/v1/orgs/{org}/api-keys/{key_id}": {
-      "delete": {
-        "operationId": "delete_key_v1_orgs__org__api_keys__key_id__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "key_id",
-            "required": true,
-            "schema": {
-              "title": "Key Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "boolean"
-                  },
-                  "title": "Response Delete Key V1 Orgs  Org  Api Keys  Key Id  Delete",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Delete Key"
-      }
-    },
-    "/v1/orgs/{org}/assertions": {
-      "get": {
-        "description": "The assertion library (design \u00a77.9).",
-        "operationId": "assertions_index_v1_orgs__org__assertions_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "include_retracted",
-            "required": false,
-            "schema": {
-              "default": false,
-              "title": "Include Retracted",
-              "type": "boolean"
-            }
-          },
-          {
-            "in": "query",
-            "name": "cursor",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Cursor"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 100,
-              "maximum": 200,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Assertions Index V1 Orgs  Org  Assertions Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Assertions Index"
-      },
-      "post": {
-        "operationId": "add_assertion_endpoint_v1_orgs__org__assertions_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AssertionIn"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Add Assertion Endpoint V1 Orgs  Org  Assertions Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Add Assertion Endpoint"
-      }
-    },
-    "/v1/orgs/{org}/assertions/{assertion_id}": {
-      "delete": {
-        "operationId": "retract_assertion_endpoint_v1_orgs__org__assertions__assertion_id__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "assertion_id",
-            "required": true,
-            "schema": {
-              "title": "Assertion Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Retract Assertion Endpoint V1 Orgs  Org  Assertions  Assertion Id  Delete",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Retract Assertion Endpoint"
-      }
-    },
-    "/v1/orgs/{org}/assertions:contradictions": {
-      "get": {
-        "description": "Unsatisfiable rule sets: a never inside an always-connected component.",
-        "operationId": "assertion_contradictions_v1_orgs__org__assertions_contradictions_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Assertion Contradictions V1 Orgs  Org  Assertions Contradictions Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Assertion Contradictions"
-      }
-    },
-    "/v1/orgs/{org}/audit": {
-      "get": {
-        "operationId": "audit_index_v1_orgs__org__audit_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "action",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Action"
-            }
-          },
-          {
-            "in": "query",
-            "name": "before_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "minimum": 1,
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Before Id"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 100,
-              "maximum": 500,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "additionalProperties": true,
-                    "type": "object"
-                  },
-                  "title": "Response Audit Index V1 Orgs  Org  Audit Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Audit Index"
-      }
-    },
-    "/v1/orgs/{org}/config": {
-      "get": {
-        "operationId": "active_config_v1_orgs__org__config_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Active Config V1 Orgs  Org  Config Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Active Config"
-      }
-    },
-    "/v1/orgs/{org}/config/versions": {
-      "get": {
-        "operationId": "config_versions_index_v1_orgs__org__config_versions_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "additionalProperties": true,
-                    "type": "object"
-                  },
-                  "title": "Response Config Versions Index V1 Orgs  Org  Config Versions Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Config Versions Index"
-      },
-      "post": {
-        "operationId": "create_config_version_v1_orgs__org__config_versions_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ConfigVersionIn"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Create Config Version V1 Orgs  Org  Config Versions Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Create Config Version"
-      }
-    },
-    "/v1/orgs/{org}/config/versions/{version}": {
-      "get": {
-        "description": "One version with its YAML body \u2014 the client-side diff's input (\u00a77.18).",
-        "operationId": "config_version_detail_v1_orgs__org__config_versions__version__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "version",
-            "required": true,
-            "schema": {
-              "title": "Version",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Config Version Detail V1 Orgs  Org  Config Versions  Version  Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Config Version Detail"
-      }
-    },
-    "/v1/orgs/{org}/config/versions/{version}:publish": {
-      "post": {
-        "operationId": "publish_config_v1_orgs__org__config_versions__version__publish_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "version",
-            "required": true,
-            "schema": {
-              "title": "Version",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Publish Config V1 Orgs  Org  Config Versions  Version  Publish Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Publish Config"
-      }
-    },
-    "/v1/orgs/{org}/duplicates": {
-      "get": {
-        "operationId": "duplicates_v1_orgs__org__duplicates_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "cursor",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Cursor"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 50,
-              "maximum": 200,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Duplicates V1 Orgs  Org  Duplicates Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Duplicates"
-      }
-    },
-    "/v1/orgs/{org}/events": {
-      "get": {
-        "description": "The org event stream, ascending from ``after_id`` (design \u00a76 `/events`).\n\nThe notification feed's read: a consumer keeps its high-water mark and\npolls \"what happened since\", so a quiet poll returns an empty page.\n``types`` is a comma-separated subset of the event vocabulary.",
-        "operationId": "events_feed_v1_orgs__org__events_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "after_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "After Id"
-            }
-          },
-          {
-            "in": "query",
-            "name": "types",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Types"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 50,
-              "maximum": 200,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Events Feed V1 Orgs  Org  Events Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Events Feed"
-      }
-    },
-    "/v1/orgs/{org}/golden-records": {
-      "get": {
-        "operationId": "golden_records_v1_orgs__org__golden_records_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "q",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Q"
-            }
-          },
-          {
-            "in": "query",
-            "name": "cursor",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Cursor"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 50,
-              "maximum": 200,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Golden Records V1 Orgs  Org  Golden Records Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Golden Records"
-      }
-    },
-    "/v1/orgs/{org}/golden-records/{entity_id}": {
-      "get": {
-        "operationId": "golden_record_v1_orgs__org__golden_records__entity_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "entity_id",
-            "required": true,
-            "schema": {
-              "title": "Entity Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Golden Record V1 Orgs  Org  Golden Records  Entity Id  Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Golden Record"
-      }
-    },
-    "/v1/orgs/{org}/golden-records/{entity_id}:unmerge": {
-      "post": {
-        "description": "Undo a merge (design \u00a77.5): resolve members from the entity, write the\nnever-assertions that force the split, and enqueue the reconcile.\n\nThe extracted records stay together; each gets a ``never`` against every\nremaining member. Contradictions with active ``always`` assertions are\npre-checked so an unsatisfiable rule set is refused here, with the\nconflicting assertion ids, instead of failing the next reconcile.",
-        "operationId": "unmerge_entity_v1_orgs__org__golden_records__entity_id__unmerge_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "entity_id",
-            "required": true,
-            "schema": {
-              "title": "Entity Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UnmergeIn"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Unmerge Entity V1 Orgs  Org  Golden Records  Entity Id  Unmerge Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Unmerge Entity"
-      }
-    },
-    "/v1/orgs/{org}/imports": {
-      "get": {
-        "description": "Delivery receipts from ingest_batches (design \u00a77.15).",
-        "operationId": "import_receipts_v1_orgs__org__imports_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "source",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Source"
-            }
-          },
-          {
-            "in": "query",
-            "name": "cursor",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Cursor"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 50,
-              "maximum": 200,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Import Receipts V1 Orgs  Org  Imports Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Import Receipts"
-      },
-      "post": {
-        "description": "The drop-dir connector's push seam: file in, incremental run enqueued.\n\nThe source name is validated against the org's active config FILE \u2014 the\nsame document the runner's ``adapter_for`` will read \u2014 before any byte\nlands on disk. A draft-only source therefore 422s until it is published,\ninstead of surfacing later as the enqueued run's exit-2 failure; the\ncheck also keeps an arbitrary ``source`` string out of the filesystem\npath below.",
-        "operationId": "create_import_v1_orgs__org__imports_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "source",
-            "required": true,
-            "schema": {
-              "minLength": 1,
-              "title": "Source",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_create_import_v1_orgs__org__imports_post"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Create Import V1 Orgs  Org  Imports Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Create Import"
-      }
-    },
-    "/v1/orgs/{org}/jobs": {
-      "get": {
-        "operationId": "jobs_index_v1_orgs__org__jobs_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "state",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "State"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 50,
-              "maximum": 200,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/JobOut"
-                  },
-                  "title": "Response Jobs Index V1 Orgs  Org  Jobs Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Jobs Index"
-      },
-      "post": {
-        "operationId": "submit_job_v1_orgs__org__jobs_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
-            }
-          },
-          {
-            "in": "header",
-            "name": "traceparent",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Traceparent"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/JobIn"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/JobOut"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Submit Job"
-      }
-    },
-    "/v1/orgs/{org}/jobs/{job_id}": {
-      "get": {
-        "operationId": "job_detail_v1_orgs__org__jobs__job_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "job_id",
-            "required": true,
-            "schema": {
-              "title": "Job Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/JobOut"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Job Detail"
-      }
-    },
-    "/v1/orgs/{org}/jobs/{job_id}:cancel": {
-      "post": {
-        "operationId": "cancel_job_v1_orgs__org__jobs__job_id__cancel_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "job_id",
-            "required": true,
-            "schema": {
-              "title": "Job Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Cancel Job V1 Orgs  Org  Jobs  Job Id  Cancel Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Cancel Job"
-      }
-    },
-    "/v1/orgs/{org}/jobs/{job_id}:resume": {
-      "post": {
-        "operationId": "resume_job_v1_orgs__org__jobs__job_id__resume_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "job_id",
-            "required": true,
-            "schema": {
-              "title": "Job Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Resume Job V1 Orgs  Org  Jobs  Job Id  Resume Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Resume Job"
-      }
-    },
-    "/v1/orgs/{org}/match-scores": {
-      "get": {
-        "description": "Browse active scored pairs with evidence (design \u00a77.8).",
-        "operationId": "match_scores_index_v1_orgs__org__match_scores_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "band_low",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maximum": 1.0,
-                  "minimum": 0.0,
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Band Low"
-            }
-          },
-          {
-            "in": "query",
-            "name": "band_high",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maximum": 1.0,
-                  "minimum": 0.0,
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Band High"
-            }
-          },
-          {
-            "in": "query",
-            "name": "cursor",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Cursor"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 50,
-              "maximum": 200,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Match Scores Index V1 Orgs  Org  Match Scores Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Match Scores Index"
-      }
-    },
-    "/v1/orgs/{org}/merge-plans": {
-      "get": {
-        "operationId": "merge_plan_export_v1_orgs__org__merge_plans_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "since",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Since"
-            }
-          },
-          {
-            "in": "query",
-            "name": "format",
-            "required": false,
-            "schema": {
-              "default": "json",
-              "pattern": "^(json|csv)$",
-              "title": "Format",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "policy",
-            "required": false,
-            "schema": {
-              "default": "most_attributes",
-              "title": "Policy",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Merge Plan Export"
-      }
-    },
-    "/v1/orgs/{org}/metrics": {
-      "get": {
-        "operationId": "org_metrics_v1_orgs__org__metrics_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Org Metrics V1 Orgs  Org  Metrics Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Org Metrics"
-      }
-    },
-    "/v1/orgs/{org}/records": {
-      "get": {
-        "description": "Standardized source records by record_key (design \u00a75.3's compare grid).\n\nReview rows carry pair keys and weight evidence only; this small lookup\nturns them into field-by-field values. Repeat ``key`` per record, up to\n50 per call.",
-        "operationId": "records_lookup_v1_orgs__org__records_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "key",
-            "required": true,
-            "schema": {
-              "items": {
-                "type": "string"
-              },
-              "maxItems": 50,
-              "minItems": 1,
-              "title": "Key",
-              "type": "array"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Records Lookup V1 Orgs  Org  Records Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Records Lookup"
-      }
-    },
-    "/v1/orgs/{org}/resources": {
-      "patch": {
-        "description": "Per-tenant pipeline parallelism: DuckDB threads and memory limit.\n\nThese are execution-only knobs \u2014 scoring is deterministic across thread\ncounts, so no retrain or rebuild follows a change. The dispatcher reads\nthe org environment when it claims a job, so the next job the tenant\nruns picks the new values up; a job already running is unaffected.",
-        "operationId": "update_resources_v1_orgs__org__resources_patch",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ResourcesIn"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Update Resources V1 Orgs  Org  Resources Patch",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Update Resources"
-      }
-    },
-    "/v1/orgs/{org}/reviews": {
-      "get": {
-        "description": "The steward inbox: filterable, keyset-paginated (design \u00a77.4).",
-        "operationId": "reviews_v1_orgs__org__reviews_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "status",
-            "required": false,
-            "schema": {
-              "default": "open",
-              "title": "Status",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "reason",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Reason"
-            }
-          },
-          {
-            "in": "query",
-            "name": "cursor",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Cursor"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 50,
-              "maximum": 200,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Reviews V1 Orgs  Org  Reviews Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Reviews"
-      }
-    },
-    "/v1/orgs/{org}/reviews/{review_id}": {
-      "get": {
-        "operationId": "review_detail_v1_orgs__org__reviews__review_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "review_id",
-            "required": true,
-            "schema": {
-              "title": "Review Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Review Detail V1 Orgs  Org  Reviews  Review Id  Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Review Detail"
-      }
-    },
-    "/v1/orgs/{org}/reviews/{review_id}:resolve": {
-      "post": {
-        "operationId": "resolve_review_endpoint_v1_orgs__org__reviews__review_id__resolve_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "review_id",
-            "required": true,
-            "schema": {
-              "title": "Review Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ReviewResolveIn"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Resolve Review Endpoint V1 Orgs  Org  Reviews  Review Id  Resolve Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Resolve Review Endpoint"
-      }
-    },
-    "/v1/orgs/{org}/reviews:bulk-resolve": {
-      "post": {
-        "description": "Resolve many reviews in one lock window + one optional reconcile job.",
-        "operationId": "bulk_resolve_reviews_v1_orgs__org__reviews_bulk_resolve_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/BulkResolveIn"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Bulk Resolve Reviews V1 Orgs  Org  Reviews Bulk Resolve Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Bulk Resolve Reviews"
-      }
-    },
-    "/v1/orgs/{org}/runs": {
-      "get": {
-        "operationId": "runs_v1_orgs__org__runs_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "additionalProperties": true,
-                    "type": "object"
-                  },
-                  "title": "Response Runs V1 Orgs  Org  Runs Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Runs"
-      }
-    },
-    "/v1/orgs/{org}/schedules": {
-      "get": {
-        "operationId": "schedules_index_v1_orgs__org__schedules_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "additionalProperties": true,
-                    "type": "object"
-                  },
-                  "title": "Response Schedules Index V1 Orgs  Org  Schedules Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Schedules Index"
-      },
-      "post": {
-        "operationId": "create_schedule_v1_orgs__org__schedules_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ScheduleIn"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Create Schedule V1 Orgs  Org  Schedules Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Create Schedule"
-      }
-    },
-    "/v1/orgs/{org}/schedules/{schedule_id}": {
-      "delete": {
-        "operationId": "delete_schedule_v1_orgs__org__schedules__schedule_id__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "schedule_id",
-            "required": true,
-            "schema": {
-              "title": "Schedule Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "boolean"
-                  },
-                  "title": "Response Delete Schedule V1 Orgs  Org  Schedules  Schedule Id  Delete",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Delete Schedule"
-      },
-      "patch": {
-        "description": "Enable/disable a tenant schedule (design \u00a77.10); config-owned rows refuse.",
-        "operationId": "update_schedule_v1_orgs__org__schedules__schedule_id__patch",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "schedule_id",
-            "required": true,
-            "schema": {
-              "title": "Schedule Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ScheduleUpdateIn"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Update Schedule V1 Orgs  Org  Schedules  Schedule Id  Patch",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Update Schedule"
-      }
-    },
-    "/v1/orgs/{org}/staged": {
-      "get": {
-        "description": "How many steward decisions wait behind the current run (design \u00a77.7).",
-        "operationId": "staged_visibility_v1_orgs__org__staged_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Staged Visibility V1 Orgs  Org  Staged Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Staged Visibility"
-      }
-    },
-    "/v1/orgs/{org}/webhooks": {
-      "get": {
-        "operationId": "webhooks_index_v1_orgs__org__webhooks_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "additionalProperties": true,
-                    "type": "object"
-                  },
-                  "title": "Response Webhooks Index V1 Orgs  Org  Webhooks Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Webhooks Index"
-      },
-      "post": {
-        "operationId": "create_webhook_v1_orgs__org__webhooks_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/WebhookIn"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Create Webhook V1 Orgs  Org  Webhooks Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Create Webhook"
-      }
-    },
-    "/v1/orgs/{org}/webhooks/{webhook_id}": {
-      "delete": {
-        "operationId": "delete_webhook_v1_orgs__org__webhooks__webhook_id__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "webhook_id",
-            "required": true,
-            "schema": {
-              "title": "Webhook Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "boolean"
-                  },
-                  "title": "Response Delete Webhook V1 Orgs  Org  Webhooks  Webhook Id  Delete",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Delete Webhook"
-      }
-    },
-    "/v1/orgs/{org}:resume": {
-      "post": {
-        "operationId": "resume_org_v1_orgs__org__resume_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Resume Org V1 Orgs  Org  Resume Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Resume Org"
-      }
-    },
-    "/v1/orgs/{org}:suspend": {
-      "post": {
-        "description": "Freeze a tenant (design \u00a77.2, the reversible half): active \u2192 suspended.\n\nThe guards already exist and do the enforcement: job submission,\nimports and steward actions refuse any non-active org, and the\ndispatcher's schedule tick swallows fires for it. Purge \u2014 the\ndestructive half \u2014 stays deliberately unimplemented.",
-        "operationId": "suspend_org_v1_orgs__org__suspend_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "org",
-            "required": true,
-            "schema": {
-              "title": "Org",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Suspend Org V1 Orgs  Org  Suspend Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
+            "type": "string",
+            "description": "The delivery URL."
           },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
+          "webhook_id": {
+            "type": "string",
+            "description": "The webhook's unique id."
           }
-        },
-        "summary": "Suspend Org"
+        }
       }
     }
   }
