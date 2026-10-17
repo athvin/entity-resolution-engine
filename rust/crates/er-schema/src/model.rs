@@ -739,7 +739,7 @@ fn acct_std_payload() -> Vec<Column> {
 
 /// The `int_std_records` columns for an entity type: `record_key` plus the
 /// standardized payload a tenant config's blocking / comparison SQL reads
-/// (person via [`std_payload`], account via [`acct_std_payload`]). This is the
+/// (person via `std_payload`, account via `acct_std_payload`). This is the
 /// single source for the publish-time config-reference check (`er-server`'s
 /// `config_check`), so there is no hand-maintained duplicate to drift.
 #[must_use]
