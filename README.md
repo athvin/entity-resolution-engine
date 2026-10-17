@@ -143,6 +143,7 @@ query traces described in the [profiling guide](docs/profiling.md) and the
 | Product | [Connectors](docs/connectors.md) | The agnostic ingress/egress seam and the Salesforce connector |
 | Product | [Cloudingo research](docs/research-cloudingo.md) | Competitor and market analysis driving the parity roadmap |
 | Engine | [Architecture](docs/architecture.md) | Pipeline stages, data ownership and entity lifecycle |
+| Engine | [ERD](docs/erd.md) | Generated entity-relationship diagram of every store (control plane, erweb, lake); regenerate with `er-entity gen` |
 | Engine | [Technical specification](DesignDoc.md) | Numbered schemas, algorithms and invariants referenced by tests |
 | Engine | [Configuration](docs/configuration.md) | Source mappings, matching rules, survivorship and runtime settings |
 | Ops | [Runbook](docs/runbook.md) | Running the engine: initial load, deliveries, reviews, recovery, maintenance |

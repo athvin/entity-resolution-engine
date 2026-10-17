@@ -1409,6 +1409,8 @@ version = "0.1.0"
 dependencies = [
  "er-entity-spec",
  "er-schema",
+ "serde",
+ "serde_json",
  "serde_norway",
  "thiserror",
 ]
