@@ -446,14 +446,6 @@ erDiagram
         varchar survivorship_version
         timestamp assembled_at
     }
-    golden_display {
-        varchar entity_id PK
-        varchar display_name
-        varchar display_email
-        varchar display_phone
-        varchar display_address
-        timestamp assembled_at
-    }
     acct_int_std_records {
         varchar record_key PK
         varchar source_system
@@ -499,14 +491,6 @@ erDiagram
         varchar survivorship_version
         timestamp assembled_at
     }
-    acct_golden_display {
-        varchar entity_id PK
-        varchar display_name
-        varchar display_domain
-        varchar display_phone
-        varchar display_address
-        timestamp assembled_at
-    }
     raw_records }o..|| ingest_batches : "ingest_batch_id"
     raw_records }o..|| entity_membership : "source_system, source_record_id"
     match_scores }o..|| runs : "run_id"
@@ -530,7 +514,6 @@ erDiagram
     golden_lineage }o..|| golden_overrides : "entity_id, attribute"
     golden_lineage }o..|| int_std_records : "record_key"
     golden_lineage }o..|| entity_membership : "source_system, source_record_id"
-    golden_display }o..|| entities : "entity_id"
     acct_int_std_records }o..|| ingest_batches : "ingest_batch_id"
     acct_int_std_records }o..|| entity_membership : "source_system, source_record_id"
     acct_int_std_records }o..|| raw_records : "source_system, source_record_id, content_hash"
@@ -539,7 +522,6 @@ erDiagram
     acct_golden_lineage }o..|| golden_overrides : "entity_id, attribute"
     acct_golden_lineage }o..|| acct_int_std_records : "record_key"
     acct_golden_lineage }o..|| entity_membership : "source_system, source_record_id"
-    acct_golden_display }o..|| entities : "entity_id"
 ```
 
 | relation | owner | description |
@@ -560,8 +542,6 @@ erDiagram
 | `int_std_records` | stage | One current standardized person record per record key: the standardization stage's output (supersession applied, tombstones excluded) and the matching stage's input. |
 | `golden_records` | stage | One resolved person: the surviving value per attribute, at a snapshot. |
 | `golden_lineage` | stage | Per-attribute survivorship provenance: which record each surviving golden value came from. |
-| `golden_display` | stage | Pre-rendered display strings for a resolved person, for list and detail views. |
 | `acct_int_std_records` | stage | One current standardized account record per record key: the account standardization stage's output (supersession applied, tombstones excluded) and the matching stage's input. |
 | `acct_golden_records` | stage | One resolved account/organization: the surviving value per attribute, at a snapshot. |
 | `acct_golden_lineage` | stage | Per-attribute survivorship provenance for a resolved account: which record each surviving value came from. |
-| `acct_golden_display` | stage | Pre-rendered display strings for a resolved account, for list and detail views. |

@@ -3,14 +3,12 @@
 //! `arrow_schema()` and (in later phases) its typed query functions.
 #![allow(clippy::all, clippy::pedantic, clippy::nursery)]
 
-pub mod acct_golden_display;
 pub mod acct_golden_lineage;
 pub mod acct_golden_record;
 pub mod acct_int_std_record;
 pub mod api_key;
 pub mod audit_log;
 pub mod config_version;
-pub mod golden_display;
 pub mod golden_lineage;
 pub mod golden_record;
 pub mod int_std_record;

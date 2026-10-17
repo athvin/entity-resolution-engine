@@ -80,7 +80,7 @@ Classification: **ENGINE** (exists, needs an API veneer) · **EXT** (engine exte
 | Real-time | Continuous tier: 1–5 min polling micro-batches | NEW + CONN | **Minutes, not seconds.** Stated plainly; entry-time `/check` endpoint is a later phase. |
 | Undo & restore | Never-assertion → reconcile split (engine) + writeback journal snapshots + SF Recycle Bin restore | ENGINE + NEW | Child-record reparenting done by SF merge is not automatically reversed; the product says so. |
 | Import wizard | Upload → profile → map → preview → commit as ingest + incremental run | NEW + EXT | Preview needs a **score-only match mode** (score a file against the corpus without mutating entities) — an engine extension. |
-| Find data | Search API over standardized columns + `golden_display` | NEW (thin) | Standardization (email/phone/name normalization) is the moat here. |
+| Find data | Search API over the standardized golden columns (inline concat + ILIKE in the golden read statements) | NEW (thin) | Standardization (email/phone/name normalization) is the moat here. |
 | Field analysis | Profiling job per source: fill rate, distinct counts, top values | NEW (thin) | Simple aggregates over staged data. |
 | Reporting/dashboard | KPI endpoints over `runs`/`run_stages`/`entity_events`/`review_queue` counters | NEW (thin) | All raw material exists. |
 | API integrations / Marketo | The engine's native multi-source shape; Marketo = second connector | ENGINE + CONN | We start cross-source; Cloudingo bolts it on. |
@@ -183,7 +183,7 @@ Publish shows the tier and estimated runtime, then enqueues the required run wit
 - Filter/sort columns are validated against the relation registry in `src/er/lake/model.py` — no string-built SQL from user input.
 - `?as_of=` history endpoints reuse the same time-travel mechanism; `entity_events` supplies the merge/split narrative.
 - **Explicit coupling:** `er lake maintain` snapshot expiry must retain snapshots longer than the maximum cursor/cache lifetime (cursors expire ≤1h; retention ≥24h).
-- **Pre-designed escape hatch, not built:** if fuzzy "find data" search outgrows queries over the normalized columns, sync `golden_display` to Postgres FTS per tenant. That is the only case that earns a serving copy.
+- **Pre-designed escape hatch, not built:** if fuzzy "find data" search outgrows queries over the normalized columns, materialise a display projection (the retired `golden_display` shape) and sync it to Postgres FTS per tenant. That is the only case that earns a serving copy.
 
 ## 9. AuthN/AuthZ
 

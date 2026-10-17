@@ -63,8 +63,9 @@ pub static GOLDEN_LINEAGE_ATTRIBUTES: LazyLock<Vec<&'static str>> = LazyLock::ne
     out
 });
 
-/// The three golden marts, in the order S4.6 lists them (rebuilt + reaped together).
-pub const GOLDEN_MART_RELATIONS: [&str; 3] = ["golden_records", "golden_lineage", "golden_display"];
+/// The golden marts, in the order S4.6 lists them (rebuilt together; the
+/// presentation-only `golden_display` was retired unbuilt).
+pub const GOLDEN_MART_RELATIONS: [&str; 2] = ["golden_records", "golden_lineage"];
 
 /// The `int_std_records` column list of S5, in DDL order (`record_key` leads: the
 /// logical key and Splink's `unique_id_column_name`).
@@ -123,10 +124,7 @@ mod tests {
         assert_eq!(STD_RECORD_COLUMNS.len(), 23);
         assert_eq!(STD_RECORD_COLUMNS[0], "record_key");
         assert_eq!(STD_RECORD_COLUMNS[19], "metadata");
-        assert_eq!(
-            GOLDEN_MART_RELATIONS,
-            ["golden_records", "golden_lineage", "golden_display"]
-        );
+        assert_eq!(GOLDEN_MART_RELATIONS, ["golden_records", "golden_lineage"]);
     }
 
     #[test]
