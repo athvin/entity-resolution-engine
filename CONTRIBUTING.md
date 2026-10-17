@@ -57,9 +57,25 @@ analyser refuses statements against unknown relations. New control-plane tables
 enter through an `entities/*/entity.yaml` (never hand DDL — er-server boots only
 the generated `POSTGRES_BASELINE`); new lake relations enter through the
 registry or an entity; the frontend's `erweb` schema changes only through
-drizzle migrations. Session-temp scratch tables and `dedupe-cli`'s
-operator-named outputs are the two deliberate exemptions. `docs/erd.md` is
-generated from the same authorities and CI fails when it is stale.
+drizzle migrations. `docs/erd.md` is generated from the same authorities and CI
+fails when it is stale.
+
+**And no free-form SQL.** Every persistent statement — read or write, both
+stores — is one of three governed kinds: a **declared statement**
+(`entities/<entity>/<op>/<name>.{sql,yaml}`, planned by the analyser, emitted as
+a typed function; lake reads carry `AT (VERSION => $snapshot)` or a justified
+`pin: live`), a **plan-vector-tested generator** (the golden marts,
+survivorship/masters, merge plans, the standardize stages — config/tenant-driven
+SQL whose real output the analyser plans over representative vectors), or the
+**engine core's execution-oracle SQL** (dedupe-core's model-derived blocking/
+scoring/clustering, proven against the captured Splink golden fixtures).
+`er-schema`'s `freeform_sql` test enforces the boundary: `query_strings` has no
+callers outside the engine core, and `er-server` names no lake relation in
+source. The deliberate exemptions, each visible at the call site: session-temp
+scratch tables and their reads (`Session::query_scratch_strings`, e.g. the
+`__preview_src` match preview), `dedupe-cli`'s operator-named outputs, and
+catalog introspection (`Session::lake_table_exists` / `relation_row_count` —
+catalog metadata, not a data contract).
 
 The fixture format is documented in
 [fixtures/static/FORMAT.md](fixtures/static/FORMAT.md). Benchmark and profiling
