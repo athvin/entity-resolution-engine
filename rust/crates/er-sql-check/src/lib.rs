@@ -12,13 +12,15 @@ mod catalog;
 mod emit;
 mod plan;
 mod rewrite;
+mod stage;
 mod statement;
 
 pub use analyze::{Diagnostic, analyze_catalog, analyze_statement};
 pub use catalog::build_store_catalog;
 pub use emit::emit_query_modules;
 pub use plan::parse_and_plan;
-pub use rewrite::{Rewritten, rewrite_lake};
+pub use rewrite::{Rewritten, rewrite_json_casts, rewrite_lake, strip_named_args};
+pub use stage::build_lake_stage_catalog;
 pub use statement::{
     LoadedStatement, Mode, Operation, Returns, StatementParam, StmtError, load_statements,
     operation_for_folder,

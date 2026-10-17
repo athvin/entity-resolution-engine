@@ -13,6 +13,30 @@ use regex::Regex;
 static SNAPSHOT_PIN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)\s+AT\s*\(\s*VERSION\s*=>\s*(\$?\w+)\s*\)").unwrap());
 
+/// A DuckDB named function argument prefix, `name := `. DataFusion's planner
+/// rejects named arguments (e.g. `struct_pack(key := a, value := b)`), so the
+/// prefix is dropped — the arguments become positional, which is all the analyser
+/// needs for schema inference. `:=` never appears elsewhere in the analysed SQL.
+static NAMED_ARG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[A-Za-z_]\w*\s*:=\s*").unwrap());
+
+/// Drop DuckDB named-argument prefixes (`name :=`), leaving positional arguments
+/// the planner accepts. Used for the engine's stage SQL (`struct_pack(key := ..)`).
+#[must_use]
+pub fn strip_named_args(sql: &str) -> String {
+    NAMED_ARG.replace_all(sql, "").into_owned()
+}
+
+/// A `::json` / `::jsonb` postfix cast. DataFusion's planner has no JSON SQL type;
+/// the analyser treats JSON as text anyway, so the cast is rewritten to `::varchar`.
+static JSON_CAST: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)::jsonb?\b").unwrap());
+
+/// Rewrite `::json` / `::jsonb` casts to `::varchar` so stage SQL that builds JSON
+/// (`'{}'::json`, `to_json(..)::jsonb`) plans; JSON is text to the analyser.
+#[must_use]
+pub fn rewrite_json_casts(sql: &str) -> String {
+    JSON_CAST.replace_all(sql, "::varchar").into_owned()
+}
+
 /// What the rewrite step removed from a statement, so later passes can check the
 /// rules those clauses stood for.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -77,5 +101,25 @@ mod tests {
         let r = rewrite_lake(sql);
         assert_eq!(r.snapshot_param, None);
         assert_eq!(r.sql, sql);
+    }
+
+    #[test]
+    fn strips_duckdb_named_arguments_to_positional() {
+        assert_eq!(
+            strip_named_args("struct_pack(key := a, value := b)"),
+            "struct_pack(a, b)"
+        );
+    }
+
+    #[test]
+    fn rewrites_json_casts_to_varchar() {
+        assert_eq!(
+            rewrite_json_casts("coalesce(m, '{}'::json)"),
+            "coalesce(m, '{}'::varchar)"
+        );
+        assert_eq!(
+            rewrite_json_casts("to_json(x)::jsonb"),
+            "to_json(x)::varchar"
+        );
     }
 }
