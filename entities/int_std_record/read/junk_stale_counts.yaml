@@ -1,0 +1,10 @@
+kind: statement
+operation: read
+description: "Junk (present-but-invalid email/phone) and stale (freshness older than the window) counts over the standardized records at a pinned snapshot (the data-quality rates)."
+params:
+  - { name: snapshot, type: bigint }
+  - { name: stale_days, type: bigint }
+returns:
+  - { name: n, type: bigint }
+  - { name: junk, type: bigint }
+  - { name: stale, type: bigint }

@@ -1,0 +1,12 @@
+kind: statement
+operation: read
+description: "The member rows of every entity in an id range at a pinned snapshot (the duplicates page assembles groups from this)."
+params:
+  - { name: snapshot, type: bigint }
+  - { name: first, type: varchar }
+  - { name: last, type: varchar }
+returns:
+  - { name: entity_id, type: varchar, nullable: false }
+  - { name: source_system, type: varchar, nullable: false }
+  - { name: source_record_id, type: varchar, nullable: false }
+  - { name: record_key, type: varchar, nullable: false }

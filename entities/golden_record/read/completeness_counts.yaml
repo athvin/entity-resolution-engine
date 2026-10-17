@@ -1,0 +1,18 @@
+kind: statement
+operation: read
+description: "Per-attribute non-null counts over the 11 survivable golden columns at a pinned snapshot (the data-quality completeness score)."
+params:
+  - { name: snapshot, type: bigint }
+returns:
+  - { name: n, type: bigint }
+  - { name: c_given_name, type: bigint }
+  - { name: c_family_name, type: bigint }
+  - { name: c_email, type: bigint }
+  - { name: c_phone_e164, type: bigint }
+  - { name: c_addr_number, type: bigint }
+  - { name: c_addr_street, type: bigint }
+  - { name: c_addr_unit, type: bigint }
+  - { name: c_addr_city, type: bigint }
+  - { name: c_addr_region, type: bigint }
+  - { name: c_addr_postal, type: bigint }
+  - { name: c_birth_date, type: bigint }

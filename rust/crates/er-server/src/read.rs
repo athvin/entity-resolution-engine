@@ -25,73 +25,6 @@ use serde_json::{Value, json};
 const DEFAULT_LIMIT: i64 = 50;
 const MAX_LIMIT: i64 = 200;
 
-/// The golden-record attribute columns, in display order. `assembled_at` is
-/// intentionally absent — er-golden omits that volatile column from the lake.
-const GOLDEN_COLUMNS: &str = "entity_id, given_name, family_name, email, phone_e164, \
-     addr_number, addr_street, addr_unit, addr_city, addr_region, addr_postal, \
-     birth_date, metadata, survivorship_version";
-
-/// The Account/Org golden columns (`acct_golden_records`), display order.
-const ACCT_GOLDEN_COLUMNS: &str = "entity_id, company_name, domain, phone_e164, \
-     addr_street, addr_city, addr_region, addr_postal, metadata, survivorship_version";
-
-/// Which golden projection a read serves, selected by the org's entity type.
-/// Person is the default, so an org that never declares `entity_type` reads the
-/// exact same tables/columns/search as before (byte-for-byte unchanged).
-pub struct GoldenView {
-    pub golden_table: &'static str,
-    pub lineage_table: &'static str,
-    pub columns: &'static str,
-    /// The `coalesce(..) || ' ' || ..` expression the `q` contains-search runs over.
-    pub search_expr: &'static str,
-    /// The `any_value(g.<col>) AS <col>` preview fragment for a duplicate group row.
-    pub group_preview: &'static str,
-}
-
-impl GoldenView {
-    /// The person projection (`golden_records`/`golden_lineage`, name+email search).
-    #[must_use]
-    pub fn person() -> Self {
-        GoldenView {
-            golden_table: "lake.main.golden_records",
-            lineage_table: "lake.main.golden_lineage",
-            columns: GOLDEN_COLUMNS,
-            search_expr: "coalesce(given_name,'') || ' ' || coalesce(family_name,'') || ' ' || coalesce(email,'')",
-            group_preview: "any_value(g.given_name) AS given_name, \
-                            any_value(g.family_name) AS family_name, \
-                            any_value(g.email) AS email",
-        }
-    }
-
-    /// The Account/Org projection (`acct_golden_records`, company+domain search).
-    #[must_use]
-    pub fn account() -> Self {
-        GoldenView {
-            golden_table: "lake.main.acct_golden_records",
-            lineage_table: "lake.main.acct_golden_lineage",
-            columns: ACCT_GOLDEN_COLUMNS,
-            search_expr: "coalesce(company_name,'') || ' ' || coalesce(domain,'')",
-            group_preview: "any_value(g.company_name) AS company_name, \
-                            any_value(g.domain) AS domain",
-        }
-    }
-
-    /// Pick the projection for an org's entity type.
-    #[must_use]
-    pub fn for_entity_type(entity_type: EntityType) -> Self {
-        match entity_type {
-            EntityType::Account => GoldenView::account(),
-            EntityType::Person => GoldenView::person(),
-        }
-    }
-}
-
-impl Default for GoldenView {
-    fn default() -> Self {
-        GoldenView::person()
-    }
-}
-
 /// A decoded keyset cursor: the pinned snapshot and the last key emitted.
 pub struct Cursor {
     pub snapshot: i64,
@@ -460,51 +393,128 @@ pub fn active_assertions(
 
 /// A keyset page of duplicate groups: entities with >=2 members, with their
 /// member list and a golden preview (`readapi.duplicate_groups`). Keyset on
-/// `entity_id`.
+/// `entity_id`. Three declared statements — the group page, the member rows in
+/// the page's id range, and the golden preview in that range — assembled here
+/// (the old single query leaned on DuckDB-only `list(.. ORDER BY ..)`).
 ///
 /// # Errors
 /// Propagates the lake query error.
 pub fn duplicates(
     session: &Session,
-    view: &GoldenView,
+    entity_type: EntityType,
     snapshot: i64,
     after: Option<&str>,
     limit: i64,
 ) -> Result<(Vec<Value>, Option<String>), String> {
+    use std::collections::BTreeMap;
+
     let limit = limit.clamp(1, MAX_LIMIT);
-    let at = format!("AT (VERSION => {snapshot})");
-    let after_sql = after.map_or(String::new(), |a| format!("WHERE m.entity_id > {}", lit(a)));
-    // Pin each table via a CTE (clean snapshot read) rather than aliasing a
-    // time-travelled table inline, which the grammar handles awkwardly. The
-    // golden table + the per-group preview columns come from the org's entity
-    // view (person: name+email; account: company+domain).
-    let sql = format!(
-        "SELECT entity_id, to_json(t) FROM ( \
-           WITH m AS (SELECT * FROM lake.main.entity_membership {at}), \
-                g AS (SELECT * FROM {golden} {at}) \
-           SELECT m.entity_id, count(*) AS member_count, \
-                  list(m.source_system || ':' || m.source_record_id ORDER BY m.record_key) \
-                    AS members, \
-                  {preview} \
-           FROM m LEFT JOIN g ON g.entity_id = m.entity_id \
-           {after_sql} \
-           GROUP BY m.entity_id HAVING count(*) >= 2 \
-           ORDER BY m.entity_id LIMIT {} \
-         ) t ORDER BY entity_id",
+    let conn = session.connection();
+    let groups = er_entities::entity_membership::read::duplicate_groups_page(
+        conn,
+        snapshot,
+        after,
         limit + 1,
-        golden = view.golden_table,
-        preview = view.group_preview,
-    );
-    let rows = session.query_strings(&sql).map_err(|e| e.to_string())?;
-    let has_more = rows.len() as i64 > limit;
-    let page = &rows[..rows.len().min(limit as usize)];
+    )
+    .map_err(|e| e.to_string())?;
+    let has_more = groups.len() as i64 > limit;
+    let page = &groups[..groups.len().min(usize::try_from(limit).unwrap_or(0))];
+    let Some((first, last)) = page.first().map(|f| {
+        (
+            f.entity_id.as_str(),
+            page[page.len() - 1].entity_id.as_str(),
+        )
+    }) else {
+        return Ok((Vec::new(), None));
+    };
+
+    // The members of every entity in the page's id range, already ordered by
+    // (entity_id, record_key) — so each group's list is record_key-ordered, the
+    // way the old `list(.. ORDER BY record_key)` aggregate built it.
+    let members =
+        er_entities::entity_membership::read::members_in_range(conn, snapshot, first, last)
+            .map_err(|e| e.to_string())?;
+    let mut member_lists: BTreeMap<&str, Vec<Value>> = BTreeMap::new();
+    for m in &members {
+        member_lists
+            .entry(m.entity_id.as_str())
+            .or_default()
+            .push(Value::from(format!(
+                "{}:{}",
+                m.source_system, m.source_record_id
+            )));
+    }
+
+    // The golden preview per entity in the range (person: name+email; account:
+    // company+domain), as a ready-to-insert field map. A group whose golden row
+    // is absent previews as nulls, like the old LEFT JOIN.
+    let preview_fields: &[&str] = match entity_type {
+        EntityType::Person => &["given_name", "family_name", "email"],
+        EntityType::Account => &["company_name", "domain"],
+    };
+    let mut previews: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+    match entity_type {
+        EntityType::Person => {
+            let rows =
+                er_entities::golden_record::read::preview_in_range(conn, snapshot, first, last)
+                    .map_err(|e| e.to_string())?;
+            for r in rows {
+                previews.insert(
+                    r.entity_id,
+                    vec![
+                        r.given_name.map_or(Value::Null, Value::from),
+                        r.family_name.map_or(Value::Null, Value::from),
+                        r.email.map_or(Value::Null, Value::from),
+                    ],
+                );
+            }
+        }
+        EntityType::Account => {
+            let rows = er_entities::acct_golden_record::read::preview_in_range(
+                conn, snapshot, first, last,
+            )
+            .map_err(|e| e.to_string())?;
+            for r in rows {
+                previews.insert(
+                    r.entity_id,
+                    vec![
+                        r.company_name.map_or(Value::Null, Value::from),
+                        r.domain.map_or(Value::Null, Value::from),
+                    ],
+                );
+            }
+        }
+    }
+
     let items: Vec<Value> = page
         .iter()
-        .map(|r| serde_json::from_str(&r[1]).unwrap_or(Value::Null))
+        .map(|g| {
+            let mut obj = serde_json::Map::new();
+            obj.insert("entity_id".to_string(), Value::from(g.entity_id.clone()));
+            obj.insert(
+                "member_count".to_string(),
+                Value::from(g.member_count.unwrap_or(0)),
+            );
+            obj.insert(
+                "members".to_string(),
+                Value::Array(
+                    member_lists
+                        .remove(g.entity_id.as_str())
+                        .unwrap_or_default(),
+                ),
+            );
+            let values = previews.remove(&g.entity_id);
+            for (i, field) in preview_fields.iter().enumerate() {
+                let v = values
+                    .as_ref()
+                    .and_then(|vals| vals.get(i).cloned())
+                    .unwrap_or(Value::Null);
+                obj.insert((*field).to_string(), v);
+            }
+            Value::Object(obj)
+        })
         .collect();
-    let next_cursor = has_more
-        .then(|| page.last().map(|r| encode_cursor(snapshot, &r[0])))
-        .flatten();
+    let next_cursor = has_more.then(|| encode_cursor(snapshot, last));
     Ok((items, next_cursor))
 }
 
@@ -527,43 +537,30 @@ pub fn match_scores_list(
     limit: i64,
 ) -> Result<(Vec<Value>, Option<String>), String> {
     let limit = limit.clamp(1, MAX_LIMIT);
-    let at = format!("AT (VERSION => {snapshot})");
-    let mut filters = vec!["is_active".to_string()];
-    if let Some(a) = after {
-        let (ka, kb) = a.split_once(PAIR_SEP).unwrap_or((a, ""));
-        filters.push(format!(
-            "(rec_a_key, rec_b_key) > ({}, {})",
-            lit(ka),
-            lit(kb)
-        ));
-    }
-    if let Some(lo) = min_prob {
-        filters.push(format!("match_probability >= {lo}"));
-    }
-    if let Some(hi) = max_prob {
-        filters.push(format!("match_probability <= {hi}"));
-    }
-    let sql = format!(
-        "SELECT rec_a_key, rec_b_key, to_json(t) FROM ( \
-           SELECT rec_a_key, rec_b_key, match_probability, model_version, evidence, run_id, \
-                  scored_at \
-           FROM lake.main.match_scores {at} WHERE {} \
-           ORDER BY rec_a_key, rec_b_key LIMIT {} \
-         ) t ORDER BY rec_a_key, rec_b_key",
-        filters.join(" AND "),
-        limit + 1
-    );
-    let rows = session.query_strings(&sql).map_err(|e| e.to_string())?;
+    // The composite cursor splits into the statement's expanded tuple predicate
+    // ($after_a/$after_b: `a > ka OR (a = ka AND b > kb)`).
+    let pair = after.map(|a| a.split_once(PAIR_SEP).unwrap_or((a, "")));
+    let rows = er_entities::match_score::read::active_page(
+        session.connection(),
+        snapshot,
+        pair.map(|(ka, _)| ka),
+        pair.map(|(_, kb)| kb),
+        min_prob,
+        max_prob,
+        limit + 1,
+    )
+    .map_err(|e| e.to_string())?;
     let has_more = rows.len() as i64 > limit;
-    let page = &rows[..rows.len().min(limit as usize)];
-    let items: Vec<Value> = page
-        .iter()
-        .map(|r| serde_json::from_str(&r[2]).unwrap_or(Value::Null))
-        .collect();
+    let page = &rows[..rows.len().min(usize::try_from(limit).unwrap_or(0))];
+    let items = rows_to_values(page);
     let next_cursor = has_more
         .then(|| {
-            page.last()
-                .map(|r| encode_cursor(snapshot, &format!("{}{PAIR_SEP}{}", r[0], r[1])))
+            page.last().map(|r| {
+                encode_cursor(
+                    snapshot,
+                    &format!("{}{PAIR_SEP}{}", r.rec_a_key, r.rec_b_key),
+                )
+            })
         })
         .flatten();
     Ok((items, next_cursor))
@@ -611,29 +608,29 @@ pub fn records_by_key(
     if keys.is_empty() {
         return Ok(Vec::new());
     }
-    let in_list = keys.iter().map(|k| lit(k)).collect::<Vec<_>>().join(", ");
-    let sql = format!(
-        "SELECT to_json(struct_pack( \
-           record_key := record_key, \
-           source_system := source_system, \
-           source_record_id := source_record_id, \
-           attributes := struct_pack( \
-             given_name := given_name, family_name := family_name, \
-             name_variants := name_variants, email := email, email_valid := email_valid, \
-             phone_e164 := phone_e164, phone_valid := phone_valid, \
-             addr_number := addr_number, addr_street := addr_street, addr_unit := addr_unit, \
-             addr_city := addr_city, addr_region := addr_region, addr_postal := addr_postal, \
-             birth_date := birth_date, metadata := metadata, \
-             updated_at_source := updated_at_source \
-           ) \
-         )) \
-         FROM lake.main.int_std_records AT (VERSION => {snapshot}) \
-         WHERE record_key IN ({in_list}) ORDER BY record_key"
-    );
-    let rows = session.query_strings(&sql).map_err(|e| e.to_string())?;
+    // The lake IN-list idiom: the keys cross as one chr(31)-delimited varchar
+    // and split in SQL (duckdb-rs has no LIST binding).
+    let joined = keys.join("\u{1f}");
+    let rows = er_entities::int_std_record::read::by_keys(session.connection(), snapshot, &joined)
+        .map_err(|e| e.to_string())?;
+    // The old `struct_pack` nesting, rebuilt in Rust: the identity columns on
+    // top, every other column under `attributes`. Serializing the typed row
+    // first keeps the DuckDB-compatible timestamp rendering.
     Ok(rows
         .iter()
-        .map(|r| serde_json::from_str(&r[0]).unwrap_or(Value::Null))
+        .map(|r| {
+            let Ok(Value::Object(mut all)) = serde_json::to_value(r) else {
+                return Value::Null;
+            };
+            let mut top = serde_json::Map::new();
+            for key in ["record_key", "source_system", "source_record_id"] {
+                if let Some(v) = all.remove(key) {
+                    top.insert(key.to_string(), v);
+                }
+            }
+            top.insert("attributes".to_string(), Value::Object(all));
+            Value::Object(top)
+        })
         .collect())
 }
 
@@ -1069,75 +1066,51 @@ pub fn metrics(session: &Session, snapshot: i64) -> Result<Value, String> {
 /// Propagates a lake query error (the core tables must exist — i.e. the org has
 /// had at least one run).
 pub fn data_quality(session: &Session, snapshot: i64, stale_days: i64) -> Result<Value, String> {
-    let at = format!("AT (VERSION => {snapshot})");
+    let conn = session.connection();
     let records = std_record_count(session, snapshot)?;
     let entities = golden_record_count(session, snapshot)?;
 
-    // Completeness: per-column non-null fraction over golden_records. The 11
-    // survivable columns (GOLDEN_COLUMNS minus entity_id/metadata/version).
-    let cols: [&str; 11] = [
-        "given_name",
-        "family_name",
-        "email",
-        "phone_e164",
-        "addr_number",
-        "addr_street",
-        "addr_unit",
-        "addr_city",
-        "addr_region",
-        "addr_postal",
-        "birth_date",
-    ];
-    let select_counts = cols
-        .iter()
-        .map(|c| format!("count({c}) AS c_{c}"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let comp_rows = session
-        .query_strings(&format!(
-            "SELECT count(*) AS n, {select_counts} FROM lake.main.golden_records {at}"
-        ))
+    // Completeness: per-column non-null fraction over golden_records — the 11
+    // survivable columns, each a named count in the declared statement.
+    let comp_rows = er_entities::golden_record::read::completeness_counts(conn, snapshot)
         .map_err(|e| e.to_string())?;
     let comp = comp_rows
         .first()
         .ok_or_else(|| "completeness query returned no row".to_string())?;
-    let n_golden = comp
-        .first()
-        .and_then(|s| s.parse::<f64>().ok())
-        .unwrap_or(0.0);
+    let n_golden = comp.n.unwrap_or(0) as f64;
+    let counts: [(&str, Option<i64>); 11] = [
+        ("given_name", comp.c_given_name),
+        ("family_name", comp.c_family_name),
+        ("email", comp.c_email),
+        ("phone_e164", comp.c_phone_e164),
+        ("addr_number", comp.c_addr_number),
+        ("addr_street", comp.c_addr_street),
+        ("addr_unit", comp.c_addr_unit),
+        ("addr_city", comp.c_addr_city),
+        ("addr_region", comp.c_addr_region),
+        ("addr_postal", comp.c_addr_postal),
+        ("birth_date", comp.c_birth_date),
+    ];
     let mut by_attribute = serde_json::Map::new();
     let mut comp_sum = 0.0;
-    for (i, c) in cols.iter().enumerate() {
-        let cnt = comp
-            .get(i + 1)
-            .and_then(|s| s.parse::<f64>().ok())
-            .unwrap_or(0.0);
+    for (name, count) in counts {
+        let cnt = count.unwrap_or(0) as f64;
         let frac = if n_golden > 0.0 { cnt / n_golden } else { 0.0 };
         comp_sum += frac;
-        by_attribute.insert((*c).to_string(), json!(frac));
+        by_attribute.insert(name.to_string(), json!(frac));
     }
-    let completeness = comp_sum / cols.len() as f64;
+    let completeness = comp_sum / counts.len() as f64;
 
-    // Junk + stale in one scan of int_std_records.
-    let js_rows = session
-        .query_strings(&format!(
-            "SELECT count(*) AS n, \
-               count(*) FILTER (WHERE (email IS NOT NULL AND email_valid = false) \
-                                   OR (phone_e164 IS NOT NULL AND phone_valid = false)) AS junk, \
-               count(*) FILTER (WHERE COALESCE(updated_at_source, ingested_at) \
-                                      < CAST(now() AS TIMESTAMP) - INTERVAL '{stale_days} days') AS stale \
-             FROM lake.main.int_std_records {at}"
-        ))
+    // Junk + stale in one scan of int_std_records (the stale window crosses as
+    // a bound `$stale_days * INTERVAL '1 day'`, no longer inside a string).
+    let js_rows = er_entities::int_std_record::read::junk_stale_counts(conn, snapshot, stale_days)
         .map_err(|e| e.to_string())?;
     let js = js_rows
         .first()
         .ok_or_else(|| "junk/stale query returned no row".to_string())?;
-    let n_std = js
-        .first()
-        .and_then(|s| s.parse::<f64>().ok())
-        .unwrap_or(0.0);
-    let junk = js.get(1).and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
-    let stale = js.get(2).and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
+    let n_std = js.n.unwrap_or(0) as f64;
+    let junk = js.junk.unwrap_or(0) as f64;
+    let stale = js.stale.unwrap_or(0) as f64;
     let junk_rate = if n_std > 0.0 { junk / n_std } else { 0.0 };
     let stale_rate = if n_std > 0.0 { stale / n_std } else { 0.0 };
 

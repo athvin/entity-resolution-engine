@@ -18,6 +18,17 @@ fn shape_err(message: String) -> duckdb::Error {
     duckdb::Error::FromSqlConversionFailure(0, duckdb::types::Type::Any, message.into())
 }
 
+/// Whether an actual Arrow type matches the declared one structurally. A list's
+/// child-field name is ignored: DuckDB names it after the source expression
+/// (`l`, `item`, ...), which is not part of the declared shape; the child's own
+/// data type still must match.
+fn data_type_matches(actual: &DataType, expected: &DataType) -> bool {
+    match (actual, expected) {
+        (DataType::List(a), DataType::List(e)) => a.data_type() == e.data_type(),
+        _ => actual == expected,
+    }
+}
+
 /// Check a batch against the compiled-in expected shape: column count, names and
 /// Arrow data types, in order (nullability is per-value, checked by `req`).
 pub fn check_columns(
@@ -34,7 +45,7 @@ pub fn check_columns(
     }
     for (i, (name, data_type)) in expected.iter().enumerate() {
         let field = schema.field(i);
-        if field.name() != name || field.data_type() != data_type {
+        if field.name() != name || !data_type_matches(field.data_type(), data_type) {
             return Err(shape_err(format!(
                 "column {i}: expected {name} {data_type:?}, got {} {:?}",
                 field.name(),

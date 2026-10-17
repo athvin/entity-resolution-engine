@@ -68,6 +68,117 @@ impl MatchScore {
 
 pub mod read {
     //! @generated query functions for this entity + operation.
+    /// One row of `active_page`: One keyset page of active pairwise match scores at a pinned snapshot, keyed on the record pair, optionally within a probability band.
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct ActivePageRow {
+        pub rec_a_key: String,
+        pub rec_b_key: String,
+        pub match_probability: f64,
+        pub model_version: String,
+        pub evidence: ::serde_json::Value,
+        pub run_id: String,
+        #[serde(serialize_with = "crate::batch::ser_duckdb_timestamp")]
+        pub scored_at: ::chrono::DateTime<::chrono::Utc>,
+    }
+
+    impl ActivePageRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("rec_a_key", ::arrow::datatypes::DataType::Utf8),
+                ("rec_b_key", ::arrow::datatypes::DataType::Utf8),
+                ("match_probability", ::arrow::datatypes::DataType::Float64),
+                ("model_version", ::arrow::datatypes::DataType::Utf8),
+                ("evidence", ::arrow::datatypes::DataType::Utf8),
+                ("run_id", ::arrow::datatypes::DataType::Utf8),
+                (
+                    "scored_at",
+                    ::arrow::datatypes::DataType::Timestamp(
+                        ::arrow::datatypes::TimeUnit::Microsecond,
+                        None,
+                    ),
+                ),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "rec_a_key")?;
+                let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "rec_b_key")?;
+                let c2: &::arrow::array::Float64Array =
+                    crate::batch::col(batch, 2, "match_probability")?;
+                let c3: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 3, "model_version")?;
+                let c4: &::arrow::array::StringArray = crate::batch::col(batch, 4, "evidence")?;
+                let c5: &::arrow::array::StringArray = crate::batch::col(batch, 5, "run_id")?;
+                let c6: &::arrow::array::TimestampMicrosecondArray =
+                    crate::batch::col(batch, 6, "scored_at")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        rec_a_key: crate::batch::req(crate::batch::opt_str(c0, i), "rec_a_key", i)?,
+                        rec_b_key: crate::batch::req(crate::batch::opt_str(c1, i), "rec_b_key", i)?,
+                        match_probability: crate::batch::req(
+                            crate::batch::opt_f64(c2, i),
+                            "match_probability",
+                            i,
+                        )?,
+                        model_version: crate::batch::req(
+                            crate::batch::opt_str(c3, i),
+                            "model_version",
+                            i,
+                        )?,
+                        evidence: crate::batch::req(
+                            crate::batch::opt_json(c4, i, "evidence")?,
+                            "evidence",
+                            i,
+                        )?,
+                        run_id: crate::batch::req(crate::batch::opt_str(c5, i), "run_id", i)?,
+                        scored_at: crate::batch::req(crate::batch::opt_ts(c6, i), "scored_at", i)?,
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// One keyset page of active pairwise match scores at a pinned snapshot, keyed on the record pair, optionally within a probability band.
+    pub fn active_page(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+        after_a: Option<&str>,
+        after_b: Option<&str>,
+        min_prob: Option<f64>,
+        max_prob: Option<f64>,
+        limit: i64,
+    ) -> ::duckdb::Result<Vec<ActivePageRow>> {
+        const SQL: &str = "SELECT rec_a_key, rec_b_key, match_probability, model_version, evidence, run_id, scored_at
+FROM lake.main.match_scores AT (VERSION => {snapshot})
+WHERE is_active
+  AND ($1 IS NULL OR rec_a_key > $1
+       OR (rec_a_key = $1 AND rec_b_key > $2))
+  AND ($3 IS NULL OR match_probability >= $3)
+  AND ($4 IS NULL OR match_probability <= $4)
+ORDER BY rec_a_key, rec_b_key
+LIMIT $5
+";
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = conn.prepare(&sql)?;
+        let batches = stmt
+            .query_arrow(::duckdb::params![
+                after_a, after_b, min_prob, max_prob, limit
+            ])?
+            .collect::<Vec<_>>();
+        ActivePageRow::from_batches(&batches)
+    }
+
     /// One row of `auto_merge_counts`: Per-run count of active pairs at or above the auto-merge threshold, at a pinned snapshot (the runs surface).
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
     pub struct AutoMergeCountsRow {
