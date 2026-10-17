@@ -1,10 +1,10 @@
-//! The S4.2 standardization macros as DuckDB SQL generators (port of
-//! `dbt/macros/std/*.sql`).
+//! The S4.2 standardization macros as DuckDB SQL generators (port of the
+//! retired dbt `macros/std/*.sql`).
 //!
 //! Each macro is pure Jinja over DuckDB string functions (no parsing library —
 //! S2.1), so the Rust port is a function that renders the same SQL expression,
 //! executed through dedupe-core's session. DuckDB runs identical SQL, so the
-//! output is byte-identical to the dbt pipeline; the rendered text need not match
+//! output is byte-identical to that pipeline's; the rendered text need not match
 //! the macro's whitespace, only its semantics. Region and other `standardization`
 //! settings are resolved at render time (the caller passes them), exactly as the
 //! macros resolve them from the `standardization` var.

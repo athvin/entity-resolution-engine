@@ -1,17 +1,4 @@
 {
- "dbt_owned": [
-  "stg_records",
-  "int_std_records",
-  "int_blocking_keys",
-  "golden_records",
-  "golden_lineage",
-  "golden_display",
-  "acct_stg_records",
-  "acct_int_std_records",
-  "acct_golden_records",
-  "acct_golden_lineage",
-  "acct_golden_display"
- ],
  "ddl_owned": [
   "raw_records",
   "match_scores",
@@ -76,7 +63,7 @@
      "where": null
     }
    ],
-   "owner": "dbt"
+   "owner": "stage"
   },
   "acct_golden_lineage": {
    "columns": [
@@ -139,7 +126,7 @@
      "where": null
     }
    ],
-   "owner": "dbt"
+   "owner": "stage"
   },
   "acct_golden_records": {
    "columns": [
@@ -209,7 +196,7 @@
      "where": null
     }
    ],
-   "owner": "dbt"
+   "owner": "stage"
   },
   "acct_int_std_records": {
    "columns": [
@@ -324,119 +311,7 @@
      "where": null
     }
    ],
-   "owner": "dbt"
-  },
-  "acct_stg_records": {
-   "columns": [
-    {
-     "name": "source_system",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "source_record_id",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "content_hash",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "std_version",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "company_name",
-     "nullable": true,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "company_name_norm",
-     "nullable": true,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "company_variants",
-     "nullable": false,
-     "type": "LIST(VARCHAR)"
-    },
-    {
-     "name": "domain",
-     "nullable": true,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "domain_norm",
-     "nullable": true,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "phone_e164",
-     "nullable": true,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "phone_valid",
-     "nullable": true,
-     "type": "BOOLEAN"
-    },
-    {
-     "name": "addr_street",
-     "nullable": true,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "addr_city",
-     "nullable": true,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "addr_region",
-     "nullable": true,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "addr_postal",
-     "nullable": true,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "metadata",
-     "nullable": true,
-     "type": "JSON"
-    },
-    {
-     "name": "updated_at_source",
-     "nullable": true,
-     "type": "TIMESTAMP"
-    },
-    {
-     "name": "ingest_batch_id",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "ingested_at",
-     "nullable": false,
-     "type": "TIMESTAMP"
-    }
-   ],
-   "create_table_sql": null,
-   "enums": {},
-   "keys": [
-    {
-     "columns": [
-      "source_system",
-      "source_record_id",
-      "content_hash"
-     ],
-     "where": null
-    }
-   ],
-   "owner": "dbt"
+   "owner": "stage"
   },
   "assertions": {
    "columns": [
@@ -513,7 +388,7 @@
      "where": "active"
     }
    ],
-   "owner": "ddl.py"
+   "owner": "ddl"
   },
   "cut_edges": {
    "columns": [
@@ -595,7 +470,7 @@
      "where": "active"
     }
    ],
-   "owner": "ddl.py"
+   "owner": "ddl"
   },
   "entities": {
    "columns": [
@@ -651,7 +526,7 @@
      "where": null
     }
    ],
-   "owner": "ddl.py"
+   "owner": "ddl"
   },
   "entity_events": {
    "columns": [
@@ -725,7 +600,7 @@
      "where": null
     }
    ],
-   "owner": "ddl.py"
+   "owner": "ddl"
   },
   "entity_membership": {
    "columns": [
@@ -771,7 +646,7 @@
      "where": null
     }
    ],
-   "owner": "ddl.py"
+   "owner": "ddl"
   },
   "er_standardize_work": {
    "columns": [
@@ -808,7 +683,7 @@
      "where": null
     }
    ],
-   "owner": "ddl.py"
+   "owner": "ddl"
   },
   "er_touched_entities": {
    "columns": [
@@ -849,7 +724,7 @@
      "where": null
     }
    ],
-   "owner": "ddl.py"
+   "owner": "ddl"
   },
   "golden_display": {
    "columns": [
@@ -894,7 +769,7 @@
      "where": null
     }
    ],
-   "owner": "dbt"
+   "owner": "stage"
   },
   "golden_lineage": {
    "columns": [
@@ -959,7 +834,7 @@
      "where": null
     }
    ],
-   "owner": "dbt"
+   "owner": "stage"
   },
   "golden_overrides": {
    "columns": [
@@ -1005,7 +880,7 @@
      "where": null
     }
    ],
-   "owner": "ddl.py"
+   "owner": "ddl"
   },
   "golden_records": {
    "columns": [
@@ -1095,7 +970,7 @@
      "where": null
     }
    ],
-   "owner": "dbt"
+   "owner": "stage"
   },
   "ingest_batches": {
    "columns": [
@@ -1165,49 +1040,7 @@
      "where": null
     }
    ],
-   "owner": "ddl.py"
-  },
-  "int_blocking_keys": {
-   "columns": [
-    {
-     "name": "key_type",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "key_value",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "record_key",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "source_system",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "source_record_id",
-     "nullable": false,
-     "type": "VARCHAR"
-    }
-   ],
-   "create_table_sql": null,
-   "enums": {},
-   "keys": [
-    {
-     "columns": [
-      "key_type",
-      "key_value",
-      "record_key"
-     ],
-     "where": null
-    }
-   ],
-   "owner": "dbt"
+   "owner": "ddl"
   },
   "int_std_records": {
    "columns": [
@@ -1337,7 +1170,7 @@
      "where": null
     }
    ],
-   "owner": "dbt"
+   "owner": "stage"
   },
   "match_scores": {
    "columns": [
@@ -1420,7 +1253,7 @@
      "where": null
     }
    ],
-   "owner": "ddl.py"
+   "owner": "ddl"
   },
   "model_registry": {
    "columns": [
@@ -1494,7 +1327,7 @@
      "where": "status='active'"
     }
    ],
-   "owner": "ddl.py"
+   "owner": "ddl"
   },
   "nickname_variants": {
    "columns": [
@@ -1556,7 +1389,7 @@
      "where": "active"
     }
    ],
-   "owner": "ddl.py"
+   "owner": "ddl"
   },
   "raw_records": {
    "columns": [
@@ -1613,7 +1446,7 @@
      "where": null
     }
    ],
-   "owner": "ddl.py"
+   "owner": "ddl"
   },
   "record_overlays": {
    "columns": [
@@ -1664,7 +1497,7 @@
      "where": null
     }
    ],
-   "owner": "ddl.py"
+   "owner": "ddl"
   },
   "review_queue": {
    "columns": [
@@ -1770,7 +1603,7 @@
      "where": "status='open'"
     }
    ],
-   "owner": "ddl.py"
+   "owner": "ddl"
   },
   "run_stages": {
    "columns": [
@@ -1920,7 +1753,7 @@
      "where": null
     }
    ],
-   "owner": "ddl.py"
+   "owner": "ddl"
   },
   "runs": {
    "columns": [
@@ -2038,134 +1871,7 @@
      "where": null
     }
    ],
-   "owner": "ddl.py"
-  },
-  "stg_records": {
-   "columns": [
-    {
-     "name": "source_system",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "source_record_id",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "content_hash",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "std_version",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "given_name",
-     "nullable": true,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "family_name",
-     "nullable": true,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "name_variants",
-     "nullable": false,
-     "type": "LIST(VARCHAR)"
-    },
-    {
-     "name": "email",
-     "nullable": true,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "email_valid",
-     "nullable": true,
-     "type": "BOOLEAN"
-    },
-    {
-     "name": "phone_e164",
-     "nullable": true,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "phone_valid",
-     "nullable": true,
-     "type": "BOOLEAN"
-    },
-    {
-     "name": "addr_number",
-     "nullable": true,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "addr_street",
-     "nullable": true,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "addr_unit",
-     "nullable": true,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "addr_city",
-     "nullable": true,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "addr_region",
-     "nullable": true,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "addr_postal",
-     "nullable": true,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "birth_date",
-     "nullable": true,
-     "type": "DATE"
-    },
-    {
-     "name": "metadata",
-     "nullable": true,
-     "type": "JSON"
-    },
-    {
-     "name": "updated_at_source",
-     "nullable": true,
-     "type": "TIMESTAMP"
-    },
-    {
-     "name": "ingest_batch_id",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "ingested_at",
-     "nullable": false,
-     "type": "TIMESTAMP"
-    }
-   ],
-   "create_table_sql": null,
-   "enums": {},
-   "keys": [
-    {
-     "columns": [
-      "source_system",
-      "source_record_id",
-      "content_hash"
-     ],
-     "where": null
-    }
-   ],
-   "owner": "dbt"
+   "owner": "ddl"
   },
   "tf_lookup": {
    "columns": [
@@ -2208,8 +1914,18 @@
      "where": null
     }
    ],
-   "owner": "ddl.py"
+   "owner": "ddl"
   }
  },
- "schema_qualifier": "lake.main"
+ "schema_qualifier": "lake.main",
+ "stage_owned": [
+  "int_std_records",
+  "golden_records",
+  "golden_lineage",
+  "golden_display",
+  "acct_int_std_records",
+  "acct_golden_records",
+  "acct_golden_lineage",
+  "acct_golden_display"
+ ]
 }

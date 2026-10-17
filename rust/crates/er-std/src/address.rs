@@ -3,7 +3,7 @@
 //! `RegexV1Parser` componentises one `address_line` into `addr_number`,
 //! `addr_street`, `addr_unit` — all NULL together when the line is unrecognised
 //! (S4.2 never guesses a partial parse). This is a second implementation of the
-//! grammar `dbt/macros/std/address_parse.sql` runs; the three patterns are valid
+//! grammar the retired dbt `address_parse.sql` macro runs; the three patterns are valid
 //! in both RE2 (DuckDB) and Rust's `regex`, and the Python `RegexV1Parser` is the
 //! shared oracle both are checked against.
 //!

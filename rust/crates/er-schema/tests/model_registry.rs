@@ -1,13 +1,14 @@
-//! The S5 registry transcription, validated against a golden dump from the real
-//! Python `er.lake.model` (vendored `tests/model_registry_golden.json`): exact
+//! The S5 registry contract, validated against the golden registry dump
+//! (`tests/model_registry_golden.json` — originally produced by the retired
+//! Python `er.lake.model`, maintained alongside the registry since): exact
 //! `create_table_sql` + owner/columns/keys/enums for every relation present.
 
 use std::collections::BTreeSet;
 
-use er_schema::model::{Owner, all_specs, create_table_sql, dbt_owned, ddl_owned};
+use er_schema::model::{Owner, all_specs, create_table_sql, ddl_owned, stage_owned};
 
 #[test]
-fn registry_matches_python_golden() {
+fn registry_matches_golden() {
     let raw = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/model_registry_golden.json"
@@ -92,7 +93,7 @@ fn registry_matches_python_golden() {
         }
     }
 
-    // DDL- and DBT-owned names, in declaration order, match the golden.
+    // DDL-owned and stage-materialised names, in declaration order, match the golden.
     let golden_ddl: Vec<&str> = golden["ddl_owned"]
         .as_array()
         .unwrap()
@@ -100,15 +101,15 @@ fn registry_matches_python_golden() {
         .map(|v| v.as_str().unwrap())
         .collect();
     assert_eq!(ddl_owned(), golden_ddl);
-    let golden_dbt: Vec<&str> = golden["dbt_owned"]
+    let golden_stage: Vec<&str> = golden["stage_owned"]
         .as_array()
         .unwrap()
         .iter()
         .map(|v| v.as_str().unwrap())
         .collect();
-    assert_eq!(dbt_owned(), golden_dbt);
+    assert_eq!(stage_owned(), golden_stage);
 
-    // All 22 relations in the golden are present in the registry.
+    // Every relation in the golden is present in the registry, and nothing more.
     assert_eq!(
         all_specs().len(),
         golden["relations"].as_object().unwrap().len()

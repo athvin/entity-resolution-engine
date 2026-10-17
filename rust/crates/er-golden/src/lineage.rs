@@ -1,6 +1,6 @@
 //! `golden_lineage` (S4.6): one row per `(entity_id, attribute)` naming WHICH
 //! member record supplied the golden value and WHICH rule decided it. A Rust
-//! port of `dbt/models/marts/golden_lineage.sql` in full-assembly mode
+//! port of the retired dbt model `golden_lineage.sql` in full-assembly mode
 //! (`assemble_entity_filter` = TRUE). The six-token vocabulary
 //! `{given_name, family_name, email, phone_e164, birth_date, address}` is the
 //! grid; `address` collapses the six `addr_*` columns into one decision.

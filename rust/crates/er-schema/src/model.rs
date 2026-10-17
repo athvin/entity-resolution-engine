@@ -1,7 +1,7 @@
-//! The S5 relation registry — framework types + closed vocabularies (port of
-//! `src/er/lake/model.py`). The `TableSpec` registry (`_DDL_SPECS`/`_DBT_SPECS`,
-//! `create_table_sql`) lands in a later wake with a Python-generated golden-DDL
-//! oracle; this is the dependency-free framework + every `in {…}` domain.
+//! The S5 relation registry — framework types, closed vocabularies and the
+//! `TableSpec` registry (`create_table_sql`), a port of the retired Python
+//! `src/er/lake/model.py` validated against its golden dump
+//! (`tests/model_registry_golden.json`, maintained since).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -37,19 +37,22 @@ pub fn is_valid_type(type_: &str) -> bool {
     COLUMN_TYPES.contains(&type_)
 }
 
-/// The two — and only two — owners of a relation (S5.0, D14).
+/// The two — and only two — owners of a relation (S5.0, D14). `Ddl` relations are
+/// created up front by [`create_table_sql`] and written into; `Stage` relations are
+/// materialised whole by a pipeline stage's `CREATE TABLE AS SELECT` each run
+/// (dbt-owned in the retired Python/dbt implementation).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Owner {
     Ddl,
-    Dbt,
+    Stage,
 }
 
 impl Owner {
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
-            Owner::Ddl => "ddl.py",
-            Owner::Dbt => "dbt",
+            Owner::Ddl => "ddl",
+            Owner::Stage => "stage",
         }
     }
 }
@@ -64,8 +67,8 @@ pub enum SchemaError {
     KeyColumnMissing { relation: String, column: String },
     #[error("{relation}: enum column {column:?} is not a column")]
     EnumColumnMissing { relation: String, column: String },
-    #[error("{relation}: dbt-owned; ddl.py must never issue DDL against it")]
-    DbtOwnedDdl { relation: String },
+    #[error("{relation}: stage-materialised; the DDL path must never issue DDL against it")]
+    StageOwnedDdl { relation: String },
 }
 
 /// One column of a relation, in S5 declaration order. `nullable` is the whole
@@ -119,7 +122,8 @@ impl Column {
     }
 }
 
-/// A key S5.0 declares, enforced by a dbt test and `MERGE INTO` — never the engine.
+/// A key S5.0 declares. DuckLake enforces only `NOT NULL`, so the key is honoured
+/// by construction — `MERGE INTO` / the stage SQL's grouping — never by the store.
 /// `columns` is empty only for `model_registry`'s at-most-one-active-row claim.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LogicalKey {
@@ -254,14 +258,15 @@ pub const REBUILD_REASONS: [&str; 5] = [
 pub const DISPOSITIONS: [&str; 2] = ["rebuild", "retire"];
 
 // --------------------------------------------------------------------------- //
-// the relations, in S5 declaration order (DDL-owned; DBT specs join next wake)
+// the relations, in S5 declaration order (DDL-owned, then stage-materialised)
 // --------------------------------------------------------------------------- //
 
 /// The `CREATE TABLE IF NOT EXISTS` statement for a DDL-owned relation (S5.0);
-/// pure text, `NOT NULL` the only constraint. Errors for a dbt-owned relation.
+/// pure text, `NOT NULL` the only constraint. Errors for a stage-materialised
+/// relation — those are created whole by their stage's `CREATE TABLE AS SELECT`.
 pub fn create_table_sql(spec: &TableSpec) -> Result<String, SchemaError> {
     if spec.owner != Owner::Ddl {
-        return Err(SchemaError::DbtOwnedDdl {
+        return Err(SchemaError::StageOwnedDdl {
             relation: spec.name.clone(),
         });
     }
@@ -661,8 +666,9 @@ fn ddl_specs() -> Vec<TableSpec> {
     ]
 }
 
-/// The standardized payload S5 declares once for `stg_records` and reuses for
-/// `int_std_records` (which prefixes `record_key`).
+/// The standardized payload S5 declares once for `int_std_records` (which
+/// prefixes `record_key`); the standardize stage's `stg_records` CTE produces
+/// the same columns.
 fn std_payload() -> Vec<Column> {
     vec![
         nn("source_system", VARCHAR),
@@ -710,9 +716,8 @@ fn golden_survivable() -> Vec<Column> {
 
 /// The standardized payload for the ACCOUNT entity type (the Account analogue of
 /// [`std_payload`]): the same structural columns, the Account canonical attributes
-/// in place of the person ones. Account's `stg_records`/`int_std_records` reuse
-/// it; the person payload is untouched. The standardize stage that populates it
-/// lands in a later sub-PR (1.1b).
+/// in place of the person ones. `acct_int_std_records` prefixes `record_key`;
+/// the person payload is untouched.
 fn acct_std_payload() -> Vec<Column> {
     vec![
         nn("source_system", VARCHAR),
@@ -781,9 +786,14 @@ fn acct_golden_survivable() -> Vec<Column> {
         .collect()
 }
 
-fn dbt_specs() -> Vec<TableSpec> {
-    let dspec = |name: &str, columns, keys, enums| {
-        TableSpec::new(name, Owner::Dbt, columns, keys, enums).expect("valid dbt spec")
+/// The stage-materialised relations: each is created whole by a pipeline stage's
+/// `CREATE TABLE AS SELECT`. In the retired Python/dbt implementation these were
+/// the dbt models; `stg_records` and `int_blocking_keys` died with it (the stg
+/// projection is now a CTE inside `int_std_records_sql`, blocking keys are
+/// runtime SQL from the trained settings) and are no longer declared.
+fn stage_specs() -> Vec<TableSpec> {
+    let sspec = |name: &str, columns, keys, enums| {
+        TableSpec::new(name, Owner::Stage, columns, keys, enums).expect("valid stage spec")
     };
 
     let mut int_std_cols = vec![nn("record_key", VARCHAR)];
@@ -813,37 +823,19 @@ fn dbt_specs() -> Vec<TableSpec> {
     ]);
 
     vec![
-        dspec(
-            "stg_records",
-            std_payload(),
-            vec![key(&["source_system", "source_record_id", "content_hash"])],
-            BTreeMap::new(),
-        ),
-        dspec(
+        sspec(
             "int_std_records",
             int_std_cols,
             vec![key(&["record_key"])],
             BTreeMap::new(),
         ),
-        dspec(
-            "int_blocking_keys",
-            vec![
-                nn("key_type", VARCHAR),
-                nn("key_value", VARCHAR),
-                nn("record_key", VARCHAR),
-                nn("source_system", VARCHAR),
-                nn("source_record_id", VARCHAR),
-            ],
-            vec![key(&["key_type", "key_value", "record_key"])],
-            BTreeMap::new(),
-        ),
-        dspec(
+        sspec(
             "golden_records",
             golden_cols,
             vec![key(&["entity_id"])],
             BTreeMap::new(),
         ),
-        dspec(
+        sspec(
             "golden_lineage",
             vec![
                 nn("entity_id", VARCHAR),
@@ -858,7 +850,7 @@ fn dbt_specs() -> Vec<TableSpec> {
             vec![key(&["entity_id", "attribute"])],
             enum_map(&[("attribute", GOLDEN_LINEAGE_ATTRIBUTES.as_slice())]),
         ),
-        dspec(
+        sspec(
             "golden_display",
             vec![
                 nn("entity_id", VARCHAR),
@@ -872,25 +864,19 @@ fn dbt_specs() -> Vec<TableSpec> {
             BTreeMap::new(),
         ),
         // --- Account entity-type relations (1.1a) ---
-        dspec(
-            "acct_stg_records",
-            acct_std_payload(),
-            vec![key(&["source_system", "source_record_id", "content_hash"])],
-            BTreeMap::new(),
-        ),
-        dspec(
+        sspec(
             "acct_int_std_records",
             acct_int_std_cols,
             vec![key(&["record_key"])],
             BTreeMap::new(),
         ),
-        dspec(
+        sspec(
             "acct_golden_records",
             acct_golden_cols,
             vec![key(&["entity_id"])],
             BTreeMap::new(),
         ),
-        dspec(
+        sspec(
             "acct_golden_lineage",
             vec![
                 nn("entity_id", VARCHAR),
@@ -908,7 +894,7 @@ fn dbt_specs() -> Vec<TableSpec> {
                 ["address", "company_name", "domain", "phone_e164"].as_slice(),
             )]),
         ),
-        dspec(
+        sspec(
             "acct_golden_display",
             vec![
                 nn("entity_id", VARCHAR),
@@ -924,11 +910,11 @@ fn dbt_specs() -> Vec<TableSpec> {
     ]
 }
 
-/// Every relation of S5, in declaration order (DDL specs then DBT specs).
+/// Every relation of S5, in declaration order (DDL specs then stage specs).
 #[must_use]
 pub fn all_specs() -> Vec<TableSpec> {
     let mut specs = ddl_specs();
-    specs.extend(dbt_specs());
+    specs.extend(stage_specs());
     specs
 }
 
@@ -942,12 +928,12 @@ pub fn ddl_owned() -> Vec<String> {
         .collect()
 }
 
-/// The dbt-owned relation names, in declaration order.
+/// The stage-materialised relation names, in declaration order.
 #[must_use]
-pub fn dbt_owned() -> Vec<String> {
+pub fn stage_owned() -> Vec<String> {
     all_specs()
         .into_iter()
-        .filter(|s| s.owner == Owner::Dbt)
+        .filter(|s| s.owner == Owner::Stage)
         .map(|s| s.name)
         .collect()
 }
@@ -983,8 +969,8 @@ mod tests {
 
     #[test]
     fn owner_spellings() {
-        assert_eq!(Owner::Ddl.as_str(), "ddl.py");
-        assert_eq!(Owner::Dbt.as_str(), "dbt");
+        assert_eq!(Owner::Ddl.as_str(), "ddl");
+        assert_eq!(Owner::Stage.as_str(), "stage");
     }
 
     #[test]

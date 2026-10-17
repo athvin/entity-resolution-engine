@@ -1,5 +1,5 @@
 //! S4.6 survivorship: the chain concatenator, the five rules, and the
-//! deciding-rule attribution — a Rust port of `dbt/macros/survivorship/*.sql`
+//! deciding-rule attribution — a Rust port of the retired dbt `macros/survivorship/*.sql`
 //! that emits byte-equivalent DuckDB. Each attribute's chain is a total order
 //! over an entity's member records, terminating in the mandatory `record_key
 //! ASC` tiebreak. `survivorship_decision_sql` returns one winner row per
