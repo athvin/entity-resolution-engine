@@ -7,11 +7,6 @@ __pycache__/
 .ruff_cache/
 .hypothesis/
 
-# dbt dependencies, build output and machine-local usage ID
-dbt/target/
-dbt/dbt_packages/
-dbt/logs/
-dbt/profiles/.user.yml
 
 # Generated run output and local databases
 artifacts/

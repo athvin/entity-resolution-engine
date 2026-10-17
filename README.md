@@ -46,7 +46,7 @@ flowchart TB
   C --> API
   API --> CPDB
   API -->|"enqueue one job per run"| RUN
-  RUN -->|"DuckDB + dbt, one writer/lake"| CAT
+  RUN -->|"DuckDB, one writer/lake"| CAT
   RUN --> S3
   API -->|"snapshot-pinned reads (MVCC)"| CAT
 ```
@@ -65,7 +65,7 @@ flowchart TB
 3. **DuckLake storage** (per tenant) — the big processing runs on
    [DuckLake](https://ducklake.select): a **dedicated Postgres catalog database per
    tenant** maps table snapshots to **parquet files in S3** under the tenant's own
-   prefix. DuckDB executes the SQL and dbt owns the transforms; snapshot/MVCC reads
+   prefix. DuckDB executes the engine's generated SQL; snapshot/MVCC reads
    let the API serve point-in-time results without ever blocking the writer.
 4. **Connectors** (`docs/connectors.md`) — a CRM-agnostic ingress/egress seam. The
    engine never learns about any specific source: connectors land deliveries as
@@ -152,12 +152,14 @@ query traces described in the [profiling guide](docs/profiling.md) and the
 
 ## Repository
 
-`src/er/` contains the CLI and resolution engine; `dbt/` contains transformation
-models; `configs/` contains reference configurations; `fixtures/` and `tests/`
-define correctness checks; `benchmarks/` and `scripts/ci/` run measurements and
-validation. `server/` is the multi-tenant control plane and `frontend/` the web
-UI/BFF — each a standalone sub-project with its own lockfile (see `server/README.md`
-and `frontend/README.md`). Generated outputs belong in the ignored `artifacts/`
+`rust/` is the backend workspace — the resolution engine, the `er` pipeline
+CLI and the multi-tenant control plane (`er-server`). `entities/` declares the
+entity framework's table shapes (one YAML per table; `er-entity gen` renders the
+committed Rust/DDL/TypeScript artifacts). `configs/` contains reference
+configurations; `fixtures/` defines correctness checks; `frontend/` is the web
+UI/BFF, a standalone pnpm project with its own lockfile (see
+`frontend/README.md`). `docs/` holds the design docs and `infra/` the
+Terraform/Helm build-out. Generated outputs belong in the ignored `artifacts/`
 directory.
 
 Licensed under [MIT](LICENSE).
