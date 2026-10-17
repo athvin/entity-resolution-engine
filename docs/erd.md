@@ -308,25 +308,6 @@ erDiagram
         varchar resolved_by
         timestamp resolved_at
     }
-    model_registry {
-        varchar model_version PK
-        varchar status "in {active, superseded}"
-        timestamp trained_at
-        bigint corpus_snapshot
-        varchar params_path
-        varchar tf_tables_path
-        varchar tf_snapshot_id
-        varchar config_hash
-        json metrics
-        varchar run_id
-    }
-    tf_lookup {
-        varchar model_version PK
-        varchar tf_snapshot_id PK
-        varchar column_name PK
-        varchar value PK
-        double tf_value
-    }
     cut_edges {
         varchar cut_id PK
         varchar rec_a_key
@@ -395,28 +376,6 @@ erDiagram
         bigint resurrected_count
         boolean full_refresh_keys
         timestamp created_at
-    }
-    er_standardize_work {
-        varchar run_id PK
-        varchar source_system PK
-        varchar ingest_batch_id PK
-        boolean full_refresh
-    }
-    er_touched_entities {
-        varchar run_id PK
-        varchar entity_id PK
-        varchar disposition "in {rebuild, retire}"
-        timestamp created_at
-    }
-    nickname_variants {
-        varchar variant_id PK
-        varchar variant_a
-        varchar variant_b
-        boolean active
-        varchar created_by
-        timestamp created_at
-        varchar retracted_by
-        timestamp retracted_at
     }
     golden_overrides {
         varchar entity_id PK
@@ -550,25 +509,17 @@ erDiagram
     }
     raw_records }o..|| ingest_batches : "ingest_batch_id"
     raw_records }o..|| entity_membership : "source_system, source_record_id"
-    match_scores }o..|| model_registry : "model_version"
     match_scores }o..|| runs : "run_id"
     entity_membership }o..|| entities : "entity_id"
     entity_membership }o..|| runs : "run_id"
-    entity_membership }o..|| er_touched_entities : "run_id, entity_id"
     entity_events }o..|| entities : "entity_id"
     entity_events }o..|| runs : "run_id"
-    entity_events }o..|| er_touched_entities : "run_id, entity_id"
     entity_events }o..|| run_stages : "run_id, seq"
     review_queue }o..|| entities : "entity_id"
-    tf_lookup }o..|| model_registry : "model_version"
     cut_edges }o..|| assertions : "assertion_id"
-    cut_edges }o..|| model_registry : "model_version"
     cut_edges }o..|| match_scores : "rec_a_key, rec_b_key, model_version, tf_snapshot_id"
     run_stages }o..|| runs : "run_id"
     ingest_batches }o..|| runs : "run_id"
-    er_standardize_work }o..|| runs : "run_id"
-    er_touched_entities }o..|| entities : "entity_id"
-    er_touched_entities }o..|| runs : "run_id"
     golden_overrides }o..|| entities : "entity_id"
     record_overlays }o..|| int_std_records : "record_key"
     int_std_records }o..|| ingest_batches : "ingest_batch_id"
@@ -600,15 +551,10 @@ erDiagram
 | `entity_events` | ddl | — |
 | `assertions` | ddl | — |
 | `review_queue` | ddl | — |
-| `model_registry` | ddl | — |
-| `tf_lookup` | ddl | — |
 | `cut_edges` | ddl | — |
 | `runs` | ddl | — |
 | `run_stages` | ddl | — |
 | `ingest_batches` | ddl | — |
-| `er_standardize_work` | ddl | — |
-| `er_touched_entities` | ddl | — |
-| `nickname_variants` | ddl | — |
 | `golden_overrides` | ddl | — |
 | `record_overlays` | ddl | — |
 | `int_std_records` | stage | One current standardized person record per record key: the standardization stage's output (supersession applied, tombstones excluded) and the matching stage's input. |
