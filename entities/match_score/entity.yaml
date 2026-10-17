@@ -1,0 +1,60 @@
+kind: entity
+version: 1
+name: match_score
+relation: match_scores
+description: "One scored candidate pair (S4.3): the frozen model's match probability with its evidence waterfall, keyed by model and TF snapshot."
+key: [rec_a_key, rec_b_key, model_version, tf_snapshot_id]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: rec_a_key
+    type: varchar
+    nullable: false
+    description: "The pair's lower record key (canonical order)."
+  - name: rec_b_key
+    type: varchar
+    nullable: false
+    description: "The pair's higher record key (canonical order)."
+  - name: match_probability
+    type: double
+    nullable: false
+    description: "The frozen model's match probability for the pair."
+  - name: model_version
+    type: varchar
+    nullable: false
+    description: "The trained model that scored the pair."
+  - name: tf_snapshot_id
+    type: varchar
+    nullable: false
+    description: "The frozen term-frequency snapshot the score used."
+  - name: rec_a_content_hash
+    type: varchar
+    nullable: false
+    description: "Content hash of record A at scoring time."
+  - name: rec_b_content_hash
+    type: varchar
+    nullable: false
+    description: "Content hash of record B at scoring time."
+  - name: evidence
+    type: json
+    nullable: false
+    description: "The per-comparison evidence waterfall behind the score."
+  - name: is_active
+    type: boolean
+    nullable: false
+    description: "Whether this score is current (false once re-scored or invalidated)."
+  - name: invalidated_at
+    type: timestamp
+    description: "When the score was invalidated; NULL while active."
+  - name: invalidated_run_id
+    type: varchar
+    description: "The run that invalidated the score; NULL while active."
+  - name: run_id
+    type: varchar
+    nullable: false
+    description: "The run that wrote this row."
+  - name: scored_at
+    type: timestamp
+    nullable: false
+    description: "The run's logical scoring timestamp."

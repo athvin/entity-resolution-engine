@@ -1,0 +1,37 @@
+kind: entity
+version: 1
+name: resolved_entity
+relation: entities
+description: "One resolved entity (S4.4): its lifecycle status and, for merge losers, the surviving entity it merged into."
+key: [entity_id]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: entity_id
+    type: varchar
+    nullable: false
+    description: "The resolved entity (ULID)."
+  - name: status
+    type: varchar
+    nullable: false
+    description: "The entity's lifecycle status."
+  - name: merged_into
+    type: varchar
+    description: "The surviving entity for a merge loser; NULL otherwise."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Creation stamp (the run's logical timestamp)."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Last-update stamp (the run's logical timestamp)."
+  - name: created_run_id
+    type: varchar
+    nullable: false
+    description: "The run that created the entity."
+  - name: updated_run_id
+    type: varchar
+    nullable: false
+    description: "The run that last updated the entity."

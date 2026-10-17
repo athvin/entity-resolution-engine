@@ -1,0 +1,55 @@
+kind: entity
+version: 1
+name: review
+relation: review_queue
+description: "One open question for a steward (S4.4.3): a gray-band pair, an unsatisfiable never, or a coherence flag, with its resolution."
+key: [review_id]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: review_id
+    type: varchar
+    nullable: false
+    description: "The review item id (ULID)."
+  - name: subject_type
+    type: varchar
+    nullable: false
+    description: "What the review is about: a record pair or an entity."
+  - name: rec_a_key
+    type: varchar
+    description: "The pair's lower record key (canonical order)."
+  - name: rec_b_key
+    type: varchar
+    description: "The pair's higher record key (canonical order)."
+  - name: entity_id
+    type: varchar
+    description: "The resolved entity (ULID)."
+  - name: reason
+    type: varchar
+    nullable: false
+    description: "Why it needs review: gray_band, never_unsatisfiable or coherence."
+  - name: match_probability
+    type: double
+    description: "The frozen model's match probability for the pair."
+  - name: waterfall
+    type: json
+    description: "The evidence waterfall snapshot shown to the steward."
+  - name: status
+    type: varchar
+    nullable: false
+    description: "The entity's lifecycle status."
+  - name: first_seen_run_id
+    type: varchar
+    nullable: false
+    description: "The run that first raised the item."
+  - name: last_seen_run_id
+    type: varchar
+    nullable: false
+    description: "The latest run that still raises it."
+  - name: resolved_by
+    type: varchar
+    description: "Who resolved it; NULL while open."
+  - name: resolved_at
+    type: timestamp
+    description: "When it was resolved; NULL while open."

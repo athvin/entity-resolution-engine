@@ -1,0 +1,34 @@
+kind: entity
+version: 1
+name: entity_membership
+relation: entity_membership
+description: "One membership row per record (S4.4): which resolved entity the record's current version belongs to."
+key: [source_system, source_record_id]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: source_system
+    type: varchar
+    nullable: false
+    description: "The delivering source system."
+  - name: source_record_id
+    type: varchar
+    nullable: false
+    description: "The record's id in its source system."
+  - name: record_key
+    type: varchar
+    nullable: false
+    description: "The standardized record key."
+  - name: entity_id
+    type: varchar
+    nullable: false
+    description: "The resolved entity (ULID)."
+  - name: assigned_at
+    type: timestamp
+    nullable: false
+    description: "When this membership was assigned."
+  - name: run_id
+    type: varchar
+    nullable: false
+    description: "The run that wrote this row."

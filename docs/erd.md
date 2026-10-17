@@ -526,19 +526,19 @@ erDiagram
 
 | relation | owner | description |
 | --- | --- | --- |
-| `raw_records` | ddl | — |
-| `match_scores` | ddl | — |
-| `entity_membership` | ddl | — |
-| `entities` | ddl | — |
-| `entity_events` | ddl | — |
-| `assertions` | ddl | — |
-| `review_queue` | ddl | — |
+| `raw_records` | ddl | One landed delivery row (S4.1): the source record's payload as delivered, content-hashed; append-only, with full-refresh tombstones. |
+| `match_scores` | ddl | One scored candidate pair (S4.3): the frozen model's match probability with its evidence waterfall, keyed by model and TF snapshot. |
+| `entity_membership` | ddl | One membership row per record (S4.4): which resolved entity the record's current version belongs to. |
+| `entities` | ddl | One resolved entity (S4.4): its lifecycle status and, for merge losers, the surviving entity it merged into. |
+| `entity_events` | ddl | One lifecycle event on an entity (S4.5.5): created/merged/split/retired and membership changes, with the run that caused it. |
+| `assertions` | ddl | One steward assertion (S4.4.1): an always/never constraint on a record pair, retractable but never deleted. |
+| `review_queue` | ddl | One open question for a steward (S4.4.3): a gray-band pair, an unsatisfiable never, or a coherence flag, with its resolution. |
 | `cut_edges` | ddl | — |
-| `runs` | ddl | — |
+| `runs` | ddl | The run ledger (S5.2): one row per pipeline run — mode, status, versions and the snapshot range it produced. |
 | `run_stages` | ddl | — |
-| `ingest_batches` | ddl | — |
-| `golden_overrides` | ddl | — |
-| `record_overlays` | ddl | — |
+| `ingest_batches` | ddl | One delivery receipt (S4.1): per-source landing counts for a batch, including tombstones and resurrections. |
+| `golden_overrides` | ddl | One steward golden-field override (latest-wins per entity and attribute); a NULL value means the steward cleared the field. |
+| `record_overlays` | ddl | One steward record overlay (protect/suppress): a flag on a record key, retractable, applied at assembly. |
 | `int_std_records` | stage | One current standardized person record per record key: the standardization stage's output (supersession applied, tombstones excluded) and the matching stage's input. |
 | `golden_records` | stage | One resolved person: the surviving value per attribute, at a snapshot. |
 | `golden_lineage` | stage | Per-attribute survivorship provenance: which record each surviving golden value came from. |

@@ -1,0 +1,18 @@
+CREATE TABLE IF NOT EXISTS lake.main.runs (
+  run_id VARCHAR NOT NULL,
+  tenant VARCHAR NOT NULL,
+  mode VARCHAR NOT NULL,
+  status VARCHAR NOT NULL,
+  started_at TIMESTAMP NOT NULL,
+  ended_at TIMESTAMP,
+  config_hash VARCHAR NOT NULL,
+  model_version VARCHAR,
+  tf_snapshot_id VARCHAR,
+  std_version VARCHAR NOT NULL,
+  survivorship_version VARCHAR NOT NULL,
+  lexicon_hash VARCHAR,
+  code_version VARCHAR NOT NULL,
+  rebuild_reason VARCHAR,
+  snapshot_start BIGINT,
+  snapshot_end BIGINT
+);
