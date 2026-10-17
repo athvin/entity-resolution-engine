@@ -1,0 +1,10 @@
+kind: statement
+operation: create
+mode: partial
+description: "Append one audit-ledger row: one per authenticated mutation."
+params:
+  - { name: actor, type: varchar }
+  - { name: org, type: varchar, nullable: true }
+  - { name: action, type: varchar }
+  - { name: detail, type: json }
+returns: none

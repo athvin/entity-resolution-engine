@@ -49,3 +49,75 @@ impl StagedStewardAction {
         ]
     }
 }
+
+pub mod create {
+    //! @generated query functions for this entity + operation.
+    /// Stage a steward action for the dispatcher to drain when the org's writer lock goes quiet.
+    pub async fn stage(
+        client: &::tokio_postgres::Client,
+        action_id: &str,
+        org: &str,
+        action: &::serde_json::Value,
+        created_by: &str,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str =
+            "INSERT INTO public.staged_steward_actions (action_id, org, action, created_by)
+VALUES ($1, $2, $3, $4)
+";
+        client
+            .execute(SQL, &[&action_id, &org, &action, &created_by])
+            .await
+    }
+}
+
+pub mod read {
+    //! @generated query functions for this entity + operation.
+    /// An org's pending steward actions, oldest first (the dispatcher drain read; its count is the pending gauge).
+    pub async fn pending(
+        client: &::tokio_postgres::Client,
+        org: &str,
+    ) -> ::std::result::Result<Vec<super::StagedStewardAction>, ::tokio_postgres::Error> {
+        const SQL: &str = "SELECT
+  action_id,
+  org,
+  action,
+  state,
+  error,
+  created_by,
+  created_at,
+  applied_at
+FROM public.staged_steward_actions
+WHERE org = $1 AND state = 'pending'
+ORDER BY created_at, action_id
+";
+        let rows = client.query(SQL, &[&org]).await?;
+        Ok(rows
+            .iter()
+            .map(|row| super::StagedStewardAction {
+                action_id: row.get("action_id"),
+                org: row.get("org"),
+                action: row.get("action"),
+                state: row.get("state"),
+                error: row.get("error"),
+                created_by: row.get("created_by"),
+                created_at: row.get("created_at"),
+                applied_at: row.get("applied_at"),
+            })
+            .collect())
+    }
+}
+
+pub mod update {
+    //! @generated query functions for this entity + operation.
+    /// Mark a staged action applied after the dispatcher drains it to the lake.
+    pub async fn mark_applied(
+        client: &::tokio_postgres::Client,
+        action_id: &str,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str =
+            "UPDATE public.staged_steward_actions SET state = 'applied', applied_at = now()
+WHERE action_id = $1
+";
+        client.execute(SQL, &[&action_id]).await
+    }
+}

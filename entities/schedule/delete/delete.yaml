@@ -1,0 +1,8 @@
+kind: statement
+operation: delete
+mode: partial
+description: "Delete a schedule; zero rows removed means absent or another org's."
+params:
+  - { name: org, type: varchar }
+  - { name: schedule_id, type: varchar }
+returns: none

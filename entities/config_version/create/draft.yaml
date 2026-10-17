@@ -1,0 +1,10 @@
+kind: statement
+operation: create
+mode: partial
+description: "Insert a new draft config version, allocating max(version)+1 atomically in the insert; the (org, version) PK rejects a concurrent duplicate."
+params:
+  - { name: org, type: varchar }
+  - { name: yaml, type: varchar }
+  - { name: config_hash, type: varchar }
+  - { name: created_by, type: varchar }
+returns: entity

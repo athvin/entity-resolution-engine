@@ -1,0 +1,8 @@
+kind: statement
+operation: read
+mode: full
+description: "One config version with its yaml body."
+params:
+  - { name: org, type: varchar }
+  - { name: version, type: bigint }
+returns: entity

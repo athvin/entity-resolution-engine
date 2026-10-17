@@ -16,6 +16,12 @@ use tokio_postgres::{Client, Error as PgError, NoTls};
 
 use crate::Job;
 
+/// Render a timestamp the way the entity wire contract declares (RFC 3339 /
+/// OpenAPI `date-time`), for the projection structs that carry text timestamps.
+fn ts(t: &chrono::DateTime<chrono::Utc>) -> String {
+    t.to_rfc3339_opts(chrono::SecondsFormat::Micros, true)
+}
+
 pub const QUEUED: &str = "queued";
 pub const DISPATCHING: &str = "dispatching";
 
@@ -63,13 +69,7 @@ pub async fn ensure_schema(client: &mut Client) -> Result<(), PgError> {
 /// # Errors
 /// Propagates the insert error.
 pub async fn ensure_org(client: &Client, name: &str, config_path: &str) -> Result<(), PgError> {
-    client
-        .execute(
-            "INSERT INTO orgs (name, config_path, state) VALUES ($1, $2, 'active') \
-             ON CONFLICT (name) DO NOTHING",
-            &[&name, &config_path],
-        )
-        .await?;
+    er_entities::org::create::ensure(client, name, config_path).await?;
     Ok(())
 }
 
@@ -140,16 +140,7 @@ pub async fn mark(client: &Client, job_id: &str, state: &str) -> Result<(), PgEr
 /// # Errors
 /// Propagates the update error.
 pub async fn resume_job(client: &Client, org: &str, job_id: &str) -> Result<bool, PgError> {
-    let n = client
-        .execute(
-            "UPDATE jobs SET state = 'queued', not_before = now(), updated_at = now(), \
-             finished_at = NULL, \
-             params = CASE WHEN run_id IS NULL THEN params \
-                           ELSE params || jsonb_build_object('resume_run_id', run_id) END \
-             WHERE org = $1 AND job_id = $2 AND state IN ('failed', 'canceled')",
-            &[&org, &job_id],
-        )
-        .await?;
+    let n = er_entities::job::update::resume(client, org, job_id).await?;
     Ok(n == 1)
 }
 
@@ -188,12 +179,7 @@ pub async fn merge_org_env(
     org: &str,
     updates: &serde_json::Value,
 ) -> Result<(), PgError> {
-    client
-        .execute(
-            "UPDATE orgs SET env = env || $2 WHERE name = $1",
-            &[&org, &updates],
-        )
-        .await?;
+    er_entities::org::update::merge_env(client, updates, org).await?;
     Ok(())
 }
 
@@ -239,12 +225,7 @@ pub async fn issue_key(
         hex::encode(buf)
     };
     let key_hash = hash_secret(&secret);
-    client
-        .execute(
-            "INSERT INTO api_keys (key_id, org, role, key_hash) VALUES ($1, $2, $3, $4)",
-            &[&key_id, &org, &role, &key_hash],
-        )
-        .await?;
+    er_entities::api_key::create::issue(client, &key_id, org, role, &key_hash).await?;
     let full_key = format!("erk_{key_id}_{secret}");
     Ok((key_id, full_key))
 }
@@ -256,13 +237,7 @@ pub async fn issue_key(
 /// # Errors
 /// Propagates the update error.
 pub async fn revoke_key(client: &Client, key_id: &str, org: &str) -> Result<bool, PgError> {
-    let n = client
-        .execute(
-            "UPDATE api_keys SET revoked_at = now() \
-             WHERE key_id = $1 AND org = $2 AND revoked_at IS NULL",
-            &[&key_id, &org],
-        )
-        .await?;
+    let n = er_entities::api_key::update::revoke(client, key_id, org).await?;
     Ok(n == 1)
 }
 
@@ -276,13 +251,11 @@ pub async fn lookup_key(
     client: &Client,
     key_id: &str,
 ) -> Result<Option<(String, String, String)>, PgError> {
-    let row = client
-        .query_opt(
-            "SELECT org, role, key_hash FROM api_keys WHERE key_id = $1 AND revoked_at IS NULL",
-            &[&key_id],
-        )
-        .await?;
-    Ok(row.map(|r| (r.get("org"), r.get("role"), r.get("key_hash"))))
+    Ok(er_entities::api_key::read::live_by_id(client, key_id)
+        .await?
+        .into_iter()
+        .next()
+        .map(|k| (k.org, k.role, k.key_hash)))
 }
 
 /// A row of the operator org listing (`queue.py` `list_orgs`). `created_at` is
@@ -318,15 +291,7 @@ pub async fn upsert_org_byo(
     env: &serde_json::Value,
     drop_root: Option<&str>,
 ) -> Result<(), PgError> {
-    client
-        .execute(
-            "INSERT INTO orgs (name, config_path, env, drop_root, state) \
-             VALUES ($1, $2, $3, $4, 'active') \
-             ON CONFLICT (name) DO UPDATE SET config_path = EXCLUDED.config_path, \
-               env = EXCLUDED.env, drop_root = EXCLUDED.drop_root",
-            &[&name, &config_path, &env, &drop_root],
-        )
-        .await?;
+    er_entities::org::create::upsert_byo(client, name, config_path, env, drop_root).await?;
     Ok(())
 }
 
@@ -335,10 +300,9 @@ pub async fn upsert_org_byo(
 /// # Errors
 /// Propagates the query error.
 pub async fn org_exists(client: &Client, name: &str) -> Result<bool, PgError> {
-    let row = client
-        .query_opt("SELECT 1 FROM orgs WHERE name = $1", &[&name])
-        .await?;
-    Ok(row.is_some())
+    Ok(!er_entities::org::read::by_name(client, name)
+        .await?
+        .is_empty())
 }
 
 /// All orgs, name-ordered (`queue.py` `list_orgs`).
@@ -346,20 +310,14 @@ pub async fn org_exists(client: &Client, name: &str) -> Result<bool, PgError> {
 /// # Errors
 /// Propagates the query error.
 pub async fn list_orgs(client: &Client) -> Result<Vec<OrgSummary>, PgError> {
-    let rows = client
-        .query(
-            "SELECT name, state, active_config_version, created_at::text AS created_at \
-             FROM orgs ORDER BY name",
-            &[],
-        )
-        .await?;
-    Ok(rows
-        .iter()
-        .map(|r| OrgSummary {
-            name: r.get("name"),
-            state: r.get("state"),
-            active_config_version: r.get("active_config_version"),
-            created_at: r.get("created_at"),
+    Ok(er_entities::org::read::list(client)
+        .await?
+        .into_iter()
+        .map(|o| OrgSummary {
+            name: o.name,
+            state: o.state,
+            active_config_version: o.active_config_version,
+            created_at: ts(&o.created_at),
         })
         .collect())
 }
@@ -370,23 +328,17 @@ pub async fn list_orgs(client: &Client) -> Result<Vec<OrgSummary>, PgError> {
 /// # Errors
 /// Propagates the query error.
 pub async fn get_org(client: &Client, name: &str) -> Result<Option<OrgDetail>, PgError> {
-    let row = client
-        .query_opt(
-            "SELECT name, state, active_config_version, drop_root, env::text AS env \
-             FROM orgs WHERE name = $1",
-            &[&name],
-        )
-        .await?;
-    Ok(row.map(|r| {
-        let env_text: String = r.get("env");
-        OrgDetail {
-            name: r.get("name"),
-            state: r.get("state"),
-            active_config_version: r.get("active_config_version"),
-            drop_root: r.get("drop_root"),
-            env: serde_json::from_str(&env_text).unwrap_or_else(|_| serde_json::json!({})),
-        }
-    }))
+    Ok(er_entities::org::read::by_name(client, name)
+        .await?
+        .into_iter()
+        .next()
+        .map(|o| OrgDetail {
+            name: o.name,
+            state: o.state,
+            active_config_version: o.active_config_version,
+            drop_root: o.drop_root,
+            env: o.env,
+        }))
 }
 
 /// Transition an org's `state` only from `expected` (`queue.py` `set_org_state`):
@@ -401,12 +353,7 @@ pub async fn set_org_state(
     new_state: &str,
     expected: &str,
 ) -> Result<bool, PgError> {
-    let n = client
-        .execute(
-            "UPDATE orgs SET state = $1 WHERE name = $2 AND state = $3",
-            &[&new_state, &name, &expected],
-        )
-        .await?;
+    let n = er_entities::org::update::set_state(client, new_state, name, expected).await?;
     Ok(n == 1)
 }
 
@@ -419,19 +366,11 @@ pub async fn org_publish_context(
     client: &Client,
     org: &str,
 ) -> Result<Option<(String, String, Option<i64>)>, PgError> {
-    let row = client
-        .query_opt(
-            "SELECT config_path, state, active_config_version FROM orgs WHERE name = $1",
-            &[&org],
-        )
-        .await?;
-    Ok(row.map(|r| {
-        (
-            r.get("config_path"),
-            r.get("state"),
-            r.get("active_config_version"),
-        )
-    }))
+    Ok(er_entities::org::read::by_name(client, org)
+        .await?
+        .into_iter()
+        .next()
+        .map(|o| (o.config_path, o.state, o.active_config_version)))
 }
 
 /// A config-version list row (`configsvc.py` list — no `yaml` body).
@@ -470,21 +409,16 @@ pub async fn create_config_version(
     config_hash: &str,
     created_by: &str,
 ) -> Result<i64, PgError> {
-    let next: i64 = client
-        .query_one(
-            "SELECT coalesce(max(version), 0) + 1 AS v FROM config_versions WHERE org = $1",
-            &[&org],
-        )
-        .await?
-        .get("v");
-    client
-        .execute(
-            "INSERT INTO config_versions (org, version, yaml, config_hash, created_by) \
-             VALUES ($1, $2, $3, $4, $5)",
-            &[&org, &next, &yaml, &config_hash, &created_by],
-        )
-        .await?;
-    Ok(next)
+    // The statement allocates max(version)+1 atomically inside the INSERT; the
+    // (org, version) PK still rejects a concurrent duplicate.
+    let rows =
+        er_entities::config_version::create::draft(client, org, yaml, config_hash, created_by)
+            .await?;
+    Ok(rows
+        .into_iter()
+        .next()
+        .expect("draft RETURNING yields exactly one row")
+        .version)
 }
 
 /// An org's config versions, newest first (`configsvc.py` list; no `yaml`).
@@ -495,24 +429,17 @@ pub async fn list_config_versions(
     client: &Client,
     org: &str,
 ) -> Result<Vec<ConfigVersionRow>, PgError> {
-    let rows = client
-        .query(
-            "SELECT version, config_hash, state, tier, created_by, \
-                    created_at::text AS created_at, published_at::text AS published_at \
-             FROM config_versions WHERE org = $1 ORDER BY version DESC",
-            &[&org],
-        )
-        .await?;
-    Ok(rows
-        .iter()
-        .map(|r| ConfigVersionRow {
-            version: r.get("version"),
-            config_hash: r.get("config_hash"),
-            state: r.get("state"),
-            tier: r.get("tier"),
-            created_by: r.get("created_by"),
-            created_at: r.get("created_at"),
-            published_at: r.get("published_at"),
+    Ok(er_entities::config_version::read::list(client, org)
+        .await?
+        .into_iter()
+        .map(|v| ConfigVersionRow {
+            version: v.version,
+            config_hash: v.config_hash,
+            state: v.state,
+            tier: v.tier,
+            created_by: v.created_by,
+            created_at: ts(&v.created_at),
+            published_at: v.published_at.as_ref().map(ts),
         })
         .collect())
 }
@@ -526,24 +453,22 @@ pub async fn get_config_version(
     org: &str,
     version: i64,
 ) -> Result<Option<ConfigVersionDetail>, PgError> {
-    let row = client
-        .query_opt(
-            "SELECT version, yaml, config_hash, state, tier, created_by, \
-                    created_at::text AS created_at, published_at::text AS published_at \
-             FROM config_versions WHERE org = $1 AND version = $2",
-            &[&org, &version],
-        )
-        .await?;
-    Ok(row.map(|r| ConfigVersionDetail {
-        version: r.get("version"),
-        yaml: r.get("yaml"),
-        config_hash: r.get("config_hash"),
-        state: r.get("state"),
-        tier: r.get("tier"),
-        created_by: r.get("created_by"),
-        created_at: r.get("created_at"),
-        published_at: r.get("published_at"),
-    }))
+    Ok(
+        er_entities::config_version::read::by_version(client, org, version)
+            .await?
+            .into_iter()
+            .next()
+            .map(|v| ConfigVersionDetail {
+                version: v.version,
+                yaml: v.yaml,
+                config_hash: v.config_hash,
+                state: v.state,
+                tier: v.tier,
+                created_by: v.created_by,
+                created_at: ts(&v.created_at),
+                published_at: v.published_at.as_ref().map(ts),
+            }),
+    )
 }
 
 /// Stage a steward action for the dispatcher to drain when the org's writer
@@ -558,12 +483,7 @@ pub async fn stage_action(
     created_by: &str,
 ) -> Result<String, PgError> {
     let action_id = ulid::Ulid::new().to_string();
-    client
-        .execute(
-            "INSERT INTO staged_steward_actions (action_id, org, action, created_by) \
-             VALUES ($1, $2, $3, $4)",
-            &[&action_id, &org, &action, &created_by],
-        )
+    er_entities::staged_steward_action::create::stage(client, &action_id, org, action, created_by)
         .await?;
     Ok(action_id)
 }
@@ -577,17 +497,13 @@ pub async fn pending_actions(
     client: &Client,
     org: &str,
 ) -> Result<Vec<(String, serde_json::Value)>, PgError> {
-    let rows = client
-        .query(
-            "SELECT action_id, action FROM staged_steward_actions \
-             WHERE org = $1 AND state = 'pending' ORDER BY created_at, action_id",
-            &[&org],
-        )
-        .await?;
-    Ok(rows
-        .iter()
-        .map(|r| (r.get("action_id"), r.get("action")))
-        .collect())
+    Ok(
+        er_entities::staged_steward_action::read::pending(client, org)
+            .await?
+            .into_iter()
+            .map(|a| (a.action_id, a.action))
+            .collect(),
+    )
 }
 
 /// Mark a staged action applied (`steward.py` `drain_org`).
@@ -595,13 +511,7 @@ pub async fn pending_actions(
 /// # Errors
 /// Propagates the update error.
 pub async fn mark_action_applied(client: &Client, action_id: &str) -> Result<(), PgError> {
-    client
-        .execute(
-            "UPDATE staged_steward_actions SET state = 'applied', applied_at = now() \
-             WHERE action_id = $1",
-            &[&action_id],
-        )
-        .await?;
+    er_entities::staged_steward_action::update::mark_applied(client, action_id).await?;
     Ok(())
 }
 
@@ -611,13 +521,10 @@ pub async fn mark_action_applied(client: &Client, action_id: &str) -> Result<(),
 /// # Errors
 /// Propagates the query error.
 pub async fn pending_count(client: &Client, org: &str) -> Result<i64, PgError> {
-    let row = client
-        .query_one(
-            "SELECT count(*) FROM staged_steward_actions WHERE org = $1 AND state = 'pending'",
-            &[&org],
-        )
-        .await?;
-    Ok(row.get::<_, i64>(0))
+    // The pending set is small by construction (drained each dispatcher pass),
+    // so counting the drain read keeps this on the one declared statement.
+    let pending = er_entities::staged_steward_action::read::pending(client, org).await?;
+    Ok(pending.len() as i64)
 }
 
 /// Append one audit-ledger row (`auth.py` `audit`): one per authenticated
@@ -632,12 +539,7 @@ pub async fn audit(
     action: &str,
     detail: &serde_json::Value,
 ) -> Result<(), PgError> {
-    client
-        .execute(
-            "INSERT INTO audit_log (actor, org, action, detail) VALUES ($1, $2, $3, $4)",
-            &[&actor, &org, &action, &detail],
-        )
-        .await?;
+    er_entities::audit_log::create::append(client, actor, org, action, detail).await?;
     Ok(())
 }
 
@@ -653,39 +555,19 @@ pub async fn audit_rows(
     before_id: Option<i64>,
     limit: i64,
 ) -> Result<Vec<serde_json::Value>, PgError> {
-    let limit = limit.clamp(1, 500);
-    let mut clauses = vec!["TRUE".to_string()];
-    let mut params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = Vec::new();
-    if let Some(o) = org.as_ref() {
-        clauses.push(format!("org = ${}", params.len() + 1));
-        params.push(o);
-    }
-    if let Some(a) = action.as_ref() {
-        clauses.push(format!("action = ${}", params.len() + 1));
-        params.push(a);
-    }
-    if let Some(b) = before_id.as_ref() {
-        clauses.push(format!("id < ${}", params.len() + 1));
-        params.push(b);
-    }
-    params.push(&limit);
-    let sql = format!(
-        "SELECT id, at::text AS at, actor, org, action, detail FROM audit_log \
-         WHERE {} ORDER BY id DESC LIMIT ${}",
-        clauses.join(" AND "),
-        params.len()
-    );
-    let rows = client.query(&sql, &params).await?;
+    let rows =
+        er_entities::audit_log::read::page(client, org, action, before_id, limit.clamp(1, 500))
+            .await?;
     Ok(rows
-        .iter()
+        .into_iter()
         .map(|r| {
             serde_json::json!({
-                "id": r.get::<_, i64>("id"),
-                "at": r.get::<_, String>("at"),
-                "actor": r.get::<_, String>("actor"),
-                "org": r.get::<_, Option<String>>("org"),
-                "action": r.get::<_, String>("action"),
-                "detail": r.get::<_, serde_json::Value>("detail"),
+                "id": r.id,
+                "at": ts(&r.at),
+                "actor": r.actor,
+                "org": r.org,
+                "action": r.action,
+                "detail": r.detail,
             })
         })
         .collect())
@@ -713,13 +595,7 @@ pub async fn create_schedule(
     params: &serde_json::Value,
 ) -> Result<String, PgError> {
     let schedule_id = ulid::Ulid::new().to_string();
-    client
-        .execute(
-            "INSERT INTO schedules (schedule_id, org, kind, params, cron, source) \
-             VALUES ($1, $2, $3, $4, $5, 'api')",
-            &[&schedule_id, &org, &kind, &params, &cron],
-        )
-        .await?;
+    er_entities::schedule::create::create(client, &schedule_id, org, kind, params, cron).await?;
     Ok(schedule_id)
 }
 
@@ -728,23 +604,16 @@ pub async fn create_schedule(
 /// # Errors
 /// Propagates the query error.
 pub async fn list_schedules(client: &Client, org: &str) -> Result<Vec<ScheduleRow>, PgError> {
-    let rows = client
-        .query(
-            "SELECT schedule_id, kind, cron, enabled, source, \
-                    last_enqueued_at::text AS last_enqueued_at \
-             FROM schedules WHERE org = $1 ORDER BY created_at",
-            &[&org],
-        )
-        .await?;
-    Ok(rows
-        .iter()
-        .map(|r| ScheduleRow {
-            schedule_id: r.get("schedule_id"),
-            kind: r.get("kind"),
-            cron: r.get("cron"),
-            enabled: r.get("enabled"),
-            source: r.get("source"),
-            last_enqueued_at: r.get("last_enqueued_at"),
+    Ok(er_entities::schedule::read::list(client, org)
+        .await?
+        .into_iter()
+        .map(|s| ScheduleRow {
+            schedule_id: s.schedule_id,
+            kind: s.kind,
+            cron: s.cron,
+            enabled: s.enabled,
+            source: s.source,
+            last_enqueued_at: s.last_enqueued_at.as_ref().map(ts),
         })
         .collect())
 }
@@ -761,13 +630,7 @@ pub async fn set_schedule_enabled(
     schedule_id: &str,
     enabled: bool,
 ) -> Result<bool, PgError> {
-    let n = client
-        .execute(
-            "UPDATE schedules SET enabled = $1 \
-             WHERE schedule_id = $2 AND org = $3 AND source = 'api'",
-            &[&enabled, &schedule_id, &org],
-        )
-        .await?;
+    let n = er_entities::schedule::update::set_enabled(client, enabled, schedule_id, org).await?;
     Ok(n == 1)
 }
 
@@ -780,12 +643,7 @@ pub async fn delete_schedule(
     org: &str,
     schedule_id: &str,
 ) -> Result<bool, PgError> {
-    let n = client
-        .execute(
-            "DELETE FROM schedules WHERE org = $1 AND schedule_id = $2",
-            &[&org, &schedule_id],
-        )
-        .await?;
+    let n = er_entities::schedule::delete::delete(client, org, schedule_id).await?;
     Ok(n == 1)
 }
 
@@ -812,13 +670,7 @@ pub async fn create_webhook(
     secret: &str,
 ) -> Result<String, PgError> {
     let webhook_id = ulid::Ulid::new().to_string();
-    client
-        .execute(
-            "INSERT INTO webhooks (webhook_id, org, url, events, secret) \
-             VALUES ($1, $2, $3, $4, $5)",
-            &[&webhook_id, &org, &url, &events, &secret],
-        )
-        .await?;
+    er_entities::webhook::create::create(client, &webhook_id, org, url, events, secret).await?;
     Ok(webhook_id)
 }
 
@@ -827,20 +679,14 @@ pub async fn create_webhook(
 /// # Errors
 /// Propagates the query error.
 pub async fn list_webhooks(client: &Client, org: &str) -> Result<Vec<WebhookRow>, PgError> {
-    let rows = client
-        .query(
-            "SELECT webhook_id, url, events, active FROM webhooks \
-             WHERE org = $1 AND active ORDER BY created_at",
-            &[&org],
-        )
-        .await?;
-    Ok(rows
-        .iter()
-        .map(|r| WebhookRow {
-            webhook_id: r.get("webhook_id"),
-            url: r.get("url"),
-            events: r.get("events"),
-            active: r.get("active"),
+    Ok(er_entities::webhook::read::list_active(client, org)
+        .await?
+        .into_iter()
+        .map(|w| WebhookRow {
+            webhook_id: w.webhook_id,
+            url: w.url,
+            events: w.events,
+            active: w.active,
         })
         .collect())
 }
@@ -857,19 +703,13 @@ pub async fn webhooks_for_delivery(
     org: &str,
     event_type: &str,
 ) -> Result<Vec<(String, String, String)>, PgError> {
-    let rows = client
-        .query(
-            "SELECT webhook_id, url, secret FROM webhooks \
-             WHERE org = $1 AND active \
-               AND (events @> to_jsonb($2::text) OR jsonb_array_length(events) = 0) \
-             ORDER BY created_at",
-            &[&org, &event_type],
-        )
-        .await?;
-    Ok(rows
-        .iter()
-        .map(|r| (r.get("webhook_id"), r.get("url"), r.get("secret")))
-        .collect())
+    Ok(
+        er_entities::webhook::read::for_delivery(client, org, event_type)
+            .await?
+            .into_iter()
+            .map(|w| (w.webhook_id, w.url, w.secret))
+            .collect(),
+    )
 }
 
 /// Delete a webhook (`webhooks.py` `delete`). `true` iff a row was removed.
@@ -877,12 +717,7 @@ pub async fn webhooks_for_delivery(
 /// # Errors
 /// Propagates the delete error.
 pub async fn delete_webhook(client: &Client, org: &str, webhook_id: &str) -> Result<bool, PgError> {
-    let n = client
-        .execute(
-            "DELETE FROM webhooks WHERE org = $1 AND webhook_id = $2",
-            &[&org, &webhook_id],
-        )
-        .await?;
+    let n = er_entities::webhook::delete::delete(client, org, webhook_id).await?;
     Ok(n == 1)
 }
 
@@ -898,18 +733,7 @@ pub async fn publish_config_version(
     version: i64,
     tier: Option<&str>,
 ) -> Result<(), PgError> {
-    client
-        .execute(
-            "UPDATE config_versions SET state = 'published', tier = $3, published_at = now() \
-             WHERE org = $1 AND version = $2",
-            &[&org, &version, &tier],
-        )
-        .await?;
-    client
-        .execute(
-            "UPDATE orgs SET active_config_version = $2 WHERE name = $1",
-            &[&org, &version],
-        )
-        .await?;
+    er_entities::config_version::update::publish(client, tier, org, version).await?;
+    er_entities::org::update::set_active_config(client, version, org).await?;
     Ok(())
 }

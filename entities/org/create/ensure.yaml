@@ -1,0 +1,8 @@
+kind: statement
+operation: create
+mode: partial
+description: "Register an org idempotently: a replayed registration is a no-op."
+params:
+  - { name: name, type: varchar }
+  - { name: config_path, type: varchar }
+returns: none

@@ -36,3 +36,61 @@ impl AuditLog {
         &["id", "at", "actor", "org", "action", "detail"]
     }
 }
+
+pub mod create {
+    //! @generated query functions for this entity + operation.
+    /// Append one audit-ledger row: one per authenticated mutation.
+    pub async fn append(
+        client: &::tokio_postgres::Client,
+        actor: &str,
+        org: Option<&str>,
+        action: &str,
+        detail: &::serde_json::Value,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str = "INSERT INTO public.audit_log (actor, org, action, detail)
+VALUES ($1, $2, $3, $4)
+";
+        client.execute(SQL, &[&actor, &org, &action, &detail]).await
+    }
+}
+
+pub mod read {
+    //! @generated query functions for this entity + operation.
+    /// A keyset page of the audit ledger, newest first, with optional org/action filters.
+    pub async fn page(
+        client: &::tokio_postgres::Client,
+        org: Option<&str>,
+        action: Option<&str>,
+        before_id: Option<i64>,
+        limit: i64,
+    ) -> ::std::result::Result<Vec<super::AuditLog>, ::tokio_postgres::Error> {
+        const SQL: &str = "SELECT
+  id,
+  at,
+  actor,
+  org,
+  action,
+  detail
+FROM public.audit_log
+WHERE ($1::text IS NULL OR org = $1)
+  AND ($2::text IS NULL OR action = $2)
+  AND ($3::bigint IS NULL OR id < $3)
+ORDER BY id DESC
+LIMIT $4
+";
+        let rows = client
+            .query(SQL, &[&org, &action, &before_id, &limit])
+            .await?;
+        Ok(rows
+            .iter()
+            .map(|row| super::AuditLog {
+                id: row.get("id"),
+                at: row.get("at"),
+                actor: row.get("actor"),
+                org: row.get("org"),
+                action: row.get("action"),
+                detail: row.get("detail"),
+            })
+            .collect())
+    }
+}

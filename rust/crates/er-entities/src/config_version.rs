@@ -52,3 +52,140 @@ impl ConfigVersion {
         ]
     }
 }
+
+pub mod create {
+    //! @generated query functions for this entity + operation.
+    /// Insert a new draft config version, allocating max(version)+1 atomically in the insert; the (org, version) PK rejects a concurrent duplicate.
+    pub async fn draft(
+        client: &::tokio_postgres::Client,
+        org: &str,
+        yaml: &str,
+        config_hash: &str,
+        created_by: &str,
+    ) -> ::std::result::Result<Vec<super::ConfigVersion>, ::tokio_postgres::Error> {
+        const SQL: &str =
+            "INSERT INTO public.config_versions (org, version, yaml, config_hash, created_by)
+SELECT $1, coalesce(max(version), 0) + 1, $2, $3, $4
+FROM public.config_versions WHERE org = $1
+RETURNING
+  org,
+  version,
+  yaml,
+  config_hash,
+  state,
+  tier,
+  created_by,
+  created_at,
+  published_at
+";
+        let rows = client
+            .query(SQL, &[&org, &yaml, &config_hash, &created_by])
+            .await?;
+        Ok(rows
+            .iter()
+            .map(|row| super::ConfigVersion {
+                org: row.get("org"),
+                version: row.get("version"),
+                yaml: row.get("yaml"),
+                config_hash: row.get("config_hash"),
+                state: row.get("state"),
+                tier: row.get("tier"),
+                created_by: row.get("created_by"),
+                created_at: row.get("created_at"),
+                published_at: row.get("published_at"),
+            })
+            .collect())
+    }
+}
+
+pub mod read {
+    //! @generated query functions for this entity + operation.
+    /// One config version with its yaml body.
+    pub async fn by_version(
+        client: &::tokio_postgres::Client,
+        org: &str,
+        version: i64,
+    ) -> ::std::result::Result<Vec<super::ConfigVersion>, ::tokio_postgres::Error> {
+        const SQL: &str = "SELECT
+  org,
+  version,
+  yaml,
+  config_hash,
+  state,
+  tier,
+  created_by,
+  created_at,
+  published_at
+FROM public.config_versions
+WHERE org = $1 AND version = $2
+";
+        let rows = client.query(SQL, &[&org, &version]).await?;
+        Ok(rows
+            .iter()
+            .map(|row| super::ConfigVersion {
+                org: row.get("org"),
+                version: row.get("version"),
+                yaml: row.get("yaml"),
+                config_hash: row.get("config_hash"),
+                state: row.get("state"),
+                tier: row.get("tier"),
+                created_by: row.get("created_by"),
+                created_at: row.get("created_at"),
+                published_at: row.get("published_at"),
+            })
+            .collect())
+    }
+
+    /// An org's config versions, newest first.
+    pub async fn list(
+        client: &::tokio_postgres::Client,
+        org: &str,
+    ) -> ::std::result::Result<Vec<super::ConfigVersion>, ::tokio_postgres::Error> {
+        const SQL: &str = "SELECT
+  org,
+  version,
+  yaml,
+  config_hash,
+  state,
+  tier,
+  created_by,
+  created_at,
+  published_at
+FROM public.config_versions
+WHERE org = $1
+ORDER BY version DESC
+";
+        let rows = client.query(SQL, &[&org]).await?;
+        Ok(rows
+            .iter()
+            .map(|row| super::ConfigVersion {
+                org: row.get("org"),
+                version: row.get("version"),
+                yaml: row.get("yaml"),
+                config_hash: row.get("config_hash"),
+                state: row.get("state"),
+                tier: row.get("tier"),
+                created_by: row.get("created_by"),
+                created_at: row.get("created_at"),
+                published_at: row.get("published_at"),
+            })
+            .collect())
+    }
+}
+
+pub mod update {
+    //! @generated query functions for this entity + operation.
+    /// Mark a version published with its rollout tier (the config_versions half of publish).
+    pub async fn publish(
+        client: &::tokio_postgres::Client,
+        tier: Option<&str>,
+        org: &str,
+        version: i64,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str =
+            "UPDATE public.config_versions SET state = 'published', tier = $1, published_at = now()
+WHERE org = $2 AND version = $3
+";
+        client.execute(SQL, &[&tier, &org, &version]).await
+    }
+}

@@ -1,0 +1,7 @@
+kind: statement
+operation: read
+mode: full
+description: "An org's schedules, oldest first."
+params:
+  - { name: org, type: varchar }
+returns: entity

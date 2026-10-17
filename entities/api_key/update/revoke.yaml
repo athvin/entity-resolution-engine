@@ -1,0 +1,8 @@
+kind: statement
+operation: update
+mode: partial
+description: "Revoke a live key, scoped to its org and idempotent: zero rows changed means already revoked or another org's key."
+params:
+  - { name: key_id, type: varchar }
+  - { name: org, type: varchar }
+returns: none

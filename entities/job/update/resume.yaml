@@ -1,0 +1,8 @@
+kind: statement
+operation: update
+mode: partial
+description: "Requeue a failed/canceled job with not_before = now(); a run_id is carried forward as resume_run_id so the next dispatch resumes that run."
+params:
+  - { name: org, type: varchar }
+  - { name: job_id, type: varchar }
+returns: none

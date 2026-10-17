@@ -1,0 +1,10 @@
+kind: statement
+operation: read
+mode: full
+description: "A keyset page of the audit ledger, newest first, with optional org/action filters."
+params:
+  - { name: org, type: varchar, nullable: true }
+  - { name: action, type: varchar, nullable: true }
+  - { name: before_id, type: bigint, nullable: true }
+  - { name: limit, type: bigint }
+returns: entity

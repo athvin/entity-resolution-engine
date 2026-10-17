@@ -1,0 +1,7 @@
+kind: statement
+operation: read
+mode: full
+description: "Resolve a live (non-revoked) key by id for authentication; the caller constant-time-compares the presented secret's hash."
+params:
+  - { name: key_id, type: varchar }
+returns: entity

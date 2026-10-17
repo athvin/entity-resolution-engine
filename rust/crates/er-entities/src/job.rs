@@ -411,4 +411,20 @@ WHERE job_id = $2
 ";
         client.execute(SQL, &[&state, &job_id]).await
     }
+
+    /// Requeue a failed/canceled job with not_before = now(); a run_id is carried forward as resume_run_id so the next dispatch resumes that run.
+    pub async fn resume(
+        client: &::tokio_postgres::Client,
+        org: &str,
+        job_id: &str,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str =
+            "UPDATE public.jobs SET state = 'queued', not_before = now(), updated_at = now(),
+    finished_at = NULL,
+    params = CASE WHEN run_id IS NULL THEN params
+                  ELSE params || jsonb_build_object('resume_run_id', run_id) END
+WHERE org = $1 AND job_id = $2 AND state IN ('failed', 'canceled')
+";
+        client.execute(SQL, &[&org, &job_id]).await
+    }
 }

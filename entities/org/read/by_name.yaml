@@ -1,0 +1,7 @@
+kind: statement
+operation: read
+mode: full
+description: "One org by name: the detail view, the exists precheck and the publish context."
+params:
+  - { name: name, type: varchar }
+returns: entity

@@ -52,3 +52,93 @@ impl Schedule {
         ]
     }
 }
+
+pub mod create {
+    //! @generated query functions for this entity + operation.
+    /// Create an API-sourced schedule.
+    pub async fn create(
+        client: &::tokio_postgres::Client,
+        schedule_id: &str,
+        org: &str,
+        kind: &str,
+        params: &::serde_json::Value,
+        cron: &str,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str =
+            "INSERT INTO public.schedules (schedule_id, org, kind, params, cron, source)
+VALUES ($1, $2, $3, $4, $5, 'api')
+";
+        client
+            .execute(SQL, &[&schedule_id, &org, &kind, &params, &cron])
+            .await
+    }
+}
+
+pub mod delete {
+    //! @generated query functions for this entity + operation.
+    /// Delete a schedule; zero rows removed means absent or another org's.
+    pub async fn delete(
+        client: &::tokio_postgres::Client,
+        org: &str,
+        schedule_id: &str,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str = "DELETE FROM public.schedules WHERE org = $1 AND schedule_id = $2
+";
+        client.execute(SQL, &[&org, &schedule_id]).await
+    }
+}
+
+pub mod read {
+    //! @generated query functions for this entity + operation.
+    /// An org's schedules, oldest first.
+    pub async fn list(
+        client: &::tokio_postgres::Client,
+        org: &str,
+    ) -> ::std::result::Result<Vec<super::Schedule>, ::tokio_postgres::Error> {
+        const SQL: &str = "SELECT
+  schedule_id,
+  org,
+  kind,
+  params,
+  cron,
+  enabled,
+  source,
+  last_enqueued_at,
+  created_at
+FROM public.schedules
+WHERE org = $1
+ORDER BY created_at
+";
+        let rows = client.query(SQL, &[&org]).await?;
+        Ok(rows
+            .iter()
+            .map(|row| super::Schedule {
+                schedule_id: row.get("schedule_id"),
+                org: row.get("org"),
+                kind: row.get("kind"),
+                params: row.get("params"),
+                cron: row.get("cron"),
+                enabled: row.get("enabled"),
+                source: row.get("source"),
+                last_enqueued_at: row.get("last_enqueued_at"),
+                created_at: row.get("created_at"),
+            })
+            .collect())
+    }
+}
+
+pub mod update {
+    //! @generated query functions for this entity + operation.
+    /// Enable/disable an API-sourced schedule; config/system-owned rows refuse (zero rows changed).
+    pub async fn set_enabled(
+        client: &::tokio_postgres::Client,
+        enabled: bool,
+        schedule_id: &str,
+        org: &str,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str = "UPDATE public.schedules SET enabled = $1
+WHERE schedule_id = $2 AND org = $3 AND source = 'api'
+";
+        client.execute(SQL, &[&enabled, &schedule_id, &org]).await
+    }
+}

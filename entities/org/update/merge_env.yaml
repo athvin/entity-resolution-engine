@@ -1,0 +1,8 @@
+kind: statement
+operation: update
+mode: partial
+description: "Merge resource knobs into an org's env map (jsonb concatenation)."
+params:
+  - { name: updates, type: json }
+  - { name: name, type: varchar }
+returns: none

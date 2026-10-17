@@ -1,0 +1,8 @@
+kind: statement
+operation: read
+mode: partial
+description: "The delivery targets for one event: every active webhook subscribed to the type (or subscribed-to-all); includes the secret the delivery signs with."
+params:
+  - { name: org, type: varchar }
+  - { name: event_type, type: varchar }
+returns: entity
