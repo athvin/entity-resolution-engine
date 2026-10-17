@@ -1,5 +1,5 @@
-//! The golden-record (survivorship) stage (port of `dbt/models/marts/golden_*`
-//! + `dbt/macros/survivorship/*`, DesignDoc.md S4.6).
+//! The golden-record (survivorship) stage (port of the retired dbt models
+//! `marts/golden_*` + `macros/survivorship/*`, DesignDoc.md S4.6).
 //!
 //! Survivorship elects, per entity and per attribute, which member record's
 //! value survives — driven by the config's per-attribute rule chains

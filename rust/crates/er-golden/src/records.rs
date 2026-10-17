@@ -1,6 +1,6 @@
 //! `golden_records` (S4.6/ER-088): assemble one surviving row per entity by
 //! reading each attribute's value from the record `golden_lineage` elected. A
-//! Rust port of `dbt/models/marts/golden_records.sql` in full-assembly mode. The
+//! Rust port of the retired dbt model `golden_records.sql` in full-assembly mode. The
 //! six `addr_*` columns all come from the single record that won the `address`
 //! decision; `metadata` aggregates each source's client metadata by
 //! `source_system -> source_record_id`.

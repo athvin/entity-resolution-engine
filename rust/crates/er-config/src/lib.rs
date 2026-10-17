@@ -210,7 +210,7 @@ pub struct Storage {
     pub model_uri_prefix: String,
 }
 
-/// S6 `versions`: the version strings the CLI passes to dbt as `--vars`.
+/// S6 `versions`: the version strings the stages stamp into their output rows.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Versions {

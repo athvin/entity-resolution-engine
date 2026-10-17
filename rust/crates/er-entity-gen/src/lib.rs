@@ -288,6 +288,25 @@ mod tests {
         }
     }
 
+    /// The completeness direction of the oracle above: every stage-materialised
+    /// registry relation is declared as a lake entity, so a relation can never
+    /// again live only in the hand-built registry (the dbt-era shape).
+    #[test]
+    fn every_stage_relation_is_an_entity() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../entities");
+        let catalog = er_entity_spec::Catalog::load_dir(dir).expect("entities load");
+        for relation in er_schema::model::stage_owned() {
+            let entity = catalog
+                .entities()
+                .iter()
+                .find(|e| e.relation == relation && e.has_store(er_entity_spec::Store::Duckdb));
+            assert!(
+                entity.is_some(),
+                "stage-materialised relation {relation} has no lake entity"
+            );
+        }
+    }
+
     #[test]
     fn job_postgres_ddl_has_constraints_and_widened_integers() {
         let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../entities");

@@ -1,11 +1,12 @@
-//! The standardization stage (port of `dbt/models/staging/stg_records.sql` +
-//! `dbt/models/intermediate/int_std_records.sql`, DesignDoc.md S4.2).
+//! The standardization stage (port of the retired dbt models `stg_records.sql`
+//! + `int_std_records.sql`, DesignDoc.md S4.2).
 //!
 //! `stg_records` projects `raw_records.payload` into the canonical staging shape
 //! by applying the [`er_std::sql`] macros per source; `int_std_records` keeps one
 //! current row per `(source_system, source_record_id)` (greatest `ingested_at`,
 //! tie-broken by `ingest_batch_id DESC`) and drops tombstones. Both are assembled
-//! as DuckDB SQL (no dbt) and run through a dedupe-core session.
+//! as DuckDB SQL and run through a dedupe-core session; `stg_records` exists only
+//! as a CTE inside the `int_std_records` statement, never as a lake relation.
 
 use dedupe_core::session::Session;
 use er_config::{Config, SourceSpec};
