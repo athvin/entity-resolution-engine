@@ -24,10 +24,13 @@ use er_entity_spec::{Catalog, Store};
 use ff_analysis::{FloatBitWidth, IntBitWidth};
 use ff_analysis::{Nullability, RelSchema, SchemaCatalog, SqlType, TypedColumn};
 
-/// The engine's intermediate lake relations (not entity-owned) that stage SQL
-/// reads. The golden marts (`golden_records`, `golden_lineage`, `golden_display`
-/// and the account variants) are entities and already come from the catalog.
-const STAGE_RELATIONS: [&str; 3] = ["int_std_records", "entity_membership", "entities"];
+/// The engine's entity-AGNOSTIC intermediate lake relations (not entity-owned)
+/// that stage SQL reads — shared by the person and account pipelines alike. The
+/// golden marts (`golden_records`, `golden_lineage`, `golden_display` and the
+/// account variants) are entities and already come from the catalog.
+/// `int_std_records` is entity-specific (person vs account std payload) and is
+/// modeled separately per entity type in [`build_lake_stage_catalog`].
+const SHARED_STAGE_RELATIONS: [&str; 2] = ["entity_membership", "entities"];
 
 /// Map an `er-schema` column type string (the eight-type vocabulary's spelling) to
 /// the feather-flow `SqlType` subset.
@@ -49,14 +52,14 @@ fn schema_type_to_sql(type_str: &str) -> SqlType {
     }
 }
 
-/// A `RelSchema` for a registry `TableSpec`: its columns in declaration order.
-fn rel_schema(spec: &er_schema::model::TableSpec) -> RelSchema {
-    let columns = spec
-        .columns
+/// A `RelSchema` from an `er-schema` column list (declaration order), attributed
+/// to `table`.
+fn rel_schema_from_columns(table: &str, columns: &[er_schema::model::Column]) -> RelSchema {
+    let columns = columns
         .iter()
         .map(|c| TypedColumn {
             name: c.name.clone(),
-            source_table: Some(spec.name.clone()),
+            source_table: Some(table.to_string()),
             sql_type: schema_type_to_sql(&c.r#type),
             nullability: if c.nullable {
                 Nullability::Nullable
@@ -69,14 +72,30 @@ fn rel_schema(spec: &er_schema::model::TableSpec) -> RelSchema {
     RelSchema::new(columns)
 }
 
+/// A `RelSchema` for a registry `TableSpec`: its columns in declaration order.
+fn rel_schema(spec: &er_schema::model::TableSpec) -> RelSchema {
+    rel_schema_from_columns(&spec.name, &spec.columns)
+}
+
 /// Build the lake-stage catalog: the DuckDB entity catalog (the golden marts) plus
-/// the engine's intermediate lake relations from the registry, so a stage statement
-/// that joins marts and intermediate tables plans against one `SchemaCatalog`.
+/// the engine's intermediate lake relations, so a stage statement that joins marts
+/// and intermediate tables plans against one `SchemaCatalog`. `account` selects the
+/// account standardized payload for `int_std_records` (vs the person payload) — the
+/// account mart-assembly SQL reads the same table name with account columns.
 #[must_use]
-pub fn build_lake_stage_catalog(entities: &Catalog) -> SchemaCatalog {
+pub fn build_lake_stage_catalog(entities: &Catalog, account: bool) -> SchemaCatalog {
     let mut catalog = crate::build_store_catalog(entities, Store::Duckdb);
+    // `int_std_records` is entity-specific: person vs account standardized payload.
+    catalog.insert(
+        format!("{}.int_std_records", Store::Duckdb.qualifier()),
+        Arc::new(rel_schema_from_columns(
+            "int_std_records",
+            &er_schema::model::int_std_record_columns(account),
+        )),
+    );
+    // The shared, entity-agnostic intermediate tables come from the registry.
     for spec in er_schema::model::all_specs() {
-        if STAGE_RELATIONS.contains(&spec.name.as_str()) {
+        if SHARED_STAGE_RELATIONS.contains(&spec.name.as_str()) {
             catalog.insert(
                 format!("{}.{}", Store::Duckdb.qualifier(), spec.name),
                 Arc::new(rel_schema(&spec)),
@@ -100,15 +119,54 @@ mod tests {
 
     const TEST_CONFIG: &str = include_str!("../../er-config/tests/fixtures/test.yaml");
 
+    /// An account-vocabulary config: the person test config with its survivorship
+    /// chains replaced by chains over the account attributes the account golden SQL
+    /// resolves (`company_name`, `domain`, `phone_e164`, `address`). Only
+    /// `phone_e164` carries a validity flag, so `validated` is used only there.
+    fn acct_config() -> er_config::Config {
+        let mut config = er_config::load_config_str(TEST_CONFIG).expect("config parses");
+        config.survivorship = [
+            (
+                "company_name".to_string(),
+                vec![
+                    "source_priority".to_string(),
+                    "frequency".to_string(),
+                    "completeness".to_string(),
+                ],
+            ),
+            (
+                "domain".to_string(),
+                vec!["source_priority".to_string(), "recency".to_string()],
+            ),
+            (
+                "phone_e164".to_string(),
+                vec![
+                    "validated".to_string(),
+                    "source_priority".to_string(),
+                    "recency".to_string(),
+                ],
+            ),
+            (
+                "address".to_string(),
+                vec!["recency".to_string(), "source_priority".to_string()],
+            ),
+        ]
+        .into_iter()
+        .collect();
+        config
+    }
+
     #[test]
     fn the_stage_catalog_carries_the_intermediate_relations() {
-        let cat = build_lake_stage_catalog(&entities_catalog());
-        for rel in STAGE_RELATIONS {
+        let cat = build_lake_stage_catalog(&entities_catalog(), false);
+        for rel in SHARED_STAGE_RELATIONS {
             assert!(
                 cat.contains_key(&format!("lake.main.{rel}")),
                 "stage catalog missing {rel}"
             );
         }
+        // …plus the entity-specific int_std_records…
+        assert!(cat.contains_key("lake.main.int_std_records"));
         // …alongside the entity-owned marts.
         assert!(cat.contains_key("lake.main.golden_records"));
         assert!(cat.contains_key("lake.main.golden_lineage"));
@@ -142,7 +200,7 @@ mod tests {
         // function stubs resolve and the statement is well-formed against the
         // schema. This is the design's "mart-populating statements under the analyser".
         let config = er_config::load_config_str(TEST_CONFIG).expect("config parses");
-        let catalog = build_lake_stage_catalog(&entities_catalog());
+        let catalog = build_lake_stage_catalog(&entities_catalog(), false);
 
         let records = er_golden::golden_records_sql(
             &config,
@@ -179,6 +237,52 @@ mod tests {
             assert!(
                 lineage_cols.contains(&required.to_string()),
                 "golden_lineage output missing {required}: {lineage_cols:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_account_mart_assembly_sql_plans_against_the_account_stage_catalog() {
+        // The ACCOUNT mart-populating SQL, planned against an account stage catalog
+        // (int_std_records modeled with the account standardized payload). Reuses the
+        // same machinery the person marts proved — DuckDB json/list stubs, the
+        // MAP-literal ExprPlanner, window stubs, and the element_at subscript rewrite
+        // — against account columns, so both entity types are under the analyser.
+        let config = acct_config();
+        let catalog = build_lake_stage_catalog(&entities_catalog(), true);
+
+        let records = er_golden::acct_golden_records_sql(
+            &config,
+            "lake.main.acct_golden_lineage",
+            "lake.main.int_std_records",
+            "lake.main.entity_membership",
+            "lake.main.entities",
+        );
+        let record_cols = plan_stage(&catalog, &records);
+        for required in [
+            "entity_id",
+            "metadata",
+            "survivorship_version",
+            "assembled_at",
+        ] {
+            assert!(
+                record_cols.contains(&required.to_string()),
+                "acct_golden_records output missing {required}: {record_cols:?}"
+            );
+        }
+
+        let lineage = er_golden::acct_golden_lineage_sql(
+            &config,
+            "lake.main.int_std_records",
+            "lake.main.entity_membership",
+            "lake.main.entities",
+        )
+        .expect("account lineage sql renders");
+        let lineage_cols = plan_stage(&catalog, &lineage);
+        for required in ["entity_id", "attribute", "record_key", "rule"] {
+            assert!(
+                lineage_cols.contains(&required.to_string()),
+                "acct_golden_lineage output missing {required}: {lineage_cols:?}"
             );
         }
     }
