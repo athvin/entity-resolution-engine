@@ -24,6 +24,6 @@ pub use rewrite::{
 };
 pub use stage::build_lake_stage_catalog;
 pub use statement::{
-    LoadedStatement, Mode, Operation, Returns, StatementParam, StmtError, load_statements,
-    operation_for_folder,
+    LoadedStatement, Mode, Operation, Pin, ReturnColumn, Returns, StatementParam, StmtError,
+    load_statements, operation_for_folder,
 };

@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS lake.main.acct_int_std_records (
   std_version VARCHAR NOT NULL,
   company_name VARCHAR,
   company_name_norm VARCHAR,
-  company_variants LIST(VARCHAR) NOT NULL,
+  company_variants VARCHAR[] NOT NULL,
   domain VARCHAR,
   domain_norm VARCHAR,
   phone_e164 VARCHAR,

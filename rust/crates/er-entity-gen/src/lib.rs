@@ -52,6 +52,10 @@ impl GeneratedTree {
     }
 }
 
+/// The static lake-read batch support module (typed Arrow extraction), emitted
+/// verbatim into the generated crate whenever any entity emits Rust.
+const BATCH_SUPPORT: &str = include_str!("../assets/batch.rs");
+
 /// Where each kind of artifact is written, relative to the repository root.
 const RUST_ENTITIES_DIR: &str = "rust/crates/er-entities/src";
 const LAKE_DDL_DIR: &str = "rust/crates/er-entities/ddl/lake";
@@ -120,6 +124,17 @@ pub fn generate(catalog: &Catalog) -> Result<GeneratedTree, ConvertError> {
             emit_postgres_baseline(&pg_entities)?,
         );
         extra_modules.push("schema");
+    }
+
+    // The lake-read batch support module: typed extraction from DuckDB's Arrow
+    // batches for the `returns: columns` row structs. Static text, carried as an
+    // asset so the generated crate stays 100% generated.
+    if !rust_modules.is_empty() {
+        tree.push(
+            format!("{RUST_ENTITIES_DIR}/batch.rs"),
+            BATCH_SUPPORT.to_string(),
+        );
+        extra_modules.push("batch");
     }
 
     // The generated crate root, so `er-entities` is 100% generated: the clippy

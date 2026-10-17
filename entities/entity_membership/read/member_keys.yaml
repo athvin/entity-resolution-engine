@@ -1,0 +1,8 @@
+kind: statement
+operation: read
+description: "The member record keys of one entity at a pinned snapshot, ascending (the unmerge precheck and the detail member list)."
+params:
+  - { name: snapshot, type: bigint }
+  - { name: entity_id, type: varchar }
+returns:
+  - { name: record_key, type: varchar, nullable: false }
