@@ -1,0 +1,8 @@
+kind: statement
+operation: update
+mode: partial
+description: "Close the run ledger row on success, stamping ended_at."
+params:
+  - { name: ended_at, type: varchar }
+  - { name: run_id, type: varchar }
+returns: none

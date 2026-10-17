@@ -1,0 +1,17 @@
+kind: statement
+operation: create
+mode: partial
+description: "Write one delivery receipt row: the per-source landing breakdown GET /imports surfaces."
+params:
+  - { name: ingest_batch_id, type: varchar }
+  - { name: run_id, type: varchar }
+  - { name: source_system, type: varchar }
+  - { name: path, type: varchar }
+  - { name: new_count, type: bigint }
+  - { name: changed_count, type: bigint }
+  - { name: unchanged_count, type: bigint }
+  - { name: tombstone_count, type: bigint }
+  - { name: resurrected_count, type: bigint }
+  - { name: full_refresh_keys, type: boolean }
+  - { name: created_at, type: varchar }
+returns: none

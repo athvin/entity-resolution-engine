@@ -1,0 +1,6 @@
+kind: statement
+operation: update
+mode: partial
+description: "The S4.3.4 single write: MERGE the scored pairs (the session's __match_src staging) on the logical key; a re-scored pair is rewritten in place, clearing any invalidation."
+params: []
+returns: none

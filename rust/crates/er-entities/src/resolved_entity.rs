@@ -46,3 +46,25 @@ impl ResolvedEntity {
         ]
     }
 }
+
+pub mod update {
+    //! @generated query functions for this entity + operation.
+    /// MERGE the run's entity transitions (the session's __ent_src staging) on entity_id.
+    pub fn upsert_from_src(
+        conn: &::duckdb::Connection,
+        updated_at: &str,
+        run_id: &str,
+    ) -> ::duckdb::Result<usize> {
+        const SQL: &str = "MERGE INTO lake.main.entities AS target USING __ent_src AS source
+  ON target.entity_id = source.entity_id
+WHEN MATCHED THEN UPDATE SET status = source.status,
+    merged_into = source.merged_into, updated_at = $1::timestamp,
+    updated_run_id = $2
+WHEN NOT MATCHED THEN INSERT
+    (entity_id, status, merged_into, created_at, updated_at, created_run_id, updated_run_id)
+    VALUES (source.entity_id, source.status, source.merged_into,
+            $1::timestamp, $1::timestamp, $2, $2)
+";
+        conn.execute(SQL, ::duckdb::params![updated_at, run_id])
+    }
+}

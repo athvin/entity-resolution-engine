@@ -18,6 +18,7 @@ er-ingest = { path = "../er-ingest" }
 er-standardize = { path = "../er-standardize" }
 er-match = { path = "../er-match" }
 er-schema = { path = "../er-schema" }
+er-entities = { path = "../er-entities" }
 er-reconcile = { path = "../er-reconcile" }
 er-ids = { path = "../er-ids" }
 er-golden = { path = "../er-golden" }

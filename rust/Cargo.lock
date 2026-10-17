@@ -1339,6 +1339,7 @@ dependencies = [
  "clap",
  "dedupe-core",
  "er-config",
+ "er-entities",
  "er-golden",
  "er-hash",
  "er-ids",

@@ -1,0 +1,11 @@
+kind: statement
+operation: create
+mode: partial
+description: "Activate a protect/suppress overlay on a record key."
+params:
+  - { name: record_key, type: varchar }
+  - { name: kind, type: varchar }
+  - { name: created_by, type: varchar }
+  - { name: created_at, type: varchar }
+  - { name: source_action_id, type: varchar }
+returns: none

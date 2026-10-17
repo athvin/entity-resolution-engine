@@ -115,6 +115,46 @@ fn emit_lake_read_fn(stmt: &LoadedStatement) -> String {
     out
 }
 
+/// Emit one lake write function returning the affected-row count. No snapshot pin
+/// (E006 is a read rule); every declared parameter binds positionally. Timestamps
+/// and JSON cross as text with an explicit `::timestamp` / `::json` cast in the
+/// statement SQL, matching the engine's string-typed logical timestamps.
+fn emit_lake_write_fn(stmt: &LoadedStatement) -> String {
+    let fn_name = stmt
+        .path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("query");
+    let bound: Vec<&StatementParam> = stmt.params.iter().collect();
+    let template = build_sql_template(&stmt.sql, None, &bound);
+    let escaped = rust_string_escape(&template);
+
+    let mut args = String::from("    conn: &::duckdb::Connection,\n");
+    for param in &stmt.params {
+        args.push_str(&format!("    {}: {},\n", param.name, param_arg_type(param)));
+    }
+    let bind_list = bound
+        .iter()
+        .map(|p| p.name.clone())
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        "    /// {}\n",
+        stmt.description.replace(['\n', '\r'], " ").trim()
+    ));
+    out.push_str(&format!(
+        "    pub fn {fn_name}(\n{args}    ) -> ::duckdb::Result<usize> {{\n"
+    ));
+    out.push_str(&format!("        const SQL: &str = \"{escaped}\";\n"));
+    out.push_str(&format!(
+        "        conn.execute(SQL, ::duckdb::params![{bind_list}])\n"
+    ));
+    out.push_str("    }\n");
+    out
+}
+
 /// `snake_case` -> `PascalCase`, matching the generated struct name in er-entity-gen.
 fn to_pascal_case(name: &str) -> String {
     name.split(['_', '-'])
@@ -210,11 +250,18 @@ pub fn emit_query_modules(entity: &Entity, statements: &[LoadedStatement]) -> Op
             continue;
         }
         let f = if entity.has_store(Store::Duckdb) {
-            // Lake: only reads are emitted today; the engine's stage writes land later.
-            if stmt.operation != Operation::Read {
-                continue;
+            // Lake: reads return Arrow batches; writes (INSERT/UPDATE/DELETE/MERGE
+            // under their folders, `returns: none`) return the affected-row count.
+            // A lake write that claims to return rows has no emitter — loudly
+            // unsupported rather than silently skipped.
+            match (stmt.operation, &stmt.returns) {
+                (Operation::Read, _) => emit_lake_read_fn(stmt),
+                (_, Returns::None) => emit_lake_write_fn(stmt),
+                _ => panic!(
+                    "{}: a lake write must declare `returns: none` (RETURNING is not emitted for the lake)",
+                    stmt.path.display()
+                ),
             }
-            emit_lake_read_fn(stmt)
         } else if entity.has_store(Store::Postgres) {
             // Control: reads and writes (create/update/delete), including RETURNING.
             emit_control_fn(entity, stmt)
@@ -291,6 +338,26 @@ mod tests {
         assert!(module.contains("pub async fn mark("));
         assert!(module.contains("-> ::std::result::Result<u64, ::tokio_postgres::Error>"));
         assert!(module.contains("client.execute(SQL,"));
+    }
+
+    #[test]
+    fn emits_run_lake_write_module() {
+        let cat = Catalog::load_dir(entities_dir()).unwrap();
+        let stmts = load_statements(&entities_dir(), &cat).unwrap();
+        let entity = cat.by_name("run").unwrap();
+        let module = emit_query_modules(entity, &stmts).expect("run has writes");
+
+        // A lake write binds positionally on the DuckDB connection and returns
+        // the affected-row count; no snapshot splice on a write.
+        assert!(module.contains("pub mod create {"));
+        assert!(module.contains("pub fn start("));
+        assert!(module.contains("conn: &::duckdb::Connection"));
+        assert!(module.contains("-> ::duckdb::Result<usize>"));
+        assert!(module.contains("conn.execute(SQL, ::duckdb::params!["));
+        assert!(module.contains("VALUES ($1, $2, $3, 'running', $4::timestamp"));
+        assert!(!module.contains("{snapshot}"));
+        assert!(module.contains("pub mod update {"));
+        assert!(module.contains("pub fn finish("));
     }
 
     #[test]

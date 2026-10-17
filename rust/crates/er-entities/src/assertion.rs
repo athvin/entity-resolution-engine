@@ -55,3 +55,70 @@ impl Assertion {
         ]
     }
 }
+
+pub mod create {
+    //! @generated query functions for this entity + operation.
+    /// Insert an active steward assertion on a canonicalized pair; its id is the staged action id (deterministic and stable).
+    pub fn add(
+        conn: &::duckdb::Connection,
+        assertion_id: &str,
+        rec_a_key: &str,
+        rec_b_key: &str,
+        kind: &str,
+        created_by: &str,
+        created_at: &str,
+        note: Option<&str>,
+    ) -> ::duckdb::Result<usize> {
+        const SQL: &str = "INSERT INTO lake.main.assertions
+  (assertion_id, rec_a_key, rec_b_key, kind, active, created_by, created_at, note)
+VALUES ($1, $2, $3, $4, true, $5, $6::timestamp, $7)
+";
+        conn.execute(
+            SQL,
+            ::duckdb::params![
+                assertion_id,
+                rec_a_key,
+                rec_b_key,
+                kind,
+                created_by,
+                created_at,
+                note
+            ],
+        )
+    }
+
+    /// Leave the always/never assertion a match/no_match review resolution implies, on the review's pair.
+    pub fn from_review(
+        conn: &::duckdb::Connection,
+        assertion_id: &str,
+        kind: &str,
+        created_at: &str,
+        review_id: &str,
+    ) -> ::duckdb::Result<usize> {
+        const SQL: &str = "INSERT INTO lake.main.assertions
+  (assertion_id, rec_a_key, rec_b_key, kind, active, created_by, created_at)
+SELECT $1, rec_a_key, rec_b_key, $2, true, 'steward', $3::timestamp
+FROM lake.main.review_queue WHERE review_id = $4
+";
+        conn.execute(
+            SQL,
+            ::duckdb::params![assertion_id, kind, created_at, review_id],
+        )
+    }
+}
+
+pub mod update {
+    //! @generated query functions for this entity + operation.
+    /// Deactivate an assertion (rows are never deleted).
+    pub fn retract(
+        conn: &::duckdb::Connection,
+        retracted_at: &str,
+        assertion_id: &str,
+    ) -> ::duckdb::Result<usize> {
+        const SQL: &str =
+            "UPDATE lake.main.assertions SET active = false, retracted_at = $1::timestamp
+WHERE assertion_id = $2
+";
+        conn.execute(SQL, ::duckdb::params![retracted_at, assertion_id])
+    }
+}

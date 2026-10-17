@@ -64,3 +64,85 @@ impl Review {
         ]
     }
 }
+
+pub mod update {
+    //! @generated query functions for this entity + operation.
+    /// Record a steward's resolution on a review item.
+    pub fn resolve(
+        conn: &::duckdb::Connection,
+        status: &str,
+        resolved_at: &str,
+        review_id: &str,
+    ) -> ::duckdb::Result<usize> {
+        const SQL: &str =
+            "UPDATE lake.main.review_queue SET status = $1, resolved_at = $2::timestamp
+WHERE review_id = $3
+";
+        conn.execute(SQL, ::duckdb::params![status, resolved_at, review_id])
+    }
+
+    /// Upsert the gray-band pair reviews from active match scores in [review_low, auto_merge): a re-run refreshes probability/waterfall/last_seen_run_id and leaves review_id/first_seen_run_id/status intact.
+    pub fn upsert_gray_band(
+        conn: &::duckdb::Connection,
+        run_id: &str,
+        review_low: f64,
+        auto_merge: f64,
+    ) -> ::duckdb::Result<usize> {
+        const SQL: &str = "MERGE INTO lake.main.review_queue AS target USING (
+  SELECT 'gray_band:' || rec_a_key || ':' || rec_b_key AS review_id,
+         'pair' AS subject_type, rec_a_key, rec_b_key,
+         CAST(NULL AS varchar) AS entity_id, 'gray_band' AS reason,
+         match_probability, evidence AS waterfall, 'open' AS status,
+         $1 AS first_seen_run_id, $1 AS last_seen_run_id,
+         CAST(NULL AS varchar) AS resolved_by, CAST(NULL AS timestamp) AS resolved_at
+  FROM lake.main.match_scores
+  WHERE is_active AND match_probability >= $2 AND match_probability < $3
+) AS source
+  ON target.rec_a_key = source.rec_a_key AND target.rec_b_key = source.rec_b_key
+ AND target.reason = source.reason
+WHEN MATCHED THEN UPDATE SET match_probability = source.match_probability,
+    waterfall = source.waterfall, last_seen_run_id = source.last_seen_run_id
+WHEN NOT MATCHED THEN INSERT
+    (review_id, subject_type, rec_a_key, rec_b_key, entity_id, reason,
+     match_probability, waterfall, status, first_seen_run_id, last_seen_run_id,
+     resolved_by, resolved_at)
+    VALUES
+    (source.review_id, source.subject_type, source.rec_a_key, source.rec_b_key,
+     source.entity_id, source.reason, source.match_probability, source.waterfall,
+     source.status, source.first_seen_run_id, source.last_seen_run_id,
+     source.resolved_by, source.resolved_at)
+";
+        conn.execute(SQL, ::duckdb::params![run_id, review_low, auto_merge])
+    }
+
+    /// Upsert one never-unsatisfiable escalation as an open pair review: a re-run keeps review_id/first_seen_run_id and refreshes last_seen_run_id.
+    pub fn upsert_never_unsatisfiable(
+        conn: &::duckdb::Connection,
+        rec_a_key: &str,
+        rec_b_key: &str,
+        run_id: &str,
+    ) -> ::duckdb::Result<usize> {
+        const SQL: &str = "MERGE INTO lake.main.review_queue AS target USING (
+  SELECT 'never_unsatisfiable:' || $1 || ':' || $2 AS review_id,
+         'pair' AS subject_type, $1 AS rec_a_key, $2 AS rec_b_key,
+         CAST(NULL AS varchar) AS entity_id, 'never_unsatisfiable' AS reason,
+         CAST(NULL AS double) AS match_probability, CAST(NULL AS json) AS waterfall,
+         'open' AS status, $3 AS first_seen_run_id, $3 AS last_seen_run_id,
+         CAST(NULL AS varchar) AS resolved_by, CAST(NULL AS timestamp) AS resolved_at
+) AS source
+  ON target.rec_a_key = source.rec_a_key AND target.rec_b_key = source.rec_b_key
+ AND target.reason = source.reason
+WHEN MATCHED THEN UPDATE SET last_seen_run_id = source.last_seen_run_id
+WHEN NOT MATCHED THEN INSERT
+    (review_id, subject_type, rec_a_key, rec_b_key, entity_id, reason,
+     match_probability, waterfall, status, first_seen_run_id, last_seen_run_id,
+     resolved_by, resolved_at)
+    VALUES
+    (source.review_id, source.subject_type, source.rec_a_key, source.rec_b_key,
+     source.entity_id, source.reason, source.match_probability, source.waterfall,
+     source.status, source.first_seen_run_id, source.last_seen_run_id,
+     source.resolved_by, source.resolved_at)
+";
+        conn.execute(SQL, ::duckdb::params![rec_a_key, rec_b_key, run_id])
+    }
+}

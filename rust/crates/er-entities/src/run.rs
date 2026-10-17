@@ -73,3 +73,58 @@ impl Run {
         ]
     }
 }
+
+pub mod create {
+    //! @generated query functions for this entity + operation.
+    /// Open the run ledger row (status running) with the run's mode, versions and the model identity it scores against.
+    pub fn start(
+        conn: &::duckdb::Connection,
+        run_id: &str,
+        tenant: &str,
+        mode: &str,
+        started_at: &str,
+        config_hash: &str,
+        model_version: &str,
+        tf_snapshot_id: &str,
+        std_version: &str,
+        survivorship_version: &str,
+        code_version: &str,
+    ) -> ::duckdb::Result<usize> {
+        const SQL: &str =
+            "INSERT INTO lake.main.runs (run_id, tenant, mode, status, started_at, config_hash,
+  model_version, tf_snapshot_id, std_version, survivorship_version, code_version)
+VALUES ($1, $2, $3, 'running', $4::timestamp, $5,
+  $6, $7, $8, $9, $10)
+";
+        conn.execute(
+            SQL,
+            ::duckdb::params![
+                run_id,
+                tenant,
+                mode,
+                started_at,
+                config_hash,
+                model_version,
+                tf_snapshot_id,
+                std_version,
+                survivorship_version,
+                code_version
+            ],
+        )
+    }
+}
+
+pub mod update {
+    //! @generated query functions for this entity + operation.
+    /// Close the run ledger row on success, stamping ended_at.
+    pub fn finish(
+        conn: &::duckdb::Connection,
+        ended_at: &str,
+        run_id: &str,
+    ) -> ::duckdb::Result<usize> {
+        const SQL: &str = "UPDATE lake.main.runs SET status = 'succeeded', ended_at = $1::timestamp
+WHERE run_id = $2
+";
+        conn.execute(SQL, ::duckdb::params![ended_at, run_id])
+    }
+}

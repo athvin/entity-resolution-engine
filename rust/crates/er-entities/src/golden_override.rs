@@ -43,3 +43,48 @@ impl GoldenOverride {
         ]
     }
 }
+
+pub mod create {
+    //! @generated query functions for this entity + operation.
+    /// Pin (or, with a NULL value, clear) one golden field for one entity; applied over golden_records at the next assemble.
+    pub fn set(
+        conn: &::duckdb::Connection,
+        entity_id: &str,
+        attribute: &str,
+        value: Option<&str>,
+        created_by: &str,
+        created_at: &str,
+        source_action_id: &str,
+    ) -> ::duckdb::Result<usize> {
+        const SQL: &str = "INSERT INTO lake.main.golden_overrides
+  (entity_id, attribute, value, created_by, created_at, source_action_id)
+VALUES ($1, $2, $3, $4, $5::timestamp, $6)
+";
+        conn.execute(
+            SQL,
+            ::duckdb::params![
+                entity_id,
+                attribute,
+                value,
+                created_by,
+                created_at,
+                source_action_id
+            ],
+        )
+    }
+}
+
+pub mod delete {
+    //! @generated query functions for this entity + operation.
+    /// Drop the prior override for (entity_id, attribute) so the new one is latest-wins.
+    pub fn clear(
+        conn: &::duckdb::Connection,
+        entity_id: &str,
+        attribute: &str,
+    ) -> ::duckdb::Result<usize> {
+        const SQL: &str =
+            "DELETE FROM lake.main.golden_overrides WHERE entity_id = $1 AND attribute = $2
+";
+        conn.execute(SQL, ::duckdb::params![entity_id, attribute])
+    }
+}

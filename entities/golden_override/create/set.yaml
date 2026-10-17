@@ -1,0 +1,12 @@
+kind: statement
+operation: create
+mode: partial
+description: "Pin (or, with a NULL value, clear) one golden field for one entity; applied over golden_records at the next assemble."
+params:
+  - { name: entity_id, type: varchar }
+  - { name: attribute, type: varchar }
+  - { name: value, type: varchar, nullable: true }
+  - { name: created_by, type: varchar }
+  - { name: created_at, type: varchar }
+  - { name: source_action_id, type: varchar }
+returns: none

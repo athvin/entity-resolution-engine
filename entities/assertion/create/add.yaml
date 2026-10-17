@@ -1,0 +1,13 @@
+kind: statement
+operation: create
+mode: partial
+description: "Insert an active steward assertion on a canonicalized pair; its id is the staged action id (deterministic and stable)."
+params:
+  - { name: assertion_id, type: varchar }
+  - { name: rec_a_key, type: varchar }
+  - { name: rec_b_key, type: varchar }
+  - { name: kind, type: varchar }
+  - { name: created_by, type: varchar }
+  - { name: created_at, type: varchar }
+  - { name: note, type: varchar, nullable: true }
+returns: none
