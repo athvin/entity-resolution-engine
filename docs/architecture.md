@@ -30,7 +30,7 @@ flowchart LR
 | Train | Fit Splink parameters and freeze term-frequency lookups | `model_registry`, `tf_lookup`, model JSON in S3 |
 | Match | Score candidates with a selected model and queue uncertain pairs | `match_scores`, `review_queue` |
 | Reconcile | Apply assertions, cluster records and preserve entity identity | `entities`, `entity_membership`, `entity_events` |
-| Assemble | Select winning values and record their source | `golden_records`, `golden_lineage`, `golden_display` |
+| Assemble | Select winning values and record their source | `golden_records`, `golden_lineage` |
 
 DuckLake stores data in S3-compatible storage and metadata in PostgreSQL. DuckDB
 executes SQL the engine generates for staging, standardization, blocking and
@@ -57,7 +57,8 @@ the old ID and mint IDs for other fragments using deterministic ordering.
 Golden values follow the configured survivorship ordering: validation, source
 priority, recency, frequency or completeness. Address fields survive as one
 component group. `golden_lineage` records the winning source and rule for each
-attribute; `golden_display` is a presentation relation. Merged or retired entities
+attribute (display formatting is client-side, over the raw golden columns). Merged
+or retired entities
 are removed from the current golden output.
 
 ## Incremental processing and review

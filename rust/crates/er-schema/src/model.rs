@@ -796,19 +796,10 @@ fn stage_specs() -> Vec<TableSpec> {
             vec![key(&["entity_id", "attribute"])],
             enum_map(&[("attribute", GOLDEN_LINEAGE_ATTRIBUTES.as_slice())]),
         ),
-        sspec(
-            "golden_display",
-            vec![
-                nn("entity_id", VARCHAR),
-                col("display_name", VARCHAR),
-                col("display_email", VARCHAR),
-                col("display_phone", VARCHAR),
-                col("display_address", VARCHAR),
-                nn("assembled_at", TIMESTAMP),
-            ],
-            vec![key(&["entity_id"])],
-            BTreeMap::new(),
-        ),
+        // (`golden_display`/`acct_golden_display` were retired: no producer was
+        // ever built, no formatting spec exists, and the shipped substitute is
+        // raw golden columns formatted client-side + the inline ILIKE search in
+        // the golden read statements. Re-adding is one entity.yaml away.)
         // --- Account entity-type relations (1.1a) ---
         sspec(
             "acct_int_std_records",
@@ -839,19 +830,6 @@ fn stage_specs() -> Vec<TableSpec> {
                 "attribute",
                 ["address", "company_name", "domain", "phone_e164"].as_slice(),
             )]),
-        ),
-        sspec(
-            "acct_golden_display",
-            vec![
-                nn("entity_id", VARCHAR),
-                col("display_name", VARCHAR),
-                col("display_domain", VARCHAR),
-                col("display_phone", VARCHAR),
-                col("display_address", VARCHAR),
-                nn("assembled_at", TIMESTAMP),
-            ],
-            vec![key(&["entity_id"])],
-            BTreeMap::new(),
         ),
     ]
 }

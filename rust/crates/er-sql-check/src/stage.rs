@@ -26,8 +26,8 @@ use ff_analysis::{Nullability, RelSchema, SchemaCatalog, SqlType, TypedColumn};
 
 /// The engine's entity-AGNOSTIC intermediate lake relations (not entity-owned)
 /// that stage SQL reads — shared by the person and account pipelines alike. The
-/// golden marts (`golden_records`, `golden_lineage`, `golden_display` and the
-/// account variants) are entities and already come from the catalog.
+/// golden marts (`golden_records`, `golden_lineage` and the account variants)
+/// are entities and already come from the catalog.
 /// `int_std_records` is entity-specific (person vs account std payload) and is
 /// modeled separately per entity type in [`build_lake_stage_catalog`].
 const SHARED_STAGE_RELATIONS: [&str; 2] = ["entity_membership", "entities"];

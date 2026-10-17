@@ -2,24 +2,6 @@ export type paths = Record<string, never>;
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** @description Pre-rendered display strings for a resolved account, for list and detail views. */
-        AcctGoldenDisplay: {
-            /**
-             * Format: date-time
-             * @description Assembly time of this row (volatile).
-             */
-            assembled_at: string;
-            /** @description Rendered display address. */
-            display_address?: string | null;
-            /** @description Rendered display domain. */
-            display_domain?: string | null;
-            /** @description Rendered display name. */
-            display_name?: string | null;
-            /** @description Rendered display phone. */
-            display_phone?: string | null;
-            /** @description The resolved account these display strings belong to. */
-            entity_id: string;
-        };
         /** @description Per-attribute survivorship provenance for a resolved account: which record each surviving value came from. */
         AcctGoldenLineage: {
             /**
@@ -141,24 +123,6 @@ export interface components {
             version: number;
             /** @description The config document source. */
             yaml: string;
-        };
-        /** @description Pre-rendered display strings for a resolved person, for list and detail views. */
-        GoldenDisplay: {
-            /**
-             * Format: date-time
-             * @description Assembly time of this row (volatile).
-             */
-            assembled_at: string;
-            /** @description Rendered display address. */
-            display_address?: string | null;
-            /** @description Rendered display email. */
-            display_email?: string | null;
-            /** @description Rendered display name. */
-            display_name?: string | null;
-            /** @description Rendered display phone. */
-            display_phone?: string | null;
-            /** @description The resolved entity these display strings belong to. */
-            entity_id: string;
         };
         /** @description Per-attribute survivorship provenance: which record each surviving golden value came from. */
         GoldenLineage: {

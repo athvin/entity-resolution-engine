@@ -12,53 +12,6 @@
   "paths": {},
   "components": {
     "schemas": {
-      "AcctGoldenDisplay": {
-        "type": "object",
-        "description": "Pre-rendered display strings for a resolved account, for list and detail views.",
-        "required": [
-          "entity_id",
-          "assembled_at"
-        ],
-        "properties": {
-          "assembled_at": {
-            "type": "string",
-            "format": "date-time",
-            "description": "Assembly time of this row (volatile)."
-          },
-          "display_address": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Rendered display address."
-          },
-          "display_domain": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Rendered display domain."
-          },
-          "display_name": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Rendered display name."
-          },
-          "display_phone": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Rendered display phone."
-          },
-          "entity_id": {
-            "type": "string",
-            "description": "The resolved account these display strings belong to."
-          }
-        }
-      },
       "AcctGoldenLineage": {
         "type": "object",
         "description": "Per-attribute survivorship provenance for a resolved account: which record each surviving value came from.",
@@ -324,53 +277,6 @@
           "yaml": {
             "type": "string",
             "description": "The config document source."
-          }
-        }
-      },
-      "GoldenDisplay": {
-        "type": "object",
-        "description": "Pre-rendered display strings for a resolved person, for list and detail views.",
-        "required": [
-          "entity_id",
-          "assembled_at"
-        ],
-        "properties": {
-          "assembled_at": {
-            "type": "string",
-            "format": "date-time",
-            "description": "Assembly time of this row (volatile)."
-          },
-          "display_address": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Rendered display address."
-          },
-          "display_email": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Rendered display email."
-          },
-          "display_name": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Rendered display name."
-          },
-          "display_phone": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Rendered display phone."
-          },
-          "entity_id": {
-            "type": "string",
-            "description": "The resolved entity these display strings belong to."
           }
         }
       },

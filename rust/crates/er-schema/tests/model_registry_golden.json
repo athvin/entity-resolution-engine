@@ -15,51 +15,6 @@
   "record_overlays"
  ],
  "relations": {
-  "acct_golden_display": {
-   "columns": [
-    {
-     "name": "entity_id",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "display_name",
-     "nullable": true,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "display_domain",
-     "nullable": true,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "display_phone",
-     "nullable": true,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "display_address",
-     "nullable": true,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "assembled_at",
-     "nullable": false,
-     "type": "TIMESTAMP"
-    }
-   ],
-   "create_table_sql": null,
-   "enums": {},
-   "keys": [
-    {
-     "columns": [
-      "entity_id"
-     ],
-     "where": null
-    }
-   ],
-   "owner": "stage"
-  },
   "acct_golden_lineage": {
    "columns": [
     {
@@ -642,51 +597,6 @@
     }
    ],
    "owner": "ddl"
-  },
-  "golden_display": {
-   "columns": [
-    {
-     "name": "entity_id",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "display_name",
-     "nullable": true,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "display_email",
-     "nullable": true,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "display_phone",
-     "nullable": true,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "display_address",
-     "nullable": true,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "assembled_at",
-     "nullable": false,
-     "type": "TIMESTAMP"
-    }
-   ],
-   "create_table_sql": null,
-   "enums": {},
-   "keys": [
-    {
-     "columns": [
-      "entity_id"
-     ],
-     "where": null
-    }
-   ],
-   "owner": "stage"
   },
   "golden_lineage": {
    "columns": [
@@ -1660,10 +1570,8 @@
   "int_std_records",
   "golden_records",
   "golden_lineage",
-  "golden_display",
   "acct_int_std_records",
   "acct_golden_records",
-  "acct_golden_lineage",
-  "acct_golden_display"
+  "acct_golden_lineage"
  ]
 }
