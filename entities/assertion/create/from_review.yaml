@@ -1,0 +1,11 @@
+kind: statement
+operation: create
+mode: partial
+description: "Leave the always/never assertion a match/no_match review resolution implies, on the review's pair."
+params:
+  - { name: assertion_id, type: varchar }
+  - { name: kind, type: varchar }
+  - { name: created_at, type: varchar }
+  - { name: review_id, type: varchar }
+reads: [review]
+returns: none

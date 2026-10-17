@@ -1,0 +1,9 @@
+kind: statement
+operation: update
+mode: partial
+description: "Upsert one never-unsatisfiable escalation as an open pair review: a re-run keeps review_id/first_seen_run_id and refreshes last_seen_run_id."
+params:
+  - { name: rec_a_key, type: varchar }
+  - { name: rec_b_key, type: varchar }
+  - { name: run_id, type: varchar }
+returns: none

@@ -275,32 +275,10 @@ pub fn run_match(
         preds = predictions.physical,
     ))?;
 
-    // S4.3.4 single write: MERGE on the logical key. A re-scored pair is
-    // rewritten in place (clearing any invalidation); a new pair is inserted.
-    session.execute_batch(&format!(
-        "merge into {MATCH_SCORES} as target using __match_src as source
-           on target.rec_a_key = source.rec_a_key and target.rec_b_key = source.rec_b_key
-          and target.model_version = source.model_version
-          and target.tf_snapshot_id = source.tf_snapshot_id
-         when matched then update set
-             match_probability = source.match_probability,
-             rec_a_content_hash = source.rec_a_content_hash,
-             rec_b_content_hash = source.rec_b_content_hash,
-             evidence = source.evidence,
-             is_active = true,
-             invalidated_at = null,
-             invalidated_run_id = null,
-             run_id = source.run_id,
-             scored_at = source.scored_at
-         when not matched then insert
-             (rec_a_key, rec_b_key, match_probability, model_version, tf_snapshot_id,
-              rec_a_content_hash, rec_b_content_hash, evidence, is_active,
-              invalidated_at, invalidated_run_id, run_id, scored_at)
-             values
-             (source.rec_a_key, source.rec_b_key, source.match_probability, source.model_version,
-              source.tf_snapshot_id, source.rec_a_content_hash, source.rec_b_content_hash,
-              source.evidence, true, null, null, source.run_id, source.scored_at)"
-    ))?;
+    // S4.3.4 single write: the declared MERGE on the logical key, over the
+    // model-derived __match_src staging. A re-scored pair is rewritten in place
+    // (clearing any invalidation); a new pair is inserted.
+    er_entities::match_score::update::upsert_from_scored(session.connection())?;
     session.execute_batch("drop table __match_src")?;
     Ok(())
 }
@@ -464,22 +442,19 @@ fn write_run_row(
     tf_snapshot_id: &str,
 ) -> Result<()> {
     create_ddl_table(session, "runs")?;
-    session.execute_batch(&format!(
-        "INSERT INTO {RUNS} (run_id, tenant, mode, status, started_at, config_hash, \
-           model_version, tf_snapshot_id, std_version, survivorship_version, code_version) \
-         VALUES ('{run_id}', '{tenant}', '{mode}', 'running', '{started_at}', '{hash}', \
-           '{model_version}', '{tf_snapshot_id}', '{std_v}', '{surv_v}', '{code_v}')",
-        run_id = esc(run_id),
-        tenant = esc(&config.tenant),
-        mode = esc(mode),
-        started_at = esc(started_at),
-        hash = esc(&er_config::config_hash(config)),
-        model_version = esc(model_version),
-        tf_snapshot_id = esc(tf_snapshot_id),
-        std_v = esc(&config.versions.std_version),
-        surv_v = esc(&config.versions.survivorship_version),
-        code_v = esc(env!("CARGO_PKG_VERSION")),
-    ))?;
+    er_entities::run::create::start(
+        session.connection(),
+        run_id,
+        &config.tenant,
+        mode,
+        started_at,
+        &er_config::config_hash(config),
+        model_version,
+        tf_snapshot_id,
+        &config.versions.std_version,
+        &config.versions.survivorship_version,
+        env!("CARGO_PKG_VERSION"),
+    )?;
     Ok(())
 }
 
@@ -504,23 +479,20 @@ pub fn write_ingest_batch(
 ) -> Result<()> {
     let r = er_ingest::landing::batch_receipt(session, RAW_RECORDS, source, run_id)?;
     create_ddl_table(session, "ingest_batches")?;
-    session.execute_batch(&format!(
-        "INSERT INTO {INGEST_BATCHES} \
-           (ingest_batch_id, run_id, source_system, path, new_count, changed_count, \
-            unchanged_count, tombstone_count, resurrected_count, full_refresh_keys, created_at) \
-         VALUES ('{id}', '{rid}', '{src}', '{path}', {new}, {chg}, {unch}, {tomb}, {res}, {fr}, '{at}')",
-        id = esc(&format!("{run_id}:{source}")),
-        rid = esc(run_id),
-        src = esc(source),
-        path = esc(path),
-        new = r.new,
-        chg = r.changed,
-        unch = r.unchanged,
-        tomb = r.tombstone,
-        res = r.resurrected,
-        fr = full_refresh,
-        at = esc(created_at),
-    ))?;
+    er_entities::ingest_batch::create::receipt(
+        session.connection(),
+        &format!("{run_id}:{source}"),
+        run_id,
+        source,
+        path,
+        r.new,
+        r.changed,
+        r.unchanged,
+        r.tombstone,
+        r.resurrected,
+        full_refresh,
+        created_at,
+    )?;
     Ok(())
 }
 
@@ -529,11 +501,7 @@ pub fn write_ingest_batch(
 /// # Errors
 /// Propagates the lake update error.
 pub fn write_run_end(session: &Session, run_id: &str, ended_at: &str) -> Result<()> {
-    session.execute_batch(&format!(
-        "UPDATE {RUNS} SET status = 'succeeded', ended_at = '{}' WHERE run_id = '{}'",
-        esc(ended_at),
-        esc(run_id),
-    ))?;
+    er_entities::run::update::finish(session.connection(), ended_at, run_id)?;
     Ok(())
 }
 
@@ -569,44 +537,40 @@ pub fn apply_staged_action(
             create_ddl_table(session, "assertions")?;
             let (a, b) = (field("a"), field("b"));
             let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
-            let note = action
-                .get("note")
-                .and_then(serde_json::Value::as_str)
-                .map_or("NULL".to_string(), |n| format!("'{}'", esc(n)));
-            session.execute_batch(&format!(
-                "INSERT INTO {ASSERTIONS} \
-                   (assertion_id, rec_a_key, rec_b_key, kind, active, created_by, created_at, note) \
-                 VALUES ('{id}', '{lo}', '{hi}', '{kind}', true, '{by}', '{at}', {note})",
-                id = esc(action_id),
-                lo = esc(lo),
-                hi = esc(hi),
-                kind = esc(field("kind")),
-                by = esc(field("created_by")),
-                at = esc(applied_at),
-            ))?;
+            let note = action.get("note").and_then(serde_json::Value::as_str);
+            er_entities::assertion::create::add(
+                session.connection(),
+                action_id,
+                lo,
+                hi,
+                field("kind"),
+                field("created_by"),
+                applied_at,
+                note,
+            )?;
         }
         Some("retract_assertion") => {
             create_ddl_table(session, "assertions")?;
-            session.execute_batch(&format!(
-                "UPDATE {ASSERTIONS} SET active = false, retracted_at = '{at}' \
-                 WHERE assertion_id = '{id}'",
-                at = esc(applied_at),
-                id = esc(field("assertion_id")),
-            ))?;
+            er_entities::assertion::update::retract(
+                session.connection(),
+                applied_at,
+                field("assertion_id"),
+            )?;
         }
         Some("resolve_review") => {
-            let rid = esc(field("review_id"));
+            let review_id = field("review_id");
             let resolution = field("resolution");
             let status = match resolution {
                 "match" => "resolved_match",
                 "no_match" => "resolved_no_match",
                 _ => "dismissed",
             };
-            session.execute_batch(&format!(
-                "UPDATE {REVIEW_QUEUE} SET status = '{status}', resolved_at = '{at}' \
-                 WHERE review_id = '{rid}'",
-                at = esc(applied_at),
-            ))?;
+            er_entities::review::update::resolve(
+                session.connection(),
+                status,
+                applied_at,
+                review_id,
+            )?;
             // match/no_match leave an always/never assertion on the review's pair.
             if let Some(kind) = match resolution {
                 "match" => Some("always"),
@@ -614,14 +578,13 @@ pub fn apply_staged_action(
                 _ => None,
             } {
                 create_ddl_table(session, "assertions")?;
-                session.execute_batch(&format!(
-                    "INSERT INTO {ASSERTIONS} \
-                       (assertion_id, rec_a_key, rec_b_key, kind, active, created_by, created_at) \
-                     SELECT '{id}', rec_a_key, rec_b_key, '{kind}', true, 'steward', '{at}' \
-                     FROM {REVIEW_QUEUE} WHERE review_id = '{rid}'",
-                    id = esc(action_id),
-                    at = esc(applied_at),
-                ))?;
+                er_entities::assertion::create::from_review(
+                    session.connection(),
+                    action_id,
+                    kind,
+                    applied_at,
+                    review_id,
+                )?;
             }
         }
         // Mass-update: set (override_field) or clear (clear_field) one golden
@@ -647,28 +610,24 @@ pub fn apply_staged_action(
             ];
             if !entity_id.is_empty() && OVERRIDABLE.contains(&attribute) {
                 let value = if kind == "clear_field" {
-                    "NULL".to_string()
+                    None
                 } else {
-                    action
-                        .get("value")
-                        .and_then(serde_json::Value::as_str)
-                        .map_or_else(|| "NULL".to_string(), |v| format!("'{}'", esc(v)))
+                    action.get("value").and_then(serde_json::Value::as_str)
                 };
-                session.execute_batch(&format!(
-                    "DELETE FROM {GOLDEN_OVERRIDES} WHERE entity_id = '{eid}' AND attribute = '{attr}'",
-                    eid = esc(entity_id),
-                    attr = esc(attribute),
-                ))?;
-                session.execute_batch(&format!(
-                    "INSERT INTO {GOLDEN_OVERRIDES} \
-                       (entity_id, attribute, value, created_by, created_at, source_action_id) \
-                     VALUES ('{eid}', '{attr}', {value}, '{by}', '{at}', '{aid}')",
-                    eid = esc(entity_id),
-                    attr = esc(attribute),
-                    by = esc(field("created_by")),
-                    at = esc(applied_at),
-                    aid = esc(action_id),
-                ))?;
+                er_entities::golden_override::delete::clear(
+                    session.connection(),
+                    entity_id,
+                    attribute,
+                )?;
+                er_entities::golden_override::create::set(
+                    session.connection(),
+                    entity_id,
+                    attribute,
+                    value,
+                    field("created_by"),
+                    applied_at,
+                    action_id,
+                )?;
             }
         }
         // Protect/suppress a record (PR 1.3): one latest-wins active row per
@@ -684,21 +643,19 @@ pub fn apply_staged_action(
                 "suppress"
             };
             if !record_key.is_empty() {
-                session.execute_batch(&format!(
-                    "DELETE FROM {RECORD_OVERLAYS} WHERE record_key = '{rk}' AND kind = '{k}'",
-                    rk = esc(record_key),
-                    k = overlay_kind,
-                ))?;
-                session.execute_batch(&format!(
-                    "INSERT INTO {RECORD_OVERLAYS} \
-                       (record_key, kind, active, created_by, created_at, source_action_id, retracted_at) \
-                     VALUES ('{rk}', '{k}', true, '{by}', '{at}', '{aid}', NULL)",
-                    rk = esc(record_key),
-                    k = overlay_kind,
-                    by = esc(field("created_by")),
-                    at = esc(applied_at),
-                    aid = esc(action_id),
-                ))?;
+                er_entities::record_overlay::delete::clear(
+                    session.connection(),
+                    record_key,
+                    overlay_kind,
+                )?;
+                er_entities::record_overlay::create::set(
+                    session.connection(),
+                    record_key,
+                    overlay_kind,
+                    field("created_by"),
+                    applied_at,
+                    action_id,
+                )?;
             }
         }
         Some("retract_record_overlay") => {
@@ -706,13 +663,12 @@ pub fn apply_staged_action(
             let record_key = field("record_key");
             let overlay_kind = field("kind"); // "protect" | "suppress"
             if !record_key.is_empty() && matches!(overlay_kind, "protect" | "suppress") {
-                session.execute_batch(&format!(
-                    "UPDATE {RECORD_OVERLAYS} SET active = false, retracted_at = '{at}' \
-                     WHERE record_key = '{rk}' AND kind = '{k}'",
-                    at = esc(applied_at),
-                    rk = esc(record_key),
-                    k = overlay_kind,
-                ))?;
+                er_entities::record_overlay::update::retract(
+                    session.connection(),
+                    applied_at,
+                    record_key,
+                    overlay_kind,
+                )?;
             }
         }
         _ => {}
@@ -735,37 +691,14 @@ pub fn apply_staged_action(
 /// Propagates lake DDL / MERGE errors.
 pub fn write_reviews(session: &Session, config: &Config, run_id: &str) -> Result<()> {
     create_ddl_table(session, "review_queue")?;
-    let run_id = esc(run_id);
-    session.execute_batch(&format!(
-        "create temp table __review_src as \
-         select 'gray_band:' || rec_a_key || ':' || rec_b_key as review_id, \
-                'pair' as subject_type, rec_a_key, rec_b_key, \
-                cast(null as varchar) as entity_id, 'gray_band' as reason, \
-                match_probability, evidence as waterfall, 'open' as status, \
-                '{run_id}' as first_seen_run_id, '{run_id}' as last_seen_run_id, \
-                cast(null as varchar) as resolved_by, cast(null as timestamp) as resolved_at \
-         from {MATCH_SCORES} \
-         where is_active and match_probability >= {low} and match_probability < {high}",
-        low = config.thresholds.review_low,
-        high = config.thresholds.auto_merge,
-    ))?;
-    session.execute_batch(&format!(
-        "merge into {REVIEW_QUEUE} as target using __review_src as source \
-           on target.rec_a_key = source.rec_a_key and target.rec_b_key = source.rec_b_key \
-          and target.reason = source.reason \
-         when matched then update set match_probability = source.match_probability, \
-             waterfall = source.waterfall, last_seen_run_id = source.last_seen_run_id \
-         when not matched then insert \
-             (review_id, subject_type, rec_a_key, rec_b_key, entity_id, reason, \
-              match_probability, waterfall, status, first_seen_run_id, last_seen_run_id, \
-              resolved_by, resolved_at) \
-             values \
-             (source.review_id, source.subject_type, source.rec_a_key, source.rec_b_key, \
-              source.entity_id, source.reason, source.match_probability, source.waterfall, \
-              source.status, source.first_seen_run_id, source.last_seen_run_id, \
-              source.resolved_by, source.resolved_at)"
-    ))?;
-    session.execute_batch("drop table __review_src")?;
+    // The gray-band source folds into the statement's USING subquery, so the
+    // whole upsert is one declared MERGE (no staging table).
+    er_entities::review::update::upsert_gray_band(
+        session.connection(),
+        run_id,
+        config.thresholds.review_low,
+        config.thresholds.auto_merge,
+    )?;
     Ok(())
 }
 
@@ -789,42 +722,16 @@ fn write_never_unsatisfiable_reviews(
         return Ok(());
     }
     create_ddl_table(session, "review_queue")?;
-    let run_id = esc(run_id);
-    let rows: Vec<String> = escalations
-        .iter()
-        .map(|(a, b, _assertion_id)| {
-            let (a, b) = (esc(a), esc(b));
-            format!(
-                "('never_unsatisfiable:{a}:{b}', 'pair', '{a}', '{b}', \
-                  cast(null as varchar), 'never_unsatisfiable', cast(null as double), \
-                  cast(null as json), 'open', '{run_id}', '{run_id}', \
-                  cast(null as varchar), cast(null as timestamp))"
-            )
-        })
-        .collect();
-    session.execute_batch(&format!(
-        "create temp table __nu_src as select * from (values {}) \
-         as t(review_id, subject_type, rec_a_key, rec_b_key, entity_id, reason, \
-              match_probability, waterfall, status, first_seen_run_id, last_seen_run_id, \
-              resolved_by, resolved_at)",
-        rows.join(", ")
-    ))?;
-    session.execute_batch(&format!(
-        "merge into {REVIEW_QUEUE} as target using __nu_src as source \
-           on target.rec_a_key = source.rec_a_key and target.rec_b_key = source.rec_b_key \
-          and target.reason = source.reason \
-         when matched then update set last_seen_run_id = source.last_seen_run_id \
-         when not matched then insert \
-             (review_id, subject_type, rec_a_key, rec_b_key, entity_id, reason, \
-              match_probability, waterfall, status, first_seen_run_id, last_seen_run_id, \
-              resolved_by, resolved_at) \
-             values \
-             (source.review_id, source.subject_type, source.rec_a_key, source.rec_b_key, \
-              source.entity_id, source.reason, source.match_probability, source.waterfall, \
-              source.status, source.first_seen_run_id, source.last_seen_run_id, \
-              source.resolved_by, source.resolved_at)"
-    ))?;
-    session.execute_batch("drop table __nu_src")?;
+    // One declared MERGE per escalation (the set is small by construction: a
+    // protected record inside an unsatisfiable never is a steward-path rarity).
+    for (a, b, _assertion_id) in escalations {
+        er_entities::review::update::upsert_never_unsatisfiable(
+            session.connection(),
+            a,
+            b,
+            run_id,
+        )?;
+    }
     Ok(())
 }
 
@@ -1076,9 +983,6 @@ pub fn run_reconcile(session: &Session, config: &Config, run_id: &str, run_at: &
         &CountingIdFactory::new(minted.max(0) as u128),
     );
 
-    let ts = esc(run_at);
-    let rid = esc(run_id);
-
     if !plan.assignments.is_empty() {
         let rows: Vec<String> = plan
             .assignments
@@ -1102,17 +1006,11 @@ pub fn run_reconcile(session: &Session, config: &Config, run_id: &str, run_at: &
              as t(source_system, source_record_id, record_key, entity_id)",
             rows.join(", ")
         ))?;
-        session.execute_batch(&format!(
-            "merge into {ENTITY_MEMBERSHIP} as target using __mem_src as source
-               on target.source_system = source.source_system
-              and target.source_record_id = source.source_record_id
-             when matched then update set record_key = source.record_key,
-                 entity_id = source.entity_id, assigned_at = cast('{ts}' as timestamp), run_id = '{rid}'
-             when not matched then insert
-                 (source_system, source_record_id, record_key, entity_id, assigned_at, run_id)
-                 values (source.source_system, source.source_record_id, source.record_key,
-                         source.entity_id, cast('{ts}' as timestamp), '{rid}')"
-        ))?;
+        er_entities::entity_membership::update::upsert_from_src(
+            session.connection(),
+            run_at,
+            run_id,
+        )?;
         session.execute_batch("drop table __mem_src")?;
     }
 
@@ -1133,45 +1031,30 @@ pub fn run_reconcile(session: &Session, config: &Config, run_id: &str, run_at: &
              as t(entity_id, status, merged_into)",
             rows.join(", ")
         ))?;
-        session.execute_batch(&format!(
-            "merge into {ENTITIES} as target using __ent_src as source
-               on target.entity_id = source.entity_id
-             when matched then update set status = source.status,
-                 merged_into = source.merged_into, updated_at = cast('{ts}' as timestamp),
-                 updated_run_id = '{rid}'
-             when not matched then insert
-                 (entity_id, status, merged_into, created_at, updated_at, created_run_id, updated_run_id)
-                 values (source.entity_id, source.status, source.merged_into,
-                         cast('{ts}' as timestamp), cast('{ts}' as timestamp), '{rid}', '{rid}')"
-        ))?;
+        er_entities::resolved_entity::update::upsert_from_src(
+            session.connection(),
+            run_at,
+            run_id,
+        )?;
         session.execute_batch("drop table __ent_src")?;
     }
 
     if !plan.events.is_empty() {
         let event_ids = CountingIdFactory::new(0);
-        let rows: Vec<String> = plan
-            .events
-            .iter()
-            .enumerate()
-            .map(|(i, e)| {
-                let details =
-                    serde_json::to_string(&e.details).unwrap_or_else(|_| "{}".to_string());
-                format!(
-                    "('{}', {i}, '{rid}', '{}', '{}', '{}'::json, '{}', cast('{ts}' as timestamp))",
-                    esc(&event_ids.new_id()),
-                    esc(&e.entity_id),
-                    esc(&e.event_type),
-                    esc(&details),
-                    esc(&e.details_hash),
-                )
-            })
-            .collect();
-        session.execute_batch(&format!(
-            "insert into {ENTITY_EVENTS} \
-             (event_id, seq, run_id, entity_id, event_type, details, details_hash, occurred_at) \
-             values {}",
-            rows.join(", ")
-        ))?;
+        for (i, e) in plan.events.iter().enumerate() {
+            let details = serde_json::to_string(&e.details).unwrap_or_else(|_| "{}".to_string());
+            er_entities::entity_event::create::append(
+                session.connection(),
+                &event_ids.new_id(),
+                i64::try_from(i).unwrap_or(i64::MAX),
+                run_id,
+                &e.entity_id,
+                &e.event_type,
+                &details,
+                &e.details_hash,
+                run_at,
+            )?;
+        }
     }
     Ok(())
 }

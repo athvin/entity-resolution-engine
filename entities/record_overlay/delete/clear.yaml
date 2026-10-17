@@ -1,0 +1,8 @@
+kind: statement
+operation: delete
+mode: partial
+description: "Drop the prior overlay for (record_key, kind) so the new one is latest-wins."
+params:
+  - { name: record_key, type: varchar }
+  - { name: kind, type: varchar }
+returns: none

@@ -46,3 +46,57 @@ impl RecordOverlay {
         ]
     }
 }
+
+pub mod create {
+    //! @generated query functions for this entity + operation.
+    /// Activate a protect/suppress overlay on a record key.
+    pub fn set(
+        conn: &::duckdb::Connection,
+        record_key: &str,
+        kind: &str,
+        created_by: &str,
+        created_at: &str,
+        source_action_id: &str,
+    ) -> ::duckdb::Result<usize> {
+        const SQL: &str = "INSERT INTO lake.main.record_overlays
+  (record_key, kind, active, created_by, created_at, source_action_id, retracted_at)
+VALUES ($1, $2, true, $3, $4::timestamp, $5, NULL)
+";
+        conn.execute(
+            SQL,
+            ::duckdb::params![record_key, kind, created_by, created_at, source_action_id],
+        )
+    }
+}
+
+pub mod delete {
+    //! @generated query functions for this entity + operation.
+    /// Drop the prior overlay for (record_key, kind) so the new one is latest-wins.
+    pub fn clear(
+        conn: &::duckdb::Connection,
+        record_key: &str,
+        kind: &str,
+    ) -> ::duckdb::Result<usize> {
+        const SQL: &str =
+            "DELETE FROM lake.main.record_overlays WHERE record_key = $1 AND kind = $2
+";
+        conn.execute(SQL, ::duckdb::params![record_key, kind])
+    }
+}
+
+pub mod update {
+    //! @generated query functions for this entity + operation.
+    /// Retract a protect/suppress overlay (rows are never deleted).
+    pub fn retract(
+        conn: &::duckdb::Connection,
+        retracted_at: &str,
+        record_key: &str,
+        kind: &str,
+    ) -> ::duckdb::Result<usize> {
+        const SQL: &str =
+            "UPDATE lake.main.record_overlays SET active = false, retracted_at = $1::timestamp
+WHERE record_key = $2 AND kind = $3
+";
+        conn.execute(SQL, ::duckdb::params![retracted_at, record_key, kind])
+    }
+}

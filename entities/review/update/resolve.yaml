@@ -1,0 +1,9 @@
+kind: statement
+operation: update
+mode: partial
+description: "Record a steward's resolution on a review item."
+params:
+  - { name: status, type: varchar }
+  - { name: resolved_at, type: varchar }
+  - { name: review_id, type: varchar }
+returns: none

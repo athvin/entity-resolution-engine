@@ -1,0 +1,14 @@
+kind: statement
+operation: create
+mode: partial
+description: "Append one lifecycle event with its dense per-run seq and replay-idempotence hash."
+params:
+  - { name: event_id, type: varchar }
+  - { name: seq, type: bigint }
+  - { name: run_id, type: varchar }
+  - { name: entity_id, type: varchar }
+  - { name: event_type, type: varchar }
+  - { name: details, type: varchar }
+  - { name: details_hash, type: varchar }
+  - { name: occurred_at, type: varchar }
+returns: none

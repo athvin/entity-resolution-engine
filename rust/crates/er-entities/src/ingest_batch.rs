@@ -58,3 +58,45 @@ impl IngestBatch {
         ]
     }
 }
+
+pub mod create {
+    //! @generated query functions for this entity + operation.
+    /// Write one delivery receipt row: the per-source landing breakdown GET /imports surfaces.
+    pub fn receipt(
+        conn: &::duckdb::Connection,
+        ingest_batch_id: &str,
+        run_id: &str,
+        source_system: &str,
+        path: &str,
+        new_count: i64,
+        changed_count: i64,
+        unchanged_count: i64,
+        tombstone_count: i64,
+        resurrected_count: i64,
+        full_refresh_keys: bool,
+        created_at: &str,
+    ) -> ::duckdb::Result<usize> {
+        const SQL: &str = "INSERT INTO lake.main.ingest_batches
+  (ingest_batch_id, run_id, source_system, path, new_count, changed_count,
+   unchanged_count, tombstone_count, resurrected_count, full_refresh_keys, created_at)
+VALUES ($1, $2, $3, $4, $5, $6,
+  $7, $8, $9, $10, $11::timestamp)
+";
+        conn.execute(
+            SQL,
+            ::duckdb::params![
+                ingest_batch_id,
+                run_id,
+                source_system,
+                path,
+                new_count,
+                changed_count,
+                unchanged_count,
+                tombstone_count,
+                resurrected_count,
+                full_refresh_keys,
+                created_at
+            ],
+        )
+    }
+}

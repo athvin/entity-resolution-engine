@@ -1,0 +1,10 @@
+kind: statement
+operation: update
+mode: partial
+description: "Upsert the gray-band pair reviews from active match scores in [review_low, auto_merge): a re-run refreshes probability/waterfall/last_seen_run_id and leaves review_id/first_seen_run_id/status intact."
+params:
+  - { name: run_id, type: varchar }
+  - { name: review_low, type: double }
+  - { name: auto_merge, type: double }
+reads: [match_score]
+returns: none

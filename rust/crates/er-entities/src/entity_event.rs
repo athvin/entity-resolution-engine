@@ -49,3 +49,37 @@ impl EntityEvent {
         ]
     }
 }
+
+pub mod create {
+    //! @generated query functions for this entity + operation.
+    /// Append one lifecycle event with its dense per-run seq and replay-idempotence hash.
+    pub fn append(
+        conn: &::duckdb::Connection,
+        event_id: &str,
+        seq: i64,
+        run_id: &str,
+        entity_id: &str,
+        event_type: &str,
+        details: &str,
+        details_hash: &str,
+        occurred_at: &str,
+    ) -> ::duckdb::Result<usize> {
+        const SQL: &str = "INSERT INTO lake.main.entity_events
+  (event_id, seq, run_id, entity_id, event_type, details, details_hash, occurred_at)
+VALUES ($1, $2, $3, $4, $5, $6::json, $7, $8::timestamp)
+";
+        conn.execute(
+            SQL,
+            ::duckdb::params![
+                event_id,
+                seq,
+                run_id,
+                entity_id,
+                event_type,
+                details,
+                details_hash,
+                occurred_at
+            ],
+        )
+    }
+}

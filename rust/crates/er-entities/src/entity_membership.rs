@@ -43,3 +43,26 @@ impl EntityMembership {
         ]
     }
 }
+
+pub mod update {
+    //! @generated query functions for this entity + operation.
+    /// MERGE the run's membership plan (the session's __mem_src staging) on the record identity.
+    pub fn upsert_from_src(
+        conn: &::duckdb::Connection,
+        assigned_at: &str,
+        run_id: &str,
+    ) -> ::duckdb::Result<usize> {
+        const SQL: &str =
+            "MERGE INTO lake.main.entity_membership AS target USING __mem_src AS source
+  ON target.source_system = source.source_system
+ AND target.source_record_id = source.source_record_id
+WHEN MATCHED THEN UPDATE SET record_key = source.record_key,
+    entity_id = source.entity_id, assigned_at = $1::timestamp, run_id = $2
+WHEN NOT MATCHED THEN INSERT
+    (source_system, source_record_id, record_key, entity_id, assigned_at, run_id)
+    VALUES (source.source_system, source.source_record_id, source.record_key,
+            source.entity_id, $1::timestamp, $2)
+";
+        conn.execute(SQL, ::duckdb::params![assigned_at, run_id])
+    }
+}

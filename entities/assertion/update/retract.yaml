@@ -1,0 +1,8 @@
+kind: statement
+operation: update
+mode: partial
+description: "Deactivate an assertion (rows are never deleted)."
+params:
+  - { name: retracted_at, type: varchar }
+  - { name: assertion_id, type: varchar }
+returns: none

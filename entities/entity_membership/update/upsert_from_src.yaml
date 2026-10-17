@@ -1,0 +1,8 @@
+kind: statement
+operation: update
+mode: partial
+description: "MERGE the run's membership plan (the session's __mem_src staging) on the record identity."
+params:
+  - { name: assigned_at, type: varchar }
+  - { name: run_id, type: varchar }
+returns: none
