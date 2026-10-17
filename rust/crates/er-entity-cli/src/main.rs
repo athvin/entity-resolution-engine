@@ -83,6 +83,16 @@ enum Command {
         #[arg(long)]
         dsn: Option<String>,
     },
+    /// Print the entity-relationship diagram (`docs/erd.md`) to stdout. `gen`
+    /// writes the same document into the tree; `verify` fails when it is stale.
+    Erd {
+        /// The repository root (holds `entities/`). Defaults to the current dir.
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+        /// Write to this path instead of stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
     /// Plan (or `--apply`) the safe migration that reconciles a live store to the
     /// catalog; a breaking difference is refused for a hand-written migration.
     Migrate {
@@ -107,7 +117,65 @@ fn load_tree(root: &Path) -> Result<GeneratedTree> {
         .with_context(|| format!("loading entities from {}", entities_dir.display()))?;
     let mut tree = generate(&catalog).context("generating artifacts")?;
     append_query_modules(&entities_dir, &catalog, &mut tree)?;
+    tree.files.push(er_entity_gen::GeneratedFile {
+        path: PathBuf::from("docs/erd.md"),
+        contents: render_erd(root, &catalog)?,
+    });
     Ok(tree)
+}
+
+/// Render `docs/erd.md` from the catalog, the er-schema registry and (when the
+/// frontend tree is present) the latest drizzle snapshot of the `erweb` schema.
+fn render_erd(root: &Path, catalog: &Catalog) -> Result<String> {
+    let snapshot = load_erweb_snapshot(root)?;
+    er_entity_gen::emit_erd(catalog, snapshot.as_deref()).context("rendering the ERD")
+}
+
+/// The latest `frontend/drizzle/meta/<NNNN>_snapshot.json`, or `None` when the
+/// frontend tree is absent (the snapshot indices sort lexicographically).
+fn load_erweb_snapshot(root: &Path) -> Result<Option<String>> {
+    let meta = root.join("frontend/drizzle/meta");
+    if !meta.is_dir() {
+        return Ok(None);
+    }
+    let mut snapshots: Vec<PathBuf> = fs::read_dir(&meta)
+        .with_context(|| format!("reading {}", meta.display()))?
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.ends_with("_snapshot.json"))
+        })
+        .collect();
+    snapshots.sort();
+    match snapshots.last() {
+        Some(path) => {
+            let text =
+                fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+            Ok(Some(text))
+        }
+        None => Ok(None),
+    }
+}
+
+fn run_erd(root: &Path, out: Option<&Path>) -> Result<()> {
+    let entities_dir = root.join("entities");
+    let catalog = Catalog::load_dir(&entities_dir)
+        .with_context(|| format!("loading entities from {}", entities_dir.display()))?;
+    let erd = render_erd(root, &catalog)?;
+    match out {
+        Some(path) => {
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("creating {}", parent.display()))?;
+            }
+            fs::write(path, &erd).with_context(|| format!("writing {}", path.display()))?;
+            println!("wrote {}", path.display());
+        }
+        None => print!("{erd}"),
+    }
+    Ok(())
 }
 
 /// Append the generated typed query functions (from the analyser) to each entity's
@@ -340,6 +408,7 @@ fn main() -> ExitCode {
     let result = match &cli.command {
         Command::Gen { root } => run_gen(root).map(|()| true),
         Command::Check { root } | Command::Verify { root } => run_verify(root),
+        Command::Erd { root, out } => run_erd(root, out.as_deref()).map(|()| true),
         Command::Diff { root, store, dsn } => run_diff(root, store, dsn.as_deref()),
         Command::Migrate {
             root,

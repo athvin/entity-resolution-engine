@@ -15,6 +15,7 @@
 mod casing;
 mod convert;
 mod ddl;
+mod erd;
 mod pg_ddl;
 mod rust;
 mod typescript;
@@ -24,6 +25,7 @@ use std::path::PathBuf;
 use er_entity_spec::{Catalog, Entity, Language, Store, Wire};
 
 pub use convert::{ConvertError, to_lake_table_spec};
+pub use erd::{ErdError, emit_erd};
 
 /// One generated file: a repo-relative path and its full contents.
 #[derive(Debug, Clone, PartialEq, Eq)]
