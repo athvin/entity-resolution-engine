@@ -584,8 +584,13 @@ mod tests {
         assert!(module.contains("-> ::duckdb::Result<usize>"));
         assert!(module.contains("conn.execute(SQL, ::duckdb::params!["));
         assert!(module.contains("VALUES ($1, $2, $3, 'running', $4::timestamp"));
-        assert!(!module.contains("{snapshot}"));
-        assert!(module.contains("pub mod update {"));
+        // No snapshot splice in the WRITE modules (`run` also has a read now,
+        // which legitimately splices; modules emit in folder order, read first).
+        let writes_start = module.find("pub mod update {").expect("update module");
+        let create_module = &module[module.find("pub mod create {").expect("create module")
+            ..module.find("pub mod read {").unwrap_or(writes_start)];
+        assert!(!create_module.contains("{snapshot}"));
+        assert!(!module[writes_start..].contains("{snapshot}"));
         assert!(module.contains("pub fn finish("));
     }
 
