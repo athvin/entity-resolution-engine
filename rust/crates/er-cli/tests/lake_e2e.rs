@@ -1077,3 +1077,49 @@ fn preview_match_scores_without_committing() {
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+/// The posterity gate, live half: after the pipeline has run every stage over a
+/// real DuckLake catalog, `lake.main` contains ONLY relations the S5 registry
+/// declares. The static half (`er-schema`'s `declared_names` test) catches
+/// hardcoded names; this catches a dynamically-built one — however a relation
+/// gets created, an undeclared survivor in the lake fails here.
+#[test]
+fn the_lake_contains_only_declared_relations() {
+    if !enabled() {
+        eprintln!("skipping lake declared-relations gate (set DEDUPE_E2E_DUCKLAKE=1)");
+        return;
+    }
+    let (session, config, tmp) = standardized_lake("declared_only");
+    match_model(&session);
+    er_cli::run_reconcile(
+        &session,
+        &config,
+        "01RUNDECLAREDONLY000000000",
+        "2026-01-02 00:00:00",
+    )
+    .unwrap();
+    er_cli::run_golden(&session, &config).unwrap();
+
+    let declared: BTreeSet<String> = er_schema::model::all_specs()
+        .into_iter()
+        .map(|s| s.name)
+        .collect();
+    let live = session
+        .query_strings(
+            "select table_name from information_schema.tables \
+             where table_catalog = 'lake' and table_schema = 'main'",
+        )
+        .unwrap();
+    let undeclared: Vec<String> = live
+        .into_iter()
+        .map(|row| row[0].clone())
+        .filter(|name| !declared.contains(name))
+        .collect();
+    assert!(
+        undeclared.is_empty(),
+        "lake.main relations that no schema authority declares (add the relation \
+         to er_schema::model or the entity catalog before creating it): {undeclared:?}"
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
