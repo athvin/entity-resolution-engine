@@ -7,15 +7,10 @@
   "entity_events",
   "assertions",
   "review_queue",
-  "model_registry",
-  "tf_lookup",
   "cut_edges",
   "runs",
   "run_stages",
   "ingest_batches",
-  "er_standardize_work",
-  "er_touched_entities",
-  "nickname_variants",
   "golden_overrides",
   "record_overlays"
  ],
@@ -648,84 +643,6 @@
    ],
    "owner": "ddl"
   },
-  "er_standardize_work": {
-   "columns": [
-    {
-     "name": "run_id",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "source_system",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "ingest_batch_id",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "full_refresh",
-     "nullable": false,
-     "type": "BOOLEAN"
-    }
-   ],
-   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.er_standardize_work (\n  run_id VARCHAR NOT NULL,\n  source_system VARCHAR NOT NULL,\n  ingest_batch_id VARCHAR NOT NULL,\n  full_refresh BOOLEAN NOT NULL\n);",
-   "enums": {},
-   "keys": [
-    {
-     "columns": [
-      "run_id",
-      "source_system",
-      "ingest_batch_id"
-     ],
-     "where": null
-    }
-   ],
-   "owner": "ddl"
-  },
-  "er_touched_entities": {
-   "columns": [
-    {
-     "name": "run_id",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "entity_id",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "disposition",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "created_at",
-     "nullable": false,
-     "type": "TIMESTAMP"
-    }
-   ],
-   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.er_touched_entities (\n  run_id VARCHAR NOT NULL,\n  entity_id VARCHAR NOT NULL,\n  disposition VARCHAR NOT NULL,\n  created_at TIMESTAMP NOT NULL\n);",
-   "enums": {
-    "disposition": [
-     "rebuild",
-     "retire"
-    ]
-   },
-   "keys": [
-    {
-     "columns": [
-      "run_id",
-      "entity_id"
-     ],
-     "where": null
-    }
-   ],
-   "owner": "ddl"
-  },
   "golden_display": {
    "columns": [
     {
@@ -1255,142 +1172,6 @@
    ],
    "owner": "ddl"
   },
-  "model_registry": {
-   "columns": [
-    {
-     "name": "model_version",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "status",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "trained_at",
-     "nullable": false,
-     "type": "TIMESTAMP"
-    },
-    {
-     "name": "corpus_snapshot",
-     "nullable": false,
-     "type": "BIGINT"
-    },
-    {
-     "name": "params_path",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "tf_tables_path",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "tf_snapshot_id",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "config_hash",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "metrics",
-     "nullable": false,
-     "type": "JSON"
-    },
-    {
-     "name": "run_id",
-     "nullable": false,
-     "type": "VARCHAR"
-    }
-   ],
-   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.model_registry (\n  model_version VARCHAR NOT NULL,\n  status VARCHAR NOT NULL,\n  trained_at TIMESTAMP NOT NULL,\n  corpus_snapshot BIGINT NOT NULL,\n  params_path VARCHAR NOT NULL,\n  tf_tables_path VARCHAR NOT NULL,\n  tf_snapshot_id VARCHAR NOT NULL,\n  config_hash VARCHAR NOT NULL,\n  metrics JSON NOT NULL,\n  run_id VARCHAR NOT NULL\n);",
-   "enums": {
-    "status": [
-     "active",
-     "superseded"
-    ]
-   },
-   "keys": [
-    {
-     "columns": [
-      "model_version"
-     ],
-     "where": null
-    },
-    {
-     "columns": [],
-     "where": "status='active'"
-    }
-   ],
-   "owner": "ddl"
-  },
-  "nickname_variants": {
-   "columns": [
-    {
-     "name": "variant_id",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "variant_a",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "variant_b",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "active",
-     "nullable": false,
-     "type": "BOOLEAN"
-    },
-    {
-     "name": "created_by",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "created_at",
-     "nullable": false,
-     "type": "TIMESTAMP"
-    },
-    {
-     "name": "retracted_by",
-     "nullable": true,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "retracted_at",
-     "nullable": true,
-     "type": "TIMESTAMP"
-    }
-   ],
-   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.nickname_variants (\n  variant_id VARCHAR NOT NULL,\n  variant_a VARCHAR NOT NULL,\n  variant_b VARCHAR NOT NULL,\n  active BOOLEAN NOT NULL,\n  created_by VARCHAR NOT NULL,\n  created_at TIMESTAMP NOT NULL,\n  retracted_by VARCHAR,\n  retracted_at TIMESTAMP\n);",
-   "enums": {},
-   "keys": [
-    {
-     "columns": [
-      "variant_id"
-     ],
-     "where": null
-    },
-    {
-     "columns": [
-      "variant_a",
-      "variant_b"
-     ],
-     "where": "active"
-    }
-   ],
-   "owner": "ddl"
-  },
   "raw_records": {
    "columns": [
     {
@@ -1867,49 +1648,6 @@
     {
      "columns": [
       "run_id"
-     ],
-     "where": null
-    }
-   ],
-   "owner": "ddl"
-  },
-  "tf_lookup": {
-   "columns": [
-    {
-     "name": "model_version",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "tf_snapshot_id",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "column_name",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "value",
-     "nullable": false,
-     "type": "VARCHAR"
-    },
-    {
-     "name": "tf_value",
-     "nullable": false,
-     "type": "DOUBLE"
-    }
-   ],
-   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.tf_lookup (\n  model_version VARCHAR NOT NULL,\n  tf_snapshot_id VARCHAR NOT NULL,\n  column_name VARCHAR NOT NULL,\n  value VARCHAR NOT NULL,\n  tf_value DOUBLE NOT NULL\n);",
-   "enums": {},
-   "keys": [
-    {
-     "columns": [
-      "model_version",
-      "tf_snapshot_id",
-      "column_name",
-      "value"
      ],
      "where": null
     }

@@ -124,7 +124,8 @@ impl Column {
 
 /// A key S5.0 declares. DuckLake enforces only `NOT NULL`, so the key is honoured
 /// by construction — `MERGE INTO` / the stage SQL's grouping — never by the store.
-/// `columns` is empty only for `model_registry`'s at-most-one-active-row claim.
+/// `columns` may be empty for a `where`-only at-most-one-row claim (no current
+/// relation declares one; the retired `model_registry` did).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LogicalKey {
     pub columns: Vec<String>,
@@ -225,7 +226,6 @@ pub const ASSERTION_KINDS: [&str; 2] = ["always", "never"];
 pub const REVIEW_SUBJECT_TYPES: [&str; 2] = ["pair", "entity"];
 pub const REVIEW_REASONS: [&str; 3] = ["gray_band", "never_unsatisfiable", "coherence"];
 pub const REVIEW_STATUSES: [&str; 4] = ["open", "resolved_match", "resolved_no_match", "dismissed"];
-pub const MODEL_STATUSES: [&str; 2] = ["active", "superseded"];
 pub const RUN_MODES: [&str; 8] = [
     "incremental",
     "full",
@@ -255,7 +255,6 @@ pub const REBUILD_REASONS: [&str; 5] = [
     "operator",
     "lexicon_change",
 ];
-pub const DISPOSITIONS: [&str; 2] = ["rebuild", "retire"];
 
 // --------------------------------------------------------------------------- //
 // the relations, in S5 declaration order (DDL-owned, then stage-materialised)
@@ -481,40 +480,14 @@ fn ddl_specs() -> Vec<TableSpec> {
                 ("status", &REVIEW_STATUSES[..]),
             ]),
         ),
-        tspec(
-            "model_registry",
-            vec![
-                nn("model_version", VARCHAR),
-                nn("status", VARCHAR),
-                nn("trained_at", TIMESTAMP),
-                nn("corpus_snapshot", BIGINT),
-                nn("params_path", VARCHAR),
-                nn("tf_tables_path", VARCHAR),
-                nn("tf_snapshot_id", VARCHAR),
-                nn("config_hash", VARCHAR),
-                nn("metrics", JSON),
-                nn("run_id", VARCHAR),
-            ],
-            vec![key(&["model_version"]), key_where(&[], "status='active'")],
-            enum_map(&[("status", &MODEL_STATUSES[..])]),
-        ),
-        tspec(
-            "tf_lookup",
-            vec![
-                nn("model_version", VARCHAR),
-                nn("tf_snapshot_id", VARCHAR),
-                nn("column_name", VARCHAR),
-                nn("value", VARCHAR),
-                nn("tf_value", DOUBLE),
-            ],
-            vec![key(&[
-                "model_version",
-                "tf_snapshot_id",
-                "column_name",
-                "value",
-            ])],
-            BTreeMap::new(),
-        ),
+        // RESERVED (parity-roadmap PR 1.3c): no writer exists yet. Cuts are
+        // rederived in memory from `assertions` each reconcile and surfaced via
+        // `review_queue` (`never_unsatisfiable`); this relation's NOT NULL
+        // `match_probability` and release lifecycle are held for the future
+        // relational-cut feature, with the paired `edge_cut` event emission.
+        // (`model_registry`/`tf_lookup` were retired instead: the trained model
+        // and its TF snapshot are file artifacts — settings JSON + the tf CSV
+        // `export_tf_snapshot` writes — keyed by the org env and the `runs` row.)
         tspec(
             "cut_edges",
             vec![
@@ -564,6 +537,10 @@ fn ddl_specs() -> Vec<TableSpec> {
                 ("rebuild_reason", &REBUILD_REASONS[..]),
             ]),
         ),
+        // RESERVED (parity-roadmap PR 1.5b): no writer exists yet — stage-level
+        // reporting is derived at read time from `runs` + the lake. The per-stage
+        // ledger (and er-obs's counter vocabulary, its designed producer) is held
+        // for the stage-persistence feature the runs UI's stage card anticipates.
         tspec(
             "run_stages",
             run_stages_cols,
@@ -588,46 +565,14 @@ fn ddl_specs() -> Vec<TableSpec> {
             vec![key(&["ingest_batch_id"])],
             BTreeMap::new(),
         ),
-        tspec(
-            "er_standardize_work",
-            vec![
-                nn("run_id", VARCHAR),
-                nn("source_system", VARCHAR),
-                nn("ingest_batch_id", VARCHAR),
-                nn("full_refresh", BOOLEAN),
-            ],
-            vec![key(&["run_id", "source_system", "ingest_batch_id"])],
-            BTreeMap::new(),
-        ),
-        tspec(
-            "er_touched_entities",
-            vec![
-                nn("run_id", VARCHAR),
-                nn("entity_id", VARCHAR),
-                nn("disposition", VARCHAR),
-                nn("created_at", TIMESTAMP),
-            ],
-            vec![key(&["run_id", "entity_id"])],
-            enum_map(&[("disposition", &DISPOSITIONS[..])]),
-        ),
-        tspec(
-            "nickname_variants",
-            vec![
-                nn("variant_id", VARCHAR),
-                nn("variant_a", VARCHAR),
-                nn("variant_b", VARCHAR),
-                nn("active", BOOLEAN),
-                nn("created_by", VARCHAR),
-                nn("created_at", TIMESTAMP),
-                col("retracted_by", VARCHAR),
-                col("retracted_at", TIMESTAMP),
-            ],
-            vec![
-                key(&["variant_id"]),
-                key_where(&["variant_a", "variant_b"], "active"),
-            ],
-            BTreeMap::new(),
-        ),
+        // Retired with the dbt-era incremental design: `er_standardize_work`
+        // and `er_touched_entities` journalled pending work and touched entities
+        // for delta standardize/assemble passes, but both stages are now
+        // unconditional `drop` + CTAS full rebuilds, which makes the journals
+        // (and S4.6's explicit reap step) unnecessary. `nickname_variants` is
+        // deliberately NOT a lake relation: the lexicon is a per-org CSV
+        // (`ER_LEXICON_PATH`, rewritten whole by `PUT /lexicon`) seeded into a
+        // three-column session table each run — determinism-safe by design.
         // Steward golden field overrides (mass-update): one latest-wins row per
         // (entity_id, attribute); `value` NULL means the steward cleared the
         // field. Applied as a post-assembly UPDATE over golden_records, so an
@@ -1039,7 +984,6 @@ mod tests {
         assert_eq!(RUN_STAGES.len(), 9);
         assert_eq!(RUN_STATUSES.len(), 3);
         assert_eq!(REBUILD_REASONS.len(), 5);
-        assert_eq!(DISPOSITIONS.len(), 2);
         assert!(EVENT_TYPES.contains(&"edge_cut"));
         assert!(RUN_STAGES.contains(&"reconcile"));
     }
