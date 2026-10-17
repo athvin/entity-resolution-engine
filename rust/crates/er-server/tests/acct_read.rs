@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use arrow::array::{Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use er_config::{EntityType, load_config_str};
-use er_server::read::{self, GoldenArrowPage, GoldenView};
+use er_server::read::{self, GoldenArrowPage};
 
 fn enabled() -> bool {
     std::env::var("DEDUPE_E2E_DUCKLAKE").as_deref() == Ok("1")
@@ -99,7 +99,6 @@ fn account_golden_read_serves_acct_projection() {
     )
     .unwrap();
 
-    let view = GoldenView::account();
     let snapshot = read::latest_snapshot(&session).unwrap();
 
     // List: the 4 account entities, served as an Arrow page whose schema is the
@@ -170,7 +169,7 @@ fn account_golden_read_serves_acct_projection() {
     // the ACCOUNT preview (company_name/domain) rather than person name/email.
     // Acme, Globex and Initech each pair a crm row with a vendors row; Umbrella
     // has no vendors twin and so is single-member, not a group.
-    let (groups, _) = read::duplicates(&session, &view, snapshot, None, 50).unwrap();
+    let (groups, _) = read::duplicates(&session, EntityType::Account, snapshot, None, 50).unwrap();
     assert_eq!(
         groups.len(),
         3,

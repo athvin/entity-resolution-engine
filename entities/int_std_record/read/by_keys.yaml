@@ -1,0 +1,27 @@
+kind: statement
+operation: read
+description: "Standardized source records by record key at a pinned snapshot. The keys cross as one chr(31)-delimited varchar and split in SQL — the lake IN-list idiom (duckdb-rs has no LIST binding)."
+mode: partial
+params:
+  - { name: snapshot, type: bigint }
+  - { name: keys, type: varchar }
+returns:
+  - { name: record_key, type: varchar, nullable: false }
+  - { name: source_system, type: varchar, nullable: false }
+  - { name: source_record_id, type: varchar, nullable: false }
+  - { name: given_name, type: varchar }
+  - { name: family_name, type: varchar }
+  - { name: name_variants, type: list<varchar>, nullable: false }
+  - { name: email, type: varchar }
+  - { name: email_valid, type: boolean }
+  - { name: phone_e164, type: varchar }
+  - { name: phone_valid, type: boolean }
+  - { name: addr_number, type: varchar }
+  - { name: addr_street, type: varchar }
+  - { name: addr_unit, type: varchar }
+  - { name: addr_city, type: varchar }
+  - { name: addr_region, type: varchar }
+  - { name: addr_postal, type: varchar }
+  - { name: birth_date, type: date }
+  - { name: metadata, type: json }
+  - { name: updated_at_source, type: timestamp }

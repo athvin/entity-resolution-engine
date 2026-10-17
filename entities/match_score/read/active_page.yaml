@@ -1,0 +1,18 @@
+kind: statement
+operation: read
+description: "One keyset page of active pairwise match scores at a pinned snapshot, keyed on the record pair, optionally within a probability band."
+params:
+  - { name: snapshot, type: bigint }
+  - { name: after_a, type: varchar, nullable: true }
+  - { name: after_b, type: varchar, nullable: true }
+  - { name: min_prob, type: double, nullable: true }
+  - { name: max_prob, type: double, nullable: true }
+  - { name: limit, type: bigint }
+returns:
+  - { name: rec_a_key, type: varchar, nullable: false }
+  - { name: rec_b_key, type: varchar, nullable: false }
+  - { name: match_probability, type: double, nullable: false }
+  - { name: model_version, type: varchar, nullable: false }
+  - { name: evidence, type: json, nullable: false }
+  - { name: run_id, type: varchar, nullable: false }
+  - { name: scored_at, type: timestamp, nullable: false }

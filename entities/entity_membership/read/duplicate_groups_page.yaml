@@ -1,0 +1,10 @@
+kind: statement
+operation: read
+description: "One keyset page of duplicate groups at a pinned snapshot: entities holding two or more member records."
+params:
+  - { name: snapshot, type: bigint }
+  - { name: after, type: varchar, nullable: true }
+  - { name: limit, type: bigint }
+returns:
+  - { name: entity_id, type: varchar, nullable: false }
+  - { name: member_count, type: bigint }

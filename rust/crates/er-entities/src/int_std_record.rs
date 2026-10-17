@@ -97,6 +97,175 @@ impl IntStdRecord {
 
 pub mod read {
     //! @generated query functions for this entity + operation.
+    /// One row of `by_keys`: Standardized source records by record key at a pinned snapshot. The keys cross as one chr(31)-delimited varchar and split in SQL — the lake IN-list idiom (duckdb-rs has no LIST binding).
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct ByKeysRow {
+        pub record_key: String,
+        pub source_system: String,
+        pub source_record_id: String,
+        pub given_name: Option<String>,
+        pub family_name: Option<String>,
+        pub name_variants: Vec<String>,
+        pub email: Option<String>,
+        pub email_valid: Option<bool>,
+        pub phone_e164: Option<String>,
+        pub phone_valid: Option<bool>,
+        pub addr_number: Option<String>,
+        pub addr_street: Option<String>,
+        pub addr_unit: Option<String>,
+        pub addr_city: Option<String>,
+        pub addr_region: Option<String>,
+        pub addr_postal: Option<String>,
+        pub birth_date: Option<::chrono::NaiveDate>,
+        pub metadata: Option<::serde_json::Value>,
+        #[serde(serialize_with = "crate::batch::ser_duckdb_timestamp_opt")]
+        pub updated_at_source: Option<::chrono::DateTime<::chrono::Utc>>,
+    }
+
+    impl ByKeysRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("record_key", ::arrow::datatypes::DataType::Utf8),
+                ("source_system", ::arrow::datatypes::DataType::Utf8),
+                ("source_record_id", ::arrow::datatypes::DataType::Utf8),
+                ("given_name", ::arrow::datatypes::DataType::Utf8),
+                ("family_name", ::arrow::datatypes::DataType::Utf8),
+                (
+                    "name_variants",
+                    ::arrow::datatypes::DataType::List(::std::sync::Arc::new(
+                        ::arrow::datatypes::Field::new(
+                            "item",
+                            ::arrow::datatypes::DataType::Utf8,
+                            true,
+                        ),
+                    )),
+                ),
+                ("email", ::arrow::datatypes::DataType::Utf8),
+                ("email_valid", ::arrow::datatypes::DataType::Boolean),
+                ("phone_e164", ::arrow::datatypes::DataType::Utf8),
+                ("phone_valid", ::arrow::datatypes::DataType::Boolean),
+                ("addr_number", ::arrow::datatypes::DataType::Utf8),
+                ("addr_street", ::arrow::datatypes::DataType::Utf8),
+                ("addr_unit", ::arrow::datatypes::DataType::Utf8),
+                ("addr_city", ::arrow::datatypes::DataType::Utf8),
+                ("addr_region", ::arrow::datatypes::DataType::Utf8),
+                ("addr_postal", ::arrow::datatypes::DataType::Utf8),
+                ("birth_date", ::arrow::datatypes::DataType::Date32),
+                ("metadata", ::arrow::datatypes::DataType::Utf8),
+                (
+                    "updated_at_source",
+                    ::arrow::datatypes::DataType::Timestamp(
+                        ::arrow::datatypes::TimeUnit::Microsecond,
+                        None,
+                    ),
+                ),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "record_key")?;
+                let c1: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 1, "source_system")?;
+                let c2: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 2, "source_record_id")?;
+                let c3: &::arrow::array::StringArray = crate::batch::col(batch, 3, "given_name")?;
+                let c4: &::arrow::array::StringArray = crate::batch::col(batch, 4, "family_name")?;
+                let c5: &::arrow::array::ListArray = crate::batch::col(batch, 5, "name_variants")?;
+                let c6: &::arrow::array::StringArray = crate::batch::col(batch, 6, "email")?;
+                let c7: &::arrow::array::BooleanArray = crate::batch::col(batch, 7, "email_valid")?;
+                let c8: &::arrow::array::StringArray = crate::batch::col(batch, 8, "phone_e164")?;
+                let c9: &::arrow::array::BooleanArray = crate::batch::col(batch, 9, "phone_valid")?;
+                let c10: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 10, "addr_number")?;
+                let c11: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 11, "addr_street")?;
+                let c12: &::arrow::array::StringArray = crate::batch::col(batch, 12, "addr_unit")?;
+                let c13: &::arrow::array::StringArray = crate::batch::col(batch, 13, "addr_city")?;
+                let c14: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 14, "addr_region")?;
+                let c15: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 15, "addr_postal")?;
+                let c16: &::arrow::array::Date32Array = crate::batch::col(batch, 16, "birth_date")?;
+                let c17: &::arrow::array::StringArray = crate::batch::col(batch, 17, "metadata")?;
+                let c18: &::arrow::array::TimestampMicrosecondArray =
+                    crate::batch::col(batch, 18, "updated_at_source")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        record_key: crate::batch::req(
+                            crate::batch::opt_str(c0, i),
+                            "record_key",
+                            i,
+                        )?,
+                        source_system: crate::batch::req(
+                            crate::batch::opt_str(c1, i),
+                            "source_system",
+                            i,
+                        )?,
+                        source_record_id: crate::batch::req(
+                            crate::batch::opt_str(c2, i),
+                            "source_record_id",
+                            i,
+                        )?,
+                        given_name: crate::batch::opt_str(c3, i),
+                        family_name: crate::batch::opt_str(c4, i),
+                        name_variants: crate::batch::req(
+                            crate::batch::opt_list_str(c5, i, "name_variants")?,
+                            "name_variants",
+                            i,
+                        )?,
+                        email: crate::batch::opt_str(c6, i),
+                        email_valid: crate::batch::opt_bool(c7, i),
+                        phone_e164: crate::batch::opt_str(c8, i),
+                        phone_valid: crate::batch::opt_bool(c9, i),
+                        addr_number: crate::batch::opt_str(c10, i),
+                        addr_street: crate::batch::opt_str(c11, i),
+                        addr_unit: crate::batch::opt_str(c12, i),
+                        addr_city: crate::batch::opt_str(c13, i),
+                        addr_region: crate::batch::opt_str(c14, i),
+                        addr_postal: crate::batch::opt_str(c15, i),
+                        birth_date: crate::batch::opt_date(c16, i),
+                        metadata: crate::batch::opt_json(c17, i, "metadata")?,
+                        updated_at_source: crate::batch::opt_ts(c18, i),
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// Standardized source records by record key at a pinned snapshot. The keys cross as one chr(31)-delimited varchar and split in SQL — the lake IN-list idiom (duckdb-rs has no LIST binding).
+    pub fn by_keys(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+        keys: &str,
+    ) -> ::duckdb::Result<Vec<ByKeysRow>> {
+        const SQL: &str = "SELECT record_key, source_system, source_record_id,
+       given_name, family_name, name_variants, email, email_valid,
+       phone_e164, phone_valid, addr_number, addr_street, addr_unit,
+       addr_city, addr_region, addr_postal, birth_date, metadata,
+       updated_at_source
+FROM lake.main.int_std_records AT (VERSION => {snapshot})
+WHERE record_key IN (SELECT unnest(string_split($1, chr(31))))
+ORDER BY record_key
+";
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = conn.prepare(&sql)?;
+        let batches = stmt
+            .query_arrow(::duckdb::params![keys])?
+            .collect::<Vec<_>>();
+        ByKeysRow::from_batches(&batches)
+    }
+
     /// One row of `count`: The standardized-record count at a pinned snapshot (the dashboard counter).
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
     pub struct CountRow {
@@ -139,5 +308,69 @@ FROM lake.main.int_std_records AT (VERSION => {snapshot})
         let mut stmt = conn.prepare(&sql)?;
         let batches = stmt.query_arrow(::duckdb::params![])?.collect::<Vec<_>>();
         CountRow::from_batches(&batches)
+    }
+
+    /// One row of `junk_stale_counts`: Junk (present-but-invalid email/phone) and stale (freshness older than the window) counts over the standardized records at a pinned snapshot (the data-quality rates).
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct JunkStaleCountsRow {
+        pub n: Option<i64>,
+        pub junk: Option<i64>,
+        pub stale: Option<i64>,
+    }
+
+    impl JunkStaleCountsRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("n", ::arrow::datatypes::DataType::Int64),
+                ("junk", ::arrow::datatypes::DataType::Int64),
+                ("stale", ::arrow::datatypes::DataType::Int64),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::Int64Array = crate::batch::col(batch, 0, "n")?;
+                let c1: &::arrow::array::Int64Array = crate::batch::col(batch, 1, "junk")?;
+                let c2: &::arrow::array::Int64Array = crate::batch::col(batch, 2, "stale")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        n: crate::batch::opt_i64(c0, i),
+                        junk: crate::batch::opt_i64(c1, i),
+                        stale: crate::batch::opt_i64(c2, i),
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// Junk (present-but-invalid email/phone) and stale (freshness older than the window) counts over the standardized records at a pinned snapshot (the data-quality rates).
+    pub fn junk_stale_counts(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+        stale_days: i64,
+    ) -> ::duckdb::Result<Vec<JunkStaleCountsRow>> {
+        const SQL: &str = "SELECT count(*) AS n,
+       count(*) FILTER (WHERE (email IS NOT NULL AND email_valid = false)
+                           OR (phone_e164 IS NOT NULL AND phone_valid = false)) AS junk,
+       count(*) FILTER (WHERE COALESCE(updated_at_source, ingested_at)
+                              < CAST(now() AS TIMESTAMP) - $1 * INTERVAL '1 day') AS stale
+FROM lake.main.int_std_records AT (VERSION => {snapshot})
+";
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = conn.prepare(&sql)?;
+        let batches = stmt
+            .query_arrow(::duckdb::params![stale_days])?
+            .collect::<Vec<_>>();
+        JunkStaleCountsRow::from_batches(&batches)
     }
 }

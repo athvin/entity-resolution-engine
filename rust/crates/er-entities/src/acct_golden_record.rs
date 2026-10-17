@@ -226,4 +226,66 @@ LIMIT $3
             .collect::<Vec<_>>();
         Ok(batches)
     }
+
+    /// One row of `preview_in_range`: The account golden preview columns of every entity in an id range at a pinned snapshot (the duplicates page preview).
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct PreviewInRangeRow {
+        pub entity_id: String,
+        pub company_name: Option<String>,
+        pub domain: Option<String>,
+    }
+
+    impl PreviewInRangeRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("entity_id", ::arrow::datatypes::DataType::Utf8),
+                ("company_name", ::arrow::datatypes::DataType::Utf8),
+                ("domain", ::arrow::datatypes::DataType::Utf8),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "entity_id")?;
+                let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "company_name")?;
+                let c2: &::arrow::array::StringArray = crate::batch::col(batch, 2, "domain")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        entity_id: crate::batch::req(crate::batch::opt_str(c0, i), "entity_id", i)?,
+                        company_name: crate::batch::opt_str(c1, i),
+                        domain: crate::batch::opt_str(c2, i),
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// The account golden preview columns of every entity in an id range at a pinned snapshot (the duplicates page preview).
+    pub fn preview_in_range(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+        first: &str,
+        last: &str,
+    ) -> ::duckdb::Result<Vec<PreviewInRangeRow>> {
+        const SQL: &str = "SELECT entity_id, company_name, domain
+FROM lake.main.acct_golden_records AT (VERSION => {snapshot})
+WHERE entity_id >= $1 AND entity_id <= $2
+";
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = conn.prepare(&sql)?;
+        let batches = stmt
+            .query_arrow(::duckdb::params![first, last])?
+            .collect::<Vec<_>>();
+        PreviewInRangeRow::from_batches(&batches)
+    }
 }
