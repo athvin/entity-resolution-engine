@@ -46,3 +46,138 @@ impl Org {
         ]
     }
 }
+
+pub mod create {
+    //! @generated query functions for this entity + operation.
+    /// Register an org idempotently: a replayed registration is a no-op.
+    pub async fn ensure(
+        client: &::tokio_postgres::Client,
+        name: &str,
+        config_path: &str,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str = "INSERT INTO public.orgs (name, config_path, state)
+VALUES ($1, $2, 'active')
+ON CONFLICT (name) DO NOTHING
+";
+        client.execute(SQL, &[&name, &config_path]).await
+    }
+
+    /// Upsert a bring-your-own-config org: insert active, or on replay refresh config_path/env/drop_root while leaving state intact.
+    pub async fn upsert_byo(
+        client: &::tokio_postgres::Client,
+        name: &str,
+        config_path: &str,
+        env: &::serde_json::Value,
+        drop_root: Option<&str>,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str = "INSERT INTO public.orgs (name, config_path, env, drop_root, state)
+VALUES ($1, $2, $3, $4, 'active')
+ON CONFLICT (name) DO UPDATE SET config_path = EXCLUDED.config_path,
+  env = EXCLUDED.env, drop_root = EXCLUDED.drop_root
+";
+        client
+            .execute(SQL, &[&name, &config_path, &env, &drop_root])
+            .await
+    }
+}
+
+pub mod read {
+    //! @generated query functions for this entity + operation.
+    /// One org by name: the detail view, the exists precheck and the publish context.
+    pub async fn by_name(
+        client: &::tokio_postgres::Client,
+        name: &str,
+    ) -> ::std::result::Result<Vec<super::Org>, ::tokio_postgres::Error> {
+        const SQL: &str = "SELECT
+  name,
+  config_path,
+  env,
+  drop_root,
+  active_config_version,
+  state,
+  created_at
+FROM public.orgs
+WHERE name = $1
+";
+        let rows = client.query(SQL, &[&name]).await?;
+        Ok(rows
+            .iter()
+            .map(|row| super::Org {
+                name: row.get("name"),
+                config_path: row.get("config_path"),
+                env: row.get("env"),
+                drop_root: row.get("drop_root"),
+                active_config_version: row.get("active_config_version"),
+                state: row.get("state"),
+                created_at: row.get("created_at"),
+            })
+            .collect())
+    }
+
+    /// Every org, name-ordered (the operator org listing).
+    pub async fn list(
+        client: &::tokio_postgres::Client,
+    ) -> ::std::result::Result<Vec<super::Org>, ::tokio_postgres::Error> {
+        const SQL: &str = "SELECT
+  name,
+  config_path,
+  env,
+  drop_root,
+  active_config_version,
+  state,
+  created_at
+FROM public.orgs
+ORDER BY name
+";
+        let rows = client.query(SQL, &[]).await?;
+        Ok(rows
+            .iter()
+            .map(|row| super::Org {
+                name: row.get("name"),
+                config_path: row.get("config_path"),
+                env: row.get("env"),
+                drop_root: row.get("drop_root"),
+                active_config_version: row.get("active_config_version"),
+                state: row.get("state"),
+                created_at: row.get("created_at"),
+            })
+            .collect())
+    }
+}
+
+pub mod update {
+    //! @generated query functions for this entity + operation.
+    /// Merge resource knobs into an org's env map (jsonb concatenation).
+    pub async fn merge_env(
+        client: &::tokio_postgres::Client,
+        updates: &::serde_json::Value,
+        name: &str,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str = "UPDATE public.orgs SET env = env || $1 WHERE name = $2
+";
+        client.execute(SQL, &[&updates, &name]).await
+    }
+
+    /// Point the org at a published config version (the orgs half of publish).
+    pub async fn set_active_config(
+        client: &::tokio_postgres::Client,
+        version: i64,
+        name: &str,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str = "UPDATE public.orgs SET active_config_version = $1 WHERE name = $2
+";
+        client.execute(SQL, &[&version, &name]).await
+    }
+
+    /// Transition an org's state only from the expected current state; zero rows changed means a lost race (409).
+    pub async fn set_state(
+        client: &::tokio_postgres::Client,
+        new_state: &str,
+        name: &str,
+        expected: &str,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str = "UPDATE public.orgs SET state = $1 WHERE name = $2 AND state = $3
+";
+        client.execute(SQL, &[&new_state, &name, &expected]).await
+    }
+}

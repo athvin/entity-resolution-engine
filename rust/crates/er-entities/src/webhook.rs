@@ -46,3 +46,106 @@ impl Webhook {
         ]
     }
 }
+
+pub mod create {
+    //! @generated query functions for this entity + operation.
+    /// Register an outbound webhook; the secret is the HMAC signing key for delivery-time signatures.
+    pub async fn create(
+        client: &::tokio_postgres::Client,
+        webhook_id: &str,
+        org: &str,
+        url: &str,
+        events: &::serde_json::Value,
+        secret: &str,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str = "INSERT INTO public.webhooks (webhook_id, org, url, events, secret)
+VALUES ($1, $2, $3, $4, $5)
+";
+        client
+            .execute(SQL, &[&webhook_id, &org, &url, &events, &secret])
+            .await
+    }
+}
+
+pub mod delete {
+    //! @generated query functions for this entity + operation.
+    /// Delete a webhook; zero rows removed means absent or another org's.
+    pub async fn delete(
+        client: &::tokio_postgres::Client,
+        org: &str,
+        webhook_id: &str,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str = "DELETE FROM public.webhooks WHERE org = $1 AND webhook_id = $2
+";
+        client.execute(SQL, &[&org, &webhook_id]).await
+    }
+}
+
+pub mod read {
+    //! @generated query functions for this entity + operation.
+    /// The delivery targets for one event: every active webhook subscribed to the type (or subscribed-to-all); includes the secret the delivery signs with.
+    pub async fn for_delivery(
+        client: &::tokio_postgres::Client,
+        org: &str,
+        event_type: &str,
+    ) -> ::std::result::Result<Vec<super::Webhook>, ::tokio_postgres::Error> {
+        const SQL: &str = "SELECT
+  webhook_id,
+  org,
+  url,
+  events,
+  secret,
+  active,
+  created_at
+FROM public.webhooks
+WHERE org = $1 AND active
+  AND (events @> to_jsonb($2::text) OR jsonb_array_length(events) = 0)
+ORDER BY created_at
+";
+        let rows = client.query(SQL, &[&org, &event_type]).await?;
+        Ok(rows
+            .iter()
+            .map(|row| super::Webhook {
+                webhook_id: row.get("webhook_id"),
+                org: row.get("org"),
+                url: row.get("url"),
+                events: row.get("events"),
+                secret: row.get("secret"),
+                active: row.get("active"),
+                created_at: row.get("created_at"),
+            })
+            .collect())
+    }
+
+    /// An org's active webhooks, oldest first (the listing projection drops the secret).
+    pub async fn list_active(
+        client: &::tokio_postgres::Client,
+        org: &str,
+    ) -> ::std::result::Result<Vec<super::Webhook>, ::tokio_postgres::Error> {
+        const SQL: &str = "SELECT
+  webhook_id,
+  org,
+  url,
+  events,
+  secret,
+  active,
+  created_at
+FROM public.webhooks
+WHERE org = $1 AND active
+ORDER BY created_at
+";
+        let rows = client.query(SQL, &[&org]).await?;
+        Ok(rows
+            .iter()
+            .map(|row| super::Webhook {
+                webhook_id: row.get("webhook_id"),
+                org: row.get("org"),
+                url: row.get("url"),
+                events: row.get("events"),
+                secret: row.get("secret"),
+                active: row.get("active"),
+                created_at: row.get("created_at"),
+            })
+            .collect())
+    }
+}

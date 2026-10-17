@@ -43,3 +43,69 @@ impl ApiKey {
         ]
     }
 }
+
+pub mod create {
+    //! @generated query functions for this entity + operation.
+    /// Store a freshly minted API key: only the SHA-256 hash of the secret is persisted.
+    pub async fn issue(
+        client: &::tokio_postgres::Client,
+        key_id: &str,
+        org: &str,
+        role: &str,
+        key_hash: &str,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str = "INSERT INTO public.api_keys (key_id, org, role, key_hash)
+VALUES ($1, $2, $3, $4)
+";
+        client
+            .execute(SQL, &[&key_id, &org, &role, &key_hash])
+            .await
+    }
+}
+
+pub mod read {
+    //! @generated query functions for this entity + operation.
+    /// Resolve a live (non-revoked) key by id for authentication; the caller constant-time-compares the presented secret's hash.
+    pub async fn live_by_id(
+        client: &::tokio_postgres::Client,
+        key_id: &str,
+    ) -> ::std::result::Result<Vec<super::ApiKey>, ::tokio_postgres::Error> {
+        const SQL: &str = "SELECT
+  key_id,
+  org,
+  role,
+  key_hash,
+  created_at,
+  revoked_at
+FROM public.api_keys
+WHERE key_id = $1 AND revoked_at IS NULL
+";
+        let rows = client.query(SQL, &[&key_id]).await?;
+        Ok(rows
+            .iter()
+            .map(|row| super::ApiKey {
+                key_id: row.get("key_id"),
+                org: row.get("org"),
+                role: row.get("role"),
+                key_hash: row.get("key_hash"),
+                created_at: row.get("created_at"),
+                revoked_at: row.get("revoked_at"),
+            })
+            .collect())
+    }
+}
+
+pub mod update {
+    //! @generated query functions for this entity + operation.
+    /// Revoke a live key, scoped to its org and idempotent: zero rows changed means already revoked or another org's key.
+    pub async fn revoke(
+        client: &::tokio_postgres::Client,
+        key_id: &str,
+        org: &str,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str = "UPDATE public.api_keys SET revoked_at = now()
+WHERE key_id = $1 AND org = $2 AND revoked_at IS NULL
+";
+        client.execute(SQL, &[&key_id, &org]).await
+    }
+}

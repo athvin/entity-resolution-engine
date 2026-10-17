@@ -1,0 +1,9 @@
+kind: statement
+operation: update
+mode: partial
+description: "Transition an org's state only from the expected current state; zero rows changed means a lost race (409)."
+params:
+  - { name: new_state, type: varchar }
+  - { name: name, type: varchar }
+  - { name: expected, type: varchar }
+returns: none

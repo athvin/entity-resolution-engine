@@ -1,0 +1,7 @@
+kind: statement
+operation: read
+mode: full
+description: "An org's active webhooks, oldest first (the listing projection drops the secret)."
+params:
+  - { name: org, type: varchar }
+returns: entity

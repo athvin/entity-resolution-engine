@@ -1,0 +1,10 @@
+kind: statement
+operation: create
+mode: partial
+description: "Stage a steward action for the dispatcher to drain when the org's writer lock goes quiet."
+params:
+  - { name: action_id, type: varchar }
+  - { name: org, type: varchar }
+  - { name: action, type: json }
+  - { name: created_by, type: varchar }
+returns: none

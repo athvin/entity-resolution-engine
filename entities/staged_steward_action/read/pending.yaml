@@ -1,0 +1,7 @@
+kind: statement
+operation: read
+mode: full
+description: "An org's pending steward actions, oldest first (the dispatcher drain read; its count is the pending gauge)."
+params:
+  - { name: org, type: varchar }
+returns: entity

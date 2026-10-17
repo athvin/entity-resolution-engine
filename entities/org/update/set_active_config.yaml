@@ -1,0 +1,8 @@
+kind: statement
+operation: update
+mode: partial
+description: "Point the org at a published config version (the orgs half of publish)."
+params:
+  - { name: version, type: bigint }
+  - { name: name, type: varchar }
+returns: none

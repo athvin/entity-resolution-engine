@@ -1,0 +1,7 @@
+kind: statement
+operation: read
+mode: full
+description: "An org's config versions, newest first."
+params:
+  - { name: org, type: varchar }
+returns: entity

@@ -1,0 +1,6 @@
+kind: statement
+operation: read
+mode: full
+description: "Every org, name-ordered (the operator org listing)."
+params: []
+returns: entity

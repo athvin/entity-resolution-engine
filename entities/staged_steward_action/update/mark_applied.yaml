@@ -1,0 +1,7 @@
+kind: statement
+operation: update
+mode: partial
+description: "Mark a staged action applied after the dispatcher drains it to the lake."
+params:
+  - { name: action_id, type: varchar }
+returns: none
