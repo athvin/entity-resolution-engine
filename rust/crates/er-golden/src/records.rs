@@ -48,38 +48,6 @@ fn scalar_projection(
         .join(",\n")
 }
 
-/// Apply steward golden field overrides (the mass-update feature) as a
-/// post-assembly UPDATE over `golden_table` from `overrides_table`: one UPDATE
-/// per overridable column (the 5 scalar + 6 address golden columns). For each
-/// entity carrying an override of that column, the column is set to the override
-/// `value` (NULL = the steward cleared the field); entities without an override
-/// keep the survivorship-elected value. With `overrides_table` empty this matches
-/// zero rows for every statement — a byte-exact no-op, so the determinism
-/// contract (golden fixtures) holds. A correlated subquery (not `UPDATE … FROM`)
-/// keeps the target/override `entity_id` references unambiguous.
-#[must_use]
-pub fn golden_overrides_update_sql(golden_table: &str, overrides_table: &str) -> Vec<String> {
-    let base = golden_table.rsplit('.').next().unwrap_or(golden_table);
-    SCALAR_ATTRIBUTES
-        .iter()
-        .chain(ADDRESS_COLUMNS.iter())
-        .map(|col| {
-            let value_expr = if *col == "birth_date" {
-                "CAST(o.value AS DATE)"
-            } else {
-                "o.value"
-            };
-            format!(
-                "UPDATE {golden_table} SET {col} = (\
-                   SELECT {value_expr} FROM {overrides_table} o \
-                   WHERE o.entity_id = {base}.entity_id AND o.attribute = '{col}') \
-                 WHERE {base}.entity_id IN (\
-                   SELECT entity_id FROM {overrides_table} WHERE attribute = '{col}')"
-            )
-        })
-        .collect()
-}
-
 /// The `golden_records` SELECT: assemble survived attribute values + metadata per
 /// entity, reading winners from `lineage_table` and values from `std_table`.
 /// `assembled_at` is the UTC assembly time (`volatile`: excluded from determinism

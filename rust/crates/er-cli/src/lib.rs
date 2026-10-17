@@ -1131,8 +1131,23 @@ pub fn run_golden(session: &Session, config: &Config) -> Result<()> {
         .unwrap_or(0)
         > 0;
     if overrides_present {
-        for stmt in er_golden::golden_overrides_update_sql(GOLDEN_RECORDS, GOLDEN_OVERRIDES) {
-            session.execute_batch(&stmt)?;
+        // One declared UPDATE per overridable golden column (5 scalar + 6 address).
+        use er_entities::golden_record::update as ov;
+        let conn = session.connection();
+        for apply in [
+            ov::override_given_name,
+            ov::override_family_name,
+            ov::override_email,
+            ov::override_phone_e164,
+            ov::override_birth_date,
+            ov::override_addr_number,
+            ov::override_addr_street,
+            ov::override_addr_unit,
+            ov::override_addr_city,
+            ov::override_addr_region,
+            ov::override_addr_postal,
+        ] {
+            apply(conn)?;
         }
     }
     Ok(())

@@ -184,3 +184,127 @@ LIMIT $3
         Ok(batches)
     }
 }
+
+pub mod update {
+    //! @generated query functions for this entity + operation.
+    /// Apply the steward addr_city overrides over the assembled golden rows (NULL value = the steward cleared the field); zero overrides match zero rows, so the determinism contract holds.
+    pub fn override_addr_city(conn: &::duckdb::Connection) -> ::duckdb::Result<usize> {
+        const SQL: &str = "UPDATE lake.main.golden_records SET addr_city = (
+  SELECT o.value FROM lake.main.golden_overrides o
+  WHERE o.entity_id = golden_records.entity_id AND o.attribute = 'addr_city')
+WHERE golden_records.entity_id IN (
+  SELECT entity_id FROM lake.main.golden_overrides WHERE attribute = 'addr_city')
+";
+        conn.execute(SQL, ::duckdb::params![])
+    }
+
+    /// Apply the steward addr_number overrides over the assembled golden rows (NULL value = the steward cleared the field); zero overrides match zero rows, so the determinism contract holds.
+    pub fn override_addr_number(conn: &::duckdb::Connection) -> ::duckdb::Result<usize> {
+        const SQL: &str = "UPDATE lake.main.golden_records SET addr_number = (
+  SELECT o.value FROM lake.main.golden_overrides o
+  WHERE o.entity_id = golden_records.entity_id AND o.attribute = 'addr_number')
+WHERE golden_records.entity_id IN (
+  SELECT entity_id FROM lake.main.golden_overrides WHERE attribute = 'addr_number')
+";
+        conn.execute(SQL, ::duckdb::params![])
+    }
+
+    /// Apply the steward addr_postal overrides over the assembled golden rows (NULL value = the steward cleared the field); zero overrides match zero rows, so the determinism contract holds.
+    pub fn override_addr_postal(conn: &::duckdb::Connection) -> ::duckdb::Result<usize> {
+        const SQL: &str = "UPDATE lake.main.golden_records SET addr_postal = (
+  SELECT o.value FROM lake.main.golden_overrides o
+  WHERE o.entity_id = golden_records.entity_id AND o.attribute = 'addr_postal')
+WHERE golden_records.entity_id IN (
+  SELECT entity_id FROM lake.main.golden_overrides WHERE attribute = 'addr_postal')
+";
+        conn.execute(SQL, ::duckdb::params![])
+    }
+
+    /// Apply the steward addr_region overrides over the assembled golden rows (NULL value = the steward cleared the field); zero overrides match zero rows, so the determinism contract holds.
+    pub fn override_addr_region(conn: &::duckdb::Connection) -> ::duckdb::Result<usize> {
+        const SQL: &str = "UPDATE lake.main.golden_records SET addr_region = (
+  SELECT o.value FROM lake.main.golden_overrides o
+  WHERE o.entity_id = golden_records.entity_id AND o.attribute = 'addr_region')
+WHERE golden_records.entity_id IN (
+  SELECT entity_id FROM lake.main.golden_overrides WHERE attribute = 'addr_region')
+";
+        conn.execute(SQL, ::duckdb::params![])
+    }
+
+    /// Apply the steward addr_street overrides over the assembled golden rows (NULL value = the steward cleared the field); zero overrides match zero rows, so the determinism contract holds.
+    pub fn override_addr_street(conn: &::duckdb::Connection) -> ::duckdb::Result<usize> {
+        const SQL: &str = "UPDATE lake.main.golden_records SET addr_street = (
+  SELECT o.value FROM lake.main.golden_overrides o
+  WHERE o.entity_id = golden_records.entity_id AND o.attribute = 'addr_street')
+WHERE golden_records.entity_id IN (
+  SELECT entity_id FROM lake.main.golden_overrides WHERE attribute = 'addr_street')
+";
+        conn.execute(SQL, ::duckdb::params![])
+    }
+
+    /// Apply the steward addr_unit overrides over the assembled golden rows (NULL value = the steward cleared the field); zero overrides match zero rows, so the determinism contract holds.
+    pub fn override_addr_unit(conn: &::duckdb::Connection) -> ::duckdb::Result<usize> {
+        const SQL: &str = "UPDATE lake.main.golden_records SET addr_unit = (
+  SELECT o.value FROM lake.main.golden_overrides o
+  WHERE o.entity_id = golden_records.entity_id AND o.attribute = 'addr_unit')
+WHERE golden_records.entity_id IN (
+  SELECT entity_id FROM lake.main.golden_overrides WHERE attribute = 'addr_unit')
+";
+        conn.execute(SQL, ::duckdb::params![])
+    }
+
+    /// Apply the steward birth_date overrides over the assembled golden rows (NULL value = the steward cleared the field); zero overrides match zero rows, so the determinism contract holds.
+    pub fn override_birth_date(conn: &::duckdb::Connection) -> ::duckdb::Result<usize> {
+        const SQL: &str = "UPDATE lake.main.golden_records SET birth_date = (
+  SELECT CAST(o.value AS DATE) FROM lake.main.golden_overrides o
+  WHERE o.entity_id = golden_records.entity_id AND o.attribute = 'birth_date')
+WHERE golden_records.entity_id IN (
+  SELECT entity_id FROM lake.main.golden_overrides WHERE attribute = 'birth_date')
+";
+        conn.execute(SQL, ::duckdb::params![])
+    }
+
+    /// Apply the steward email overrides over the assembled golden rows (NULL value = the steward cleared the field); zero overrides match zero rows, so the determinism contract holds.
+    pub fn override_email(conn: &::duckdb::Connection) -> ::duckdb::Result<usize> {
+        const SQL: &str = "UPDATE lake.main.golden_records SET email = (
+  SELECT o.value FROM lake.main.golden_overrides o
+  WHERE o.entity_id = golden_records.entity_id AND o.attribute = 'email')
+WHERE golden_records.entity_id IN (
+  SELECT entity_id FROM lake.main.golden_overrides WHERE attribute = 'email')
+";
+        conn.execute(SQL, ::duckdb::params![])
+    }
+
+    /// Apply the steward family_name overrides over the assembled golden rows (NULL value = the steward cleared the field); zero overrides match zero rows, so the determinism contract holds.
+    pub fn override_family_name(conn: &::duckdb::Connection) -> ::duckdb::Result<usize> {
+        const SQL: &str = "UPDATE lake.main.golden_records SET family_name = (
+  SELECT o.value FROM lake.main.golden_overrides o
+  WHERE o.entity_id = golden_records.entity_id AND o.attribute = 'family_name')
+WHERE golden_records.entity_id IN (
+  SELECT entity_id FROM lake.main.golden_overrides WHERE attribute = 'family_name')
+";
+        conn.execute(SQL, ::duckdb::params![])
+    }
+
+    /// Apply the steward given_name overrides over the assembled golden rows (NULL value = the steward cleared the field); zero overrides match zero rows, so the determinism contract holds.
+    pub fn override_given_name(conn: &::duckdb::Connection) -> ::duckdb::Result<usize> {
+        const SQL: &str = "UPDATE lake.main.golden_records SET given_name = (
+  SELECT o.value FROM lake.main.golden_overrides o
+  WHERE o.entity_id = golden_records.entity_id AND o.attribute = 'given_name')
+WHERE golden_records.entity_id IN (
+  SELECT entity_id FROM lake.main.golden_overrides WHERE attribute = 'given_name')
+";
+        conn.execute(SQL, ::duckdb::params![])
+    }
+
+    /// Apply the steward phone_e164 overrides over the assembled golden rows (NULL value = the steward cleared the field); zero overrides match zero rows, so the determinism contract holds.
+    pub fn override_phone_e164(conn: &::duckdb::Connection) -> ::duckdb::Result<usize> {
+        const SQL: &str = "UPDATE lake.main.golden_records SET phone_e164 = (
+  SELECT o.value FROM lake.main.golden_overrides o
+  WHERE o.entity_id = golden_records.entity_id AND o.attribute = 'phone_e164')
+WHERE golden_records.entity_id IN (
+  SELECT entity_id FROM lake.main.golden_overrides WHERE attribute = 'phone_e164')
+";
+        conn.execute(SQL, ::duckdb::params![])
+    }
+}

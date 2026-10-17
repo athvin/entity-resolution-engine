@@ -9,7 +9,7 @@
 use std::path::PathBuf;
 
 use er_entity_spec::Catalog;
-use er_sql_check::{load_statements, rewrite_lake};
+use er_sql_check::{Operation, load_statements, rewrite_lake};
 use regex::{NoExpand, Regex};
 
 fn entities_dir() -> PathBuf {
@@ -56,7 +56,11 @@ fn oracle_golden_reads_match_duckdb_result_types() {
         .map(|c| (c.name.clone(), c.col_type.ducklake_type().to_string()))
         .collect();
 
-    for stmt in statements.iter().filter(|s| s.entity == "golden_record") {
+    // Reads only: a write (the override UPDATEs) has no result shape to DESCRIBE.
+    for stmt in statements
+        .iter()
+        .filter(|s| s.entity == "golden_record" && s.operation == Operation::Read)
+    {
         let rewritten = rewrite_lake(&stmt.sql);
         let described = substitute_null_literals(&rewritten.sql, stmt);
         let mut prepared = conn
