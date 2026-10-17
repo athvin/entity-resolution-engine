@@ -15,5 +15,6 @@ pub mod golden_record;
 pub mod job;
 pub mod org;
 pub mod schedule;
+pub mod schema;
 pub mod staged_steward_action;
 pub mod webhook;
