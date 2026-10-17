@@ -1577,6 +1577,7 @@ dependencies = [
  "er-entity-spec",
  "er-golden",
  "er-schema",
+ "er-standardize",
  "ff-analysis",
  "regex",
  "serde",
@@ -1648,7 +1649,7 @@ checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
 [[package]]
 name = "ff-analysis"
 version = "0.1.2"
-source = "git+https://github.com/athvin/feather-flow?tag=er-entity-v0.1.2#3f7598a0a9f9f2a38fa073cda946630bf9c36e0d"
+source = "git+https://github.com/athvin/feather-flow?tag=er-entity-v0.1.3#086f2a92ac892d45bb7e25adc2a7924501744768"
 dependencies = [
  "arrow 57.3.1",
  "datafusion-common",
@@ -1667,7 +1668,7 @@ dependencies = [
 [[package]]
 name = "ff-core"
 version = "0.1.2"
-source = "git+https://github.com/athvin/feather-flow?tag=er-entity-v0.1.2#3f7598a0a9f9f2a38fa073cda946630bf9c36e0d"
+source = "git+https://github.com/athvin/feather-flow?tag=er-entity-v0.1.3#086f2a92ac892d45bb7e25adc2a7924501744768"
 dependencies = [
  "chrono",
  "log",
@@ -1683,7 +1684,7 @@ dependencies = [
 [[package]]
 name = "ff-sql"
 version = "0.1.2"
-source = "git+https://github.com/athvin/feather-flow?tag=er-entity-v0.1.2#3f7598a0a9f9f2a38fa073cda946630bf9c36e0d"
+source = "git+https://github.com/athvin/feather-flow?tag=er-entity-v0.1.3#086f2a92ac892d45bb7e25adc2a7924501744768"
 dependencies = [
  "log",
  "serde",
