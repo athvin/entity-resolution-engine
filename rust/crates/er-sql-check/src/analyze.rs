@@ -6,7 +6,8 @@
 
 use std::path::PathBuf;
 
-use er_entity_spec::{Catalog, Entity, Store};
+use datafusion_common::arrow::datatypes::DataType;
+use er_entity_spec::{Catalog, ColumnType, Entity, Store};
 use ff_analysis::sqlparser::ast::{Query, Select, SelectItem, SetExpr, Statement, TableFactor};
 use ff_analysis::sqlparser::dialect::{Dialect, DuckDbDialect, PostgreSqlDialect};
 use ff_analysis::sqlparser::parser::Parser;
@@ -14,7 +15,9 @@ use ff_analysis::{FeatherFlowProvider, FunctionRegistry};
 
 use crate::catalog::build_store_catalog;
 use crate::rewrite::rewrite_lake;
-use crate::statement::{LoadedStatement, Mode, Operation, Returns, StmtError, load_statements};
+use crate::statement::{
+    LoadedStatement, Mode, Operation, Pin, Returns, StmtError, load_statements,
+};
 
 /// One analysis finding: a stable `E0xx` code, the offending statement, and why.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,15 +63,57 @@ pub fn analyze_statement(
     // Rewrite: strip the lake snapshot pin, recording whether one was present.
     let rewritten = rewrite_lake(&stmt.sql);
 
-    // E006 — a lake read must be snapshot-pinned.
-    if store == Store::Duckdb
-        && stmt.operation == Operation::Read
-        && rewritten.snapshot_param.is_none()
-    {
+    // E006 — a lake read must be snapshot-pinned, unless it declares (and
+    // justifies) `pin: live`; a live read must then NOT carry a pin, and `pin:
+    // live` means nothing anywhere but a lake read.
+    if store == Store::Duckdb && stmt.operation == Operation::Read {
+        match (stmt.pin, rewritten.snapshot_param.is_some()) {
+            (Pin::Snapshot, false) => diags.push(Diagnostic::new(
+                "E006",
+                &stmt.path,
+                "a lake read must carry AT (VERSION => $snapshot); the read API's MVCC rule",
+            )),
+            (Pin::Live, true) => diags.push(Diagnostic::new(
+                "E006",
+                &stmt.path,
+                "a `pin: live` read must not carry AT (VERSION => ..); drop the clause or drop `pin: live`",
+            )),
+            _ => {}
+        }
+    } else if stmt.pin == Pin::Live {
         diags.push(Diagnostic::new(
             "E006",
             &stmt.path,
-            "a lake read must carry AT (VERSION => $snapshot); the read API's MVCC rule",
+            "`pin: live` is a lake-read concept; nothing else has a snapshot to opt out of",
+        ));
+    }
+
+    // E002 — a list<varchar> parameter cannot bind on the lake (duckdb-rs has no
+    // LIST binding); the lake idiom is a chr(31)-delimited varchar split in SQL.
+    if store == Store::Duckdb {
+        for param in &stmt.params {
+            if param.param_type == ColumnType::ListVarchar {
+                diags.push(Diagnostic::new(
+                    "E002",
+                    &stmt.path,
+                    format!(
+                        "parameter ${} is list<varchar>, which cannot bind on the lake \
+                         (duckdb-rs has no LIST binding); pass a chr(31)-delimited varchar \
+                         and split with string_split(${}, chr(31))",
+                        param.name, param.name
+                    ),
+                ));
+            }
+        }
+    }
+
+    // E012 — `returns: columns` is lake-read-only in this phase; a control read
+    // declares `returns: entity` (the control emitter maps rows by entity column).
+    if store == Store::Postgres && matches!(stmt.returns, Returns::Columns(_)) {
+        diags.push(Diagnostic::new(
+            "E012",
+            &stmt.path,
+            "returns: columns is lake-read-only in this phase; a control read declares `returns: entity`",
         ));
     }
 
@@ -179,29 +224,103 @@ pub fn analyze_statement(
         }
     }
 
-    // E003 — a `returns: entity` read's output equals the entity: same columns,
-    // same order. (Type fidelity is the oracle's job and lands with it.)
-    if stmt.returns == Returns::Entity {
-        let actual: Vec<String> = plan
-            .schema()
-            .fields()
-            .iter()
-            .map(|f| f.name().clone())
-            .collect();
-        let expected: Vec<String> = entity.columns.iter().map(|c| c.name.clone()).collect();
-        if actual != expected {
-            diags.push(Diagnostic::new(
-                "E003",
-                &stmt.path,
-                format!(
-                    "output columns do not equal entity {}: expected {expected:?}, got {actual:?}",
-                    entity.name
-                ),
-            ));
+    // E003 — the statement's output equals its declaration. For `returns: entity`
+    // that is the entity's columns, in order (type fidelity is the oracle's job).
+    // For `returns: columns` it is the declared typed list: names in order, each
+    // plan type compatible with the declared type, and a declared non-null column
+    // must be provably non-null in the plan.
+    match &stmt.returns {
+        Returns::Entity => {
+            let actual: Vec<String> = plan
+                .schema()
+                .fields()
+                .iter()
+                .map(|f| f.name().clone())
+                .collect();
+            let expected: Vec<String> = entity.columns.iter().map(|c| c.name.clone()).collect();
+            if actual != expected {
+                diags.push(Diagnostic::new(
+                    "E003",
+                    &stmt.path,
+                    format!(
+                        "output columns do not equal entity {}: expected {expected:?}, got {actual:?}",
+                        entity.name
+                    ),
+                ));
+            }
         }
+        Returns::Columns(cols) => {
+            let fields = plan.schema().fields();
+            let actual: Vec<String> = fields.iter().map(|f| f.name().clone()).collect();
+            let expected: Vec<String> = cols.iter().map(|c| c.name.clone()).collect();
+            if actual == expected {
+                for (col, field) in cols.iter().zip(fields.iter()) {
+                    if !arrow_compatible(col.col_type, field.data_type()) {
+                        diags.push(Diagnostic::new(
+                            "E003",
+                            &stmt.path,
+                            format!(
+                                "column {}: declared {} but the plan output is {:?}",
+                                col.name,
+                                col.col_type.ducklake_type(),
+                                field.data_type()
+                            ),
+                        ));
+                    }
+                    if !col.nullable && field.is_nullable() {
+                        diags.push(Diagnostic::new(
+                            "E003",
+                            &stmt.path,
+                            format!(
+                                "column {} is declared non-null but the plan cannot prove it \
+                                 (an outer join or expression on its path); declare it nullable",
+                                col.name
+                            ),
+                        ));
+                    }
+                }
+            } else {
+                diags.push(Diagnostic::new(
+                    "E003",
+                    &stmt.path,
+                    format!(
+                        "output columns do not equal the declared returns: expected {expected:?}, got {actual:?}"
+                    ),
+                ));
+            }
+        }
+        Returns::None => {}
     }
 
     diags
+}
+
+/// Whether a declared column type is compatible with the plan's (arrow 57) output
+/// type. DataFusion's coercions widen strings and pick its own timestamp unit, so
+/// the relation is deliberately tolerant there; the oracle holds the exact line
+/// against the real database.
+fn arrow_compatible(declared: ColumnType, actual: &DataType) -> bool {
+    match declared {
+        // JSON plans as text (the `::json` casts are rewritten to `::varchar`).
+        ColumnType::Varchar | ColumnType::Json => matches!(
+            actual,
+            DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View
+        ),
+        ColumnType::Bigint => matches!(actual, DataType::Int64),
+        ColumnType::Double => matches!(actual, DataType::Float64),
+        ColumnType::Boolean => matches!(actual, DataType::Boolean),
+        ColumnType::Date => matches!(actual, DataType::Date32),
+        // Unit-insensitive: DuckDB decides microseconds at runtime; the oracle and
+        // the generated `from_batches` hold that line.
+        ColumnType::Timestamp => matches!(actual, DataType::Timestamp(_, None)),
+        ColumnType::ListVarchar => match actual {
+            DataType::List(item) | DataType::LargeList(item) => matches!(
+                item.data_type(),
+                DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View
+            ),
+            _ => false,
+        },
+    }
 }
 
 /// Load and analyse every statement in the catalog, against each statement's
@@ -368,30 +487,240 @@ mod tests {
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:#?}");
     }
 
-    /// A hand-built bad statement proves the passes bite: an unpinned `SELECT *`
-    /// read raises E006 (no snapshot) and E011 (wildcard).
-    #[test]
-    fn a_wildcard_unpinned_read_is_rejected() {
+    /// A statement skeleton for the hand-built rule tests: a pinned, full-mode
+    /// golden_record read with no params, to be bent per test.
+    fn read_stmt(sql: &str) -> LoadedStatement {
+        LoadedStatement {
+            entity: "golden_record".to_string(),
+            operation: Operation::Read,
+            description: "test".to_string(),
+            params: vec![],
+            returns: Returns::Entity,
+            mode: crate::Mode::Full,
+            reads: vec![],
+            pin: Pin::Snapshot,
+            pin_reason: String::new(),
+            sql: sql.to_string(),
+            path: PathBuf::from("entities/golden_record/read/test.sql"),
+        }
+    }
+
+    fn lake_diags(stmt: &LoadedStatement) -> Vec<Diagnostic> {
         let cat = catalog();
         let entity = cat.by_name("golden_record").unwrap();
         let lake = build_store_catalog(&cat, Store::Duckdb);
         let registry = FunctionRegistry::new();
         let provider = FeatherFlowProvider::new(&lake, &registry);
+        analyze_statement(stmt, entity, Store::Duckdb, &provider)
+    }
 
-        let bad = LoadedStatement {
-            entity: "golden_record".to_string(),
-            operation: Operation::Read,
-            description: "bad".to_string(),
-            params: vec![],
-            returns: Returns::Entity,
-            mode: crate::Mode::Full,
-            reads: vec![],
-            sql: "SELECT * FROM lake.main.golden_records".to_string(),
-            path: PathBuf::from("entities/golden_record/read/bad.sql"),
-        };
-        let diags = analyze_statement(&bad, entity, Store::Duckdb, &provider);
-        let codes: Vec<&str> = diags.iter().map(|d| d.code).collect();
+    fn codes(diags: &[Diagnostic]) -> Vec<&str> {
+        diags.iter().map(|d| d.code).collect()
+    }
+
+    /// A hand-built bad statement proves the passes bite: an unpinned `SELECT *`
+    /// read raises E006 (no snapshot) and E011 (wildcard).
+    #[test]
+    fn a_wildcard_unpinned_read_is_rejected() {
+        let bad = read_stmt("SELECT * FROM lake.main.golden_records");
+        let diags = lake_diags(&bad);
+        let codes = codes(&diags);
         assert!(codes.contains(&"E006"), "expected E006, got {codes:?}");
         assert!(codes.contains(&"E011"), "expected E011, got {codes:?}");
+    }
+
+    #[test]
+    fn a_justified_live_read_passes_without_a_pin() {
+        let mut stmt = read_stmt("SELECT entity_id FROM lake.main.golden_records");
+        stmt.pin = Pin::Live;
+        stmt.pin_reason = "the writer's own in-transaction read".to_string();
+        stmt.returns = Returns::Columns(vec![crate::ReturnColumn {
+            name: "entity_id".to_string(),
+            col_type: ColumnType::Varchar,
+            nullable: false,
+        }]);
+        let diags = lake_diags(&stmt);
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:#?}");
+    }
+
+    #[test]
+    fn a_live_read_carrying_a_pin_is_rejected() {
+        let mut stmt =
+            read_stmt("SELECT entity_id FROM lake.main.golden_records AT (VERSION => $snapshot)");
+        stmt.pin = Pin::Live;
+        stmt.pin_reason = "contradiction".to_string();
+        stmt.params = vec![crate::StatementParam {
+            name: "snapshot".to_string(),
+            param_type: ColumnType::Bigint,
+            nullable: false,
+        }];
+        stmt.returns = Returns::Columns(vec![crate::ReturnColumn {
+            name: "entity_id".to_string(),
+            col_type: ColumnType::Varchar,
+            nullable: false,
+        }]);
+        let diags = lake_diags(&stmt);
+        assert!(codes(&diags).contains(&"E006"), "got {diags:#?}");
+    }
+
+    #[test]
+    fn a_lake_list_parameter_is_rejected() {
+        let mut stmt =
+            read_stmt("SELECT entity_id FROM lake.main.golden_records AT (VERSION => $snapshot)");
+        stmt.params = vec![
+            crate::StatementParam {
+                name: "snapshot".to_string(),
+                param_type: ColumnType::Bigint,
+                nullable: false,
+            },
+            crate::StatementParam {
+                name: "keys".to_string(),
+                param_type: ColumnType::ListVarchar,
+                nullable: false,
+            },
+        ];
+        stmt.returns = Returns::Columns(vec![crate::ReturnColumn {
+            name: "entity_id".to_string(),
+            col_type: ColumnType::Varchar,
+            nullable: false,
+        }]);
+        let diags = lake_diags(&stmt);
+        let e002: Vec<_> = diags.iter().filter(|d| d.code == "E002").collect();
+        assert!(
+            e002.iter().any(|d| d.message.contains("LIST binding")),
+            "expected the lake list-param E002, got {diags:#?}"
+        );
+    }
+
+    #[test]
+    fn a_columns_read_with_a_wrong_type_is_rejected() {
+        let mut stmt =
+            read_stmt("SELECT entity_id FROM lake.main.golden_records AT (VERSION => $snapshot)");
+        stmt.params = vec![crate::StatementParam {
+            name: "snapshot".to_string(),
+            param_type: ColumnType::Bigint,
+            nullable: false,
+        }];
+        stmt.returns = Returns::Columns(vec![crate::ReturnColumn {
+            name: "entity_id".to_string(),
+            col_type: ColumnType::Bigint,
+            nullable: false,
+        }]);
+        let diags = lake_diags(&stmt);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.code == "E003" && d.message.contains("declared BIGINT")),
+            "expected the type-mismatch E003, got {diags:#?}"
+        );
+    }
+
+    #[test]
+    fn a_columns_read_overclaiming_non_null_is_rejected() {
+        // given_name is nullable on the entity; declaring it non-null must fail.
+        let mut stmt =
+            read_stmt("SELECT given_name FROM lake.main.golden_records AT (VERSION => $snapshot)");
+        stmt.params = vec![crate::StatementParam {
+            name: "snapshot".to_string(),
+            param_type: ColumnType::Bigint,
+            nullable: false,
+        }];
+        stmt.returns = Returns::Columns(vec![crate::ReturnColumn {
+            name: "given_name".to_string(),
+            col_type: ColumnType::Varchar,
+            nullable: false,
+        }]);
+        let diags = lake_diags(&stmt);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.code == "E003" && d.message.contains("declared non-null")),
+            "expected the nullability E003, got {diags:#?}"
+        );
+    }
+
+    #[test]
+    fn a_columns_read_with_wrong_names_is_rejected() {
+        let mut stmt =
+            read_stmt("SELECT entity_id FROM lake.main.golden_records AT (VERSION => $snapshot)");
+        stmt.params = vec![crate::StatementParam {
+            name: "snapshot".to_string(),
+            param_type: ColumnType::Bigint,
+            nullable: false,
+        }];
+        stmt.returns = Returns::Columns(vec![crate::ReturnColumn {
+            name: "record_key".to_string(),
+            col_type: ColumnType::Varchar,
+            nullable: true,
+        }]);
+        let diags = lake_diags(&stmt);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.code == "E003" && d.message.contains("declared returns")),
+            "expected the name-mismatch E003, got {diags:#?}"
+        );
+    }
+
+    #[test]
+    fn a_control_statement_cannot_return_columns() {
+        let cat = catalog();
+        let entity = cat.by_name("org").unwrap();
+        let pg = build_store_catalog(&cat, Store::Postgres);
+        let registry = FunctionRegistry::new();
+        let provider = FeatherFlowProvider::new(&pg, &registry);
+        let stmt = LoadedStatement {
+            entity: "org".to_string(),
+            operation: Operation::Read,
+            description: "test".to_string(),
+            params: vec![],
+            returns: Returns::Columns(vec![crate::ReturnColumn {
+                name: "name".to_string(),
+                col_type: ColumnType::Varchar,
+                nullable: false,
+            }]),
+            mode: crate::Mode::Partial,
+            reads: vec![],
+            pin: Pin::Snapshot,
+            pin_reason: String::new(),
+            sql: "SELECT name FROM public.orgs".to_string(),
+            path: PathBuf::from("entities/org/read/test.sql"),
+        };
+        let diags = analyze_statement(&stmt, entity, Store::Postgres, &provider);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.code == "E012" && d.message.contains("lake-read-only")),
+            "expected the control-columns E012, got {diags:#?}"
+        );
+    }
+
+    #[test]
+    fn pin_live_outside_a_lake_read_is_rejected() {
+        let cat = catalog();
+        let entity = cat.by_name("org").unwrap();
+        let pg = build_store_catalog(&cat, Store::Postgres);
+        let registry = FunctionRegistry::new();
+        let provider = FeatherFlowProvider::new(&pg, &registry);
+        let stmt = LoadedStatement {
+            entity: "org".to_string(),
+            operation: Operation::Read,
+            description: "test".to_string(),
+            params: vec![],
+            returns: Returns::Entity,
+            mode: crate::Mode::Partial,
+            reads: vec![],
+            pin: Pin::Live,
+            pin_reason: "misplaced".to_string(),
+            sql: "SELECT 1 FROM public.orgs".to_string(),
+            path: PathBuf::from("entities/org/read/test.sql"),
+        };
+        let diags = analyze_statement(&stmt, entity, Store::Postgres, &provider);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.code == "E006" && d.message.contains("lake-read concept")),
+            "expected the misplaced-pin E006, got {diags:#?}"
+        );
     }
 }

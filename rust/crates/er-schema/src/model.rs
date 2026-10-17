@@ -110,13 +110,20 @@ impl Column {
         Self::new(name, type_, false)
     }
 
-    /// The column's DDL fragment, `NOT NULL` included when it applies.
+    /// The column's DDL fragment, `NOT NULL` included when it applies. The
+    /// registry's logical `LIST(VARCHAR)` renders as `VARCHAR[]` — the spelling
+    /// DuckDB's DDL parser accepts (DESCRIBE reports it the same way; the
+    /// entity-diff normalizes it back to the logical name).
     #[must_use]
     pub fn sql(&self) -> String {
+        let ddl_type = if self.r#type == LIST_VARCHAR {
+            "VARCHAR[]"
+        } else {
+            self.r#type.as_str()
+        };
         format!(
-            "{} {}{}",
+            "{} {ddl_type}{}",
             self.name,
-            self.r#type,
             if self.nullable { "" } else { " NOT NULL" }
         )
     }

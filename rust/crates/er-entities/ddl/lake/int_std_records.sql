@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS lake.main.int_std_records (
   std_version VARCHAR NOT NULL,
   given_name VARCHAR,
   family_name VARCHAR,
-  name_variants LIST(VARCHAR) NOT NULL,
+  name_variants VARCHAR[] NOT NULL,
   email VARCHAR,
   email_valid BOOLEAN,
   phone_e164 VARCHAR,

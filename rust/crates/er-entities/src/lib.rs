@@ -9,6 +9,7 @@ pub mod acct_int_std_record;
 pub mod api_key;
 pub mod assertion;
 pub mod audit_log;
+pub mod batch;
 pub mod config_version;
 pub mod entity_event;
 pub mod entity_membership;

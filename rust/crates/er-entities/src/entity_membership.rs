@@ -44,6 +44,65 @@ impl EntityMembership {
     }
 }
 
+pub mod read {
+    //! @generated query functions for this entity + operation.
+    /// One row of `member_keys`: The member record keys of one entity at a pinned snapshot, ascending (the unmerge precheck and the detail member list).
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct MemberKeysRow {
+        pub record_key: String,
+    }
+
+    impl MemberKeysRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![("record_key", ::arrow::datatypes::DataType::Utf8)]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "record_key")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        record_key: crate::batch::req(
+                            crate::batch::opt_str(c0, i),
+                            "record_key",
+                            i,
+                        )?,
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// The member record keys of one entity at a pinned snapshot, ascending (the unmerge precheck and the detail member list).
+    pub fn member_keys(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+        entity_id: &str,
+    ) -> ::duckdb::Result<Vec<MemberKeysRow>> {
+        const SQL: &str = "SELECT record_key
+FROM lake.main.entity_membership AT (VERSION => {snapshot})
+WHERE entity_id = $1
+ORDER BY record_key
+";
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = conn.prepare(&sql)?;
+        let batches = stmt
+            .query_arrow(::duckdb::params![entity_id])?
+            .collect::<Vec<_>>();
+        MemberKeysRow::from_batches(&batches)
+    }
+}
+
 pub mod update {
     //! @generated query functions for this entity + operation.
     /// MERGE the run's membership plan (the session's __mem_src staging) on the record identity.
