@@ -1,0 +1,8 @@
+kind: statement
+operation: read
+description: "Duplicate-group sizing at a pinned snapshot: how many entities have two or more members, and how many records they hold."
+params:
+  - { name: snapshot, type: bigint }
+returns:
+  - { name: groups, type: bigint }
+  - { name: records_in_groups, type: bigint }

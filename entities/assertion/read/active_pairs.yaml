@@ -1,0 +1,10 @@
+kind: statement
+operation: read
+description: "The active assertions at a pinned snapshot as bare pairs (the unmerge contradiction precheck)."
+params:
+  - { name: snapshot, type: bigint }
+returns:
+  - { name: assertion_id, type: varchar, nullable: false }
+  - { name: rec_a_key, type: varchar, nullable: false }
+  - { name: rec_b_key, type: varchar, nullable: false }
+  - { name: kind, type: varchar, nullable: false }

@@ -94,3 +94,50 @@ impl IntStdRecord {
         ]
     }
 }
+
+pub mod read {
+    //! @generated query functions for this entity + operation.
+    /// One row of `count`: The standardized-record count at a pinned snapshot (the dashboard counter).
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct CountRow {
+        pub n: Option<i64>,
+    }
+
+    impl CountRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![("n", ::arrow::datatypes::DataType::Int64)]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::Int64Array = crate::batch::col(batch, 0, "n")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        n: crate::batch::opt_i64(c0, i),
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// The standardized-record count at a pinned snapshot (the dashboard counter).
+    pub fn count(conn: &::duckdb::Connection, snapshot: i64) -> ::duckdb::Result<Vec<CountRow>> {
+        const SQL: &str = "SELECT count(*) AS n
+FROM lake.main.int_std_records AT (VERSION => {snapshot})
+";
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = conn.prepare(&sql)?;
+        let batches = stmt.query_arrow(::duckdb::params![])?.collect::<Vec<_>>();
+        CountRow::from_batches(&batches)
+    }
+}

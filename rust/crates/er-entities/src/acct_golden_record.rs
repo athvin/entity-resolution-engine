@@ -94,24 +94,91 @@ impl AcctGoldenRecord {
 
 pub mod read {
     //! @generated query functions for this entity + operation.
-    /// A single account golden record by entity id at a pinned snapshot (the account detail page's master row).
+    /// One row of `by_id`: One account golden record by id at a pinned snapshot, without the volatile assembled_at (the detail surface).
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct ByIdRow {
+        pub entity_id: String,
+        pub company_name: Option<String>,
+        pub domain: Option<String>,
+        pub phone_e164: Option<String>,
+        pub addr_street: Option<String>,
+        pub addr_city: Option<String>,
+        pub addr_region: Option<String>,
+        pub addr_postal: Option<String>,
+        pub metadata: Option<::serde_json::Value>,
+        pub survivorship_version: String,
+    }
+
+    impl ByIdRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("entity_id", ::arrow::datatypes::DataType::Utf8),
+                ("company_name", ::arrow::datatypes::DataType::Utf8),
+                ("domain", ::arrow::datatypes::DataType::Utf8),
+                ("phone_e164", ::arrow::datatypes::DataType::Utf8),
+                ("addr_street", ::arrow::datatypes::DataType::Utf8),
+                ("addr_city", ::arrow::datatypes::DataType::Utf8),
+                ("addr_region", ::arrow::datatypes::DataType::Utf8),
+                ("addr_postal", ::arrow::datatypes::DataType::Utf8),
+                ("metadata", ::arrow::datatypes::DataType::Utf8),
+                ("survivorship_version", ::arrow::datatypes::DataType::Utf8),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "entity_id")?;
+                let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "company_name")?;
+                let c2: &::arrow::array::StringArray = crate::batch::col(batch, 2, "domain")?;
+                let c3: &::arrow::array::StringArray = crate::batch::col(batch, 3, "phone_e164")?;
+                let c4: &::arrow::array::StringArray = crate::batch::col(batch, 4, "addr_street")?;
+                let c5: &::arrow::array::StringArray = crate::batch::col(batch, 5, "addr_city")?;
+                let c6: &::arrow::array::StringArray = crate::batch::col(batch, 6, "addr_region")?;
+                let c7: &::arrow::array::StringArray = crate::batch::col(batch, 7, "addr_postal")?;
+                let c8: &::arrow::array::StringArray = crate::batch::col(batch, 8, "metadata")?;
+                let c9: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 9, "survivorship_version")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        entity_id: crate::batch::req(crate::batch::opt_str(c0, i), "entity_id", i)?,
+                        company_name: crate::batch::opt_str(c1, i),
+                        domain: crate::batch::opt_str(c2, i),
+                        phone_e164: crate::batch::opt_str(c3, i),
+                        addr_street: crate::batch::opt_str(c4, i),
+                        addr_city: crate::batch::opt_str(c5, i),
+                        addr_region: crate::batch::opt_str(c6, i),
+                        addr_postal: crate::batch::opt_str(c7, i),
+                        metadata: crate::batch::opt_json(c8, i, "metadata")?,
+                        survivorship_version: crate::batch::req(
+                            crate::batch::opt_str(c9, i),
+                            "survivorship_version",
+                            i,
+                        )?,
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// One account golden record by id at a pinned snapshot, without the volatile assembled_at (the detail surface).
     pub fn by_id(
         conn: &::duckdb::Connection,
         snapshot: i64,
         entity_id: &str,
-    ) -> ::duckdb::Result<Vec<::arrow::record_batch::RecordBatch>> {
-        const SQL: &str = "SELECT
-  entity_id,
-  company_name,
-  domain,
-  phone_e164,
-  addr_street,
-  addr_city,
-  addr_region,
-  addr_postal,
-  metadata,
-  survivorship_version,
-  assembled_at
+    ) -> ::duckdb::Result<Vec<ByIdRow>> {
+        const SQL: &str = "SELECT entity_id, company_name, domain, phone_e164,
+       addr_street, addr_city, addr_region, addr_postal,
+       metadata, survivorship_version
 FROM lake.main.acct_golden_records AT (VERSION => {snapshot})
 WHERE entity_id = $1
 ";
@@ -120,7 +187,7 @@ WHERE entity_id = $1
         let batches = stmt
             .query_arrow(::duckdb::params![entity_id])?
             .collect::<Vec<_>>();
-        Ok(batches)
+        ByIdRow::from_batches(&batches)
     }
 
     /// One keyset page of account golden records at a pinned snapshot, optionally filtered by a company/domain contains-search.

@@ -1,0 +1,20 @@
+kind: statement
+operation: read
+description: "One review item by id at a pinned snapshot."
+params:
+  - { name: snapshot, type: bigint }
+  - { name: review_id, type: varchar }
+returns:
+  - { name: review_id, type: varchar, nullable: false }
+  - { name: subject_type, type: varchar, nullable: false }
+  - { name: rec_a_key, type: varchar }
+  - { name: rec_b_key, type: varchar }
+  - { name: entity_id, type: varchar }
+  - { name: reason, type: varchar, nullable: false }
+  - { name: match_probability, type: double }
+  - { name: waterfall, type: json }
+  - { name: status, type: varchar, nullable: false }
+  - { name: first_seen_run_id, type: varchar, nullable: false }
+  - { name: last_seen_run_id, type: varchar, nullable: false }
+  - { name: resolved_by, type: varchar }
+  - { name: resolved_at, type: timestamp }

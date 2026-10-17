@@ -65,6 +65,314 @@ impl Review {
     }
 }
 
+pub mod read {
+    //! @generated query functions for this entity + operation.
+    /// One row of `by_id`: One review item by id at a pinned snapshot.
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct ByIdRow {
+        pub review_id: String,
+        pub subject_type: String,
+        pub rec_a_key: Option<String>,
+        pub rec_b_key: Option<String>,
+        pub entity_id: Option<String>,
+        pub reason: String,
+        pub match_probability: Option<f64>,
+        pub waterfall: Option<::serde_json::Value>,
+        pub status: String,
+        pub first_seen_run_id: String,
+        pub last_seen_run_id: String,
+        pub resolved_by: Option<String>,
+        #[serde(serialize_with = "crate::batch::ser_duckdb_timestamp_opt")]
+        pub resolved_at: Option<::chrono::DateTime<::chrono::Utc>>,
+    }
+
+    impl ByIdRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("review_id", ::arrow::datatypes::DataType::Utf8),
+                ("subject_type", ::arrow::datatypes::DataType::Utf8),
+                ("rec_a_key", ::arrow::datatypes::DataType::Utf8),
+                ("rec_b_key", ::arrow::datatypes::DataType::Utf8),
+                ("entity_id", ::arrow::datatypes::DataType::Utf8),
+                ("reason", ::arrow::datatypes::DataType::Utf8),
+                ("match_probability", ::arrow::datatypes::DataType::Float64),
+                ("waterfall", ::arrow::datatypes::DataType::Utf8),
+                ("status", ::arrow::datatypes::DataType::Utf8),
+                ("first_seen_run_id", ::arrow::datatypes::DataType::Utf8),
+                ("last_seen_run_id", ::arrow::datatypes::DataType::Utf8),
+                ("resolved_by", ::arrow::datatypes::DataType::Utf8),
+                (
+                    "resolved_at",
+                    ::arrow::datatypes::DataType::Timestamp(
+                        ::arrow::datatypes::TimeUnit::Microsecond,
+                        None,
+                    ),
+                ),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "review_id")?;
+                let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "subject_type")?;
+                let c2: &::arrow::array::StringArray = crate::batch::col(batch, 2, "rec_a_key")?;
+                let c3: &::arrow::array::StringArray = crate::batch::col(batch, 3, "rec_b_key")?;
+                let c4: &::arrow::array::StringArray = crate::batch::col(batch, 4, "entity_id")?;
+                let c5: &::arrow::array::StringArray = crate::batch::col(batch, 5, "reason")?;
+                let c6: &::arrow::array::Float64Array =
+                    crate::batch::col(batch, 6, "match_probability")?;
+                let c7: &::arrow::array::StringArray = crate::batch::col(batch, 7, "waterfall")?;
+                let c8: &::arrow::array::StringArray = crate::batch::col(batch, 8, "status")?;
+                let c9: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 9, "first_seen_run_id")?;
+                let c10: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 10, "last_seen_run_id")?;
+                let c11: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 11, "resolved_by")?;
+                let c12: &::arrow::array::TimestampMicrosecondArray =
+                    crate::batch::col(batch, 12, "resolved_at")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        review_id: crate::batch::req(crate::batch::opt_str(c0, i), "review_id", i)?,
+                        subject_type: crate::batch::req(
+                            crate::batch::opt_str(c1, i),
+                            "subject_type",
+                            i,
+                        )?,
+                        rec_a_key: crate::batch::opt_str(c2, i),
+                        rec_b_key: crate::batch::opt_str(c3, i),
+                        entity_id: crate::batch::opt_str(c4, i),
+                        reason: crate::batch::req(crate::batch::opt_str(c5, i), "reason", i)?,
+                        match_probability: crate::batch::opt_f64(c6, i),
+                        waterfall: crate::batch::opt_json(c7, i, "waterfall")?,
+                        status: crate::batch::req(crate::batch::opt_str(c8, i), "status", i)?,
+                        first_seen_run_id: crate::batch::req(
+                            crate::batch::opt_str(c9, i),
+                            "first_seen_run_id",
+                            i,
+                        )?,
+                        last_seen_run_id: crate::batch::req(
+                            crate::batch::opt_str(c10, i),
+                            "last_seen_run_id",
+                            i,
+                        )?,
+                        resolved_by: crate::batch::opt_str(c11, i),
+                        resolved_at: crate::batch::opt_ts(c12, i),
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// One review item by id at a pinned snapshot.
+    pub fn by_id(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+        review_id: &str,
+    ) -> ::duckdb::Result<Vec<ByIdRow>> {
+        const SQL: &str = "SELECT review_id, subject_type, rec_a_key, rec_b_key, entity_id, reason,
+       match_probability, waterfall, status, first_seen_run_id, last_seen_run_id,
+       resolved_by, resolved_at
+FROM lake.main.review_queue AT (VERSION => {snapshot})
+WHERE review_id = $1
+";
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = conn.prepare(&sql)?;
+        let batches = stmt
+            .query_arrow(::duckdb::params![review_id])?
+            .collect::<Vec<_>>();
+        ByIdRow::from_batches(&batches)
+    }
+
+    /// One row of `open_count`: The open-review count at a pinned snapshot (the dashboard counter).
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct OpenCountRow {
+        pub n: Option<i64>,
+    }
+
+    impl OpenCountRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![("n", ::arrow::datatypes::DataType::Int64)]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::Int64Array = crate::batch::col(batch, 0, "n")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        n: crate::batch::opt_i64(c0, i),
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// The open-review count at a pinned snapshot (the dashboard counter).
+    pub fn open_count(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+    ) -> ::duckdb::Result<Vec<OpenCountRow>> {
+        const SQL: &str = "SELECT count(*) AS n
+FROM lake.main.review_queue AT (VERSION => {snapshot})
+WHERE status = 'open'
+";
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = conn.prepare(&sql)?;
+        let batches = stmt.query_arrow(::duckdb::params![])?.collect::<Vec<_>>();
+        OpenCountRow::from_batches(&batches)
+    }
+
+    /// One row of `page`: One keyset page of the review queue at a pinned snapshot, FIFO by review id.
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct PageRow {
+        pub review_id: String,
+        pub subject_type: String,
+        pub rec_a_key: Option<String>,
+        pub rec_b_key: Option<String>,
+        pub entity_id: Option<String>,
+        pub reason: String,
+        pub match_probability: Option<f64>,
+        pub waterfall: Option<::serde_json::Value>,
+        pub status: String,
+        pub first_seen_run_id: String,
+        pub last_seen_run_id: String,
+        pub resolved_by: Option<String>,
+        #[serde(serialize_with = "crate::batch::ser_duckdb_timestamp_opt")]
+        pub resolved_at: Option<::chrono::DateTime<::chrono::Utc>>,
+    }
+
+    impl PageRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("review_id", ::arrow::datatypes::DataType::Utf8),
+                ("subject_type", ::arrow::datatypes::DataType::Utf8),
+                ("rec_a_key", ::arrow::datatypes::DataType::Utf8),
+                ("rec_b_key", ::arrow::datatypes::DataType::Utf8),
+                ("entity_id", ::arrow::datatypes::DataType::Utf8),
+                ("reason", ::arrow::datatypes::DataType::Utf8),
+                ("match_probability", ::arrow::datatypes::DataType::Float64),
+                ("waterfall", ::arrow::datatypes::DataType::Utf8),
+                ("status", ::arrow::datatypes::DataType::Utf8),
+                ("first_seen_run_id", ::arrow::datatypes::DataType::Utf8),
+                ("last_seen_run_id", ::arrow::datatypes::DataType::Utf8),
+                ("resolved_by", ::arrow::datatypes::DataType::Utf8),
+                (
+                    "resolved_at",
+                    ::arrow::datatypes::DataType::Timestamp(
+                        ::arrow::datatypes::TimeUnit::Microsecond,
+                        None,
+                    ),
+                ),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "review_id")?;
+                let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "subject_type")?;
+                let c2: &::arrow::array::StringArray = crate::batch::col(batch, 2, "rec_a_key")?;
+                let c3: &::arrow::array::StringArray = crate::batch::col(batch, 3, "rec_b_key")?;
+                let c4: &::arrow::array::StringArray = crate::batch::col(batch, 4, "entity_id")?;
+                let c5: &::arrow::array::StringArray = crate::batch::col(batch, 5, "reason")?;
+                let c6: &::arrow::array::Float64Array =
+                    crate::batch::col(batch, 6, "match_probability")?;
+                let c7: &::arrow::array::StringArray = crate::batch::col(batch, 7, "waterfall")?;
+                let c8: &::arrow::array::StringArray = crate::batch::col(batch, 8, "status")?;
+                let c9: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 9, "first_seen_run_id")?;
+                let c10: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 10, "last_seen_run_id")?;
+                let c11: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 11, "resolved_by")?;
+                let c12: &::arrow::array::TimestampMicrosecondArray =
+                    crate::batch::col(batch, 12, "resolved_at")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        review_id: crate::batch::req(crate::batch::opt_str(c0, i), "review_id", i)?,
+                        subject_type: crate::batch::req(
+                            crate::batch::opt_str(c1, i),
+                            "subject_type",
+                            i,
+                        )?,
+                        rec_a_key: crate::batch::opt_str(c2, i),
+                        rec_b_key: crate::batch::opt_str(c3, i),
+                        entity_id: crate::batch::opt_str(c4, i),
+                        reason: crate::batch::req(crate::batch::opt_str(c5, i), "reason", i)?,
+                        match_probability: crate::batch::opt_f64(c6, i),
+                        waterfall: crate::batch::opt_json(c7, i, "waterfall")?,
+                        status: crate::batch::req(crate::batch::opt_str(c8, i), "status", i)?,
+                        first_seen_run_id: crate::batch::req(
+                            crate::batch::opt_str(c9, i),
+                            "first_seen_run_id",
+                            i,
+                        )?,
+                        last_seen_run_id: crate::batch::req(
+                            crate::batch::opt_str(c10, i),
+                            "last_seen_run_id",
+                            i,
+                        )?,
+                        resolved_by: crate::batch::opt_str(c11, i),
+                        resolved_at: crate::batch::opt_ts(c12, i),
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// One keyset page of the review queue at a pinned snapshot, FIFO by review id.
+    pub fn page(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+        after: Option<&str>,
+        limit: i64,
+    ) -> ::duckdb::Result<Vec<PageRow>> {
+        const SQL: &str = "SELECT review_id, subject_type, rec_a_key, rec_b_key, entity_id, reason,
+       match_probability, waterfall, status, first_seen_run_id, last_seen_run_id,
+       resolved_by, resolved_at
+FROM lake.main.review_queue AT (VERSION => {snapshot})
+WHERE ($1 IS NULL OR review_id > $1)
+ORDER BY review_id
+LIMIT $2
+";
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = conn.prepare(&sql)?;
+        let batches = stmt
+            .query_arrow(::duckdb::params![after, limit])?
+            .collect::<Vec<_>>();
+        PageRow::from_batches(&batches)
+    }
+}
+
 pub mod update {
     //! @generated query functions for this entity + operation.
     /// Record a steward's resolution on a review item.

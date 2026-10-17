@@ -1952,7 +1952,7 @@ async fn golden_record_detail(
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let (session, _entity_type, view) = match org_lake_golden(&state, &org).await {
+    let (session, entity_type, _view) = match org_lake_golden(&state, &org).await {
         Ok(s) => s,
         Err(r) => return *r,
     };
@@ -1960,7 +1960,7 @@ async fn golden_record_detail(
         Ok(s) => s,
         Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
     };
-    match read::entity_detail(&session, &view, snapshot, &entity_id) {
+    match read::entity_detail(&session, entity_type, snapshot, &entity_id) {
         Ok(Some(detail)) => Json(detail).into_response(),
         Ok(None) => detail_err(StatusCode::NOT_FOUND, format!("no entity '{entity_id}'")),
         Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),

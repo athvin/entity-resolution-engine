@@ -83,3 +83,100 @@ VALUES ($1, $2, $3, $4, $5, $6::json, $7, $8::timestamp)
         )
     }
 }
+
+pub mod read {
+    //! @generated query functions for this entity + operation.
+    /// One row of `by_entity`: One entity's lifecycle events at a pinned snapshot, in occurrence order (the detail event feed).
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct ByEntityRow {
+        pub event_id: String,
+        pub seq: i64,
+        pub run_id: String,
+        pub event_type: String,
+        pub details: ::serde_json::Value,
+        #[serde(serialize_with = "crate::batch::ser_duckdb_timestamp")]
+        pub occurred_at: ::chrono::DateTime<::chrono::Utc>,
+    }
+
+    impl ByEntityRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("event_id", ::arrow::datatypes::DataType::Utf8),
+                ("seq", ::arrow::datatypes::DataType::Int64),
+                ("run_id", ::arrow::datatypes::DataType::Utf8),
+                ("event_type", ::arrow::datatypes::DataType::Utf8),
+                ("details", ::arrow::datatypes::DataType::Utf8),
+                (
+                    "occurred_at",
+                    ::arrow::datatypes::DataType::Timestamp(
+                        ::arrow::datatypes::TimeUnit::Microsecond,
+                        None,
+                    ),
+                ),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "event_id")?;
+                let c1: &::arrow::array::Int64Array = crate::batch::col(batch, 1, "seq")?;
+                let c2: &::arrow::array::StringArray = crate::batch::col(batch, 2, "run_id")?;
+                let c3: &::arrow::array::StringArray = crate::batch::col(batch, 3, "event_type")?;
+                let c4: &::arrow::array::StringArray = crate::batch::col(batch, 4, "details")?;
+                let c5: &::arrow::array::TimestampMicrosecondArray =
+                    crate::batch::col(batch, 5, "occurred_at")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        event_id: crate::batch::req(crate::batch::opt_str(c0, i), "event_id", i)?,
+                        seq: crate::batch::req(crate::batch::opt_i64(c1, i), "seq", i)?,
+                        run_id: crate::batch::req(crate::batch::opt_str(c2, i), "run_id", i)?,
+                        event_type: crate::batch::req(
+                            crate::batch::opt_str(c3, i),
+                            "event_type",
+                            i,
+                        )?,
+                        details: crate::batch::req(
+                            crate::batch::opt_json(c4, i, "details")?,
+                            "details",
+                            i,
+                        )?,
+                        occurred_at: crate::batch::req(
+                            crate::batch::opt_ts(c5, i),
+                            "occurred_at",
+                            i,
+                        )?,
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// One entity's lifecycle events at a pinned snapshot, in occurrence order (the detail event feed).
+    pub fn by_entity(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+        entity_id: &str,
+    ) -> ::duckdb::Result<Vec<ByEntityRow>> {
+        const SQL: &str = "SELECT event_id, seq, run_id, event_type, details, occurred_at
+FROM lake.main.entity_events AT (VERSION => {snapshot})
+WHERE entity_id = $1
+ORDER BY occurred_at, seq
+";
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = conn.prepare(&sql)?;
+        let batches = stmt
+            .query_arrow(::duckdb::params![entity_id])?
+            .collect::<Vec<_>>();
+        ByEntityRow::from_batches(&batches)
+    }
+}

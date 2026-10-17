@@ -1,0 +1,13 @@
+kind: statement
+operation: read
+description: "One entity's lifecycle events at a pinned snapshot, in occurrence order (the detail event feed)."
+params:
+  - { name: snapshot, type: bigint }
+  - { name: entity_id, type: varchar }
+returns:
+  - { name: event_id, type: varchar, nullable: false }
+  - { name: seq, type: bigint, nullable: false }
+  - { name: run_id, type: varchar, nullable: false }
+  - { name: event_type, type: varchar, nullable: false }
+  - { name: details, type: json, nullable: false }
+  - { name: occurred_at, type: timestamp, nullable: false }

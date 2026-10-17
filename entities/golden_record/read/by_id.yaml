@@ -1,7 +1,21 @@
 kind: statement
 operation: read
-description: "A single golden record by entity id at a pinned snapshot (the entity detail page's master row)."
+description: "One golden record by id at a pinned snapshot, without the volatile assembled_at (the detail surface)."
 params:
   - { name: snapshot, type: bigint }
   - { name: entity_id, type: varchar }
-returns: entity
+returns:
+  - { name: entity_id, type: varchar, nullable: false }
+  - { name: given_name, type: varchar }
+  - { name: family_name, type: varchar }
+  - { name: email, type: varchar }
+  - { name: phone_e164, type: varchar }
+  - { name: addr_number, type: varchar }
+  - { name: addr_street, type: varchar }
+  - { name: addr_unit, type: varchar }
+  - { name: addr_city, type: varchar }
+  - { name: addr_region, type: varchar }
+  - { name: addr_postal, type: varchar }
+  - { name: birth_date, type: date }
+  - { name: metadata, type: json }
+  - { name: survivorship_version, type: varchar, nullable: false }

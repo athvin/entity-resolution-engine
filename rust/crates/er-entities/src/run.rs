@@ -114,6 +114,118 @@ VALUES ($1, $2, $3, 'running', $4::timestamp, $5,
     }
 }
 
+pub mod read {
+    //! @generated query functions for this entity + operation.
+    /// One row of `recent`: The most recent runs at a pinned snapshot, newest first, capped at 20 (the runs surface).
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct RecentRow {
+        pub run_id: String,
+        pub mode: String,
+        pub status: String,
+        #[serde(serialize_with = "crate::batch::ser_duckdb_timestamp")]
+        pub started_at: ::chrono::DateTime<::chrono::Utc>,
+        #[serde(serialize_with = "crate::batch::ser_duckdb_timestamp_opt")]
+        pub ended_at: Option<::chrono::DateTime<::chrono::Utc>>,
+        pub config_hash: String,
+        pub model_version: Option<String>,
+        pub tf_snapshot_id: Option<String>,
+        pub rebuild_reason: Option<String>,
+    }
+
+    impl RecentRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("run_id", ::arrow::datatypes::DataType::Utf8),
+                ("mode", ::arrow::datatypes::DataType::Utf8),
+                ("status", ::arrow::datatypes::DataType::Utf8),
+                (
+                    "started_at",
+                    ::arrow::datatypes::DataType::Timestamp(
+                        ::arrow::datatypes::TimeUnit::Microsecond,
+                        None,
+                    ),
+                ),
+                (
+                    "ended_at",
+                    ::arrow::datatypes::DataType::Timestamp(
+                        ::arrow::datatypes::TimeUnit::Microsecond,
+                        None,
+                    ),
+                ),
+                ("config_hash", ::arrow::datatypes::DataType::Utf8),
+                ("model_version", ::arrow::datatypes::DataType::Utf8),
+                ("tf_snapshot_id", ::arrow::datatypes::DataType::Utf8),
+                ("rebuild_reason", ::arrow::datatypes::DataType::Utf8),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "run_id")?;
+                let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "mode")?;
+                let c2: &::arrow::array::StringArray = crate::batch::col(batch, 2, "status")?;
+                let c3: &::arrow::array::TimestampMicrosecondArray =
+                    crate::batch::col(batch, 3, "started_at")?;
+                let c4: &::arrow::array::TimestampMicrosecondArray =
+                    crate::batch::col(batch, 4, "ended_at")?;
+                let c5: &::arrow::array::StringArray = crate::batch::col(batch, 5, "config_hash")?;
+                let c6: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 6, "model_version")?;
+                let c7: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 7, "tf_snapshot_id")?;
+                let c8: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 8, "rebuild_reason")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        run_id: crate::batch::req(crate::batch::opt_str(c0, i), "run_id", i)?,
+                        mode: crate::batch::req(crate::batch::opt_str(c1, i), "mode", i)?,
+                        status: crate::batch::req(crate::batch::opt_str(c2, i), "status", i)?,
+                        started_at: crate::batch::req(
+                            crate::batch::opt_ts(c3, i),
+                            "started_at",
+                            i,
+                        )?,
+                        ended_at: crate::batch::opt_ts(c4, i),
+                        config_hash: crate::batch::req(
+                            crate::batch::opt_str(c5, i),
+                            "config_hash",
+                            i,
+                        )?,
+                        model_version: crate::batch::opt_str(c6, i),
+                        tf_snapshot_id: crate::batch::opt_str(c7, i),
+                        rebuild_reason: crate::batch::opt_str(c8, i),
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// The most recent runs at a pinned snapshot, newest first, capped at 20 (the runs surface).
+    pub fn recent(conn: &::duckdb::Connection, snapshot: i64) -> ::duckdb::Result<Vec<RecentRow>> {
+        const SQL: &str =
+            "SELECT run_id, mode, status, started_at, ended_at, config_hash, model_version,
+       tf_snapshot_id, rebuild_reason
+FROM lake.main.runs AT (VERSION => {snapshot})
+ORDER BY started_at DESC
+LIMIT 20
+";
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = conn.prepare(&sql)?;
+        let batches = stmt.query_arrow(::duckdb::params![])?.collect::<Vec<_>>();
+        RecentRow::from_batches(&batches)
+    }
+}
+
 pub mod update {
     //! @generated query functions for this entity + operation.
     /// Close the run ledger row on success, stamping ended_at.

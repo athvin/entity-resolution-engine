@@ -1,0 +1,12 @@
+kind: statement
+operation: read
+description: "One entity's member records at a pinned snapshot, by record key (the detail member list)."
+params:
+  - { name: snapshot, type: bigint }
+  - { name: entity_id, type: varchar }
+returns:
+  - { name: source_system, type: varchar, nullable: false }
+  - { name: source_record_id, type: varchar, nullable: false }
+  - { name: record_key, type: varchar, nullable: false }
+  - { name: assigned_at, type: timestamp, nullable: false }
+  - { name: run_id, type: varchar, nullable: false }

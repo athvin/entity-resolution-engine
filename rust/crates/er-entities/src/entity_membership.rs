@@ -46,6 +46,162 @@ impl EntityMembership {
 
 pub mod read {
     //! @generated query functions for this entity + operation.
+    /// One row of `by_entity`: One entity's member records at a pinned snapshot, by record key (the detail member list).
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct ByEntityRow {
+        pub source_system: String,
+        pub source_record_id: String,
+        pub record_key: String,
+        #[serde(serialize_with = "crate::batch::ser_duckdb_timestamp")]
+        pub assigned_at: ::chrono::DateTime<::chrono::Utc>,
+        pub run_id: String,
+    }
+
+    impl ByEntityRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("source_system", ::arrow::datatypes::DataType::Utf8),
+                ("source_record_id", ::arrow::datatypes::DataType::Utf8),
+                ("record_key", ::arrow::datatypes::DataType::Utf8),
+                (
+                    "assigned_at",
+                    ::arrow::datatypes::DataType::Timestamp(
+                        ::arrow::datatypes::TimeUnit::Microsecond,
+                        None,
+                    ),
+                ),
+                ("run_id", ::arrow::datatypes::DataType::Utf8),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 0, "source_system")?;
+                let c1: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 1, "source_record_id")?;
+                let c2: &::arrow::array::StringArray = crate::batch::col(batch, 2, "record_key")?;
+                let c3: &::arrow::array::TimestampMicrosecondArray =
+                    crate::batch::col(batch, 3, "assigned_at")?;
+                let c4: &::arrow::array::StringArray = crate::batch::col(batch, 4, "run_id")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        source_system: crate::batch::req(
+                            crate::batch::opt_str(c0, i),
+                            "source_system",
+                            i,
+                        )?,
+                        source_record_id: crate::batch::req(
+                            crate::batch::opt_str(c1, i),
+                            "source_record_id",
+                            i,
+                        )?,
+                        record_key: crate::batch::req(
+                            crate::batch::opt_str(c2, i),
+                            "record_key",
+                            i,
+                        )?,
+                        assigned_at: crate::batch::req(
+                            crate::batch::opt_ts(c3, i),
+                            "assigned_at",
+                            i,
+                        )?,
+                        run_id: crate::batch::req(crate::batch::opt_str(c4, i), "run_id", i)?,
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// One entity's member records at a pinned snapshot, by record key (the detail member list).
+    pub fn by_entity(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+        entity_id: &str,
+    ) -> ::duckdb::Result<Vec<ByEntityRow>> {
+        const SQL: &str = "SELECT source_system, source_record_id, record_key, assigned_at, run_id
+FROM lake.main.entity_membership AT (VERSION => {snapshot})
+WHERE entity_id = $1
+ORDER BY record_key
+";
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = conn.prepare(&sql)?;
+        let batches = stmt
+            .query_arrow(::duckdb::params![entity_id])?
+            .collect::<Vec<_>>();
+        ByEntityRow::from_batches(&batches)
+    }
+
+    /// One row of `dup_group_stats`: Duplicate-group sizing at a pinned snapshot: how many entities have two or more members, and how many records they hold.
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct DupGroupStatsRow {
+        pub groups: Option<i64>,
+        pub records_in_groups: Option<i64>,
+    }
+
+    impl DupGroupStatsRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("groups", ::arrow::datatypes::DataType::Int64),
+                ("records_in_groups", ::arrow::datatypes::DataType::Int64),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::Int64Array = crate::batch::col(batch, 0, "groups")?;
+                let c1: &::arrow::array::Int64Array =
+                    crate::batch::col(batch, 1, "records_in_groups")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        groups: crate::batch::opt_i64(c0, i),
+                        records_in_groups: crate::batch::opt_i64(c1, i),
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// Duplicate-group sizing at a pinned snapshot: how many entities have two or more members, and how many records they hold.
+    pub fn dup_group_stats(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+    ) -> ::duckdb::Result<Vec<DupGroupStatsRow>> {
+        const SQL: &str = "SELECT count(*) AS groups,
+       CAST(coalesce(sum(c), 0) AS BIGINT) AS records_in_groups
+FROM (
+  SELECT entity_id, count(*) AS c
+  FROM lake.main.entity_membership AT (VERSION => {snapshot})
+  GROUP BY entity_id
+  HAVING count(*) >= 2
+) g
+";
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = conn.prepare(&sql)?;
+        let batches = stmt.query_arrow(::duckdb::params![])?.collect::<Vec<_>>();
+        DupGroupStatsRow::from_batches(&batches)
+    }
+
     /// One row of `member_keys`: The member record keys of one entity at a pinned snapshot, ascending (the unmerge precheck and the detail member list).
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
     pub struct MemberKeysRow {

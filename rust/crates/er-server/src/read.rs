@@ -342,16 +342,13 @@ pub fn latest_snapshot(session: &Session) -> Result<i64, String> {
     session.latest_snapshot_version().map_err(|e| e.to_string())
 }
 
-/// Each row of an inner SELECT as a JSON object (NULLs/types preserved via
-/// `to_json`).
-fn json_rows(session: &Session, inner_sql: &str) -> Result<Vec<Value>, String> {
-    let rows = session
-        .query_strings(&format!("SELECT to_json(t) FROM ({inner_sql}) t"))
-        .map_err(|e| e.to_string())?;
-    Ok(rows
-        .iter()
-        .map(|r| serde_json::from_str(&r[0]).unwrap_or(Value::Null))
-        .collect())
+/// Serialize generated statement rows to JSON values (the row structs' serde
+/// derives carry the DuckDB-compatible rendering, so this replaces the old
+/// `to_json` hop byte-for-byte).
+fn rows_to_values<T: serde::Serialize>(rows: &[T]) -> Vec<Value> {
+    rows.iter()
+        .map(|r| serde_json::to_value(r).unwrap_or(Value::Null))
+        .collect()
 }
 
 /// One resolved entity with its members, lineage, and events
@@ -362,51 +359,47 @@ fn json_rows(session: &Session, inner_sql: &str) -> Result<Vec<Value>, String> {
 /// Propagates a lake query error.
 pub fn entity_detail(
     session: &Session,
-    view: &GoldenView,
+    entity_type: EntityType,
     snapshot: i64,
     entity_id: &str,
 ) -> Result<Option<Value>, String> {
-    let eid = lit(entity_id);
-    let at = format!("AT (VERSION => {snapshot})");
-    let golden = json_rows(
-        session,
-        &format!(
-            "SELECT {cols} FROM {table} {at} WHERE entity_id = {eid}",
-            cols = view.columns,
-            table = view.golden_table,
-        ),
-    )?;
+    let conn = session.connection();
+    let golden = match entity_type {
+        EntityType::Person => {
+            let rows = er_entities::golden_record::read::by_id(conn, snapshot, entity_id)
+                .map_err(|e| e.to_string())?;
+            rows_to_values(&rows)
+        }
+        EntityType::Account => {
+            let rows = er_entities::acct_golden_record::read::by_id(conn, snapshot, entity_id)
+                .map_err(|e| e.to_string())?;
+            rows_to_values(&rows)
+        }
+    };
     let Some(golden_row) = golden.into_iter().next() else {
         return Ok(None);
     };
-    let members = json_rows(
-        session,
-        &format!(
-            "SELECT source_system, source_record_id, record_key, assigned_at, run_id \
-             FROM lake.main.entity_membership {at} WHERE entity_id = {eid} ORDER BY record_key"
-        ),
-    )?;
-    let lineage = json_rows(
-        session,
-        &format!(
-            "SELECT attribute, record_key, source_system, source_record_id, rule \
-             FROM {lineage} {at} WHERE entity_id = {eid} \
-             ORDER BY attribute, record_key",
-            lineage = view.lineage_table,
-        ),
-    )?;
-    let events = json_rows(
-        session,
-        &format!(
-            "SELECT event_id, seq, run_id, event_type, details, occurred_at \
-             FROM lake.main.entity_events {at} WHERE entity_id = {eid} ORDER BY occurred_at, seq"
-        ),
-    )?;
+    let members = er_entities::entity_membership::read::by_entity(conn, snapshot, entity_id)
+        .map_err(|e| e.to_string())?;
+    let lineage = match entity_type {
+        EntityType::Person => {
+            let rows = er_entities::golden_lineage::read::by_entity(conn, snapshot, entity_id)
+                .map_err(|e| e.to_string())?;
+            rows_to_values(&rows)
+        }
+        EntityType::Account => {
+            let rows = er_entities::acct_golden_lineage::read::by_entity(conn, snapshot, entity_id)
+                .map_err(|e| e.to_string())?;
+            rows_to_values(&rows)
+        }
+    };
+    let events = er_entities::entity_event::read::by_entity(conn, snapshot, entity_id)
+        .map_err(|e| e.to_string())?;
     Ok(Some(json!({
         "golden": golden_row,
-        "members": members,
+        "members": rows_to_values(&members),
         "lineage": lineage,
-        "events": events,
+        "events": rows_to_values(&events),
     })))
 }
 
@@ -422,13 +415,12 @@ pub fn entity_member_keys(
     snapshot: i64,
     entity_id: &str,
 ) -> Result<Vec<String>, String> {
-    let sql = format!(
-        "SELECT record_key FROM lake.main.entity_membership AT (VERSION => {snapshot}) \
-         WHERE entity_id = {} ORDER BY record_key",
-        lit(entity_id)
-    );
-    match session.query_strings(&sql) {
-        Ok(rows) => Ok(rows.into_iter().map(|mut r| r.remove(0)).collect()),
+    match er_entities::entity_membership::read::member_keys(
+        session.connection(),
+        snapshot,
+        entity_id,
+    ) {
+        Ok(rows) => Ok(rows.into_iter().map(|r| r.record_key).collect()),
         Err(e) => {
             let s = e.to_string();
             if is_missing_table(&s) {
@@ -450,14 +442,10 @@ pub fn active_assertions(
     session: &Session,
     snapshot: i64,
 ) -> Result<Vec<(String, String, String, String)>, String> {
-    let sql = format!(
-        "SELECT assertion_id, rec_a_key, rec_b_key, kind \
-         FROM lake.main.assertions AT (VERSION => {snapshot}) WHERE active"
-    );
-    match session.query_strings(&sql) {
+    match er_entities::assertion::read::active_pairs(session.connection(), snapshot) {
         Ok(rows) => Ok(rows
             .into_iter()
-            .map(|r| (r[0].clone(), r[1].clone(), r[2].clone(), r[3].clone()))
+            .map(|r| (r.assertion_id, r.rec_a_key, r.rec_b_key, r.kind))
             .collect()),
         Err(e) => {
             let s = e.to_string();
@@ -659,76 +647,23 @@ fn is_missing_table(err: &str) -> bool {
         || err.contains("Table with name")
 }
 
-/// A generic snapshot-pinned keyset page over one lake table, ordered by
-/// `key_col`. Returns an empty page if the table is absent (a lake whose
-/// stage hasn't populated it). `columns` is the projection; `extra_filters` are
-/// AND-ed with the keyset predicate.
-///
-/// # Errors
-/// Propagates a non-missing-table lake query error.
-#[allow(clippy::too_many_arguments)]
-pub fn keyset_list(
-    session: &Session,
+/// Page typed statement rows fetched with `limit + 1`: serialize the kept page,
+/// and derive the next keyset cursor from the last kept row's key when a row
+/// crossed the limit.
+fn typed_page<T: serde::Serialize>(
+    rows: &[T],
     snapshot: i64,
-    table: &str,
-    columns: &str,
-    key_col: &str,
-    extra_filters: &[String],
-    after: Option<&str>,
     limit: i64,
-) -> Result<(Vec<Value>, Option<String>), String> {
-    let limit = limit.clamp(1, MAX_LIMIT);
-    let at = format!("AT (VERSION => {snapshot})");
-    let mut filters: Vec<String> = extra_filters.to_vec();
-    if let Some(a) = after {
-        filters.push(format!("{key_col} > {}", lit(a)));
-    }
-    let where_sql = if filters.is_empty() {
-        String::new()
-    } else {
-        format!("WHERE {}", filters.join(" AND "))
-    };
-    let sql = format!(
-        "SELECT {key_col}, to_json(t) FROM ( \
-           SELECT {columns} FROM lake.main.{table} {at} {where_sql} \
-           ORDER BY {key_col} LIMIT {} \
-         ) t ORDER BY {key_col}",
-        limit + 1
-    );
-    match session.query_strings(&sql) {
-        Ok(rows) => {
-            let has_more = rows.len() as i64 > limit;
-            let page = &rows[..rows.len().min(limit as usize)];
-            let items = page
-                .iter()
-                .map(|r| serde_json::from_str(&r[1]).unwrap_or(Value::Null))
-                .collect();
-            let next = has_more
-                .then(|| page.last().map(|r| encode_cursor(snapshot, &r[0])))
-                .flatten();
-            Ok((items, next))
-        }
-        Err(e) => {
-            let s = e.to_string();
-            if is_missing_table(&s) {
-                Ok((Vec::new(), None))
-            } else {
-                Err(s)
-            }
-        }
-    }
+    key: impl Fn(&T) -> &str,
+) -> (Vec<Value>, Option<String>) {
+    let has_more = rows.len() as i64 > limit;
+    let page = &rows[..rows.len().min(usize::try_from(limit).unwrap_or(0))];
+    let items = rows_to_values(page);
+    let next = has_more
+        .then(|| page.last().map(|r| encode_cursor(snapshot, key(r))))
+        .flatten();
+    (items, next)
 }
-
-const REVIEW_COLUMNS: &str = "review_id, subject_type, rec_a_key, rec_b_key, entity_id, reason, \
-     match_probability, waterfall, status, first_seen_run_id, last_seen_run_id, resolved_by, \
-     resolved_at";
-const ASSERTION_COLUMNS: &str = "assertion_id, rec_a_key, rec_b_key, kind, active, created_by, \
-     created_at, retracted_by, retracted_at, note";
-const IMPORT_COLUMNS: &str = "ingest_batch_id, run_id, source_system, path, new_count, \
-     changed_count, unchanged_count, tombstone_count, resurrected_count, full_refresh_keys, \
-     created_at";
-const RUN_COLUMNS: &str = "run_id, mode, status, started_at, ended_at, config_hash, \
-     model_version, tf_snapshot_id, rebuild_reason";
 
 /// The open-review queue, FIFO by `review_id` (`readapi.reviews_list`).
 ///
@@ -740,16 +675,18 @@ pub fn reviews_list(
     after: Option<&str>,
     limit: i64,
 ) -> Result<(Vec<Value>, Option<String>), String> {
-    keyset_list(
-        session,
-        snapshot,
-        "review_queue",
-        REVIEW_COLUMNS,
-        "review_id",
-        &[],
-        after,
-        limit,
-    )
+    let limit = limit.clamp(1, MAX_LIMIT);
+    match er_entities::review::read::page(session.connection(), snapshot, after, limit + 1) {
+        Ok(rows) => Ok(typed_page(&rows, snapshot, limit, |r| &r.review_id)),
+        Err(e) => {
+            let s = e.to_string();
+            if is_missing_table(&s) {
+                Ok((Vec::new(), None))
+            } else {
+                Err(s)
+            }
+        }
+    }
 }
 
 /// One review by id (`readapi.review_get`), `None` if absent / table missing.
@@ -761,17 +698,8 @@ pub fn review_get(
     snapshot: i64,
     review_id: &str,
 ) -> Result<Option<Value>, String> {
-    let sql = format!(
-        "SELECT to_json(t) FROM ( \
-           SELECT {REVIEW_COLUMNS} FROM lake.main.review_queue AT (VERSION => {snapshot}) \
-           WHERE review_id = {} \
-         ) t",
-        lit(review_id)
-    );
-    match session.query_strings(&sql) {
-        Ok(rows) => Ok(rows
-            .first()
-            .map(|r| serde_json::from_str(&r[0]).unwrap_or(Value::Null))),
+    match er_entities::review::read::by_id(session.connection(), snapshot, review_id) {
+        Ok(rows) => Ok(rows_to_values(&rows).into_iter().next()),
         Err(e) => {
             let s = e.to_string();
             if is_missing_table(&s) {
@@ -795,21 +723,24 @@ pub fn assertions_list(
     after: Option<&str>,
     limit: i64,
 ) -> Result<(Vec<Value>, Option<String>), String> {
-    let filters: Vec<String> = if include_retracted {
-        Vec::new()
-    } else {
-        vec!["active".to_string()]
-    };
-    keyset_list(
-        session,
+    let limit = limit.clamp(1, MAX_LIMIT);
+    match er_entities::assertion::read::page(
+        session.connection(),
         snapshot,
-        "assertions",
-        ASSERTION_COLUMNS,
-        "assertion_id",
-        &filters,
+        include_retracted,
         after,
-        limit,
-    )
+        limit + 1,
+    ) {
+        Ok(rows) => Ok(typed_page(&rows, snapshot, limit, |r| &r.assertion_id)),
+        Err(e) => {
+            let s = e.to_string();
+            if is_missing_table(&s) {
+                Ok((Vec::new(), None))
+            } else {
+                Err(s)
+            }
+        }
+    }
 }
 
 /// The ingest-batch receipts, keyed by `ingest_batch_id`
@@ -824,20 +755,25 @@ pub fn imports_list(
     after: Option<&str>,
     limit: i64,
 ) -> Result<(Vec<Value>, Option<String>), String> {
-    let filters: Vec<String> = source
-        .filter(|s| !s.is_empty())
-        .map(|s| vec![format!("source_system = {}", lit(s))])
-        .unwrap_or_default();
-    keyset_list(
-        session,
+    let limit = limit.clamp(1, MAX_LIMIT);
+    let source = source.filter(|s| !s.is_empty());
+    match er_entities::ingest_batch::read::page(
+        session.connection(),
         snapshot,
-        "ingest_batches",
-        IMPORT_COLUMNS,
-        "ingest_batch_id",
-        &filters,
+        source,
         after,
-        limit,
-    )
+        limit + 1,
+    ) {
+        Ok(rows) => Ok(typed_page(&rows, snapshot, limit, |r| &r.ingest_batch_id)),
+        Err(e) => {
+            let s = e.to_string();
+            if is_missing_table(&s) {
+                Ok((Vec::new(), None))
+            } else {
+                Err(s)
+            }
+        }
+    }
 }
 
 /// The most recent runs, newest first, capped at 20 (`readapi.runs_list`): a
@@ -850,17 +786,9 @@ pub fn runs_list(
     snapshot: i64,
     auto_merge: Option<f64>,
 ) -> Result<Vec<Value>, String> {
-    let sql = format!(
-        "SELECT to_json(t) FROM ( \
-           SELECT {RUN_COLUMNS} FROM lake.main.runs AT (VERSION => {snapshot}) \
-           ORDER BY started_at DESC LIMIT 20 \
-         ) t"
-    );
-    let mut runs: Vec<Value> = match session.query_strings(&sql) {
-        Ok(rows) => rows
-            .iter()
-            .map(|r| serde_json::from_str(&r[0]).unwrap_or(Value::Null))
-            .collect(),
+    let mut runs: Vec<Value> = match er_entities::run::read::recent(session.connection(), snapshot)
+    {
+        Ok(rows) => rows_to_values(&rows),
         Err(e) => {
             let s = e.to_string();
             return if is_missing_table(&s) {
@@ -898,17 +826,16 @@ fn run_auto_merge_counts(
     snapshot: i64,
     auto_merge: f64,
 ) -> Result<std::collections::BTreeMap<String, u64>, String> {
-    let sql = format!(
-        "SELECT run_id, count(*) FROM lake.main.match_scores AT (VERSION => {snapshot}) \
-         WHERE is_active AND match_probability >= {auto_merge} GROUP BY run_id"
-    );
-    match session.query_strings(&sql) {
+    match er_entities::match_score::read::auto_merge_counts(
+        session.connection(),
+        snapshot,
+        auto_merge,
+    ) {
         Ok(rows) => Ok(rows
-            .iter()
+            .into_iter()
             .filter_map(|r| {
-                let id = r.first()?.clone();
-                let n = r.get(1)?.parse::<u64>().ok()?;
-                Some((id, n))
+                let n = u64::try_from(r.n?).ok()?;
+                Some((r.run_id, n))
             })
             .collect()),
         Err(e) => {
@@ -1072,13 +999,29 @@ pub fn merge_plans_csv(items: &[Value]) -> String {
 }
 
 /// A snapshot-pinned scalar count.
-fn count_at(session: &Session, sql: &str) -> Result<i64, String> {
-    let rows = session.query_strings(sql).map_err(|e| e.to_string())?;
-    Ok(rows
-        .first()
-        .and_then(|r| r.first())
-        .and_then(|s| s.parse::<i64>().ok())
-        .unwrap_or(0))
+/// The standardized-record count at `snapshot` via the declared statement.
+fn std_record_count(session: &Session, snapshot: i64) -> Result<i64, String> {
+    let rows = er_entities::int_std_record::read::count(session.connection(), snapshot)
+        .map_err(|e| e.to_string())?;
+    Ok(rows.first().and_then(|r| r.n).unwrap_or(0))
+}
+
+/// The golden-record count at `snapshot` via the declared statement.
+fn golden_record_count(session: &Session, snapshot: i64) -> Result<i64, String> {
+    let rows = er_entities::golden_record::read::count(session.connection(), snapshot)
+        .map_err(|e| e.to_string())?;
+    Ok(rows.first().and_then(|r| r.n).unwrap_or(0))
+}
+
+/// Duplicate-group sizing at `snapshot`: `(groups, records_in_groups)`.
+fn dup_group_stats(session: &Session, snapshot: i64) -> Result<(i64, i64), String> {
+    let rows = er_entities::entity_membership::read::dup_group_stats(session.connection(), snapshot)
+        .map_err(|e| e.to_string())?;
+    let row = rows.first();
+    Ok((
+        row.and_then(|r| r.groups).unwrap_or(0),
+        row.and_then(|r| r.records_in_groups).unwrap_or(0),
+    ))
 }
 
 /// Dashboard counters (`readapi.metrics`), snapshot-pinned: record/entity totals
@@ -1089,44 +1032,13 @@ fn count_at(session: &Session, sql: &str) -> Result<i64, String> {
 /// # Errors
 /// Propagates a lake query error (other than a missing `review_queue`).
 pub fn metrics(session: &Session, snapshot: i64) -> Result<Value, String> {
-    let at = format!("AT (VERSION => {snapshot})");
-    let records = count_at(
-        session,
-        &format!("SELECT count(*) FROM lake.main.int_std_records {at}"),
-    )?;
-    let entities = count_at(
-        session,
-        &format!("SELECT count(*) FROM lake.main.golden_records {at}"),
-    )?;
-    let dup = session
-        .query_strings(&format!(
-            "SELECT count(*), coalesce(sum(c), 0) FROM ( \
-               SELECT entity_id, count(*) AS c FROM lake.main.entity_membership {at} \
-               GROUP BY entity_id HAVING count(*) >= 2 \
-             ) g"
-        ))
-        .map_err(|e| e.to_string())?;
-    let duplicate_groups: i64 = dup
-        .first()
-        .and_then(|r| r.first())
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
-    let records_in_dupes: i64 = dup
-        .first()
-        .and_then(|r| r.get(1))
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
+    let records = std_record_count(session, snapshot)?;
+    let entities = golden_record_count(session, snapshot)?;
+    let (duplicate_groups, records_in_dupes) = dup_group_stats(session, snapshot)?;
     // review_queue is optional in a base-pipeline lake; absence ⇒ 0 open.
-    let open_reviews = session
-        .query_strings(&format!(
-            "SELECT count(*) FROM lake.main.review_queue {at} WHERE status = 'open'"
-        ))
+    let open_reviews = er_entities::review::read::open_count(session.connection(), snapshot)
         .ok()
-        .and_then(|r| {
-            r.first()
-                .and_then(|c| c.first())
-                .and_then(|s| s.parse::<i64>().ok())
-        })
+        .and_then(|rows| rows.first().and_then(|r| r.n))
         .unwrap_or(0);
     Ok(json!({
         "records": records,
@@ -1157,14 +1069,8 @@ pub fn metrics(session: &Session, snapshot: i64) -> Result<Value, String> {
 /// had at least one run).
 pub fn data_quality(session: &Session, snapshot: i64, stale_days: i64) -> Result<Value, String> {
     let at = format!("AT (VERSION => {snapshot})");
-    let records = count_at(
-        session,
-        &format!("SELECT count(*) FROM lake.main.int_std_records {at}"),
-    )?;
-    let entities = count_at(
-        session,
-        &format!("SELECT count(*) FROM lake.main.golden_records {at}"),
-    )?;
+    let records = std_record_count(session, snapshot)?;
+    let entities = golden_record_count(session, snapshot)?;
 
     // Completeness: per-column non-null fraction over golden_records. The 11
     // survivable columns (GOLDEN_COLUMNS minus entity_id/metadata/version).
@@ -1235,21 +1141,9 @@ pub fn data_quality(session: &Session, snapshot: i64, stale_days: i64) -> Result
     let stale_rate = if n_std > 0.0 { stale / n_std } else { 0.0 };
 
     // Duplicate rate: records in >=2-member entities / total records.
-    let dup = session
-        .query_strings(&format!(
-            "SELECT coalesce(sum(c), 0) FROM ( \
-               SELECT entity_id, count(*) AS c FROM lake.main.entity_membership {at} \
-               GROUP BY entity_id HAVING count(*) >= 2 \
-             ) g"
-        ))
-        .map_err(|e| e.to_string())?;
-    let records_in_dupes = dup
-        .first()
-        .and_then(|r| r.first())
-        .and_then(|s| s.parse::<f64>().ok())
-        .unwrap_or(0.0);
+    let (_, records_in_dupes) = dup_group_stats(session, snapshot)?;
     let duplicate_rate = if records > 0 {
-        records_in_dupes / records as f64
+        records_in_dupes as f64 / records as f64
     } else {
         0.0
     };

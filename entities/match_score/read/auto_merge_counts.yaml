@@ -1,0 +1,9 @@
+kind: statement
+operation: read
+description: "Per-run count of active pairs at or above the auto-merge threshold, at a pinned snapshot (the runs surface)."
+params:
+  - { name: snapshot, type: bigint }
+  - { name: threshold, type: double }
+returns:
+  - { name: run_id, type: varchar, nullable: false }
+  - { name: n, type: bigint }

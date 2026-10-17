@@ -250,6 +250,18 @@ fn emit_lake_read_rows_fn(stmt: &LoadedStatement, cols: &[ReturnColumn]) -> Stri
     );
     out.push_str(&format!("    pub struct {struct_name} {{\n"));
     for col in cols {
+        // Timestamp fields serialize the way DuckDB's `to_json` renders them, so
+        // migrated JSON endpoints are byte-compatible with what they replace.
+        if col.col_type == ColumnType::Timestamp {
+            let ser = if col.nullable {
+                "ser_duckdb_timestamp_opt"
+            } else {
+                "ser_duckdb_timestamp"
+            };
+            out.push_str(&format!(
+                "        #[serde(serialize_with = \"crate::batch::{ser}\")]\n"
+            ));
+        }
         out.push_str(&format!(
             "        pub {}: {},\n",
             col.name,
@@ -668,6 +680,44 @@ mod tests {
         // A nullable column stays Option and skips `req`.
         assert!(f.contains("pub record_key: Option<String>,"));
         assert!(f.contains("record_key: crate::batch::opt_str(c0, i),"));
+    }
+
+    #[test]
+    fn timestamp_row_fields_serialize_duckdb_style() {
+        let cols = vec![
+            ReturnColumn {
+                name: "created_at".to_string(),
+                col_type: ColumnType::Timestamp,
+                nullable: false,
+            },
+            ReturnColumn {
+                name: "resolved_at".to_string(),
+                col_type: ColumnType::Timestamp,
+                nullable: true,
+            },
+        ];
+        let stmt = columns_stmt(
+            "SELECT created_at, resolved_at FROM lake.main.entity_membership AT (VERSION => $snapshot)",
+            vec![StatementParam {
+                name: "snapshot".to_string(),
+                param_type: ColumnType::Bigint,
+                nullable: false,
+            }],
+            cols.clone(),
+        );
+        let f = emit_lake_read_rows_fn(&stmt, &cols);
+        assert!(
+            f.contains(
+                "#[serde(serialize_with = \"crate::batch::ser_duckdb_timestamp\")]\n        pub created_at:"
+            ),
+            "non-null timestamp wires the plain serializer: {f}"
+        );
+        assert!(
+            f.contains(
+                "#[serde(serialize_with = \"crate::batch::ser_duckdb_timestamp_opt\")]\n        pub resolved_at:"
+            ),
+            "nullable timestamp wires the Option serializer: {f}"
+        );
     }
 
     #[test]
