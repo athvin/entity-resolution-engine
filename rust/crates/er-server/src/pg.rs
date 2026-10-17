@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS orgs (\
   config_path text NOT NULL,\
   env jsonb NOT NULL DEFAULT '{}'::jsonb,\
   drop_root text,\
-  active_config_version integer,\
+  active_config_version bigint,\
   state text NOT NULL DEFAULT 'active' CHECK (state IN ('provisioning','active','suspended','purging')),\
   created_at timestamptz NOT NULL DEFAULT now()\
 );\
@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS api_keys (\
 );\
 CREATE TABLE IF NOT EXISTS config_versions (\
   org text NOT NULL REFERENCES orgs(name),\
-  version integer NOT NULL,\
+  version bigint NOT NULL,\
   yaml text NOT NULL,\
   config_hash text NOT NULL,\
   state text NOT NULL DEFAULT 'draft' CHECK (state IN ('draft','published')),\
@@ -384,7 +384,7 @@ pub async fn lookup_key(
 pub struct OrgSummary {
     pub name: String,
     pub state: String,
-    pub active_config_version: Option<i32>,
+    pub active_config_version: Option<i64>,
     pub created_at: String,
 }
 
@@ -393,7 +393,7 @@ pub struct OrgSummary {
 pub struct OrgDetail {
     pub name: String,
     pub state: String,
-    pub active_config_version: Option<i32>,
+    pub active_config_version: Option<i64>,
     pub drop_root: Option<String>,
     pub env: serde_json::Value,
 }
@@ -512,7 +512,7 @@ pub async fn set_org_state(
 pub async fn org_publish_context(
     client: &Client,
     org: &str,
-) -> Result<Option<(String, String, Option<i32>)>, PgError> {
+) -> Result<Option<(String, String, Option<i64>)>, PgError> {
     let row = client
         .query_opt(
             "SELECT config_path, state, active_config_version FROM orgs WHERE name = $1",
@@ -530,7 +530,7 @@ pub async fn org_publish_context(
 
 /// A config-version list row (`configsvc.py` list — no `yaml` body).
 pub struct ConfigVersionRow {
-    pub version: i32,
+    pub version: i64,
     pub config_hash: String,
     pub state: String,
     pub tier: Option<String>,
@@ -541,7 +541,7 @@ pub struct ConfigVersionRow {
 
 /// A config-version detail (adds the `yaml` body).
 pub struct ConfigVersionDetail {
-    pub version: i32,
+    pub version: i64,
     pub yaml: String,
     pub config_hash: String,
     pub state: String,
@@ -563,8 +563,8 @@ pub async fn create_config_version(
     yaml: &str,
     config_hash: &str,
     created_by: &str,
-) -> Result<i32, PgError> {
-    let next: i32 = client
+) -> Result<i64, PgError> {
+    let next: i64 = client
         .query_one(
             "SELECT coalesce(max(version), 0) + 1 AS v FROM config_versions WHERE org = $1",
             &[&org],
@@ -618,7 +618,7 @@ pub async fn list_config_versions(
 pub async fn get_config_version(
     client: &Client,
     org: &str,
-    version: i32,
+    version: i64,
 ) -> Result<Option<ConfigVersionDetail>, PgError> {
     let row = client
         .query_opt(
@@ -989,7 +989,7 @@ pub async fn delete_webhook(client: &Client, org: &str, webhook_id: &str) -> Res
 pub async fn publish_config_version(
     client: &Client,
     org: &str,
-    version: i32,
+    version: i64,
     tier: Option<&str>,
 ) -> Result<(), PgError> {
     client

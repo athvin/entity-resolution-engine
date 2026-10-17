@@ -662,8 +662,8 @@ async fn list_config_versions(
 }
 
 /// Parse a `{version}` path segment to the stored integer, or `None`.
-fn parse_version(s: &str) -> Option<i32> {
-    s.parse::<i32>().ok()
+fn parse_version(s: &str) -> Option<i64> {
+    s.parse::<i64>().ok()
 }
 
 /// Viewer+: one config version with its `yaml` (404 if absent).
