@@ -1,0 +1,7 @@
+kind: statement
+operation: read
+description: "The standardized-record count at a pinned snapshot (the dashboard counter)."
+params:
+  - { name: snapshot, type: bigint }
+returns:
+  - { name: n, type: bigint }

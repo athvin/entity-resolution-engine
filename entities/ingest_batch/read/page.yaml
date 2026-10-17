@@ -1,0 +1,20 @@
+kind: statement
+operation: read
+description: "One keyset page of ingest-batch receipts at a pinned snapshot, optionally filtered by source system."
+params:
+  - { name: snapshot, type: bigint }
+  - { name: source, type: varchar, nullable: true }
+  - { name: after, type: varchar, nullable: true }
+  - { name: limit, type: bigint }
+returns:
+  - { name: ingest_batch_id, type: varchar, nullable: false }
+  - { name: run_id, type: varchar, nullable: false }
+  - { name: source_system, type: varchar, nullable: false }
+  - { name: path, type: varchar, nullable: false }
+  - { name: new_count, type: bigint, nullable: false }
+  - { name: changed_count, type: bigint, nullable: false }
+  - { name: unchanged_count, type: bigint, nullable: false }
+  - { name: tombstone_count, type: bigint, nullable: false }
+  - { name: resurrected_count, type: bigint, nullable: false }
+  - { name: full_refresh_keys, type: boolean, nullable: false }
+  - { name: created_at, type: timestamp, nullable: false }

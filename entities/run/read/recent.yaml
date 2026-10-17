@@ -1,0 +1,15 @@
+kind: statement
+operation: read
+description: "The most recent runs at a pinned snapshot, newest first, capped at 20 (the runs surface)."
+params:
+  - { name: snapshot, type: bigint }
+returns:
+  - { name: run_id, type: varchar, nullable: false }
+  - { name: mode, type: varchar, nullable: false }
+  - { name: status, type: varchar, nullable: false }
+  - { name: started_at, type: timestamp, nullable: false }
+  - { name: ended_at, type: timestamp }
+  - { name: config_hash, type: varchar, nullable: false }
+  - { name: model_version, type: varchar }
+  - { name: tf_snapshot_id, type: varchar }
+  - { name: rebuild_reason, type: varchar }

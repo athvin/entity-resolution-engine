@@ -154,7 +154,7 @@ fn account_golden_read_serves_acct_projection() {
         .into_iter()
         .next()
         .expect("an entity_id in the account page");
-    let detail = read::entity_detail(&session, &view, snapshot, &entity_id)
+    let detail = read::entity_detail(&session, EntityType::Account, snapshot, &entity_id)
         .unwrap()
         .expect("entity detail present");
     assert!(

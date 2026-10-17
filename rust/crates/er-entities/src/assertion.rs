@@ -107,6 +107,198 @@ FROM lake.main.review_queue WHERE review_id = $4
     }
 }
 
+pub mod read {
+    //! @generated query functions for this entity + operation.
+    /// One row of `active_pairs`: The active assertions at a pinned snapshot as bare pairs (the unmerge contradiction precheck).
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct ActivePairsRow {
+        pub assertion_id: String,
+        pub rec_a_key: String,
+        pub rec_b_key: String,
+        pub kind: String,
+    }
+
+    impl ActivePairsRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("assertion_id", ::arrow::datatypes::DataType::Utf8),
+                ("rec_a_key", ::arrow::datatypes::DataType::Utf8),
+                ("rec_b_key", ::arrow::datatypes::DataType::Utf8),
+                ("kind", ::arrow::datatypes::DataType::Utf8),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "assertion_id")?;
+                let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "rec_a_key")?;
+                let c2: &::arrow::array::StringArray = crate::batch::col(batch, 2, "rec_b_key")?;
+                let c3: &::arrow::array::StringArray = crate::batch::col(batch, 3, "kind")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        assertion_id: crate::batch::req(
+                            crate::batch::opt_str(c0, i),
+                            "assertion_id",
+                            i,
+                        )?,
+                        rec_a_key: crate::batch::req(crate::batch::opt_str(c1, i), "rec_a_key", i)?,
+                        rec_b_key: crate::batch::req(crate::batch::opt_str(c2, i), "rec_b_key", i)?,
+                        kind: crate::batch::req(crate::batch::opt_str(c3, i), "kind", i)?,
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// The active assertions at a pinned snapshot as bare pairs (the unmerge contradiction precheck).
+    pub fn active_pairs(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+    ) -> ::duckdb::Result<Vec<ActivePairsRow>> {
+        const SQL: &str = "SELECT assertion_id, rec_a_key, rec_b_key, kind
+FROM lake.main.assertions AT (VERSION => {snapshot})
+WHERE active
+";
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = conn.prepare(&sql)?;
+        let batches = stmt.query_arrow(::duckdb::params![])?.collect::<Vec<_>>();
+        ActivePairsRow::from_batches(&batches)
+    }
+
+    /// One row of `page`: One keyset page of the assertion ledger at a pinned snapshot, active-only unless retracted rows are included.
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct PageRow {
+        pub assertion_id: String,
+        pub rec_a_key: String,
+        pub rec_b_key: String,
+        pub kind: String,
+        pub active: bool,
+        pub created_by: String,
+        #[serde(serialize_with = "crate::batch::ser_duckdb_timestamp")]
+        pub created_at: ::chrono::DateTime<::chrono::Utc>,
+        pub retracted_by: Option<String>,
+        #[serde(serialize_with = "crate::batch::ser_duckdb_timestamp_opt")]
+        pub retracted_at: Option<::chrono::DateTime<::chrono::Utc>>,
+        pub note: Option<String>,
+    }
+
+    impl PageRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("assertion_id", ::arrow::datatypes::DataType::Utf8),
+                ("rec_a_key", ::arrow::datatypes::DataType::Utf8),
+                ("rec_b_key", ::arrow::datatypes::DataType::Utf8),
+                ("kind", ::arrow::datatypes::DataType::Utf8),
+                ("active", ::arrow::datatypes::DataType::Boolean),
+                ("created_by", ::arrow::datatypes::DataType::Utf8),
+                (
+                    "created_at",
+                    ::arrow::datatypes::DataType::Timestamp(
+                        ::arrow::datatypes::TimeUnit::Microsecond,
+                        None,
+                    ),
+                ),
+                ("retracted_by", ::arrow::datatypes::DataType::Utf8),
+                (
+                    "retracted_at",
+                    ::arrow::datatypes::DataType::Timestamp(
+                        ::arrow::datatypes::TimeUnit::Microsecond,
+                        None,
+                    ),
+                ),
+                ("note", ::arrow::datatypes::DataType::Utf8),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "assertion_id")?;
+                let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "rec_a_key")?;
+                let c2: &::arrow::array::StringArray = crate::batch::col(batch, 2, "rec_b_key")?;
+                let c3: &::arrow::array::StringArray = crate::batch::col(batch, 3, "kind")?;
+                let c4: &::arrow::array::BooleanArray = crate::batch::col(batch, 4, "active")?;
+                let c5: &::arrow::array::StringArray = crate::batch::col(batch, 5, "created_by")?;
+                let c6: &::arrow::array::TimestampMicrosecondArray =
+                    crate::batch::col(batch, 6, "created_at")?;
+                let c7: &::arrow::array::StringArray = crate::batch::col(batch, 7, "retracted_by")?;
+                let c8: &::arrow::array::TimestampMicrosecondArray =
+                    crate::batch::col(batch, 8, "retracted_at")?;
+                let c9: &::arrow::array::StringArray = crate::batch::col(batch, 9, "note")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        assertion_id: crate::batch::req(
+                            crate::batch::opt_str(c0, i),
+                            "assertion_id",
+                            i,
+                        )?,
+                        rec_a_key: crate::batch::req(crate::batch::opt_str(c1, i), "rec_a_key", i)?,
+                        rec_b_key: crate::batch::req(crate::batch::opt_str(c2, i), "rec_b_key", i)?,
+                        kind: crate::batch::req(crate::batch::opt_str(c3, i), "kind", i)?,
+                        active: crate::batch::req(crate::batch::opt_bool(c4, i), "active", i)?,
+                        created_by: crate::batch::req(
+                            crate::batch::opt_str(c5, i),
+                            "created_by",
+                            i,
+                        )?,
+                        created_at: crate::batch::req(
+                            crate::batch::opt_ts(c6, i),
+                            "created_at",
+                            i,
+                        )?,
+                        retracted_by: crate::batch::opt_str(c7, i),
+                        retracted_at: crate::batch::opt_ts(c8, i),
+                        note: crate::batch::opt_str(c9, i),
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// One keyset page of the assertion ledger at a pinned snapshot, active-only unless retracted rows are included.
+    pub fn page(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+        include_retracted: bool,
+        after: Option<&str>,
+        limit: i64,
+    ) -> ::duckdb::Result<Vec<PageRow>> {
+        const SQL: &str =
+            "SELECT assertion_id, rec_a_key, rec_b_key, kind, active, created_by, created_at,
+       retracted_by, retracted_at, note
+FROM lake.main.assertions AT (VERSION => {snapshot})
+WHERE ($1 OR active) AND ($2 IS NULL OR assertion_id > $2)
+ORDER BY assertion_id
+LIMIT $3
+";
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = conn.prepare(&sql)?;
+        let batches = stmt
+            .query_arrow(::duckdb::params![include_retracted, after, limit])?
+            .collect::<Vec<_>>();
+        PageRow::from_batches(&batches)
+    }
+}
+
 pub mod update {
     //! @generated query functions for this entity + operation.
     /// Deactivate an assertion (rows are never deleted).

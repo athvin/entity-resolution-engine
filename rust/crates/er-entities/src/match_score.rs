@@ -66,6 +66,67 @@ impl MatchScore {
     }
 }
 
+pub mod read {
+    //! @generated query functions for this entity + operation.
+    /// One row of `auto_merge_counts`: Per-run count of active pairs at or above the auto-merge threshold, at a pinned snapshot (the runs surface).
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct AutoMergeCountsRow {
+        pub run_id: String,
+        pub n: Option<i64>,
+    }
+
+    impl AutoMergeCountsRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("run_id", ::arrow::datatypes::DataType::Utf8),
+                ("n", ::arrow::datatypes::DataType::Int64),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "run_id")?;
+                let c1: &::arrow::array::Int64Array = crate::batch::col(batch, 1, "n")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        run_id: crate::batch::req(crate::batch::opt_str(c0, i), "run_id", i)?,
+                        n: crate::batch::opt_i64(c1, i),
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// Per-run count of active pairs at or above the auto-merge threshold, at a pinned snapshot (the runs surface).
+    pub fn auto_merge_counts(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+        threshold: f64,
+    ) -> ::duckdb::Result<Vec<AutoMergeCountsRow>> {
+        const SQL: &str = "SELECT run_id, count(*) AS n
+FROM lake.main.match_scores AT (VERSION => {snapshot})
+WHERE is_active AND match_probability >= $1
+GROUP BY run_id
+";
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = conn.prepare(&sql)?;
+        let batches = stmt
+            .query_arrow(::duckdb::params![threshold])?
+            .collect::<Vec<_>>();
+        AutoMergeCountsRow::from_batches(&batches)
+    }
+}
+
 pub mod update {
     //! @generated query functions for this entity + operation.
     /// The S4.3.4 single write: MERGE the scored pairs (the session's __match_src staging) on the logical key; a re-scored pair is rewritten in place, clearing any invalidation.

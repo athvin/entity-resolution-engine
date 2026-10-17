@@ -77,3 +77,90 @@ impl GoldenLineage {
         Schema::new(fields).with_metadata(metadata)
     }
 }
+
+pub mod read {
+    //! @generated query functions for this entity + operation.
+    /// One row of `by_entity`: One entity's per-attribute survivorship provenance at a pinned snapshot (the detail lineage panel).
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct ByEntityRow {
+        pub attribute: String,
+        pub record_key: String,
+        pub source_system: String,
+        pub source_record_id: String,
+        pub rule: String,
+    }
+
+    impl ByEntityRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("attribute", ::arrow::datatypes::DataType::Utf8),
+                ("record_key", ::arrow::datatypes::DataType::Utf8),
+                ("source_system", ::arrow::datatypes::DataType::Utf8),
+                ("source_record_id", ::arrow::datatypes::DataType::Utf8),
+                ("rule", ::arrow::datatypes::DataType::Utf8),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "attribute")?;
+                let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "record_key")?;
+                let c2: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 2, "source_system")?;
+                let c3: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 3, "source_record_id")?;
+                let c4: &::arrow::array::StringArray = crate::batch::col(batch, 4, "rule")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        attribute: crate::batch::req(crate::batch::opt_str(c0, i), "attribute", i)?,
+                        record_key: crate::batch::req(
+                            crate::batch::opt_str(c1, i),
+                            "record_key",
+                            i,
+                        )?,
+                        source_system: crate::batch::req(
+                            crate::batch::opt_str(c2, i),
+                            "source_system",
+                            i,
+                        )?,
+                        source_record_id: crate::batch::req(
+                            crate::batch::opt_str(c3, i),
+                            "source_record_id",
+                            i,
+                        )?,
+                        rule: crate::batch::req(crate::batch::opt_str(c4, i), "rule", i)?,
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// One entity's per-attribute survivorship provenance at a pinned snapshot (the detail lineage panel).
+    pub fn by_entity(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+        entity_id: &str,
+    ) -> ::duckdb::Result<Vec<ByEntityRow>> {
+        const SQL: &str = "SELECT attribute, record_key, source_system, source_record_id, rule
+FROM lake.main.golden_lineage AT (VERSION => {snapshot})
+WHERE entity_id = $1
+ORDER BY attribute, record_key
+";
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = conn.prepare(&sql)?;
+        let batches = stmt
+            .query_arrow(::duckdb::params![entity_id])?
+            .collect::<Vec<_>>();
+        ByEntityRow::from_batches(&batches)
+    }
+}

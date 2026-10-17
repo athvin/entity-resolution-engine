@@ -1,0 +1,12 @@
+kind: statement
+operation: read
+description: "One account entity's per-attribute survivorship provenance at a pinned snapshot (the detail lineage panel)."
+params:
+  - { name: snapshot, type: bigint }
+  - { name: entity_id, type: varchar }
+returns:
+  - { name: attribute, type: varchar, nullable: false }
+  - { name: record_key, type: varchar, nullable: false }
+  - { name: source_system, type: varchar, nullable: false }
+  - { name: source_record_id, type: varchar, nullable: false }
+  - { name: rule, type: varchar, nullable: false }

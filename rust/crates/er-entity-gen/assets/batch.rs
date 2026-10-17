@@ -141,13 +141,17 @@ pub fn req<T>(value: Option<T>, name: &str, row: usize) -> duckdb::Result<T> {
     value.ok_or_else(|| shape_err(format!("column {name} row {row}: NULL in a non-null column")))
 }
 
-/// Serialize a timestamp the way DuckDB's `to_json` renders it
-/// (`YYYY-MM-DD HH:MM:SS.ffffff`), for endpoints that must keep that exact shape.
+/// Serialize a timestamp the way DuckDB's `to_json` renders it: naive lake text
+/// (`YYYY-MM-DD HH:MM:SS.ffffff`) with trailing fraction zeros trimmed and the
+/// dot dropped on whole seconds (`03:04:05`, `.12`, `.1001`). The emitter wires
+/// this onto every generated timestamp row field so migrated JSON endpoints are
+/// byte-compatible with the `to_json` responses they replace.
 pub fn ser_duckdb_timestamp<S: serde::Serializer>(
     value: &chrono::DateTime<chrono::Utc>,
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
-    serializer.serialize_str(&value.format("%Y-%m-%d %H:%M:%S%.6f").to_string())
+    let text = value.format("%Y-%m-%d %H:%M:%S%.6f").to_string();
+    serializer.serialize_str(text.trim_end_matches('0').trim_end_matches('.'))
 }
 
 /// The `Option` variant of [`ser_duckdb_timestamp`].

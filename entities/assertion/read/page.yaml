@@ -1,0 +1,19 @@
+kind: statement
+operation: read
+description: "One keyset page of the assertion ledger at a pinned snapshot, active-only unless retracted rows are included."
+params:
+  - { name: snapshot, type: bigint }
+  - { name: include_retracted, type: boolean }
+  - { name: after, type: varchar, nullable: true }
+  - { name: limit, type: bigint }
+returns:
+  - { name: assertion_id, type: varchar, nullable: false }
+  - { name: rec_a_key, type: varchar, nullable: false }
+  - { name: rec_b_key, type: varchar, nullable: false }
+  - { name: kind, type: varchar, nullable: false }
+  - { name: active, type: boolean, nullable: false }
+  - { name: created_by, type: varchar, nullable: false }
+  - { name: created_at, type: timestamp, nullable: false }
+  - { name: retracted_by, type: varchar }
+  - { name: retracted_at, type: timestamp }
+  - { name: note, type: varchar }
