@@ -1,55 +1,57 @@
 # Contributing
 
-Use Python 3.12 and the pinned uv version in [the version table](DesignDoc.md#s2-1).
-Docker Compose is required for integration tests and benchmarks.
+The backend is the Rust workspace under `rust/` (toolchain pinned by
+`rust/rust-toolchain.toml`, MSRV 1.85); the frontend is a standalone pnpm
+project under `frontend/` (pnpm pinned via corepack in its `package.json`).
 
 ```sh
-uv sync --frozen
 make check
 ```
 
-`make check` runs specification validation, Ruff, strict mypy, workflow lint,
-fixture validation, dbt dependency installation/parsing, and unit tests. It needs
-no lake. The first dbt dependency installation needs network access. Individual
-targets are `spec`, `lint`, `types`, `workflows`, `fixtures`, `dbt` and `unit`.
+`make check` is the PR-equivalent backend gate, mirroring CI
+(`.github/workflows/rust.yml`): `cargo fmt --check`, clippy with `-D warnings`,
+the entity-framework gate (`er-entity verify` — regenerate every artifact from
+`entities/*.yaml`, fail on stale committed files, then plan every statement and
+run the E0xx passes), and `cargo test --workspace`. It needs no lake.
 
-## Integration tests
+## Gated end-to-end tiers
 
 ```sh
-make integration
-# Or select the tests affected by a change:
-COMPOSE_PROJECT_NAME=er-integration bash scripts/ci/itest.sh \
-  tests/integration/test_reconcile_apply.py -q
+make check-e2e ER_TEST_PG_DSN='host=localhost port=5433 user=er password=er dbname=er'
 ```
 
-The runner builds the image and resets its Compose project before and after the
-suite. Use a dedicated project name; the commands above use `er-integration`.
-The image also compiles the pinned MinIO server and client from verified source
-archives. The first build needs access to GitHub and Go modules; later builds
-reuse Docker's cached layers. Both storage services use this image, so startup
-does not require access to the retired MinIO container registries.
-`make check-all` runs the local checks followed by the non-slow integration suite.
-Run slow model-regeneration checks separately when changing the trained fixture.
+Runs the DuckLake + extensions pipeline tier and the Postgres control-plane
+queue/dispatch tier. Needs the DuckDB extensions and a local Postgres (see the
+`ducklake-e2e` job in `rust.yml` for the service definition).
 
-CI runs static and unit checks, then 32 isolated integration shards. To reproduce
-one shard, add `--integration-shard-index 0 --integration-shard-count 32` and
-`-m 'not slow'` to the integration runner's pytest arguments. JUnit and dbt
-diagnostics are written under `artifacts/`.
+## Frontend
+
+```sh
+make frontend
+```
+
+Installs with a frozen lockfile, runs `pnpm check` (lint + format + types +
+unit), builds, and runs the mock-backed Playwright tier. Visual baselines
+compare on Linux only; see `frontend/README.md`.
 
 ## Making a change
 
-Use a branch and a pull request. Explain the behavior changed and the validation
-performed. Tests should exercise observable behavior, including relevant merge,
-split, deletion or incremental cases when changing resolution logic.
+Use a branch and a pull request. Explain the behavior changed and the
+validation performed. Tests should exercise observable behavior, including
+relevant merge, split, deletion or incremental cases when changing resolution
+logic.
 
-Keep dependency pins in `pyproject.toml`, `uv.lock`, `src/er/versions.py` and the
-specification consistent. Keep Python-owned relation definitions in
-`src/er/lake/model.py` / `ddl.py`, and dbt-owned contracts in their `schema.yml`
-files. Update [the reference specification](DesignDoc.md) when a contract changes.
+Table shapes are declared once: entity-owned relations in `entities/*.yaml`
+(run `cd rust && cargo run -p er-entity-cli -- gen --root ..` after editing and
+commit the regenerated artifacts), the remaining engine-internal lake relations
+in `er-schema`'s registry (`rust/crates/er-schema/src/model.rs`, gated by
+`tests/model_registry_golden.json`). Update
+[the reference specification](DesignDoc.md) when a contract changes.
 
-The fixture format is documented in [fixtures/static/FORMAT.md](fixtures/static/FORMAT.md).
-Benchmark and profiling changes should follow [performance.md](docs/performance.md)
-and [profiling.md](docs/profiling.md).
+The fixture format is documented in
+[fixtures/static/FORMAT.md](fixtures/static/FORMAT.md). Benchmark and profiling
+changes should follow [performance.md](docs/performance.md) and
+[profiling.md](docs/profiling.md).
 
 ## Keeping the checkout small
 
@@ -57,11 +59,6 @@ and [profiling.md](docs/profiling.md).
 make clean
 ```
 
-This removes Python/test caches, dbt build output, downloaded dbt packages and its
-machine-local usage file. It preserves the virtual environment and run artifacts.
-The next `make check` restores dbt packages.
-
-Remove individual directories under `artifacts/` after extracting any result worth
-retaining. Keep durable measurements and methodology in the performance guide;
-raw logs, exports, generated corpora and temporary scripts stay out of Git. Keep
-additional Git worktrees outside `artifacts/` so run cleanup cannot erase a checkout.
+This removes the Cargo build cache (`rust/target`). Raw logs, exports,
+generated corpora and temporary scripts stay out of Git; keep durable
+measurements and methodology in the performance guide.

@@ -230,7 +230,7 @@ using that full chain's run ID. To reuse the exact pre-migration model and
 state instead, restore the corresponding catalog and object-store backup together.
 Review quality and downstream results before resuming deliveries in either direction.
 
-Standardization journals pending ingestion batches before dbt begins. A failure
+Standardization journals pending ingestion batches before the stage's SQL begins. A failure
 after staging or current-record updates leaves the journal for the next attempt,
 including an attempt with a new run ID. Do not manually clear this table during
 recovery. Successful processing removes it after current records and blocking

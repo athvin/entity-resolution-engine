@@ -13,9 +13,9 @@ Deliver CSV or Parquet files in `<drop-root>/<source-name>/`. For example,
 the drop root, not a single file or the source subdirectory.
 
 Each source declares its adapter, ID column, update timestamp column, date format,
-priority and business-column mapping. The unified `stg_records` dbt model renders
+priority and business-column mapping. The unified `stg_records` staging SQL renders
 one union arm per declared source, so adding a new source name is a config change
-alone — no staging model file accompanies it.
+alone — no staging code accompanies it.
 
 ```yaml
 sources:

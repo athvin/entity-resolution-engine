@@ -3,12 +3,8 @@
 .gitignore
 .venv
 
-# Generated data and dbt output
+# Generated data
 artifacts
-dbt/target
-dbt/dbt_packages
-dbt/logs
-dbt/profiles/.user.yml
 
 # Caches and bytecode
 **/__pycache__

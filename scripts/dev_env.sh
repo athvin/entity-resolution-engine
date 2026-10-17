@@ -160,7 +160,6 @@ tenant_env = {
     "ER_LAKE_ALIAS": "lake",
     "ER_DUCKDB_THREADS": "2",
     "ER_DUCKDB_MEMORY_LIMIT": "2GB",
-    "DBT_PROFILES_DIR": "dbt/profiles",
 }
 
 print(json.dumps({

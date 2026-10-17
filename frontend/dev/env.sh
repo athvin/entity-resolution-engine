@@ -25,8 +25,7 @@ export ERSERVER_TENANT_ENV_JSON="{
   \"ER_LAKE_ALIAS\": \"lake\",
   \"ER_DUCKDB_THREADS\": \"4\",
   \"ER_DUCKDB_MEMORY_LIMIT\": \"4GB\",
-  \"ER_DUCKDB_EXTENSION_DIR\": \"${STATE_DIR}/ext\",
-  \"DBT_PROFILES_DIR\": \"dbt/profiles\"
+  \"ER_DUCKDB_EXTENSION_DIR\": \"${STATE_DIR}/ext\"
 }"
 
 # BFF (Next.js server side)

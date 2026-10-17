@@ -33,8 +33,9 @@ flowchart LR
 | Assemble | Select winning values and record their source | `golden_records`, `golden_lineage`, `golden_display` |
 
 DuckLake stores data in S3-compatible storage and metadata in PostgreSQL. DuckDB
-executes SQL; dbt owns staging, standardization, blocking and golden models. Python
-orchestrates ingestion, model lifecycle, reconciliation and operational writes.
+executes SQL the engine generates for staging, standardization, blocking and
+golden assembly; the engine orchestrates ingestion, model lifecycle,
+reconciliation and operational writes.
 File scans, hashing, score classification, affected-set discovery, overlap planning
 and membership updates execute as SQL in DuckDB. Only documented compatibility,
 ID-generation, serialization and graph operations process rows in Python; see
@@ -78,7 +79,7 @@ across transitive connections, not just the directly scored pair.
 ## Execution boundaries
 
 A PostgreSQL advisory lock permits one writer per tenant. Native DuckDB connections
-are reused within a command and closed before dbt runs. `runs` and `run_stages`
+are reused within a command and closed between stages. `runs` and `run_stages`
 record configuration fingerprints, status, counters and snapshot ranges. Failed
 chains can resume from their first unfinished stage with the original configuration.
 
