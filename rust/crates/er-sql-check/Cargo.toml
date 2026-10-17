@@ -11,14 +11,16 @@ repository.workspace = true
 # named params), plans each statement against a two-store catalog via ff-analysis,
 # runs the E0xx passes, and (later) emits the typed query functions + the oracle.
 #
-# ff-analysis is pinned by rev (feather-flow is public; a tag is cut at the end of
-# the integration). It brings datafusion 52 / arrow 57 / sqlparser 0.59 — a
-# separate arrow major from the duckdb-pulled arrow 58 the rest of the workspace
-# uses. The two never unify: the analyser works in ff_analysis::SqlType and the
-# oracle compares type-name strings, so the split is contained to this crate.
+# ff-analysis is pinned by the `er-entity-v0.1.0` tag on feather-flow (public),
+# cut at the integration baseline (store-qualified get_table_source +
+# plan_statement for a pre-parsed AST). It brings datafusion 52 / arrow 57 /
+# sqlparser 0.59 — a separate arrow major from the duckdb-pulled arrow 58 the rest
+# of the workspace uses. The two never unify: the analyser works in
+# ff_analysis::SqlType and the oracle compares type-name strings, so the split is
+# contained to this crate.
 [dependencies]
 er-entity-spec = { path = "../er-entity-spec" }
-ff-analysis = { git = "https://github.com/athvin/feather-flow", rev = "23e24180e009ddb91ec8f768f2f1496d17f5c70e" }
+ff-analysis = { git = "https://github.com/athvin/feather-flow", tag = "er-entity-v0.1.0" }
 # Pinned to the same major ff-analysis resolves (52), so the LogicalPlan this crate
 # inspects and the plan ff-analysis produces are the same types. sqlparser is used
 # only through ff_analysis::sqlparser (DataFusion's bundled 0.59), never the
