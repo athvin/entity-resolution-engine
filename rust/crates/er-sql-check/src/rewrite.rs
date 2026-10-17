@@ -52,6 +52,28 @@ pub fn rewrite_map_subscript(sql: &str) -> String {
         .into_owned()
 }
 
+/// The two lambda arguments `source_metadata` (er-std) emits — the ONLY lambdas
+/// in the governed generator surface, both generator-fixed shapes. DataFusion
+/// cannot plan a lambda, so each is dropped for planning (the enclosing
+/// `list_filter`/`list_transform` stubs are variadic and type-preserving); the
+/// runtime SQL is untouched.
+static METADATA_FILTER_LAMBDA: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r", k -> not list_contains\(\[[^\]]*\], k\)").unwrap());
+static METADATA_TRANSFORM_LAMBDA: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r", k -> struct_pack\(key := k, value := json_extract\(\w+, '/' \|\| replace\(replace\(k, '~', '~0'\), '/', '~1'\)\)\)",
+    )
+    .unwrap()
+});
+
+/// Drop the `source_metadata` lambda arguments (the generator-fixed shapes
+/// above) so the metadata expression plans; everything else is untouched.
+#[must_use]
+pub fn rewrite_metadata_lambdas(sql: &str) -> String {
+    let sql = METADATA_FILTER_LAMBDA.replace_all(sql, "");
+    METADATA_TRANSFORM_LAMBDA.replace_all(&sql, "").into_owned()
+}
+
 /// What the rewrite step removed from a statement, so later passes can check the
 /// rules those clauses stood for.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

@@ -51,9 +51,12 @@ fn single_quote(value: &str) -> String {
     value.replace('\'', "''")
 }
 
-/// `payload ->> '<col>'` — a VARCHAR accessor into the JSON payload.
+/// `json_extract_string(payload, '<col>')` — a VARCHAR accessor into the JSON
+/// payload. The named-function spelling of `payload ->> '<col>'` (value-identical
+/// in DuckDB), so the analyser's plan-vector tests resolve it through the ff
+/// json stubs without an operator rewrite.
 fn field(col: &str) -> String {
-    format!("payload ->> '{}'", single_quote(col))
+    format!("json_extract_string(payload, '{}')", single_quote(col))
 }
 
 /// The keys `source_metadata` excludes: the record-id and updated-at columns,

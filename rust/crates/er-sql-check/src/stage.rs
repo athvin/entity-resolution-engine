@@ -176,20 +176,111 @@ mod tests {
     /// rewrites (snapshot pin, DuckDB named args, ::json casts), returning its
     /// output column names. Panics with the SQL if it does not plan.
     fn plan_stage(catalog: &SchemaCatalog, sql: &str) -> Vec<String> {
-        let registry = FunctionRegistry::new();
-        let provider = FeatherFlowProvider::new(catalog, &registry);
-        let dialect = DuckDbDialect {};
-        let rewritten = crate::rewrite_lake(sql);
-        let planar = crate::rewrite_map_subscript(&crate::rewrite_json_casts(
-            &crate::strip_named_args(&rewritten.sql),
-        ));
-        let plan = crate::parse_and_plan(&planar, &dialect, &provider)
-            .unwrap_or_else(|e| panic!("stage SQL did not plan: {e}\n--- sql ---\n{sql}"));
-        plan.schema()
-            .fields()
-            .iter()
-            .map(|f| f.name().clone())
-            .collect()
+        // The standardize-stage expression trees are deep enough to overflow a
+        // test thread's default 2MB stack inside DataFusion's recursive
+        // planner; a scoped 16MB thread gives planning the room it needs.
+        std::thread::scope(|scope| {
+            std::thread::Builder::new()
+                .stack_size(16 * 1024 * 1024)
+                .spawn_scoped(scope, || {
+                    let registry = FunctionRegistry::new();
+                    let provider = FeatherFlowProvider::new(catalog, &registry);
+                    let dialect = DuckDbDialect {};
+                    let rewritten = crate::rewrite_lake(sql);
+                    // The lambda rewrite matches the generator's literal output,
+                    // so it runs before strip_named_args eats the `key := `s.
+                    let planar = crate::rewrite_map_subscript(&crate::rewrite_json_casts(
+                        &crate::strip_named_args(&crate::rewrite_metadata_lambdas(&rewritten.sql)),
+                    ));
+                    let plan =
+                        crate::parse_and_plan(&planar, &dialect, &provider).unwrap_or_else(|e| {
+                            panic!("stage SQL did not plan: {e}\n--- sql ---\n{sql}")
+                        });
+                    plan.schema()
+                        .fields()
+                        .iter()
+                        .map(|f| f.name().clone())
+                        .collect()
+                })
+                .expect("spawn planning thread")
+                .join()
+                .expect("planning thread")
+        })
+    }
+
+    /// The stage catalog + the lexicon session temp (`seed_lexicon`'s fixed
+    /// shape), for planning the standardization SQL that reads it.
+    fn standardize_catalog(account: bool) -> SchemaCatalog {
+        let mut catalog = build_lake_stage_catalog(&entities_catalog(), account);
+        let lexicon: Vec<er_schema::model::Column> = [
+            ("variant_a", "VARCHAR"),
+            ("variant_b", "VARCHAR"),
+            ("active", "BOOLEAN"),
+        ]
+        .iter()
+        .map(|(name, ty)| er_schema::model::Column::new(*name, *ty, true).expect("lexicon column"))
+        .collect();
+        // The lexicon is a SESSION temp (seed_lexicon), not a lake relation —
+        // the SQL references it by its bare name, so it is modeled under that
+        // bare key (the declared-names gate rightly rejects a lake.main spelling).
+        catalog.insert(
+            "nickname_variants".to_string(),
+            Arc::new(rel_schema_from_columns("nickname_variants", &lexicon)),
+        );
+        catalog
+    }
+
+    /// The standardization stage SQL — the config-driven stg union + the
+    /// int_std supersession query, person and account — is a governed
+    /// generator: its REAL output plans against raw_records (the entity
+    /// catalog) + the modeled lexicon, through the analyser.
+    #[test]
+    fn the_standardize_stage_sql_plans_against_the_stage_catalog() {
+        let config = er_config::load_config_str(TEST_CONFIG).expect("config parses");
+        let catalog = standardize_catalog(false);
+
+        let stg =
+            er_standardize::stg_records_sql(&config, "lake.main.raw_records", "nickname_variants");
+        let stg_cols = plan_stage(&catalog, &stg);
+        for required in ["given_name", "name_variants", "metadata", "ingested_at"] {
+            assert!(
+                stg_cols.contains(&required.to_string()),
+                "stg_records output missing {required}: {stg_cols:?}"
+            );
+        }
+
+        let int_std = er_standardize::int_std_records_sql(
+            &config,
+            "lake.main.raw_records",
+            "nickname_variants",
+        );
+        let int_cols = plan_stage(&catalog, &int_std);
+        for required in ["record_key", "std_version", "content_hash", "birth_date"] {
+            assert!(
+                int_cols.contains(&required.to_string()),
+                "int_std_records output missing {required}: {int_cols:?}"
+            );
+        }
+    }
+
+    /// The account standardize fixture (account-shaped sources/column maps),
+    /// shared with er-standardize's own tests.
+    const ACCT_STD_CONFIG: &str =
+        include_str!("../../er-standardize/tests/fixtures/acct_test.yaml");
+
+    #[test]
+    fn the_account_standardize_stage_sql_plans_against_the_account_catalog() {
+        let config = er_config::load_config_str(ACCT_STD_CONFIG).expect("acct config parses");
+        let catalog = standardize_catalog(true);
+
+        let int_std = er_standardize::acct_int_std_records_sql(&config, "lake.main.raw_records");
+        let cols = plan_stage(&catalog, &int_std);
+        for required in ["record_key", "company_name", "domain", "ingested_at"] {
+            assert!(
+                cols.contains(&required.to_string()),
+                "acct_int_std_records output missing {required}: {cols:?}"
+            );
+        }
     }
 
     /// The merge-plan generator (er-golden) is a governed generator like the
