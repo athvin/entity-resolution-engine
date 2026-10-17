@@ -18,7 +18,22 @@ version = 2
 #   - RUSTSEC-2024-0449: `unsafe-libyaml`, via feather-flow's `serde_yaml`. Our own
 #     crates deliberately use `serde_norway` instead; this reaches us only through
 #     ff-analysis. Retire when feather-flow moves off serde_yaml.
-ignore = ["zip@6.0.0", "RUSTSEC-2024-0436", "RUSTSEC-2024-0449"]
+#
+# The three RUSTSEC-2026 entries are ZIP-extraction vulnerabilities in `zip` 6.0.0
+# (symlink-escaping / SUID-SGID / Unix-permission-through-symlink in
+# `ZipArchive::extract`). `zip` reaches us only transitively through
+# libduckdb-sys's build (the pinned =1.10505.0 DuckDB), and nothing in this
+# workspace extracts an untrusted archive at runtime — the vulnerable extract
+# paths are never called. Retire when libduckdb-sys pulls a patched zip.
+#   - RUSTSEC-2026-0367 / -0368 / -0369: `zip` 6.0.0 extract-time path handling.
+ignore = [
+    "zip@6.0.0",
+    "RUSTSEC-2024-0436",
+    "RUSTSEC-2024-0449",
+    "RUSTSEC-2026-0367",
+    "RUSTSEC-2026-0368",
+    "RUSTSEC-2026-0369",
+]
 
 [licenses]
 # Allow only permissive licenses typical for this dependency tree.
