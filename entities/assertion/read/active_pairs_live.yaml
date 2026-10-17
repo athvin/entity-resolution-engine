@@ -1,0 +1,11 @@
+kind: statement
+operation: read
+description: "The active assertions as bare pairs, read live (the reconcile adjustment input)."
+pin: live
+pin_reason: "er-cli composes this read inside the writer's own transaction; there is no committed snapshot to pin."
+params: []
+returns:
+  - { name: assertion_id, type: varchar, nullable: false }
+  - { name: rec_a_key, type: varchar, nullable: false }
+  - { name: rec_b_key, type: varchar, nullable: false }
+  - { name: kind, type: varchar, nullable: false }

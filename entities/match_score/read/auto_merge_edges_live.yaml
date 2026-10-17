@@ -1,0 +1,11 @@
+kind: statement
+operation: read
+description: "The active auto-merge edges with their probabilities, read live (never-cut severs the lowest-probability edge, so the weight is load-bearing)."
+pin: live
+pin_reason: "er-cli composes this read inside the writer's own transaction; there is no committed snapshot to pin."
+params:
+  - { name: threshold, type: double }
+returns:
+  - { name: rec_a_key, type: varchar, nullable: false }
+  - { name: rec_b_key, type: varchar, nullable: false }
+  - { name: match_probability, type: double, nullable: false }

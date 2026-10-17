@@ -116,6 +116,71 @@ VALUES ($1, $2, $3, 'running', $4::timestamp, $5,
 
 pub mod read {
     //! @generated query functions for this entity + operation.
+    /// One row of `latest_live`: The latest run's identity, read live (doctor's status line and the correction pass's model identity), with the run_id tiebreak for same-timestamp runs.
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct LatestLiveRow {
+        pub run_id: String,
+        pub status: String,
+        pub mode: String,
+        pub model_version: Option<String>,
+        pub tf_snapshot_id: Option<String>,
+    }
+
+    impl LatestLiveRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("run_id", ::arrow::datatypes::DataType::Utf8),
+                ("status", ::arrow::datatypes::DataType::Utf8),
+                ("mode", ::arrow::datatypes::DataType::Utf8),
+                ("model_version", ::arrow::datatypes::DataType::Utf8),
+                ("tf_snapshot_id", ::arrow::datatypes::DataType::Utf8),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "run_id")?;
+                let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "status")?;
+                let c2: &::arrow::array::StringArray = crate::batch::col(batch, 2, "mode")?;
+                let c3: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 3, "model_version")?;
+                let c4: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 4, "tf_snapshot_id")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        run_id: crate::batch::req(crate::batch::opt_str(c0, i), "run_id", i)?,
+                        status: crate::batch::req(crate::batch::opt_str(c1, i), "status", i)?,
+                        mode: crate::batch::req(crate::batch::opt_str(c2, i), "mode", i)?,
+                        model_version: crate::batch::opt_str(c3, i),
+                        tf_snapshot_id: crate::batch::opt_str(c4, i),
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// The latest run's identity, read live (doctor's status line and the correction pass's model identity), with the run_id tiebreak for same-timestamp runs.
+    pub fn latest_live(conn: &::duckdb::Connection) -> ::duckdb::Result<Vec<LatestLiveRow>> {
+        const SQL: &str = "SELECT run_id, status, mode, model_version, tf_snapshot_id
+FROM lake.main.runs
+ORDER BY started_at DESC, run_id DESC
+LIMIT 1
+";
+        let mut stmt = conn.prepare(SQL)?;
+        let batches = stmt.query_arrow(::duckdb::params![])?.collect::<Vec<_>>();
+        LatestLiveRow::from_batches(&batches)
+    }
+
     /// One row of `recent`: The most recent runs at a pinned snapshot, newest first, capped at 20 (the runs surface).
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
     pub struct RecentRow {

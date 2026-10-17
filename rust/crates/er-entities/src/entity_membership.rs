@@ -46,6 +46,60 @@ impl EntityMembership {
 
 pub mod read {
     //! @generated query functions for this entity + operation.
+    /// One row of `all_pairs_live`: Every (entity, record) membership pair, ordered, read live (the prior partition reconcile diffs against).
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct AllPairsLiveRow {
+        pub entity_id: String,
+        pub record_key: String,
+    }
+
+    impl AllPairsLiveRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("entity_id", ::arrow::datatypes::DataType::Utf8),
+                ("record_key", ::arrow::datatypes::DataType::Utf8),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "entity_id")?;
+                let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "record_key")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        entity_id: crate::batch::req(crate::batch::opt_str(c0, i), "entity_id", i)?,
+                        record_key: crate::batch::req(
+                            crate::batch::opt_str(c1, i),
+                            "record_key",
+                            i,
+                        )?,
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// Every (entity, record) membership pair, ordered, read live (the prior partition reconcile diffs against).
+    pub fn all_pairs_live(conn: &::duckdb::Connection) -> ::duckdb::Result<Vec<AllPairsLiveRow>> {
+        const SQL: &str = "SELECT entity_id, record_key
+FROM lake.main.entity_membership
+ORDER BY entity_id, record_key
+";
+        let mut stmt = conn.prepare(SQL)?;
+        let batches = stmt.query_arrow(::duckdb::params![])?.collect::<Vec<_>>();
+        AllPairsLiveRow::from_batches(&batches)
+    }
+
     /// One row of `by_entity`: One entity's member records at a pinned snapshot, by record key (the detail member list).
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
     pub struct ByEntityRow {

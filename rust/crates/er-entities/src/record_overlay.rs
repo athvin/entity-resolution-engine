@@ -86,6 +86,59 @@ pub mod delete {
 
 pub mod read {
     //! @generated query functions for this entity + operation.
+    /// One row of `active_keys_by_kind_live`: The active overlay record keys of one kind (suppress or protect), read live (the reconcile clustering inputs).
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct ActiveKeysByKindLiveRow {
+        pub record_key: String,
+    }
+
+    impl ActiveKeysByKindLiveRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![("record_key", ::arrow::datatypes::DataType::Utf8)]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "record_key")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        record_key: crate::batch::req(
+                            crate::batch::opt_str(c0, i),
+                            "record_key",
+                            i,
+                        )?,
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// The active overlay record keys of one kind (suppress or protect), read live (the reconcile clustering inputs).
+    pub fn active_keys_by_kind_live(
+        conn: &::duckdb::Connection,
+        kind: &str,
+    ) -> ::duckdb::Result<Vec<ActiveKeysByKindLiveRow>> {
+        const SQL: &str = "SELECT record_key
+FROM lake.main.record_overlays
+WHERE kind = $1 AND active
+";
+        let mut stmt = conn.prepare(SQL)?;
+        let batches = stmt
+            .query_arrow(::duckdb::params![kind])?
+            .collect::<Vec<_>>();
+        ActiveKeysByKindLiveRow::from_batches(&batches)
+    }
+
     /// One row of `any_active_protect`: Whether any record carries an active protect overlay (gates the merge-plan protect topology).
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
     pub struct AnyActiveProtectRow {

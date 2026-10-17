@@ -1,0 +1,9 @@
+kind: statement
+operation: read
+description: "Every (entity, record) membership pair, ordered, read live (the prior partition reconcile diffs against)."
+pin: live
+pin_reason: "er-cli composes this read inside the writer's own transaction; there is no committed snapshot to pin."
+params: []
+returns:
+  - { name: entity_id, type: varchar, nullable: false }
+  - { name: record_key, type: varchar, nullable: false }

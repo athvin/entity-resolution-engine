@@ -1,0 +1,8 @@
+kind: statement
+operation: read
+description: "Every standardized record key, ascending, read live (the reconcile node universe for an account tenant)."
+pin: live
+pin_reason: "er-cli composes this read inside the writer's own transaction; there is no committed snapshot to pin."
+params: []
+returns:
+  - { name: record_key, type: varchar, nullable: false }

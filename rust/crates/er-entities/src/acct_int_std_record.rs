@@ -85,3 +85,54 @@ impl AcctIntStdRecord {
         ]
     }
 }
+
+pub mod read {
+    //! @generated query functions for this entity + operation.
+    /// One row of `all_keys_live`: Every standardized record key, ascending, read live (the reconcile node universe for an account tenant).
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct AllKeysLiveRow {
+        pub record_key: String,
+    }
+
+    impl AllKeysLiveRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![("record_key", ::arrow::datatypes::DataType::Utf8)]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "record_key")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        record_key: crate::batch::req(
+                            crate::batch::opt_str(c0, i),
+                            "record_key",
+                            i,
+                        )?,
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// Every standardized record key, ascending, read live (the reconcile node universe for an account tenant).
+    pub fn all_keys_live(conn: &::duckdb::Connection) -> ::duckdb::Result<Vec<AllKeysLiveRow>> {
+        const SQL: &str = "SELECT record_key
+FROM lake.main.acct_int_std_records
+ORDER BY record_key
+";
+        let mut stmt = conn.prepare(SQL)?;
+        let batches = stmt.query_arrow(::duckdb::params![])?.collect::<Vec<_>>();
+        AllKeysLiveRow::from_batches(&batches)
+    }
+}
