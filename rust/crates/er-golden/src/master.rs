@@ -146,3 +146,81 @@ pub fn masters_cte_sql(
          ) WHERE rank = 1"
     ))
 }
+
+/// The full merge-plan statement for one `(policy, protect, since)` shape — a
+/// governed generator: its output is planned by the analyser's vector tests
+/// (every policy × protect on/off × since on/off), the way the mart assembly
+/// SQL is. One row per MEMBER of each affected >=2-member entity (flat — the
+/// read path groups in Rust; a `list(.. ORDER BY ..)` aggregate would not
+/// plan), ordered by `(entity_id, record_key)`, with the elected master and the
+/// golden preview repeated per row.
+///
+/// Reads live by design (the Python-export parity rule). Bound parameters, in
+/// order: `$1 = since` (text timestamp, only when `since`), then the group
+/// LIMIT (`$2`, or `$1` when `since` is absent).
+///
+/// `protect` injects the overlay override topology: a member with an active
+/// `protect` overlay forces itself master for its entity (min(record_key)
+/// tie-break), overriding the policy election.
+///
+/// # Errors
+/// [`MasterElectionError`] as [`masters_cte_sql`].
+pub fn merge_plans_sql(
+    policy: &str,
+    schema_qualifier: &str,
+    source_ranks: Option<&BTreeMap<String, i64>>,
+    protect: bool,
+    since: bool,
+) -> Result<String, MasterElectionError> {
+    let masters_sql = masters_cte_sql(policy, schema_qualifier, source_ranks)?;
+    let since_filter = if since {
+        "AND occurred_at >= $1::timestamp "
+    } else {
+        ""
+    };
+    let limit_param = if since { "$2" } else { "$1" };
+    let masters_cte = if protect {
+        // `protected` picks, per affected entity, the active-protected member
+        // (min(record_key) is a deterministic tie-break when several members of
+        // one entity are protected). COALESCE lets it win over the policy master.
+        format!(
+            "masters_policy AS ( {masters_sql} ), \
+             protected AS ( \
+               SELECT m.entity_id, min(m.record_key) AS master_key \
+               FROM {schema_qualifier}.entity_membership m \
+               JOIN affected a ON a.entity_id = m.entity_id \
+               JOIN {schema_qualifier}.record_overlays o \
+                 ON o.record_key = m.record_key AND o.kind = 'protect' AND o.active \
+               GROUP BY m.entity_id \
+             ), \
+             masters AS ( \
+               SELECT p.entity_id, COALESCE(pr.master_key, p.master_key) AS master_key \
+               FROM masters_policy p \
+               LEFT JOIN protected pr ON pr.entity_id = p.entity_id \
+             )"
+        )
+    } else {
+        format!("masters AS ( {masters_sql} )")
+    };
+    Ok(format!(
+        "WITH affected AS ( \
+           SELECT DISTINCT entity_id FROM {schema_qualifier}.entity_events \
+           WHERE event_type IN ('merged', 'member_added') {since_filter}\
+         ), \
+         {masters_cte}, \
+         plan_groups AS ( \
+           SELECT m.entity_id, ms.master_key, count(*) AS member_count \
+           FROM {schema_qualifier}.entity_membership m \
+           JOIN masters ms ON ms.entity_id = m.entity_id \
+           GROUP BY m.entity_id, ms.master_key HAVING count(*) >= 2 \
+           ORDER BY m.entity_id LIMIT {limit_param} \
+         ) \
+         SELECT gr.entity_id, gr.master_key, gr.member_count, \
+                m.source_system, m.source_record_id, m.record_key, \
+                g.given_name, g.family_name, g.email, g.phone_e164 \
+         FROM plan_groups gr \
+         JOIN {schema_qualifier}.entity_membership m ON m.entity_id = gr.entity_id \
+         LEFT JOIN {schema_qualifier}.golden_records g ON g.entity_id = gr.entity_id \
+         ORDER BY gr.entity_id, m.record_key"
+    ))
+}

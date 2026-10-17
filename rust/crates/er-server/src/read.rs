@@ -49,11 +49,6 @@ pub fn decode_cursor(raw: &str) -> Option<Cursor> {
     })
 }
 
-/// A SQL string literal: single-quote the value, doubling embedded quotes.
-fn lit(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "''"))
-}
-
 /// A `%…%` contains-search LIKE pattern: escape the LIKE metacharacters so a user's
 /// `%`/`_`/`\` are matched literally, then wrap in wildcards. The result is a bound
 /// parameter value (not a SQL literal), paired with `ESCAPE '\'` at the use site.
@@ -864,22 +859,19 @@ pub fn merge_plans(
     source_ranks: Option<&std::collections::BTreeMap<String, i64>>,
     limit: i64,
 ) -> Result<Vec<Value>, String> {
+    use arrow::datatypes::DataType;
+    use er_entities::batch;
+
     let limit = limit.clamp(1, MAX_LIMIT);
-    let masters_sql =
-        er_golden::masters_cte_sql(policy, "lake.main", source_ranks).map_err(|e| e.to_string())?;
-    let since_filter = since
-        .filter(|s| !s.is_empty())
-        .map(|s| format!("AND occurred_at >= {}::timestamp", lit(s)))
-        .unwrap_or_default();
+    let conn = session.connection();
+    let since = since.filter(|s| !s.is_empty());
+
     // Protect enforcement (PR 1.3b): a member record with an active `protect`
     // overlay forces itself master for its entity, overriding the policy
-    // election. Read-path only — no golden/fixture touched. Gated on the overlay
-    // table existing AND holding at least one active protect row, so when no
-    // records are protected (or the steward drain never created the table) the
-    // CTE collapses to today's exact `masters AS ( {masters_sql} )` — byte-exact.
-    let protect_active = match session.query_strings(
-        "SELECT 1 FROM lake.main.record_overlays WHERE kind = 'protect' AND active LIMIT 1",
-    ) {
+    // election. Gated on the overlay table existing AND holding at least one
+    // active protect row, so when no records are protected the generator emits
+    // today's exact single-CTE masters topology.
+    let protect_active = match er_entities::record_overlay::read::any_active_protect(conn) {
         Ok(rows) => !rows.is_empty(),
         Err(e) => {
             let s = e.to_string();
@@ -890,56 +882,104 @@ pub fn merge_plans(
             }
         }
     };
-    let masters_cte = if protect_active {
-        // `protected` picks, per affected entity, the active-protected member
-        // (min(record_key) is a deterministic tie-break when several members of
-        // one entity are protected). COALESCE lets it win over the policy master.
-        format!(
-            "masters_policy AS ( {masters_sql} ), \
-             protected AS ( \
-               SELECT m.entity_id, min(m.record_key) AS master_key \
-               FROM lake.main.entity_membership m \
-               JOIN affected a ON a.entity_id = m.entity_id \
-               JOIN lake.main.record_overlays o \
-                 ON o.record_key = m.record_key AND o.kind = 'protect' AND o.active \
-               GROUP BY m.entity_id \
-             ), \
-             masters AS ( \
-               SELECT p.entity_id, COALESCE(pr.master_key, p.master_key) AS master_key \
-               FROM masters_policy p \
-               LEFT JOIN protected pr ON pr.entity_id = p.entity_id \
-             )"
-        )
-    } else {
-        format!("masters AS ( {masters_sql} )")
-    };
-    let sql = format!(
-        "WITH affected AS ( \
-           SELECT DISTINCT entity_id FROM lake.main.entity_events \
-           WHERE event_type IN ('merged', 'member_added') {since_filter} \
-         ), \
-         {masters_cte} \
-         SELECT to_json(t) FROM ( \
-           SELECT m.entity_id, ms.master_key, \
-                  list(m.source_system || ':' || m.source_record_id ORDER BY m.record_key) \
-                    AS member_records, \
-                  count(*) AS member_count, \
-                  any_value(g.given_name) AS given_name, \
-                  any_value(g.family_name) AS family_name, \
-                  any_value(g.email) AS email, \
-                  any_value(g.phone_e164) AS phone_e164 \
-           FROM lake.main.entity_membership m \
-           JOIN masters ms ON ms.entity_id = m.entity_id \
-           LEFT JOIN lake.main.golden_records g ON g.entity_id = m.entity_id \
-           GROUP BY m.entity_id, ms.master_key HAVING count(*) >= 2 \
-           ORDER BY m.entity_id LIMIT {limit} \
-         ) t ORDER BY entity_id"
-    );
-    let rows = session.query_strings(&sql).map_err(|e| e.to_string())?;
-    Ok(rows
+
+    // The governed generator (plan-vector-tested in er-sql-check): one flat row
+    // per member, ordered by (entity_id, record_key); grouped here.
+    let sql = er_golden::merge_plans_sql(
+        policy,
+        "lake.main",
+        source_ranks,
+        protect_active,
+        since.is_some(),
+    )
+    .map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let batches: Vec<arrow::record_batch::RecordBatch> = match since {
+        Some(s) => stmt.query_arrow(duckdb::params![s, limit]),
+        None => stmt.query_arrow(duckdb::params![limit]),
+    }
+    .map_err(|e| e.to_string())?
+    .collect();
+
+    let expected = [
+        ("entity_id", DataType::Utf8),
+        ("master_key", DataType::Utf8),
+        ("member_count", DataType::Int64),
+        ("source_system", DataType::Utf8),
+        ("source_record_id", DataType::Utf8),
+        ("record_key", DataType::Utf8),
+        ("given_name", DataType::Utf8),
+        ("family_name", DataType::Utf8),
+        ("email", DataType::Utf8),
+        ("phone_e164", DataType::Utf8),
+    ];
+    let mut items: Vec<Value> = Vec::new();
+    let mut current: Option<(String, serde_json::Map<String, Value>, Vec<Value>)> = None;
+    let err = |e: duckdb::Error| e.to_string();
+    for b in &batches {
+        batch::check_columns(b, &expected).map_err(err)?;
+        let entity_id: &arrow::array::StringArray = batch::col(b, 0, "entity_id").map_err(err)?;
+        let master_key: &arrow::array::StringArray = batch::col(b, 1, "master_key").map_err(err)?;
+        let member_count: &arrow::array::Int64Array =
+            batch::col(b, 2, "member_count").map_err(err)?;
+        let source_system: &arrow::array::StringArray =
+            batch::col(b, 3, "source_system").map_err(err)?;
+        let source_record_id: &arrow::array::StringArray =
+            batch::col(b, 4, "source_record_id").map_err(err)?;
+        let previews: Vec<&arrow::array::StringArray> = [
+            ("given_name", 6),
+            ("family_name", 7),
+            ("email", 8),
+            ("phone_e164", 9),
+        ]
         .iter()
-        .map(|r| serde_json::from_str(&r[0]).unwrap_or(Value::Null))
-        .collect())
+        .map(|(name, i)| batch::col(b, *i, name).map_err(err))
+        .collect::<Result<_, _>>()?;
+        for i in 0..b.num_rows() {
+            let eid = batch::req(batch::opt_str(entity_id, i), "entity_id", i).map_err(err)?;
+            let is_new = current.as_ref().is_none_or(|(id, _, _)| *id != eid);
+            if is_new {
+                if let Some((_, mut obj, members)) = current.take() {
+                    obj.insert("member_records".to_string(), Value::Array(members));
+                    items.push(Value::Object(obj));
+                }
+                let mut obj = serde_json::Map::new();
+                obj.insert("entity_id".to_string(), Value::from(eid.clone()));
+                obj.insert(
+                    "master_key".to_string(),
+                    batch::opt_str(master_key, i).map_or(Value::Null, Value::from),
+                );
+                obj.insert(
+                    "member_count".to_string(),
+                    batch::opt_i64(member_count, i).map_or(Value::Null, Value::from),
+                );
+                for (j, name) in ["given_name", "family_name", "email", "phone_e164"]
+                    .iter()
+                    .enumerate()
+                {
+                    obj.insert(
+                        (*name).to_string(),
+                        batch::opt_str(previews[j], i).map_or(Value::Null, Value::from),
+                    );
+                }
+                current = Some((eid, obj, Vec::new()));
+            }
+            if let Some((_, _, members)) = current.as_mut() {
+                members.push(Value::from(format!(
+                    "{}:{}",
+                    batch::req(batch::opt_str(source_system, i), "source_system", i)
+                        .map_err(err)?,
+                    batch::req(batch::opt_str(source_record_id, i), "source_record_id", i)
+                        .map_err(err)?
+                )));
+            }
+        }
+    }
+    if let Some((_, mut obj, members)) = current.take() {
+        obj.insert("member_records".to_string(), Value::Array(members));
+        items.push(Value::Object(obj));
+    }
+    Ok(items)
 }
 
 /// Render merge-plan rows as CSV (`readapi.merge_plans` text/csv): the

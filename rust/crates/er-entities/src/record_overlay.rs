@@ -84,6 +84,56 @@ pub mod delete {
     }
 }
 
+pub mod read {
+    //! @generated query functions for this entity + operation.
+    /// One row of `any_active_protect`: Whether any record carries an active protect overlay (gates the merge-plan protect topology).
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct AnyActiveProtectRow {
+        pub present: i64,
+    }
+
+    impl AnyActiveProtectRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![("present", ::arrow::datatypes::DataType::Int64)]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::Int64Array = crate::batch::col(batch, 0, "present")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        present: crate::batch::req(crate::batch::opt_i64(c0, i), "present", i)?,
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// Whether any record carries an active protect overlay (gates the merge-plan protect topology).
+    pub fn any_active_protect(
+        conn: &::duckdb::Connection,
+    ) -> ::duckdb::Result<Vec<AnyActiveProtectRow>> {
+        const SQL: &str = "SELECT CAST(1 AS BIGINT) AS present
+FROM lake.main.record_overlays
+WHERE kind = 'protect' AND active
+LIMIT 1
+";
+        let mut stmt = conn.prepare(SQL)?;
+        let batches = stmt.query_arrow(::duckdb::params![])?.collect::<Vec<_>>();
+        AnyActiveProtectRow::from_batches(&batches)
+    }
+}
+
 pub mod update {
     //! @generated query functions for this entity + operation.
     /// Retract a protect/suppress overlay (rows are never deleted).

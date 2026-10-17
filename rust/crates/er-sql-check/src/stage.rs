@@ -192,6 +192,48 @@ mod tests {
             .collect()
     }
 
+    /// The merge-plan generator (er-golden) is a governed generator like the
+    /// mart assembly: every shape it can emit — the full policy vocabulary ×
+    /// the protect-override topology × the since filter — plans against the
+    /// entity catalog, with its bound `$1`/`$2` placeholders and window
+    /// election intact. 5 × 2 × 2 = 20 vectors.
+    #[test]
+    fn the_merge_plan_generator_plans_for_every_policy_and_topology() {
+        let catalog = build_lake_stage_catalog(&entities_catalog(), false);
+        let ranks: std::collections::BTreeMap<String, i64> =
+            [("crm".to_string(), 1), ("vendors".to_string(), 2)]
+                .into_iter()
+                .collect();
+        for policy in er_golden::MASTER_ELECTION_POLICIES {
+            for protect in [false, true] {
+                for since in [false, true] {
+                    let sql = er_golden::merge_plans_sql(
+                        policy,
+                        "lake.main",
+                        Some(&ranks),
+                        protect,
+                        since,
+                    )
+                    .expect("a vocabulary policy renders");
+                    let cols = plan_stage(&catalog, &sql);
+                    for required in [
+                        "entity_id",
+                        "master_key",
+                        "member_count",
+                        "record_key",
+                        "phone_e164",
+                    ] {
+                        assert!(
+                            cols.contains(&required.to_string()),
+                            "merge-plan ({policy}, protect={protect}, since={since}) output \
+                             missing {required}: {cols:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn the_golden_record_mart_assembly_sql_plans_against_the_stage_catalog() {
         // The REAL golden_records mart-populating SQL, generated from a

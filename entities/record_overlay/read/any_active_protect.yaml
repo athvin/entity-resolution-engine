@@ -1,0 +1,8 @@
+kind: statement
+operation: read
+description: "Whether any record carries an active protect overlay (gates the merge-plan protect topology)."
+pin: live
+pin_reason: "Merge plans deliberately read the live lake (the Python-export parity rule); this probe gates the protect topology inside that same live read."
+params: []
+returns:
+  - { name: present, type: bigint, nullable: false }
