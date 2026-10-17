@@ -737,6 +737,22 @@ fn acct_std_payload() -> Vec<Column> {
     ]
 }
 
+/// The `int_std_records` columns for an entity type: `record_key` plus the
+/// standardized payload a tenant config's blocking / comparison SQL reads
+/// (person via [`std_payload`], account via [`acct_std_payload`]). This is the
+/// single source for the publish-time config-reference check (`er-server`'s
+/// `config_check`), so there is no hand-maintained duplicate to drift.
+#[must_use]
+pub fn int_std_record_columns(account: bool) -> Vec<Column> {
+    let mut cols = vec![nn("record_key", VARCHAR)];
+    cols.extend(if account {
+        acct_std_payload()
+    } else {
+        std_payload()
+    });
+    cols
+}
+
 /// The Account `golden_records` survivable columns (the Account analogue of
 /// [`golden_survivable`]): the raw canonical Account attributes, all nullable,
 /// types from the Account std payload.

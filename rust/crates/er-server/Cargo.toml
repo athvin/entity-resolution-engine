@@ -27,6 +27,9 @@ path = "src/bin/er-openapi-check.rs"
 
 [dependencies]
 er-config = { path = "../er-config" }
+# The config-publish check validates a tenant config's blocking/comparison column
+# references against the standardized-records schema (int_std_records columns).
+er-schema = { path = "../er-schema" }
 er-std = { path = "../er-std" }
 # The generated entity structs + typed control query functions (job, org, …): the
 # read/write path no longer hand-writes SQL or row mapping.

@@ -1542,6 +1542,7 @@ dependencies = [
  "er-entities",
  "er-golden",
  "er-reconcile",
+ "er-schema",
  "er-std",
  "hex",
  "hmac 0.12.1",

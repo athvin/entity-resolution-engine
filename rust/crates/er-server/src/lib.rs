@@ -29,6 +29,7 @@
 //! infrastructure-bound. Unit tests are network-free (`tests/http.rs`); the
 //! Postgres + DuckLake paths are gated (`ER_TEST_PG_DSN`, `DEDUPE_E2E_DUCKLAKE`).
 
+pub mod config_check;
 pub mod dispatcher;
 pub mod openapi;
 pub mod pg;
@@ -1068,6 +1069,22 @@ async fn publish_config_version(
         Ok(c) => c,
         Err(e) => return config_invalid(&e).into_response(),
     };
+
+    // Publish-time analysis: the config's blocking/comparison definitions must
+    // only reference columns the standardized-records table has for this entity
+    // type. A mistyped or non-existent column is refused here rather than failing
+    // the tenant's first run.
+    let reference_problems = config_check::config_reference_problems(&new_config);
+    if !reference_problems.is_empty() {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!(
+                "config references columns the standardized schema does not have: {}",
+                reference_problems.join("; ")
+            ),
+        )
+        .into_response();
+    }
 
     // Org publish context (config_path / state / current active version).
     let (config_path, org_state, active_v) = match pg::org_publish_context(&client, &org).await {
