@@ -1541,6 +1541,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "dedupe-core",
+ "duckdb",
  "er-cli",
  "er-config",
  "er-entities",

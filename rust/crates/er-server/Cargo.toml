@@ -50,6 +50,9 @@ er-golden = { path = "../er-golden" }
 er-reconcile = { path = "../er-reconcile" }
 # The read API attaches each org's DuckLake (read-only) and queries lake.main.*.
 dedupe-core = { path = "../dedupe-core" }
+# The merge-plan generator statement runs on the lake connection directly
+# (prepare + params! + typed batch extraction).
+duckdb = { workspace = true }
 axum = { workspace = true }
 # The :action path normalizer wraps the router as an outer tower service.
 tower = { workspace = true }
