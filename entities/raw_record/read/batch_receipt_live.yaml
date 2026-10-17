@@ -1,0 +1,15 @@
+kind: statement
+operation: read
+description: "The delivery receipt: this batch's landed keys classified against the source's prior latest state (new / resurrected / unchanged / changed / tombstoned). The tombstone sentinel crosses as a parameter."
+pin: live
+pin_reason: "Ingest reads its own landing transaction (which keys this delivery omitted, how this batch compares to the prior state); there is no committed snapshot to pin."
+params:
+  - { name: source, type: varchar }
+  - { name: batch, type: varchar }
+  - { name: tombstone_hash, type: varchar }
+returns:
+  - { name: new_count, type: bigint }
+  - { name: resurrected_count, type: bigint }
+  - { name: unchanged_count, type: bigint }
+  - { name: changed_count, type: bigint }
+  - { name: tombstone_count, type: bigint }

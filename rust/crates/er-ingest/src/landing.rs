@@ -71,21 +71,17 @@ pub fn create_raw_records_sql(table: &str) -> String {
     )
 }
 
-fn sql_str(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "''"))
-}
-
-/// Land one source's base-delivery CSV into `table` (S4.1): one `raw_records` row
-/// per record, `payload` the full delivered row as JSON, `content_hash` per
-/// [`row_content_hash`]. The reserved `persona_id` is stripped. For a base
-/// delivery (empty table) this is a plain insert — the incremental
-/// anti-join/tombstone machinery is inert. Returns the number of rows landed.
+/// Land one source's base-delivery CSV into `lake.main.raw_records` (S4.1): one
+/// row per record, `payload` the full delivered row as JSON, `content_hash` per
+/// [`row_content_hash`]. The reserved `persona_id` is stripped. Rows cross
+/// through the generated bulk-append primitive (typed, bound parameters — the
+/// tuple shape comes from the entity, never hand-written). Returns the number
+/// of rows landed.
 ///
 /// `ingest_batch_id`/`ingested_at` are stamped verbatim; neither is in
 /// `STD_HASH_COLUMNS`, so their values never reach `std_hash`.
 pub fn land_base_delivery(
     session: &Session,
-    table: &str,
     source: &str,
     spec: &SourceSpec,
     csv_text: &str,
@@ -95,7 +91,7 @@ pub fn land_base_delivery(
     let mut reader = csv::Reader::from_reader(csv_text.as_bytes());
     let headers: Vec<String> = reader.headers()?.iter().map(str::to_string).collect();
 
-    let mut rows: Vec<String> = Vec::new();
+    let mut rows: Vec<er_entities::raw_record::AppendRow> = Vec::new();
     for record in reader.records() {
         let record = record?;
         let mut payload: BTreeMap<String, Option<String>> = BTreeMap::new();
@@ -123,24 +119,20 @@ pub fn land_base_delivery(
             })
             .collect();
         let payload_json = serde_json::to_string(&serde_json::Value::Object(json_map))?;
-        rows.push(format!(
-            "({}, {}, {}::json, {}, false, NULL, {}, {}::timestamp)",
-            sql_str(source),
-            sql_str(&source_record_id),
-            sql_str(&payload_json),
-            sql_str(&content_hash),
-            sql_str(ingest_batch_id),
-            sql_str(ingested_at),
-        ));
+        rows.push(er_entities::raw_record::AppendRow {
+            source_system: source.to_string(),
+            source_record_id,
+            payload: Some(payload_json),
+            content_hash,
+            is_deleted: false,
+            deleted_at: None,
+            ingest_batch_id: ingest_batch_id.to_string(),
+            ingested_at: ingested_at.to_string(),
+        });
     }
 
-    let count = rows.len();
-    if count > 0 {
-        session
-            .execute_batch(&format!("insert into {table} values {}", rows.join(", ")))
-            .map_err(|e| anyhow::anyhow!("insert into {table}: {e}"))?;
-    }
-    Ok(count)
+    er_entities::raw_record::append_rows(session.connection(), &rows)
+        .map_err(|e| anyhow::anyhow!("append into raw_records: {e}"))
 }
 
 /// Land a full-refresh delivery (S4.1.1, `--full-refresh-keys`): land the
@@ -156,7 +148,6 @@ pub fn land_base_delivery(
 /// omitted-key query / tombstone insert.
 pub fn land_full_refresh(
     session: &Session,
-    table: &str,
     source: &str,
     spec: &SourceSpec,
     csv_text: &str,
@@ -165,43 +156,37 @@ pub fn land_full_refresh(
 ) -> anyhow::Result<usize> {
     let landed = land_base_delivery(
         session,
-        table,
         source,
         spec,
         csv_text,
         ingest_batch_id,
         ingested_at,
     )?;
-    // Keys this source carried before this delivery but that the delivery omits.
-    let omitted = session
-        .query_strings(&format!(
-            "select distinct source_record_id from {table} \
-             where source_system = {src} and ingest_batch_id <> {batch} \
-               and source_record_id not in (\
-                 select source_record_id from {table} \
-                 where source_system = {src} and ingest_batch_id = {batch})",
-            src = sql_str(source),
-            batch = sql_str(ingest_batch_id),
-        ))
-        .map_err(|e| anyhow::anyhow!("full-refresh omitted-key query on {table}: {e}"))?;
+    // Keys this source carried before this delivery but that the delivery omits
+    // (the delivered rows are already landed under this batch id, so the omitted
+    // set is a pure self-subquery — the declared live statement).
+    let omitted = er_entities::raw_record::read::omitted_keys_live(
+        session.connection(),
+        source,
+        ingest_batch_id,
+    )
+    .map_err(|e| anyhow::anyhow!("full-refresh omitted-key query: {e}"))?;
     if !omitted.is_empty() {
-        let rows: Vec<String> = omitted
-            .iter()
-            .map(|r| {
-                format!(
-                    "({}, {}, NULL, {}, true, {}::timestamp, {}, {}::timestamp)",
-                    sql_str(source),
-                    sql_str(&r[0]),
-                    sql_str(TOMBSTONE_CONTENT_HASH),
-                    sql_str(ingested_at),
-                    sql_str(ingest_batch_id),
-                    sql_str(ingested_at),
-                )
+        let rows: Vec<er_entities::raw_record::AppendRow> = omitted
+            .into_iter()
+            .map(|r| er_entities::raw_record::AppendRow {
+                source_system: source.to_string(),
+                source_record_id: r.source_record_id,
+                payload: None,
+                content_hash: TOMBSTONE_CONTENT_HASH.to_string(),
+                is_deleted: true,
+                deleted_at: Some(ingested_at.to_string()),
+                ingest_batch_id: ingest_batch_id.to_string(),
+                ingested_at: ingested_at.to_string(),
             })
             .collect();
-        session
-            .execute_batch(&format!("insert into {table} values {}", rows.join(", ")))
-            .map_err(|e| anyhow::anyhow!("insert tombstones into {table}: {e}"))?;
+        er_entities::raw_record::append_rows(session.connection(), &rows)
+            .map_err(|e| anyhow::anyhow!("append tombstones into raw_records: {e}"))?;
     }
     Ok(landed)
 }
@@ -233,45 +218,26 @@ pub struct BatchReceipt {
 /// Propagates the aggregate-query error.
 pub fn batch_receipt(
     session: &Session,
-    table: &str,
     source: &str,
     ingest_batch_id: &str,
 ) -> anyhow::Result<BatchReceipt> {
-    let tomb = TOMBSTONE_CONTENT_HASH;
-    let sql = format!(
-        "with prior as (\
-           select source_record_id, content_hash, \
-             row_number() over (partition by source_record_id \
-               order by ingested_at desc, ingest_batch_id desc) as rn \
-           from {table} where source_system = {src} and ingest_batch_id <> {batch}), \
-         prior_latest as (select source_record_id, content_hash from prior where rn = 1), \
-         this_batch as (select source_record_id, content_hash from {table} \
-           where source_system = {src} and ingest_batch_id = {batch}) \
-         select \
-           count(*) filter (where tb.content_hash <> '{tomb}' and p.source_record_id is null), \
-           count(*) filter (where tb.content_hash <> '{tomb}' and p.content_hash = '{tomb}'), \
-           count(*) filter (where tb.content_hash <> '{tomb}' and p.content_hash = tb.content_hash), \
-           count(*) filter (where tb.content_hash <> '{tomb}' and p.source_record_id is not null \
-             and p.content_hash <> '{tomb}' and p.content_hash <> tb.content_hash), \
-           count(*) filter (where tb.content_hash = '{tomb}' and p.source_record_id is not null \
-             and p.content_hash <> '{tomb}') \
-         from this_batch tb left join prior_latest p on tb.source_record_id = p.source_record_id",
-        src = sql_str(source),
-        batch = sql_str(ingest_batch_id),
-    );
-    let rows = session
-        .query_strings(&sql)
-        .map_err(|e| anyhow::anyhow!("batch receipt on {table}: {e}"))?;
+    let rows = er_entities::raw_record::read::batch_receipt_live(
+        session.connection(),
+        source,
+        ingest_batch_id,
+        TOMBSTONE_CONTENT_HASH,
+    )
+    .map_err(|e| anyhow::anyhow!("batch receipt: {e}"))?;
     let r = rows
-        .first()
+        .into_iter()
+        .next()
         .ok_or_else(|| anyhow::anyhow!("empty batch-receipt result"))?;
-    let n = |i: usize| r.get(i).and_then(|v| v.parse::<i64>().ok()).unwrap_or(0);
     Ok(BatchReceipt {
-        new: n(0),
-        resurrected: n(1),
-        unchanged: n(2),
-        changed: n(3),
-        tombstone: n(4),
+        new: r.new_count.unwrap_or(0),
+        resurrected: r.resurrected_count.unwrap_or(0),
+        unchanged: r.unchanged_count.unwrap_or(0),
+        changed: r.changed_count.unwrap_or(0),
+        tombstone: r.tombstone_count.unwrap_or(0),
     })
 }
 
