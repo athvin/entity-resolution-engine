@@ -1015,8 +1015,9 @@ fn golden_record_count(session: &Session, snapshot: i64) -> Result<i64, String> 
 
 /// Duplicate-group sizing at `snapshot`: `(groups, records_in_groups)`.
 fn dup_group_stats(session: &Session, snapshot: i64) -> Result<(i64, i64), String> {
-    let rows = er_entities::entity_membership::read::dup_group_stats(session.connection(), snapshot)
-        .map_err(|e| e.to_string())?;
+    let rows =
+        er_entities::entity_membership::read::dup_group_stats(session.connection(), snapshot)
+            .map_err(|e| e.to_string())?;
     let row = rows.first();
     Ok((
         row.and_then(|r| r.groups).unwrap_or(0),
