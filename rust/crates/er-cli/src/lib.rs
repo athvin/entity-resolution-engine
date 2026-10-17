@@ -750,9 +750,7 @@ fn canon(a: &str, b: &str) -> (String, String) {
 /// # Errors
 /// Propagates a non-missing-table query error.
 fn load_active_assertions(session: &Session) -> Result<Vec<Assertion>> {
-    let rows = match session.query_strings(&format!(
-        "select assertion_id, rec_a_key, rec_b_key, kind from {ASSERTIONS} where active"
-    )) {
+    let rows = match er_entities::assertion::read::active_pairs_live(session.connection()) {
         Ok(rows) => rows,
         Err(e) => {
             if is_missing_table(&e.to_string()) {
@@ -764,14 +762,14 @@ fn load_active_assertions(session: &Session) -> Result<Vec<Assertion>> {
     Ok(rows
         .into_iter()
         .filter_map(|r| {
-            let kind = match r[3].as_str() {
+            let kind = match r.kind.as_str() {
                 "always" => AssertionKind::Always,
                 "never" => AssertionKind::Never,
                 _ => return None,
             };
-            let (a, b) = canon(&r[1], &r[2]);
+            let (a, b) = canon(&r.rec_a_key, &r.rec_b_key);
             Some(Assertion {
-                assertion_id: r[0].clone(),
+                assertion_id: r.assertion_id,
                 rec_a_key: a,
                 rec_b_key: b,
                 kind,
@@ -788,10 +786,14 @@ fn load_active_assertions(session: &Session) -> Result<Vec<Assertion>> {
 /// # Errors
 /// Propagates a non-missing-table query error.
 fn load_suppressed_keys(session: &Session) -> Result<BTreeSet<String>> {
-    match session.query_strings(&format!(
-        "select record_key from {RECORD_OVERLAYS} where kind = 'suppress' and active"
-    )) {
-        Ok(rows) => Ok(rows.into_iter().map(|r| r[0].clone()).collect()),
+    load_overlay_keys(session, "suppress")
+}
+
+/// The active overlay record keys of one kind, via the declared live statement
+/// (empty when the overlay table hasn't been created yet).
+fn load_overlay_keys(session: &Session, kind: &str) -> Result<BTreeSet<String>> {
+    match er_entities::record_overlay::read::active_keys_by_kind_live(session.connection(), kind) {
+        Ok(rows) => Ok(rows.into_iter().map(|r| r.record_key).collect()),
         Err(e) => {
             if is_missing_table(&e.to_string()) {
                 Ok(BTreeSet::new())
@@ -812,18 +814,7 @@ fn load_suppressed_keys(session: &Session) -> Result<BTreeSet<String>> {
 /// # Errors
 /// Propagates a non-missing-table query error.
 fn load_protected_keys(session: &Session) -> Result<BTreeSet<String>> {
-    match session.query_strings(&format!(
-        "select record_key from {RECORD_OVERLAYS} where kind = 'protect' and active"
-    )) {
-        Ok(rows) => Ok(rows.into_iter().map(|r| r[0].clone()).collect()),
-        Err(e) => {
-            if is_missing_table(&e.to_string()) {
-                Ok(BTreeSet::new())
-            } else {
-                Err(e.into())
-            }
-        }
-    }
+    load_overlay_keys(session, "protect")
 }
 
 /// S4.5 reconcile: cluster the active auto-merge pairs in `lake.main.match_scores`
@@ -843,37 +834,28 @@ pub fn run_reconcile(session: &Session, config: &Config, run_id: &str, run_at: &
     create_ddl_table(session, "entity_events")?;
 
     let auto_merge = config.thresholds.auto_merge;
+    let conn = session.connection();
     // Auto-merge edges carry their probability: never-cut severs the
     // lowest-probability edge on a path, so the weight is load-bearing.
-    let mut edges: Vec<PathEdge> = session
-        .query_strings(&format!(
-            "select rec_a_key, rec_b_key, match_probability from {MATCH_SCORES} \
-             where is_active and match_probability >= {auto_merge} order by rec_a_key, rec_b_key"
-        ))?
-        .into_iter()
-        .map(|r| {
-            (
-                r[0].clone(),
-                r[1].clone(),
-                r[2].parse::<f64>().unwrap_or(1.0),
-            )
-        })
-        .collect();
+    let mut edges: Vec<PathEdge> =
+        er_entities::match_score::read::auto_merge_edges_live(conn, auto_merge)?
+            .into_iter()
+            .map(|r| (r.rec_a_key, r.rec_b_key, r.match_probability))
+            .collect();
     // The node universe is the person or Account standardized corpus, by
     // entity_type; everything else in reconcile (match_scores edges, assertions,
     // membership/entities/events) is shared + entity-agnostic.
-    let std_table = if config.entity_type.is_person() {
-        INT_STD_RECORDS
+    let nodes: Vec<String> = if config.entity_type.is_person() {
+        er_entities::int_std_record::read::all_keys_live(conn)?
+            .into_iter()
+            .map(|r| r.record_key)
+            .collect()
     } else {
-        ACCT_INT_STD_RECORDS
+        er_entities::acct_int_std_record::read::all_keys_live(conn)?
+            .into_iter()
+            .map(|r| r.record_key)
+            .collect()
     };
-    let nodes: Vec<String> = session
-        .query_strings(&format!(
-            "select record_key from {std_table} order by record_key"
-        ))?
-        .into_iter()
-        .map(|r| r[0].clone())
-        .collect();
 
     // S4.4 assertion adjustment (identical to er-match's proven in-memory path).
     // Empty when the lake has no assertions, so the base run is unchanged.
@@ -956,10 +938,8 @@ pub fn run_reconcile(session: &Session, config: &Config, run_id: &str, run_at: &
 
     // Prior active membership (empty on the first run).
     let mut p_old: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for r in session.query_strings(&format!(
-        "select entity_id, record_key from {ENTITY_MEMBERSHIP} order by entity_id, record_key"
-    ))? {
-        p_old.entry(r[0].clone()).or_default().push(r[1].clone());
+    for r in er_entities::entity_membership::read::all_pairs_live(conn)? {
+        p_old.entry(r.entity_id).or_default().push(r.record_key);
     }
 
     let labels = label_propagate(&nodes, &edges);
@@ -974,8 +954,9 @@ pub fn run_reconcile(session: &Session, config: &Config, run_id: &str, run_at: &
 
     // Continue the entity-id counter past every entity ever minted, so a new
     // phase's ids never collide with persisted ones.
-    let minted: i64 = session.query_strings(&format!("select count(*) from {ENTITIES}"))?[0][0]
-        .parse()
+    let minted: i64 = er_entities::resolved_entity::read::count_live(conn)?
+        .first()
+        .and_then(|r| r.n)
         .unwrap_or(0);
     let plan = reconcile_plan(
         &p_old,
@@ -1117,19 +1098,8 @@ pub fn run_golden(session: &Session, config: &Config) -> Result<()> {
     // golden_overrides table, nothing runs, and golden_records is byte-identical
     // (the determinism contract holds — base fixtures are untouched).
     let overrides_present = session
-        .query_strings(
-            "select count(*) from duckdb_tables() \
-             where database_name = 'lake' and schema_name = 'main' \
-               and table_name = 'golden_overrides'",
-        )
-        .ok()
-        .and_then(|rows| {
-            rows.first()
-                .and_then(|r| r.first())
-                .and_then(|s| s.parse::<i64>().ok())
-        })
-        .unwrap_or(0)
-        > 0;
+        .lake_table_exists("golden_overrides")
+        .unwrap_or(false);
     if overrides_present {
         // One declared UPDATE per overridable golden column (5 scalar + 6 address).
         use er_entities::golden_record::update as ov;
@@ -1162,43 +1132,24 @@ fn is_missing_table(err: &str) -> bool {
         || err.contains("Table with name")
 }
 
-/// `(present, row_count)` for a fully-qualified lake relation — `(false, 0)` when
-/// the relation hasn't been created yet.
-fn relation_count(session: &Session, qualified: &str) -> Result<(bool, i64)> {
-    match session.query_strings(&format!("select count(*) from {qualified}")) {
-        Ok(rows) => {
-            let n = rows
-                .first()
-                .and_then(|r| r.first())
-                .map_or(0, |v| v.parse::<i64>().unwrap_or(0));
-            Ok((true, n))
-        }
-        Err(e) => {
-            if is_missing_table(&e.to_string()) {
-                Ok((false, 0))
-            } else {
-                Err(e.into())
-            }
-        }
-    }
-}
-
-/// The lake relations `doctor` inspects, by bare name -> fully-qualified, in
-/// pipeline order. The DuckLake-resident outputs the Rust engine writes (the
-/// control-plane tables live in Postgres, not here).
-const DOCTOR_RELATIONS: [(&str, &str); 12] = [
-    ("raw_records", RAW_RECORDS),
-    ("int_std_records", INT_STD_RECORDS),
-    ("match_scores", MATCH_SCORES),
-    ("entity_membership", ENTITY_MEMBERSHIP),
-    ("entities", ENTITIES),
-    ("entity_events", ENTITY_EVENTS),
-    ("golden_records", GOLDEN_RECORDS),
-    ("golden_lineage", GOLDEN_LINEAGE),
-    ("runs", RUNS),
-    ("review_queue", REVIEW_QUEUE),
-    ("assertions", ASSERTIONS),
-    ("ingest_batches", INGEST_BATCHES),
+/// The lake relations `doctor` inspects, by bare name, in pipeline order. The
+/// DuckLake-resident outputs the Rust engine writes (the control-plane tables
+/// live in Postgres, not here). Presence/row counts come from the Session's
+/// catalog-introspection helpers; the names stay covered by the declared-names
+/// gate.
+const DOCTOR_RELATIONS: [&str; 12] = [
+    "raw_records",
+    "int_std_records",
+    "match_scores",
+    "entity_membership",
+    "entities",
+    "entity_events",
+    "golden_records",
+    "golden_lineage",
+    "runs",
+    "review_queue",
+    "assertions",
+    "ingest_batches",
 ];
 
 /// A read-only health report over the lake + config (`er doctor`): the config
@@ -1213,22 +1164,24 @@ const DOCTOR_RELATIONS: [(&str, &str); 12] = [
 pub fn doctor(session: &Session, config: &Config) -> Result<serde_json::Value> {
     let mut relations = Vec::with_capacity(DOCTOR_RELATIONS.len());
     let mut present: std::collections::BTreeMap<&str, bool> = std::collections::BTreeMap::new();
-    for (name, qualified) in DOCTOR_RELATIONS {
-        let (is_present, rows) = relation_count(session, qualified)?;
-        present.insert(name, is_present);
-        relations.push(serde_json::json!({ "name": name, "present": is_present, "rows": rows }));
+    for name in DOCTOR_RELATIONS {
+        let count = session.relation_row_count(name)?;
+        present.insert(name, count.is_some());
+        relations.push(serde_json::json!({
+            "name": name,
+            "present": count.is_some(),
+            "rows": count.unwrap_or(0),
+        }));
     }
     let ok = ["int_std_records", "entity_membership", "golden_records"]
         .iter()
         .all(|n| present.get(n).copied().unwrap_or(false));
 
     // The latest run (if the ledger exists): run_id + status + mode.
-    let latest_run = match session.query_strings(&format!(
-        "select run_id, status, mode from {RUNS} order by started_at desc limit 1"
-    )) {
+    let latest_run = match er_entities::run::read::latest_live(session.connection()) {
         Ok(rows) => rows
             .first()
-            .map(|r| serde_json::json!({ "run_id": r[0], "status": r[1], "mode": r[2] })),
+            .map(|r| serde_json::json!({ "run_id": r.run_id, "status": r.status, "mode": r.mode })),
         Err(e) if is_missing_table(&e.to_string()) => None,
         Err(e) => return Err(e.into()),
     };
@@ -1350,21 +1303,24 @@ pub fn run_all(session: &Session, config: &Config, inputs: &PipelineInputs) -> R
 /// Returns an error if there is no prior run to correct (nothing has been scored
 /// yet); otherwise propagates the reconcile / golden / lake errors.
 pub fn run_correct(session: &Session, config: &Config, run_id: &str, run_at: &str) -> Result<()> {
-    let latest = session
-        .query_strings(&format!(
-            "select model_version, tf_snapshot_id from {RUNS} \
-             order by started_at desc, run_id desc limit 1"
-        ))
-        .map_err(|e| {
-            if is_missing_table(&e.to_string()) {
-                anyhow::anyhow!("no prior run to correct; run a full run first")
-            } else {
-                e.into()
-            }
-        })?;
+    let latest = er_entities::run::read::latest_live(session.connection()).map_err(|e| {
+        if is_missing_table(&e.to_string()) {
+            anyhow::anyhow!("no prior run to correct; run a full run first")
+        } else {
+            e.into()
+        }
+    })?;
+    // A trained run always stamps both; an untrained prior run corrects with
+    // empty identity rather than the old stringified-NULL literal.
     let (model_version, tf_snapshot_id) = latest
-        .first()
-        .map(|r| (r[0].clone(), r[1].clone()))
+        .into_iter()
+        .next()
+        .map(|r| {
+            (
+                r.model_version.unwrap_or_default(),
+                r.tf_snapshot_id.unwrap_or_default(),
+            )
+        })
         .ok_or_else(|| anyhow::anyhow!("no prior run to correct; run a full run first"))?;
 
     write_run_row(

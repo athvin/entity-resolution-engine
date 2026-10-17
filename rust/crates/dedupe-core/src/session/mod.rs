@@ -393,6 +393,40 @@ impl Session {
         )?)
     }
 
+    /// Whether a lake relation exists in the attached catalog — the pipeline or
+    /// steward drain may not have created it yet. Catalog introspection, one of
+    /// the deliberate non-statement reads (the relation NAMES stay governed by
+    /// the registry/entity gates).
+    pub fn lake_table_exists(&self, table: &str) -> Result<bool> {
+        let lake = self.lake()?;
+        let n: i64 = self.conn.query_row(
+            "SELECT count(*) FROM duckdb_tables() \
+             WHERE database_name = ? AND schema_name = ? AND table_name = ?",
+            duckdb::params![lake.alias, lake.schema, table],
+            |r| r.get(0),
+        )?;
+        Ok(n > 0)
+    }
+
+    /// `Some(row_count)` for an existing lake relation (by bare name), `None`
+    /// when it has not been created yet. Catalog introspection + count — the
+    /// doctor's presence/size probe.
+    pub fn relation_row_count(&self, table: &str) -> Result<Option<i64>> {
+        if !self.lake_table_exists(table)? {
+            return Ok(None);
+        }
+        let lake = self.lake()?;
+        let n: i64 = self.conn.query_row(
+            &format!(
+                "SELECT count(*) FROM {}.{}.{table}",
+                lake.alias, lake.schema
+            ),
+            [],
+            |r| r.get(0),
+        )?;
+        Ok(Some(n))
+    }
+
     /// List all snapshots (version + ISO timestamp), newest last.
     pub fn list_snapshots(&self) -> Result<Vec<Snapshot>> {
         let lake = self.lake()?;

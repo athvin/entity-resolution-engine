@@ -1,0 +1,12 @@
+kind: statement
+operation: read
+description: "The latest run's identity, read live (doctor's status line and the correction pass's model identity), with the run_id tiebreak for same-timestamp runs."
+pin: live
+pin_reason: "er-cli composes this read inside the writer's own transaction; there is no committed snapshot to pin."
+params: []
+returns:
+  - { name: run_id, type: varchar, nullable: false }
+  - { name: status, type: varchar, nullable: false }
+  - { name: mode, type: varchar, nullable: false }
+  - { name: model_version, type: varchar }
+  - { name: tf_snapshot_id, type: varchar }

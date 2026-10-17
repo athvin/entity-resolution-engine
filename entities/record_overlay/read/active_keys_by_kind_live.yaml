@@ -1,0 +1,9 @@
+kind: statement
+operation: read
+description: "The active overlay record keys of one kind (suppress or protect), read live (the reconcile clustering inputs)."
+pin: live
+pin_reason: "er-cli composes this read inside the writer's own transaction; there is no committed snapshot to pin."
+params:
+  - { name: kind, type: varchar }
+returns:
+  - { name: record_key, type: varchar, nullable: false }

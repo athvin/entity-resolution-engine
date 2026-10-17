@@ -175,6 +175,70 @@ WHERE active
         ActivePairsRow::from_batches(&batches)
     }
 
+    /// One row of `active_pairs_live`: The active assertions as bare pairs, read live (the reconcile adjustment input).
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct ActivePairsLiveRow {
+        pub assertion_id: String,
+        pub rec_a_key: String,
+        pub rec_b_key: String,
+        pub kind: String,
+    }
+
+    impl ActivePairsLiveRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("assertion_id", ::arrow::datatypes::DataType::Utf8),
+                ("rec_a_key", ::arrow::datatypes::DataType::Utf8),
+                ("rec_b_key", ::arrow::datatypes::DataType::Utf8),
+                ("kind", ::arrow::datatypes::DataType::Utf8),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "assertion_id")?;
+                let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "rec_a_key")?;
+                let c2: &::arrow::array::StringArray = crate::batch::col(batch, 2, "rec_b_key")?;
+                let c3: &::arrow::array::StringArray = crate::batch::col(batch, 3, "kind")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        assertion_id: crate::batch::req(
+                            crate::batch::opt_str(c0, i),
+                            "assertion_id",
+                            i,
+                        )?,
+                        rec_a_key: crate::batch::req(crate::batch::opt_str(c1, i), "rec_a_key", i)?,
+                        rec_b_key: crate::batch::req(crate::batch::opt_str(c2, i), "rec_b_key", i)?,
+                        kind: crate::batch::req(crate::batch::opt_str(c3, i), "kind", i)?,
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// The active assertions as bare pairs, read live (the reconcile adjustment input).
+    pub fn active_pairs_live(
+        conn: &::duckdb::Connection,
+    ) -> ::duckdb::Result<Vec<ActivePairsLiveRow>> {
+        const SQL: &str = "SELECT assertion_id, rec_a_key, rec_b_key, kind
+FROM lake.main.assertions
+WHERE active
+";
+        let mut stmt = conn.prepare(SQL)?;
+        let batches = stmt.query_arrow(::duckdb::params![])?.collect::<Vec<_>>();
+        ActivePairsLiveRow::from_batches(&batches)
+    }
+
     /// One row of `page`: One keyset page of the assertion ledger at a pinned snapshot, active-only unless retracted rows are included.
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
     pub struct PageRow {

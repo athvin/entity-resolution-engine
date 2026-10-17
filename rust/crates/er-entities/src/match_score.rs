@@ -236,6 +236,71 @@ GROUP BY run_id
             .collect::<Vec<_>>();
         AutoMergeCountsRow::from_batches(&batches)
     }
+
+    /// One row of `auto_merge_edges_live`: The active auto-merge edges with their probabilities, read live (never-cut severs the lowest-probability edge, so the weight is load-bearing).
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct AutoMergeEdgesLiveRow {
+        pub rec_a_key: String,
+        pub rec_b_key: String,
+        pub match_probability: f64,
+    }
+
+    impl AutoMergeEdgesLiveRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("rec_a_key", ::arrow::datatypes::DataType::Utf8),
+                ("rec_b_key", ::arrow::datatypes::DataType::Utf8),
+                ("match_probability", ::arrow::datatypes::DataType::Float64),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "rec_a_key")?;
+                let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "rec_b_key")?;
+                let c2: &::arrow::array::Float64Array =
+                    crate::batch::col(batch, 2, "match_probability")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        rec_a_key: crate::batch::req(crate::batch::opt_str(c0, i), "rec_a_key", i)?,
+                        rec_b_key: crate::batch::req(crate::batch::opt_str(c1, i), "rec_b_key", i)?,
+                        match_probability: crate::batch::req(
+                            crate::batch::opt_f64(c2, i),
+                            "match_probability",
+                            i,
+                        )?,
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// The active auto-merge edges with their probabilities, read live (never-cut severs the lowest-probability edge, so the weight is load-bearing).
+    pub fn auto_merge_edges_live(
+        conn: &::duckdb::Connection,
+        threshold: f64,
+    ) -> ::duckdb::Result<Vec<AutoMergeEdgesLiveRow>> {
+        const SQL: &str = "SELECT rec_a_key, rec_b_key, match_probability
+FROM lake.main.match_scores
+WHERE is_active AND match_probability >= $1
+ORDER BY rec_a_key, rec_b_key
+";
+        let mut stmt = conn.prepare(SQL)?;
+        let batches = stmt
+            .query_arrow(::duckdb::params![threshold])?
+            .collect::<Vec<_>>();
+        AutoMergeEdgesLiveRow::from_batches(&batches)
+    }
 }
 
 pub mod update {

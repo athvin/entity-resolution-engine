@@ -1,0 +1,8 @@
+kind: statement
+operation: read
+description: "How many entities have ever been minted, read live (the id-factory floor, so new ids never collide with persisted ones)."
+pin: live
+pin_reason: "er-cli composes this read inside the writer's own transaction; there is no committed snapshot to pin."
+params: []
+returns:
+  - { name: n, type: bigint }
