@@ -55,7 +55,7 @@ jobs:
         run: rustup update stable --no-self-update && rustup default stable && rustup component add rustfmt clippy
       - name: Install mold
         run: sudo apt-get update && sudo apt-get install -y mold
-      - uses: mozilla-actions/sccache-action@d651010b8da762cde178750d8eda7b5febfe147a # v0.0.9
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: rust
@@ -95,7 +95,7 @@ jobs:
         run: rustup update stable --no-self-update && rustup default stable
       - name: Install mold
         run: sudo apt-get update && sudo apt-get install -y mold
-      - uses: mozilla-actions/sccache-action@d651010b8da762cde178750d8eda7b5febfe147a # v0.0.9
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: rust
@@ -150,7 +150,7 @@ jobs:
         run: rustup update stable --no-self-update && rustup default stable
       - name: Install mold
         run: sudo apt-get update && sudo apt-get install -y mold
-      - uses: mozilla-actions/sccache-action@d651010b8da762cde178750d8eda7b5febfe147a # v0.0.9
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: rust
@@ -185,7 +185,7 @@ jobs:
         run: rustup update stable --no-self-update && rustup default stable
       - name: Install mold
         run: sudo apt-get update && sudo apt-get install -y mold
-      - uses: mozilla-actions/sccache-action@d651010b8da762cde178750d8eda7b5febfe147a # v0.0.9
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: rust
@@ -207,7 +207,7 @@ jobs:
         run: rustup update stable --no-self-update && rustup default stable
       - name: Install mold
         run: sudo apt-get update && sudo apt-get install -y mold
-      - uses: mozilla-actions/sccache-action@d651010b8da762cde178750d8eda7b5febfe147a # v0.0.9
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: rust
