@@ -249,6 +249,8 @@ This satisfies the §2 shared-instance constraint by construction (queue and adv
 
 Roles, both forms: `er_app` for application traffic, `er_provisioner` with `CREATEDB` used only by `ERSERVER_MAINT_DSN`, and in prod `er_readonly` authenticated by IAM (`rds_iam`, no password exists) for the §8.4 read path.
 
+**DDL ledger install:** the `er_ddl_audit_*` event triggers (the `ddl_log` ledger) need superuser/rds_superuser — neither `er_app` nor `er_provisioner` qualifies. Boot applies them best-effort (succeeds in CI/dev where the role is superuser; logs a warning otherwise); in production they are installed once by running `er-server migrate` with the Aurora master-user DSN as part of the deploy.
+
 **Every DSN carries `sslmode=verify-full` in prod** (`sslmode` appears nowhere in the repo today, an encryption-in-transit gap against Aurora an auditor will ask about — §8.6). It affects `ERSERVER_DSN`, `ERSERVER_MAINT_DSN`, `ERSERVER_TENANT_DSN_TEMPLATE`, `ERWEB_DATABASE_URL`, and `ER_CATALOG_DSN` — a secret-value change, not code, provided `verify-full` works with the Aurora CA bundle in the images (§18.15). Dev keeps `sslmode=disable` against the in-namespace pod.
 
 ### 7.2 The tenant database name collision

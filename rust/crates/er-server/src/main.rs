@@ -8,7 +8,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let dsn = std::env::var("ER_PG_DSN").map_err(|_| "ER_PG_DSN is required for migrate")?;
         let mut client = er_server::pg::connect(&dsn).await?;
         er_server::pg::ensure_schema(&mut client).await?;
-        eprintln!("er-server: schema ensured");
+        if er_server::pg::ensure_event_triggers(&mut client).await? {
+            eprintln!("er-server: schema + DDL-ledger event triggers ensured");
+        } else {
+            eprintln!(
+                "er-server: schema ensured; DDL-ledger event triggers NOT installed \
+                 (requires superuser/rds_superuser) — run `er-server migrate` with the master DSN"
+            );
+        }
         return Ok(());
     }
     // Ensure the control-plane schema at boot (it "rides the API boot", as the
@@ -18,6 +25,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(dsn) = &dsn {
         let mut client = er_server::pg::connect(dsn).await?;
         er_server::pg::ensure_schema(&mut client).await?;
+        if !er_server::pg::ensure_event_triggers(&mut client).await? {
+            eprintln!(
+                "er-server: DDL-ledger event triggers not installed (requires \
+                 superuser/rds_superuser); run `er-server migrate` with the master DSN"
+            );
+        }
     }
 
     // The merged `web-api` service runs the dispatcher IN-PROCESS: set

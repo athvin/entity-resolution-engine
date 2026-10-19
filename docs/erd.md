@@ -44,6 +44,17 @@ erDiagram
         timestamp created_at
         timestamp published_at
     }
+    ddl_log {
+        bigint id PK
+        timestamp created_at
+        timestamp updated_at
+        varchar actor
+        varchar phase "in {ddl_command_end, sql_drop}"
+        varchar ddl_tag
+        varchar object_type
+        varchar object_identity
+        varchar command_text
+    }
     jobs {
         varchar job_id PK
         varchar org FK
@@ -117,6 +128,7 @@ erDiagram
 | `api_keys` | An org-scoped API key: its role and the at-rest hash of the secret. |
 | `audit_log` | The append-only audit ledger: one row per authenticated mutation (actor, action, optional org scope, and structured detail). |
 | `config_versions` | A versioned config document for a tenant: its YAML, hash and publish state. |
+| `ddl_log` | The DDL ledger: one row per DDL command executed against the control database, captured by the er_ddl_audit event triggers (migrations, operator DDL — boot replays are suppressed). |
 | `jobs` | A unit of work on the dispatcher's queue: its kind, params, lifecycle state and retry bookkeeping. |
 | `orgs` | A tenant: its config pointer, lake env, lifecycle state and active config version. |
 | `schedules` | A recurring job schedule for a tenant: its kind, cron and source. |

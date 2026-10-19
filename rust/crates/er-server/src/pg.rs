@@ -57,11 +57,68 @@ pub async fn ensure_schema(client: &mut Client) -> Result<(), PgError> {
         &[],
     )
     .await?;
+    // The baseline replays CREATE OR REPLACE / IF NOT EXISTS DDL every boot;
+    // suppress the DDL ledger for the replay so boots don't spam it (real
+    // migrations and operator DDL never set this).
+    tx.batch_execute("SET LOCAL er.ddl_log_skip = 'on'").await?;
     for stmt in er_entities::schema::POSTGRES_BASELINE {
         tx.batch_execute(stmt).await?;
     }
     tx.commit().await?;
     Ok(())
+}
+
+/// Install the DDL-ledger event triggers (`er_ddl_audit_end` / `er_ddl_audit_drop`)
+/// best-effort: `CREATE EVENT TRIGGER` needs superuser/rds_superuser, which CI
+/// and dev have but the app role deliberately does not. Returns `Ok(false)` on
+/// insufficient privilege — the caller logs and boots on; production installs
+/// through the deploy migrate Job running with the master DSN.
+///
+/// # Errors
+/// Propagates any non-privilege DDL / transaction error.
+pub async fn ensure_event_triggers(client: &mut Client) -> Result<bool, PgError> {
+    let tx = client.transaction().await?;
+    tx.execute(
+        "SELECT pg_advisory_xact_lock(hashtext('erserver.ensure_schema'), 0)",
+        &[],
+    )
+    .await?;
+    if let Err(e) = tx
+        .batch_execute(er_entities::schema::POSTGRES_EVENT_TRIGGERS)
+        .await
+    {
+        if e.code() == Some(&tokio_postgres::error::SqlState::INSUFFICIENT_PRIVILEGE) {
+            return Ok(false);
+        }
+        return Err(e);
+    }
+    tx.commit().await?;
+    Ok(true)
+}
+
+/// Declare the acting principal for this connection (`er.actor`): the history
+/// triggers and the DDL ledger record it; absent, they fall back to the
+/// session user. Session-scoped — safe because er-server connects per request
+/// and the dispatcher owns its one connection; if pooling ever arrives, switch
+/// to transaction scope (`set_config(.., true)`).
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn set_actor(client: &Client, actor: &str) -> Result<(), PgError> {
+    client
+        .execute("SELECT set_config('er.actor', $1, false)", &[&actor])
+        .await?;
+    Ok(())
+}
+
+/// Connect and declare the actor in one step (the mutation-handler idiom).
+///
+/// # Errors
+/// Propagates the connect / query error.
+pub async fn connect_pg_as(dsn: &str, actor: &str) -> Result<Client, PgError> {
+    let client = connect(dsn).await?;
+    set_actor(&client, actor).await?;
+    Ok(client)
 }
 
 /// Register an org (idempotent).

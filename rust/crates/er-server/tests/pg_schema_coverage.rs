@@ -10,15 +10,17 @@ use std::collections::BTreeSet;
 use er_server::pg;
 
 /// The table names the generated baseline creates, parsed from its own DDL.
+/// Every occurrence per entry counts — a baseline entry may carry companion
+/// tables (e.g. a `<relation>_history`) beside the entity's own.
 fn baseline_tables() -> BTreeSet<String> {
     er_entities::schema::POSTGRES_BASELINE
         .iter()
-        .filter_map(|ddl| {
-            let rest = ddl.split("CREATE TABLE IF NOT EXISTS public.").nth(1)?;
+        .flat_map(|ddl| ddl.split("CREATE TABLE IF NOT EXISTS public.").skip(1))
+        .map(|rest| {
             let end = rest
                 .find(|c: char| !(c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'))
                 .unwrap_or(rest.len());
-            Some(rest[..end].to_string())
+            rest[..end].to_string()
         })
         .collect()
 }
