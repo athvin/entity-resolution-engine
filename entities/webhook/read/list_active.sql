@@ -5,7 +5,8 @@ SELECT
   events,
   secret,
   active,
-  created_at
+  created_at,
+  updated_at
 FROM public.webhooks
 WHERE org = $org AND active
 ORDER BY created_at

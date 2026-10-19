@@ -9,6 +9,8 @@ repository.workspace = true
 [dependencies]
 er-hash = { path = "../er-hash" }
 er-config = { path = "../er-config" }
+# The landing mints raw_records' batch-salted content-derived ids.
+er-ids = { path = "../er-ids" }
 dedupe-core = { path = "../dedupe-core" }
 # The landing writes/reads run through the generated raw_record primitives.
 er-entities = { path = "../er-entities" }

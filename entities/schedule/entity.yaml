@@ -51,6 +51,12 @@ columns:
     default: "now()"
     volatile: true
     description: "When the schedule was created."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Wall-clock last-write time (database default; advanced by mutations once the entity migrates)."
 indexes:
   - name: schedules_one_correction_per_org
     columns: [org]

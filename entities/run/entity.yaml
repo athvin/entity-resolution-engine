@@ -66,3 +66,11 @@ columns:
   - name: snapshot_end
     type: bigint
     description: "Last lake snapshot version the run produced."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical creation time (the run's start stamp)."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time (advanced when the run finishes)."

@@ -60,8 +60,14 @@ fn base_10_golden_lineage_and_records_match_committed() {
     let (config, plan) = common::resolve_base_10(&session);
     common::materialize_entities(&session, &plan);
 
-    let lineage_sql =
-        golden_lineage_sql(&config, "int_std_records", "entity_membership", "entities").unwrap();
+    let lineage_sql = golden_lineage_sql(
+        &config,
+        "int_std_records",
+        "entity_membership",
+        "entities",
+        "2026-01-01 00:00:00",
+    )
+    .unwrap();
     session
         .execute_batch(&format!("create table golden_lineage as\n{lineage_sql}"))
         .unwrap();

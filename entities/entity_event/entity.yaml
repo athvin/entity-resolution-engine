@@ -41,3 +41,11 @@ columns:
     type: timestamp
     nullable: false
     description: "The run's logical timestamp for the event."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical creation time (the event's occurrence stamp; events are append-only)."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time (equals created_at; events are append-only)."

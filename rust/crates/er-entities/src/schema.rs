@@ -14,6 +14,7 @@ pub const POSTGRES_BASELINE: &[&str] = &[
   active_config_version bigint,
   state text NOT NULL DEFAULT 'active' CHECK (state IN ('provisioning', 'active', 'suspended', 'purging')),
   created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (name)
 );"#,
     r#"CREATE TABLE IF NOT EXISTS public.api_keys (
@@ -23,6 +24,7 @@ pub const POSTGRES_BASELINE: &[&str] = &[
   key_hash text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   revoked_at timestamptz,
+  updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (key_id)
 );"#,
     r#"CREATE TABLE IF NOT EXISTS public.audit_log (
@@ -32,6 +34,8 @@ pub const POSTGRES_BASELINE: &[&str] = &[
   org text,
   action text NOT NULL,
   detail jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (id)
 );"#,
     r#"CREATE TABLE IF NOT EXISTS public.config_versions (
@@ -44,6 +48,7 @@ pub const POSTGRES_BASELINE: &[&str] = &[
   created_by text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   published_at timestamptz,
+  updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (org, version)
 );"#,
     r#"CREATE TABLE IF NOT EXISTS public.ddl_log (
@@ -94,6 +99,7 @@ CREATE INDEX IF NOT EXISTS jobs_claimable ON public.jobs (state, not_before, pri
   source text NOT NULL DEFAULT 'api',
   last_enqueued_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (schedule_id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS schedules_one_correction_per_org ON public.schedules (org) WHERE source = 'config:correction_pass';
@@ -107,6 +113,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS schedules_one_maintenance_per_org ON public.sc
   created_by text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   applied_at timestamptz,
+  updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (action_id)
 );
 CREATE INDEX IF NOT EXISTS staged_pending ON public.staged_steward_actions (org, state);"#,
@@ -118,6 +125,7 @@ CREATE INDEX IF NOT EXISTS staged_pending ON public.staged_steward_actions (org,
   secret text NOT NULL,
   active boolean NOT NULL DEFAULT true,
   created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (webhook_id)
 );"#,
 ];

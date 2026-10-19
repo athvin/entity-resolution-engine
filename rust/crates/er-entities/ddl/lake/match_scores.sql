@@ -1,4 +1,5 @@
 CREATE TABLE IF NOT EXISTS lake.main.match_scores (
+  id VARCHAR NOT NULL,
   rec_a_key VARCHAR NOT NULL,
   rec_b_key VARCHAR NOT NULL,
   match_probability DOUBLE NOT NULL,
@@ -11,5 +12,7 @@ CREATE TABLE IF NOT EXISTS lake.main.match_scores (
   invalidated_at TIMESTAMP,
   invalidated_run_id VARCHAR,
   run_id VARCHAR NOT NULL,
-  scored_at TIMESTAMP NOT NULL
+  scored_at TIMESTAMP NOT NULL,
+  created_at TIMESTAMP NOT NULL,
+  updated_at TIMESTAMP NOT NULL
 );

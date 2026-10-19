@@ -24,6 +24,8 @@ pub struct ConfigVersion {
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
     /// When the version was published, if it has been.
     pub published_at: Option<::chrono::DateTime<::chrono::Utc>>,
+    /// Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
 }
 
 impl ConfigVersion {
@@ -49,6 +51,7 @@ impl ConfigVersion {
             "created_by",
             "created_at",
             "published_at",
+            "updated_at",
         ]
     }
 }
@@ -76,7 +79,8 @@ RETURNING
   tier,
   created_by,
   created_at,
-  published_at
+  published_at,
+  updated_at
 ";
         let rows = client
             .query(SQL, &[&org, &yaml, &config_hash, &created_by])
@@ -93,6 +97,7 @@ RETURNING
                 created_by: row.get("created_by"),
                 created_at: row.get("created_at"),
                 published_at: row.get("published_at"),
+                updated_at: row.get("updated_at"),
             })
             .collect())
     }
@@ -115,7 +120,8 @@ pub mod read {
   tier,
   created_by,
   created_at,
-  published_at
+  published_at,
+  updated_at
 FROM public.config_versions
 WHERE org = $1 AND version = $2
 ";
@@ -132,6 +138,7 @@ WHERE org = $1 AND version = $2
                 created_by: row.get("created_by"),
                 created_at: row.get("created_at"),
                 published_at: row.get("published_at"),
+                updated_at: row.get("updated_at"),
             })
             .collect())
     }
@@ -150,7 +157,8 @@ WHERE org = $1 AND version = $2
   tier,
   created_by,
   created_at,
-  published_at
+  published_at,
+  updated_at
 FROM public.config_versions
 WHERE org = $1
 ORDER BY version DESC
@@ -168,6 +176,7 @@ ORDER BY version DESC
                 created_by: row.get("created_by"),
                 created_at: row.get("created_at"),
                 published_at: row.get("published_at"),
+                updated_at: row.get("updated_at"),
             })
             .collect())
     }

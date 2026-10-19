@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 /// One current standardized person record per record key: the standardization stage's output (supersession applied, tombstones excluded) and the matching stage's input.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
 pub struct IntStdRecord {
+    /// Content-derived row id: sha256('int_std_records:' || record_key).
+    pub id: String,
     /// Stable record identity: `source_system:source_record_id`.
     pub record_key: String,
     /// Source system the record was ingested from.
@@ -52,11 +54,15 @@ pub struct IntStdRecord {
     pub ingest_batch_id: String,
     /// When this version was ingested.
     pub ingested_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Run-logical creation time (the building run's clock; the mart is rebuilt whole).
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Run-logical last-write time (equals created_at; the mart is rebuilt whole).
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
 }
 
 impl IntStdRecord {
     /// The logical key columns.
-    pub const KEY: &'static [&'static str] = &["record_key"];
+    pub const KEY: &'static [&'static str] = &["id"];
     /// The entity schema version; bumped only on a breaking change.
     pub const VERSION: u64 = 1;
     /// The relation (table) name.
@@ -68,6 +74,7 @@ impl IntStdRecord {
     #[must_use]
     pub fn columns() -> &'static [&'static str] {
         &[
+            "id",
             "record_key",
             "source_system",
             "source_record_id",
@@ -91,6 +98,8 @@ impl IntStdRecord {
             "updated_at_source",
             "ingest_batch_id",
             "ingested_at",
+            "created_at",
+            "updated_at",
         ]
     }
 }

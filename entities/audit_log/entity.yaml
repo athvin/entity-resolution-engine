@@ -37,3 +37,15 @@ columns:
     nullable: false
     default: "'{}'::jsonb"
     description: "Structured detail for the action."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Wall-clock creation time (database default; `at` remains the domain event stamp)."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Wall-clock last-write time (equals created_at; audit rows are append-only)."

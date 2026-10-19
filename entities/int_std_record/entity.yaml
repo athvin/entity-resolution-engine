@@ -3,12 +3,16 @@ version: 1
 name: int_std_record
 relation: int_std_records
 description: "One current standardized person record per record key: the standardization stage's output (supersession applied, tombstones excluded) and the matching stage's input."
-key: [record_key]
-identity: legacy
+key: [id]
+natural_key: [record_key]
 generate:
   stores: [duckdb]
   languages: [rust]
 columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "Content-derived row id: sha256('int_std_records:' || record_key)."
   - name: record_key
     type: varchar
     nullable: false
@@ -86,3 +90,11 @@ columns:
     type: timestamp
     nullable: false
     description: "When this version was ingested."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical creation time (the building run's clock; the mart is rebuilt whole)."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time (equals created_at; the mart is rebuilt whole)."

@@ -39,7 +39,7 @@ function readListUtf8(v: unknown): string[] {
 }
 
 const EXPECTED_VERSION = "1";
-const REQUIRED: readonly string[] = ["entity_id", "attribute", "record_key", "source_system", "source_record_id", "rule", "survivorship_version", "assembled_at"];
+const REQUIRED: readonly string[] = ["id", "entity_id", "attribute", "record_key", "source_system", "source_record_id", "rule", "survivorship_version", "created_at", "updated_at"];
 
 /** Decode an Arrow table into GoldenLineage[] after checking the in-band schema. */
 export function readGoldenLineage(table: Table): GoldenLineage[] {
@@ -56,6 +56,7 @@ export function readGoldenLineage(table: Table): GoldenLineage[] {
   const rows: GoldenLineage[] = [];
   for (let i = 0; i < table.numRows; i++) {
     rows.push({
+      id: ((v) => (v == null ? null : readUtf8(v)))(table.getChild("id")?.get(i)),
       entity_id: ((v) => (v == null ? null : readUtf8(v)))(table.getChild("entity_id")?.get(i)),
       attribute: ((v) => (v == null ? null : readUtf8(v)))(table.getChild("attribute")?.get(i)),
       record_key: ((v) => (v == null ? null : readUtf8(v)))(table.getChild("record_key")?.get(i)),
@@ -63,7 +64,8 @@ export function readGoldenLineage(table: Table): GoldenLineage[] {
       source_record_id: ((v) => (v == null ? null : readUtf8(v)))(table.getChild("source_record_id")?.get(i)),
       rule: ((v) => (v == null ? null : readUtf8(v)))(table.getChild("rule")?.get(i)),
       survivorship_version: ((v) => (v == null ? null : readUtf8(v)))(table.getChild("survivorship_version")?.get(i)),
-      assembled_at: ((v) => (v == null ? null : readTimestamp(v)))(table.getChild("assembled_at")?.get(i)),
+      created_at: ((v) => (v == null ? null : readTimestamp(v)))(table.getChild("created_at")?.get(i)),
+      updated_at: ((v) => (v == null ? null : readTimestamp(v)))(table.getChild("updated_at")?.get(i)),
     } as GoldenLineage);
   }
   return rows;

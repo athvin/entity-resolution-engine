@@ -53,3 +53,7 @@ columns:
     type: timestamp
     nullable: false
     description: "Creation stamp (the run's logical timestamp)."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time (equals created_at; receipts are written once)."

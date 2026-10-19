@@ -3,6 +3,8 @@
 
 /** Per-attribute survivorship provenance: which record each surviving golden value came from. */
 export interface GoldenLineage {
+  /** Content-derived row id: sha256('golden_lineage:' || entity_id || ':' || attribute). */
+  id: string;
   /** The resolved entity this attribute decision belongs to. */
   entity_id: string;
   /** The survivable attribute decided (e.g. given_name, email, address). */
@@ -17,6 +19,8 @@ export interface GoldenLineage {
   rule: string;
   /** Survivorship policy version that produced this row. */
   survivorship_version: string;
-  /** Assembly time of this row (volatile). */
-  assembled_at: string;
+  /** Run-logical creation time (the assembling run's clock; the mart is rebuilt whole). */
+  created_at: string;
+  /** Run-logical last-write time (equals created_at; the mart is rebuilt whole). */
+  updated_at: string;
 }

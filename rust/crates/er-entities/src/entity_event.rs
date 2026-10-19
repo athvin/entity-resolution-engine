@@ -22,6 +22,10 @@ pub struct EntityEvent {
     pub details_hash: String,
     /// The run's logical timestamp for the event.
     pub occurred_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Run-logical creation time (the event's occurrence stamp; events are append-only).
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Run-logical last-write time (equals created_at; events are append-only).
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
 }
 
 impl EntityEvent {
@@ -46,6 +50,8 @@ impl EntityEvent {
             "details",
             "details_hash",
             "occurred_at",
+            "created_at",
+            "updated_at",
         ]
     }
 }
@@ -65,8 +71,10 @@ pub mod create {
         occurred_at: &str,
     ) -> ::duckdb::Result<usize> {
         const SQL: &str = "INSERT INTO lake.main.entity_events
-  (event_id, seq, run_id, entity_id, event_type, details, details_hash, occurred_at)
-VALUES ($1, $2, $3, $4, $5, $6::json, $7, $8::timestamp)
+  (event_id, seq, run_id, entity_id, event_type, details, details_hash, occurred_at,
+   created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6::json, $7, $8::timestamp,
+  $8::timestamp, $8::timestamp)
 ";
         conn.execute(
             SQL,

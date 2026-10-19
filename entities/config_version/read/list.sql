@@ -7,7 +7,8 @@ SELECT
   tier,
   created_by,
   created_at,
-  published_at
+  published_at,
+  updated_at
 FROM public.config_versions
 WHERE org = $org
 ORDER BY version DESC

@@ -15,4 +15,8 @@ export interface AuditLog {
   action: string;
   /** Structured detail for the action. */
   detail: unknown;
+  /** Wall-clock creation time (database default; `at` remains the domain event stamp). */
+  created_at: string;
+  /** Wall-clock last-write time (equals created_at; audit rows are append-only). */
+  updated_at: string;
 }

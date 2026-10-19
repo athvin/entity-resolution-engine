@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 /// One membership row per record (S4.4): which resolved entity the record's current version belongs to.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
 pub struct EntityMembership {
+    /// Content-derived row id: sha256('entity_membership:' || source_system || ':' || source_record_id).
+    pub id: String,
     /// The delivering source system.
     pub source_system: String,
     /// The record's id in its source system.
@@ -18,11 +20,15 @@ pub struct EntityMembership {
     pub assigned_at: ::chrono::DateTime<::chrono::Utc>,
     /// The run that wrote this row.
     pub run_id: String,
+    /// Run-logical creation time (the assigning run's clock).
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Run-logical last-write time (the latest assigning run's clock).
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
 }
 
 impl EntityMembership {
     /// The logical key columns.
-    pub const KEY: &'static [&'static str] = &["source_system", "source_record_id"];
+    pub const KEY: &'static [&'static str] = &["id"];
     /// The entity schema version; bumped only on a breaking change.
     pub const VERSION: u64 = 1;
     /// The relation (table) name.
@@ -34,12 +40,15 @@ impl EntityMembership {
     #[must_use]
     pub fn columns() -> &'static [&'static str] {
         &[
+            "id",
             "source_system",
             "source_record_id",
             "record_key",
             "entity_id",
             "assigned_at",
             "run_id",
+            "created_at",
+            "updated_at",
         ]
     }
 }
@@ -469,11 +478,15 @@ pub mod update {
   ON target.source_system = source.source_system
  AND target.source_record_id = source.source_record_id
 WHEN MATCHED THEN UPDATE SET record_key = source.record_key,
-    entity_id = source.entity_id, assigned_at = $1::timestamp, run_id = $2
+    entity_id = source.entity_id, assigned_at = $1::timestamp, run_id = $2,
+    updated_at = $1::timestamp
 WHEN NOT MATCHED THEN INSERT
-    (source_system, source_record_id, record_key, entity_id, assigned_at, run_id)
-    VALUES (source.source_system, source.source_record_id, source.record_key,
-            source.entity_id, $1::timestamp, $2)
+    (id, source_system, source_record_id, record_key, entity_id, assigned_at, run_id,
+     created_at, updated_at)
+    VALUES (sha256('entity_membership:' || source.source_system || ':' || source.source_record_id),
+            source.source_system, source.source_record_id, source.record_key,
+            source.entity_id, $1::timestamp, $2,
+            $1::timestamp, $1::timestamp)
 ";
         conn.execute(SQL, ::duckdb::params![assigned_at, run_id])
     }

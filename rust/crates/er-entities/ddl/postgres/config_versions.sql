@@ -8,5 +8,6 @@ CREATE TABLE IF NOT EXISTS public.config_versions (
   created_by text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   published_at timestamptz,
+  updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (org, version)
 );

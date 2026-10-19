@@ -24,6 +24,8 @@ pub struct Schedule {
     pub last_enqueued_at: Option<::chrono::DateTime<::chrono::Utc>>,
     /// When the schedule was created.
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
 }
 
 impl Schedule {
@@ -49,6 +51,7 @@ impl Schedule {
             "source",
             "last_enqueued_at",
             "created_at",
+            "updated_at",
         ]
     }
 }
@@ -104,7 +107,8 @@ pub mod read {
   enabled,
   source,
   last_enqueued_at,
-  created_at
+  created_at,
+  updated_at
 FROM public.schedules
 WHERE org = $1
 ORDER BY created_at
@@ -122,6 +126,7 @@ ORDER BY created_at
                 source: row.get("source"),
                 last_enqueued_at: row.get("last_enqueued_at"),
                 created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
             })
             .collect())
     }

@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 /// Per-attribute survivorship provenance for a resolved account: which record each surviving value came from.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
 pub struct AcctGoldenLineage {
+    /// Content-derived row id: sha256('acct_golden_lineage:' || entity_id || ':' || attribute).
+    pub id: String,
     /// The resolved account this attribute decision belongs to.
     pub entity_id: String,
     /// The survivable attribute decided (e.g. company_name, domain, address).
@@ -20,13 +22,15 @@ pub struct AcctGoldenLineage {
     pub rule: String,
     /// Survivorship policy version that produced this row.
     pub survivorship_version: String,
-    /// Assembly time of this row (volatile).
-    pub assembled_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Run-logical creation time (the assembling run's clock; the mart is rebuilt whole).
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Run-logical last-write time (equals created_at; the mart is rebuilt whole).
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
 }
 
 impl AcctGoldenLineage {
     /// The logical key columns.
-    pub const KEY: &'static [&'static str] = &["entity_id", "attribute"];
+    pub const KEY: &'static [&'static str] = &["id"];
     /// The entity schema version; bumped only on a breaking change.
     pub const VERSION: u64 = 1;
     /// The relation (table) name.
@@ -38,6 +42,7 @@ impl AcctGoldenLineage {
     #[must_use]
     pub fn columns() -> &'static [&'static str] {
         &[
+            "id",
             "entity_id",
             "attribute",
             "record_key",
@@ -45,7 +50,8 @@ impl AcctGoldenLineage {
             "source_record_id",
             "rule",
             "survivorship_version",
-            "assembled_at",
+            "created_at",
+            "updated_at",
         ]
     }
 
@@ -55,6 +61,7 @@ impl AcctGoldenLineage {
     pub fn arrow_schema() -> ::arrow::datatypes::Schema {
         use ::arrow::datatypes::{DataType, Field, Schema, TimeUnit};
         let fields: Vec<Field> = vec![
+            Field::new("id", DataType::Utf8, false),
             Field::new("entity_id", DataType::Utf8, false),
             Field::new("attribute", DataType::Utf8, false),
             Field::new("record_key", DataType::Utf8, false),
@@ -63,13 +70,18 @@ impl AcctGoldenLineage {
             Field::new("rule", DataType::Utf8, false),
             Field::new("survivorship_version", DataType::Utf8, false),
             Field::new(
-                "assembled_at",
+                "created_at",
+                DataType::Timestamp(TimeUnit::Microsecond, None),
+                false,
+            ),
+            Field::new(
+                "updated_at",
                 DataType::Timestamp(TimeUnit::Microsecond, None),
                 false,
             ),
         ];
         let metadata = ::std::collections::HashMap::from([
-            ("er.key".to_string(), "entity_id,attribute".to_string()),
+            ("er.key".to_string(), "id".to_string()),
             ("er.store".to_string(), "lake.main".to_string()),
             ("er.relation".to_string(), "acct_golden_lineage".to_string()),
             ("er.schema_version".to_string(), "1".to_string()),

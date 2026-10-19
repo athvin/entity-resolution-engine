@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 /// One steward golden-field override (latest-wins per entity and attribute); a NULL value means the steward cleared the field.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
 pub struct GoldenOverride {
+    /// Content-derived row id: sha256('golden_overrides:' || entity_id || ':' || attribute).
+    pub id: String,
     /// The resolved entity (ULID).
     pub entity_id: String,
     /// The golden attribute the override pins.
@@ -18,11 +20,13 @@ pub struct GoldenOverride {
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
     /// The staged steward action that produced this row.
     pub source_action_id: String,
+    /// Run-logical last-write time (set at insert; overrides are replaced, not edited).
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
 }
 
 impl GoldenOverride {
     /// The logical key columns.
-    pub const KEY: &'static [&'static str] = &["entity_id", "attribute"];
+    pub const KEY: &'static [&'static str] = &["id"];
     /// The entity schema version; bumped only on a breaking change.
     pub const VERSION: u64 = 1;
     /// The relation (table) name.
@@ -34,12 +38,14 @@ impl GoldenOverride {
     #[must_use]
     pub fn columns() -> &'static [&'static str] {
         &[
+            "id",
             "entity_id",
             "attribute",
             "value",
             "created_by",
             "created_at",
             "source_action_id",
+            "updated_at",
         ]
     }
 }
@@ -57,8 +63,10 @@ pub mod create {
         source_action_id: &str,
     ) -> ::duckdb::Result<usize> {
         const SQL: &str = "INSERT INTO lake.main.golden_overrides
-  (entity_id, attribute, value, created_by, created_at, source_action_id)
-VALUES ($1, $2, $3, $4, $5::timestamp, $6)
+  (id, entity_id, attribute, value, created_by, created_at, source_action_id, updated_at)
+VALUES (sha256('golden_overrides:' || $1 || ':' || $2),
+        $1, $2, $3, $4, $5::timestamp,
+        $6, $5::timestamp)
 ";
         conn.execute(
             SQL,

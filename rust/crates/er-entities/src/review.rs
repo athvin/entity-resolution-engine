@@ -32,6 +32,10 @@ pub struct Review {
     pub resolved_by: Option<String>,
     /// When it was resolved; NULL while open.
     pub resolved_at: Option<::chrono::DateTime<::chrono::Utc>>,
+    /// Run-logical creation time (the writing run's clock).
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Run-logical last-write time (advanced by re-sighting and resolve).
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
 }
 
 impl Review {
@@ -61,6 +65,8 @@ impl Review {
             "last_seen_run_id",
             "resolved_by",
             "resolved_at",
+            "created_at",
+            "updated_at",
         ]
     }
 }
@@ -383,7 +389,8 @@ pub mod update {
         review_id: &str,
     ) -> ::duckdb::Result<usize> {
         const SQL: &str =
-            "UPDATE lake.main.review_queue SET status = $1, resolved_at = $2::timestamp
+            "UPDATE lake.main.review_queue SET status = $1, resolved_at = $2::timestamp,
+    updated_at = $2::timestamp
 WHERE review_id = $3
 ";
         conn.execute(SQL, ::duckdb::params![status, resolved_at, review_id])
@@ -393,6 +400,7 @@ WHERE review_id = $3
     pub fn upsert_gray_band(
         conn: &::duckdb::Connection,
         run_id: &str,
+        created_at: &str,
         review_low: f64,
         auto_merge: f64,
     ) -> ::duckdb::Result<usize> {
@@ -404,23 +412,27 @@ WHERE review_id = $3
          $1 AS first_seen_run_id, $1 AS last_seen_run_id,
          CAST(NULL AS varchar) AS resolved_by, CAST(NULL AS timestamp) AS resolved_at
   FROM lake.main.match_scores
-  WHERE is_active AND match_probability >= $2 AND match_probability < $3
+  WHERE is_active AND match_probability >= $3 AND match_probability < $4
 ) AS source
   ON target.rec_a_key = source.rec_a_key AND target.rec_b_key = source.rec_b_key
  AND target.reason = source.reason
 WHEN MATCHED THEN UPDATE SET match_probability = source.match_probability,
-    waterfall = source.waterfall, last_seen_run_id = source.last_seen_run_id
+    waterfall = source.waterfall, last_seen_run_id = source.last_seen_run_id,
+    updated_at = $2::timestamp
 WHEN NOT MATCHED THEN INSERT
     (review_id, subject_type, rec_a_key, rec_b_key, entity_id, reason,
      match_probability, waterfall, status, first_seen_run_id, last_seen_run_id,
-     resolved_by, resolved_at)
+     resolved_by, resolved_at, created_at, updated_at)
     VALUES
     (source.review_id, source.subject_type, source.rec_a_key, source.rec_b_key,
      source.entity_id, source.reason, source.match_probability, source.waterfall,
      source.status, source.first_seen_run_id, source.last_seen_run_id,
-     source.resolved_by, source.resolved_at)
+     source.resolved_by, source.resolved_at, $2::timestamp, $2::timestamp)
 ";
-        conn.execute(SQL, ::duckdb::params![run_id, review_low, auto_merge])
+        conn.execute(
+            SQL,
+            ::duckdb::params![run_id, created_at, review_low, auto_merge],
+        )
     }
 
     /// Upsert one never-unsatisfiable escalation as an open pair review: a re-run keeps review_id/first_seen_run_id and refreshes last_seen_run_id.
@@ -429,6 +441,7 @@ WHEN NOT MATCHED THEN INSERT
         rec_a_key: &str,
         rec_b_key: &str,
         run_id: &str,
+        created_at: &str,
     ) -> ::duckdb::Result<usize> {
         const SQL: &str = "MERGE INTO lake.main.review_queue AS target USING (
   SELECT 'never_unsatisfiable:' || $1 || ':' || $2 AS review_id,
@@ -440,17 +453,21 @@ WHEN NOT MATCHED THEN INSERT
 ) AS source
   ON target.rec_a_key = source.rec_a_key AND target.rec_b_key = source.rec_b_key
  AND target.reason = source.reason
-WHEN MATCHED THEN UPDATE SET last_seen_run_id = source.last_seen_run_id
+WHEN MATCHED THEN UPDATE SET last_seen_run_id = source.last_seen_run_id,
+    updated_at = $4::timestamp
 WHEN NOT MATCHED THEN INSERT
     (review_id, subject_type, rec_a_key, rec_b_key, entity_id, reason,
      match_probability, waterfall, status, first_seen_run_id, last_seen_run_id,
-     resolved_by, resolved_at)
+     resolved_by, resolved_at, created_at, updated_at)
     VALUES
     (source.review_id, source.subject_type, source.rec_a_key, source.rec_b_key,
      source.entity_id, source.reason, source.match_probability, source.waterfall,
      source.status, source.first_seen_run_id, source.last_seen_run_id,
-     source.resolved_by, source.resolved_at)
+     source.resolved_by, source.resolved_at, $4::timestamp, $4::timestamp)
 ";
-        conn.execute(SQL, ::duckdb::params![rec_a_key, rec_b_key, run_id])
+        conn.execute(
+            SQL,
+            ::duckdb::params![rec_a_key, rec_b_key, run_id, created_at],
+        )
     }
 }

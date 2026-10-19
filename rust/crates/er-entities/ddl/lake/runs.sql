@@ -14,5 +14,7 @@ CREATE TABLE IF NOT EXISTS lake.main.runs (
   code_version VARCHAR NOT NULL,
   rebuild_reason VARCHAR,
   snapshot_start BIGINT,
-  snapshot_end BIGINT
+  snapshot_end BIGINT,
+  created_at TIMESTAMP NOT NULL,
+  updated_at TIMESTAMP NOT NULL
 );

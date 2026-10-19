@@ -6,7 +6,8 @@ use dedupe_core::session::Session;
 use er_config::SourceSpec;
 
 /// The `raw_records` columns (S4.1), in S5 DDL order.
-pub const RAW_RECORDS_COLUMNS: [&str; 8] = [
+pub const RAW_RECORDS_COLUMNS: [&str; 11] = [
+    "id",
     "source_system",
     "source_record_id",
     "payload",
@@ -15,6 +16,8 @@ pub const RAW_RECORDS_COLUMNS: [&str; 8] = [
     "deleted_at",
     "ingest_batch_id",
     "ingested_at",
+    "created_at",
+    "updated_at",
 ];
 
 /// The S4.1.1 tombstone sentinel `content_hash`: 64 zeros. The S4.1 hash function
@@ -65,9 +68,10 @@ pub fn row_content_hash(payload: &BTreeMap<String, Option<String>>, spec: &Sourc
 pub fn create_raw_records_sql(table: &str) -> String {
     format!(
         "create table {table} (\
-         source_system varchar, source_record_id varchar, payload json, \
+         id varchar, source_system varchar, source_record_id varchar, payload json, \
          content_hash varchar, is_deleted boolean, deleted_at timestamp, \
-         ingest_batch_id varchar, ingested_at timestamp)"
+         ingest_batch_id varchar, ingested_at timestamp, \
+         created_at timestamp, updated_at timestamp)"
     )
 }
 
@@ -120,6 +124,10 @@ pub fn land_base_delivery(
             .collect();
         let payload_json = serde_json::to_string(&serde_json::Value::Object(json_map))?;
         rows.push(er_entities::raw_record::AppendRow {
+            id: er_ids::natural_id(
+                "raw_records",
+                &[source, &source_record_id, &content_hash, ingest_batch_id],
+            ),
             source_system: source.to_string(),
             source_record_id,
             payload: Some(payload_json),
@@ -128,6 +136,8 @@ pub fn land_base_delivery(
             deleted_at: None,
             ingest_batch_id: ingest_batch_id.to_string(),
             ingested_at: ingested_at.to_string(),
+            created_at: ingested_at.to_string(),
+            updated_at: ingested_at.to_string(),
         });
     }
 
@@ -175,6 +185,15 @@ pub fn land_full_refresh(
         let rows: Vec<er_entities::raw_record::AppendRow> = omitted
             .into_iter()
             .map(|r| er_entities::raw_record::AppendRow {
+                id: er_ids::natural_id(
+                    "raw_records",
+                    &[
+                        source,
+                        &r.source_record_id,
+                        TOMBSTONE_CONTENT_HASH,
+                        ingest_batch_id,
+                    ],
+                ),
                 source_system: source.to_string(),
                 source_record_id: r.source_record_id,
                 payload: None,
@@ -183,6 +202,8 @@ pub fn land_full_refresh(
                 deleted_at: Some(ingested_at.to_string()),
                 ingest_batch_id: ingest_batch_id.to_string(),
                 ingested_at: ingested_at.to_string(),
+                created_at: ingested_at.to_string(),
+                updated_at: ingested_at.to_string(),
             })
             .collect();
         er_entities::raw_record::append_rows(session.connection(), &rows)
@@ -246,11 +267,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tombstone_is_64_zeros_and_columns_are_eight() {
+    fn tombstone_is_64_zeros_and_columns_are_eleven() {
         assert_eq!(TOMBSTONE_CONTENT_HASH.len(), 64);
         assert!(TOMBSTONE_CONTENT_HASH.chars().all(|c| c == '0'));
-        assert_eq!(RAW_RECORDS_COLUMNS.len(), 8);
-        assert_eq!(RAW_RECORDS_COLUMNS[0], "source_system");
+        assert_eq!(RAW_RECORDS_COLUMNS.len(), 11);
+        assert_eq!(RAW_RECORDS_COLUMNS[0], "id");
     }
 
     /// The session-table DDL and column list here must stay in S5 order: the

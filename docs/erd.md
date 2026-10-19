@@ -24,6 +24,7 @@ erDiagram
         varchar key_hash
         timestamp created_at
         timestamp revoked_at
+        timestamp updated_at
     }
     audit_log {
         bigint id PK
@@ -32,6 +33,8 @@ erDiagram
         varchar org
         varchar action
         json detail
+        timestamp created_at
+        timestamp updated_at
     }
     config_versions {
         varchar org PK, FK
@@ -43,6 +46,7 @@ erDiagram
         varchar created_by
         timestamp created_at
         timestamp published_at
+        timestamp updated_at
     }
     ddl_log {
         bigint id PK
@@ -84,6 +88,7 @@ erDiagram
         bigint active_config_version
         varchar state "in {active, provisioning, purging, suspended}"
         timestamp created_at
+        timestamp updated_at
     }
     schedules {
         varchar schedule_id PK
@@ -95,6 +100,7 @@ erDiagram
         varchar source
         timestamp last_enqueued_at
         timestamp created_at
+        timestamp updated_at
     }
     staged_steward_actions {
         varchar action_id PK
@@ -105,6 +111,7 @@ erDiagram
         varchar created_by
         timestamp created_at
         timestamp applied_at
+        timestamp updated_at
     }
     webhooks {
         varchar webhook_id PK
@@ -114,6 +121,7 @@ erDiagram
         varchar secret
         boolean active
         timestamp created_at
+        timestamp updated_at
     }
     api_keys }o--|| orgs : "org → name"
     config_versions }o--|| orgs : "org → name"
@@ -242,21 +250,25 @@ edge with several plausible targets is omitted rather than guessed.
 ```mermaid
 erDiagram
     raw_records {
-        varchar source_system PK
-        varchar source_record_id PK
+        varchar id PK
+        varchar source_system
+        varchar source_record_id
         json payload
-        varchar content_hash PK
+        varchar content_hash
         boolean is_deleted
         timestamp deleted_at
         varchar ingest_batch_id
         timestamp ingested_at
+        timestamp created_at
+        timestamp updated_at
     }
     match_scores {
-        varchar rec_a_key PK
-        varchar rec_b_key PK
+        varchar id PK
+        varchar rec_a_key
+        varchar rec_b_key
         double match_probability
-        varchar model_version PK
-        varchar tf_snapshot_id PK
+        varchar model_version
+        varchar tf_snapshot_id
         varchar rec_a_content_hash
         varchar rec_b_content_hash
         json evidence
@@ -265,14 +277,19 @@ erDiagram
         varchar invalidated_run_id
         varchar run_id
         timestamp scored_at
+        timestamp created_at
+        timestamp updated_at
     }
     entity_membership {
-        varchar source_system PK
-        varchar source_record_id PK
+        varchar id PK
+        varchar source_system
+        varchar source_record_id
         varchar record_key
         varchar entity_id
         timestamp assigned_at
         varchar run_id
+        timestamp created_at
+        timestamp updated_at
     }
     entities {
         varchar entity_id PK
@@ -292,6 +309,8 @@ erDiagram
         json details
         varchar details_hash
         timestamp occurred_at
+        timestamp created_at
+        timestamp updated_at
     }
     assertions {
         varchar assertion_id PK
@@ -304,6 +323,7 @@ erDiagram
         varchar retracted_by
         timestamp retracted_at
         varchar note
+        timestamp updated_at
     }
     review_queue {
         varchar review_id PK
@@ -319,6 +339,8 @@ erDiagram
         varchar last_seen_run_id
         varchar resolved_by
         timestamp resolved_at
+        timestamp created_at
+        timestamp updated_at
     }
     cut_edges {
         varchar cut_id PK
@@ -351,6 +373,8 @@ erDiagram
         varchar rebuild_reason "in {correction_pass, lexicon_change, operator, std_version_bump, survivorship_version_bump}"
         bigint snapshot_start
         bigint snapshot_end
+        timestamp created_at
+        timestamp updated_at
     }
     run_stages {
         varchar run_id PK
@@ -388,26 +412,32 @@ erDiagram
         bigint resurrected_count
         boolean full_refresh_keys
         timestamp created_at
+        timestamp updated_at
     }
     golden_overrides {
-        varchar entity_id PK
-        varchar attribute PK
+        varchar id PK
+        varchar entity_id
+        varchar attribute
         varchar value
         varchar created_by
         timestamp created_at
         varchar source_action_id
+        timestamp updated_at
     }
     record_overlays {
-        varchar record_key PK
-        varchar kind PK
+        varchar id PK
+        varchar record_key
+        varchar kind
         boolean active
         varchar created_by
         timestamp created_at
         varchar source_action_id
         timestamp retracted_at
+        timestamp updated_at
     }
     int_std_records {
-        varchar record_key PK
+        varchar id PK
+        varchar record_key
         varchar source_system
         varchar source_record_id
         varchar content_hash
@@ -430,6 +460,8 @@ erDiagram
         timestamp updated_at_source
         varchar ingest_batch_id
         timestamp ingested_at
+        timestamp created_at
+        timestamp updated_at
     }
     golden_records {
         varchar entity_id PK
@@ -449,17 +481,20 @@ erDiagram
         timestamp assembled_at
     }
     golden_lineage {
-        varchar entity_id PK
-        varchar attribute PK "in {address, birth_date, email, family_name, given_name, phone_e164}"
+        varchar id PK
+        varchar entity_id
+        varchar attribute "in {address, birth_date, email, family_name, given_name, phone_e164}"
         varchar record_key
         varchar source_system
         varchar source_record_id
         varchar rule
         varchar survivorship_version
-        timestamp assembled_at
+        timestamp created_at
+        timestamp updated_at
     }
     acct_int_std_records {
-        varchar record_key PK
+        varchar id PK
+        varchar record_key
         varchar source_system
         varchar source_record_id
         varchar content_hash
@@ -479,6 +514,8 @@ erDiagram
         timestamp updated_at_source
         varchar ingest_batch_id
         timestamp ingested_at
+        timestamp created_at
+        timestamp updated_at
     }
     acct_golden_records {
         varchar entity_id PK
@@ -494,14 +531,16 @@ erDiagram
         timestamp assembled_at
     }
     acct_golden_lineage {
-        varchar entity_id PK
-        varchar attribute PK "in {address, company_name, domain, phone_e164}"
+        varchar id PK
+        varchar entity_id
+        varchar attribute "in {address, company_name, domain, phone_e164}"
         varchar record_key
         varchar source_system
         varchar source_record_id
         varchar rule
         varchar survivorship_version
-        timestamp assembled_at
+        timestamp created_at
+        timestamp updated_at
     }
     raw_records }o..|| ingest_batches : "ingest_batch_id"
     raw_records }o..|| entity_membership : "source_system, source_record_id"

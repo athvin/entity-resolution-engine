@@ -19,4 +19,6 @@ export interface StagedStewardAction {
   created_at: string;
   /** When the action was applied, if it has been. */
   applied_at: string | null;
+  /** Wall-clock last-write time (database default; advanced by mutations once the entity migrates). */
+  updated_at: string;
 }

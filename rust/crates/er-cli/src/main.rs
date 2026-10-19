@@ -44,6 +44,8 @@ enum Command {
     Standardize {
         #[arg(long)]
         lexicon: PathBuf,
+        #[arg(long, default_value = "2026-01-01 00:00:00")]
+        run_at: String,
     },
     /// S4.3 — score match_scores against the committed model (full mode).
     Match {
@@ -68,7 +70,10 @@ enum Command {
         run_at: String,
     },
     /// S4.6 — assemble golden_records + golden_lineage.
-    Golden,
+    Golden {
+        #[arg(long, default_value = "2026-01-01 00:00:00")]
+        run_at: String,
+    },
     /// The S4.0 full-mode chain: ingest every `<drop>/<source>.csv` → standardize
     /// → match → reconcile → golden, under one run id.
     RunAll {
@@ -179,9 +184,9 @@ fn main() -> Result<()> {
             )?;
             println!("ingested {n} rows from {source}");
         }
-        Command::Standardize { lexicon } => {
+        Command::Standardize { lexicon, run_at } => {
             er_cli::seed_lexicon(&session, &load_lexicon(&lexicon)?)?;
-            er_cli::run_standardize(&session, &config)?;
+            er_cli::run_standardize(&session, &config, &run_at)?;
             println!("standardized");
         }
         Command::Match {
@@ -213,8 +218,8 @@ fn main() -> Result<()> {
             er_cli::run_reconcile(&session, &config, &run_id, &run_at)?;
             println!("reconciled");
         }
-        Command::Golden => {
-            er_cli::run_golden(&session, &config)?;
+        Command::Golden { run_at } => {
+            er_cli::run_golden(&session, &config, &run_at)?;
             println!("assembled golden records");
         }
         Command::RunAll {

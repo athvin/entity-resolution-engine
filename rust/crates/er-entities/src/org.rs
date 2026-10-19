@@ -20,6 +20,8 @@ pub struct Org {
     pub state: String,
     /// When the tenant was created.
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
 }
 
 impl Org {
@@ -43,6 +45,7 @@ impl Org {
             "active_config_version",
             "state",
             "created_at",
+            "updated_at",
         ]
     }
 }
@@ -95,7 +98,8 @@ pub mod read {
   drop_root,
   active_config_version,
   state,
-  created_at
+  created_at,
+  updated_at
 FROM public.orgs
 WHERE name = $1
 ";
@@ -110,6 +114,7 @@ WHERE name = $1
                 active_config_version: row.get("active_config_version"),
                 state: row.get("state"),
                 created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
             })
             .collect())
     }
@@ -125,7 +130,8 @@ WHERE name = $1
   drop_root,
   active_config_version,
   state,
-  created_at
+  created_at,
+  updated_at
 FROM public.orgs
 ORDER BY name
 ";
@@ -140,6 +146,7 @@ ORDER BY name
                 active_config_version: row.get("active_config_version"),
                 state: row.get("state"),
                 created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
             })
             .collect())
     }

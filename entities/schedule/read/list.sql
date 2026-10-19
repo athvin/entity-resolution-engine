@@ -7,7 +7,8 @@ SELECT
   enabled,
   source,
   last_enqueued_at,
-  created_at
+  created_at,
+  updated_at
 FROM public.schedules
 WHERE org = $org
 ORDER BY created_at

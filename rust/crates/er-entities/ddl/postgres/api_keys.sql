@@ -5,5 +5,6 @@ CREATE TABLE IF NOT EXISTS public.api_keys (
   key_hash text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   revoked_at timestamptz,
+  updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (key_id)
 );
