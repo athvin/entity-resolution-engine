@@ -46,3 +46,7 @@ columns:
   - name: note
     type: varchar
     description: "Optional steward note."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time (advanced by retract)."

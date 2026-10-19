@@ -18,6 +18,8 @@ pub struct ApiKey {
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
     /// When the key was revoked, if it has been.
     pub revoked_at: Option<::chrono::DateTime<::chrono::Utc>>,
+    /// Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
 }
 
 impl ApiKey {
@@ -40,6 +42,7 @@ impl ApiKey {
             "key_hash",
             "created_at",
             "revoked_at",
+            "updated_at",
         ]
     }
 }
@@ -76,7 +79,8 @@ pub mod read {
   role,
   key_hash,
   created_at,
-  revoked_at
+  revoked_at,
+  updated_at
 FROM public.api_keys
 WHERE key_id = $1 AND revoked_at IS NULL
 ";
@@ -90,6 +94,7 @@ WHERE key_id = $1 AND revoked_at IS NULL
                 key_hash: row.get("key_hash"),
                 created_at: row.get("created_at"),
                 revoked_at: row.get("revoked_at"),
+                updated_at: row.get("updated_at"),
             })
             .collect())
     }

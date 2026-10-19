@@ -18,6 +18,10 @@ pub struct AuditLog {
     pub action: String,
     /// Structured detail for the action.
     pub detail: ::serde_json::Value,
+    /// Wall-clock creation time (database default; `at` remains the domain event stamp).
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Wall-clock last-write time (equals created_at; audit rows are append-only).
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
 }
 
 impl AuditLog {
@@ -33,7 +37,16 @@ impl AuditLog {
     /// The declaration-ordered column names.
     #[must_use]
     pub fn columns() -> &'static [&'static str] {
-        &["id", "at", "actor", "org", "action", "detail"]
+        &[
+            "id",
+            "at",
+            "actor",
+            "org",
+            "action",
+            "detail",
+            "created_at",
+            "updated_at",
+        ]
     }
 }
 
@@ -70,7 +83,9 @@ pub mod read {
   actor,
   org,
   action,
-  detail
+  detail,
+  created_at,
+  updated_at
 FROM public.audit_log
 WHERE ($1::text IS NULL OR org = $1)
   AND ($2::text IS NULL OR action = $2)
@@ -90,6 +105,8 @@ LIMIT $4
                 org: row.get("org"),
                 action: row.get("action"),
                 detail: row.get("detail"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
             })
             .collect())
     }

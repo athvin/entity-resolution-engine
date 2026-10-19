@@ -695,13 +695,14 @@ pub fn apply_staged_action(
 ///
 /// # Errors
 /// Propagates lake DDL / MERGE errors.
-pub fn write_reviews(session: &Session, config: &Config, run_id: &str) -> Result<()> {
+pub fn write_reviews(session: &Session, config: &Config, run_id: &str, run_at: &str) -> Result<()> {
     create_ddl_table(session, "review_queue")?;
     // The gray-band source folds into the statement's USING subquery, so the
     // whole upsert is one declared MERGE (no staging table).
     er_entities::review::update::upsert_gray_band(
         session.connection(),
         run_id,
+        run_at,
         config.thresholds.review_low,
         config.thresholds.auto_merge,
     )?;
@@ -722,6 +723,7 @@ pub fn write_reviews(session: &Session, config: &Config, run_id: &str) -> Result
 fn write_never_unsatisfiable_reviews(
     session: &Session,
     run_id: &str,
+    run_at: &str,
     escalations: &[(String, String, String)],
 ) -> Result<()> {
     if escalations.is_empty() {
@@ -736,6 +738,7 @@ fn write_never_unsatisfiable_reviews(
             a,
             b,
             run_id,
+            run_at,
         )?;
     }
     Ok(())
@@ -937,7 +940,7 @@ pub fn run_reconcile(session: &Session, config: &Config, run_id: &str, run_at: &
         // determinism contract — is untouched on the base path. (High-confidence
         // escalations, possible pre-1.3c, stay silent until we rebaseline.)
         if !protected.is_empty() && !result.escalations.is_empty() {
-            write_never_unsatisfiable_reviews(session, run_id, &result.escalations)?;
+            write_never_unsatisfiable_reviews(session, run_id, run_at, &result.escalations)?;
         }
     }
     let edges: Vec<(String, String)> = edges.into_iter().map(|(a, b, _)| (a, b)).collect();
@@ -1299,7 +1302,7 @@ pub fn run_all(session: &Session, config: &Config, inputs: &PipelineInputs) -> R
     )?;
     run_reconcile(session, config, inputs.run_id, inputs.run_at)?;
     run_golden(session, config, inputs.run_at)?;
-    write_reviews(session, config, inputs.run_id)?;
+    write_reviews(session, config, inputs.run_id, inputs.run_at)?;
     write_run_end(session, inputs.run_id, inputs.run_at)?;
     Ok(())
 }
@@ -1346,7 +1349,7 @@ pub fn run_correct(session: &Session, config: &Config, run_id: &str, run_at: &st
     )?;
     run_reconcile(session, config, run_id, run_at)?;
     run_golden(session, config, run_at)?;
-    write_reviews(session, config, run_id)?;
+    write_reviews(session, config, run_id, run_at)?;
     write_run_end(session, run_id, run_at)?;
     Ok(())
 }

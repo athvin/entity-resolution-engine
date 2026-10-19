@@ -17,4 +17,6 @@ export interface Org {
   state: string;
   /** When the tenant was created. */
   created_at: string;
+  /** Wall-clock last-write time (database default; advanced by mutations once the entity migrates). */
+  updated_at: string;
 }

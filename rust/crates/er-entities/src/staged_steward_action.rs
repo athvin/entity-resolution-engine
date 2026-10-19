@@ -22,6 +22,8 @@ pub struct StagedStewardAction {
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
     /// When the action was applied, if it has been.
     pub applied_at: Option<::chrono::DateTime<::chrono::Utc>>,
+    /// Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
 }
 
 impl StagedStewardAction {
@@ -46,6 +48,7 @@ impl StagedStewardAction {
             "created_by",
             "created_at",
             "applied_at",
+            "updated_at",
         ]
     }
 }
@@ -85,7 +88,8 @@ pub mod read {
   error,
   created_by,
   created_at,
-  applied_at
+  applied_at,
+  updated_at
 FROM public.staged_steward_actions
 WHERE org = $1 AND state = 'pending'
 ORDER BY created_at, action_id
@@ -102,6 +106,7 @@ ORDER BY created_at, action_id
                 created_by: row.get("created_by"),
                 created_at: row.get("created_at"),
                 applied_at: row.get("applied_at"),
+                updated_at: row.get("updated_at"),
             })
             .collect())
     }

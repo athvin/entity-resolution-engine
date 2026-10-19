@@ -45,6 +45,12 @@ columns:
   - name: applied_at
     type: timestamp
     description: "When the action was applied, if it has been."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Wall-clock last-write time (database default; advanced by mutations once the entity migrates)."
 indexes:
   - name: staged_pending
     columns: [org, state]

@@ -11,5 +11,7 @@ CREATE TABLE IF NOT EXISTS lake.main.review_queue (
   first_seen_run_id VARCHAR NOT NULL,
   last_seen_run_id VARCHAR NOT NULL,
   resolved_by VARCHAR,
-  resolved_at TIMESTAMP
+  resolved_at TIMESTAMP,
+  created_at TIMESTAMP NOT NULL,
+  updated_at TIMESTAMP NOT NULL
 );

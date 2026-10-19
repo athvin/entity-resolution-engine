@@ -1,2 +1,3 @@
-UPDATE lake.main.runs SET status = 'succeeded', ended_at = $ended_at::timestamp
+UPDATE lake.main.runs SET status = 'succeeded', ended_at = $ended_at::timestamp,
+    updated_at = $ended_at::timestamp
 WHERE run_id = $run_id

@@ -28,6 +28,8 @@ pub struct IngestBatch {
     pub full_refresh_keys: bool,
     /// Creation stamp (the run's logical timestamp).
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Run-logical last-write time (equals created_at; receipts are written once).
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
 }
 
 impl IngestBatch {
@@ -55,6 +57,7 @@ impl IngestBatch {
             "resurrected_count",
             "full_refresh_keys",
             "created_at",
+            "updated_at",
         ]
     }
 }
@@ -78,9 +81,11 @@ pub mod create {
     ) -> ::duckdb::Result<usize> {
         const SQL: &str = "INSERT INTO lake.main.ingest_batches
   (ingest_batch_id, run_id, source_system, path, new_count, changed_count,
-   unchanged_count, tombstone_count, resurrected_count, full_refresh_keys, created_at)
+   unchanged_count, tombstone_count, resurrected_count, full_refresh_keys, created_at,
+   updated_at)
 VALUES ($1, $2, $3, $4, $5, $6,
-  $7, $8, $9, $10, $11::timestamp)
+  $7, $8, $9, $10, $11::timestamp,
+  $11::timestamp)
 ";
         conn.execute(
             SQL,

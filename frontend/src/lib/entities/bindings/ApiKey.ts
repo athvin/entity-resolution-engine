@@ -15,4 +15,6 @@ export interface ApiKey {
   created_at: string;
   /** When the key was revoked, if it has been. */
   revoked_at: string | null;
+  /** Wall-clock last-write time (database default; advanced by mutations once the entity migrates). */
+  updated_at: string;
 }

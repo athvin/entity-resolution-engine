@@ -4,7 +4,9 @@ SELECT
   actor,
   org,
   action,
-  detail
+  detail,
+  created_at,
+  updated_at
 FROM public.audit_log
 WHERE ($org::text IS NULL OR org = $org)
   AND ($action::text IS NULL OR action = $action)

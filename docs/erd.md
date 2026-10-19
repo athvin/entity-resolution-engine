@@ -24,6 +24,7 @@ erDiagram
         varchar key_hash
         timestamp created_at
         timestamp revoked_at
+        timestamp updated_at
     }
     audit_log {
         bigint id PK
@@ -32,6 +33,8 @@ erDiagram
         varchar org
         varchar action
         json detail
+        timestamp created_at
+        timestamp updated_at
     }
     config_versions {
         varchar org PK, FK
@@ -43,6 +46,7 @@ erDiagram
         varchar created_by
         timestamp created_at
         timestamp published_at
+        timestamp updated_at
     }
     ddl_log {
         bigint id PK
@@ -84,6 +88,7 @@ erDiagram
         bigint active_config_version
         varchar state "in {active, provisioning, purging, suspended}"
         timestamp created_at
+        timestamp updated_at
     }
     schedules {
         varchar schedule_id PK
@@ -95,6 +100,7 @@ erDiagram
         varchar source
         timestamp last_enqueued_at
         timestamp created_at
+        timestamp updated_at
     }
     staged_steward_actions {
         varchar action_id PK
@@ -105,6 +111,7 @@ erDiagram
         varchar created_by
         timestamp created_at
         timestamp applied_at
+        timestamp updated_at
     }
     webhooks {
         varchar webhook_id PK
@@ -114,6 +121,7 @@ erDiagram
         varchar secret
         boolean active
         timestamp created_at
+        timestamp updated_at
     }
     api_keys }o--|| orgs : "org → name"
     config_versions }o--|| orgs : "org → name"
@@ -301,6 +309,8 @@ erDiagram
         json details
         varchar details_hash
         timestamp occurred_at
+        timestamp created_at
+        timestamp updated_at
     }
     assertions {
         varchar assertion_id PK
@@ -313,6 +323,7 @@ erDiagram
         varchar retracted_by
         timestamp retracted_at
         varchar note
+        timestamp updated_at
     }
     review_queue {
         varchar review_id PK
@@ -328,6 +339,8 @@ erDiagram
         varchar last_seen_run_id
         varchar resolved_by
         timestamp resolved_at
+        timestamp created_at
+        timestamp updated_at
     }
     cut_edges {
         varchar cut_id PK
@@ -360,6 +373,8 @@ erDiagram
         varchar rebuild_reason "in {correction_pass, lexicon_change, operator, std_version_bump, survivorship_version_bump}"
         bigint snapshot_start
         bigint snapshot_end
+        timestamp created_at
+        timestamp updated_at
     }
     run_stages {
         varchar run_id PK
@@ -397,6 +412,7 @@ erDiagram
         bigint resurrected_count
         boolean full_refresh_keys
         timestamp created_at
+        timestamp updated_at
     }
     golden_overrides {
         varchar id PK

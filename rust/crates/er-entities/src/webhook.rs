@@ -20,6 +20,8 @@ pub struct Webhook {
     pub active: bool,
     /// When the webhook was registered.
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
 }
 
 impl Webhook {
@@ -43,6 +45,7 @@ impl Webhook {
             "secret",
             "active",
             "created_at",
+            "updated_at",
         ]
     }
 }
@@ -96,7 +99,8 @@ pub mod read {
   events,
   secret,
   active,
-  created_at
+  created_at,
+  updated_at
 FROM public.webhooks
 WHERE org = $1 AND active
   AND (events @> to_jsonb($2::text) OR jsonb_array_length(events) = 0)
@@ -113,6 +117,7 @@ ORDER BY created_at
                 secret: row.get("secret"),
                 active: row.get("active"),
                 created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
             })
             .collect())
     }
@@ -129,7 +134,8 @@ ORDER BY created_at
   events,
   secret,
   active,
-  created_at
+  created_at,
+  updated_at
 FROM public.webhooks
 WHERE org = $1 AND active
 ORDER BY created_at
@@ -145,6 +151,7 @@ ORDER BY created_at
                 secret: row.get("secret"),
                 active: row.get("active"),
                 created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
             })
             .collect())
     }

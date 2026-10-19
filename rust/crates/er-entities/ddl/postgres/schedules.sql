@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS public.schedules (
   source text NOT NULL DEFAULT 'api',
   last_enqueued_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (schedule_id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS schedules_one_correction_per_org ON public.schedules (org) WHERE source = 'config:correction_pass';

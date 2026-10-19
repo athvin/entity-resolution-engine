@@ -37,3 +37,9 @@ columns:
   - name: revoked_at
     type: timestamp
     description: "When the key was revoked, if it has been."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Wall-clock last-write time (database default; advanced by mutations once the entity migrates)."

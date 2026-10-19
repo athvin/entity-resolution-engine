@@ -6,4 +6,5 @@ params:
   - { name: rec_a_key, type: varchar }
   - { name: rec_b_key, type: varchar }
   - { name: run_id, type: varchar }
+  - { name: created_at, type: varchar }
 returns: none

@@ -54,3 +54,11 @@ columns:
   - name: resolved_at
     type: timestamp
     description: "When it was resolved; NULL while open."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical creation time (the writing run's clock)."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time (advanced by re-sighting and resolve)."

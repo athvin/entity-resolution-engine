@@ -26,6 +26,8 @@ pub struct Assertion {
     pub retracted_at: Option<::chrono::DateTime<::chrono::Utc>>,
     /// Optional steward note.
     pub note: Option<String>,
+    /// Run-logical last-write time (advanced by retract).
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
 }
 
 impl Assertion {
@@ -52,6 +54,7 @@ impl Assertion {
             "retracted_by",
             "retracted_at",
             "note",
+            "updated_at",
         ]
     }
 }
@@ -70,8 +73,9 @@ pub mod create {
         note: Option<&str>,
     ) -> ::duckdb::Result<usize> {
         const SQL: &str = "INSERT INTO lake.main.assertions
-  (assertion_id, rec_a_key, rec_b_key, kind, active, created_by, created_at, note)
-VALUES ($1, $2, $3, $4, true, $5, $6::timestamp, $7)
+  (assertion_id, rec_a_key, rec_b_key, kind, active, created_by, created_at, note, updated_at)
+VALUES ($1, $2, $3, $4, true, $5, $6::timestamp, $7,
+  $6::timestamp)
 ";
         conn.execute(
             SQL,
@@ -96,8 +100,9 @@ VALUES ($1, $2, $3, $4, true, $5, $6::timestamp, $7)
         review_id: &str,
     ) -> ::duckdb::Result<usize> {
         const SQL: &str = "INSERT INTO lake.main.assertions
-  (assertion_id, rec_a_key, rec_b_key, kind, active, created_by, created_at)
-SELECT $1, rec_a_key, rec_b_key, $2, true, 'steward', $3::timestamp
+  (assertion_id, rec_a_key, rec_b_key, kind, active, created_by, created_at, updated_at)
+SELECT $1, rec_a_key, rec_b_key, $2, true, 'steward', $3::timestamp,
+  $3::timestamp
 FROM lake.main.review_queue WHERE review_id = $4
 ";
         conn.execute(
@@ -372,7 +377,8 @@ pub mod update {
         assertion_id: &str,
     ) -> ::duckdb::Result<usize> {
         const SQL: &str =
-            "UPDATE lake.main.assertions SET active = false, retracted_at = $1::timestamp
+            "UPDATE lake.main.assertions SET active = false, retracted_at = $1::timestamp,
+    updated_at = $1::timestamp
 WHERE assertion_id = $2
 ";
         conn.execute(SQL, ::duckdb::params![retracted_at, assertion_id])

@@ -21,4 +21,6 @@ export interface Schedule {
   last_enqueued_at: string | null;
   /** When the schedule was created. */
   created_at: string;
+  /** Wall-clock last-write time (database default; advanced by mutations once the entity migrates). */
+  updated_at: string;
 }

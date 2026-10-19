@@ -10,4 +10,5 @@ RETURNING
   tier,
   created_by,
   created_at,
-  published_at
+  published_at,
+  updated_at

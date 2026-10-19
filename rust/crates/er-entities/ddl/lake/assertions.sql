@@ -8,5 +8,6 @@ CREATE TABLE IF NOT EXISTS lake.main.assertions (
   created_at TIMESTAMP NOT NULL,
   retracted_by VARCHAR,
   retracted_at TIMESTAMP,
-  note VARCHAR
+  note VARCHAR,
+  updated_at TIMESTAMP NOT NULL
 );

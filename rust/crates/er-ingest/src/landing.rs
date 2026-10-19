@@ -6,7 +6,8 @@ use dedupe_core::session::Session;
 use er_config::SourceSpec;
 
 /// The `raw_records` columns (S4.1), in S5 DDL order.
-pub const RAW_RECORDS_COLUMNS: [&str; 8] = [
+pub const RAW_RECORDS_COLUMNS: [&str; 11] = [
+    "id",
     "source_system",
     "source_record_id",
     "payload",
@@ -15,6 +16,8 @@ pub const RAW_RECORDS_COLUMNS: [&str; 8] = [
     "deleted_at",
     "ingest_batch_id",
     "ingested_at",
+    "created_at",
+    "updated_at",
 ];
 
 /// The S4.1.1 tombstone sentinel `content_hash`: 64 zeros. The S4.1 hash function
@@ -65,9 +68,10 @@ pub fn row_content_hash(payload: &BTreeMap<String, Option<String>>, spec: &Sourc
 pub fn create_raw_records_sql(table: &str) -> String {
     format!(
         "create table {table} (\
-         source_system varchar, source_record_id varchar, payload json, \
+         id varchar, source_system varchar, source_record_id varchar, payload json, \
          content_hash varchar, is_deleted boolean, deleted_at timestamp, \
-         ingest_batch_id varchar, ingested_at timestamp)"
+         ingest_batch_id varchar, ingested_at timestamp, \
+         created_at timestamp, updated_at timestamp)"
     )
 }
 
@@ -263,11 +267,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tombstone_is_64_zeros_and_columns_are_eight() {
+    fn tombstone_is_64_zeros_and_columns_are_eleven() {
         assert_eq!(TOMBSTONE_CONTENT_HASH.len(), 64);
         assert!(TOMBSTONE_CONTENT_HASH.chars().all(|c| c == '0'));
-        assert_eq!(RAW_RECORDS_COLUMNS.len(), 8);
-        assert_eq!(RAW_RECORDS_COLUMNS[0], "source_system");
+        assert_eq!(RAW_RECORDS_COLUMNS.len(), 11);
+        assert_eq!(RAW_RECORDS_COLUMNS[0], "id");
     }
 
     /// The session-table DDL and column list here must stay in S5 order: the

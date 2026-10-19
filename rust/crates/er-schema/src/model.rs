@@ -434,6 +434,8 @@ fn ddl_specs() -> Vec<TableSpec> {
                 nn("details", JSON),
                 nn("details_hash", VARCHAR),
                 nn("occurred_at", TIMESTAMP),
+                nn("created_at", TIMESTAMP),
+                nn("updated_at", TIMESTAMP),
             ],
             vec![
                 key(&["event_id"]),
@@ -454,6 +456,7 @@ fn ddl_specs() -> Vec<TableSpec> {
                 col("retracted_by", VARCHAR),
                 col("retracted_at", TIMESTAMP),
                 col("note", VARCHAR),
+                nn("updated_at", TIMESTAMP),
             ],
             vec![
                 key(&["assertion_id"]),
@@ -477,6 +480,8 @@ fn ddl_specs() -> Vec<TableSpec> {
                 nn("last_seen_run_id", VARCHAR),
                 col("resolved_by", VARCHAR),
                 col("resolved_at", TIMESTAMP),
+                nn("created_at", TIMESTAMP),
+                nn("updated_at", TIMESTAMP),
             ],
             vec![
                 key(&["review_id"]),
@@ -546,6 +551,8 @@ fn ddl_specs() -> Vec<TableSpec> {
                 col("rebuild_reason", VARCHAR),
                 col("snapshot_start", BIGINT),
                 col("snapshot_end", BIGINT),
+                nn("created_at", TIMESTAMP),
+                nn("updated_at", TIMESTAMP),
             ],
             vec![key(&["run_id"])],
             enum_map(&[
@@ -578,6 +585,7 @@ fn ddl_specs() -> Vec<TableSpec> {
                 nn("resurrected_count", BIGINT),
                 nn("full_refresh_keys", BOOLEAN),
                 nn("created_at", TIMESTAMP),
+                nn("updated_at", TIMESTAMP),
             ],
             vec![key(&["ingest_batch_id"])],
             BTreeMap::new(),

@@ -16,6 +16,7 @@
         "type": "object",
         "description": "Per-attribute survivorship provenance for a resolved account: which record each surviving value came from.",
         "required": [
+          "id",
           "entity_id",
           "attribute",
           "record_key",
@@ -23,21 +24,26 @@
           "source_record_id",
           "rule",
           "survivorship_version",
-          "assembled_at"
+          "created_at",
+          "updated_at"
         ],
         "properties": {
-          "assembled_at": {
-            "type": "string",
-            "format": "date-time",
-            "description": "Assembly time of this row (volatile)."
-          },
           "attribute": {
             "type": "string",
             "description": "The survivable attribute decided (e.g. company_name, domain, address)."
           },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Run-logical creation time (the assembling run's clock; the mart is rebuilt whole)."
+          },
           "entity_id": {
             "type": "string",
             "description": "The resolved account this attribute decision belongs to."
+          },
+          "id": {
+            "type": "string",
+            "description": "Content-derived row id: sha256('acct_golden_lineage:' || entity_id || ':' || attribute)."
           },
           "record_key": {
             "type": "string",
@@ -58,6 +64,11 @@
           "survivorship_version": {
             "type": "string",
             "description": "Survivorship policy version that produced this row."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Run-logical last-write time (equals created_at; the mart is rebuilt whole)."
           }
         }
       },
@@ -145,7 +156,8 @@
           "org",
           "role",
           "key_hash",
-          "created_at"
+          "created_at",
+          "updated_at"
         ],
         "properties": {
           "created_at": {
@@ -176,6 +188,11 @@
           "role": {
             "type": "string",
             "description": "The role the key grants."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Wall-clock last-write time (database default; advanced by mutations once the entity migrates)."
           }
         }
       },
@@ -187,7 +204,9 @@
           "at",
           "actor",
           "action",
-          "detail"
+          "detail",
+          "created_at",
+          "updated_at"
         ],
         "properties": {
           "action": {
@@ -203,6 +222,11 @@
             "format": "date-time",
             "description": "When the audited action occurred."
           },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Wall-clock creation time (database default; `at` remains the domain event stamp)."
+          },
           "detail": {
             "description": "Structured detail for the action."
           },
@@ -217,6 +241,11 @@
               "null"
             ],
             "description": "The tenant the action applies to, if the action is org-scoped."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Wall-clock last-write time (equals created_at; audit rows are append-only)."
           }
         }
       },
@@ -230,7 +259,8 @@
           "config_hash",
           "state",
           "created_by",
-          "created_at"
+          "created_at",
+          "updated_at"
         ],
         "properties": {
           "config_hash": {
@@ -269,6 +299,11 @@
             ],
             "description": "Optional service tier label."
           },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Wall-clock last-write time (database default; advanced by mutations once the entity migrates)."
+          },
           "version": {
             "type": "integer",
             "format": "int64",
@@ -284,6 +319,7 @@
         "type": "object",
         "description": "Per-attribute survivorship provenance: which record each surviving golden value came from.",
         "required": [
+          "id",
           "entity_id",
           "attribute",
           "record_key",
@@ -291,21 +327,26 @@
           "source_record_id",
           "rule",
           "survivorship_version",
-          "assembled_at"
+          "created_at",
+          "updated_at"
         ],
         "properties": {
-          "assembled_at": {
-            "type": "string",
-            "format": "date-time",
-            "description": "Assembly time of this row (volatile)."
-          },
           "attribute": {
             "type": "string",
             "description": "The survivable attribute decided (e.g. given_name, email, address)."
           },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Run-logical creation time (the assembling run's clock; the mart is rebuilt whole)."
+          },
           "entity_id": {
             "type": "string",
             "description": "The resolved entity this attribute decision belongs to."
+          },
+          "id": {
+            "type": "string",
+            "description": "Content-derived row id: sha256('golden_lineage:' || entity_id || ':' || attribute)."
           },
           "record_key": {
             "type": "string",
@@ -326,6 +367,11 @@
           "survivorship_version": {
             "type": "string",
             "description": "Survivorship policy version that produced this row."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Run-logical last-write time (equals created_at; the mart is rebuilt whole)."
           }
         }
       },
@@ -570,7 +616,8 @@
           "config_path",
           "env",
           "state",
-          "created_at"
+          "created_at",
+          "updated_at"
         ],
         "properties": {
           "active_config_version": {
@@ -607,6 +654,11 @@
           "state": {
             "type": "string",
             "description": "Tenant lifecycle state."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Wall-clock last-write time (database default; advanced by mutations once the entity migrates)."
           }
         }
       },
@@ -621,7 +673,8 @@
           "cron",
           "enabled",
           "source",
-          "created_at"
+          "created_at",
+          "updated_at"
         ],
         "properties": {
           "created_at": {
@@ -663,6 +716,11 @@
           "source": {
             "type": "string",
             "description": "What created the schedule (api, config:correction_pass, system:lake_maintain)."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Wall-clock last-write time (database default; advanced by mutations once the entity migrates)."
           }
         }
       },
@@ -675,7 +733,8 @@
           "action",
           "state",
           "created_by",
-          "created_at"
+          "created_at",
+          "updated_at"
         ],
         "properties": {
           "action": {
@@ -716,6 +775,11 @@
           "state": {
             "type": "string",
             "description": "Whether the action is pending, applied or failed."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Wall-clock last-write time (database default; advanced by mutations once the entity migrates)."
           }
         }
       },
@@ -729,7 +793,8 @@
           "events",
           "secret",
           "active",
-          "created_at"
+          "created_at",
+          "updated_at"
         ],
         "properties": {
           "active": {
@@ -751,6 +816,11 @@
           "secret": {
             "type": "string",
             "description": "HMAC signing secret for deliveries."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Wall-clock last-write time (database default; advanced by mutations once the entity migrates)."
           },
           "url": {
             "type": "string",

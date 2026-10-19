@@ -6,5 +6,7 @@ CREATE TABLE IF NOT EXISTS lake.main.entity_events (
   event_type VARCHAR NOT NULL,
   details JSON NOT NULL,
   details_hash VARCHAR NOT NULL,
-  occurred_at TIMESTAMP NOT NULL
+  occurred_at TIMESTAMP NOT NULL,
+  created_at TIMESTAMP NOT NULL,
+  updated_at TIMESTAMP NOT NULL
 );

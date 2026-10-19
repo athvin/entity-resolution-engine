@@ -38,6 +38,10 @@ pub struct Run {
     pub snapshot_start: Option<i64>,
     /// Last lake snapshot version the run produced.
     pub snapshot_end: Option<i64>,
+    /// Run-logical creation time (the run's start stamp).
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Run-logical last-write time (advanced when the run finishes).
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
 }
 
 impl Run {
@@ -70,6 +74,8 @@ impl Run {
             "rebuild_reason",
             "snapshot_start",
             "snapshot_end",
+            "created_at",
+            "updated_at",
         ]
     }
 }
@@ -92,9 +98,11 @@ pub mod create {
     ) -> ::duckdb::Result<usize> {
         const SQL: &str =
             "INSERT INTO lake.main.runs (run_id, tenant, mode, status, started_at, config_hash,
-  model_version, tf_snapshot_id, std_version, survivorship_version, code_version)
+  model_version, tf_snapshot_id, std_version, survivorship_version, code_version,
+  created_at, updated_at)
 VALUES ($1, $2, $3, 'running', $4::timestamp, $5,
-  $6, $7, $8, $9, $10)
+  $6, $7, $8, $9, $10,
+  $4::timestamp, $4::timestamp)
 ";
         conn.execute(
             SQL,
@@ -299,7 +307,9 @@ pub mod update {
         ended_at: &str,
         run_id: &str,
     ) -> ::duckdb::Result<usize> {
-        const SQL: &str = "UPDATE lake.main.runs SET status = 'succeeded', ended_at = $1::timestamp
+        const SQL: &str =
+            "UPDATE lake.main.runs SET status = 'succeeded', ended_at = $1::timestamp,
+    updated_at = $1::timestamp
 WHERE run_id = $2
 ";
         conn.execute(SQL, ::duckdb::params![ended_at, run_id])

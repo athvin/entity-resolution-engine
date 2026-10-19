@@ -4,15 +4,17 @@ export interface components {
     schemas: {
         /** @description Per-attribute survivorship provenance for a resolved account: which record each surviving value came from. */
         AcctGoldenLineage: {
-            /**
-             * Format: date-time
-             * @description Assembly time of this row (volatile).
-             */
-            assembled_at: string;
             /** @description The survivable attribute decided (e.g. company_name, domain, address). */
             attribute: string;
+            /**
+             * Format: date-time
+             * @description Run-logical creation time (the assembling run's clock; the mart is rebuilt whole).
+             */
+            created_at: string;
             /** @description The resolved account this attribute decision belongs to. */
             entity_id: string;
+            /** @description Content-derived row id: sha256('acct_golden_lineage:' || entity_id || ':' || attribute). */
+            id: string;
             /** @description The source record that won the attribute. */
             record_key: string;
             /** @description The survivorship rule that selected this value. */
@@ -23,6 +25,11 @@ export interface components {
             source_system: string;
             /** @description Survivorship policy version that produced this row. */
             survivorship_version: string;
+            /**
+             * Format: date-time
+             * @description Run-logical last-write time (equals created_at; the mart is rebuilt whole).
+             */
+            updated_at: string;
         };
         /** @description One resolved account/organization: the surviving value per attribute, at a snapshot. */
         AcctGoldenRecord: {
@@ -72,6 +79,11 @@ export interface components {
             revoked_at?: string | null;
             /** @description The role the key grants. */
             role: string;
+            /**
+             * Format: date-time
+             * @description Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
+             */
+            updated_at: string;
         };
         /** @description The append-only audit ledger: one row per authenticated mutation (actor, action, optional org scope, and structured detail). */
         AuditLog: {
@@ -84,6 +96,11 @@ export interface components {
              * @description When the audited action occurred.
              */
             at: string;
+            /**
+             * Format: date-time
+             * @description Wall-clock creation time (database default; `at` remains the domain event stamp).
+             */
+            created_at: string;
             /** @description Structured detail for the action. */
             detail: unknown;
             /**
@@ -93,6 +110,11 @@ export interface components {
             id: number;
             /** @description The tenant the action applies to, if the action is org-scoped. */
             org?: string | null;
+            /**
+             * Format: date-time
+             * @description Wall-clock last-write time (equals created_at; audit rows are append-only).
+             */
+            updated_at: string;
         };
         /** @description A versioned config document for a tenant: its YAML, hash and publish state. */
         ConfigVersion: {
@@ -117,6 +139,11 @@ export interface components {
             /** @description Optional service tier label. */
             tier?: string | null;
             /**
+             * Format: date-time
+             * @description Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
+             */
+            updated_at: string;
+            /**
              * Format: int64
              * @description The monotonic version number within the tenant.
              */
@@ -126,15 +153,17 @@ export interface components {
         };
         /** @description Per-attribute survivorship provenance: which record each surviving golden value came from. */
         GoldenLineage: {
-            /**
-             * Format: date-time
-             * @description Assembly time of this row (volatile).
-             */
-            assembled_at: string;
             /** @description The survivable attribute decided (e.g. given_name, email, address). */
             attribute: string;
+            /**
+             * Format: date-time
+             * @description Run-logical creation time (the assembling run's clock; the mart is rebuilt whole).
+             */
+            created_at: string;
             /** @description The resolved entity this attribute decision belongs to. */
             entity_id: string;
+            /** @description Content-derived row id: sha256('golden_lineage:' || entity_id || ':' || attribute). */
+            id: string;
             /** @description The source record that won the attribute. */
             record_key: string;
             /** @description The survivorship rule that selected this value. */
@@ -145,6 +174,11 @@ export interface components {
             source_system: string;
             /** @description Survivorship policy version that produced this row. */
             survivorship_version: string;
+            /**
+             * Format: date-time
+             * @description Run-logical last-write time (equals created_at; the mart is rebuilt whole).
+             */
+            updated_at: string;
         };
         /** @description One resolved person: the surviving value per attribute, at a snapshot. */
         GoldenRecord: {
@@ -272,6 +306,11 @@ export interface components {
             name: string;
             /** @description Tenant lifecycle state. */
             state: string;
+            /**
+             * Format: date-time
+             * @description Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
+             */
+            updated_at: string;
         };
         /** @description A recurring job schedule for a tenant: its kind, cron and source. */
         Schedule: {
@@ -299,6 +338,11 @@ export interface components {
             schedule_id: string;
             /** @description What created the schedule (api, config:correction_pass, system:lake_maintain). */
             source: string;
+            /**
+             * Format: date-time
+             * @description Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
+             */
+            updated_at: string;
         };
         /** @description A steward action staged for review/apply: its payload, state and outcome. */
         StagedStewardAction: {
@@ -324,6 +368,11 @@ export interface components {
             org: string;
             /** @description Whether the action is pending, applied or failed. */
             state: string;
+            /**
+             * Format: date-time
+             * @description Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
+             */
+            updated_at: string;
         };
         /** @description A tenant webhook endpoint: its URL, subscribed events and signing secret. */
         Webhook: {
@@ -340,6 +389,11 @@ export interface components {
             org: string;
             /** @description HMAC signing secret for deliveries. */
             secret: string;
+            /**
+             * Format: date-time
+             * @description Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
+             */
+            updated_at: string;
             /** @description The delivery URL. */
             url: string;
             /** @description The webhook's unique id. */

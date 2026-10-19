@@ -43,3 +43,9 @@ columns:
     default: "now()"
     volatile: true
     description: "When the webhook was registered."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Wall-clock last-write time (database default; advanced by mutations once the entity migrates)."
