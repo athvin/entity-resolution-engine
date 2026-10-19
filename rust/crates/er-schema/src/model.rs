@@ -364,6 +364,7 @@ fn ddl_specs() -> Vec<TableSpec> {
         tspec(
             "match_scores",
             vec![
+                nn("id", VARCHAR),
                 nn("rec_a_key", VARCHAR),
                 nn("rec_b_key", VARCHAR),
                 nn("match_probability", DOUBLE),
@@ -377,26 +378,29 @@ fn ddl_specs() -> Vec<TableSpec> {
                 col("invalidated_run_id", VARCHAR),
                 nn("run_id", VARCHAR),
                 nn("scored_at", TIMESTAMP),
+                nn("created_at", TIMESTAMP),
+                nn("updated_at", TIMESTAMP),
             ],
-            vec![key(&[
-                "rec_a_key",
-                "rec_b_key",
-                "model_version",
-                "tf_snapshot_id",
-            ])],
+            vec![
+                key(&["id"]),
+                key(&["rec_a_key", "rec_b_key", "model_version", "tf_snapshot_id"]),
+            ],
             BTreeMap::new(),
         ),
         tspec(
             "entity_membership",
             vec![
+                nn("id", VARCHAR),
                 nn("source_system", VARCHAR),
                 nn("source_record_id", VARCHAR),
                 nn("record_key", VARCHAR),
                 nn("entity_id", VARCHAR),
                 nn("assigned_at", TIMESTAMP),
                 nn("run_id", VARCHAR),
+                nn("created_at", TIMESTAMP),
+                nn("updated_at", TIMESTAMP),
             ],
-            vec![key(&["source_system", "source_record_id"])],
+            vec![key(&["id"]), key(&["source_system", "source_record_id"])],
             BTreeMap::new(),
         ),
         tspec(
@@ -587,14 +591,16 @@ fn ddl_specs() -> Vec<TableSpec> {
         tspec(
             "golden_overrides",
             vec![
+                nn("id", VARCHAR),
                 nn("entity_id", VARCHAR),
                 nn("attribute", VARCHAR),
                 col("value", VARCHAR),
                 nn("created_by", VARCHAR),
                 nn("created_at", TIMESTAMP),
                 nn("source_action_id", VARCHAR),
+                nn("updated_at", TIMESTAMP),
             ],
-            vec![key(&["entity_id", "attribute"])],
+            vec![key(&["id"]), key(&["entity_id", "attribute"])],
             BTreeMap::new(),
         ),
         // Steward record overlays (PR 1.3): protect/suppress one record. One
@@ -605,6 +611,7 @@ fn ddl_specs() -> Vec<TableSpec> {
         tspec(
             "record_overlays",
             vec![
+                nn("id", VARCHAR),
                 nn("record_key", VARCHAR),
                 nn("kind", VARCHAR),
                 nn("active", BOOLEAN),
@@ -612,8 +619,9 @@ fn ddl_specs() -> Vec<TableSpec> {
                 nn("created_at", TIMESTAMP),
                 nn("source_action_id", VARCHAR),
                 col("retracted_at", TIMESTAMP),
+                nn("updated_at", TIMESTAMP),
             ],
-            vec![key(&["record_key", "kind"])],
+            vec![key(&["id"]), key(&["record_key", "kind"])],
             BTreeMap::new(),
         ),
     ]

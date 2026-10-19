@@ -555,6 +555,11 @@
   "entity_membership": {
    "columns": [
     {
+     "name": "id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
      "name": "source_system",
      "nullable": false,
      "type": "VARCHAR"
@@ -583,11 +588,27 @@
      "name": "run_id",
      "nullable": false,
      "type": "VARCHAR"
+    },
+    {
+     "name": "created_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "updated_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
     }
    ],
-   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.entity_membership (\n  source_system VARCHAR NOT NULL,\n  source_record_id VARCHAR NOT NULL,\n  record_key VARCHAR NOT NULL,\n  entity_id VARCHAR NOT NULL,\n  assigned_at TIMESTAMP NOT NULL,\n  run_id VARCHAR NOT NULL\n);",
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.entity_membership (\n  id VARCHAR NOT NULL,\n  source_system VARCHAR NOT NULL,\n  source_record_id VARCHAR NOT NULL,\n  record_key VARCHAR NOT NULL,\n  entity_id VARCHAR NOT NULL,\n  assigned_at TIMESTAMP NOT NULL,\n  run_id VARCHAR NOT NULL,\n  created_at TIMESTAMP NOT NULL,\n  updated_at TIMESTAMP NOT NULL\n);",
    "enums": {},
    "keys": [
+    {
+     "columns": [
+      "id"
+     ],
+     "where": null
+    },
     {
      "columns": [
       "source_system",
@@ -666,6 +687,11 @@
   "golden_overrides": {
    "columns": [
     {
+     "name": "id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
      "name": "entity_id",
      "nullable": false,
      "type": "VARCHAR"
@@ -694,11 +720,22 @@
      "name": "source_action_id",
      "nullable": false,
      "type": "VARCHAR"
+    },
+    {
+     "name": "updated_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
     }
    ],
-   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.golden_overrides (\n  entity_id VARCHAR NOT NULL,\n  attribute VARCHAR NOT NULL,\n  value VARCHAR,\n  created_by VARCHAR NOT NULL,\n  created_at TIMESTAMP NOT NULL,\n  source_action_id VARCHAR NOT NULL\n);",
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.golden_overrides (\n  id VARCHAR NOT NULL,\n  entity_id VARCHAR NOT NULL,\n  attribute VARCHAR NOT NULL,\n  value VARCHAR,\n  created_by VARCHAR NOT NULL,\n  created_at TIMESTAMP NOT NULL,\n  source_action_id VARCHAR NOT NULL,\n  updated_at TIMESTAMP NOT NULL\n);",
    "enums": {},
    "keys": [
+    {
+     "columns": [
+      "id"
+     ],
+     "where": null
+    },
     {
      "columns": [
       "entity_id",
@@ -1002,6 +1039,11 @@
   "match_scores": {
    "columns": [
     {
+     "name": "id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
      "name": "rec_a_key",
      "nullable": false,
      "type": "VARCHAR"
@@ -1065,11 +1107,27 @@
      "name": "scored_at",
      "nullable": false,
      "type": "TIMESTAMP"
+    },
+    {
+     "name": "created_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "updated_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
     }
    ],
-   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.match_scores (\n  rec_a_key VARCHAR NOT NULL,\n  rec_b_key VARCHAR NOT NULL,\n  match_probability DOUBLE NOT NULL,\n  model_version VARCHAR NOT NULL,\n  tf_snapshot_id VARCHAR NOT NULL,\n  rec_a_content_hash VARCHAR NOT NULL,\n  rec_b_content_hash VARCHAR NOT NULL,\n  evidence JSON NOT NULL,\n  is_active BOOLEAN NOT NULL,\n  invalidated_at TIMESTAMP,\n  invalidated_run_id VARCHAR,\n  run_id VARCHAR NOT NULL,\n  scored_at TIMESTAMP NOT NULL\n);",
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.match_scores (\n  id VARCHAR NOT NULL,\n  rec_a_key VARCHAR NOT NULL,\n  rec_b_key VARCHAR NOT NULL,\n  match_probability DOUBLE NOT NULL,\n  model_version VARCHAR NOT NULL,\n  tf_snapshot_id VARCHAR NOT NULL,\n  rec_a_content_hash VARCHAR NOT NULL,\n  rec_b_content_hash VARCHAR NOT NULL,\n  evidence JSON NOT NULL,\n  is_active BOOLEAN NOT NULL,\n  invalidated_at TIMESTAMP,\n  invalidated_run_id VARCHAR,\n  run_id VARCHAR NOT NULL,\n  scored_at TIMESTAMP NOT NULL,\n  created_at TIMESTAMP NOT NULL,\n  updated_at TIMESTAMP NOT NULL\n);",
    "enums": {},
    "keys": [
+    {
+     "columns": [
+      "id"
+     ],
+     "where": null
+    },
     {
      "columns": [
       "rec_a_key",
@@ -1142,6 +1200,11 @@
   "record_overlays": {
    "columns": [
     {
+     "name": "id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
      "name": "record_key",
      "nullable": false,
      "type": "VARCHAR"
@@ -1175,11 +1238,22 @@
      "name": "retracted_at",
      "nullable": true,
      "type": "TIMESTAMP"
+    },
+    {
+     "name": "updated_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
     }
    ],
-   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.record_overlays (\n  record_key VARCHAR NOT NULL,\n  kind VARCHAR NOT NULL,\n  active BOOLEAN NOT NULL,\n  created_by VARCHAR NOT NULL,\n  created_at TIMESTAMP NOT NULL,\n  source_action_id VARCHAR NOT NULL,\n  retracted_at TIMESTAMP\n);",
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.record_overlays (\n  id VARCHAR NOT NULL,\n  record_key VARCHAR NOT NULL,\n  kind VARCHAR NOT NULL,\n  active BOOLEAN NOT NULL,\n  created_by VARCHAR NOT NULL,\n  created_at TIMESTAMP NOT NULL,\n  source_action_id VARCHAR NOT NULL,\n  retracted_at TIMESTAMP,\n  updated_at TIMESTAMP NOT NULL\n);",
    "enums": {},
    "keys": [
+    {
+     "columns": [
+      "id"
+     ],
+     "where": null
+    },
     {
      "columns": [
       "record_key",

@@ -252,11 +252,12 @@ erDiagram
         timestamp ingested_at
     }
     match_scores {
-        varchar rec_a_key PK
-        varchar rec_b_key PK
+        varchar id PK
+        varchar rec_a_key
+        varchar rec_b_key
         double match_probability
-        varchar model_version PK
-        varchar tf_snapshot_id PK
+        varchar model_version
+        varchar tf_snapshot_id
         varchar rec_a_content_hash
         varchar rec_b_content_hash
         json evidence
@@ -265,14 +266,19 @@ erDiagram
         varchar invalidated_run_id
         varchar run_id
         timestamp scored_at
+        timestamp created_at
+        timestamp updated_at
     }
     entity_membership {
-        varchar source_system PK
-        varchar source_record_id PK
+        varchar id PK
+        varchar source_system
+        varchar source_record_id
         varchar record_key
         varchar entity_id
         timestamp assigned_at
         varchar run_id
+        timestamp created_at
+        timestamp updated_at
     }
     entities {
         varchar entity_id PK
@@ -390,21 +396,25 @@ erDiagram
         timestamp created_at
     }
     golden_overrides {
-        varchar entity_id PK
-        varchar attribute PK
+        varchar id PK
+        varchar entity_id
+        varchar attribute
         varchar value
         varchar created_by
         timestamp created_at
         varchar source_action_id
+        timestamp updated_at
     }
     record_overlays {
-        varchar record_key PK
-        varchar kind PK
+        varchar id PK
+        varchar record_key
+        varchar kind
         boolean active
         varchar created_by
         timestamp created_at
         varchar source_action_id
         timestamp retracted_at
+        timestamp updated_at
     }
     int_std_records {
         varchar record_key PK

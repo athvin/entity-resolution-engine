@@ -3,12 +3,16 @@ version: 1
 name: entity_membership
 relation: entity_membership
 description: "One membership row per record (S4.4): which resolved entity the record's current version belongs to."
-key: [source_system, source_record_id]
-identity: legacy
+key: [id]
+natural_key: [source_system, source_record_id]
 generate:
   stores: [duckdb]
   languages: [rust]
 columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "Content-derived row id: sha256('entity_membership:' || source_system || ':' || source_record_id)."
   - name: source_system
     type: varchar
     nullable: false
@@ -33,3 +37,11 @@ columns:
     type: varchar
     nullable: false
     description: "The run that wrote this row."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical creation time (the assigning run's clock)."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time (the latest assigning run's clock)."

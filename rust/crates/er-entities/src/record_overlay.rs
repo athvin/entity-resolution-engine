@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 /// One steward record overlay (protect/suppress): a flag on a record key, retractable, applied at assembly.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
 pub struct RecordOverlay {
+    /// Content-derived row id: sha256('record_overlays:' || record_key || ':' || kind).
+    pub id: String,
     /// The standardized record key.
     pub record_key: String,
     /// always or never.
@@ -20,11 +22,13 @@ pub struct RecordOverlay {
     pub source_action_id: String,
     /// When it was retracted; NULL while active.
     pub retracted_at: Option<::chrono::DateTime<::chrono::Utc>>,
+    /// Run-logical last-write time (advanced by retract).
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
 }
 
 impl RecordOverlay {
     /// The logical key columns.
-    pub const KEY: &'static [&'static str] = &["record_key", "kind"];
+    pub const KEY: &'static [&'static str] = &["id"];
     /// The entity schema version; bumped only on a breaking change.
     pub const VERSION: u64 = 1;
     /// The relation (table) name.
@@ -36,6 +40,7 @@ impl RecordOverlay {
     #[must_use]
     pub fn columns() -> &'static [&'static str] {
         &[
+            "id",
             "record_key",
             "kind",
             "active",
@@ -43,6 +48,7 @@ impl RecordOverlay {
             "created_at",
             "source_action_id",
             "retracted_at",
+            "updated_at",
         ]
     }
 }
@@ -59,8 +65,10 @@ pub mod create {
         source_action_id: &str,
     ) -> ::duckdb::Result<usize> {
         const SQL: &str = "INSERT INTO lake.main.record_overlays
-  (record_key, kind, active, created_by, created_at, source_action_id, retracted_at)
-VALUES ($1, $2, true, $3, $4::timestamp, $5, NULL)
+  (id, record_key, kind, active, created_by, created_at, source_action_id, retracted_at, updated_at)
+VALUES (sha256('record_overlays:' || $1 || ':' || $2),
+        $1, $2, true, $3, $4::timestamp,
+        $5, NULL, $4::timestamp)
 ";
         conn.execute(
             SQL,
@@ -197,7 +205,8 @@ pub mod update {
         kind: &str,
     ) -> ::duckdb::Result<usize> {
         const SQL: &str =
-            "UPDATE lake.main.record_overlays SET active = false, retracted_at = $1::timestamp
+            "UPDATE lake.main.record_overlays SET active = false, retracted_at = $1::timestamp,
+    updated_at = $1::timestamp
 WHERE record_key = $2 AND kind = $3
 ";
         conn.execute(SQL, ::duckdb::params![retracted_at, record_key, kind])

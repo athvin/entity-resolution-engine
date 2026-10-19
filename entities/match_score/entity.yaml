@@ -3,12 +3,16 @@ version: 1
 name: match_score
 relation: match_scores
 description: "One scored candidate pair (S4.3): the frozen model's match probability with its evidence waterfall, keyed by model and TF snapshot."
-key: [rec_a_key, rec_b_key, model_version, tf_snapshot_id]
-identity: legacy
+key: [id]
+natural_key: [rec_a_key, rec_b_key, model_version, tf_snapshot_id]
 generate:
   stores: [duckdb]
   languages: [rust]
 columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "Content-derived row id: sha256('match_scores:' || rec_a_key || ':' || rec_b_key || ':' || model_version || ':' || tf_snapshot_id)."
   - name: rec_a_key
     type: varchar
     nullable: false
@@ -59,3 +63,11 @@ columns:
     type: timestamp
     nullable: false
     description: "The run's logical scoring timestamp."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical creation time (the scoring run's clock)."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time (the latest scoring run's clock)."

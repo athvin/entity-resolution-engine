@@ -11,12 +11,16 @@ WHEN MATCHED THEN UPDATE SET
     invalidated_at = NULL,
     invalidated_run_id = NULL,
     run_id = source.run_id,
-    scored_at = source.scored_at
+    scored_at = source.scored_at,
+    updated_at = source.scored_at
 WHEN NOT MATCHED THEN INSERT
-    (rec_a_key, rec_b_key, match_probability, model_version, tf_snapshot_id,
+    (id, rec_a_key, rec_b_key, match_probability, model_version, tf_snapshot_id,
      rec_a_content_hash, rec_b_content_hash, evidence, is_active,
-     invalidated_at, invalidated_run_id, run_id, scored_at)
+     invalidated_at, invalidated_run_id, run_id, scored_at, created_at, updated_at)
     VALUES
-    (source.rec_a_key, source.rec_b_key, source.match_probability, source.model_version,
+    (sha256('match_scores:' || source.rec_a_key || ':' || source.rec_b_key || ':'
+            || source.model_version || ':' || source.tf_snapshot_id),
+     source.rec_a_key, source.rec_b_key, source.match_probability, source.model_version,
      source.tf_snapshot_id, source.rec_a_content_hash, source.rec_b_content_hash,
-     source.evidence, true, NULL, NULL, source.run_id, source.scored_at)
+     source.evidence, true, NULL, NULL, source.run_id, source.scored_at,
+     source.scored_at, source.scored_at)

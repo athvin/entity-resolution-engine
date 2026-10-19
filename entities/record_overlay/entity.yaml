@@ -3,12 +3,16 @@ version: 1
 name: record_overlay
 relation: record_overlays
 description: "One steward record overlay (protect/suppress): a flag on a record key, retractable, applied at assembly."
-key: [record_key, kind]
-identity: legacy
+key: [id]
+natural_key: [record_key, kind]
 generate:
   stores: [duckdb]
   languages: [rust]
 columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "Content-derived row id: sha256('record_overlays:' || record_key || ':' || kind)."
   - name: record_key
     type: varchar
     nullable: false
@@ -36,3 +40,7 @@ columns:
   - name: retracted_at
     type: timestamp
     description: "When it was retracted; NULL while active."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time (advanced by retract)."
