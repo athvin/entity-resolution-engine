@@ -77,6 +77,27 @@ scratch tables and their reads (`Session::query_scratch_strings`, e.g. the
 catalog introspection (`Session::lake_table_exists` / `relation_row_count` —
 catalog metadata, not a data contract).
 
+**And one identity shape.** Every entity's primary key is `id` (`key: [id]`),
+every entity carries `created_at`/`updated_at`, and foreign keys are named
+`<singular(relation)>_id` referencing `id` — validated at catalog load (V1–V10)
+and at statement analysis (E005 immutables, E014 updated_at, E015 MERGE-on-
+natural-key). How an id is minted depends on who creates the row:
+
+| mint class | recipe | examples |
+| --- | --- | --- |
+| application, one-shot | `er_ids::new_v7()` (wall-clock UUIDv7 text) | org, job, api_key, schedule, webhook, staged_action |
+| application, rerun-reproducible | `er_ids::DeterministicV7Factory` (`deterministic_v7(run clock, mint counter)`) | reconcile's entity ids |
+| SQL/CTAS, content-derived | `sha256('<relation>:' \|\| k1 \|\| ':' \|\| …)` (`er_ids::natural_id` is the Rust twin) | int_std/lineage marts, membership, match_scores, reviews, events, raw_records (batch-salted) |
+| database-minted ledgers | `bigint` + `serial: true` | audit_log, ddl_log |
+
+`natural_key:` declares the upsert/MERGE identity (a second registry LogicalKey
+on the lake, `UNIQUE` on the control plane); domain linkage columns keep their
+names (`record_key`, `run_id`, `entity_id`-as-FK, …). Control-plane entities may
+opt into `history: true` (a generated `<relation>_history` jsonb row-image
+companion), and every DDL statement lands in the `ddl_log` ledger via event
+triggers. The full conventions: the "Identity conventions" section of
+[docs/entity-framework-design.md](docs/entity-framework-design.md).
+
 The fixture format is documented in
 [fixtures/static/FORMAT.md](fixtures/static/FORMAT.md). Benchmark and profiling
 changes should follow [performance.md](docs/performance.md) and
