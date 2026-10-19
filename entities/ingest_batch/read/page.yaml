@@ -7,7 +7,7 @@ params:
   - { name: after, type: varchar, nullable: true }
   - { name: limit, type: bigint }
 returns:
-  - { name: ingest_batch_id, type: varchar, nullable: false }
+  - { name: id, type: varchar, nullable: false }
   - { name: run_id, type: varchar, nullable: false }
   - { name: source_system, type: varchar, nullable: false }
   - { name: path, type: varchar, nullable: false }

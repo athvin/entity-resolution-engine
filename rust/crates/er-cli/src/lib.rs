@@ -25,7 +25,7 @@ use er_config::Config;
 use er_ingest::landing::{land_base_delivery, land_full_refresh};
 use std::collections::BTreeMap;
 
-use er_ids::{CountingIdFactory, DeterministicV7Factory, IdFactory};
+use er_ids::DeterministicV7Factory;
 use er_match::{build_frozen_tf_tables, load_model};
 use er_reconcile::assertions::{Assertion, AssertionKind};
 use er_reconcile::cluster::label_propagate;
@@ -778,7 +778,7 @@ fn load_active_assertions(session: &Session) -> Result<Vec<Assertion>> {
             };
             let (a, b) = canon(&r.rec_a_key, &r.rec_b_key);
             Some(Assertion {
-                assertion_id: r.assertion_id,
+                assertion_id: r.id,
                 rec_a_key: a,
                 rec_b_key: b,
                 kind,
@@ -1031,12 +1031,14 @@ pub fn run_reconcile(session: &Session, config: &Config, run_id: &str, run_at: &
     }
 
     if !plan.events.is_empty() {
-        let event_ids = CountingIdFactory::new(0);
         for (i, e) in plan.events.iter().enumerate() {
             let details = serde_json::to_string(&e.details).unwrap_or_else(|_| "{}".to_string());
+            // Content-derived and rerun-stable: the retired per-run counter
+            // stream minted DUPLICATE event ids across runs (it restarted at 0).
+            let event_id = er_ids::natural_id("entity_events", &[run_id, &i.to_string()]);
             er_entities::entity_event::create::append(
                 session.connection(),
-                &event_ids.new_id(),
+                &event_id,
                 i64::try_from(i).unwrap_or(i64::MAX),
                 run_id,
                 &e.entity_id,
@@ -1199,7 +1201,7 @@ pub fn doctor(session: &Session, config: &Config) -> Result<serde_json::Value> {
     let latest_run = match er_entities::run::read::latest_live(session.connection()) {
         Ok(rows) => rows
             .first()
-            .map(|r| serde_json::json!({ "run_id": r.run_id, "status": r.status, "mode": r.mode })),
+            .map(|r| serde_json::json!({ "run_id": r.id, "status": r.status, "mode": r.mode })),
         Err(e) if is_missing_table(&e.to_string()) => None,
         Err(e) => return Err(e.into()),
     };

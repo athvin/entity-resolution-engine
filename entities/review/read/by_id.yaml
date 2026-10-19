@@ -5,7 +5,7 @@ params:
   - { name: snapshot, type: bigint }
   - { name: review_id, type: varchar }
 returns:
-  - { name: review_id, type: varchar, nullable: false }
+  - { name: id, type: varchar, nullable: false }
   - { name: subject_type, type: varchar, nullable: false }
   - { name: rec_a_key, type: varchar }
   - { name: rec_b_key, type: varchar }

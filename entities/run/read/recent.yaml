@@ -4,7 +4,7 @@ description: "The most recent runs at a pinned snapshot, newest first, capped at
 params:
   - { name: snapshot, type: bigint }
 returns:
-  - { name: run_id, type: varchar, nullable: false }
+  - { name: id, type: varchar, nullable: false }
   - { name: mode, type: varchar, nullable: false }
   - { name: status, type: varchar, nullable: false }
   - { name: started_at, type: timestamp, nullable: false }

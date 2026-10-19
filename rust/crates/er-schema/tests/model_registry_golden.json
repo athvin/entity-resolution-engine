@@ -313,7 +313,7 @@
   "assertions": {
    "columns": [
     {
-     "name": "assertion_id",
+     "name": "id",
      "nullable": false,
      "type": "VARCHAR"
     },
@@ -368,7 +368,7 @@
      "type": "TIMESTAMP"
     }
    ],
-   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.assertions (\n  assertion_id VARCHAR NOT NULL,\n  rec_a_key VARCHAR NOT NULL,\n  rec_b_key VARCHAR NOT NULL,\n  kind VARCHAR NOT NULL,\n  active BOOLEAN NOT NULL,\n  created_by VARCHAR NOT NULL,\n  created_at TIMESTAMP NOT NULL,\n  retracted_by VARCHAR,\n  retracted_at TIMESTAMP,\n  note VARCHAR,\n  updated_at TIMESTAMP NOT NULL\n);",
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.assertions (\n  id VARCHAR NOT NULL,\n  rec_a_key VARCHAR NOT NULL,\n  rec_b_key VARCHAR NOT NULL,\n  kind VARCHAR NOT NULL,\n  active BOOLEAN NOT NULL,\n  created_by VARCHAR NOT NULL,\n  created_at TIMESTAMP NOT NULL,\n  retracted_by VARCHAR,\n  retracted_at TIMESTAMP,\n  note VARCHAR,\n  updated_at TIMESTAMP NOT NULL\n);",
    "enums": {
     "kind": [
      "always",
@@ -378,7 +378,7 @@
    "keys": [
     {
      "columns": [
-      "assertion_id"
+      "id"
      ],
      "where": null
     },
@@ -533,7 +533,7 @@
   "entity_events": {
    "columns": [
     {
-     "name": "event_id",
+     "name": "id",
      "nullable": false,
      "type": "VARCHAR"
     },
@@ -583,7 +583,7 @@
      "type": "TIMESTAMP"
     }
    ],
-   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.entity_events (\n  event_id VARCHAR NOT NULL,\n  seq BIGINT NOT NULL,\n  run_id VARCHAR NOT NULL,\n  entity_id VARCHAR NOT NULL,\n  event_type VARCHAR NOT NULL,\n  details JSON NOT NULL,\n  details_hash VARCHAR NOT NULL,\n  occurred_at TIMESTAMP NOT NULL,\n  created_at TIMESTAMP NOT NULL,\n  updated_at TIMESTAMP NOT NULL\n);",
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.entity_events (\n  id VARCHAR NOT NULL,\n  seq BIGINT NOT NULL,\n  run_id VARCHAR NOT NULL,\n  entity_id VARCHAR NOT NULL,\n  event_type VARCHAR NOT NULL,\n  details JSON NOT NULL,\n  details_hash VARCHAR NOT NULL,\n  occurred_at TIMESTAMP NOT NULL,\n  created_at TIMESTAMP NOT NULL,\n  updated_at TIMESTAMP NOT NULL\n);",
    "enums": {
     "event_type": [
      "created",
@@ -598,7 +598,7 @@
    "keys": [
     {
      "columns": [
-      "event_id"
+      "id"
      ],
      "where": null
     },
@@ -927,7 +927,7 @@
   "ingest_batches": {
    "columns": [
     {
-     "name": "ingest_batch_id",
+     "name": "id",
      "nullable": false,
      "type": "VARCHAR"
     },
@@ -987,12 +987,12 @@
      "type": "TIMESTAMP"
     }
    ],
-   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.ingest_batches (\n  ingest_batch_id VARCHAR NOT NULL,\n  run_id VARCHAR NOT NULL,\n  source_system VARCHAR NOT NULL,\n  path VARCHAR NOT NULL,\n  new_count BIGINT NOT NULL,\n  changed_count BIGINT NOT NULL,\n  unchanged_count BIGINT NOT NULL,\n  tombstone_count BIGINT NOT NULL,\n  resurrected_count BIGINT NOT NULL,\n  full_refresh_keys BOOLEAN NOT NULL,\n  created_at TIMESTAMP NOT NULL,\n  updated_at TIMESTAMP NOT NULL\n);",
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.ingest_batches (\n  id VARCHAR NOT NULL,\n  run_id VARCHAR NOT NULL,\n  source_system VARCHAR NOT NULL,\n  path VARCHAR NOT NULL,\n  new_count BIGINT NOT NULL,\n  changed_count BIGINT NOT NULL,\n  unchanged_count BIGINT NOT NULL,\n  tombstone_count BIGINT NOT NULL,\n  resurrected_count BIGINT NOT NULL,\n  full_refresh_keys BOOLEAN NOT NULL,\n  created_at TIMESTAMP NOT NULL,\n  updated_at TIMESTAMP NOT NULL\n);",
    "enums": {},
    "keys": [
     {
      "columns": [
-      "ingest_batch_id"
+      "id"
      ],
      "where": null
     }
@@ -1402,7 +1402,7 @@
   "review_queue": {
    "columns": [
     {
-     "name": "review_id",
+     "name": "id",
      "nullable": false,
      "type": "VARCHAR"
     },
@@ -1477,7 +1477,7 @@
      "type": "TIMESTAMP"
     }
    ],
-   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.review_queue (\n  review_id VARCHAR NOT NULL,\n  subject_type VARCHAR NOT NULL,\n  rec_a_key VARCHAR,\n  rec_b_key VARCHAR,\n  entity_id VARCHAR,\n  reason VARCHAR NOT NULL,\n  match_probability DOUBLE,\n  waterfall JSON,\n  status VARCHAR NOT NULL,\n  first_seen_run_id VARCHAR NOT NULL,\n  last_seen_run_id VARCHAR NOT NULL,\n  resolved_by VARCHAR,\n  resolved_at TIMESTAMP,\n  created_at TIMESTAMP NOT NULL,\n  updated_at TIMESTAMP NOT NULL\n);",
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.review_queue (\n  id VARCHAR NOT NULL,\n  subject_type VARCHAR NOT NULL,\n  rec_a_key VARCHAR,\n  rec_b_key VARCHAR,\n  entity_id VARCHAR,\n  reason VARCHAR NOT NULL,\n  match_probability DOUBLE,\n  waterfall JSON,\n  status VARCHAR NOT NULL,\n  first_seen_run_id VARCHAR NOT NULL,\n  last_seen_run_id VARCHAR NOT NULL,\n  resolved_by VARCHAR,\n  resolved_at TIMESTAMP,\n  created_at TIMESTAMP NOT NULL,\n  updated_at TIMESTAMP NOT NULL\n);",
    "enums": {
     "reason": [
      "coherence",
@@ -1498,7 +1498,15 @@
    "keys": [
     {
      "columns": [
-      "review_id"
+      "id"
+     ],
+     "where": null
+    },
+    {
+     "columns": [
+      "rec_a_key",
+      "rec_b_key",
+      "reason"
      ],
      "where": null
     },
@@ -1668,7 +1676,7 @@
   "runs": {
    "columns": [
     {
-     "name": "run_id",
+     "name": "id",
      "nullable": false,
      "type": "VARCHAR"
     },
@@ -1758,7 +1766,7 @@
      "type": "TIMESTAMP"
     }
    ],
-   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.runs (\n  run_id VARCHAR NOT NULL,\n  tenant VARCHAR NOT NULL,\n  mode VARCHAR NOT NULL,\n  status VARCHAR NOT NULL,\n  started_at TIMESTAMP NOT NULL,\n  ended_at TIMESTAMP,\n  config_hash VARCHAR NOT NULL,\n  model_version VARCHAR,\n  tf_snapshot_id VARCHAR,\n  std_version VARCHAR NOT NULL,\n  survivorship_version VARCHAR NOT NULL,\n  lexicon_hash VARCHAR,\n  code_version VARCHAR NOT NULL,\n  rebuild_reason VARCHAR,\n  snapshot_start BIGINT,\n  snapshot_end BIGINT,\n  created_at TIMESTAMP NOT NULL,\n  updated_at TIMESTAMP NOT NULL\n);",
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.runs (\n  id VARCHAR NOT NULL,\n  tenant VARCHAR NOT NULL,\n  mode VARCHAR NOT NULL,\n  status VARCHAR NOT NULL,\n  started_at TIMESTAMP NOT NULL,\n  ended_at TIMESTAMP,\n  config_hash VARCHAR NOT NULL,\n  model_version VARCHAR,\n  tf_snapshot_id VARCHAR,\n  std_version VARCHAR NOT NULL,\n  survivorship_version VARCHAR NOT NULL,\n  lexicon_hash VARCHAR,\n  code_version VARCHAR NOT NULL,\n  rebuild_reason VARCHAR,\n  snapshot_start BIGINT,\n  snapshot_end BIGINT,\n  created_at TIMESTAMP NOT NULL,\n  updated_at TIMESTAMP NOT NULL\n);",
    "enums": {
     "mode": [
      "correction_pass",
@@ -1786,7 +1794,7 @@
    "keys": [
     {
      "columns": [
-      "run_id"
+      "id"
      ],
      "where": null
     }

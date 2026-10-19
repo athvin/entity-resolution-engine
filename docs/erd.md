@@ -303,7 +303,7 @@ erDiagram
         varchar updated_run_id
     }
     entity_events {
-        varchar event_id PK
+        varchar id PK
         bigint seq
         varchar run_id
         varchar entity_id
@@ -315,7 +315,7 @@ erDiagram
         timestamp updated_at
     }
     assertions {
-        varchar assertion_id PK
+        varchar id PK
         varchar rec_a_key
         varchar rec_b_key
         varchar kind "in {always, never}"
@@ -328,7 +328,7 @@ erDiagram
         timestamp updated_at
     }
     review_queue {
-        varchar review_id PK
+        varchar id PK
         varchar subject_type "in {entity, pair}"
         varchar rec_a_key
         varchar rec_b_key
@@ -359,7 +359,7 @@ erDiagram
         timestamp released_at
     }
     runs {
-        varchar run_id PK
+        varchar id PK
         varchar tenant
         varchar mode "in {correction_pass, full, incremental, init, maintain, reset, stage, train}"
         varchar status "in {failed, running, succeeded}"
@@ -403,7 +403,7 @@ erDiagram
         varchar error_detail
     }
     ingest_batches {
-        varchar ingest_batch_id PK
+        varchar id PK
         varchar run_id
         varchar source_system
         varchar path
@@ -548,24 +548,15 @@ erDiagram
         timestamp created_at
         timestamp updated_at
     }
-    raw_records }o..|| ingest_batches : "ingest_batch_id"
     raw_records }o..|| entity_membership : "source_system, source_record_id"
-    match_scores }o..|| runs : "run_id"
-    entity_membership }o..|| runs : "run_id"
-    entity_events }o..|| runs : "run_id"
     entity_events }o..|| run_stages : "run_id, seq"
-    cut_edges }o..|| assertions : "assertion_id"
     cut_edges }o..|| match_scores : "rec_a_key, rec_b_key, model_version, tf_snapshot_id"
-    run_stages }o..|| runs : "run_id"
-    ingest_batches }o..|| runs : "run_id"
     record_overlays }o..|| int_std_records : "record_key"
-    int_std_records }o..|| ingest_batches : "ingest_batch_id"
     int_std_records }o..|| entity_membership : "source_system, source_record_id"
     int_std_records }o..|| raw_records : "source_system, source_record_id, content_hash"
     golden_lineage }o..|| golden_overrides : "entity_id, attribute"
     golden_lineage }o..|| int_std_records : "record_key"
     golden_lineage }o..|| entity_membership : "source_system, source_record_id"
-    acct_int_std_records }o..|| ingest_batches : "ingest_batch_id"
     acct_int_std_records }o..|| entity_membership : "source_system, source_record_id"
     acct_int_std_records }o..|| raw_records : "source_system, source_record_id, content_hash"
     acct_golden_lineage }o..|| golden_overrides : "entity_id, attribute"
@@ -577,6 +568,15 @@ erDiagram
     golden_overrides }o..|| entities : "entity_id → id"
     golden_lineage }o..|| entities : "entity_id → id"
     acct_golden_lineage }o..|| entities : "entity_id → id"
+    cut_edges }o..|| assertions : "assertion_id → id"
+    match_scores }o..|| runs : "run_id → id"
+    entity_membership }o..|| runs : "run_id → id"
+    entity_events }o..|| runs : "run_id → id"
+    run_stages }o..|| runs : "run_id → id"
+    ingest_batches }o..|| runs : "run_id → id"
+    raw_records }o..|| ingest_batches : "ingest_batch_id → id"
+    int_std_records }o..|| ingest_batches : "ingest_batch_id → id"
+    acct_int_std_records }o..|| ingest_batches : "ingest_batch_id → id"
 ```
 
 | relation | owner | description |

@@ -249,7 +249,7 @@ export function RunsContent({ org }: { org: string }) {
               </thead>
               <tbody>
                 {(runs.data ?? []).map((run) => (
-                  <tr key={run.run_id} className="border-b last:border-0">
+                  <tr key={run.id} className="border-b last:border-0">
                     <td className="py-2 pr-4 font-medium">{run.mode ?? "—"}</td>
                     <td className="py-2 pr-4">
                       <StateChip state={run.status ?? "unknown"} />

@@ -146,7 +146,7 @@ async fn drain_and_correct_applies_through_dispatcher() {
         .oneshot(op("GET", "/v1/orgs/acme/reviews", Body::empty()))
         .await
         .unwrap();
-    let review_id = json_body(resp).await["items"][0]["review_id"]
+    let review_id = json_body(resp).await["items"][0]["id"]
         .as_str()
         .unwrap()
         .to_string();

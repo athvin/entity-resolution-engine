@@ -94,21 +94,6 @@ pub struct Index {
     pub r#where: Option<String>,
 }
 
-/// Where an entity stands on the identity conventions (`id` PK, timestamps,
-/// FK naming — rules V1–V10). `legacy` marks a not-yet-migrated entity; each
-/// rename wave deletes its markers, and the final wave deletes the field — a
-/// greppable ratchet, never a permanent dialect.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Identity {
-    /// Not yet migrated: the V1–V10 conventions and the mutation rules
-    /// (E014/E015 and the E005 extension) are skipped.
-    Legacy,
-    /// The conventions hold (the default — absence means enforced).
-    #[default]
-    V2,
-}
-
 /// One entity: a table and everything generated from it.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -131,9 +116,6 @@ pub struct Entity {
     /// what makes two rows "the same thing".
     #[serde(default)]
     pub natural_key: Vec<String>,
-    /// Identity-conventions ratchet (temporary; see [`Identity`]).
-    #[serde(default)]
-    pub identity: Identity,
     /// What to generate for this entity.
     pub generate: GenerateBlock,
     /// The columns, in declaration order.
@@ -164,12 +146,6 @@ pub fn singular(relation: &str) -> String {
 }
 
 impl Entity {
-    /// Whether this entity is still exempt from the identity conventions.
-    #[must_use]
-    pub fn is_legacy(&self) -> bool {
-        self.identity == Identity::Legacy
-    }
-
     /// The declaration-ordered column names.
     #[must_use]
     pub fn column_names(&self) -> Vec<&str> {

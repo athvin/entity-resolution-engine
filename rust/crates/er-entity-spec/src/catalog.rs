@@ -306,9 +306,11 @@ fn validate(entity: &Entity) -> Result<(), SpecError> {
         }
     }
 
-    // V10 — a natural_key, where declared, is well-formed: real NOT NULL
-    // columns, no duplicates, and never the universal id/timestamps (those are
-    // row identity and bookkeeping, not what makes two rows the same thing).
+    // V10 — a natural_key, where declared, is well-formed: real columns, no
+    // duplicates, never the universal id/timestamps (those are row identity and
+    // bookkeeping, not what makes two rows the same thing). Nullable columns
+    // are allowed: a MERGE identity can be partial (review_queue's pair keys
+    // are NULL on entity-subject rows; the upserts only ever produce pairs).
     let mut nk_seen = std::collections::BTreeSet::new();
     for nk_col in &entity.natural_key {
         if !nk_seen.insert(nk_col.as_str()) {
@@ -317,16 +319,10 @@ fn validate(entity: &Entity) -> Result<(), SpecError> {
                 format!("natural_key repeats column {nk_col:?}"),
             ));
         }
-        let Some(column) = entity.column(nk_col) else {
+        if entity.column(nk_col).is_none() {
             return Err(invalid(
                 entity,
                 format!("natural_key column {nk_col:?} is not a column"),
-            ));
-        };
-        if column.nullable {
-            return Err(invalid(
-                entity,
-                format!("natural_key column {nk_col:?} must be NOT NULL"),
             ));
         }
         if matches!(nk_col.as_str(), "id" | "created_at" | "updated_at") {
@@ -340,11 +336,9 @@ fn validate(entity: &Entity) -> Result<(), SpecError> {
         }
     }
 
-    // The identity conventions (V1–V8). `identity: legacy` marks a
-    // not-yet-migrated entity and skips exactly this block — the ratchet.
-    if !entity.is_legacy() {
-        validate_identity(entity)?;
-    }
+    // The identity conventions (V1–V8) — unconditional since the retrofit
+    // completed and the `identity: legacy` ratchet was deleted.
+    validate_identity(entity)?;
 
     Ok(())
 }

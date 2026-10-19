@@ -96,14 +96,14 @@ Cross-entity read — `entities/assertion/create/from_review.yaml` declares
 | E002 | every `$param` is declared with a compatible type; **no `list<varchar>` param on the lake** | declare the param; for lake lists use the `chr(31)` idiom below |
 | E003 | output = declaration: names, order, compatible types, nullability no looser than declared (both `returns: entity` and typed columns) | project exactly the declared columns; if the plan can't prove non-null (outer join, expression, aggregate), declare the column nullable |
 | E004 | an INSERT (incl. MERGE insert arms) supplies every NOT NULL column without a `default`/`serial`; positional inserts by arity | name the missing column or supply every column positionally |
-| E005 | assigned columns exist; **a key column is never assigned**; for a migrated (non-`identity: legacy`) entity, `natural_key` columns and `created_at` are also immutable | never rewrite identity or birth time — delete-and-insert if the key must change |
+| E005 | assigned columns exist; **a key column is never assigned**; `natural_key` columns and `created_at` are also immutable | never rewrite identity or birth time — delete-and-insert if the key must change |
 | E006 | lake reads carry `AT (VERSION => $snapshot)` XOR declare `pin: live` + `pin_reason` | pin it; go `live` only for the writer's own in-transaction reads, and say why |
 | E009 | qualified references resolve to same-store entities; foreign entities are named under `reads:` | add the entity NAME to `reads:`; cross-store references are never allowed |
 | E010 | a string literal meeting an `accepted_values` column (compared, assigned, or inserted) is in the set | use a value from the entity's declared set |
 | E011 | no `SELECT *` anywhere (projections, subqueries, CTEs) | name every column, so an added column can never change a shape silently |
 | E012 | the SQL's verb matches its folder | move the file or change the statement |
-| E014 | an UPDATE, MERGE matched-update arm or `ON CONFLICT DO UPDATE` assigns `updated_at` (skipped while `identity: legacy`) | add `updated_at = $updated_at` (lake, run-logical) or `updated_at = now()` (control) to the SET list |
-| E015 | a MERGE's ON clause matches on exactly the declared `natural_key` (or `[id]` when none) (skipped while `identity: legacy`) | declare the natural key on the entity, or fix the ON clause to match it |
+| E014 | an UPDATE, MERGE matched-update arm or `ON CONFLICT DO UPDATE` assigns `updated_at` | add `updated_at = $updated_at` (lake, run-logical) or `updated_at = now()` (control) to the SET list |
+| E015 | a MERGE's ON clause matches on exactly the declared `natural_key` (or `[id]` when none) | declare the natural key on the entity, or fix the ON clause to match it |
 | E007 / E008 / E013 | documented in the design doc, deliberately not implemented yet (control WHERE-presence, COPY TO, the `functions/` yaml tree) | nothing — do not claim them in reviews |
 
 Partial-mode statements get no plan, so E003's type proof is replaced by the

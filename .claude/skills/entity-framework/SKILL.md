@@ -128,13 +128,12 @@ its golden fixtures — do not add analyser coverage there.
 
 - **E006**: lake reads pin a snapshot, or justify `pin: live`. Never both.
 - **E011**: no `SELECT *` anywhere — name every column.
-- **E005**: a key column is never assigned; identity is never rewritten. On a
-  migrated entity (no `identity: legacy`), `natural_key` columns and
-  `created_at` are immutable too.
-- **E014/E015 (migrated entities)**: every mutation SETs `updated_at`, and a
-  MERGE matches on exactly the declared `natural_key`. New entities follow the
-  identity conventions: `key: [id]` (varchar UUIDv7/sha256, or bigint+serial
-  for DB-minted ledgers), `created_at`/`updated_at` always, FKs named
+- **E005**: a key column is never assigned; identity is never rewritten.
+  `natural_key` columns and `created_at` are immutable too (written at insert).
+- **E014/E015**: every mutation SETs `updated_at`, and a MERGE matches on
+  exactly the declared `natural_key`. Every entity follows the identity
+  conventions: `key: [id]` (varchar UUIDv7/sha256, or bigint+serial for
+  DB-minted ledgers), `created_at`/`updated_at` always, FKs named
   `<singular(relation)>_id` referencing `id`.
 - **E002 (lake)**: `list<varchar>` params cannot bind (duckdb-rs has no LIST
   binding). The IN-list idiom: pass one varchar of `chr(31)`-joined values and

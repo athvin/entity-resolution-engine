@@ -3,13 +3,12 @@ version: 1
 name: ingest_batch
 relation: ingest_batches
 description: "One delivery receipt (S4.1): per-source landing counts for a batch, including tombstones and resurrections."
-key: [ingest_batch_id]
-identity: legacy
+key: [id]
 generate:
   stores: [duckdb]
   languages: [rust]
 columns:
-  - name: ingest_batch_id
+  - name: id
     type: varchar
     nullable: false
     description: "The delivery batch that landed this row."

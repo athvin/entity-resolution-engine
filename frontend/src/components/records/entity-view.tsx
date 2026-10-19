@@ -326,7 +326,7 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
           ) : (
             <ol className="relative flex flex-col gap-3 border-l pl-4">
               {events.map((event) => (
-                <li key={event.event_id} className="text-sm wrap-anywhere">
+                <li key={event.id} className="text-sm wrap-anywhere">
                   <span className="bg-border absolute -left-[3px] mt-1.5 size-1.5 rounded-full" />
                   <span className="font-medium">{describeEvent(event)}</span>
                   <span className="text-muted-foreground block text-xs sm:ml-2 sm:inline">

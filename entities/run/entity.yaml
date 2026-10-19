@@ -3,13 +3,12 @@ version: 1
 name: run
 relation: runs
 description: "The run ledger (S5.2): one row per pipeline run — mode, status, versions and the snapshot range it produced."
-key: [run_id]
-identity: legacy
+key: [id]
 generate:
   stores: [duckdb]
   languages: [rust]
 columns:
-  - name: run_id
+  - name: id
     type: varchar
     nullable: false
     description: "The run that wrote this row."

@@ -1,4 +1,4 @@
-SELECT run_id, status, mode, model_version, tf_snapshot_id
+SELECT id, status, mode, model_version, tf_snapshot_id
 FROM lake.main.runs
-ORDER BY started_at DESC, run_id DESC
+ORDER BY started_at DESC, id DESC
 LIMIT 1
