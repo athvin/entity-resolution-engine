@@ -4,6 +4,7 @@ name: record_overlay
 relation: record_overlays
 description: "One steward record overlay (protect/suppress): a flag on a record key, retractable, applied at assembly."
 key: [record_key, kind]
+identity: legacy
 generate:
   stores: [duckdb]
   languages: [rust]

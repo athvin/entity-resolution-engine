@@ -4,6 +4,7 @@ name: golden_lineage
 relation: golden_lineage
 description: "Per-attribute survivorship provenance: which record each surviving golden value came from."
 key: [entity_id, attribute]
+identity: legacy
 generate:
   stores: [duckdb]
   languages: [rust, typescript]

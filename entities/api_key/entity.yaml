@@ -4,6 +4,7 @@ name: api_key
 relation: api_keys
 description: "An org-scoped API key: its role and the at-rest hash of the secret."
 key: [key_id]
+identity: legacy
 generate:
   stores: [postgres]
   languages: [rust, typescript]

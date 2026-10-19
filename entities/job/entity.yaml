@@ -4,6 +4,7 @@ name: job
 relation: jobs
 description: "A unit of work on the dispatcher's queue: its kind, params, lifecycle state and retry bookkeeping."
 key: [job_id]
+identity: legacy
 generate:
   stores: [postgres]
   languages: [rust, typescript]

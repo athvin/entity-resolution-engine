@@ -74,6 +74,45 @@ impl Catalog {
         Ok(Self { entities })
     }
 
+    /// V9 — every reference points at a declared Postgres relation and one of
+    /// its real columns (references were previously taken on faith). A property
+    /// of the *whole* tree: [`Catalog::load_dir`] enforces it; a programmatic
+    /// subset catalog (the differ's tests, a focused tool) may skip it.
+    pub fn validate_references(&self) -> Result<(), SpecError> {
+        for entity in &self.entities {
+            for column in &entity.columns {
+                let Some(reference) = &column.references else {
+                    continue;
+                };
+                let Some(target) = self
+                    .entities
+                    .iter()
+                    .find(|e| e.relation == reference.relation && e.has_store(Store::Postgres))
+                else {
+                    return Err(invalid(
+                        entity,
+                        format!(
+                            "column {:?} references {}({}), but no Postgres entity declares \
+                             that relation",
+                            column.name, reference.relation, reference.column
+                        ),
+                    ));
+                };
+                if target.column(&reference.column).is_none() {
+                    return Err(invalid(
+                        entity,
+                        format!(
+                            "column {:?} references {}({}), but the target declares no such \
+                             column",
+                            column.name, reference.relation, reference.column
+                        ),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Load every `<root>/*/entity.yaml`, parse and validate it, and build the
     /// catalog. Entities are ordered by directory name for a stable generated diff.
     pub fn load_dir(root: impl AsRef<Path>) -> Result<Self, SpecError> {
@@ -106,7 +145,9 @@ impl Catalog {
                 })?;
             entities.push(entity);
         }
-        Self::from_entities(entities)
+        let catalog = Self::from_entities(entities)?;
+        catalog.validate_references()?;
+        Ok(catalog)
     }
 
     /// Every entity, in load order.
@@ -262,6 +303,145 @@ fn validate(entity: &Entity) -> Result<(), SpecError> {
                     format!("index column {col:?} is not a column"),
                 ));
             }
+        }
+    }
+
+    // V10 — a natural_key, where declared, is well-formed: real NOT NULL
+    // columns, no duplicates, and never the universal id/timestamps (those are
+    // row identity and bookkeeping, not what makes two rows the same thing).
+    let mut nk_seen = std::collections::BTreeSet::new();
+    for nk_col in &entity.natural_key {
+        if !nk_seen.insert(nk_col.as_str()) {
+            return Err(invalid(
+                entity,
+                format!("natural_key repeats column {nk_col:?}"),
+            ));
+        }
+        let Some(column) = entity.column(nk_col) else {
+            return Err(invalid(
+                entity,
+                format!("natural_key column {nk_col:?} is not a column"),
+            ));
+        };
+        if column.nullable {
+            return Err(invalid(
+                entity,
+                format!("natural_key column {nk_col:?} must be NOT NULL"),
+            ));
+        }
+        if matches!(nk_col.as_str(), "id" | "created_at" | "updated_at") {
+            return Err(invalid(
+                entity,
+                format!(
+                    "natural_key may not include {nk_col:?} — the universal columns are row \
+                     identity and bookkeeping, not natural identity"
+                ),
+            ));
+        }
+    }
+
+    // The identity conventions (V1–V8). `identity: legacy` marks a
+    // not-yet-migrated entity and skips exactly this block — the ratchet.
+    if !entity.is_legacy() {
+        validate_identity(entity)?;
+    }
+
+    Ok(())
+}
+
+/// V1–V8: the identity conventions for a migrated (non-legacy) entity.
+fn validate_identity(entity: &Entity) -> Result<(), SpecError> {
+    // V1 — a NOT NULL `id` column exists: varchar (UUIDv7 or sha256 text), or
+    // bigint+serial for database-minted ledgers (audit_log, ddl_log).
+    let Some(id) = entity.column("id") else {
+        return Err(invalid(entity, "V1: an entity must declare an id column"));
+    };
+    if id.nullable {
+        return Err(invalid(entity, "V1: id must be NOT NULL"));
+    }
+    let id_ok =
+        id.col_type == ColumnType::Varchar || (id.col_type == ColumnType::Bigint && id.serial);
+    if !id_ok {
+        return Err(invalid(
+            entity,
+            "V1: id must be varchar (UUIDv7/sha256 text) or bigint with serial: true \
+             (a database-minted ledger)",
+        ));
+    }
+
+    // V2 — the primary key is exactly [id]; natural identity lives in natural_key.
+    if entity.key != ["id"] {
+        return Err(invalid(
+            entity,
+            format!("V2: key must be exactly [id], got {:?}", entity.key),
+        ));
+    }
+
+    // V3 — id leads the declaration (uniform shape across every entity).
+    if entity.columns.first().map(|c| c.name.as_str()) != Some("id") {
+        return Err(invalid(entity, "V3: id must be the first declared column"));
+    }
+
+    // V4 — created_at and updated_at exist as NOT NULL timestamps.
+    for name in ["created_at", "updated_at"] {
+        let Some(column) = entity.column(name) else {
+            return Err(invalid(
+                entity,
+                format!("V4: an entity must declare {name} (timestamp, NOT NULL)"),
+            ));
+        };
+        if column.col_type != ColumnType::Timestamp || column.nullable {
+            return Err(invalid(
+                entity,
+                format!("V4: {name} must be a NOT NULL timestamp"),
+            ));
+        }
+        if entity.has_store(Store::Postgres) {
+            // V5 — control-plane timestamps are wall-clock: defaulted, volatile.
+            if column.default.is_none() || !column.volatile {
+                return Err(invalid(
+                    entity,
+                    format!(
+                        "V5: control-plane {name} must carry a default (now()) and be \
+                         volatile (wall-clock)"
+                    ),
+                ));
+            }
+        } else if column.volatile {
+            // V6 — lake timestamps are run-logical, written by statements and
+            // part of the determinism contract: never volatile (and the lake
+            // default ban already holds).
+            return Err(invalid(
+                entity,
+                format!("V6: lake {name} is run-logical and must not be volatile"),
+            ));
+        }
+    }
+
+    // V7/V8 — FK columns are named for what they point at, and point at id.
+    for column in &entity.columns {
+        let Some(reference) = &column.references else {
+            continue;
+        };
+        let expected = format!("{}_id", crate::entity::singular(&reference.relation));
+        if column.name != expected && !column.name.ends_with(&format!("_{expected}")) {
+            return Err(invalid(
+                entity,
+                format!(
+                    "V7: foreign-key column {:?} must be named {expected:?} (or \
+                     <role>_{expected}) after the relation it references",
+                    column.name
+                ),
+            ));
+        }
+        if reference.column != "id" {
+            return Err(invalid(
+                entity,
+                format!(
+                    "V8: foreign keys reference id, not {}({})",
+                    reference.relation, reference.column
+                ),
+            ));
         }
     }
 

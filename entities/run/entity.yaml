@@ -4,6 +4,7 @@ name: run
 relation: runs
 description: "The run ledger (S5.2): one row per pipeline run — mode, status, versions and the snapshot range it produced."
 key: [run_id]
+identity: legacy
 generate:
   stores: [duckdb]
   languages: [rust]

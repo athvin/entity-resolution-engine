@@ -4,6 +4,7 @@ name: int_std_record
 relation: int_std_records
 description: "One current standardized person record per record key: the standardization stage's output (supersession applied, tombstones excluded) and the matching stage's input."
 key: [record_key]
+identity: legacy
 generate:
   stores: [duckdb]
   languages: [rust]

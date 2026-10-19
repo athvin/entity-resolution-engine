@@ -4,6 +4,7 @@ name: staged_steward_action
 relation: staged_steward_actions
 description: "A steward action staged for review/apply: its payload, state and outcome."
 key: [action_id]
+identity: legacy
 generate:
   stores: [postgres]
   languages: [rust, typescript]

@@ -51,8 +51,12 @@ pub fn emit_postgres_ddl(entity: &Entity) -> Result<String, ConvertError> {
         }
         lines.push(col);
     }
-    // The primary key is the entity's logical key.
+    // The primary key is the entity's logical key; the natural key (what makes
+    // two rows the same thing — the upsert identity) renders as UNIQUE.
     lines.push(format!("  PRIMARY KEY ({})", entity.key.join(", ")));
+    if !entity.natural_key.is_empty() {
+        lines.push(format!("  UNIQUE ({})", entity.natural_key.join(", ")));
+    }
 
     let mut out = format!(
         "CREATE TABLE IF NOT EXISTS public.{} (\n{}\n);\n",

@@ -4,6 +4,7 @@ name: assertion
 relation: assertions
 description: "One steward assertion (S4.4.1): an always/never constraint on a record pair, retractable but never deleted."
 key: [assertion_id]
+identity: legacy
 generate:
   stores: [duckdb]
   languages: [rust]

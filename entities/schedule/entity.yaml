@@ -4,6 +4,7 @@ name: schedule
 relation: schedules
 description: "A recurring job schedule for a tenant: its kind, cron and source."
 key: [schedule_id]
+identity: legacy
 generate:
   stores: [postgres]
   languages: [rust, typescript]

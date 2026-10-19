@@ -4,6 +4,7 @@ name: resolved_entity
 relation: entities
 description: "One resolved entity (S4.4): its lifecycle status and, for merge losers, the surviving entity it merged into."
 key: [entity_id]
+identity: legacy
 generate:
   stores: [duckdb]
   languages: [rust]

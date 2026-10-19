@@ -387,13 +387,26 @@ fn implied_edges(specs: &[TableSpec]) -> Vec<(String, String, Vec<String>)> {
             if target.name == child.name {
                 continue;
             }
-            let matched = target.keys.iter().find(|k| {
-                k.r#where.is_none()
-                    && !k.columns.is_empty()
-                    && k.columns.iter().all(|c| child_columns.contains(c.as_str()))
-            });
-            if let Some(key) = matched {
-                by_key.entry(key.columns.clone()).or_default().push(target);
+            // EVERY unconditional key can imply an edge — once primary keys are
+            // the universal `id`, the natural key (published as a second
+            // LogicalKey) is what a child actually carries. The bare `["id"]`
+            // key itself is skipped: every relation has one, so "the child has
+            // a column named id" names nothing.
+            for key in &target.keys {
+                if key.r#where.is_some()
+                    || key.columns.is_empty()
+                    || key.columns == ["id"]
+                    || !key
+                        .columns
+                        .iter()
+                        .all(|c| child_columns.contains(c.as_str()))
+                {
+                    continue;
+                }
+                let targets = by_key.entry(key.columns.clone()).or_default();
+                if !targets.iter().any(|t: &&TableSpec| t.name == target.name) {
+                    targets.push(target);
+                }
             }
         }
         for (key_columns, mut targets) in by_key {

@@ -4,6 +4,7 @@ name: entity_event
 relation: entity_events
 description: "One lifecycle event on an entity (S4.5.5): created/merged/split/retired and membership changes, with the run that caused it."
 key: [event_id]
+identity: legacy
 generate:
   stores: [duckdb]
   languages: [rust]
