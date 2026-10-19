@@ -1,0 +1,52 @@
+kind: entity
+version: 1
+name: ddl_log
+relation: ddl_log
+description: "The DDL ledger: one row per DDL command executed against the control database, captured by the er_ddl_audit event triggers (migrations, operator DDL — boot replays are suppressed)."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: bigint
+    nullable: false
+    serial: true
+    description: "Monotonic ledger id (bigserial); the primary key. Database-minted — the ledger is written by an event trigger."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the DDL ran."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Row update stamp; equals created_at (the ledger is append-only)."
+  - name: actor
+    type: varchar
+    nullable: false
+    description: "current_setting('er.actor') when the writer declared itself, else the session user."
+  - name: phase
+    type: varchar
+    nullable: false
+    accepted_values: [ddl_command_end, sql_drop]
+    description: "Which event-trigger phase captured the row (sql_drop owns drops; ddl_command_end owns everything else)."
+  - name: ddl_tag
+    type: varchar
+    nullable: false
+    description: "The command tag (CREATE TABLE, ALTER TABLE, DROP INDEX, ...)."
+  - name: object_type
+    type: varchar
+    description: "The object type (table, index, ...) when the phase reports one."
+  - name: object_identity
+    type: varchar
+    description: "The schema-qualified identity (public.jobs) when the phase reports one."
+  - name: command_text
+    type: varchar
+    description: "Best-effort current_query(): the client's statement text, which may contain more than the one command."
+indexes:
+  - name: ddl_log_created_at
+    columns: [created_at]

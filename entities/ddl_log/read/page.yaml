@@ -1,0 +1,10 @@
+kind: statement
+operation: read
+mode: full
+description: "A keyset page of the DDL ledger, newest first, with optional command-tag and object filters (the ops surface for schema-change forensics)."
+params:
+  - { name: ddl_tag, type: varchar, nullable: true }
+  - { name: object_identity, type: varchar, nullable: true }
+  - { name: before_id, type: bigint, nullable: true }
+  - { name: limit, type: bigint }
+returns: entity

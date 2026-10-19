@@ -15,6 +15,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut client = pg::connect(&dsn).await?;
     // Advisory-locked, so it's safe alongside the API's own ensure_schema.
     pg::ensure_schema(&mut client).await?;
+    if !pg::ensure_event_triggers(&mut client).await? {
+        eprintln!("er-dispatcher: DDL-ledger event triggers not installed (needs superuser)");
+    }
+    // The dispatcher's writes identify themselves to the history/DDL ledgers.
+    pg::set_actor(&client, "er-dispatcher").await?;
     let http = reqwest::Client::new();
 
     // SIGTERM -> drain: finish the in-flight job, then exit at the next loop top.

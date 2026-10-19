@@ -11,6 +11,7 @@ pub mod assertion;
 pub mod audit_log;
 pub mod batch;
 pub mod config_version;
+pub mod ddl_log;
 pub mod entity_event;
 pub mod entity_membership;
 pub mod golden_lineage;
