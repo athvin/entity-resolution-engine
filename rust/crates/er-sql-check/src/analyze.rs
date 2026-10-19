@@ -60,6 +60,7 @@ pub fn analyze_statement(
     entity: &Entity,
     store: Store,
     provider: &FeatherFlowProvider,
+    catalog: &Catalog,
 ) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
 
@@ -144,7 +145,7 @@ pub fn analyze_statement(
         let dialect = dialect_for(store);
         match Parser::parse_sql(dialect.as_ref(), &rewritten.sql) {
             Ok(mut stmts) if !stmts.is_empty() => {
-                diags.extend(ast_checks(stmt, entity, &stmts.remove(0)));
+                diags.extend(ast_checks(stmt, entity, catalog, store, &stmts.remove(0)));
             }
             _ => {
                 // Truly unparseable: the text heuristics hold the line.
@@ -185,8 +186,9 @@ pub fn analyze_statement(
     };
 
     // The AST passes: E011 (no wildcard), E012 (verb matches folder), E004
-    // (INSERT coverage/arity), E005 (assignments), E010 (accepted values).
-    diags.extend(ast_checks(stmt, entity, &parsed));
+    // (INSERT coverage/arity), E005 (assignments), E009 (declared reads), E010
+    // (accepted values).
+    diags.extend(ast_checks(stmt, entity, catalog, store, &parsed));
 
     // Plan, then the plan-dependent checks.
     let plan = match ff_analysis::plan_statement(parsed, provider) {
@@ -381,7 +383,7 @@ pub fn analyze_catalog(
         } else {
             &pg_provider
         };
-        diags.extend(analyze_statement(stmt, entity, store, provider));
+        diags.extend(analyze_statement(stmt, entity, store, provider, catalog));
     }
     Ok(diags)
 }
@@ -391,7 +393,13 @@ pub fn analyze_catalog(
 /// The AST passes shared by full and (parseable) partial statements: E011 (no
 /// wildcard), E012 (verb vs folder), E004 (INSERT coverage/arity), E005
 /// (assignment legality) and E010 (accepted-values literals).
-fn ast_checks(stmt: &LoadedStatement, entity: &Entity, parsed: &Statement) -> Vec<Diagnostic> {
+fn ast_checks(
+    stmt: &LoadedStatement,
+    entity: &Entity,
+    catalog: &Catalog,
+    store: Store,
+    parsed: &Statement,
+) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
     if statement_has_wildcard(parsed) {
         diags.push(Diagnostic::new(
@@ -438,6 +446,90 @@ fn ast_checks(stmt: &LoadedStatement, entity: &Entity, parsed: &Statement) -> Ve
         _ => {}
     }
     diags.extend(accepted_values_comparisons(stmt, entity, parsed));
+    diags.extend(reads_checks(stmt, entity, catalog, store, parsed));
+    diags
+}
+
+/// E009 — the statement references only relations of its own store, and every
+/// entity beyond its own is named under `reads:` (the declaration the differ's
+/// impact report and the oracle's DDL set rely on). Unqualified references are
+/// session temps or CTE names — scratch, governed elsewhere.
+fn reads_checks(
+    stmt: &LoadedStatement,
+    entity: &Entity,
+    catalog: &Catalog,
+    store: Store,
+    parsed: &Statement,
+) -> Vec<Diagnostic> {
+    use std::ops::ControlFlow;
+
+    let mut diags = Vec::new();
+    // A reads: entry must name a real entity of the statement's store.
+    for name in &stmt.reads {
+        match catalog.by_name(name) {
+            None => diags.push(Diagnostic::new(
+                "E009",
+                &stmt.path,
+                format!("reads: names {name:?}, which is not an entity"),
+            )),
+            Some(read) if !read.has_store(store) => diags.push(Diagnostic::new(
+                "E009",
+                &stmt.path,
+                format!("reads: names {name:?}, which does not live in this statement's store"),
+            )),
+            Some(_) => {}
+        }
+    }
+
+    let mut refs: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let _ = ff_analysis::sqlparser::ast::visit_relations(parsed, |relation| {
+        refs.insert(relation.to_string().to_lowercase());
+        ControlFlow::<()>::Continue(())
+    });
+
+    let qualifier = format!("{}.", store.qualifier());
+    let own = entity.relation.to_lowercase();
+    for full in refs {
+        let Some(rel) = full.strip_prefix(&qualifier) else {
+            if full.contains('.') {
+                diags.push(Diagnostic::new(
+                    "E009",
+                    &stmt.path,
+                    format!(
+                        "references {full}, outside the statement's {} store",
+                        store.qualifier()
+                    ),
+                ));
+            }
+            continue;
+        };
+        if rel == own {
+            continue;
+        }
+        match catalog
+            .entities()
+            .iter()
+            .find(|e| e.relation.to_lowercase() == rel && e.has_store(store))
+        {
+            None => diags.push(Diagnostic::new(
+                "E009",
+                &stmt.path,
+                format!("references {full}, which no entity of this store declares"),
+            )),
+            Some(read) if !stmt.reads.iter().any(|r| r == &read.name) => {
+                diags.push(Diagnostic::new(
+                    "E009",
+                    &stmt.path,
+                    format!(
+                        "reads entity {} ({full}); declare it under reads: so the impact \
+                         surface is explicit",
+                        read.name
+                    ),
+                ));
+            }
+            Some(_) => {}
+        }
+    }
     diags
 }
 
@@ -945,7 +1037,7 @@ mod tests {
         let lake = build_store_catalog(&cat, Store::Duckdb);
         let registry = FunctionRegistry::new();
         let provider = FeatherFlowProvider::new(&lake, &registry);
-        analyze_statement(stmt, entity, Store::Duckdb, &provider)
+        analyze_statement(stmt, entity, Store::Duckdb, &provider, &cat)
     }
 
     fn codes(diags: &[Diagnostic]) -> Vec<&str> {
@@ -975,7 +1067,7 @@ mod tests {
         let lake = build_store_catalog(&cat, Store::Duckdb);
         let registry = FunctionRegistry::new();
         let provider = FeatherFlowProvider::new(&lake, &registry);
-        analyze_statement(stmt, entity, Store::Duckdb, &provider)
+        analyze_statement(stmt, entity, Store::Duckdb, &provider, &cat)
     }
 
     #[test]
@@ -1076,7 +1168,7 @@ mod tests {
         let pg = build_store_catalog(&cat, Store::Postgres);
         let registry = FunctionRegistry::new();
         let provider = FeatherFlowProvider::new(&pg, &registry);
-        analyze_statement(stmt, entity, Store::Postgres, &provider)
+        analyze_statement(stmt, entity, Store::Postgres, &provider, &cat)
     }
 
     #[test]
@@ -1130,6 +1222,66 @@ mod tests {
         assert!(
             !org_diags(&fine).iter().any(|d| d.code == "E010"),
             "an accepted literal must pass"
+        );
+    }
+
+    #[test]
+    fn an_undeclared_cross_entity_read_is_rejected() {
+        // The override shape without its reads: declaration.
+        let stmt = partial_write(
+            Operation::Update,
+            "UPDATE lake.main.golden_records SET email = (SELECT o.value \
+             FROM lake.main.golden_overrides o WHERE o.entity_id = golden_records.entity_id)",
+        );
+        let diags = golden_diags(&stmt);
+        assert!(
+            diags.iter().any(|d| d.code == "E009"
+                && d.message.contains("golden_override")
+                && d.message.contains("reads:")),
+            "expected the undeclared-read E009, got {diags:#?}"
+        );
+
+        // ...and declaring it passes.
+        let mut declared = partial_write(
+            Operation::Update,
+            "UPDATE lake.main.golden_records SET email = (SELECT o.value \
+             FROM lake.main.golden_overrides o WHERE o.entity_id = golden_records.entity_id)",
+        );
+        declared.reads = vec!["golden_override".to_string()];
+        assert!(
+            !golden_diags(&declared).iter().any(|d| d.code == "E009"),
+            "a declared read must pass"
+        );
+    }
+
+    #[test]
+    fn a_reads_entry_naming_no_entity_is_rejected() {
+        let mut stmt = partial_write(
+            Operation::Update,
+            "UPDATE lake.main.golden_records SET email = 'x'",
+        );
+        stmt.reads = vec!["golden_overlays".to_string()];
+        let diags = golden_diags(&stmt);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.code == "E009" && d.message.contains("not an entity")),
+            "expected the unknown-reads E009, got {diags:#?}"
+        );
+    }
+
+    #[test]
+    fn a_cross_store_reference_is_rejected() {
+        let stmt = partial_write(
+            Operation::Update,
+            "UPDATE lake.main.golden_records SET email = (SELECT name FROM public.orgs LIMIT 1)",
+        );
+        let diags = golden_diags(&stmt);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.code == "E009" && d.message.contains("outside the statement's")),
+            "expected the cross-store E009, got {diags:#?}"
         );
     }
 
@@ -1326,7 +1478,7 @@ mod tests {
             sql: "SELECT name FROM public.orgs".to_string(),
             path: PathBuf::from("entities/org/read/test.sql"),
         };
-        let diags = analyze_statement(&stmt, entity, Store::Postgres, &provider);
+        let diags = analyze_statement(&stmt, entity, Store::Postgres, &provider, &cat);
         assert!(
             diags
                 .iter()
@@ -1355,7 +1507,7 @@ mod tests {
             sql: "SELECT 1 FROM public.orgs".to_string(),
             path: PathBuf::from("entities/org/read/test.sql"),
         };
-        let diags = analyze_statement(&stmt, entity, Store::Postgres, &provider);
+        let diags = analyze_statement(&stmt, entity, Store::Postgres, &provider, &cat);
         assert!(
             diags
                 .iter()
