@@ -78,10 +78,25 @@ pub fn emit_postgres_ddl(entity: &Entity) -> Result<String, ConvertError> {
         ));
     }
 
-    // The history companion + trigger: a generated jsonb row-image ledger, not
-    // an entity. The trigger routes through the one `public.er_history()`
-    // function (the baseline prelude) with the companion name as its argument.
-    if entity.generate.history {
+    // The history companion + trigger ride in the entity's own DDL entry.
+    if let Some(companion) = emit_history_companion_ddl(entity) {
+        out.push_str(&companion);
+    }
+
+    Ok(out)
+}
+
+/// The history companion + trigger for a `history: true` entity: a generated
+/// jsonb row-image ledger, not an entity. The trigger routes through the one
+/// `public.er_history()` function (the baseline prelude) with the companion
+/// name as its argument. `None` for entities without the flag.
+#[must_use]
+pub fn emit_history_companion_ddl(entity: &Entity) -> Option<String> {
+    if !entity.generate.history {
+        return None;
+    }
+    let mut out = String::new();
+    {
         let relation = &entity.relation;
         out.push_str(&format!(
             "CREATE TABLE IF NOT EXISTS public.{relation}_history (\n  \
@@ -100,6 +115,5 @@ pub fn emit_postgres_ddl(entity: &Entity) -> Result<String, ConvertError> {
              FOR EACH ROW EXECUTE FUNCTION public.er_history('{relation}_history');\n"
         ));
     }
-
-    Ok(out)
+    Some(out)
 }

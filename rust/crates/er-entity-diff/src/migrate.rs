@@ -118,9 +118,16 @@ pub fn plan_migration(
     // DDL (not a diff message): a missing relation -> CREATE TABLE; a missing
     // nullable column -> ADD COLUMN. CREATEs are ordered so a referenced table is
     // created before the table that references it (the FK is valid on apply).
+    let mut needs_history_prelude = false;
     for entity in topo_order(&catalog.for_store(store)) {
         match live.get(&entity.relation) {
-            None => plan.statements.push(create_table_sql(store, entity)),
+            None => {
+                // A fresh entity's Postgres DDL includes its history companion
+                // and trigger, which call public.er_history() — the prelude
+                // must precede it.
+                needs_history_prelude |= store == Store::Postgres && entity.generate.history;
+                plan.statements.push(create_table_sql(store, entity));
+            }
             Some(cols) => {
                 let present: std::collections::BTreeSet<&str> =
                     cols.iter().map(|c| c.name.as_str()).collect();
@@ -130,8 +137,25 @@ pub fn plan_migration(
                             .push(add_column_sql(store, &entity.relation, column));
                     }
                 }
+                // The entity exists but its history companion does not: create
+                // the companion + trigger (generated DDL, Safe).
+                if store == Store::Postgres
+                    && entity.generate.history
+                    && !live.contains_key(&format!("{}_history", entity.relation))
+                {
+                    if let Some(companion) = er_entity_gen::emit_history_companion_ddl(entity) {
+                        needs_history_prelude = true;
+                        plan.statements.push(companion);
+                    }
+                }
             }
         }
+    }
+    // The er_history() function every companion trigger calls, once, first
+    // (CREATE OR REPLACE — idempotent against an already-provisioned database).
+    if needs_history_prelude {
+        plan.statements
+            .insert(0, er_entity_gen::history_prelude().to_string());
     }
     plan
 }
@@ -161,8 +185,8 @@ mod tests {
     fn a_missing_nullable_column_plans_an_add_column_and_a_type_change_is_refused() {
         // Live `jobs` missing the nullable `run_id`, and with `priority` as integer.
         let cols: Vec<LiveColumn> = [
-            ("job_id", "text", false),
-            ("org", "text", false),
+            ("id", "text", false),
+            ("org_id", "text", false),
             ("kind", "text", false),
             ("params", "jsonb", false),
             ("state", "text", false),
@@ -205,5 +229,73 @@ mod tests {
                 .iter()
                 .any(|d| d.message.contains("priority: type integer -> bigint"))
         );
+    }
+
+    const WEBHOOK_YAML: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../entities/webhook/entity.yaml"
+    ));
+
+    fn webhook_catalog() -> Catalog {
+        Catalog::from_entities(vec![serde_norway::from_str(WEBHOOK_YAML).unwrap()]).unwrap()
+    }
+
+    /// Live columns exactly matching an entity's declared shape.
+    fn live_like(catalog: &Catalog, name: &str) -> Vec<LiveColumn> {
+        catalog
+            .by_name(name)
+            .unwrap()
+            .columns
+            .iter()
+            .map(|c| LiveColumn {
+                name: c.name.clone(),
+                type_name: c.col_type.postgres_type().to_string(),
+                nullable: c.nullable,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_fresh_history_entity_plans_the_prelude_before_its_create() {
+        let plan = plan_migration(&webhook_catalog(), Store::Postgres, &BTreeMap::new());
+        assert_eq!(plan.statements.len(), 2, "{:?}", plan.statements);
+        assert!(
+            plan.statements[0].contains("FUNCTION public.er_history()"),
+            "the er_history prelude must precede the trigger that calls it"
+        );
+        assert!(plan.statements[1].contains("CREATE TABLE IF NOT EXISTS public.webhooks ("));
+        assert!(plan.statements[1].contains("public.webhooks_history ("));
+        assert_eq!(plan.breaking, Vec::new());
+    }
+
+    #[test]
+    fn an_absent_companion_plans_prelude_plus_companion_only() {
+        let catalog = webhook_catalog();
+        let mut live = BTreeMap::new();
+        live.insert("webhooks".to_string(), live_like(&catalog, "webhook"));
+
+        let plan = plan_migration(&catalog, Store::Postgres, &live);
+        assert_eq!(plan.statements.len(), 2, "{:?}", plan.statements);
+        assert!(plan.statements[0].contains("FUNCTION public.er_history()"));
+        assert!(plan.statements[1].contains("public.webhooks_history ("));
+        assert!(plan.statements[1].contains("TRIGGER er_history_webhooks"));
+        assert!(
+            !plan.statements[1].contains("public.webhooks ("),
+            "the entity table already exists; only the companion is created"
+        );
+        assert_eq!(plan.breaking, Vec::new());
+    }
+
+    #[test]
+    fn a_present_companion_plans_nothing() {
+        let catalog = webhook_catalog();
+        let mut live = BTreeMap::new();
+        live.insert("webhooks".to_string(), live_like(&catalog, "webhook"));
+        // Existence is what the differ checks; the companion's shape is
+        // generated DDL, corrected by the boot replay like indexes are.
+        live.insert("webhooks_history".to_string(), Vec::new());
+
+        let plan = plan_migration(&catalog, Store::Postgres, &live);
+        assert!(plan.is_empty(), "{plan:?}");
     }
 }

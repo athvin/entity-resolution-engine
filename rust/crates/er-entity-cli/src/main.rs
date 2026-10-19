@@ -328,11 +328,7 @@ fn run_diff(root: &Path, store: &str, dsn: Option<&str>) -> Result<bool> {
         .map(ToString::to_string)
         .or_else(|| std::env::var("ER_PG_DSN").ok())
         .context("a Postgres DSN is required (--dsn or ER_PG_DSN)")?;
-    let relations: Vec<String> = catalog
-        .for_store(Store::Postgres)
-        .iter()
-        .map(|e| e.relation.clone())
-        .collect();
+    let relations: Vec<String> = er_entity_diff::postgres_relations(&catalog);
 
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -376,11 +372,7 @@ fn run_migrate(root: &Path, store: &str, dsn: Option<&str>, apply: bool) -> Resu
         .map(ToString::to_string)
         .or_else(|| std::env::var("ER_PG_DSN").ok())
         .context("a Postgres DSN is required (--dsn or ER_PG_DSN)")?;
-    let relations: Vec<String> = catalog
-        .for_store(Store::Postgres)
-        .iter()
-        .map(|e| e.relation.clone())
-        .collect();
+    let relations: Vec<String> = er_entity_diff::postgres_relations(&catalog);
 
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()

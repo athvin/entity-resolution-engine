@@ -300,7 +300,7 @@ Every statement the product runs is a file under its entity's `create`, `read`, 
 
 ### Schema diff
 
-The differ answers one question per store: does the live database match the catalog? Desired state is the catalog. Actual state is read into the same `RelSchema` values: from Postgres through `information_schema.columns`, `pg_indexes` and `pg_constraint` over `tokio_postgres`; from DuckLake through `duckdb_columns()` on the attached catalog at its latest snapshot. The comparison is then catalog against catalog, column by column, in declaration order.
+The differ answers one question per store: does the live database match the catalog? History companions are covered by existence: `er-entity diff` reads `<relation>_history` beside each `history: true` entity's relation and reports an absent companion as a Safe difference, and `migrate plan` creates it (prepending the `er_history()` prelude once, before any statement whose trigger calls it); a companion's column shape is generated DDL corrected by the boot replay, like indexes. Desired state is the catalog. Actual state is read into the same `RelSchema` values: from Postgres through `information_schema.columns`, `pg_indexes` and `pg_constraint` over `tokio_postgres`; from DuckLake through `duckdb_columns()` on the attached catalog at its latest snapshot. The comparison is then catalog against catalog, column by column, in declaration order.
 
 | Operation | Lake | Control | Severity |
 |---|---|---|---|
