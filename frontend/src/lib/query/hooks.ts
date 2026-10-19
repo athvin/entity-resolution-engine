@@ -47,12 +47,11 @@ export interface RunRow {
  * One golden record as the read API serves it — a superset over both entity
  * types, derived from the generated entity bindings so the column set stays in
  * lock-step with the schema. A given row carries only its entity type's
- * projection (person *or* account), so every attribute is optional; `entity_id`
+ * projection (person *or* account), so every attribute is optional; `id`
  * is always present. Render through the entity-type attribute selectors
  * (`goldenAttributes`/`displayName`), not these fields directly.
  */
-export type GoldenRecord = Partial<PersonGoldenRecord> &
-  Partial<AcctGoldenRecord> & { entity_id: string };
+export type GoldenRecord = Partial<PersonGoldenRecord> & Partial<AcctGoldenRecord> & { id: string };
 
 export interface GoldenPage {
   items: GoldenRecord[];

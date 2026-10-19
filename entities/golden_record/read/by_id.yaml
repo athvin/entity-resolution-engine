@@ -5,7 +5,7 @@ params:
   - { name: snapshot, type: bigint }
   - { name: entity_id, type: varchar }
 returns:
-  - { name: entity_id, type: varchar, nullable: false }
+  - { name: id, type: varchar, nullable: false }
   - { name: given_name, type: varchar }
   - { name: family_name, type: varchar }
   - { name: email, type: varchar }

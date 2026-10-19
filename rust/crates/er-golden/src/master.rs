@@ -220,7 +220,7 @@ pub fn merge_plans_sql(
                 g.given_name, g.family_name, g.email, g.phone_e164 \
          FROM plan_groups gr \
          JOIN {schema_qualifier}.entity_membership m ON m.entity_id = gr.entity_id \
-         LEFT JOIN {schema_qualifier}.golden_records g ON g.entity_id = gr.entity_id \
+         LEFT JOIN {schema_qualifier}.golden_records g ON g.id = gr.entity_id \
          ORDER BY gr.entity_id, m.record_key"
     ))
 }

@@ -39,7 +39,7 @@ function readListUtf8(v: unknown): string[] {
 }
 
 const EXPECTED_VERSION = "1";
-const REQUIRED: readonly string[] = ["entity_id", "survivorship_version", "assembled_at"];
+const REQUIRED: readonly string[] = ["id", "survivorship_version", "assembled_at", "created_at", "updated_at"];
 
 /** Decode an Arrow table into GoldenRecord[] after checking the in-band schema. */
 export function readGoldenRecord(table: Table): GoldenRecord[] {
@@ -56,7 +56,7 @@ export function readGoldenRecord(table: Table): GoldenRecord[] {
   const rows: GoldenRecord[] = [];
   for (let i = 0; i < table.numRows; i++) {
     rows.push({
-      entity_id: ((v) => (v == null ? null : readUtf8(v)))(table.getChild("entity_id")?.get(i)),
+      id: ((v) => (v == null ? null : readUtf8(v)))(table.getChild("id")?.get(i)),
       given_name: ((v) => (v == null ? null : readUtf8(v)))(table.getChild("given_name")?.get(i)),
       family_name: ((v) => (v == null ? null : readUtf8(v)))(table.getChild("family_name")?.get(i)),
       email: ((v) => (v == null ? null : readUtf8(v)))(table.getChild("email")?.get(i)),
@@ -71,6 +71,8 @@ export function readGoldenRecord(table: Table): GoldenRecord[] {
       metadata: ((v) => (v == null ? null : readUtf8(v)))(table.getChild("metadata")?.get(i)),
       survivorship_version: ((v) => (v == null ? null : readUtf8(v)))(table.getChild("survivorship_version")?.get(i)),
       assembled_at: ((v) => (v == null ? null : readTimestamp(v)))(table.getChild("assembled_at")?.get(i)),
+      created_at: ((v) => (v == null ? null : readTimestamp(v)))(table.getChild("created_at")?.get(i)),
+      updated_at: ((v) => (v == null ? null : readTimestamp(v)))(table.getChild("updated_at")?.get(i)),
     } as GoldenRecord);
   }
   return rows;

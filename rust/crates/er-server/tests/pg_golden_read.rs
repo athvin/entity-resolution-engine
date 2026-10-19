@@ -235,10 +235,10 @@ async fn golden_records_read_over_ducklake() {
     );
     assert!(page.snapshot.unwrap() >= 1);
     assert!(page.next_cursor.is_none());
-    assert!(page.has_field("entity_id"));
+    assert!(page.has_field("id"));
     assert!(page.has_field("given_name"));
     let some_entity = page
-        .string_values("entity_id")
+        .string_values("id")
         .into_iter()
         .next()
         .expect("at least one entity_id");
@@ -252,7 +252,7 @@ async fn golden_records_read_over_ducklake() {
         let resp = app.clone().oneshot(op_get(&uri)).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let page = arrow_page(resp).await;
-        for id in page.string_values("entity_id") {
+        for id in page.string_values("id") {
             assert!(seen.insert(id), "entity_id must not repeat across pages");
         }
         pages += 1;
@@ -294,7 +294,7 @@ async fn golden_records_read_over_ducklake() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let detail = json_body(resp).await;
-    assert_eq!(detail["golden"]["entity_id"], some_entity);
+    assert_eq!(detail["golden"]["id"], some_entity);
     assert!(
         !detail["members"].as_array().unwrap().is_empty(),
         "an entity has >=1 member"

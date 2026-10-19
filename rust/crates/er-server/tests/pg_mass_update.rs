@@ -123,7 +123,7 @@ fn str_col<'a>(batch: &'a RecordBatch, name: &str) -> &'a StringArray {
 /// null or the entity is absent).
 async fn golden_email(app: &axum::Router, entity_id: &str) -> Option<String> {
     for batch in &golden_rows(app).await {
-        let ids = str_col(batch, "entity_id");
+        let ids = str_col(batch, "id");
         let emails = str_col(batch, "email");
         for i in 0..batch.num_rows() {
             if ids.value(i) == entity_id {
@@ -179,7 +179,7 @@ async fn mass_update_overrides_and_clears_golden_fields() {
 
     // Pick an entity to edit (first row of the Arrow page).
     let batches = golden_rows(&app).await;
-    let entity_id = str_col(&batches[0], "entity_id").value(0).to_string();
+    let entity_id = str_col(&batches[0], "id").value(0).to_string();
 
     // 1) Override `email` for that entity, then drain + correct.
     let body = serde_json::json!({

@@ -97,7 +97,7 @@
   "acct_golden_records": {
    "columns": [
     {
-     "name": "entity_id",
+     "name": "id",
      "nullable": false,
      "type": "VARCHAR"
     },
@@ -150,6 +150,16 @@
      "name": "assembled_at",
      "nullable": false,
      "type": "TIMESTAMP"
+    },
+    {
+     "name": "created_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "updated_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
     }
    ],
    "create_table_sql": null,
@@ -157,7 +167,7 @@
    "keys": [
     {
      "columns": [
-      "entity_id"
+      "id"
      ],
      "where": null
     }
@@ -467,7 +477,7 @@
   "entities": {
    "columns": [
     {
-     "name": "entity_id",
+     "name": "id",
      "nullable": false,
      "type": "VARCHAR"
     },
@@ -502,7 +512,7 @@
      "type": "VARCHAR"
     }
    ],
-   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.entities (\n  entity_id VARCHAR NOT NULL,\n  status VARCHAR NOT NULL,\n  merged_into VARCHAR,\n  created_at TIMESTAMP NOT NULL,\n  updated_at TIMESTAMP NOT NULL,\n  created_run_id VARCHAR NOT NULL,\n  updated_run_id VARCHAR NOT NULL\n);",
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.entities (\n  id VARCHAR NOT NULL,\n  status VARCHAR NOT NULL,\n  merged_into VARCHAR,\n  created_at TIMESTAMP NOT NULL,\n  updated_at TIMESTAMP NOT NULL,\n  created_run_id VARCHAR NOT NULL,\n  updated_run_id VARCHAR NOT NULL\n);",
    "enums": {
     "status": [
      "active",
@@ -513,7 +523,7 @@
    "keys": [
     {
      "columns": [
-      "entity_id"
+      "id"
      ],
      "where": null
     }
@@ -817,7 +827,7 @@
   "golden_records": {
    "columns": [
     {
-     "name": "entity_id",
+     "name": "id",
      "nullable": false,
      "type": "VARCHAR"
     },
@@ -890,6 +900,16 @@
      "name": "assembled_at",
      "nullable": false,
      "type": "TIMESTAMP"
+    },
+    {
+     "name": "created_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "updated_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
     }
    ],
    "create_table_sql": null,
@@ -897,7 +917,7 @@
    "keys": [
     {
      "columns": [
-      "entity_id"
+      "id"
      ],
      "where": null
     }

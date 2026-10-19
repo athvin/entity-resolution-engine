@@ -6,6 +6,6 @@ params:
   - { name: first, type: varchar }
   - { name: last, type: varchar }
 returns:
-  - { name: entity_id, type: varchar, nullable: false }
+  - { name: id, type: varchar, nullable: false }
   - { name: company_name, type: varchar }
   - { name: domain, type: varchar }

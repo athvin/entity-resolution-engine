@@ -77,6 +77,7 @@ fn base_10_golden_lineage_and_records_match_committed() {
         "int_std_records",
         "entity_membership",
         "entities",
+        "2026-01-01 00:00:00",
     );
     session
         .execute_batch(&format!("create table golden_records as\n{records_sql}"))

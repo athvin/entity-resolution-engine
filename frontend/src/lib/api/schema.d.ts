@@ -48,16 +48,26 @@ export interface components {
             assembled_at: string;
             /** @description Surviving company name. */
             company_name?: string | null;
+            /**
+             * Format: date-time
+             * @description Run-logical creation time (the assembling run's clock; the mart is rebuilt whole).
+             */
+            created_at: string;
             /** @description Surviving web domain. */
             domain?: string | null;
             /** @description Persistent entity id (ULID); the survivorship key. */
-            entity_id: string;
+            id: string;
             /** @description Surviving opaque per-source metadata object. */
             metadata?: unknown;
             /** @description Surviving phone number in E.164 form. */
             phone_e164?: string | null;
             /** @description Survivorship policy version that produced this row. */
             survivorship_version: string;
+            /**
+             * Format: date-time
+             * @description Run-logical last-write time (equals created_at; the mart is rebuilt whole).
+             */
+            updated_at: string;
         };
         /** @description An org-scoped API key: its role and the at-rest hash of the secret. */
         ApiKey: {
@@ -206,20 +216,30 @@ export interface components {
              * @description Surviving birth date.
              */
             birth_date?: string | null;
+            /**
+             * Format: date-time
+             * @description Run-logical creation time (the assembling run's clock; the mart is rebuilt whole).
+             */
+            created_at: string;
             /** @description Surviving email address. */
             email?: string | null;
-            /** @description Persistent entity id (ULID); the survivorship key. */
-            entity_id: string;
             /** @description Surviving family name. */
             family_name?: string | null;
             /** @description Surviving given name. */
             given_name?: string | null;
+            /** @description Persistent entity id (ULID); the survivorship key. */
+            id: string;
             /** @description Surviving opaque per-source metadata object. */
             metadata?: unknown;
             /** @description Surviving phone number in E.164 form. */
             phone_e164?: string | null;
             /** @description Survivorship policy version that produced this row. */
             survivorship_version: string;
+            /**
+             * Format: date-time
+             * @description Run-logical last-write time (equals created_at; the mart is rebuilt whole).
+             */
+            updated_at: string;
         };
         /** @description A unit of work on the dispatcher's queue: its kind, params, lifecycle state and retry bookkeeping. */
         Job: {

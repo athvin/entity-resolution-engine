@@ -1,5 +1,5 @@
 SELECT
-  entity_id,
+  id,
   company_name,
   domain,
   phone_e164,
@@ -9,12 +9,14 @@ SELECT
   addr_postal,
   metadata,
   survivorship_version,
-  assembled_at
+  assembled_at,
+  created_at,
+  updated_at
 FROM lake.main.acct_golden_records AT (VERSION => $snapshot)
-WHERE ($after IS NULL OR entity_id > $after)
+WHERE ($after IS NULL OR id > $after)
   AND (
     $q IS NULL
     OR (coalesce(company_name, '') || ' ' || coalesce(domain, '')) ILIKE $q ESCAPE '\'
   )
-ORDER BY entity_id
+ORDER BY id
 LIMIT $limit

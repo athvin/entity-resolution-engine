@@ -76,9 +76,11 @@
         "type": "object",
         "description": "One resolved account/organization: the surviving value per attribute, at a snapshot.",
         "required": [
-          "entity_id",
+          "id",
           "survivorship_version",
-          "assembled_at"
+          "assembled_at",
+          "created_at",
+          "updated_at"
         ],
         "properties": {
           "addr_city": {
@@ -121,6 +123,11 @@
             ],
             "description": "Surviving company name."
           },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Run-logical creation time (the assembling run's clock; the mart is rebuilt whole)."
+          },
           "domain": {
             "type": [
               "string",
@@ -128,7 +135,7 @@
             ],
             "description": "Surviving web domain."
           },
-          "entity_id": {
+          "id": {
             "type": "string",
             "description": "Persistent entity id (ULID); the survivorship key."
           },
@@ -145,6 +152,11 @@
           "survivorship_version": {
             "type": "string",
             "description": "Survivorship policy version that produced this row."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Run-logical last-write time (equals created_at; the mart is rebuilt whole)."
           }
         }
       },
@@ -384,9 +396,11 @@
         "type": "object",
         "description": "One resolved person: the surviving value per attribute, at a snapshot.",
         "required": [
-          "entity_id",
+          "id",
           "survivorship_version",
-          "assembled_at"
+          "assembled_at",
+          "created_at",
+          "updated_at"
         ],
         "properties": {
           "addr_city": {
@@ -444,16 +458,17 @@
             "format": "date",
             "description": "Surviving birth date."
           },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Run-logical creation time (the assembling run's clock; the mart is rebuilt whole)."
+          },
           "email": {
             "type": [
               "string",
               "null"
             ],
             "description": "Surviving email address."
-          },
-          "entity_id": {
-            "type": "string",
-            "description": "Persistent entity id (ULID); the survivorship key."
           },
           "family_name": {
             "type": [
@@ -469,6 +484,10 @@
             ],
             "description": "Surviving given name."
           },
+          "id": {
+            "type": "string",
+            "description": "Persistent entity id (ULID); the survivorship key."
+          },
           "metadata": {
             "description": "Surviving opaque per-source metadata object."
           },
@@ -482,6 +501,11 @@
           "survivorship_version": {
             "type": "string",
             "description": "Survivorship policy version that produced this row."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Run-logical last-write time (equals created_at; the mart is rebuilt whole)."
           }
         }
       },

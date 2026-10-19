@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS lake.main.golden_records (
-  entity_id VARCHAR NOT NULL,
+  id VARCHAR NOT NULL,
   given_name VARCHAR,
   family_name VARCHAR,
   email VARCHAR,
@@ -13,5 +13,7 @@ CREATE TABLE IF NOT EXISTS lake.main.golden_records (
   birth_date DATE,
   metadata JSON,
   survivorship_version VARCHAR NOT NULL,
-  assembled_at TIMESTAMP NOT NULL
+  assembled_at TIMESTAMP NOT NULL,
+  created_at TIMESTAMP NOT NULL,
+  updated_at TIMESTAMP NOT NULL
 );

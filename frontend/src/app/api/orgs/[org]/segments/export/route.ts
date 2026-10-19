@@ -10,7 +10,7 @@ const exportSchema = z.object({
 });
 
 const COLUMNS = [
-  "entity_id",
+  "id",
   "given_name",
   "family_name",
   "email",

@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS lake.main.acct_golden_records (
-  entity_id VARCHAR NOT NULL,
+  id VARCHAR NOT NULL,
   company_name VARCHAR,
   domain VARCHAR,
   phone_e164 VARCHAR,
@@ -9,5 +9,7 @@ CREATE TABLE IF NOT EXISTS lake.main.acct_golden_records (
   addr_postal VARCHAR,
   metadata JSON,
   survivorship_version VARCHAR NOT NULL,
-  assembled_at TIMESTAMP NOT NULL
+  assembled_at TIMESTAMP NOT NULL,
+  created_at TIMESTAMP NOT NULL,
+  updated_at TIMESTAMP NOT NULL
 );

@@ -759,7 +759,7 @@ mod tests {
         assert!(module.contains("entity_id: &str"));
         // The snapshot is spliced; after/q/limit are bound $1/$2/$3 in order.
         assert!(module.contains("AT (VERSION => {snapshot})"));
-        assert!(module.contains("entity_id > $1"));
+        assert!(module.contains("id > $1"));
         assert!(module.contains("params![after, q, limit]"));
         // ESCAPE backslash survives as a Rust-escaped literal.
         assert!(module.contains("ESCAPE '\\\\'"));

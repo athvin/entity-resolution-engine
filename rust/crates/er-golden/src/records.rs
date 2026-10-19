@@ -37,7 +37,7 @@ fn scalar_projection(
                 Some(agg) => format!(
                     "    (select {agg} from {membership_table} mm \
                        join {std_table} rr on rr.record_key = mm.record_key \
-                       join {entities_table} ee on ee.entity_id = mm.entity_id \
+                       join {entities_table} ee on ee.id = mm.entity_id \
                         and ee.status = 'active' \
                      where mm.entity_id = l.entity_id) as {a}"
                 ),
@@ -59,8 +59,10 @@ pub fn golden_records_sql(
     std_table: &str,
     membership_table: &str,
     entities_table: &str,
+    run_at: &str,
 ) -> String {
     let version = config.versions.survivorship_version.replace('\'', "''");
+    let run_at = run_at.replace('\'', "''");
 
     let scalar_select = scalar_projection(
         config,
@@ -86,7 +88,7 @@ pub fn golden_records_sql(
         ))) as metadata
     from {membership_table} as m
     join {std_table} as r on r.record_key = m.record_key
-    join {entities_table} as e on e.entity_id = m.entity_id and e.status = 'active'
+    join {entities_table} as e on e.id = m.entity_id and e.status = 'active'
     where coalesce(array_length(json_keys(r.metadata)), 0) > 0
     group by m.entity_id, r.source_system
 ),
@@ -101,19 +103,21 @@ entity_metadata as (
 ),
 survived as (
     select
-        l.entity_id,
+        l.entity_id as id,
 {scalar_select},
 {address_select},
         cast('{version}' as VARCHAR) as survivorship_version
     from {lineage_table} as l
     join {std_table} as r on r.record_key = l.record_key
-    join {entities_table} as e on e.entity_id = l.entity_id and e.status = 'active'
+    join {entities_table} as e on e.id = l.entity_id and e.status = 'active'
     group by l.entity_id
 )
 select s.*, coalesce(m.metadata, '{{}}'::json) as metadata,
-       (now() at time zone 'UTC') as assembled_at
+       (now() at time zone 'UTC') as assembled_at,
+       cast('{run_at}' as timestamp) as created_at,
+       cast('{run_at}' as timestamp) as updated_at
 from survived as s
-left join entity_metadata as m using (entity_id)"
+left join entity_metadata as m on m.entity_id = s.id"
     )
 }
 
@@ -129,8 +133,10 @@ pub fn acct_golden_records_sql(
     std_table: &str,
     membership_table: &str,
     entities_table: &str,
+    run_at: &str,
 ) -> String {
     let version = config.versions.survivorship_version.replace('\'', "''");
+    let run_at = run_at.replace('\'', "''");
 
     let scalar_select = scalar_projection(
         config,
@@ -156,7 +162,7 @@ pub fn acct_golden_records_sql(
         ))) as metadata
     from {membership_table} as m
     join {std_table} as r on r.record_key = m.record_key
-    join {entities_table} as e on e.entity_id = m.entity_id and e.status = 'active'
+    join {entities_table} as e on e.id = m.entity_id and e.status = 'active'
     where coalesce(array_length(json_keys(r.metadata)), 0) > 0
     group by m.entity_id, r.source_system
 ),
@@ -171,18 +177,20 @@ entity_metadata as (
 ),
 survived as (
     select
-        l.entity_id,
+        l.entity_id as id,
 {scalar_select},
 {address_select},
         cast('{version}' as VARCHAR) as survivorship_version
     from {lineage_table} as l
     join {std_table} as r on r.record_key = l.record_key
-    join {entities_table} as e on e.entity_id = l.entity_id and e.status = 'active'
+    join {entities_table} as e on e.id = l.entity_id and e.status = 'active'
     group by l.entity_id
 )
 select s.*, coalesce(m.metadata, '{{}}'::json) as metadata,
-       (now() at time zone 'UTC') as assembled_at
+       (now() at time zone 'UTC') as assembled_at,
+       cast('{run_at}' as timestamp) as created_at,
+       cast('{run_at}' as timestamp) as updated_at
 from survived as s
-left join entity_metadata as m using (entity_id)"
+left join entity_metadata as m on m.entity_id = s.id"
     )
 }

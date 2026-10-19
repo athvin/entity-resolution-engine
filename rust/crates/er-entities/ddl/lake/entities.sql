@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS lake.main.entities (
-  entity_id VARCHAR NOT NULL,
+  id VARCHAR NOT NULL,
   status VARCHAR NOT NULL,
   merged_into VARCHAR,
   created_at TIMESTAMP NOT NULL,

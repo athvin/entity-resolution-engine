@@ -39,7 +39,7 @@ function readListUtf8(v: unknown): string[] {
 }
 
 const EXPECTED_VERSION = "1";
-const REQUIRED: readonly string[] = ["entity_id", "survivorship_version", "assembled_at"];
+const REQUIRED: readonly string[] = ["id", "survivorship_version", "assembled_at", "created_at", "updated_at"];
 
 /** Decode an Arrow table into AcctGoldenRecord[] after checking the in-band schema. */
 export function readAcctGoldenRecord(table: Table): AcctGoldenRecord[] {
@@ -56,7 +56,7 @@ export function readAcctGoldenRecord(table: Table): AcctGoldenRecord[] {
   const rows: AcctGoldenRecord[] = [];
   for (let i = 0; i < table.numRows; i++) {
     rows.push({
-      entity_id: ((v) => (v == null ? null : readUtf8(v)))(table.getChild("entity_id")?.get(i)),
+      id: ((v) => (v == null ? null : readUtf8(v)))(table.getChild("id")?.get(i)),
       company_name: ((v) => (v == null ? null : readUtf8(v)))(table.getChild("company_name")?.get(i)),
       domain: ((v) => (v == null ? null : readUtf8(v)))(table.getChild("domain")?.get(i)),
       phone_e164: ((v) => (v == null ? null : readUtf8(v)))(table.getChild("phone_e164")?.get(i)),
@@ -67,6 +67,8 @@ export function readAcctGoldenRecord(table: Table): AcctGoldenRecord[] {
       metadata: ((v) => (v == null ? null : readUtf8(v)))(table.getChild("metadata")?.get(i)),
       survivorship_version: ((v) => (v == null ? null : readUtf8(v)))(table.getChild("survivorship_version")?.get(i)),
       assembled_at: ((v) => (v == null ? null : readTimestamp(v)))(table.getChild("assembled_at")?.get(i)),
+      created_at: ((v) => (v == null ? null : readTimestamp(v)))(table.getChild("created_at")?.get(i)),
+      updated_at: ((v) => (v == null ? null : readTimestamp(v)))(table.getChild("updated_at")?.get(i)),
     } as AcctGoldenRecord);
   }
   return rows;

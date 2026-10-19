@@ -412,7 +412,7 @@ fn ddl_specs() -> Vec<TableSpec> {
         tspec(
             "entities",
             vec![
-                nn("entity_id", VARCHAR),
+                nn("id", VARCHAR),
                 nn("status", VARCHAR),
                 col("merged_into", VARCHAR),
                 nn("created_at", TIMESTAMP),
@@ -420,7 +420,7 @@ fn ddl_specs() -> Vec<TableSpec> {
                 nn("created_run_id", VARCHAR),
                 nn("updated_run_id", VARCHAR),
             ],
-            vec![key(&["entity_id"])],
+            vec![key(&["id"])],
             enum_map(&[("status", &ENTITY_STATUSES[..])]),
         ),
         tspec(
@@ -774,12 +774,14 @@ fn stage_specs() -> Vec<TableSpec> {
 
     let int_std_cols = int_std_record_columns(false);
 
-    let mut golden_cols = vec![nn("entity_id", VARCHAR)];
+    let mut golden_cols = vec![nn("id", VARCHAR)];
     golden_cols.extend(golden_survivable());
     golden_cols.extend([
         col("metadata", JSON),
         nn("survivorship_version", VARCHAR),
         nn("assembled_at", TIMESTAMP),
+        nn("created_at", TIMESTAMP),
+        nn("updated_at", TIMESTAMP),
     ]);
 
     // The parallel Account entity-type relations (1.1a). Same shapes as the
@@ -788,12 +790,14 @@ fn stage_specs() -> Vec<TableSpec> {
     // …); only these standardized/golden projections are entity-specific.
     let acct_int_std_cols = int_std_record_columns(true);
 
-    let mut acct_golden_cols = vec![nn("entity_id", VARCHAR)];
+    let mut acct_golden_cols = vec![nn("id", VARCHAR)];
     acct_golden_cols.extend(acct_golden_survivable());
     acct_golden_cols.extend([
         col("metadata", JSON),
         nn("survivorship_version", VARCHAR),
         nn("assembled_at", TIMESTAMP),
+        nn("created_at", TIMESTAMP),
+        nn("updated_at", TIMESTAMP),
     ]);
 
     vec![
@@ -806,7 +810,7 @@ fn stage_specs() -> Vec<TableSpec> {
         sspec(
             "golden_records",
             golden_cols,
-            vec![key(&["entity_id"])],
+            vec![key(&["id"])],
             BTreeMap::new(),
         ),
         sspec(
@@ -840,7 +844,7 @@ fn stage_specs() -> Vec<TableSpec> {
         sspec(
             "acct_golden_records",
             acct_golden_cols,
-            vec![key(&["entity_id"])],
+            vec![key(&["id"])],
             BTreeMap::new(),
         ),
         sspec(

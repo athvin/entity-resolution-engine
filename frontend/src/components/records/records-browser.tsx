@@ -165,8 +165,8 @@ export function RecordsBrowser({ org }: { org: string }) {
               if (!record) return null;
               return (
                 <Link
-                  key={record.entity_id}
-                  href={`/${org}/records/${record.entity_id}`}
+                  key={record.id}
+                  href={`/${org}/records/${record.id}`}
                   data-index={item.index}
                   ref={virtualizer.measureElement}
                   className="hover:bg-accent/50 absolute top-0 left-0 block w-full translate-y-(--row-y) border-b px-3 py-3"

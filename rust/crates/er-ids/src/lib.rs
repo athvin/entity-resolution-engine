@@ -37,6 +37,8 @@ pub enum IdError {
     PairSameKey(String),
     #[error("redirect does not terminate: {0}")]
     IdCycle(String),
+    #[error("not a lake YYYY-MM-DD HH:MM:SS timestamp: {0:?}")]
+    BadTimestamp(String),
 }
 
 /// The canonical scalar record identity (S5.0). `':'` is banned in BOTH
@@ -153,6 +155,76 @@ pub fn deterministic_v7(unix_ts_ms: u64, counter: u64) -> String {
     uuid::Builder::from_unix_timestamp_millis(unix_ts_ms, &rand)
         .into_uuid()
         .to_string()
+}
+
+/// The deterministic UUIDv7 mint stream for reconcile's entity ids: every
+/// [`IdFactory::new_id`] call is [`deterministic_v7`] of the run's logical
+/// timestamp and an ascending counter — a pure function of (run clock, mint
+/// sequence), so reruns mint byte-identical ids and mint order is lexical
+/// order. The counter starts past every id ever minted, like the retired
+/// counting-ULID stream.
+pub struct DeterministicV7Factory {
+    unix_ts_ms: u64,
+    next: std::cell::Cell<u64>,
+}
+
+impl DeterministicV7Factory {
+    #[must_use]
+    pub fn new(unix_ts_ms: u64, start: u64) -> Self {
+        Self {
+            unix_ts_ms,
+            next: std::cell::Cell::new(start),
+        }
+    }
+
+    /// Build from the lake's `YYYY-MM-DD HH:MM:SS` timestamp literal (the
+    /// run-logical clock every stage already threads). Errors on any other
+    /// shape — a malformed run stamp must fail loudly, not mint from zero.
+    pub fn from_lake_timestamp(ts: &str, start: u64) -> Result<Self, IdError> {
+        let ms =
+            parse_lake_timestamp_ms(ts).ok_or_else(|| IdError::BadTimestamp(ts.to_string()))?;
+        Ok(Self::new(ms, start))
+    }
+}
+
+impl IdFactory for DeterministicV7Factory {
+    fn new_id(&self) -> String {
+        let value = self.next.get();
+        self.next.set(value + 1);
+        deterministic_v7(self.unix_ts_ms, value)
+    }
+}
+
+/// Parse the lake's `YYYY-MM-DD HH:MM:SS` literal to Unix epoch milliseconds
+/// (UTC; the inverse of the dispatcher's civil-from-days rendering).
+#[must_use]
+pub fn parse_lake_timestamp_ms(ts: &str) -> Option<u64> {
+    let (date, time) = ts.split_once(' ')?;
+    let mut d = date.split('-');
+    let (y, m, day): (i64, i64, i64) = (
+        d.next()?.parse().ok()?,
+        d.next()?.parse().ok()?,
+        d.next()?.parse().ok()?,
+    );
+    let mut c = time.split(':');
+    let (hh, mm, ss): (i64, i64, i64) = (
+        c.next()?.parse().ok()?,
+        c.next()?.parse().ok()?,
+        c.next()?.parse().ok()?,
+    );
+    if !(1..=12).contains(&m) || !(1..=31).contains(&day) || hh > 23 || mm > 59 || ss > 59 {
+        return None;
+    }
+    // Howard Hinnant's days-from-civil (exact, dependency-free).
+    let y_adj = if m <= 2 { y - 1 } else { y };
+    let era = if y_adj >= 0 { y_adj } else { y_adj - 399 } / 400;
+    let yoe = y_adj - era * 400;
+    let mp = (m + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    let secs = days * 86_400 + hh * 3600 + mm * 60 + ss;
+    u64::try_from(secs).ok()?.checked_mul(1000)
 }
 
 /// The content-derived id for SQL/CTAS-minted rows: `sha256('<relation>:' ||
@@ -332,6 +404,28 @@ mod tests {
             let _ = write!(acc, "{b:02x}");
             acc
         })
+    }
+
+    #[test]
+    fn deterministic_v7_factory_is_a_pure_function_of_clock_and_sequence() {
+        let f1 = DeterministicV7Factory::from_lake_timestamp("2026-01-01 00:00:00", 7).unwrap();
+        let f2 = DeterministicV7Factory::from_lake_timestamp("2026-01-01 00:00:00", 7).unwrap();
+        let (a1, b1) = (f1.new_id(), f1.new_id());
+        assert_eq!(a1, f2.new_id(), "rerun mints the same stream");
+        assert!(a1 < b1, "mint order is lexical order");
+        assert_eq!(&a1[14..15], "7");
+        assert!(DeterministicV7Factory::from_lake_timestamp("yesterday", 0).is_err());
+    }
+
+    #[test]
+    fn parse_lake_timestamp_matches_known_epochs() {
+        assert_eq!(parse_lake_timestamp_ms("1970-01-01 00:00:00"), Some(0));
+        assert_eq!(
+            parse_lake_timestamp_ms("2026-01-01 00:00:00"),
+            Some(1_767_225_600_000)
+        );
+        assert_eq!(parse_lake_timestamp_ms("2026-13-01 00:00:00"), None);
+        assert_eq!(parse_lake_timestamp_ms("nope"), None);
     }
 
     #[test]

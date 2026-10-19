@@ -1235,7 +1235,7 @@ mod tests {
     fn an_update_assigning_the_key_is_rejected() {
         let stmt = partial_write(
             Operation::Update,
-            "UPDATE lake.main.golden_records SET entity_id = 'x'",
+            "UPDATE lake.main.golden_records SET id = 'x'",
         );
         let diags = golden_diags(&stmt);
         assert!(
@@ -1251,8 +1251,8 @@ mod tests {
         let stmt = partial_write(
             Operation::Update,
             "MERGE INTO lake.main.golden_records t USING (SELECT 'a' AS entity_id) s \
-             ON t.entity_id = s.entity_id \
-             WHEN MATCHED THEN UPDATE SET entity_id = s.entity_id",
+             ON t.id = s.entity_id \
+             WHEN MATCHED THEN UPDATE SET id = s.entity_id",
         );
         let diags = golden_diags(&stmt);
         assert!(
@@ -1289,14 +1289,14 @@ mod tests {
 
     #[test]
     fn a_named_insert_missing_a_not_null_column_is_rejected() {
-        // golden_record: entity_id / survivorship_version / assembled_at are
-        // NOT NULL with no default; naming only entity_id must flag the others.
+        // golden_record: id / survivorship_version / assembled_at etc. are
+        // NOT NULL with no default; naming only id must flag the others.
         let stmt = LoadedStatement {
             operation: Operation::Create,
             path: PathBuf::from("entities/golden_record/create/test.sql"),
             ..partial_write(
                 Operation::Create,
-                "INSERT INTO lake.main.golden_records (entity_id) VALUES ('a')",
+                "INSERT INTO lake.main.golden_records (id) VALUES ('a')",
             )
         };
         let diags = golden_diags(&stmt);
@@ -1377,7 +1377,7 @@ mod tests {
         let stmt = partial_write(
             Operation::Update,
             "UPDATE lake.main.golden_records SET email = (SELECT o.value \
-             FROM lake.main.golden_overrides o WHERE o.entity_id = golden_records.entity_id)",
+             FROM lake.main.golden_overrides o WHERE o.entity_id = golden_records.id)",
         );
         let diags = golden_diags(&stmt);
         assert!(
@@ -1391,7 +1391,7 @@ mod tests {
         let mut declared = partial_write(
             Operation::Update,
             "UPDATE lake.main.golden_records SET email = (SELECT o.value \
-             FROM lake.main.golden_overrides o WHERE o.entity_id = golden_records.entity_id)",
+             FROM lake.main.golden_overrides o WHERE o.entity_id = golden_records.id)",
         );
         declared.reads = vec!["golden_override".to_string()];
         assert!(
@@ -1444,11 +1444,11 @@ mod tests {
 
     #[test]
     fn a_justified_live_read_passes_without_a_pin() {
-        let mut stmt = read_stmt("SELECT entity_id FROM lake.main.golden_records");
+        let mut stmt = read_stmt("SELECT id FROM lake.main.golden_records");
         stmt.pin = Pin::Live;
         stmt.pin_reason = "the writer's own in-transaction read".to_string();
         stmt.returns = Returns::Columns(vec![crate::ReturnColumn {
-            name: "entity_id".to_string(),
+            name: "id".to_string(),
             col_type: ColumnType::Varchar,
             nullable: false,
         }]);
@@ -1459,7 +1459,7 @@ mod tests {
     #[test]
     fn a_live_read_carrying_a_pin_is_rejected() {
         let mut stmt =
-            read_stmt("SELECT entity_id FROM lake.main.golden_records AT (VERSION => $snapshot)");
+            read_stmt("SELECT id FROM lake.main.golden_records AT (VERSION => $snapshot)");
         stmt.pin = Pin::Live;
         stmt.pin_reason = "contradiction".to_string();
         stmt.params = vec![crate::StatementParam {
@@ -1468,7 +1468,7 @@ mod tests {
             nullable: false,
         }];
         stmt.returns = Returns::Columns(vec![crate::ReturnColumn {
-            name: "entity_id".to_string(),
+            name: "id".to_string(),
             col_type: ColumnType::Varchar,
             nullable: false,
         }]);
@@ -1479,7 +1479,7 @@ mod tests {
     #[test]
     fn a_lake_list_parameter_is_rejected() {
         let mut stmt =
-            read_stmt("SELECT entity_id FROM lake.main.golden_records AT (VERSION => $snapshot)");
+            read_stmt("SELECT id FROM lake.main.golden_records AT (VERSION => $snapshot)");
         stmt.params = vec![
             crate::StatementParam {
                 name: "snapshot".to_string(),
@@ -1493,7 +1493,7 @@ mod tests {
             },
         ];
         stmt.returns = Returns::Columns(vec![crate::ReturnColumn {
-            name: "entity_id".to_string(),
+            name: "id".to_string(),
             col_type: ColumnType::Varchar,
             nullable: false,
         }]);
@@ -1511,9 +1511,10 @@ mod tests {
     #[test]
     fn an_entity_read_losing_non_null_provability_is_rejected() {
         let mut stmt = read_stmt(
-            "SELECT NULLIF(entity_id, '') AS entity_id, given_name, family_name, email, \
+            "SELECT NULLIF(id, '') AS id, given_name, family_name, email, \
              phone_e164, addr_number, addr_street, addr_unit, addr_city, addr_region, \
-             addr_postal, birth_date, metadata, survivorship_version, assembled_at \
+             addr_postal, birth_date, metadata, survivorship_version, assembled_at, \
+             created_at, updated_at \
              FROM lake.main.golden_records AT (VERSION => $snapshot)",
         );
         stmt.params = vec![crate::StatementParam {
@@ -1533,14 +1534,14 @@ mod tests {
     #[test]
     fn a_columns_read_with_a_wrong_type_is_rejected() {
         let mut stmt =
-            read_stmt("SELECT entity_id FROM lake.main.golden_records AT (VERSION => $snapshot)");
+            read_stmt("SELECT id FROM lake.main.golden_records AT (VERSION => $snapshot)");
         stmt.params = vec![crate::StatementParam {
             name: "snapshot".to_string(),
             param_type: ColumnType::Bigint,
             nullable: false,
         }];
         stmt.returns = Returns::Columns(vec![crate::ReturnColumn {
-            name: "entity_id".to_string(),
+            name: "id".to_string(),
             col_type: ColumnType::Bigint,
             nullable: false,
         }]);
@@ -1580,7 +1581,7 @@ mod tests {
     #[test]
     fn a_columns_read_with_wrong_names_is_rejected() {
         let mut stmt =
-            read_stmt("SELECT entity_id FROM lake.main.golden_records AT (VERSION => $snapshot)");
+            read_stmt("SELECT id FROM lake.main.golden_records AT (VERSION => $snapshot)");
         stmt.params = vec![crate::StatementParam {
             name: "snapshot".to_string(),
             param_type: ColumnType::Bigint,
@@ -1669,15 +1670,7 @@ mod tests {
     /// not re-run here — these tests exercise the statement rules only.)
     fn v2_entity() -> Entity {
         let mut entity = catalog().by_name("golden_record").unwrap().clone();
-        entity.identity = er_entity_spec::Identity::V2;
-        entity.key = vec!["id".to_string()];
-        entity.natural_key = vec!["entity_id".to_string()];
-        let proto = entity.columns[0].clone();
-        for name in ["id", "created_at", "updated_at"] {
-            let mut column = proto.clone();
-            column.name = name.to_string();
-            entity.columns.push(column);
-        }
+        entity.natural_key = vec!["survivorship_version".to_string()];
         entity
     }
 
@@ -1708,7 +1701,7 @@ mod tests {
 
         let merge = parse_one(
             "MERGE INTO lake.main.golden_records t USING (SELECT 1 AS x) s \
-             ON t.entity_id = s.x WHEN MATCHED THEN UPDATE SET given_name = 'x'",
+             ON t.survivorship_version = s.x WHEN MATCHED THEN UPDATE SET given_name = 'x'",
         );
         assert_eq!(
             codes(&updated_at_checks(&stmt, &entity, &merge)),
@@ -1722,8 +1715,9 @@ mod tests {
             vec!["E014"]
         );
 
-        // The legacy ratchet: the same bare UPDATE is accepted while unmigrated.
-        let legacy = catalog().by_name("golden_record").unwrap().clone();
+        // The legacy ratchet: the same bare UPDATE is accepted while unmigrated
+        // (review still carries the marker until its W5 key rename).
+        let legacy = catalog().by_name("review").unwrap().clone();
         assert_eq!(
             codes(&updated_at_checks(&stmt, &legacy, &bare)),
             Vec::<&str>::new()
@@ -1746,7 +1740,7 @@ mod tests {
 
         let right = parse_one(
             "MERGE INTO lake.main.golden_records t USING (SELECT 1 AS x) s \
-             ON t.entity_id = s.x WHEN MATCHED THEN UPDATE SET updated_at = $u",
+             ON t.survivorship_version = s.x WHEN MATCHED THEN UPDATE SET updated_at = $u",
         );
         assert_eq!(
             codes(&merge_identity_checks(&stmt, &entity, &right)),
@@ -1766,8 +1760,9 @@ mod tests {
     fn e005_extension_natural_key_and_created_at_are_insert_only() {
         let entity = v2_entity();
         let stmt = partial_write(Operation::Update, "");
-        let parsed =
-            parse_one("UPDATE lake.main.golden_records SET created_at = $c, entity_id = 'e2'");
+        let parsed = parse_one(
+            "UPDATE lake.main.golden_records SET created_at = $c, survivorship_version = 'v2'",
+        );
         let Statement::Update { assignments, .. } = parsed else {
             panic!("expected an UPDATE");
         };

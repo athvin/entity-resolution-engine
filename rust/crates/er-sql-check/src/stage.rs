@@ -362,13 +362,16 @@ mod tests {
             "lake.main.int_std_records",
             "lake.main.entity_membership",
             "lake.main.entities",
+            "2000-01-01 00:00:00",
         );
         let record_cols = plan_stage(&catalog, &records);
         for required in [
-            "entity_id",
+            "id",
             "metadata",
             "survivorship_version",
             "assembled_at",
+            "created_at",
+            "updated_at",
         ] {
             assert!(
                 record_cols.contains(&required.to_string()),
@@ -420,13 +423,16 @@ mod tests {
             "lake.main.int_std_records",
             "lake.main.entity_membership",
             "lake.main.entities",
+            "2000-01-01 00:00:00",
         );
         let record_cols = plan_stage(&catalog, &records);
         for required in [
-            "entity_id",
+            "id",
             "metadata",
             "survivorship_version",
             "assembled_at",
+            "created_at",
+            "updated_at",
         ] {
             assert!(
                 record_cols.contains(&required.to_string()),

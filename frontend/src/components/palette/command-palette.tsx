@@ -156,16 +156,16 @@ export function CommandPalette({
         {(records.data?.items.length ?? 0) > 0 && (
           <Command.Group heading="Records" className={GROUP_CLASS}>
             {records.data?.items.map((record) => {
-              const name = displayName(record, entityType) || record.entity_id;
+              const name = displayName(record, entityType) || record.id;
               const secondary =
                 entityType === "account" ? (record.domain ?? "") : (record.email ?? "");
               return (
                 <Command.Item
-                  key={record.entity_id}
-                  value={`record ${name} ${secondary} ${record.entity_id}`}
+                  key={record.id}
+                  value={`record ${name} ${secondary} ${record.id}`}
                   onSelect={() => {
                     run(() => {
-                      router.push(`/${org}/records/${record.entity_id}`);
+                      router.push(`/${org}/records/${record.id}`);
                     });
                   }}
                   className={ITEM_CLASS}
