@@ -9,6 +9,7 @@ generate:
   stores: [postgres]
   languages: [rust, typescript]
   wire: [json]
+  history: true
 columns:
   - name: id
     type: varchar

@@ -6,6 +6,40 @@
 /// Each entry is one entity's full Postgres DDL, ordered so a referenced table
 /// precedes the table that references it. Applied at boot by er-server.
 pub const POSTGRES_BASELINE: &[&str] = &[
+    r#"-- The generic history trigger: one plpgsql function serves every
+-- `history: true` entity. The companion table name arrives as TG_ARGV[0], the
+-- row images are whole-row jsonb (schema-evolution-proof: no entity column is
+-- named here, so ADD/DROP/ALTER COLUMN never breaks the trigger and old rows
+-- keep the values of dropped columns), and the acting principal comes from the
+-- er.actor GUC with a session_user fallback. Deliberately NOT
+-- exception-swallowed: if history cannot be written, the write fails.
+CREATE OR REPLACE FUNCTION public.er_history() RETURNS trigger
+LANGUAGE plpgsql AS $fn$
+DECLARE
+  target text := TG_ARGV[0];
+  acting text := COALESCE(NULLIF(current_setting('er.actor', true), ''), session_user);
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    EXECUTE format(
+      'INSERT INTO public.%I (row_id, op, actor, old_row, new_row) VALUES ($1, $2, $3, $4, $5)',
+      target)
+      USING NEW.id, 'insert', acting, NULL::jsonb, to_jsonb(NEW);
+    RETURN NEW;
+  ELSIF TG_OP = 'UPDATE' THEN
+    EXECUTE format(
+      'INSERT INTO public.%I (row_id, op, actor, old_row, new_row) VALUES ($1, $2, $3, $4, $5)',
+      target)
+      USING NEW.id, 'update', acting, to_jsonb(OLD), to_jsonb(NEW);
+    RETURN NEW;
+  ELSE
+    EXECUTE format(
+      'INSERT INTO public.%I (row_id, op, actor, old_row, new_row) VALUES ($1, $2, $3, $4, $5)',
+      target)
+      USING OLD.id, 'delete', acting, to_jsonb(OLD), NULL::jsonb;
+    RETURN OLD;
+  END IF;
+END
+$fn$;"#,
     r#"CREATE TABLE IF NOT EXISTS public.orgs (
   id text NOT NULL,
   name text NOT NULL,
@@ -18,7 +52,22 @@ pub const POSTGRES_BASELINE: &[&str] = &[
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (id),
   UNIQUE (name)
-);"#,
+);
+CREATE TABLE IF NOT EXISTS public.orgs_history (
+  history_id bigserial NOT NULL,
+  row_id text NOT NULL,
+  op text NOT NULL CHECK (op IN ('insert', 'update', 'delete')),
+  changed_at timestamptz NOT NULL DEFAULT now(),
+  actor text NOT NULL,
+  old_row jsonb,
+  new_row jsonb,
+  PRIMARY KEY (history_id)
+);
+CREATE INDEX IF NOT EXISTS orgs_history_row_id ON public.orgs_history (row_id);
+CREATE INDEX IF NOT EXISTS orgs_history_changed_at ON public.orgs_history (changed_at);
+CREATE OR REPLACE TRIGGER er_history_orgs
+  AFTER INSERT OR UPDATE OR DELETE ON public.orgs
+  FOR EACH ROW EXECUTE FUNCTION public.er_history('orgs_history');"#,
     r#"CREATE TABLE IF NOT EXISTS public.api_keys (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
@@ -28,7 +77,22 @@ pub const POSTGRES_BASELINE: &[&str] = &[
   revoked_at timestamptz,
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (id)
-);"#,
+);
+CREATE TABLE IF NOT EXISTS public.api_keys_history (
+  history_id bigserial NOT NULL,
+  row_id text NOT NULL,
+  op text NOT NULL CHECK (op IN ('insert', 'update', 'delete')),
+  changed_at timestamptz NOT NULL DEFAULT now(),
+  actor text NOT NULL,
+  old_row jsonb,
+  new_row jsonb,
+  PRIMARY KEY (history_id)
+);
+CREATE INDEX IF NOT EXISTS api_keys_history_row_id ON public.api_keys_history (row_id);
+CREATE INDEX IF NOT EXISTS api_keys_history_changed_at ON public.api_keys_history (changed_at);
+CREATE OR REPLACE TRIGGER er_history_api_keys
+  AFTER INSERT OR UPDATE OR DELETE ON public.api_keys
+  FOR EACH ROW EXECUTE FUNCTION public.er_history('api_keys_history');"#,
     r#"CREATE TABLE IF NOT EXISTS public.audit_log (
   id bigserial NOT NULL,
   at timestamptz NOT NULL DEFAULT now(),
@@ -54,7 +118,22 @@ pub const POSTGRES_BASELINE: &[&str] = &[
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (id),
   UNIQUE (org_id, version)
-);"#,
+);
+CREATE TABLE IF NOT EXISTS public.config_versions_history (
+  history_id bigserial NOT NULL,
+  row_id text NOT NULL,
+  op text NOT NULL CHECK (op IN ('insert', 'update', 'delete')),
+  changed_at timestamptz NOT NULL DEFAULT now(),
+  actor text NOT NULL,
+  old_row jsonb,
+  new_row jsonb,
+  PRIMARY KEY (history_id)
+);
+CREATE INDEX IF NOT EXISTS config_versions_history_row_id ON public.config_versions_history (row_id);
+CREATE INDEX IF NOT EXISTS config_versions_history_changed_at ON public.config_versions_history (changed_at);
+CREATE OR REPLACE TRIGGER er_history_config_versions
+  AFTER INSERT OR UPDATE OR DELETE ON public.config_versions
+  FOR EACH ROW EXECUTE FUNCTION public.er_history('config_versions_history');"#,
     r#"CREATE TABLE IF NOT EXISTS public.ddl_log (
   id bigserial NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -107,7 +186,22 @@ CREATE INDEX IF NOT EXISTS jobs_claimable ON public.jobs (state, not_before, pri
   PRIMARY KEY (id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS schedules_one_correction_per_org ON public.schedules (org_id) WHERE source = 'config:correction_pass';
-CREATE UNIQUE INDEX IF NOT EXISTS schedules_one_maintenance_per_org ON public.schedules (org_id) WHERE source = 'system:lake_maintain';"#,
+CREATE UNIQUE INDEX IF NOT EXISTS schedules_one_maintenance_per_org ON public.schedules (org_id) WHERE source = 'system:lake_maintain';
+CREATE TABLE IF NOT EXISTS public.schedules_history (
+  history_id bigserial NOT NULL,
+  row_id text NOT NULL,
+  op text NOT NULL CHECK (op IN ('insert', 'update', 'delete')),
+  changed_at timestamptz NOT NULL DEFAULT now(),
+  actor text NOT NULL,
+  old_row jsonb,
+  new_row jsonb,
+  PRIMARY KEY (history_id)
+);
+CREATE INDEX IF NOT EXISTS schedules_history_row_id ON public.schedules_history (row_id);
+CREATE INDEX IF NOT EXISTS schedules_history_changed_at ON public.schedules_history (changed_at);
+CREATE OR REPLACE TRIGGER er_history_schedules
+  AFTER INSERT OR UPDATE OR DELETE ON public.schedules
+  FOR EACH ROW EXECUTE FUNCTION public.er_history('schedules_history');"#,
     r#"CREATE TABLE IF NOT EXISTS public.staged_steward_actions (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
@@ -131,7 +225,22 @@ CREATE INDEX IF NOT EXISTS staged_pending ON public.staged_steward_actions (org_
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (id)
-);"#,
+);
+CREATE TABLE IF NOT EXISTS public.webhooks_history (
+  history_id bigserial NOT NULL,
+  row_id text NOT NULL,
+  op text NOT NULL CHECK (op IN ('insert', 'update', 'delete')),
+  changed_at timestamptz NOT NULL DEFAULT now(),
+  actor text NOT NULL,
+  old_row jsonb,
+  new_row jsonb,
+  PRIMARY KEY (history_id)
+);
+CREATE INDEX IF NOT EXISTS webhooks_history_row_id ON public.webhooks_history (row_id);
+CREATE INDEX IF NOT EXISTS webhooks_history_changed_at ON public.webhooks_history (changed_at);
+CREATE OR REPLACE TRIGGER er_history_webhooks
+  AFTER INSERT OR UPDATE OR DELETE ON public.webhooks
+  FOR EACH ROW EXECUTE FUNCTION public.er_history('webhooks_history');"#,
 ];
 
 /// The DDL-ledger event triggers (functions + CREATE EVENT TRIGGER), applied

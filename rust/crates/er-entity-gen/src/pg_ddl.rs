@@ -78,5 +78,28 @@ pub fn emit_postgres_ddl(entity: &Entity) -> Result<String, ConvertError> {
         ));
     }
 
+    // The history companion + trigger: a generated jsonb row-image ledger, not
+    // an entity. The trigger routes through the one `public.er_history()`
+    // function (the baseline prelude) with the companion name as its argument.
+    if entity.generate.history {
+        let relation = &entity.relation;
+        out.push_str(&format!(
+            "CREATE TABLE IF NOT EXISTS public.{relation}_history (\n  \
+             history_id bigserial NOT NULL,\n  \
+             row_id text NOT NULL,\n  \
+             op text NOT NULL CHECK (op IN ('insert', 'update', 'delete')),\n  \
+             changed_at timestamptz NOT NULL DEFAULT now(),\n  \
+             actor text NOT NULL,\n  \
+             old_row jsonb,\n  \
+             new_row jsonb,\n  \
+             PRIMARY KEY (history_id)\n);\n\
+             CREATE INDEX IF NOT EXISTS {relation}_history_row_id ON public.{relation}_history (row_id);\n\
+             CREATE INDEX IF NOT EXISTS {relation}_history_changed_at ON public.{relation}_history (changed_at);\n\
+             CREATE OR REPLACE TRIGGER er_history_{relation}\n  \
+             AFTER INSERT OR UPDATE OR DELETE ON public.{relation}\n  \
+             FOR EACH ROW EXECUTE FUNCTION public.er_history('{relation}_history');\n"
+        ));
+    }
+
     Ok(out)
 }

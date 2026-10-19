@@ -31,6 +31,7 @@ The `generate` block:
 | `stores` | `duckdb`, `postgres` | which DDL is rendered; also decides the statement store (lake vs control) |
 | `languages` | `rust`, `typescript` | which readers/bindings are emitted |
 | `wire` | `arrow`, `json` | `arrow` adds `arrow_schema()` + a TS Arrow reader; `json` emits the TS binding only |
+| `history` | bool, default false | control-plane only: generates a `<relation>_history` jsonb row-image companion + an `er_history()` trigger (baseline prelude entry 0). Requires the `id` PK; actor from the `er.actor` GUC (session_user fallback); NOT exception-swallowed. Lake entities refuse it (DuckLake snapshots are the lake's history) |
 | `append` | bool, default false | emits the typed bulk-append primitive (`AppendRow` + `append_rows`: chunked, bound-parameter INSERT..VALUES generated from the columns) — for variable-arity row batches, never hand-built VALUES |
 
 Each column:

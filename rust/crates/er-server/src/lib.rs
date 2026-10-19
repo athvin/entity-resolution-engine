@@ -408,6 +408,8 @@ async fn create_org(
         Err(r) => return *r,
     };
     let env = json!(body.env);
+    // History images record the acting principal (er.actor).
+    let _ = pg::set_actor(&client, &principal.actor).await;
     match pg::upsert_org_byo(
         &client,
         &body.name,
@@ -553,6 +555,8 @@ async fn transition_org(
         Err(e) => return pg_err(e),
         Ok(true) => {}
     }
+    // History images record the acting principal (er.actor).
+    let _ = pg::set_actor(&client, &principal.actor).await;
     match pg::set_org_state(&client, org, new_state, expected).await {
         Ok(true) => {
             let action = if new_state == "suspended" {
@@ -638,6 +642,8 @@ async fn create_config_version(
         Ok(r) => r,
         Err(r) => return *r,
     };
+    // History images record the acting principal (er.actor).
+    let _ = pg::set_actor(&client, &principal.actor).await;
     match pg::create_config_version(&client, &org_row.id, &body.yaml, &hash, &principal.actor).await
     {
         Ok(version) => (
@@ -1214,6 +1220,8 @@ async fn publish_config_version(
         )
             .into_response();
     }
+    // History images record the acting principal (er.actor).
+    let _ = pg::set_actor(&client, &principal.actor).await;
     if let Err(e) = pg::publish_config_version(&client, &org_row.id, &org, version, tier).await {
         return pg_err(e);
     }
@@ -2666,6 +2674,8 @@ async fn create_schedule(
         Err(r) => return *r,
     };
     let params = body.params.unwrap_or_else(|| json!({}));
+    // History images record the acting principal (er.actor).
+    let _ = pg::set_actor(&client, &principal.actor).await;
     match pg::create_schedule(&client, &org_row.id, &body.kind, &body.cron, &params).await {
         Ok(schedule_id) => (
             StatusCode::CREATED,
@@ -2739,6 +2749,8 @@ async fn update_schedule(
         Ok(r) => r,
         Err(r) => return *r,
     };
+    // History images record the acting principal (er.actor).
+    let _ = pg::set_actor(&client, &principal.actor).await;
     match pg::set_schedule_enabled(&client, &org_row.id, &schedule_id, body.enabled).await {
         Ok(true) => Json(json!({ "id": schedule_id, "enabled": body.enabled })).into_response(),
         Ok(false) => detail_err(
@@ -2769,6 +2781,8 @@ async fn delete_schedule(
         Ok(r) => r,
         Err(r) => return *r,
     };
+    // History images record the acting principal (er.actor).
+    let _ = pg::set_actor(&client, &principal.actor).await;
     match pg::delete_schedule(&client, &org_row.id, &schedule_id).await {
         Ok(deleted) => Json(json!({ "deleted": deleted })).into_response(),
         Err(e) => pg_err(e),
@@ -2828,6 +2842,8 @@ async fn create_webhook(
         .filter(|s| !s.is_empty())
         .unwrap_or_else(gen_webhook_secret);
     let events = json!(body.events);
+    // History images record the acting principal (er.actor).
+    let _ = pg::set_actor(&client, &principal.actor).await;
     match pg::create_webhook(&client, &org_row.id, &body.url, &events, &secret).await {
         Ok(webhook_id) => {
             let _ = pg::audit(
@@ -2914,6 +2930,8 @@ async fn delete_webhook(
         Ok(r) => r,
         Err(r) => return *r,
     };
+    // History images record the acting principal (er.actor).
+    let _ = pg::set_actor(&client, &principal.actor).await;
     match pg::delete_webhook(&client, &org_row.id, &webhook_id).await {
         Ok(deleted) => {
             if deleted {
@@ -3853,6 +3871,8 @@ async fn create_key(
         Ok(r) => r,
         Err(r) => return *r,
     };
+    // History images record the acting principal (er.actor).
+    let _ = pg::set_actor(&client, &principal.actor).await;
     match pg::issue_key(&client, &org_row.id, role.as_str()).await {
         Ok((key_id, key)) => {
             let _ = pg::audit(
@@ -3898,6 +3918,8 @@ async fn revoke_key(
         Ok(r) => r,
         Err(r) => return *r,
     };
+    // History images record the acting principal (er.actor).
+    let _ = pg::set_actor(&client, &principal.actor).await;
     match pg::revoke_key(&client, &key_id, &org_row.id).await {
         Ok(revoked) => {
             let _ = pg::audit(
