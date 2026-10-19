@@ -55,7 +55,7 @@ export interface components {
             created_at: string;
             /** @description Surviving web domain. */
             domain?: string | null;
-            /** @description Persistent entity id (ULID); the survivorship key. */
+            /** @description Persistent entity id (deterministic UUIDv7, minted by reconcile); the survivorship key. */
             id: string;
             /** @description Surviving opaque per-source metadata object. */
             metadata?: unknown;
@@ -227,7 +227,7 @@ export interface components {
             family_name?: string | null;
             /** @description Surviving given name. */
             given_name?: string | null;
-            /** @description Persistent entity id (ULID); the survivorship key. */
+            /** @description Persistent entity id (deterministic UUIDv7, minted by reconcile); the survivorship key. */
             id: string;
             /** @description Surviving opaque per-source metadata object. */
             metadata?: unknown;
@@ -260,7 +260,7 @@ export interface components {
              * @description When the job finished.
              */
             finished_at?: string | null;
-            /** @description The job's unique id (ULID). */
+            /** @description The job's unique id (UUIDv7, minted at enqueue). */
             id: string;
             /** @description Optional dedup key, unique per org. */
             idempotency_key?: string | null;

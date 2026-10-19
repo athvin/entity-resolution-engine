@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 /// One delivery receipt (S4.1): per-source landing counts for a batch, including tombstones and resurrections.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
 pub struct IngestBatch {
-    /// The delivery batch that landed this row.
+    /// The delivery batch's unique id (caller-supplied per delivery).
     pub id: String,
     /// The run that wrote this row.
     pub run_id: String,

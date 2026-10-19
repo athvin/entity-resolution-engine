@@ -11,7 +11,7 @@ columns:
   - name: id
     type: varchar
     nullable: false
-    description: "The delivery batch that landed this row."
+    description: "The delivery batch's unique id (caller-supplied per delivery)."
   - name: run_id
     type: varchar
     nullable: false

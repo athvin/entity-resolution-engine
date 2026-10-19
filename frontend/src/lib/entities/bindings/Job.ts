@@ -3,7 +3,7 @@
 
 /** A unit of work on the dispatcher's queue: its kind, params, lifecycle state and retry bookkeeping. */
 export interface Job {
-  /** The job's unique id (ULID). */
+  /** The job's unique id (UUIDv7, minted at enqueue). */
   id: string;
   /** The tenant this job runs for. */
   org_id: string;

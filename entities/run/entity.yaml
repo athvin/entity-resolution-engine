@@ -11,7 +11,7 @@ columns:
   - name: id
     type: varchar
     nullable: false
-    description: "The run that wrote this row."
+    description: "The run's unique id (caller-supplied; the dispatcher passes the job's UUIDv7)."
   - name: tenant
     type: varchar
     nullable: false

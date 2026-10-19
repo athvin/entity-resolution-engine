@@ -11,7 +11,7 @@ columns:
   - name: id
     type: varchar
     nullable: false
-    description: "The assertion id (ULID)."
+    description: "The assertion id (the staged steward action's UUIDv7)."
   - name: rec_a_key
     type: varchar
     nullable: false

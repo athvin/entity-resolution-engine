@@ -28,7 +28,7 @@ columns:
   - name: entity_id
     type: varchar
     nullable: false
-    description: "The resolved entity (ULID)."
+    description: "The resolved entity's id (deterministic UUIDv7)."
   - name: assigned_at
     type: timestamp
     nullable: false

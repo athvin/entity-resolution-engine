@@ -12,7 +12,7 @@ columns:
   - name: id
     type: varchar
     nullable: false
-    description: "The event id (ULID)."
+    description: "Content-derived event id: sha256('entity_events:' || run_id || ':' || seq)."
   - name: seq
     type: bigint
     nullable: false
@@ -24,7 +24,7 @@ columns:
   - name: entity_id
     type: varchar
     nullable: false
-    description: "The resolved entity (ULID)."
+    description: "The resolved entity's id (deterministic UUIDv7)."
   - name: event_type
     type: varchar
     nullable: false

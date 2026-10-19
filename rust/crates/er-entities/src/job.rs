@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 /// A unit of work on the dispatcher's queue: its kind, params, lifecycle state and retry bookkeeping.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
 pub struct Job {
-    /// The job's unique id (ULID).
+    /// The job's unique id (UUIDv7, minted at enqueue).
     pub id: String,
     /// The tenant this job runs for.
     pub org_id: String,
