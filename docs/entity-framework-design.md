@@ -269,7 +269,7 @@ Every statement the product runs is a file under its entity's `create`, `read`, 
 | E006 | lake `read` folder | the statement carries `AT (VERSION => $snapshot)` unless it declares `pin: live` with a `pin_reason` (the writer's own in-transaction reads); a live read must then NOT carry a pin, and `pin:` outside a lake read is rejected; engine `create` and `update` statements are exempt because they are the writer |
 | E007 | DELETE, UPDATE | a `WHERE` clause is present on a control table |
 | E008 | COPY TO | the source query plans and the target format is parquet or csv |
-| E009 | all | the statement references only entities whose `generate.stores` includes its store, and only entities named by its folder or its `reads:` list |
+| E009 | all (AST; subquery-complete via the sqlparser visitor) | every qualified relation reference resolves to an entity of the statement's own store, and every entity beyond the statement's own is named under `reads:` (a `reads:` entry must itself name a same-store entity); unqualified names are session temps/CTEs, governed elsewhere |
 | E010 | all | a string literal meeting an `accepted_values` column — compared in a predicate, assigned, or inserted — is in the set |
 | E011 | all, no override | no `SELECT *` anywhere: projections, subqueries, CTEs, `INSERT ... SELECT`, `COPY TO`; every column is named, so an added column can never change a statement's shape |
 | E012 | all, no override | the statement's kind matches its folder, per the table in Statements and functions on disk |
