@@ -4,6 +4,7 @@ name: acct_golden_record
 relation: acct_golden_records
 description: "One resolved account/organization: the surviving value per attribute, at a snapshot."
 key: [entity_id]
+identity: legacy
 generate:
   stores: [duckdb]
   languages: [rust, typescript]

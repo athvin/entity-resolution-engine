@@ -19,9 +19,11 @@ One file per table: `entities/<name>/entity.yaml`.
 | `name` | yes | the entity (directory) name, snake_case singular (`golden_record`) |
 | `relation` | yes | the table name (`golden_records`) |
 | `description` | yes | prose; the tree doubles as documentation |
-| `key` | yes | logical key columns (the lake enforces only NOT NULL; keys are honoured by construction — MERGE/grouping — and E005 forbids assigning them) |
+| `key` | yes | logical key columns (the lake enforces only NOT NULL; keys are honoured by construction — MERGE/grouping — and E005 forbids assigning them). Identity convention: exactly `[id]` (V2) — `id` is varchar NOT NULL first column (V1/V3), minted as UUIDv7 (`er_ids::new_v7`/`deterministic_v7`), content-derived sha256 (`er_ids::natural_id`) for SQL/CTAS mints, or bigint+`serial` for database-minted ledgers |
+| `natural_key` | no | the upsert/MERGE identity — what makes two rows the same thing. Published as a second registry LogicalKey on the lake (and drives the ERD's implied edges); renders `UNIQUE (…)` on the control plane. Columns must be real, NOT NULL, never id/created_at/updated_at (V10); MERGEs must match on exactly this set (E015) |
+| `identity` | no | the retrofit ratchet: `legacy` skips V1–V8, E014, E015 and the E005 immutables. Default (absent) = enforced. Deleted entirely once the retrofit lands — never add it to a new entity |
 | `generate` | yes | what to emit; an entity with no block is a spec error |
-| `columns` | yes | declaration order is load-bearing everywhere |
+| `columns` | yes | declaration order is load-bearing everywhere. Identity convention: every entity carries `created_at` + `updated_at` (timestamp, NOT NULL; control = `default: now()` + `volatile: true`, lake = run-logical, written by statements, not volatile) (V4–V6); FK columns are named `<singular(relation)>_id` and reference `id` (V7/V8) |
 
 The `generate` block:
 

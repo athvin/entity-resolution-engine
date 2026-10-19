@@ -73,6 +73,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
 tower = "0.5"
 tokio-postgres = { version = "0.7", features = ["with-serde_json-1"] }
 ulid = "1"
+# UUIDv7 minting (the identity convention for application-minted ids).
+uuid = { version = "1", features = ["v7"] }
 # API-key secret generation (SHA-256-hashed at rest; the plaintext is random).
 rand = "0.9"
 # Opaque keyset read cursors (base64url of the snapshot + last key).

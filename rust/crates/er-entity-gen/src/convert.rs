@@ -36,10 +36,19 @@ pub fn to_lake_table_spec(entity: &Entity) -> Result<TableSpec, ConvertError> {
         .map(|c| Column::new(c.name.clone(), c.col_type.ducklake_type(), c.nullable))
         .collect::<Result<Vec<_>, _>>()?;
 
-    let keys = vec![LogicalKey {
+    // The primary key, then — for a migrated entity — the natural key: the
+    // registry publishes both, so MERGE identity and the implied-edge ERD keep
+    // working after every primary key becomes the universal `id`.
+    let mut keys = vec![LogicalKey {
         columns: entity.key.clone(),
         r#where: None,
     }];
+    if !entity.natural_key.is_empty() {
+        keys.push(LogicalKey {
+            columns: entity.natural_key.clone(),
+            r#where: None,
+        });
+    }
 
     // accepted_values become `∈ {…}` domains (never present on a lake entity today,
     // but the mapping is here so a dual-store entity renders the same way).

@@ -4,6 +4,7 @@ name: golden_record
 relation: golden_records
 description: "One resolved person: the surviving value per attribute, at a snapshot."
 key: [entity_id]
+identity: legacy
 generate:
   stores: [duckdb]
   languages: [rust, typescript]

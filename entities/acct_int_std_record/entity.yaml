@@ -4,6 +4,7 @@ name: acct_int_std_record
 relation: acct_int_std_records
 description: "One current standardized account record per record key: the account standardization stage's output (supersession applied, tombstones excluded) and the matching stage's input."
 key: [record_key]
+identity: legacy
 generate:
   stores: [duckdb]
   languages: [rust]

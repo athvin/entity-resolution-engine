@@ -9,8 +9,8 @@ use std::path::PathBuf;
 use datafusion_common::arrow::datatypes::DataType;
 use er_entity_spec::{Catalog, ColumnType, Entity, Store};
 use ff_analysis::sqlparser::ast::{
-    Assignment, AssignmentTarget, Expr, Insert, MergeAction, Query, Select, SelectItem, SetExpr,
-    Statement, TableFactor, Value,
+    Assignment, AssignmentTarget, Expr, Insert, MergeAction, OnConflictAction, OnInsert, Query,
+    Select, SelectItem, SetExpr, Statement, TableFactor, Value,
 };
 use ff_analysis::sqlparser::dialect::{Dialect, DuckDbDialect, PostgreSqlDialect};
 use ff_analysis::sqlparser::parser::Parser;
@@ -25,7 +25,7 @@ use crate::statement::{
 /// One analysis finding: a stable `E0xx` code, the offending statement, and why.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
-    /// The rule code (`E001`..`E013`).
+    /// The rule code (`E001`..`E015`).
     pub code: &'static str,
     /// The `.sql` path the finding is about.
     pub path: PathBuf,
@@ -447,7 +447,127 @@ fn ast_checks(
     }
     diags.extend(accepted_values_comparisons(stmt, entity, parsed));
     diags.extend(reads_checks(stmt, entity, catalog, store, parsed));
+    diags.extend(updated_at_checks(stmt, entity, parsed));
+    diags.extend(merge_identity_checks(stmt, entity, parsed));
     diags
+}
+
+/// E014 — a mutation that rewrites a row advances `updated_at`: every UPDATE,
+/// every MERGE matched-update arm and every `ON CONFLICT … DO UPDATE` must
+/// assign it. Skipped for legacy entities (which may not carry the column yet).
+fn updated_at_checks(
+    stmt: &LoadedStatement,
+    entity: &Entity,
+    parsed: &Statement,
+) -> Vec<Diagnostic> {
+    if entity.is_legacy() || entity.column("updated_at").is_none() {
+        return Vec::new();
+    }
+    let sets_updated_at = |assignments: &[Assignment]| {
+        assignment_targets(assignments)
+            .iter()
+            .any(|name| name == "updated_at")
+    };
+    let mut diags = Vec::new();
+    let mut push = |what: &str| {
+        diags.push(Diagnostic::new(
+            "E014",
+            &stmt.path,
+            format!("{what} rewrites rows without SET updated_at"),
+        ));
+    };
+    match parsed {
+        Statement::Update { assignments, .. } => {
+            if !sets_updated_at(assignments) {
+                push("the UPDATE");
+            }
+        }
+        Statement::Merge { clauses, .. } => {
+            for clause in clauses {
+                if let MergeAction::Update { assignments } = &clause.action {
+                    if !sets_updated_at(assignments) {
+                        push("a MERGE matched-update arm");
+                    }
+                }
+            }
+        }
+        Statement::Insert(insert) => {
+            if let Some(OnInsert::OnConflict(conflict)) = &insert.on {
+                if let OnConflictAction::DoUpdate(do_update) = &conflict.action {
+                    if !sets_updated_at(&do_update.assignments) {
+                        push("the ON CONFLICT DO UPDATE");
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    diags
+}
+
+/// E015 — a MERGE matches on exactly the declared natural key (or `[id]` when
+/// no natural key is declared): the ON clause's target-side column set must
+/// equal the declared upsert identity, so "what makes two rows the same thing"
+/// lives in the entity file, not ad hoc in each statement. Skipped for legacy
+/// entities and when no target-qualified column is identifiable.
+fn merge_identity_checks(
+    stmt: &LoadedStatement,
+    entity: &Entity,
+    parsed: &Statement,
+) -> Vec<Diagnostic> {
+    use std::ops::ControlFlow;
+
+    if entity.is_legacy() {
+        return Vec::new();
+    }
+    let Statement::Merge { table, on, .. } = parsed else {
+        return Vec::new();
+    };
+    // The target's name in the ON clause: its alias, else its bare relation name.
+    let TableFactor::Table { name, alias, .. } = table else {
+        return Vec::new();
+    };
+    let target = alias.as_ref().map_or_else(
+        || {
+            let full = name.to_string().to_lowercase();
+            full.rsplit('.').next().unwrap_or(&full).to_string()
+        },
+        |a| a.name.value.to_lowercase(),
+    );
+
+    let mut matched: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let _ = ff_analysis::sqlparser::ast::visit_expressions(on, |expr: &Expr| {
+        if let Expr::CompoundIdentifier(parts) = expr {
+            if parts.len() >= 2 && parts[parts.len() - 2].value.to_lowercase() == target {
+                matched.insert(parts[parts.len() - 1].value.to_lowercase());
+            }
+        }
+        ControlFlow::<()>::Continue(())
+    });
+    if matched.is_empty() {
+        return Vec::new();
+    }
+
+    let expected: std::collections::BTreeSet<String> = if entity.natural_key.is_empty() {
+        std::iter::once("id".to_string()).collect()
+    } else {
+        entity
+            .natural_key
+            .iter()
+            .map(|k| k.to_lowercase())
+            .collect()
+    };
+    if matched == expected {
+        return Vec::new();
+    }
+    vec![Diagnostic::new(
+        "E015",
+        &stmt.path,
+        format!(
+            "the MERGE matches on {matched:?}, but the declared upsert identity is {expected:?} \
+             (natural_key, or [id] when none is declared)"
+        ),
+    )]
 }
 
 /// E009 — the statement references only relations of its own store, and every
@@ -547,7 +667,9 @@ fn accepted_map(entity: &Entity) -> std::collections::BTreeMap<String, &Vec<Stri
 }
 
 /// E005 — every assigned column exists on the entity, and a key column is never
-/// assigned (an UPDATE/MERGE may not rewrite identity).
+/// assigned (an UPDATE/MERGE may not rewrite identity). For a migrated
+/// (non-legacy) entity the immutables extend to the natural key and
+/// `created_at`: natural identity and birth time are written once, at insert.
 fn assignment_checks(
     stmt: &LoadedStatement,
     entity: &Entity,
@@ -560,6 +682,15 @@ fn assignment_checks(
         .collect();
     let keys: std::collections::BTreeSet<String> =
         entity.key.iter().map(|k| k.to_lowercase()).collect();
+    let natural: std::collections::BTreeSet<String> = if entity.is_legacy() {
+        std::collections::BTreeSet::new()
+    } else {
+        entity
+            .natural_key
+            .iter()
+            .map(|k| k.to_lowercase())
+            .collect()
+    };
     let mut diags = Vec::new();
     for name in assignment_targets(assignments) {
         if !columns.contains(&name) {
@@ -576,6 +707,21 @@ fn assignment_checks(
                 "E005",
                 &stmt.path,
                 format!("assigns the key column {name}; an entity's identity is never rewritten"),
+            ));
+        } else if natural.contains(&name) {
+            diags.push(Diagnostic::new(
+                "E005",
+                &stmt.path,
+                format!(
+                    "assigns the natural-key column {name}; natural identity is written once, \
+                     at insert"
+                ),
+            ));
+        } else if !entity.is_legacy() && name == "created_at" {
+            diags.push(Diagnostic::new(
+                "E005",
+                &stmt.path,
+                "assigns created_at; birth time is written once, at insert",
             ));
         }
     }
@@ -1513,6 +1659,124 @@ mod tests {
                 .iter()
                 .any(|d| d.code == "E006" && d.message.contains("lake-read concept")),
             "expected the misplaced-pin E006, got {diags:#?}"
+        );
+    }
+
+    // ── the identity-convention rules (E014 / E015 / the E005 extension) ────
+
+    /// A migrated entity for the rule tests: golden_record promoted to v2 with
+    /// a natural key and the universal timestamps bolted on. (Validation does
+    /// not re-run here — these tests exercise the statement rules only.)
+    fn v2_entity() -> Entity {
+        let mut entity = catalog().by_name("golden_record").unwrap().clone();
+        entity.identity = er_entity_spec::Identity::V2;
+        entity.key = vec!["id".to_string()];
+        entity.natural_key = vec!["entity_id".to_string()];
+        let proto = entity.columns[0].clone();
+        for name in ["id", "created_at", "updated_at"] {
+            let mut column = proto.clone();
+            column.name = name.to_string();
+            entity.columns.push(column);
+        }
+        entity
+    }
+
+    fn parse_one(sql: &str) -> Statement {
+        Parser::parse_sql(&DuckDbDialect {}, sql)
+            .expect("test SQL parses")
+            .remove(0)
+    }
+
+    #[test]
+    fn e014_mutations_must_advance_updated_at() {
+        let entity = v2_entity();
+        let stmt = partial_write(Operation::Update, "");
+
+        let bare = parse_one("UPDATE lake.main.golden_records SET given_name = 'x'");
+        assert_eq!(
+            codes(&updated_at_checks(&stmt, &entity, &bare)),
+            vec!["E014"],
+            "an UPDATE without SET updated_at must fail"
+        );
+        let good = parse_one(
+            "UPDATE lake.main.golden_records SET given_name = 'x', updated_at = $updated_at",
+        );
+        assert_eq!(
+            codes(&updated_at_checks(&stmt, &entity, &good)),
+            Vec::<&str>::new()
+        );
+
+        let merge = parse_one(
+            "MERGE INTO lake.main.golden_records t USING (SELECT 1 AS x) s \
+             ON t.entity_id = s.x WHEN MATCHED THEN UPDATE SET given_name = 'x'",
+        );
+        assert_eq!(
+            codes(&updated_at_checks(&stmt, &entity, &merge)),
+            vec!["E014"]
+        );
+
+        let conflict =
+            parse_one("INSERT INTO public.t (a) VALUES (1) ON CONFLICT (a) DO UPDATE SET a = 2");
+        assert_eq!(
+            codes(&updated_at_checks(&stmt, &entity, &conflict)),
+            vec!["E014"]
+        );
+
+        // The legacy ratchet: the same bare UPDATE is accepted while unmigrated.
+        let legacy = catalog().by_name("golden_record").unwrap().clone();
+        assert_eq!(
+            codes(&updated_at_checks(&stmt, &legacy, &bare)),
+            Vec::<&str>::new()
+        );
+    }
+
+    #[test]
+    fn e015_a_merge_matches_on_the_declared_natural_key() {
+        let entity = v2_entity();
+        let stmt = partial_write(Operation::Update, "");
+
+        let wrong = parse_one(
+            "MERGE INTO lake.main.golden_records t USING (SELECT 1 AS x) s \
+             ON t.given_name = s.x WHEN MATCHED THEN UPDATE SET updated_at = $u",
+        );
+        assert_eq!(
+            codes(&merge_identity_checks(&stmt, &entity, &wrong)),
+            vec!["E015"]
+        );
+
+        let right = parse_one(
+            "MERGE INTO lake.main.golden_records t USING (SELECT 1 AS x) s \
+             ON t.entity_id = s.x WHEN MATCHED THEN UPDATE SET updated_at = $u",
+        );
+        assert_eq!(
+            codes(&merge_identity_checks(&stmt, &entity, &right)),
+            Vec::<&str>::new()
+        );
+
+        // With no natural key declared, the upsert identity is [id].
+        let mut no_natural = entity.clone();
+        no_natural.natural_key = Vec::new();
+        assert_eq!(
+            codes(&merge_identity_checks(&stmt, &no_natural, &right)),
+            vec!["E015"]
+        );
+    }
+
+    #[test]
+    fn e005_extension_natural_key_and_created_at_are_insert_only() {
+        let entity = v2_entity();
+        let stmt = partial_write(Operation::Update, "");
+        let parsed =
+            parse_one("UPDATE lake.main.golden_records SET created_at = $c, entity_id = 'e2'");
+        let Statement::Update { assignments, .. } = parsed else {
+            panic!("expected an UPDATE");
+        };
+        let diags = assignment_checks(&stmt, &entity, &assignments);
+        assert_eq!(codes(&diags), vec!["E005", "E005"], "got {diags:#?}");
+        assert!(
+            diags.iter().any(|d| d.message.contains("created_at"))
+                && diags.iter().any(|d| d.message.contains("natural-key")),
+            "both immutables are named: {diags:#?}"
         );
     }
 }

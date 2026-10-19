@@ -4,6 +4,7 @@ name: golden_override
 relation: golden_overrides
 description: "One steward golden-field override (latest-wins per entity and attribute); a NULL value means the steward cleared the field."
 key: [entity_id, attribute]
+identity: legacy
 generate:
   stores: [duckdb]
   languages: [rust]

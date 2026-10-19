@@ -4,6 +4,7 @@ name: audit_log
 relation: audit_log
 description: "The append-only audit ledger: one row per authenticated mutation (actor, action, optional org scope, and structured detail)."
 key: [id]
+identity: legacy
 generate:
   stores: [postgres]
   languages: [rust, typescript]

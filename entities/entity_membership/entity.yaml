@@ -4,6 +4,7 @@ name: entity_membership
 relation: entity_membership
 description: "One membership row per record (S4.4): which resolved entity the record's current version belongs to."
 key: [source_system, source_record_id]
+identity: legacy
 generate:
   stores: [duckdb]
   languages: [rust]

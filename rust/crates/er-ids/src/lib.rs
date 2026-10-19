@@ -124,6 +124,61 @@ impl IdFactory for CountingIdFactory {
     }
 }
 
+/// Canonical lowercase-hyphenated UUID text width; every v7 id sorts as a
+/// fixed-width VARCHAR (the hex alphabet is ASCII-ascending, so byte order on
+/// the canonical text IS timestamp-then-counter order).
+pub const UUID_LENGTH: usize = 36;
+
+/// Mint a wall-clock UUIDv7 as canonical lowercase text — the identity
+/// convention for one-shot application mints (org/job/api_key/schedule/
+/// webhook/staged_action ids). Time-ordered, so fresh ids cluster in indexes.
+#[must_use]
+pub fn new_v7() -> String {
+    uuid::Uuid::now_v7().to_string()
+}
+
+/// Mint a *deterministic* UUIDv7 from a logical timestamp and a mint counter —
+/// the rerun-reproducible variant for reconcile's entity ids: the run's logical
+/// time fills the 48-bit timestamp field and the counter fills `rand_b`, so the
+/// same inputs always mint the same id and mint order equals lexical order.
+/// The counter must fit the 62-bit `rand_b` field.
+#[must_use]
+pub fn deterministic_v7(unix_ts_ms: u64, counter: u64) -> String {
+    assert!(
+        counter < (1 << 62),
+        "deterministic_v7 counter must fit UUIDv7's 62-bit rand_b field"
+    );
+    let mut rand = [0u8; 10];
+    rand[2..].copy_from_slice(&counter.to_be_bytes());
+    uuid::Builder::from_unix_timestamp_millis(unix_ts_ms, &rand)
+        .into_uuid()
+        .to_string()
+}
+
+/// The content-derived id for SQL/CTAS-minted rows: `sha256('<relation>:' ||
+/// k1 || ':' || …)` as 64 lowercase hex chars — byte-identical to DuckDB's
+/// `sha256(...)` over the same concatenation, so a Rust mint and a SQL mint of
+/// the same natural key agree. The relation prefix domain-separates relations;
+/// parts are the already-canonical natural-key values, joined with `':'`
+/// exactly as the SQL recipe writes them.
+#[must_use]
+pub fn natural_id(relation: &str, parts: &[&str]) -> String {
+    use sha2::Digest;
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(relation.as_bytes());
+    for part in parts {
+        hasher.update(b":");
+        hasher.update(part.as_bytes());
+    }
+    let digest = hasher.finalize();
+    let mut out = String::with_capacity(64);
+    for byte in digest {
+        use std::fmt::Write;
+        let _ = write!(out, "{byte:02x}");
+    }
+    out
+}
+
 /// Follow `entities.merged_into` to the entity that absorbed `entity_id`
 /// (EXTERNAL id resolution, S4.5.3). Self if no redirect; errors on a cycle or a
 /// chain longer than `max_hops`.
@@ -222,6 +277,61 @@ mod tests {
         assert_eq!(a.len(), ULID_LENGTH);
         assert_eq!(b.len(), ULID_LENGTH);
         assert!(a < b, "mint order must equal lexical order");
+    }
+
+    #[test]
+    fn new_v7_mints_canonical_version_7_text() {
+        let id = new_v7();
+        assert_eq!(id.len(), UUID_LENGTH);
+        assert_eq!(&id[14..15], "7", "version nibble must be 7: {id}");
+        assert!(
+            matches!(&id[19..20], "8" | "9" | "a" | "b"),
+            "RFC variant expected: {id}"
+        );
+        assert_eq!(id, id.to_lowercase(), "canonical text is lowercase");
+    }
+
+    // The determinism contract reconcile's entity ids rely on: same logical
+    // inputs -> the same id, and mint order == lexical order.
+    #[test]
+    fn deterministic_v7_is_stable_and_sorts_by_mint_order() {
+        let a1 = deterministic_v7(1_700_000_000_000, 0);
+        let a2 = deterministic_v7(1_700_000_000_000, 0);
+        assert_eq!(a1, a2, "reruns must mint byte-identical ids");
+        assert_eq!(a1.len(), UUID_LENGTH);
+        assert_eq!(&a1[14..15], "7");
+
+        let b = deterministic_v7(1_700_000_000_000, 1);
+        let c = deterministic_v7(1_700_000_000_001, 0);
+        assert!(a1 < b, "same tick: counter order is lexical order");
+        assert!(b < c, "a later logical tick sorts after every earlier mint");
+    }
+
+    // Must stay byte-identical to DuckDB's sha256('<relation>:'||k1||':'||k2):
+    // the SQL mints and the Rust mints of the same natural key must agree.
+    #[test]
+    fn natural_id_matches_the_sql_recipe() {
+        assert_eq!(
+            natural_id("review_queue", &["crm:1", "crm:2"]),
+            sha256_hex("review_queue:crm:1:crm:2")
+        );
+        assert_eq!(natural_id("t", &[]), sha256_hex("t"));
+        let id = natural_id("memberships", &["e1", "r1"]);
+        assert_eq!(id.len(), 64);
+        assert!(
+            id.chars()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_uppercase())
+        );
+    }
+
+    fn sha256_hex(text: &str) -> String {
+        use sha2::Digest;
+        let digest = sha2::Sha256::digest(text.as_bytes());
+        digest.iter().fold(String::new(), |mut acc, b| {
+            use std::fmt::Write;
+            let _ = write!(acc, "{b:02x}");
+            acc
+        })
     }
 
     #[test]

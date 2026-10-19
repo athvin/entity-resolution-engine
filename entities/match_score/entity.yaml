@@ -4,6 +4,7 @@ name: match_score
 relation: match_scores
 description: "One scored candidate pair (S4.3): the frozen model's match probability with its evidence waterfall, keyed by model and TF snapshot."
 key: [rec_a_key, rec_b_key, model_version, tf_snapshot_id]
+identity: legacy
 generate:
   stores: [duckdb]
   languages: [rust]

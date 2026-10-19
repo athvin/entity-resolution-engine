@@ -4,6 +4,7 @@ name: raw_record
 relation: raw_records
 description: "One landed delivery row (S4.1): the source record's payload as delivered, content-hashed; append-only, with full-refresh tombstones."
 key: [source_system, source_record_id, content_hash]
+identity: legacy
 generate:
   stores: [duckdb]
   languages: [rust]

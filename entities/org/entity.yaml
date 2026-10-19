@@ -4,6 +4,7 @@ name: org
 relation: orgs
 description: "A tenant: its config pointer, lake env, lifecycle state and active config version."
 key: [name]
+identity: legacy
 generate:
   stores: [postgres]
   languages: [rust, typescript]

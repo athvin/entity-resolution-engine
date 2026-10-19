@@ -4,6 +4,7 @@ name: webhook
 relation: webhooks
 description: "A tenant webhook endpoint: its URL, subscribed events and signing secret."
 key: [webhook_id]
+identity: legacy
 generate:
   stores: [postgres]
   languages: [rust, typescript]

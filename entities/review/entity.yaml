@@ -4,6 +4,7 @@ name: review
 relation: review_queue
 description: "One open question for a steward (S4.4.3): a gray-band pair, an unsatisfiable never, or a coherence flag, with its resolution."
 key: [review_id]
+identity: legacy
 generate:
   stores: [duckdb]
   languages: [rust]
