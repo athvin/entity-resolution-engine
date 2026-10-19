@@ -7,9 +7,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
 pub struct Job {
     /// The job's unique id (ULID).
-    pub job_id: String,
+    pub id: String,
     /// The tenant this job runs for.
-    pub org: String,
+    pub org_id: String,
     /// The job kind (run_all, correct, maintain, train, ...).
     pub kind: String,
     /// Kind-specific parameters.
@@ -48,7 +48,7 @@ pub struct Job {
 
 impl Job {
     /// The logical key columns.
-    pub const KEY: &'static [&'static str] = &["job_id"];
+    pub const KEY: &'static [&'static str] = &["id"];
     /// The entity schema version; bumped only on a breaking change.
     pub const VERSION: u64 = 1;
     /// The relation (table) name.
@@ -60,8 +60,8 @@ impl Job {
     #[must_use]
     pub fn columns() -> &'static [&'static str] {
         &[
-            "job_id",
-            "org",
+            "id",
+            "org_id",
             "kind",
             "params",
             "state",
@@ -89,20 +89,20 @@ pub mod create {
     pub async fn enqueue(
         client: &::tokio_postgres::Client,
         job_id: &str,
-        org: &str,
+        org_id: &str,
         kind: &str,
         priority: i64,
         idempotency_key: Option<&str>,
         params: Option<&::serde_json::Value>,
     ) -> ::std::result::Result<Vec<super::Job>, ::tokio_postgres::Error> {
         const SQL: &str =
-            "INSERT INTO public.jobs (job_id, org, kind, priority, idempotency_key, params)
+            "INSERT INTO public.jobs (id, org_id, kind, priority, idempotency_key, params)
 VALUES ($1, $2, $3, $4, $5, coalesce($6, '{}'::jsonb))
-ON CONFLICT (org, idempotency_key) WHERE idempotency_key IS NOT NULL
-  DO UPDATE SET kind = jobs.kind
+ON CONFLICT (org_id, idempotency_key) WHERE idempotency_key IS NOT NULL
+  DO UPDATE SET kind = jobs.kind, updated_at = now()
 RETURNING
-  job_id,
-  org,
+  id,
+  org_id,
   kind,
   params,
   state,
@@ -124,14 +124,21 @@ RETURNING
         let rows = client
             .query(
                 SQL,
-                &[&job_id, &org, &kind, &priority, &idempotency_key, &params],
+                &[
+                    &job_id,
+                    &org_id,
+                    &kind,
+                    &priority,
+                    &idempotency_key,
+                    &params,
+                ],
             )
             .await?;
         Ok(rows
             .iter()
             .map(|row| super::Job {
-                job_id: row.get("job_id"),
-                org: row.get("org"),
+                id: row.get("id"),
+                org_id: row.get("org_id"),
                 kind: row.get("kind"),
                 params: row.get("params"),
                 state: row.get("state"),
@@ -159,12 +166,12 @@ pub mod read {
     /// One job by id, scoped to its org (the job detail view).
     pub async fn by_id(
         client: &::tokio_postgres::Client,
-        org: &str,
+        org_id: &str,
         job_id: &str,
     ) -> ::std::result::Result<Vec<super::Job>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT
-  job_id,
-  org,
+  id,
+  org_id,
   kind,
   params,
   state,
@@ -183,14 +190,14 @@ pub mod read {
   started_at,
   finished_at
 FROM public.jobs
-WHERE org = $1 AND job_id = $2
+WHERE org_id = $1 AND id = $2
 ";
-        let rows = client.query(SQL, &[&org, &job_id]).await?;
+        let rows = client.query(SQL, &[&org_id, &job_id]).await?;
         Ok(rows
             .iter()
             .map(|row| super::Job {
-                job_id: row.get("job_id"),
-                org: row.get("org"),
+                id: row.get("id"),
+                org_id: row.get("org_id"),
                 kind: row.get("kind"),
                 params: row.get("params"),
                 state: row.get("state"),
@@ -215,12 +222,12 @@ WHERE org = $1 AND job_id = $2
     /// The job a given idempotency key already created (enqueue's dedup fallback).
     pub async fn by_idempotency_key(
         client: &::tokio_postgres::Client,
-        org: &str,
+        org_id: &str,
         idempotency_key: &str,
     ) -> ::std::result::Result<Vec<super::Job>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT
-  job_id,
-  org,
+  id,
+  org_id,
   kind,
   params,
   state,
@@ -239,14 +246,14 @@ WHERE org = $1 AND job_id = $2
   started_at,
   finished_at
 FROM public.jobs
-WHERE org = $1 AND idempotency_key = $2
+WHERE org_id = $1 AND idempotency_key = $2
 ";
-        let rows = client.query(SQL, &[&org, &idempotency_key]).await?;
+        let rows = client.query(SQL, &[&org_id, &idempotency_key]).await?;
         Ok(rows
             .iter()
             .map(|row| super::Job {
-                job_id: row.get("job_id"),
-                org: row.get("org"),
+                id: row.get("id"),
+                org_id: row.get("org_id"),
                 kind: row.get("kind"),
                 params: row.get("params"),
                 state: row.get("state"),
@@ -271,13 +278,13 @@ WHERE org = $1 AND idempotency_key = $2
     /// The queue view, newest first, optionally filtered by org and/or state (the operator console).
     pub async fn list(
         client: &::tokio_postgres::Client,
-        org: Option<&str>,
+        org_id: Option<&str>,
         state: Option<&str>,
         limit: i64,
     ) -> ::std::result::Result<Vec<super::Job>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT
-  job_id,
-  org,
+  id,
+  org_id,
   kind,
   params,
   state,
@@ -299,17 +306,17 @@ FROM public.jobs
 -- The `::text` casts let Postgres infer the optional-filter params' type (an
 -- `$x IS NULL` use alone is ambiguous to its planner; DuckDB infers it, Postgres
 -- does not). Casts are planned by DataFusion unchanged.
-WHERE ($1::text IS NULL OR org = $1)
+WHERE ($1::text IS NULL OR org_id = $1)
   AND ($2::text IS NULL OR state = $2)
-ORDER BY job_id DESC
+ORDER BY id DESC
 LIMIT $3
 ";
-        let rows = client.query(SQL, &[&org, &state, &limit]).await?;
+        let rows = client.query(SQL, &[&org_id, &state, &limit]).await?;
         Ok(rows
             .iter()
             .map(|row| super::Job {
-                job_id: row.get("job_id"),
-                org: row.get("org"),
+                id: row.get("id"),
+                org_id: row.get("org_id"),
                 kind: row.get("kind"),
                 params: row.get("params"),
                 state: row.get("state"),
@@ -340,18 +347,18 @@ pub mod update {
     ) -> ::std::result::Result<Vec<super::Job>, ::tokio_postgres::Error> {
         const SQL: &str = "UPDATE public.jobs
 SET state = 'dispatching', started_at = now(), updated_at = now()
-WHERE job_id = (
-  SELECT j.job_id FROM public.jobs j
+WHERE id = (
+  SELECT j.id FROM public.jobs j
   WHERE j.state = 'queued' AND (j.not_before IS NULL OR j.not_before <= now())
     AND NOT EXISTS (
       SELECT 1 FROM public.jobs a
-      WHERE a.org = j.org AND a.state IN ('dispatching', 'running', 'canceling'))
-  ORDER BY j.priority DESC, j.job_id
+      WHERE a.org_id = j.org_id AND a.state IN ('dispatching', 'running', 'canceling'))
+  ORDER BY j.priority DESC, j.id
   FOR UPDATE SKIP LOCKED
   LIMIT 1)
 RETURNING
-  job_id,
-  org,
+  id,
+  org_id,
   kind,
   params,
   state,
@@ -374,8 +381,8 @@ RETURNING
         Ok(rows
             .iter()
             .map(|row| super::Job {
-                job_id: row.get("job_id"),
-                org: row.get("org"),
+                id: row.get("id"),
+                org_id: row.get("org_id"),
                 kind: row.get("kind"),
                 params: row.get("params"),
                 state: row.get("state"),
@@ -407,7 +414,7 @@ RETURNING
 SET state = $1,
     updated_at = now(),
     finished_at = CASE WHEN $1 IN ('succeeded', 'failed', 'canceled') THEN now() ELSE finished_at END
-WHERE job_id = $2
+WHERE id = $2
 ";
         client.execute(SQL, &[&state, &job_id]).await
     }
@@ -415,7 +422,7 @@ WHERE job_id = $2
     /// Requeue a failed/canceled job with not_before = now(); a run_id is carried forward as resume_run_id so the next dispatch resumes that run.
     pub async fn resume(
         client: &::tokio_postgres::Client,
-        org: &str,
+        org_id: &str,
         job_id: &str,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
         const SQL: &str =
@@ -423,8 +430,8 @@ WHERE job_id = $2
     finished_at = NULL,
     params = CASE WHEN run_id IS NULL THEN params
                   ELSE params || jsonb_build_object('resume_run_id', run_id) END
-WHERE org = $1 AND job_id = $2 AND state IN ('failed', 'canceled')
+WHERE org_id = $1 AND id = $2 AND state IN ('failed', 'canceled')
 ";
-        client.execute(SQL, &[&org, &job_id]).await
+        client.execute(SQL, &[&org_id, &job_id]).await
     }
 }

@@ -3,6 +3,7 @@ operation: create
 mode: partial
 description: "Upsert a bring-your-own-config org: insert active, or on replay refresh config_path/env/drop_root while leaving state intact."
 params:
+  - { name: id, type: varchar }
   - { name: name, type: varchar }
   - { name: config_path, type: varchar }
   - { name: env, type: json }

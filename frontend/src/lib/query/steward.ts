@@ -7,7 +7,7 @@ import { bffFetch } from "@/lib/api/client";
 import { queryKeys } from "./keys";
 
 export interface ScheduleRow {
-  schedule_id: string;
+  id: string;
   kind: string;
   cron: string;
   enabled: boolean;
@@ -71,7 +71,7 @@ export function useToggleSchedule(org: string) {
       await queryClient.cancelQueries({ queryKey: key });
       const previous = queryClient.getQueryData<ScheduleRow[]>(key);
       queryClient.setQueryData<ScheduleRow[]>(key, (rows) =>
-        (rows ?? []).map((row) => (row.schedule_id === scheduleId ? { ...row, enabled } : row)),
+        (rows ?? []).map((row) => (row.id === scheduleId ? { ...row, enabled } : row)),
       );
       return { previous };
     },
@@ -93,7 +93,7 @@ export function useSources(org: string) {
 }
 
 export interface ImportResult {
-  job: { job_id: string };
+  job: { id: string };
   batch_id?: string;
 }
 
@@ -118,7 +118,7 @@ export function useSubmitJob(org: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: { kind: string; params?: Record<string, unknown> }) =>
-      bffFetch<{ job_id: string }>(`/api/orgs/${org}/jobs/submit`, {
+      bffFetch<{ id: string }>(`/api/orgs/${org}/jobs/submit`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ ...body, intent: ulid().toLowerCase() }),

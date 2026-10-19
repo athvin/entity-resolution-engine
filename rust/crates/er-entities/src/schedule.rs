@@ -7,9 +7,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
 pub struct Schedule {
     /// The schedule's unique id.
-    pub schedule_id: String,
+    pub id: String,
     /// The tenant this schedule runs for.
-    pub org: String,
+    pub org_id: String,
     /// The job kind the schedule enqueues.
     pub kind: String,
     /// Kind-specific parameters.
@@ -30,7 +30,7 @@ pub struct Schedule {
 
 impl Schedule {
     /// The logical key columns.
-    pub const KEY: &'static [&'static str] = &["schedule_id"];
+    pub const KEY: &'static [&'static str] = &["id"];
     /// The entity schema version; bumped only on a breaking change.
     pub const VERSION: u64 = 1;
     /// The relation (table) name.
@@ -42,8 +42,8 @@ impl Schedule {
     #[must_use]
     pub fn columns() -> &'static [&'static str] {
         &[
-            "schedule_id",
-            "org",
+            "id",
+            "org_id",
             "kind",
             "params",
             "cron",
@@ -62,17 +62,16 @@ pub mod create {
     pub async fn create(
         client: &::tokio_postgres::Client,
         schedule_id: &str,
-        org: &str,
+        org_id: &str,
         kind: &str,
         params: &::serde_json::Value,
         cron: &str,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
-        const SQL: &str =
-            "INSERT INTO public.schedules (schedule_id, org, kind, params, cron, source)
+        const SQL: &str = "INSERT INTO public.schedules (id, org_id, kind, params, cron, source)
 VALUES ($1, $2, $3, $4, $5, 'api')
 ";
         client
-            .execute(SQL, &[&schedule_id, &org, &kind, &params, &cron])
+            .execute(SQL, &[&schedule_id, &org_id, &kind, &params, &cron])
             .await
     }
 }
@@ -82,12 +81,12 @@ pub mod delete {
     /// Delete a schedule; zero rows removed means absent or another org's.
     pub async fn delete(
         client: &::tokio_postgres::Client,
-        org: &str,
+        org_id: &str,
         schedule_id: &str,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
-        const SQL: &str = "DELETE FROM public.schedules WHERE org = $1 AND schedule_id = $2
+        const SQL: &str = "DELETE FROM public.schedules WHERE org_id = $1 AND id = $2
 ";
-        client.execute(SQL, &[&org, &schedule_id]).await
+        client.execute(SQL, &[&org_id, &schedule_id]).await
     }
 }
 
@@ -96,11 +95,11 @@ pub mod read {
     /// An org's schedules, oldest first.
     pub async fn list(
         client: &::tokio_postgres::Client,
-        org: &str,
+        org_id: &str,
     ) -> ::std::result::Result<Vec<super::Schedule>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT
-  schedule_id,
-  org,
+  id,
+  org_id,
   kind,
   params,
   cron,
@@ -110,15 +109,15 @@ pub mod read {
   created_at,
   updated_at
 FROM public.schedules
-WHERE org = $1
+WHERE org_id = $1
 ORDER BY created_at
 ";
-        let rows = client.query(SQL, &[&org]).await?;
+        let rows = client.query(SQL, &[&org_id]).await?;
         Ok(rows
             .iter()
             .map(|row| super::Schedule {
-                schedule_id: row.get("schedule_id"),
-                org: row.get("org"),
+                id: row.get("id"),
+                org_id: row.get("org_id"),
                 kind: row.get("kind"),
                 params: row.get("params"),
                 cron: row.get("cron"),
@@ -139,11 +138,13 @@ pub mod update {
         client: &::tokio_postgres::Client,
         enabled: bool,
         schedule_id: &str,
-        org: &str,
+        org_id: &str,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
-        const SQL: &str = "UPDATE public.schedules SET enabled = $1
-WHERE schedule_id = $2 AND org = $3 AND source = 'api'
+        const SQL: &str = "UPDATE public.schedules SET enabled = $1, updated_at = now()
+WHERE id = $2 AND org_id = $3 AND source = 'api'
 ";
-        client.execute(SQL, &[&enabled, &schedule_id, &org]).await
+        client
+            .execute(SQL, &[&enabled, &schedule_id, &org_id])
+            .await
     }
 }

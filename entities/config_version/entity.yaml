@@ -3,17 +3,21 @@ version: 1
 name: config_version
 relation: config_versions
 description: "A versioned config document for a tenant: its YAML, hash and publish state."
-key: [org, version]
-identity: legacy
+key: [id]
+natural_key: [org_id, version]
 generate:
   stores: [postgres]
   languages: [rust, typescript]
   wire: [json]
 columns:
-  - name: org
+  - name: id
     type: varchar
     nullable: false
-    references: { relation: orgs, column: name }
+    description: "The version row's unique id (UUIDv7, minted at draft)."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
     description: "The tenant this config version belongs to."
   - name: version
     type: bigint

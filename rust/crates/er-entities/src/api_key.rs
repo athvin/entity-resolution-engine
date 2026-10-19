@@ -6,10 +6,10 @@ use serde::{Deserialize, Serialize};
 /// An org-scoped API key: its role and the at-rest hash of the secret.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
 pub struct ApiKey {
-    /// The key's unique id.
-    pub key_id: String,
+    /// The key's unique id (UUIDv7, minted at issue).
+    pub id: String,
     /// The tenant the key authenticates.
-    pub org: String,
+    pub org_id: String,
     /// The role the key grants.
     pub role: String,
     /// SHA-256 hash of the secret (never the plaintext).
@@ -24,7 +24,7 @@ pub struct ApiKey {
 
 impl ApiKey {
     /// The logical key columns.
-    pub const KEY: &'static [&'static str] = &["key_id"];
+    pub const KEY: &'static [&'static str] = &["id"];
     /// The entity schema version; bumped only on a breaking change.
     pub const VERSION: u64 = 1;
     /// The relation (table) name.
@@ -36,8 +36,8 @@ impl ApiKey {
     #[must_use]
     pub fn columns() -> &'static [&'static str] {
         &[
-            "key_id",
-            "org",
+            "id",
+            "org_id",
             "role",
             "key_hash",
             "created_at",
@@ -53,15 +53,15 @@ pub mod create {
     pub async fn issue(
         client: &::tokio_postgres::Client,
         key_id: &str,
-        org: &str,
+        org_id: &str,
         role: &str,
         key_hash: &str,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
-        const SQL: &str = "INSERT INTO public.api_keys (key_id, org, role, key_hash)
+        const SQL: &str = "INSERT INTO public.api_keys (id, org_id, role, key_hash)
 VALUES ($1, $2, $3, $4)
 ";
         client
-            .execute(SQL, &[&key_id, &org, &role, &key_hash])
+            .execute(SQL, &[&key_id, &org_id, &role, &key_hash])
             .await
     }
 }
@@ -74,22 +74,22 @@ pub mod read {
         key_id: &str,
     ) -> ::std::result::Result<Vec<super::ApiKey>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT
-  key_id,
-  org,
+  id,
+  org_id,
   role,
   key_hash,
   created_at,
   revoked_at,
   updated_at
 FROM public.api_keys
-WHERE key_id = $1 AND revoked_at IS NULL
+WHERE id = $1 AND revoked_at IS NULL
 ";
         let rows = client.query(SQL, &[&key_id]).await?;
         Ok(rows
             .iter()
             .map(|row| super::ApiKey {
-                key_id: row.get("key_id"),
-                org: row.get("org"),
+                id: row.get("id"),
+                org_id: row.get("org_id"),
                 role: row.get("role"),
                 key_hash: row.get("key_hash"),
                 created_at: row.get("created_at"),
@@ -106,11 +106,11 @@ pub mod update {
     pub async fn revoke(
         client: &::tokio_postgres::Client,
         key_id: &str,
-        org: &str,
+        org_id: &str,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
-        const SQL: &str = "UPDATE public.api_keys SET revoked_at = now()
-WHERE key_id = $1 AND org = $2 AND revoked_at IS NULL
+        const SQL: &str = "UPDATE public.api_keys SET revoked_at = now(), updated_at = now()
+WHERE id = $1 AND org_id = $2 AND revoked_at IS NULL
 ";
-        client.execute(SQL, &[&key_id, &org]).await
+        client.execute(SQL, &[&key_id, &org_id]).await
     }
 }

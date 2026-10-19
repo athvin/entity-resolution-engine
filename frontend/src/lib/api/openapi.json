@@ -152,8 +152,8 @@
         "type": "object",
         "description": "An org-scoped API key: its role and the at-rest hash of the secret.",
         "required": [
-          "key_id",
-          "org",
+          "id",
+          "org_id",
           "role",
           "key_hash",
           "created_at",
@@ -165,15 +165,15 @@
             "format": "date-time",
             "description": "When the key was issued."
           },
+          "id": {
+            "type": "string",
+            "description": "The key's unique id (UUIDv7, minted at issue)."
+          },
           "key_hash": {
             "type": "string",
             "description": "SHA-256 hash of the secret (never the plaintext)."
           },
-          "key_id": {
-            "type": "string",
-            "description": "The key's unique id."
-          },
-          "org": {
+          "org_id": {
             "type": "string",
             "description": "The tenant the key authenticates."
           },
@@ -253,7 +253,8 @@
         "type": "object",
         "description": "A versioned config document for a tenant: its YAML, hash and publish state.",
         "required": [
-          "org",
+          "id",
+          "org_id",
           "version",
           "yaml",
           "config_hash",
@@ -276,7 +277,11 @@
             "type": "string",
             "description": "Principal that created the version."
           },
-          "org": {
+          "id": {
+            "type": "string",
+            "description": "The version row's unique id (UUIDv7, minted at draft)."
+          },
+          "org_id": {
             "type": "string",
             "description": "The tenant this config version belongs to."
           },
@@ -484,8 +489,8 @@
         "type": "object",
         "description": "A unit of work on the dispatcher's queue: its kind, params, lifecycle state and retry bookkeeping.",
         "required": [
-          "job_id",
-          "org",
+          "id",
+          "org_id",
           "kind",
           "params",
           "state",
@@ -521,16 +526,16 @@
             "format": "date-time",
             "description": "When the job finished."
           },
+          "id": {
+            "type": "string",
+            "description": "The job's unique id (ULID)."
+          },
           "idempotency_key": {
             "type": [
               "string",
               "null"
             ],
             "description": "Optional dedup key, unique per org."
-          },
-          "job_id": {
-            "type": "string",
-            "description": "The job's unique id (ULID)."
           },
           "kind": {
             "type": "string",
@@ -549,7 +554,7 @@
             "format": "date-time",
             "description": "Earliest time the job may be claimed."
           },
-          "org": {
+          "org_id": {
             "type": "string",
             "description": "The tenant this job runs for."
           },
@@ -612,6 +617,7 @@
         "type": "object",
         "description": "A tenant: its config pointer, lake env, lifecycle state and active config version.",
         "required": [
+          "id",
           "name",
           "config_path",
           "env",
@@ -647,9 +653,13 @@
           "env": {
             "description": "Lake connection env (catalog, data path, metadata schema)."
           },
+          "id": {
+            "type": "string",
+            "description": "The tenant's unique id (UUIDv7, minted at creation)."
+          },
           "name": {
             "type": "string",
-            "description": "The tenant's unique name (the control-plane key)."
+            "description": "The tenant's unique name (the routing handle; URLs stay name-based)."
           },
           "state": {
             "type": "string",
@@ -666,8 +676,8 @@
         "type": "object",
         "description": "A recurring job schedule for a tenant: its kind, cron and source.",
         "required": [
-          "schedule_id",
-          "org",
+          "id",
+          "org_id",
           "kind",
           "params",
           "cron",
@@ -690,6 +700,10 @@
             "type": "boolean",
             "description": "Whether the schedule is active."
           },
+          "id": {
+            "type": "string",
+            "description": "The schedule's unique id."
+          },
           "kind": {
             "type": "string",
             "description": "The job kind the schedule enqueues."
@@ -702,16 +716,12 @@
             "format": "date-time",
             "description": "When the schedule last enqueued a job."
           },
-          "org": {
+          "org_id": {
             "type": "string",
             "description": "The tenant this schedule runs for."
           },
           "params": {
             "description": "Kind-specific parameters."
-          },
-          "schedule_id": {
-            "type": "string",
-            "description": "The schedule's unique id."
           },
           "source": {
             "type": "string",
@@ -728,8 +738,8 @@
         "type": "object",
         "description": "A steward action staged for review/apply: its payload, state and outcome.",
         "required": [
-          "action_id",
-          "org",
+          "id",
+          "org_id",
           "action",
           "state",
           "created_by",
@@ -739,10 +749,6 @@
         "properties": {
           "action": {
             "description": "The action payload."
-          },
-          "action_id": {
-            "type": "string",
-            "description": "The staged action's unique id."
           },
           "applied_at": {
             "type": [
@@ -768,7 +774,11 @@
             ],
             "description": "The failure reason, if the action failed."
           },
-          "org": {
+          "id": {
+            "type": "string",
+            "description": "The staged action's unique id."
+          },
+          "org_id": {
             "type": "string",
             "description": "The tenant the action applies to."
           },
@@ -787,8 +797,8 @@
         "type": "object",
         "description": "A tenant webhook endpoint: its URL, subscribed events and signing secret.",
         "required": [
-          "webhook_id",
-          "org",
+          "id",
+          "org_id",
           "url",
           "events",
           "secret",
@@ -809,7 +819,11 @@
           "events": {
             "description": "The subscribed event types."
           },
-          "org": {
+          "id": {
+            "type": "string",
+            "description": "The webhook's unique id."
+          },
+          "org_id": {
             "type": "string",
             "description": "The tenant that owns the webhook."
           },
@@ -825,10 +839,6 @@
           "url": {
             "type": "string",
             "description": "The delivery URL."
-          },
-          "webhook_id": {
-            "type": "string",
-            "description": "The webhook's unique id."
           }
         }
       }

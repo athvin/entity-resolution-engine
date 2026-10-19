@@ -98,7 +98,7 @@ function SourceCard({ org, name, isSteward }: { org: string; name: string; isSte
       { source: name, file },
       {
         onSuccess: (result) => {
-          setMessage(`queued — job ${result.job.job_id.slice(-8)} runs the import`);
+          setMessage(`queued — job ${result.job.id.slice(-8)} runs the import`);
         },
         onError: (error) => {
           setMessage(error instanceof BffRequestError ? error.message : "upload failed");

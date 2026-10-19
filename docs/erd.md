@@ -18,8 +18,8 @@ entity spec); a dotted edge means the referencing column is nullable.
 ```mermaid
 erDiagram
     api_keys {
-        varchar key_id PK
-        varchar org FK
+        varchar id PK
+        varchar org_id FK
         varchar role "in {admin, steward, viewer}"
         varchar key_hash
         timestamp created_at
@@ -37,8 +37,9 @@ erDiagram
         timestamp updated_at
     }
     config_versions {
-        varchar org PK, FK
-        bigint version PK
+        varchar id PK
+        varchar org_id FK
+        bigint version
         varchar yaml
         varchar config_hash
         varchar state "in {draft, published}"
@@ -60,8 +61,8 @@ erDiagram
         varchar command_text
     }
     jobs {
-        varchar job_id PK
-        varchar org FK
+        varchar id PK
+        varchar org_id FK
         varchar kind
         json params
         varchar state
@@ -81,7 +82,8 @@ erDiagram
         timestamp finished_at
     }
     orgs {
-        varchar name PK
+        varchar id PK
+        varchar name
         varchar config_path
         json env
         varchar drop_root
@@ -91,8 +93,8 @@ erDiagram
         timestamp updated_at
     }
     schedules {
-        varchar schedule_id PK
-        varchar org FK
+        varchar id PK
+        varchar org_id FK
         varchar kind
         json params
         varchar cron
@@ -103,8 +105,8 @@ erDiagram
         timestamp updated_at
     }
     staged_steward_actions {
-        varchar action_id PK
-        varchar org FK
+        varchar id PK
+        varchar org_id FK
         json action
         varchar state "in {applied, failed, pending}"
         varchar error
@@ -114,8 +116,8 @@ erDiagram
         timestamp updated_at
     }
     webhooks {
-        varchar webhook_id PK
-        varchar org FK
+        varchar id PK
+        varchar org_id FK
         varchar url
         json events
         varchar secret
@@ -123,12 +125,12 @@ erDiagram
         timestamp created_at
         timestamp updated_at
     }
-    api_keys }o--|| orgs : "org → name"
-    config_versions }o--|| orgs : "org → name"
-    jobs }o--|| orgs : "org → name"
-    schedules }o--|| orgs : "org → name"
-    staged_steward_actions }o--|| orgs : "org → name"
-    webhooks }o--|| orgs : "org → name"
+    api_keys }o--|| orgs : "org_id → id"
+    config_versions }o--|| orgs : "org_id → id"
+    jobs }o--|| orgs : "org_id → id"
+    schedules }o--|| orgs : "org_id → id"
+    staged_steward_actions }o--|| orgs : "org_id → id"
+    webhooks }o--|| orgs : "org_id → id"
 ```
 
 | relation | description |

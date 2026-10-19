@@ -3,21 +3,20 @@ version: 1
 name: staged_steward_action
 relation: staged_steward_actions
 description: "A steward action staged for review/apply: its payload, state and outcome."
-key: [action_id]
-identity: legacy
+key: [id]
 generate:
   stores: [postgres]
   languages: [rust, typescript]
   wire: [json]
 columns:
-  - name: action_id
+  - name: id
     type: varchar
     nullable: false
     description: "The staged action's unique id."
-  - name: org
+  - name: org_id
     type: varchar
     nullable: false
-    references: { relation: orgs, column: name }
+    references: { relation: orgs, column: id }
     description: "The tenant the action applies to."
   - name: action
     type: json
@@ -53,4 +52,4 @@ columns:
     description: "Wall-clock last-write time (database default; advanced by mutations once the entity migrates)."
 indexes:
   - name: staged_pending
-    columns: [org, state]
+    columns: [org_id, state]

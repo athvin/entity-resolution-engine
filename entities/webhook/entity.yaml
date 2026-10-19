@@ -3,21 +3,20 @@ version: 1
 name: webhook
 relation: webhooks
 description: "A tenant webhook endpoint: its URL, subscribed events and signing secret."
-key: [webhook_id]
-identity: legacy
+key: [id]
 generate:
   stores: [postgres]
   languages: [rust, typescript]
   wire: [json]
 columns:
-  - name: webhook_id
+  - name: id
     type: varchar
     nullable: false
     description: "The webhook's unique id."
-  - name: org
+  - name: org_id
     type: varchar
     nullable: false
-    references: { relation: orgs, column: name }
+    references: { relation: orgs, column: id }
     description: "The tenant that owns the webhook."
   - name: url
     type: varchar

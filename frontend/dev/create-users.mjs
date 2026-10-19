@@ -88,7 +88,7 @@ try {
     const sealed = seal(org, role, entry.key);
     await sql`
       INSERT INTO erweb.org_credentials (org, role, key_id, ciphertext, nonce)
-      VALUES (${org}, ${role}, ${entry.key_id}, ${sealed.ciphertext}, ${sealed.nonce})
+      VALUES (${org}, ${role}, ${entry.id}, ${sealed.ciphertext}, ${sealed.nonce})
       ON CONFLICT (org, role) DO UPDATE
         SET key_id = EXCLUDED.key_id, ciphertext = EXCLUDED.ciphertext,
             nonce = EXCLUDED.nonce, rotated_at = now()`;

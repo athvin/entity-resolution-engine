@@ -17,6 +17,14 @@ use axum::http::{Request, StatusCode, header};
 use er_server::{AppState, app, pg};
 use tower::ServiceExt;
 
+/// The org's id for a test org name (child wrappers key on org_id).
+async fn oid(client: &tokio_postgres::Client, name: &str) -> String {
+    er_server::pg::org_id_by_name(client, name)
+        .await
+        .expect("org lookup")
+        .expect("org exists")
+}
+
 const TEST_YAML: &str = include_str!("../../er-cli/tests/fixtures/test.yaml");
 const NICKNAMES: &str = include_str!("../../er-cli/tests/fixtures/nickname_variants.csv");
 
@@ -203,7 +211,9 @@ async fn unmerge_splits_and_respects_contradictions() {
     assert_eq!(body["pairs"], 1);
     assert!(body["apply_job"].as_str().is_some());
 
-    let pending = pg::pending_actions(&client, "split").await.unwrap();
+    let pending = pg::pending_actions(&client, &oid(&client, "split").await)
+        .await
+        .unwrap();
     assert_eq!(pending.len(), 1, "one never-rule staged");
     {
         let session = er_cli::open_lake(&cat_a, &data_a).unwrap();
@@ -246,7 +256,9 @@ async fn unmerge_splits_and_respects_contradictions() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
-    let pending = pg::pending_actions(&client, "conflict").await.unwrap();
+    let pending = pg::pending_actions(&client, &oid(&client, "conflict").await)
+        .await
+        .unwrap();
     {
         let session = er_cli::open_lake(&cat_b, &data_b).unwrap();
         for (action_id, action) in &pending {
@@ -267,7 +279,12 @@ async fn unmerge_splits_and_respects_contradictions() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::CONFLICT);
     // The refused unmerge staged nothing new.
-    assert_eq!(pg::pending_count(&client, "conflict").await.unwrap(), 0);
+    assert_eq!(
+        pg::pending_count(&client, &oid(&client, "conflict").await)
+            .await
+            .unwrap(),
+        0
+    );
 
     // --- Scenario C: the contradictions read flags the unsatisfiable pair. ---
     // Add a `never` over the always-locked pair and drain it; now the ledger has
@@ -284,7 +301,10 @@ async fn unmerge_splits_and_respects_contradictions() {
     assert_eq!(resp.status(), StatusCode::CREATED);
     {
         let session = er_cli::open_lake(&cat_b, &data_b).unwrap();
-        for (action_id, action) in &pg::pending_actions(&client, "conflict").await.unwrap() {
+        for (action_id, action) in &pg::pending_actions(&client, &oid(&client, "conflict").await)
+            .await
+            .unwrap()
+        {
             er_cli::apply_staged_action(&session, action_id, action, "2026-02-02 00:00:00")
                 .unwrap();
             pg::mark_action_applied(&client, action_id).await.unwrap();

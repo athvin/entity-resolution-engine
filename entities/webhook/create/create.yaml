@@ -4,7 +4,7 @@ mode: partial
 description: "Register an outbound webhook; the secret is the HMAC signing key for delivery-time signatures."
 params:
   - { name: webhook_id, type: varchar }
-  - { name: org, type: varchar }
+  - { name: org_id, type: varchar }
   - { name: url, type: varchar }
   - { name: events, type: json }
   - { name: secret, type: varchar }

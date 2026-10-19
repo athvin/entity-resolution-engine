@@ -1,0 +1,6 @@
+kind: statement
+operation: read
+description: "One tenant by its id — the dispatcher's lookup once a child row carries only org_id."
+params:
+  - { name: id, type: varchar }
+returns: entity

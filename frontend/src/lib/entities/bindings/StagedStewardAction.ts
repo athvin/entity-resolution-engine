@@ -4,9 +4,9 @@
 /** A steward action staged for review/apply: its payload, state and outcome. */
 export interface StagedStewardAction {
   /** The staged action's unique id. */
-  action_id: string;
+  id: string;
   /** The tenant the action applies to. */
-  org: string;
+  org_id: string;
   /** The action payload. */
   action: unknown;
   /** Whether the action is pending, applied or failed. */

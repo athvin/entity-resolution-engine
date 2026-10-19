@@ -1,1 +1,1 @@
-DELETE FROM public.webhooks WHERE org = $org AND webhook_id = $webhook_id
+DELETE FROM public.webhooks WHERE org_id = $org_id AND id = $webhook_id

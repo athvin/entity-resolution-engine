@@ -7,9 +7,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
 pub struct Webhook {
     /// The webhook's unique id.
-    pub webhook_id: String,
+    pub id: String,
     /// The tenant that owns the webhook.
-    pub org: String,
+    pub org_id: String,
     /// The delivery URL.
     pub url: String,
     /// The subscribed event types.
@@ -26,7 +26,7 @@ pub struct Webhook {
 
 impl Webhook {
     /// The logical key columns.
-    pub const KEY: &'static [&'static str] = &["webhook_id"];
+    pub const KEY: &'static [&'static str] = &["id"];
     /// The entity schema version; bumped only on a breaking change.
     pub const VERSION: u64 = 1;
     /// The relation (table) name.
@@ -38,8 +38,8 @@ impl Webhook {
     #[must_use]
     pub fn columns() -> &'static [&'static str] {
         &[
-            "webhook_id",
-            "org",
+            "id",
+            "org_id",
             "url",
             "events",
             "secret",
@@ -56,16 +56,16 @@ pub mod create {
     pub async fn create(
         client: &::tokio_postgres::Client,
         webhook_id: &str,
-        org: &str,
+        org_id: &str,
         url: &str,
         events: &::serde_json::Value,
         secret: &str,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
-        const SQL: &str = "INSERT INTO public.webhooks (webhook_id, org, url, events, secret)
+        const SQL: &str = "INSERT INTO public.webhooks (id, org_id, url, events, secret)
 VALUES ($1, $2, $3, $4, $5)
 ";
         client
-            .execute(SQL, &[&webhook_id, &org, &url, &events, &secret])
+            .execute(SQL, &[&webhook_id, &org_id, &url, &events, &secret])
             .await
     }
 }
@@ -75,12 +75,12 @@ pub mod delete {
     /// Delete a webhook; zero rows removed means absent or another org's.
     pub async fn delete(
         client: &::tokio_postgres::Client,
-        org: &str,
+        org_id: &str,
         webhook_id: &str,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
-        const SQL: &str = "DELETE FROM public.webhooks WHERE org = $1 AND webhook_id = $2
+        const SQL: &str = "DELETE FROM public.webhooks WHERE org_id = $1 AND id = $2
 ";
-        client.execute(SQL, &[&org, &webhook_id]).await
+        client.execute(SQL, &[&org_id, &webhook_id]).await
     }
 }
 
@@ -89,12 +89,12 @@ pub mod read {
     /// The delivery targets for one event: every active webhook subscribed to the type (or subscribed-to-all); includes the secret the delivery signs with.
     pub async fn for_delivery(
         client: &::tokio_postgres::Client,
-        org: &str,
+        org_id: &str,
         event_type: &str,
     ) -> ::std::result::Result<Vec<super::Webhook>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT
-  webhook_id,
-  org,
+  id,
+  org_id,
   url,
   events,
   secret,
@@ -102,16 +102,16 @@ pub mod read {
   created_at,
   updated_at
 FROM public.webhooks
-WHERE org = $1 AND active
+WHERE org_id = $1 AND active
   AND (events @> to_jsonb($2::text) OR jsonb_array_length(events) = 0)
 ORDER BY created_at
 ";
-        let rows = client.query(SQL, &[&org, &event_type]).await?;
+        let rows = client.query(SQL, &[&org_id, &event_type]).await?;
         Ok(rows
             .iter()
             .map(|row| super::Webhook {
-                webhook_id: row.get("webhook_id"),
-                org: row.get("org"),
+                id: row.get("id"),
+                org_id: row.get("org_id"),
                 url: row.get("url"),
                 events: row.get("events"),
                 secret: row.get("secret"),
@@ -125,11 +125,11 @@ ORDER BY created_at
     /// An org's active webhooks, oldest first (the listing projection drops the secret).
     pub async fn list_active(
         client: &::tokio_postgres::Client,
-        org: &str,
+        org_id: &str,
     ) -> ::std::result::Result<Vec<super::Webhook>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT
-  webhook_id,
-  org,
+  id,
+  org_id,
   url,
   events,
   secret,
@@ -137,15 +137,15 @@ ORDER BY created_at
   created_at,
   updated_at
 FROM public.webhooks
-WHERE org = $1 AND active
+WHERE org_id = $1 AND active
 ORDER BY created_at
 ";
-        let rows = client.query(SQL, &[&org]).await?;
+        let rows = client.query(SQL, &[&org_id]).await?;
         Ok(rows
             .iter()
             .map(|row| super::Webhook {
-                webhook_id: row.get("webhook_id"),
-                org: row.get("org"),
+                id: row.get("id"),
+                org_id: row.get("org_id"),
                 url: row.get("url"),
                 events: row.get("events"),
                 secret: row.get("secret"),

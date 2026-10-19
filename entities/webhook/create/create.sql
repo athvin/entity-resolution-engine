@@ -1,2 +1,2 @@
-INSERT INTO public.webhooks (webhook_id, org, url, events, secret)
-VALUES ($webhook_id, $org, $url, $events, $secret)
+INSERT INTO public.webhooks (id, org_id, url, events, secret)
+VALUES ($webhook_id, $org_id, $url, $events, $secret)

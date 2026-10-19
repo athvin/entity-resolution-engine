@@ -4,7 +4,7 @@ mode: partial
 description: "Queue a job, idempotent on the org idempotency key (a repeat key returns the original row via a no-op upsert)."
 params:
   - { name: job_id, type: varchar }
-  - { name: org, type: varchar }
+  - { name: org_id, type: varchar }
   - { name: kind, type: varchar }
   - { name: priority, type: bigint }
   - { name: idempotency_key, type: varchar, nullable: true }

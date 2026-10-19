@@ -115,6 +115,7 @@ export function initialState() {
   const state = {
     orgs: {
       "acme-dev": {
+        id: "uuid-acme-dev",
         name: "acme-dev",
         state: "active",
         active_config_version: 1,
@@ -123,6 +124,7 @@ export function initialState() {
         resources: { duckdb_threads: 2, duckdb_memory_limit: "4GB" },
       },
       "mutable-dev": {
+        id: "uuid-mutable-dev",
         name: "mutable-dev",
         state: "active",
         active_config_version: 1,
@@ -135,6 +137,7 @@ export function initialState() {
       // names) switches to the account vocabulary off its `entity_type: account`
       // config. Never pixel-compared.
       "orgs-dev": {
+        id: "uuid-orgs-dev",
         name: "orgs-dev",
         state: "active",
         active_config_version: 1,
@@ -202,8 +205,8 @@ export function initialState() {
     jobs: {
       "acme-dev": [
         {
-          job_id: "01jm000000000000000000000c",
-          org: "acme-dev",
+          id: "01jm000000000000000000000c",
+          org_id: "acme-dev",
           kind: "run_all_incremental",
           params: {},
           state: "running",
@@ -219,8 +222,8 @@ export function initialState() {
           progress: { stages: [{ stage: "standardize" }, { stage: "match" }] },
         },
         {
-          job_id: "01jm000000000000000000000b",
-          org: "acme-dev",
+          id: "01jm000000000000000000000b",
+          org_id: "acme-dev",
           kind: "run_all_incremental",
           params: {},
           state: "failed",
@@ -236,8 +239,8 @@ export function initialState() {
           progress: { stages: [{ stage: "standardize" }] },
         },
         {
-          job_id: "01jm000000000000000000000a",
-          org: "acme-dev",
+          id: "01jm000000000000000000000a",
+          org_id: "acme-dev",
           kind: "train",
           params: {},
           state: "succeeded",
@@ -257,8 +260,8 @@ export function initialState() {
       // stay byte-stable for the visual baselines under parallel projects.
       "mutable-dev": [
         {
-          job_id: "01jmmutable00000000000000m1",
-          org: "mutable-dev",
+          id: "01jmmutable00000000000000m1",
+          org_id: "mutable-dev",
           kind: "run_all_incremental",
           params: {},
           state: "running",
@@ -274,8 +277,8 @@ export function initialState() {
           progress: { stages: [{ stage: "standardize" }] },
         },
         {
-          job_id: "01jmmutable00000000000000m2",
-          org: "mutable-dev",
+          id: "01jmmutable00000000000000m2",
+          org_id: "mutable-dev",
           kind: "run_all_full",
           params: {},
           state: "failed",
@@ -435,7 +438,7 @@ export function initialState() {
     schedules: {
       "acme-dev": [
         {
-          schedule_id: "01jmsched00000000000000001",
+          id: "01jmsched00000000000000001",
           kind: "run_all_incremental",
           cron: "0 6 * * *",
           enabled: true,
@@ -443,7 +446,7 @@ export function initialState() {
           last_enqueued_at: "2026-09-24T06:00:00Z",
         },
         {
-          schedule_id: "01jmsched00000000000000002",
+          id: "01jmsched00000000000000002",
           kind: "correct",
           cron: "0 3 * * 0",
           enabled: true,
@@ -538,6 +541,7 @@ export function initialState() {
     "palette-dev",
   ]) {
     state.orgs[org] = {
+      id: `uuid-${org}`,
       name: org,
       state: "active",
       active_config_version: 1,
@@ -660,8 +664,8 @@ export function initialState() {
   state.reviews["fresh-dev"] = [];
   state.jobs["fresh-dev"] = [
     {
-      job_id: "01jmfresh000000000000000f1",
-      org: "fresh-dev",
+      id: "01jmfresh000000000000000f1",
+      org_id: "fresh-dev",
       kind: "run_all_incremental",
       params: { source: "crm" },
       state: "failed",
@@ -677,8 +681,8 @@ export function initialState() {
       progress: { stages: [{ stage: "ingest" }, { stage: "standardize" }] },
     },
     {
-      job_id: "01jmfresh000000000000000f2",
-      org: "fresh-dev",
+      id: "01jmfresh000000000000000f2",
+      org_id: "fresh-dev",
       kind: "run_all_incremental",
       params: { source: "billing" },
       state: "failed",
@@ -991,6 +995,7 @@ const server = http.createServer((req, res) => {
       if (!/^[a-z0-9][a-z0-9_-]*$/.test(name)) return send(res, 422, { detail: "bad name" });
       if (!state.orgs[name]) {
         state.orgs[name] = {
+          id: `uuid-${name}`,
           name,
           state: "provisioning",
           active_config_version: 1,
@@ -1011,8 +1016,8 @@ const server = http.createServer((req, res) => {
         state.reviews[name] = [];
         state.jobs[name] = [
           {
-            job_id: `01jmprov${name.slice(0, 8).padEnd(8, "0")}`,
-            org: name,
+            id: `01jmprov${name.slice(0, 8).padEnd(8, "0")}`,
+            org_id: name,
             kind: "provision",
             params: {},
             state: "running",
@@ -1034,7 +1039,7 @@ const server = http.createServer((req, res) => {
         tenant: `t_${name}_mock`,
         config_version: 1,
         state: "provisioning",
-        job_id: state.jobs[name][0].job_id,
+        job_id: state.jobs[name][0].id,
         admin_key_id: `onetime-${name}`,
         admin_key: `erk_onetime${name.replaceAll(/[^a-z0-9]/g, "")}_secret`,
       });
@@ -1121,7 +1126,7 @@ const server = http.createServer((req, res) => {
       const body = await readBody(req);
       const role = String(body.role ?? "viewer");
       return send(res, 201, {
-        key_id: `mock-${match[1]}-${role}`,
+        id: `mock-${match[1]}-${role}`,
         key: `erk_mock_${role}_secret_${match[1]}`,
         role,
       });
@@ -1255,8 +1260,8 @@ const server = http.createServer((req, res) => {
       const body = await readBody(req);
       const kind = String(body.kind ?? "");
       const job = {
-        job_id: `01jmsubmit${String(Object.values(state.jobs).flat().length).padStart(4, "0")}`,
-        org: match[1],
+        id: `01jmsubmit${String(Object.values(state.jobs).flat().length).padStart(4, "0")}`,
+        org_id: match[1],
         kind,
         params: body.params ?? {},
         // Train completes instantly in the mock so onboarding advances on refetch.
@@ -1280,31 +1285,31 @@ const server = http.createServer((req, res) => {
       return send(res, 200, (state.jobs[match[1]] ?? []).slice(0, limit));
     }
     if ((match = /^\/v1\/orgs\/([^/]+)\/jobs\/([^/:]+)$/.exec(path)) && req.method === "GET") {
-      const job = (state.jobs[match[1]] ?? []).find((row) => row.job_id === match[2]);
+      const job = (state.jobs[match[1]] ?? []).find((row) => row.id === match[2]);
       return job ? send(res, 200, job) : send(res, 404, { detail: "not found" });
     }
     if (
       (match = /^\/v1\/orgs\/([^/]+)\/jobs\/([^/:]+):cancel$/.exec(path)) &&
       req.method === "POST"
     ) {
-      const job = (state.jobs[match[1]] ?? []).find((row) => row.job_id === match[2]);
+      const job = (state.jobs[match[1]] ?? []).find((row) => row.id === match[2]);
       if (!job || !["queued", "dispatching", "running", "retrying"].includes(job.state)) {
         return send(res, 409, { detail: "job is not cancelable" });
       }
       job.state = "canceled";
-      return send(res, 200, { job_id: job.job_id, state: "canceled" });
+      return send(res, 200, { id: job.id, state: "canceled" });
     }
     if (
       (match = /^\/v1\/orgs\/([^/]+)\/jobs\/([^/:]+):resume$/.exec(path)) &&
       req.method === "POST"
     ) {
-      const job = (state.jobs[match[1]] ?? []).find((row) => row.job_id === match[2]);
+      const job = (state.jobs[match[1]] ?? []).find((row) => row.id === match[2]);
       if (!job || !["failed", "canceled"].includes(job.state)) {
         return send(res, 409, { detail: "job is not resumable" });
       }
       job.state = "queued";
       job.error_class = null;
-      return send(res, 200, { job_id: job.job_id, state: "queued" });
+      return send(res, 200, { id: job.id, state: "queued" });
     }
     if ((match = /^\/v1\/orgs\/([^/]+)\/reviews$/.exec(path)) && req.method === "GET") {
       const limit = Number(url.searchParams.get("limit") ?? 50);
@@ -1540,8 +1545,8 @@ const server = http.createServer((req, res) => {
       // Succeeds instantly, like mock train, so job-detail's success CTA renders
       // on the first refetch instead of the suite simulating a dispatcher.
       const job = {
-        job_id: `01jmimport${String(Object.values(state.jobs).flat().length).padStart(4, "0")}`,
-        org,
+        id: `01jmimport${String(Object.values(state.jobs).flat().length).padStart(4, "0")}`,
+        org_id: org,
         kind: "run_all_incremental",
         params: { source },
         state: "succeeded",
@@ -1573,7 +1578,7 @@ const server = http.createServer((req, res) => {
     if ((match = /^\/v1\/orgs\/([^/]+)\/schedules$/.exec(path)) && req.method === "POST") {
       const body = await readBody(req);
       const schedule = {
-        schedule_id: `01jmschednew${String((state.schedules[match[1]] ?? []).length)}`,
+        id: `01jmschednew${String((state.schedules[match[1]] ?? []).length)}`,
         kind: String(body.kind ?? ""),
         cron: String(body.cron ?? ""),
         enabled: true,
@@ -1587,20 +1592,20 @@ const server = http.createServer((req, res) => {
       (match = /^\/v1\/orgs\/([^/]+)\/schedules\/([^/]+)$/.exec(path)) &&
       req.method === "PATCH"
     ) {
-      const row = (state.schedules[match[1]] ?? []).find((r) => r.schedule_id === match[2]);
+      const row = (state.schedules[match[1]] ?? []).find((r) => r.id === match[2]);
       if (!row || row.source !== "api") {
         return send(res, 409, { detail: "unknown or config-owned schedule" });
       }
       const body = await readBody(req);
       row.enabled = Boolean(body.enabled);
-      return send(res, 200, { schedule_id: row.schedule_id, enabled: row.enabled });
+      return send(res, 200, { id: row.id, enabled: row.enabled });
     }
     if (
       (match = /^\/v1\/orgs\/([^/]+)\/schedules\/([^/]+)$/.exec(path)) &&
       req.method === "DELETE"
     ) {
       const rows = state.schedules[match[1]] ?? [];
-      const index = rows.findIndex((r) => r.schedule_id === match[2]);
+      const index = rows.findIndex((r) => r.id === match[2]);
       if (index >= 0) rows.splice(index, 1);
       return send(res, 200, { deleted: index >= 0 });
     }
@@ -1691,10 +1696,10 @@ const server = http.createServer((req, res) => {
       }
       if (tierC) {
         const enqueued = ["train", "run_all_full"].map((kind, index) => ({
-          job_id: `01jmpublish${kind.replace(/_/g, "")}${String(
+          id: `01jmpublish${kind.replace(/_/g, "")}${String(
             Object.values(state.jobs).flat().length + index,
           ).padStart(3, "0")}`,
-          org,
+          org_id: org,
           kind,
           params: kind === "run_all_full" ? { skip_ingest: true } : {},
           // Instantly succeeded, like mock train: the queue's serialization is
@@ -1717,7 +1722,7 @@ const server = http.createServer((req, res) => {
           version: row.version,
           tier: "C",
           changed_blocks: ["sources"],
-          jobs_enqueued: enqueued.map((job) => job.job_id),
+          jobs_enqueued: enqueued.map((job) => job.id),
           published_by: "user:mock via key:mock",
         });
       }

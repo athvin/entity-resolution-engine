@@ -66,13 +66,14 @@ async fn post(
 pub async fn emit(
     pg_client: &tokio_postgres::Client,
     http: &reqwest::Client,
-    org: &str,
+    org_id: &str,
+    org_name: &str,
     event_type: &str,
     data: &Value,
 ) -> Result<Vec<DeliveryResult>, tokio_postgres::Error> {
-    let targets = pg::webhooks_for_delivery(pg_client, org, event_type).await?;
+    let targets = pg::webhooks_for_delivery(pg_client, org_id, event_type).await?;
 
-    let mut body_doc = json!({ "event": event_type, "org": org });
+    let mut body_doc = json!({ "event": event_type, "org": org_name });
     if let (Some(obj), Some(extra)) = (body_doc.as_object_mut(), data.as_object()) {
         for (k, v) in extra {
             obj.insert(k.clone(), v.clone());
@@ -108,11 +109,16 @@ pub async fn emit_job_event(
 ) -> Result<Vec<DeliveryResult>, tokio_postgres::Error> {
     let event_type = format!("job.{}", job.state);
     let data = json!({
-        "job_id": job.job_id,
+        "job_id": job.id,
         "kind": job.kind,
         "state": job.state,
     });
-    emit(pg_client, http, &job.org, &event_type, &data).await
+    // Subscribers key on the org's id; the payload names the org (the public
+    // handle), resolved from the job's org_id.
+    let org_name = crate::pg::get_org_by_id(pg_client, &job.org_id)
+        .await?
+        .map_or_else(|| job.org_id.clone(), |o| o.name);
+    emit(pg_client, http, &job.org_id, &org_name, &event_type, &data).await
 }
 
 #[cfg(test)]

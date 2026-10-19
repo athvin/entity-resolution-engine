@@ -7,9 +7,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
 pub struct StagedStewardAction {
     /// The staged action's unique id.
-    pub action_id: String,
+    pub id: String,
     /// The tenant the action applies to.
-    pub org: String,
+    pub org_id: String,
     /// The action payload.
     pub action: ::serde_json::Value,
     /// Whether the action is pending, applied or failed.
@@ -28,7 +28,7 @@ pub struct StagedStewardAction {
 
 impl StagedStewardAction {
     /// The logical key columns.
-    pub const KEY: &'static [&'static str] = &["action_id"];
+    pub const KEY: &'static [&'static str] = &["id"];
     /// The entity schema version; bumped only on a breaking change.
     pub const VERSION: u64 = 1;
     /// The relation (table) name.
@@ -40,8 +40,8 @@ impl StagedStewardAction {
     #[must_use]
     pub fn columns() -> &'static [&'static str] {
         &[
-            "action_id",
-            "org",
+            "id",
+            "org_id",
             "action",
             "state",
             "error",
@@ -59,16 +59,16 @@ pub mod create {
     pub async fn stage(
         client: &::tokio_postgres::Client,
         action_id: &str,
-        org: &str,
+        org_id: &str,
         action: &::serde_json::Value,
         created_by: &str,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
         const SQL: &str =
-            "INSERT INTO public.staged_steward_actions (action_id, org, action, created_by)
+            "INSERT INTO public.staged_steward_actions (id, org_id, action, created_by)
 VALUES ($1, $2, $3, $4)
 ";
         client
-            .execute(SQL, &[&action_id, &org, &action, &created_by])
+            .execute(SQL, &[&action_id, &org_id, &action, &created_by])
             .await
     }
 }
@@ -78,11 +78,11 @@ pub mod read {
     /// An org's pending steward actions, oldest first (the dispatcher drain read; its count is the pending gauge).
     pub async fn pending(
         client: &::tokio_postgres::Client,
-        org: &str,
+        org_id: &str,
     ) -> ::std::result::Result<Vec<super::StagedStewardAction>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT
-  action_id,
-  org,
+  id,
+  org_id,
   action,
   state,
   error,
@@ -91,15 +91,15 @@ pub mod read {
   applied_at,
   updated_at
 FROM public.staged_steward_actions
-WHERE org = $1 AND state = 'pending'
-ORDER BY created_at, action_id
+WHERE org_id = $1 AND state = 'pending'
+ORDER BY created_at, id
 ";
-        let rows = client.query(SQL, &[&org]).await?;
+        let rows = client.query(SQL, &[&org_id]).await?;
         Ok(rows
             .iter()
             .map(|row| super::StagedStewardAction {
-                action_id: row.get("action_id"),
-                org: row.get("org"),
+                id: row.get("id"),
+                org_id: row.get("org_id"),
                 action: row.get("action"),
                 state: row.get("state"),
                 error: row.get("error"),
@@ -120,8 +120,9 @@ pub mod update {
         action_id: &str,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
         const SQL: &str =
-            "UPDATE public.staged_steward_actions SET state = 'applied', applied_at = now()
-WHERE action_id = $1
+            "UPDATE public.staged_steward_actions SET state = 'applied', applied_at = now(),
+    updated_at = now()
+WHERE id = $1
 ";
         client.execute(SQL, &[&action_id]).await
     }

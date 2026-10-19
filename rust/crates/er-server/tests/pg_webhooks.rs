@@ -68,7 +68,7 @@ async fn webhooks_crud() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
     let created = json_body(resp).await;
-    let webhook_id = created["webhook_id"].as_str().unwrap().to_string();
+    let webhook_id = created["id"].as_str().unwrap().to_string();
     assert!(created["secret"].as_str().is_some_and(|s| !s.is_empty()));
     assert_eq!(
         created["events"],

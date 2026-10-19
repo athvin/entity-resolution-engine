@@ -163,8 +163,8 @@ mod tests {
         // The live `jobs` row as the current ensure_schema creates it (job columns
         // widened to bigint already).
         [
-            ("job_id", "text", false),
-            ("org", "text", false),
+            ("id", "text", false),
+            ("org_id", "text", false),
             ("kind", "text", false),
             ("params", "jsonb", false),
             ("state", "text", false),

@@ -5,5 +5,5 @@ description: "Enable/disable an API-sourced schedule; config/system-owned rows r
 params:
   - { name: enabled, type: boolean }
   - { name: schedule_id, type: varchar }
-  - { name: org, type: varchar }
+  - { name: org_id, type: varchar }
 returns: none

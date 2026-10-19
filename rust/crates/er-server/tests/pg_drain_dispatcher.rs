@@ -16,6 +16,14 @@ use axum::http::{Request, StatusCode, header};
 use er_server::{AppState, app, dispatcher, pg};
 use tower::ServiceExt;
 
+/// The org's id for a test org name (child wrappers key on org_id).
+async fn oid(client: &tokio_postgres::Client, name: &str) -> String {
+    er_server::pg::org_id_by_name(client, name)
+        .await
+        .expect("org lookup")
+        .expect("org exists")
+}
+
 const TEST_YAML: &str = include_str!("../../er-cli/tests/fixtures/test.yaml");
 const NICKNAMES: &str = include_str!("../../er-cli/tests/fixtures/nickname_variants.csv");
 
@@ -164,15 +172,30 @@ async fn drain_and_correct_applies_through_dispatcher() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_eq!(pg::pending_count(&client, "acme").await.unwrap(), 2);
+    assert_eq!(
+        pg::pending_count(&client, &oid(&client, "acme").await)
+            .await
+            .unwrap(),
+        2
+    );
 
     // Drive the real drain path (what an `apply_corrections` job runs).
-    dispatcher::drain_and_correct(&client, "acme", &env, "01DISPCORRECT0000000000000001")
-        .await
-        .unwrap();
+    dispatcher::drain_and_correct(
+        &client,
+        &oid(&client, "acme").await,
+        &env,
+        "01DISPCORRECT0000000000000001",
+    )
+    .await
+    .unwrap();
 
     // Everything applied + marked.
-    assert_eq!(pg::pending_count(&client, "acme").await.unwrap(), 0);
+    assert_eq!(
+        pg::pending_count(&client, &oid(&client, "acme").await)
+            .await
+            .unwrap(),
+        0
+    );
     let resp = app
         .clone()
         .oneshot(op("GET", "/v1/orgs/acme/assertions", Body::empty()))

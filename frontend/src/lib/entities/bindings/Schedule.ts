@@ -4,9 +4,9 @@
 /** A recurring job schedule for a tenant: its kind, cron and source. */
 export interface Schedule {
   /** The schedule's unique id. */
-  schedule_id: string;
+  id: string;
   /** The tenant this schedule runs for. */
-  org: string;
+  org_id: string;
   /** The job kind the schedule enqueues. */
   kind: string;
   /** Kind-specific parameters. */

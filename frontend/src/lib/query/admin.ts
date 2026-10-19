@@ -61,7 +61,8 @@ export function useAdminOrg(org: string, options: { poll?: boolean } = {}) {
 export function useAdminJobs() {
   return useQuery({
     queryKey: queryKeys.adminJobs(),
-    queryFn: () => bffFetch<(JobRow & { org: string })[]>("/api/admin/jobs?limit=100"),
+    queryFn: () =>
+      bffFetch<(JobRow & { org: string; org_id: string })[]>("/api/admin/jobs?limit=100"),
     refetchInterval: 5_000,
   });
 }

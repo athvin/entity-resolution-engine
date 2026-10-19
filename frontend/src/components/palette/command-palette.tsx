@@ -121,7 +121,7 @@ export function CommandPalette({
       { kind: entry.kind, params: entry.params },
       {
         onSuccess: (result) => {
-          router.push(`/${org}/runs/${result.job_id}`);
+          router.push(`/${org}/runs/${result.id}`);
         },
         onError: () => {
           toast({

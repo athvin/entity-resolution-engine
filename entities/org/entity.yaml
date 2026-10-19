@@ -3,17 +3,21 @@ version: 1
 name: org
 relation: orgs
 description: "A tenant: its config pointer, lake env, lifecycle state and active config version."
-key: [name]
-identity: legacy
+key: [id]
+natural_key: [name]
 generate:
   stores: [postgres]
   languages: [rust, typescript]
   wire: [json]
 columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "The tenant's unique id (UUIDv7, minted at creation)."
   - name: name
     type: varchar
     nullable: false
-    description: "The tenant's unique name (the control-plane key)."
+    description: "The tenant's unique name (the routing handle; URLs stay name-based)."
   - name: config_path
     type: varchar
     nullable: false

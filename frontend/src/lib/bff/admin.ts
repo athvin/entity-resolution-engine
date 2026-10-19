@@ -68,7 +68,7 @@ export async function mintServiceKeys(identity: Identity, org: string): Promise<
   const database = await db();
   const key = Buffer.from(env().ERWEB_CREDENTIAL_KEY, "base64");
   for (const role of ["viewer", "steward", "admin"] as const) {
-    const issued = await operatorFetch<{ key_id: string; key: string }>(
+    const issued = await operatorFetch<{ id: string; key: string }>(
       identity,
       `/v1/orgs/${org}/api-keys`,
       { method: "POST", body: { role } },
@@ -79,14 +79,14 @@ export async function mintServiceKeys(identity: Identity, org: string): Promise<
       .values({
         org,
         role,
-        keyId: issued.key_id,
+        keyId: issued.id,
         ciphertext: sealed.ciphertext,
         nonce: sealed.nonce,
       })
       .onConflictDoUpdate({
         target: [schema.orgCredentials.org, schema.orgCredentials.role],
         set: {
-          keyId: issued.key_id,
+          keyId: issued.id,
           ciphertext: sealed.ciphertext,
           nonce: sealed.nonce,
           rotatedAt: new Date(),

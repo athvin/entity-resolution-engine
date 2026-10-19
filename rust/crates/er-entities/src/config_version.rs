@@ -6,8 +6,10 @@ use serde::{Deserialize, Serialize};
 /// A versioned config document for a tenant: its YAML, hash and publish state.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
 pub struct ConfigVersion {
+    /// The version row's unique id (UUIDv7, minted at draft).
+    pub id: String,
     /// The tenant this config version belongs to.
-    pub org: String,
+    pub org_id: String,
     /// The monotonic version number within the tenant.
     pub version: i64,
     /// The config document source.
@@ -30,7 +32,7 @@ pub struct ConfigVersion {
 
 impl ConfigVersion {
     /// The logical key columns.
-    pub const KEY: &'static [&'static str] = &["org", "version"];
+    pub const KEY: &'static [&'static str] = &["id"];
     /// The entity schema version; bumped only on a breaking change.
     pub const VERSION: u64 = 1;
     /// The relation (table) name.
@@ -42,7 +44,8 @@ impl ConfigVersion {
     #[must_use]
     pub fn columns() -> &'static [&'static str] {
         &[
-            "org",
+            "id",
+            "org_id",
             "version",
             "yaml",
             "config_hash",
@@ -61,17 +64,18 @@ pub mod create {
     /// Insert a new draft config version, allocating max(version)+1 atomically in the insert; the (org, version) PK rejects a concurrent duplicate.
     pub async fn draft(
         client: &::tokio_postgres::Client,
-        org: &str,
+        id: &str,
+        org_id: &str,
         yaml: &str,
         config_hash: &str,
         created_by: &str,
     ) -> ::std::result::Result<Vec<super::ConfigVersion>, ::tokio_postgres::Error> {
-        const SQL: &str =
-            "INSERT INTO public.config_versions (org, version, yaml, config_hash, created_by)
-SELECT $1, coalesce(max(version), 0) + 1, $2, $3, $4
-FROM public.config_versions WHERE org = $1
+        const SQL: &str = "INSERT INTO public.config_versions (id, org_id, version, yaml, config_hash, created_by)
+SELECT $1, $2, coalesce(max(version), 0) + 1, $3, $4, $5
+FROM public.config_versions WHERE org_id = $2
 RETURNING
-  org,
+  id,
+  org_id,
   version,
   yaml,
   config_hash,
@@ -83,12 +87,13 @@ RETURNING
   updated_at
 ";
         let rows = client
-            .query(SQL, &[&org, &yaml, &config_hash, &created_by])
+            .query(SQL, &[&id, &org_id, &yaml, &config_hash, &created_by])
             .await?;
         Ok(rows
             .iter()
             .map(|row| super::ConfigVersion {
-                org: row.get("org"),
+                id: row.get("id"),
+                org_id: row.get("org_id"),
                 version: row.get("version"),
                 yaml: row.get("yaml"),
                 config_hash: row.get("config_hash"),
@@ -108,11 +113,12 @@ pub mod read {
     /// One config version with its yaml body.
     pub async fn by_version(
         client: &::tokio_postgres::Client,
-        org: &str,
+        org_id: &str,
         version: i64,
     ) -> ::std::result::Result<Vec<super::ConfigVersion>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT
-  org,
+  id,
+  org_id,
   version,
   yaml,
   config_hash,
@@ -123,13 +129,14 @@ pub mod read {
   published_at,
   updated_at
 FROM public.config_versions
-WHERE org = $1 AND version = $2
+WHERE org_id = $1 AND version = $2
 ";
-        let rows = client.query(SQL, &[&org, &version]).await?;
+        let rows = client.query(SQL, &[&org_id, &version]).await?;
         Ok(rows
             .iter()
             .map(|row| super::ConfigVersion {
-                org: row.get("org"),
+                id: row.get("id"),
+                org_id: row.get("org_id"),
                 version: row.get("version"),
                 yaml: row.get("yaml"),
                 config_hash: row.get("config_hash"),
@@ -146,10 +153,11 @@ WHERE org = $1 AND version = $2
     /// An org's config versions, newest first.
     pub async fn list(
         client: &::tokio_postgres::Client,
-        org: &str,
+        org_id: &str,
     ) -> ::std::result::Result<Vec<super::ConfigVersion>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT
-  org,
+  id,
+  org_id,
   version,
   yaml,
   config_hash,
@@ -160,14 +168,15 @@ WHERE org = $1 AND version = $2
   published_at,
   updated_at
 FROM public.config_versions
-WHERE org = $1
+WHERE org_id = $1
 ORDER BY version DESC
 ";
-        let rows = client.query(SQL, &[&org]).await?;
+        let rows = client.query(SQL, &[&org_id]).await?;
         Ok(rows
             .iter()
             .map(|row| super::ConfigVersion {
-                org: row.get("org"),
+                id: row.get("id"),
+                org_id: row.get("org_id"),
                 version: row.get("version"),
                 yaml: row.get("yaml"),
                 config_hash: row.get("config_hash"),
@@ -188,13 +197,13 @@ pub mod update {
     pub async fn publish(
         client: &::tokio_postgres::Client,
         tier: Option<&str>,
-        org: &str,
+        org_id: &str,
         version: i64,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
-        const SQL: &str =
-            "UPDATE public.config_versions SET state = 'published', tier = $1, published_at = now()
-WHERE org = $2 AND version = $3
+        const SQL: &str = "UPDATE public.config_versions SET state = 'published', tier = $1, published_at = now(),
+    updated_at = now()
+WHERE org_id = $2 AND version = $3
 ";
-        client.execute(SQL, &[&tier, &org, &version]).await
+        client.execute(SQL, &[&tier, &org_id, &version]).await
     }
 }

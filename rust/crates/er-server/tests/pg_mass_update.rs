@@ -14,6 +14,14 @@ use axum::http::{Request, StatusCode, header};
 use er_server::{AppState, app, dispatcher, pg};
 use tower::ServiceExt;
 
+/// The org's id for a test org name (child wrappers key on org_id).
+async fn oid(client: &tokio_postgres::Client, name: &str) -> String {
+    er_server::pg::org_id_by_name(client, name)
+        .await
+        .expect("org lookup")
+        .expect("org exists")
+}
+
 const TEST_YAML: &str = include_str!("../../er-cli/tests/fixtures/test.yaml");
 const NICKNAMES: &str = include_str!("../../er-cli/tests/fixtures/nickname_variants.csv");
 
@@ -187,10 +195,20 @@ async fn mass_update_overrides_and_clears_golden_fields() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_eq!(pg::pending_count(&client, "acme").await.unwrap(), 1);
-    dispatcher::drain_and_correct(&client, "acme", &env, "01MUCORRECT00000000000000001")
-        .await
-        .unwrap();
+    assert_eq!(
+        pg::pending_count(&client, &oid(&client, "acme").await)
+            .await
+            .unwrap(),
+        1
+    );
+    dispatcher::drain_and_correct(
+        &client,
+        &oid(&client, "acme").await,
+        &env,
+        "01MUCORRECT00000000000000001",
+    )
+    .await
+    .unwrap();
     assert_eq!(
         golden_email(&app, &entity_id).await.as_deref(),
         Some("override@dupezero.test"),
@@ -211,9 +229,14 @@ async fn mass_update_overrides_and_clears_golden_fields() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    dispatcher::drain_and_correct(&client, "acme", &env, "01MUCORRECT00000000000000002")
-        .await
-        .unwrap();
+    dispatcher::drain_and_correct(
+        &client,
+        &oid(&client, "acme").await,
+        &env,
+        "01MUCORRECT00000000000000002",
+    )
+    .await
+    .unwrap();
     assert_eq!(
         golden_email(&app, &entity_id).await,
         None,

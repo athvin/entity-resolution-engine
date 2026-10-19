@@ -544,9 +544,9 @@ mod tests {
             module.contains("-> ::std::result::Result<Vec<super::Job>, ::tokio_postgres::Error>")
         );
         // Rows map into the struct by column name; params bind positionally.
-        assert!(module.contains("job_id: row.get(\"job_id\"),"));
-        assert!(module.contains("WHERE org = $1 AND job_id = $2"));
-        assert!(module.contains("client.query(SQL, &[&org, &job_id]).await?"));
+        assert!(module.contains("id: row.get(\"id\"),"));
+        assert!(module.contains("WHERE org_id = $1 AND id = $2"));
+        assert!(module.contains("client.query(SQL, &[&org_id, &job_id]).await?"));
     }
 
     #[test]

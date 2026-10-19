@@ -16,6 +16,14 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
 use er_server::{dispatch_pg, pg, webhook};
 
+/// The org's id for a test org name (child wrappers key on org_id).
+async fn oid(client: &tokio_postgres::Client, name: &str) -> String {
+    er_server::pg::org_id_by_name(client, name)
+        .await
+        .expect("org lookup")
+        .expect("org exists")
+}
+
 /// Captured deliveries: (signature header, raw body).
 type Captured = Arc<Mutex<Vec<(Option<String>, Vec<u8>)>>>;
 
@@ -65,7 +73,7 @@ async fn webhook_fires_on_job_success_with_valid_signature() {
     // Subscribed to job.succeeded -> must fire.
     pg::create_webhook(
         &client,
-        "acme",
+        &oid(&client, "acme").await,
         &hook_url,
         &serde_json::json!(["job.succeeded"]),
         secret,
@@ -75,7 +83,7 @@ async fn webhook_fires_on_job_success_with_valid_signature() {
     // Subscribed only to job.failed -> must NOT fire for a success.
     pg::create_webhook(
         &client,
-        "acme",
+        &oid(&client, "acme").await,
         &other_url,
         &serde_json::json!(["job.failed"]),
         "other-secret",
@@ -85,9 +93,16 @@ async fn webhook_fires_on_job_success_with_valid_signature() {
 
     // Enqueue + dispatch with webhook emission enabled; the runner just succeeds.
     let http = reqwest::Client::new();
-    pg::enqueue(&client, "acme", "run_all_full", 0, None, None)
-        .await
-        .unwrap();
+    pg::enqueue(
+        &client,
+        &oid(&client, "acme").await,
+        "run_all_full",
+        0,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
     let done = dispatch_pg(&client, |_job| Ok(()), Some(&http))
         .await
         .unwrap()

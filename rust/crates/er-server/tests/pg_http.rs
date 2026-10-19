@@ -46,6 +46,9 @@ async fn job_lifecycle_over_postgres_http() {
     pg::ensure_org(&client, "acme", "/configs/acme.yaml")
         .await
         .unwrap();
+    pg::ensure_org(&client, "other", "/configs/other.yaml")
+        .await
+        .unwrap();
 
     let app = app(AppState::with_pg("op-secret".to_string(), dsn.clone()));
 
@@ -76,10 +79,11 @@ async fn job_lifecycle_over_postgres_http() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::ACCEPTED);
     let job = json_body(resp).await;
-    let job_id = job["job_id"].as_str().unwrap().to_string();
+    let job_id = job["id"].as_str().unwrap().to_string();
     assert_eq!(job["state"], "queued");
     assert_eq!(job["kind"], "run");
-    assert_eq!(job["org"], "acme");
+    // The wire carries the org's id (a UUID), not its name.
+    assert!(job["org_id"].as_str().is_some_and(|v| !v.is_empty()));
     assert_eq!(job["priority"], 5);
 
     // list sees exactly the one job
@@ -91,9 +95,10 @@ async fn job_lifecycle_over_postgres_http() {
     assert_eq!(resp.status(), StatusCode::OK);
     let jobs = json_body(resp).await;
     assert_eq!(jobs["jobs"].as_array().unwrap().len(), 1);
-    assert_eq!(jobs["jobs"][0]["job_id"], job_id);
+    assert_eq!(jobs["jobs"][0]["id"], job_id);
 
-    // an org with no jobs lists empty
+    // an existing org with no jobs lists empty (an unknown org is now a 404 —
+    // the listing resolves the org first, like every org-scoped read)
     let resp = app
         .clone()
         .oneshot(op_request("GET", "/v1/orgs/other/jobs", Body::empty()))
@@ -112,7 +117,7 @@ async fn job_lifecycle_over_postgres_http() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_eq!(json_body(resp).await["job_id"], job_id);
+    assert_eq!(json_body(resp).await["id"], job_id);
 
     // a job id scoped to the wrong org is a 404
     let resp = app

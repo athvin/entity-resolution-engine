@@ -1,6 +1,6 @@
 SELECT
-  action_id,
-  org,
+  id,
+  org_id,
   action,
   state,
   error,
@@ -9,5 +9,5 @@ SELECT
   applied_at,
   updated_at
 FROM public.staged_steward_actions
-WHERE org = $org AND state = 'pending'
-ORDER BY created_at, action_id
+WHERE org_id = $org_id AND state = 'pending'
+ORDER BY created_at, id

@@ -4,9 +4,9 @@
 /** A unit of work on the dispatcher's queue: its kind, params, lifecycle state and retry bookkeeping. */
 export interface Job {
   /** The job's unique id (ULID). */
-  job_id: string;
+  id: string;
   /** The tenant this job runs for. */
-  org: string;
+  org_id: string;
   /** The job kind (run_all, correct, maintain, train, ...). */
   kind: string;
   /** Kind-specific parameters. */

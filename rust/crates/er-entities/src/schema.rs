@@ -7,6 +7,7 @@
 /// precedes the table that references it. Applied at boot by er-server.
 pub const POSTGRES_BASELINE: &[&str] = &[
     r#"CREATE TABLE IF NOT EXISTS public.orgs (
+  id text NOT NULL,
   name text NOT NULL,
   config_path text NOT NULL,
   env jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -15,17 +16,18 @@ pub const POSTGRES_BASELINE: &[&str] = &[
   state text NOT NULL DEFAULT 'active' CHECK (state IN ('provisioning', 'active', 'suspended', 'purging')),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (name)
+  PRIMARY KEY (id),
+  UNIQUE (name)
 );"#,
     r#"CREATE TABLE IF NOT EXISTS public.api_keys (
-  key_id text NOT NULL,
-  org text NOT NULL REFERENCES orgs(name),
+  id text NOT NULL,
+  org_id text NOT NULL REFERENCES orgs(id),
   role text NOT NULL CHECK (role IN ('admin', 'steward', 'viewer')),
   key_hash text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   revoked_at timestamptz,
   updated_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (key_id)
+  PRIMARY KEY (id)
 );"#,
     r#"CREATE TABLE IF NOT EXISTS public.audit_log (
   id bigserial NOT NULL,
@@ -39,7 +41,8 @@ pub const POSTGRES_BASELINE: &[&str] = &[
   PRIMARY KEY (id)
 );"#,
     r#"CREATE TABLE IF NOT EXISTS public.config_versions (
-  org text NOT NULL REFERENCES orgs(name),
+  id text NOT NULL,
+  org_id text NOT NULL REFERENCES orgs(id),
   version bigint NOT NULL,
   yaml text NOT NULL,
   config_hash text NOT NULL,
@@ -49,7 +52,8 @@ pub const POSTGRES_BASELINE: &[&str] = &[
   created_at timestamptz NOT NULL DEFAULT now(),
   published_at timestamptz,
   updated_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (org, version)
+  PRIMARY KEY (id),
+  UNIQUE (org_id, version)
 );"#,
     r#"CREATE TABLE IF NOT EXISTS public.ddl_log (
   id bigserial NOT NULL,
@@ -65,8 +69,8 @@ pub const POSTGRES_BASELINE: &[&str] = &[
 );
 CREATE INDEX IF NOT EXISTS ddl_log_created_at ON public.ddl_log (created_at);"#,
     r#"CREATE TABLE IF NOT EXISTS public.jobs (
-  job_id text NOT NULL,
-  org text NOT NULL REFERENCES orgs(name),
+  id text NOT NULL,
+  org_id text NOT NULL REFERENCES orgs(id),
   kind text NOT NULL,
   params jsonb NOT NULL DEFAULT '{}'::jsonb,
   state text NOT NULL DEFAULT 'queued',
@@ -84,14 +88,14 @@ CREATE INDEX IF NOT EXISTS ddl_log_created_at ON public.ddl_log (created_at);"#,
   updated_at timestamptz NOT NULL DEFAULT now(),
   started_at timestamptz,
   finished_at timestamptz,
-  PRIMARY KEY (job_id)
+  PRIMARY KEY (id)
 );
-CREATE UNIQUE INDEX IF NOT EXISTS jobs_idempotency ON public.jobs (org, idempotency_key) WHERE idempotency_key IS NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS jobs_one_active_per_org ON public.jobs (org) WHERE state IN ('dispatching','running','canceling');
-CREATE INDEX IF NOT EXISTS jobs_claimable ON public.jobs (state, not_before, priority, job_id);"#,
+CREATE UNIQUE INDEX IF NOT EXISTS jobs_idempotency ON public.jobs (org_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS jobs_one_active_per_org ON public.jobs (org_id) WHERE state IN ('dispatching','running','canceling');
+CREATE INDEX IF NOT EXISTS jobs_claimable ON public.jobs (state, not_before, priority, id);"#,
     r#"CREATE TABLE IF NOT EXISTS public.schedules (
-  schedule_id text NOT NULL,
-  org text NOT NULL REFERENCES orgs(name),
+  id text NOT NULL,
+  org_id text NOT NULL REFERENCES orgs(id),
   kind text NOT NULL,
   params jsonb NOT NULL DEFAULT '{}'::jsonb,
   cron text NOT NULL,
@@ -100,13 +104,13 @@ CREATE INDEX IF NOT EXISTS jobs_claimable ON public.jobs (state, not_before, pri
   last_enqueued_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (schedule_id)
+  PRIMARY KEY (id)
 );
-CREATE UNIQUE INDEX IF NOT EXISTS schedules_one_correction_per_org ON public.schedules (org) WHERE source = 'config:correction_pass';
-CREATE UNIQUE INDEX IF NOT EXISTS schedules_one_maintenance_per_org ON public.schedules (org) WHERE source = 'system:lake_maintain';"#,
+CREATE UNIQUE INDEX IF NOT EXISTS schedules_one_correction_per_org ON public.schedules (org_id) WHERE source = 'config:correction_pass';
+CREATE UNIQUE INDEX IF NOT EXISTS schedules_one_maintenance_per_org ON public.schedules (org_id) WHERE source = 'system:lake_maintain';"#,
     r#"CREATE TABLE IF NOT EXISTS public.staged_steward_actions (
-  action_id text NOT NULL,
-  org text NOT NULL REFERENCES orgs(name),
+  id text NOT NULL,
+  org_id text NOT NULL REFERENCES orgs(id),
   action jsonb NOT NULL,
   state text NOT NULL DEFAULT 'pending' CHECK (state IN ('pending', 'applied', 'failed')),
   error text,
@@ -114,19 +118,19 @@ CREATE UNIQUE INDEX IF NOT EXISTS schedules_one_maintenance_per_org ON public.sc
   created_at timestamptz NOT NULL DEFAULT now(),
   applied_at timestamptz,
   updated_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (action_id)
+  PRIMARY KEY (id)
 );
-CREATE INDEX IF NOT EXISTS staged_pending ON public.staged_steward_actions (org, state);"#,
+CREATE INDEX IF NOT EXISTS staged_pending ON public.staged_steward_actions (org_id, state);"#,
     r#"CREATE TABLE IF NOT EXISTS public.webhooks (
-  webhook_id text NOT NULL,
-  org text NOT NULL REFERENCES orgs(name),
+  id text NOT NULL,
+  org_id text NOT NULL REFERENCES orgs(id),
   url text NOT NULL,
   events jsonb NOT NULL DEFAULT '[]'::jsonb,
   secret text NOT NULL,
   active boolean NOT NULL DEFAULT true,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (webhook_id)
+  PRIMARY KEY (id)
 );"#,
 ];
 

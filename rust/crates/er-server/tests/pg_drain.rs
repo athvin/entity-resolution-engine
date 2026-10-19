@@ -13,6 +13,14 @@ use axum::http::{Request, StatusCode, header};
 use er_server::{AppState, app, pg};
 use tower::ServiceExt;
 
+/// The org's id for a test org name (child wrappers key on org_id).
+async fn oid(client: &tokio_postgres::Client, name: &str) -> String {
+    er_server::pg::org_id_by_name(client, name)
+        .await
+        .expect("org lookup")
+        .expect("org exists")
+}
+
 const TEST_YAML: &str = include_str!("../../er-cli/tests/fixtures/test.yaml");
 const NICKNAMES: &str = include_str!("../../er-cli/tests/fixtures/nickname_variants.csv");
 
@@ -156,7 +164,9 @@ async fn steward_drain_applies_to_lake() {
     assert_eq!(resp.status(), StatusCode::OK);
 
     // Drain: apply each pending action into the lake, then mark it applied.
-    let pending = pg::pending_actions(&client, "acme").await.unwrap();
+    let pending = pg::pending_actions(&client, &oid(&client, "acme").await)
+        .await
+        .unwrap();
     assert_eq!(pending.len(), 2, "two actions staged");
     {
         let session = er_cli::open_lake(&catalog, &data_path).unwrap();

@@ -3,21 +3,20 @@ version: 1
 name: api_key
 relation: api_keys
 description: "An org-scoped API key: its role and the at-rest hash of the secret."
-key: [key_id]
-identity: legacy
+key: [id]
 generate:
   stores: [postgres]
   languages: [rust, typescript]
   wire: [json]
 columns:
-  - name: key_id
+  - name: id
     type: varchar
     nullable: false
-    description: "The key's unique id."
-  - name: org
+    description: "The key's unique id (UUIDv7, minted at issue)."
+  - name: org_id
     type: varchar
     nullable: false
-    references: { relation: orgs, column: name }
+    references: { relation: orgs, column: id }
     description: "The tenant the key authenticates."
   - name: role
     type: varchar

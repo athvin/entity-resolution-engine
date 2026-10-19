@@ -6,6 +6,14 @@
 
 use er_server::pg;
 
+/// The org's id for a test org name (child wrappers key on org_id).
+async fn oid(client: &tokio_postgres::Client, name: &str) -> String {
+    er_server::pg::org_id_by_name(client, name)
+        .await
+        .expect("org lookup")
+        .expect("org exists")
+}
+
 #[tokio::test]
 async fn queue_lifecycle_over_postgres() {
     let Ok(dsn) = std::env::var("ER_TEST_PG_DSN") else {
@@ -27,16 +35,16 @@ async fn queue_lifecycle_over_postgres() {
         .unwrap();
 
     // Enqueue two jobs; claim takes the higher priority first.
-    let high = pg::enqueue(&client, "acme", "run", 5, None, None)
+    let high = pg::enqueue(&client, &oid(&client, "acme").await, "run", 5, None, None)
         .await
         .unwrap();
-    let _low = pg::enqueue(&client, "acme", "run", 0, None, None)
+    let _low = pg::enqueue(&client, &oid(&client, "acme").await, "run", 0, None, None)
         .await
         .unwrap();
     assert_eq!(high.state, "queued");
 
     let claimed = pg::claim(&client).await.unwrap().expect("a job to claim");
-    assert_eq!(claimed.job_id, high.job_id);
+    assert_eq!(claimed.id, high.id);
     assert_eq!(claimed.state, "dispatching");
 
     // One active job per org: the second claim finds nothing while `high` runs.
@@ -46,24 +54,40 @@ async fn queue_lifecycle_over_postgres() {
     );
 
     // Finish the first; now the low-priority job is claimable.
-    pg::mark(&client, &high.job_id, "succeeded").await.unwrap();
+    pg::mark(&client, &high.id, "succeeded").await.unwrap();
     let next = pg::claim(&client)
         .await
         .unwrap()
         .expect("low job now claimable");
     assert_eq!(next.priority, 0);
-    pg::mark(&client, &next.job_id, "succeeded").await.unwrap();
+    pg::mark(&client, &next.id, "succeeded").await.unwrap();
 
     // Idempotent enqueue: the same key returns the original job.
-    let a = pg::enqueue(&client, "acme", "run", 0, Some("k1"), None)
-        .await
-        .unwrap();
-    let b = pg::enqueue(&client, "acme", "run", 0, Some("k1"), None)
-        .await
-        .unwrap();
-    assert_eq!(a.job_id, b.job_id, "idempotency key must dedupe");
+    let a = pg::enqueue(
+        &client,
+        &oid(&client, "acme").await,
+        "run",
+        0,
+        Some("k1"),
+        None,
+    )
+    .await
+    .unwrap();
+    let b = pg::enqueue(
+        &client,
+        &oid(&client, "acme").await,
+        "run",
+        0,
+        Some("k1"),
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(a.id, b.id, "idempotency key must dedupe");
 
     // list_jobs sees all four distinct jobs (high, low, and the one idempotent).
-    let jobs = pg::list_jobs(&client, "acme").await.unwrap();
+    let jobs = pg::list_jobs(&client, &oid(&client, "acme").await)
+        .await
+        .unwrap();
     assert_eq!(jobs.len(), 3, "high + low + idempotent(k1)");
 }

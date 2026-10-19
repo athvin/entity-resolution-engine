@@ -36,7 +36,7 @@ export function GlobalQueue() {
               </thead>
               <tbody>
                 {(jobs.data ?? []).map((job) => (
-                  <tr key={job.job_id} className="border-b last:border-0">
+                  <tr key={job.id} className="border-b last:border-0">
                     <td className="px-4 py-2.5 font-medium">{job.org}</td>
                     <td className="px-4 py-2.5">{job.kind}</td>
                     <td className="px-4 py-2.5">
@@ -47,7 +47,7 @@ export function GlobalQueue() {
                       {job.error_class ?? "—"}
                     </td>
                     <td className="text-muted-foreground px-4 py-2.5 font-mono text-xs">
-                      {job.job_id.slice(-8)}
+                      {job.id.slice(-8)}
                     </td>
                   </tr>
                 ))}
