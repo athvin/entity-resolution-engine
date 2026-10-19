@@ -71,6 +71,20 @@ impl Catalog {
                 }
             }
         }
+        // A history companion's name must stay free: `<relation>_history` is
+        // generated DDL, and a declared entity claiming it would collide.
+        for entity in &entities {
+            if !entity.generate.history {
+                continue;
+            }
+            let companion = format!("{}_history", entity.relation);
+            if entities.iter().any(|e| e.relation == companion) {
+                return Err(invalid(
+                    entity,
+                    format!("history companion {companion:?} collides with a declared relation"),
+                ));
+            }
+        }
         Ok(Self { entities })
     }
 
@@ -339,6 +353,15 @@ fn validate(entity: &Entity) -> Result<(), SpecError> {
     // The identity conventions (V1–V8) — unconditional since the retrofit
     // completed and the `identity: legacy` ratchet was deleted.
     validate_identity(entity)?;
+
+    // History companions ride the control plane's triggers; the lake's history
+    // is DuckLake snapshots. The trigger keys rows by `id` (V1 guarantees it).
+    if entity.generate.history && !entity.has_store(Store::Postgres) {
+        return Err(invalid(
+            entity,
+            "history: true is control-plane only (lake history is DuckLake snapshots)",
+        ));
+    }
 
     Ok(())
 }

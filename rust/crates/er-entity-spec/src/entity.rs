@@ -19,6 +19,13 @@ pub struct GenerateBlock {
     /// Any of `arrow`, `json` — decides whether `arrow_schema()` / OpenAPI emit.
     #[serde(default)]
     pub wire: Vec<Wire>,
+    /// Control-plane only: generate a `<relation>_history` companion table and
+    /// an `er_history` row-image trigger — every INSERT/UPDATE/DELETE on the
+    /// entity leaves a jsonb old/new image with the acting principal. The
+    /// companion is generated DDL, not an entity; the lake's history is
+    /// DuckLake snapshots, so `history` on a duckdb entity is a spec error.
+    #[serde(default)]
+    pub history: bool,
     /// Emit a typed bulk-append primitive for this lake relation
     /// (`append_rows` + its `AppendRow` transport struct): variable-arity row
     /// batches cross as chunked, bound-parameter `INSERT .. VALUES`, the shape
