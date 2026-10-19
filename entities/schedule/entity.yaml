@@ -3,21 +3,20 @@ version: 1
 name: schedule
 relation: schedules
 description: "A recurring job schedule for a tenant: its kind, cron and source."
-key: [schedule_id]
-identity: legacy
+key: [id]
 generate:
   stores: [postgres]
   languages: [rust, typescript]
   wire: [json]
 columns:
-  - name: schedule_id
+  - name: id
     type: varchar
     nullable: false
     description: "The schedule's unique id."
-  - name: org
+  - name: org_id
     type: varchar
     nullable: false
-    references: { relation: orgs, column: name }
+    references: { relation: orgs, column: id }
     description: "The tenant this schedule runs for."
   - name: kind
     type: varchar
@@ -59,10 +58,10 @@ columns:
     description: "Wall-clock last-write time (database default; advanced by mutations once the entity migrates)."
 indexes:
   - name: schedules_one_correction_per_org
-    columns: [org]
+    columns: [org_id]
     unique: true
     where: "source = 'config:correction_pass'"
   - name: schedules_one_maintenance_per_org
-    columns: [org]
+    columns: [org_id]
     unique: true
     where: "source = 'system:lake_maintain'"

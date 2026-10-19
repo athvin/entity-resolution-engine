@@ -14,7 +14,17 @@ export async function GET(request: Request): Promise<NextResponse> {
       const value = incoming.get(key);
       if (value !== null) searchParams.set(key, value);
     }
-    const jobs = await operatorFetch<unknown[]>(identity, "/v1/jobs", { searchParams });
-    return NextResponse.json(jobs);
+    const jobs = await operatorFetch<Record<string, unknown>[]>(identity, "/v1/jobs", {
+      searchParams,
+    });
+    // Rows carry org_id (the org's UUIDv7); the console displays the org NAME,
+    // joined here from the operator org listing.
+    const orgs = await operatorFetch<{ id: string; name: string }[]>(identity, "/v1/orgs");
+    const names = new Map(orgs.map((o) => [o.id, o.name]));
+    const enriched = jobs.map((job) => ({
+      ...job,
+      org: names.get(job.org_id as string) ?? job.org_id,
+    }));
+    return NextResponse.json(enriched);
   });
 }

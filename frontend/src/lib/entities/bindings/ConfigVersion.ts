@@ -3,8 +3,10 @@
 
 /** A versioned config document for a tenant: its YAML, hash and publish state. */
 export interface ConfigVersion {
+  /** The version row's unique id (UUIDv7, minted at draft). */
+  id: string;
   /** The tenant this config version belongs to. */
-  org: string;
+  org_id: string;
   /** The monotonic version number within the tenant. */
   version: number;
   /** The config document source. */

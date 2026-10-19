@@ -3,10 +3,10 @@
 
 /** An org-scoped API key: its role and the at-rest hash of the secret. */
 export interface ApiKey {
-  /** The key's unique id. */
-  key_id: string;
+  /** The key's unique id (UUIDv7, minted at issue). */
+  id: string;
   /** The tenant the key authenticates. */
-  org: string;
+  org_id: string;
   /** The role the key grants. */
   role: string;
   /** SHA-256 hash of the secret (never the plaintext). */

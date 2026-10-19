@@ -13,12 +13,12 @@ fn claims_highest_priority_then_fifo_and_records_outcome() {
 
     // Highest priority wins; the earlier of the two priority-5 jobs goes first.
     let job = dispatch_next(&state, |_| Ok(())).unwrap();
-    assert_eq!(job.job_id, first_high.job_id);
+    assert_eq!(job.id, first_high.id);
     assert_eq!(job.state, "succeeded");
 
     // Then the second priority-5 job; a failing runner marks it failed.
     let job = dispatch_next(&state, |_| Err("boom".to_string())).unwrap();
-    assert_eq!(job.job_id, second_high.job_id);
+    assert_eq!(job.id, second_high.id);
     assert_eq!(job.state, "failed");
 
     // Then the priority-0 job.
@@ -36,7 +36,7 @@ fn runner_sees_the_claimed_job() {
     enqueue(&state, "beta", "provision", 1);
     let seen = std::cell::RefCell::new(None);
     dispatch_next(&state, |job| {
-        *seen.borrow_mut() = Some((job.org.clone(), job.kind.clone(), job.state.clone()));
+        *seen.borrow_mut() = Some((job.org_id.clone(), job.kind.clone(), job.state.clone()));
         Ok(())
     });
     assert_eq!(

@@ -226,7 +226,7 @@ export function NewSourceWizard({ org }: { org: string }) {
     if (!state.file) return;
     try {
       const result = await importFile.mutateAsync({ source: state.name, file: state.file });
-      router.push(`/${org}/runs/${result.job.job_id}`);
+      router.push(`/${org}/runs/${result.job.id}`);
     } catch (cause) {
       setActivation({
         phase: "upload",

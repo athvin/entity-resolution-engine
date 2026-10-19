@@ -126,7 +126,7 @@ pub async fn connect_pg_as(dsn: &str, actor: &str) -> Result<Client, PgError> {
 /// # Errors
 /// Propagates the insert error.
 pub async fn ensure_org(client: &Client, name: &str, config_path: &str) -> Result<(), PgError> {
-    er_entities::org::create::ensure(client, name, config_path).await?;
+    er_entities::org::create::ensure(client, &er_ids::new_v7(), name, config_path).await?;
     Ok(())
 }
 
@@ -138,19 +138,19 @@ pub async fn ensure_org(client: &Client, name: &str, config_path: &str) -> Resul
 /// Propagates the insert/select error (incl. the FK violation for an unknown org).
 pub async fn enqueue(
     client: &Client,
-    org: &str,
+    org_id: &str,
     kind: &str,
     priority: i64,
     idempotency_key: Option<&str>,
     params: Option<&serde_json::Value>,
 ) -> Result<Job, PgError> {
-    let job_id = ulid::Ulid::new().to_string();
+    let job_id = er_ids::new_v7();
     // The statement is an idempotent upsert: a repeat idempotency key returns the
     // original row via a no-op ON CONFLICT DO UPDATE, so exactly one row comes back.
     let jobs = er_entities::job::create::enqueue(
         client,
         &job_id,
-        org,
+        org_id,
         kind,
         priority,
         idempotency_key,
@@ -196,8 +196,8 @@ pub async fn mark(client: &Client, job_id: &str, state: &str) -> Result<(), PgEr
 ///
 /// # Errors
 /// Propagates the update error.
-pub async fn resume_job(client: &Client, org: &str, job_id: &str) -> Result<bool, PgError> {
-    let n = er_entities::job::update::resume(client, org, job_id).await?;
+pub async fn resume_job(client: &Client, org_id: &str, job_id: &str) -> Result<bool, PgError> {
+    let n = er_entities::job::update::resume(client, org_id, job_id).await?;
     Ok(n == 1)
 }
 
@@ -205,8 +205,8 @@ pub async fn resume_job(client: &Client, org: &str, job_id: &str) -> Result<bool
 ///
 /// # Errors
 /// Propagates the query error.
-pub async fn get_job(client: &Client, org: &str, job_id: &str) -> Result<Option<Job>, PgError> {
-    Ok(er_entities::job::read::by_id(client, org, job_id)
+pub async fn get_job(client: &Client, org_id: &str, job_id: &str) -> Result<Option<Job>, PgError> {
+    Ok(er_entities::job::read::by_id(client, org_id, job_id)
         .await?
         .into_iter()
         .next())
@@ -219,11 +219,11 @@ pub async fn get_job(client: &Client, org: &str, job_id: &str) -> Result<Option<
 /// Propagates the query error.
 pub async fn list_jobs_all(
     client: &Client,
-    org: Option<&str>,
+    org_id: Option<&str>,
     state: Option<&str>,
     limit: i64,
 ) -> Result<Vec<Job>, PgError> {
-    er_entities::job::read::list(client, org, state, limit.clamp(1, 200)).await
+    er_entities::job::read::list(client, org_id, state, limit.clamp(1, 200)).await
 }
 
 /// Merge DuckDB resource knobs into an org's `env` (`queue.py` `merge_org_env`):
@@ -244,9 +244,9 @@ pub async fn merge_org_env(
 ///
 /// # Errors
 /// Propagates the query error.
-pub async fn list_jobs(client: &Client, org: &str) -> Result<Vec<Job>, PgError> {
+pub async fn list_jobs(client: &Client, org_id: &str) -> Result<Vec<Job>, PgError> {
     // Newest first, all of the org's jobs (no page cap on the per-org view).
-    er_entities::job::read::list(client, Some(org), None, i64::MAX).await
+    er_entities::job::read::list(client, Some(org_id), None, i64::MAX).await
 }
 
 /// SHA-256 hex of `secret` — the exact at-rest key representation (`auth.py`
@@ -269,10 +269,10 @@ pub fn hash_secret(secret: &str) -> String {
 /// Propagates the insert error (incl. the FK violation / role CHECK violation).
 pub async fn issue_key(
     client: &Client,
-    org: &str,
+    org_id: &str,
     role: &str,
 ) -> Result<(String, String), PgError> {
-    let key_id = ulid::Ulid::new().to_string().to_lowercase();
+    let key_id = er_ids::new_v7();
     // 24 random bytes, hex-encoded: url-safe and free of '_', so the token
     // survives the Python `credential.split("_", 2)` decode unambiguously.
     let secret = {
@@ -282,7 +282,7 @@ pub async fn issue_key(
         hex::encode(buf)
     };
     let key_hash = hash_secret(&secret);
-    er_entities::api_key::create::issue(client, &key_id, org, role, &key_hash).await?;
+    er_entities::api_key::create::issue(client, &key_id, org_id, role, &key_hash).await?;
     let full_key = format!("erk_{key_id}_{secret}");
     Ok((key_id, full_key))
 }
@@ -293,8 +293,8 @@ pub async fn issue_key(
 ///
 /// # Errors
 /// Propagates the update error.
-pub async fn revoke_key(client: &Client, key_id: &str, org: &str) -> Result<bool, PgError> {
-    let n = er_entities::api_key::update::revoke(client, key_id, org).await?;
+pub async fn revoke_key(client: &Client, key_id: &str, org_id: &str) -> Result<bool, PgError> {
+    let n = er_entities::api_key::update::revoke(client, key_id, org_id).await?;
     Ok(n == 1)
 }
 
@@ -312,12 +312,13 @@ pub async fn lookup_key(
         .await?
         .into_iter()
         .next()
-        .map(|k| (k.org, k.role, k.key_hash)))
+        .map(|k| (k.org_id, k.role, k.key_hash)))
 }
 
 /// A row of the operator org listing (`queue.py` `list_orgs`). `created_at` is
 /// rendered to text in SQL so the port stays free of a timestamp-type feature.
 pub struct OrgSummary {
+    pub id: String,
     pub name: String,
     pub state: String,
     pub active_config_version: Option<i64>,
@@ -327,6 +328,7 @@ pub struct OrgSummary {
 /// An org's detail view (`queue.py` `org_record`). `env` is the raw settings map
 /// the handler projects `resources` out of.
 pub struct OrgDetail {
+    pub id: String,
     pub name: String,
     pub state: String,
     pub active_config_version: Option<i64>,
@@ -348,7 +350,15 @@ pub async fn upsert_org_byo(
     env: &serde_json::Value,
     drop_root: Option<&str>,
 ) -> Result<(), PgError> {
-    er_entities::org::create::upsert_byo(client, name, config_path, env, drop_root).await?;
+    er_entities::org::create::upsert_byo(
+        client,
+        &er_ids::new_v7(),
+        name,
+        config_path,
+        env,
+        drop_root,
+    )
+    .await?;
     Ok(())
 }
 
@@ -371,6 +381,7 @@ pub async fn list_orgs(client: &Client) -> Result<Vec<OrgSummary>, PgError> {
         .await?
         .into_iter()
         .map(|o| OrgSummary {
+            id: o.id,
             name: o.name,
             state: o.state,
             active_config_version: o.active_config_version,
@@ -390,6 +401,41 @@ pub async fn get_org(client: &Client, name: &str) -> Result<Option<OrgDetail>, P
         .into_iter()
         .next()
         .map(|o| OrgDetail {
+            id: o.id,
+            name: o.name,
+            state: o.state,
+            active_config_version: o.active_config_version,
+            drop_root: o.drop_root,
+            env: o.env,
+        }))
+}
+
+/// An org's id by its unique name (the routing handle) — the one-expression
+/// resolver tests and operator tools use before calling the org_id-keyed
+/// wrappers.
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn org_id_by_name(client: &Client, name: &str) -> Result<Option<String>, PgError> {
+    Ok(er_entities::org::read::by_name(client, name)
+        .await?
+        .into_iter()
+        .next()
+        .map(|o| o.id))
+}
+
+/// One org's detail by its id (the dispatcher's and key-auth's lookup once
+/// child rows carry only `org_id`).
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn get_org_by_id(client: &Client, org_id: &str) -> Result<Option<OrgDetail>, PgError> {
+    Ok(er_entities::org::read::by_id(client, org_id)
+        .await?
+        .into_iter()
+        .next()
+        .map(|o| OrgDetail {
+            id: o.id,
             name: o.name,
             state: o.state,
             active_config_version: o.active_config_version,
@@ -461,16 +507,22 @@ pub struct ConfigVersionDetail {
 /// Propagates the query/insert error.
 pub async fn create_config_version(
     client: &Client,
-    org: &str,
+    org_id: &str,
     yaml: &str,
     config_hash: &str,
     created_by: &str,
 ) -> Result<i64, PgError> {
     // The statement allocates max(version)+1 atomically inside the INSERT; the
     // (org, version) PK still rejects a concurrent duplicate.
-    let rows =
-        er_entities::config_version::create::draft(client, org, yaml, config_hash, created_by)
-            .await?;
+    let rows = er_entities::config_version::create::draft(
+        client,
+        &er_ids::new_v7(),
+        org_id,
+        yaml,
+        config_hash,
+        created_by,
+    )
+    .await?;
     Ok(rows
         .into_iter()
         .next()
@@ -484,9 +536,9 @@ pub async fn create_config_version(
 /// Propagates the query error.
 pub async fn list_config_versions(
     client: &Client,
-    org: &str,
+    org_id: &str,
 ) -> Result<Vec<ConfigVersionRow>, PgError> {
-    Ok(er_entities::config_version::read::list(client, org)
+    Ok(er_entities::config_version::read::list(client, org_id)
         .await?
         .into_iter()
         .map(|v| ConfigVersionRow {
@@ -507,11 +559,11 @@ pub async fn list_config_versions(
 /// Propagates the query error.
 pub async fn get_config_version(
     client: &Client,
-    org: &str,
+    org_id: &str,
     version: i64,
 ) -> Result<Option<ConfigVersionDetail>, PgError> {
     Ok(
-        er_entities::config_version::read::by_version(client, org, version)
+        er_entities::config_version::read::by_version(client, org_id, version)
             .await?
             .into_iter()
             .next()
@@ -535,13 +587,15 @@ pub async fn get_config_version(
 /// Propagates the insert error.
 pub async fn stage_action(
     client: &Client,
-    org: &str,
+    org_id: &str,
     action: &serde_json::Value,
     created_by: &str,
 ) -> Result<String, PgError> {
-    let action_id = ulid::Ulid::new().to_string();
-    er_entities::staged_steward_action::create::stage(client, &action_id, org, action, created_by)
-        .await?;
+    let action_id = er_ids::new_v7();
+    er_entities::staged_steward_action::create::stage(
+        client, &action_id, org_id, action, created_by,
+    )
+    .await?;
     Ok(action_id)
 }
 
@@ -552,13 +606,13 @@ pub async fn stage_action(
 /// Propagates the query error.
 pub async fn pending_actions(
     client: &Client,
-    org: &str,
+    org_id: &str,
 ) -> Result<Vec<(String, serde_json::Value)>, PgError> {
     Ok(
-        er_entities::staged_steward_action::read::pending(client, org)
+        er_entities::staged_steward_action::read::pending(client, org_id)
             .await?
             .into_iter()
-            .map(|a| (a.action_id, a.action))
+            .map(|a| (a.id, a.action))
             .collect(),
     )
 }
@@ -577,10 +631,10 @@ pub async fn mark_action_applied(client: &Client, action_id: &str) -> Result<(),
 ///
 /// # Errors
 /// Propagates the query error.
-pub async fn pending_count(client: &Client, org: &str) -> Result<i64, PgError> {
+pub async fn pending_count(client: &Client, org_id: &str) -> Result<i64, PgError> {
     // The pending set is small by construction (drained each dispatcher pass),
     // so counting the drain read keeps this on the one declared statement.
-    let pending = er_entities::staged_steward_action::read::pending(client, org).await?;
+    let pending = er_entities::staged_steward_action::read::pending(client, org_id).await?;
     Ok(pending.len() as i64)
 }
 
@@ -632,7 +686,7 @@ pub async fn audit_rows(
 
 /// A schedule row for the API listing (`schedules.py`).
 pub struct ScheduleRow {
-    pub schedule_id: String,
+    pub id: String,
     pub kind: String,
     pub cron: String,
     pub enabled: bool,
@@ -646,13 +700,13 @@ pub struct ScheduleRow {
 /// Propagates the insert error.
 pub async fn create_schedule(
     client: &Client,
-    org: &str,
+    org_id: &str,
     kind: &str,
     cron: &str,
     params: &serde_json::Value,
 ) -> Result<String, PgError> {
-    let schedule_id = ulid::Ulid::new().to_string();
-    er_entities::schedule::create::create(client, &schedule_id, org, kind, params, cron).await?;
+    let schedule_id = er_ids::new_v7();
+    er_entities::schedule::create::create(client, &schedule_id, org_id, kind, params, cron).await?;
     Ok(schedule_id)
 }
 
@@ -660,12 +714,12 @@ pub async fn create_schedule(
 ///
 /// # Errors
 /// Propagates the query error.
-pub async fn list_schedules(client: &Client, org: &str) -> Result<Vec<ScheduleRow>, PgError> {
-    Ok(er_entities::schedule::read::list(client, org)
+pub async fn list_schedules(client: &Client, org_id: &str) -> Result<Vec<ScheduleRow>, PgError> {
+    Ok(er_entities::schedule::read::list(client, org_id)
         .await?
         .into_iter()
         .map(|s| ScheduleRow {
-            schedule_id: s.schedule_id,
+            id: s.id,
             kind: s.kind,
             cron: s.cron,
             enabled: s.enabled,
@@ -683,11 +737,12 @@ pub async fn list_schedules(client: &Client, org: &str) -> Result<Vec<ScheduleRo
 /// Propagates the update error.
 pub async fn set_schedule_enabled(
     client: &Client,
-    org: &str,
+    org_id: &str,
     schedule_id: &str,
     enabled: bool,
 ) -> Result<bool, PgError> {
-    let n = er_entities::schedule::update::set_enabled(client, enabled, schedule_id, org).await?;
+    let n =
+        er_entities::schedule::update::set_enabled(client, enabled, schedule_id, org_id).await?;
     Ok(n == 1)
 }
 
@@ -697,17 +752,17 @@ pub async fn set_schedule_enabled(
 /// Propagates the delete error.
 pub async fn delete_schedule(
     client: &Client,
-    org: &str,
+    org_id: &str,
     schedule_id: &str,
 ) -> Result<bool, PgError> {
-    let n = er_entities::schedule::delete::delete(client, org, schedule_id).await?;
+    let n = er_entities::schedule::delete::delete(client, org_id, schedule_id).await?;
     Ok(n == 1)
 }
 
 /// A webhook row for the API listing (`webhooks.py`); the `secret` is never
 /// listed (returned once on create, like an API key).
 pub struct WebhookRow {
-    pub webhook_id: String,
+    pub id: String,
     pub url: String,
     pub events: serde_json::Value,
     pub active: bool,
@@ -721,13 +776,13 @@ pub struct WebhookRow {
 /// Propagates the insert error.
 pub async fn create_webhook(
     client: &Client,
-    org: &str,
+    org_id: &str,
     url: &str,
     events: &serde_json::Value,
     secret: &str,
 ) -> Result<String, PgError> {
-    let webhook_id = ulid::Ulid::new().to_string();
-    er_entities::webhook::create::create(client, &webhook_id, org, url, events, secret).await?;
+    let webhook_id = er_ids::new_v7();
+    er_entities::webhook::create::create(client, &webhook_id, org_id, url, events, secret).await?;
     Ok(webhook_id)
 }
 
@@ -735,12 +790,12 @@ pub async fn create_webhook(
 ///
 /// # Errors
 /// Propagates the query error.
-pub async fn list_webhooks(client: &Client, org: &str) -> Result<Vec<WebhookRow>, PgError> {
-    Ok(er_entities::webhook::read::list_active(client, org)
+pub async fn list_webhooks(client: &Client, org_id: &str) -> Result<Vec<WebhookRow>, PgError> {
+    Ok(er_entities::webhook::read::list_active(client, org_id)
         .await?
         .into_iter()
         .map(|w| WebhookRow {
-            webhook_id: w.webhook_id,
+            id: w.id,
             url: w.url,
             events: w.events,
             active: w.active,
@@ -757,14 +812,14 @@ pub async fn list_webhooks(client: &Client, org: &str) -> Result<Vec<WebhookRow>
 /// Propagates the query error.
 pub async fn webhooks_for_delivery(
     client: &Client,
-    org: &str,
+    org_id: &str,
     event_type: &str,
 ) -> Result<Vec<(String, String, String)>, PgError> {
     Ok(
-        er_entities::webhook::read::for_delivery(client, org, event_type)
+        er_entities::webhook::read::for_delivery(client, org_id, event_type)
             .await?
             .into_iter()
-            .map(|w| (w.webhook_id, w.url, w.secret))
+            .map(|w| (w.id, w.url, w.secret))
             .collect(),
     )
 }
@@ -773,8 +828,12 @@ pub async fn webhooks_for_delivery(
 ///
 /// # Errors
 /// Propagates the delete error.
-pub async fn delete_webhook(client: &Client, org: &str, webhook_id: &str) -> Result<bool, PgError> {
-    let n = er_entities::webhook::delete::delete(client, org, webhook_id).await?;
+pub async fn delete_webhook(
+    client: &Client,
+    org_id: &str,
+    webhook_id: &str,
+) -> Result<bool, PgError> {
+    let n = er_entities::webhook::delete::delete(client, org_id, webhook_id).await?;
     Ok(n == 1)
 }
 
@@ -786,11 +845,12 @@ pub async fn delete_webhook(client: &Client, org: &str, webhook_id: &str) -> Res
 /// Propagates either update error.
 pub async fn publish_config_version(
     client: &Client,
-    org: &str,
+    org_id: &str,
+    org_name: &str,
     version: i64,
     tier: Option<&str>,
 ) -> Result<(), PgError> {
-    er_entities::config_version::update::publish(client, tier, org, version).await?;
-    er_entities::org::update::set_active_config(client, version, org).await?;
+    er_entities::config_version::update::publish(client, tier, org_id, version).await?;
+    er_entities::org::update::set_active_config(client, version, org_name).await?;
     Ok(())
 }

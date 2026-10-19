@@ -66,12 +66,12 @@ export interface components {
              * @description When the key was issued.
              */
             created_at: string;
+            /** @description The key's unique id (UUIDv7, minted at issue). */
+            id: string;
             /** @description SHA-256 hash of the secret (never the plaintext). */
             key_hash: string;
-            /** @description The key's unique id. */
-            key_id: string;
             /** @description The tenant the key authenticates. */
-            org: string;
+            org_id: string;
             /**
              * Format: date-time
              * @description When the key was revoked, if it has been.
@@ -127,8 +127,10 @@ export interface components {
             created_at: string;
             /** @description Principal that created the version. */
             created_by: string;
+            /** @description The version row's unique id (UUIDv7, minted at draft). */
+            id: string;
             /** @description The tenant this config version belongs to. */
-            org: string;
+            org_id: string;
             /**
              * Format: date-time
              * @description When the version was published, if it has been.
@@ -238,10 +240,10 @@ export interface components {
              * @description When the job finished.
              */
             finished_at?: string | null;
+            /** @description The job's unique id (ULID). */
+            id: string;
             /** @description Optional dedup key, unique per org. */
             idempotency_key?: string | null;
-            /** @description The job's unique id (ULID). */
-            job_id: string;
             /** @description The job kind (run_all, correct, maintain, train, ...). */
             kind: string;
             /**
@@ -255,7 +257,7 @@ export interface components {
              */
             not_before?: string | null;
             /** @description The tenant this job runs for. */
-            org: string;
+            org_id: string;
             /** @description Kind-specific parameters. */
             params: unknown;
             /**
@@ -302,7 +304,9 @@ export interface components {
             drop_root?: string | null;
             /** @description Lake connection env (catalog, data path, metadata schema). */
             env: unknown;
-            /** @description The tenant's unique name (the control-plane key). */
+            /** @description The tenant's unique id (UUIDv7, minted at creation). */
+            id: string;
+            /** @description The tenant's unique name (the routing handle; URLs stay name-based). */
             name: string;
             /** @description Tenant lifecycle state. */
             state: string;
@@ -323,6 +327,8 @@ export interface components {
             cron: string;
             /** @description Whether the schedule is active. */
             enabled: boolean;
+            /** @description The schedule's unique id. */
+            id: string;
             /** @description The job kind the schedule enqueues. */
             kind: string;
             /**
@@ -331,11 +337,9 @@ export interface components {
              */
             last_enqueued_at?: string | null;
             /** @description The tenant this schedule runs for. */
-            org: string;
+            org_id: string;
             /** @description Kind-specific parameters. */
             params: unknown;
-            /** @description The schedule's unique id. */
-            schedule_id: string;
             /** @description What created the schedule (api, config:correction_pass, system:lake_maintain). */
             source: string;
             /**
@@ -348,8 +352,6 @@ export interface components {
         StagedStewardAction: {
             /** @description The action payload. */
             action: unknown;
-            /** @description The staged action's unique id. */
-            action_id: string;
             /**
              * Format: date-time
              * @description When the action was applied, if it has been.
@@ -364,8 +366,10 @@ export interface components {
             created_by: string;
             /** @description The failure reason, if the action failed. */
             error?: string | null;
+            /** @description The staged action's unique id. */
+            id: string;
             /** @description The tenant the action applies to. */
-            org: string;
+            org_id: string;
             /** @description Whether the action is pending, applied or failed. */
             state: string;
             /**
@@ -385,8 +389,10 @@ export interface components {
             created_at: string;
             /** @description The subscribed event types. */
             events: unknown;
+            /** @description The webhook's unique id. */
+            id: string;
             /** @description The tenant that owns the webhook. */
-            org: string;
+            org_id: string;
             /** @description HMAC signing secret for deliveries. */
             secret: string;
             /**
@@ -396,8 +402,6 @@ export interface components {
             updated_at: string;
             /** @description The delivery URL. */
             url: string;
-            /** @description The webhook's unique id. */
-            webhook_id: string;
         };
     };
     responses: never;

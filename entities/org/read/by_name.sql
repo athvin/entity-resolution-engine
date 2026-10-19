@@ -1,4 +1,5 @@
 SELECT
+  id,
   name,
   config_path,
   env,

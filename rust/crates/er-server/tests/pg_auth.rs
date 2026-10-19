@@ -63,7 +63,7 @@ async fn api_key_auth_role_scope_and_revocation() {
     assert_eq!(resp.status(), StatusCode::CREATED);
     let minted = json_body(resp).await;
     let admin_key = minted["key"].as_str().unwrap().to_string();
-    let admin_key_id = minted["key_id"].as_str().unwrap().to_string();
+    let admin_key_id = minted["id"].as_str().unwrap().to_string();
     assert_eq!(minted["role"], "admin");
     assert!(admin_key.starts_with(&format!("erk_{admin_key_id}_")));
 

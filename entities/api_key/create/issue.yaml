@@ -4,7 +4,7 @@ mode: partial
 description: "Store a freshly minted API key: only the SHA-256 hash of the secret is persisted."
 params:
   - { name: key_id, type: varchar }
-  - { name: org, type: varchar }
+  - { name: org_id, type: varchar }
   - { name: role, type: varchar }
   - { name: key_hash, type: varchar }
 returns: none

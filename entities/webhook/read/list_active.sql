@@ -1,6 +1,6 @@
 SELECT
-  webhook_id,
-  org,
+  id,
+  org_id,
   url,
   events,
   secret,
@@ -8,5 +8,5 @@ SELECT
   created_at,
   updated_at
 FROM public.webhooks
-WHERE org = $org AND active
+WHERE org_id = $org_id AND active
 ORDER BY created_at

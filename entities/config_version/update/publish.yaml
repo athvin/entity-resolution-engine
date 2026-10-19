@@ -4,6 +4,6 @@ mode: partial
 description: "Mark a version published with its rollout tier (the config_versions half of publish)."
 params:
   - { name: tier, type: varchar, nullable: true }
-  - { name: org, type: varchar }
+  - { name: org_id, type: varchar }
   - { name: version, type: bigint }
 returns: none

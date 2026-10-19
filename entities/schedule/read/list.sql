@@ -1,6 +1,6 @@
 SELECT
-  schedule_id,
-  org,
+  id,
+  org_id,
   kind,
   params,
   cron,
@@ -10,5 +10,5 @@ SELECT
   created_at,
   updated_at
 FROM public.schedules
-WHERE org = $org
+WHERE org_id = $org_id
 ORDER BY created_at

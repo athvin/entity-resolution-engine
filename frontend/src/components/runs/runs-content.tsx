@@ -72,7 +72,7 @@ export function RunsContent({ org }: { org: string }) {
       { kind, params },
       {
         onSuccess: (result) => {
-          router.push(`/${org}/runs/${result.job_id}`);
+          router.push(`/${org}/runs/${result.id}`);
         },
         onError: () => {
           setSubmitError("could not start the run — the org may already have one in flight");
@@ -158,7 +158,7 @@ export function RunsContent({ org }: { org: string }) {
       )}
 
       {activeJob && (
-        <Link href={`/${org}/runs/${activeJob.job_id}`} data-testid="active-job-link">
+        <Link href={`/${org}/runs/${activeJob.id}`} data-testid="active-job-link">
           <Card className="border-primary/40">
             <CardContent className="flex flex-wrap items-center gap-3 p-4 text-sm">
               <Loader2 className="size-4 animate-spin" />
@@ -195,7 +195,7 @@ export function RunsContent({ org }: { org: string }) {
               </thead>
               <tbody>
                 {(jobs.data ?? []).map((job) => (
-                  <tr key={job.job_id} className="border-b last:border-0">
+                  <tr key={job.id} className="border-b last:border-0">
                     <td className="py-2 pr-4 font-medium">{job.kind}</td>
                     <td className="py-2 pr-4">
                       <StateChip state={job.state} />
@@ -208,10 +208,10 @@ export function RunsContent({ org }: { org: string }) {
                     </td>
                     <td className="py-2">
                       <Link
-                        href={`/${org}/runs/${job.job_id}`}
+                        href={`/${org}/runs/${job.id}`}
                         className="font-mono text-xs underline-offset-2 hover:underline"
                       >
-                        {job.job_id.slice(-8)}
+                        {job.id.slice(-8)}
                       </Link>
                     </td>
                   </tr>

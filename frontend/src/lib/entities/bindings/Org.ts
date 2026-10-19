@@ -3,7 +3,9 @@
 
 /** A tenant: its config pointer, lake env, lifecycle state and active config version. */
 export interface Org {
-  /** The tenant's unique name (the control-plane key). */
+  /** The tenant's unique id (UUIDv7, minted at creation). */
+  id: string;
+  /** The tenant's unique name (the routing handle; URLs stay name-based). */
   name: string;
   /** Path to the tenant's config document. */
   config_path: string;

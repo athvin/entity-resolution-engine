@@ -1,4 +1,5 @@
 CREATE TABLE IF NOT EXISTS public.orgs (
+  id text NOT NULL,
   name text NOT NULL,
   config_path text NOT NULL,
   env jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -7,5 +8,6 @@ CREATE TABLE IF NOT EXISTS public.orgs (
   state text NOT NULL DEFAULT 'active' CHECK (state IN ('provisioning', 'active', 'suspended', 'purging')),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (name)
+  PRIMARY KEY (id),
+  UNIQUE (name)
 );

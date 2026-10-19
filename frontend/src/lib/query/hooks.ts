@@ -93,7 +93,7 @@ export interface EntityDetail {
 }
 
 export interface JobRow {
-  job_id: string;
+  id: string;
   kind: string;
   state: string;
   error_class: string | null;

@@ -2,6 +2,6 @@ kind: statement
 operation: read
 description: "The job a given idempotency key already created (enqueue's dedup fallback)."
 params:
-  - { name: org, type: varchar }
+  - { name: org_id, type: varchar }
   - { name: idempotency_key, type: varchar }
 returns: entity

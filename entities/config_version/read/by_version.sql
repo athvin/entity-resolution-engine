@@ -1,5 +1,6 @@
 SELECT
-  org,
+  id,
+  org_id,
   version,
   yaml,
   config_hash,
@@ -10,4 +11,4 @@ SELECT
   published_at,
   updated_at
 FROM public.config_versions
-WHERE org = $org AND version = $version
+WHERE org_id = $org_id AND version = $version

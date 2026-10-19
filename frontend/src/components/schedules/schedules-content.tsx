@@ -69,7 +69,7 @@ export function SchedulesContent({ org }: { org: string }) {
                     const system = schedule.source !== "api";
                     return (
                       <tr
-                        key={schedule.schedule_id}
+                        key={schedule.id}
                         className="border-b last:border-0"
                         data-testid={`schedule-${schedule.kind}`}
                       >
@@ -97,7 +97,7 @@ export function SchedulesContent({ org }: { org: string }) {
                             data-testid={`schedule-toggle-${schedule.kind}`}
                             onClick={() => {
                               toggle.mutate({
-                                scheduleId: schedule.schedule_id,
+                                scheduleId: schedule.id,
                                 enabled: !schedule.enabled,
                               });
                             }}
@@ -118,7 +118,7 @@ export function SchedulesContent({ org }: { org: string }) {
                               size="icon"
                               aria-label={`Delete ${schedule.kind} schedule`}
                               onClick={() => {
-                                remove.mutate(schedule.schedule_id);
+                                remove.mutate(schedule.id);
                               }}
                             >
                               <Trash2 className="size-4" />

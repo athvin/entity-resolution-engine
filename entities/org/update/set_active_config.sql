@@ -1,1 +1,1 @@
-UPDATE public.orgs SET active_config_version = $version WHERE name = $name
+UPDATE public.orgs SET active_config_version = $version, updated_at = now() WHERE name = $name

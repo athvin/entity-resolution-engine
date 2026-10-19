@@ -3,21 +3,20 @@ version: 1
 name: job
 relation: jobs
 description: "A unit of work on the dispatcher's queue: its kind, params, lifecycle state and retry bookkeeping."
-key: [job_id]
-identity: legacy
+key: [id]
 generate:
   stores: [postgres]
   languages: [rust, typescript]
   wire: [json]
 columns:
-  - name: job_id
+  - name: id
     type: varchar
     nullable: false
     description: "The job's unique id (ULID)."
-  - name: org
+  - name: org_id
     type: varchar
     nullable: false
-    references: { relation: orgs, column: name }
+    references: { relation: orgs, column: id }
     description: "The tenant this job runs for."
   - name: kind
     type: varchar
@@ -91,12 +90,12 @@ columns:
     description: "When the job finished."
 indexes:
   - name: jobs_idempotency
-    columns: [org, idempotency_key]
+    columns: [org_id, idempotency_key]
     unique: true
     where: "idempotency_key IS NOT NULL"
   - name: jobs_one_active_per_org
-    columns: [org]
+    columns: [org_id]
     unique: true
     where: "state IN ('dispatching','running','canceling')"
   - name: jobs_claimable
-    columns: [state, not_before, priority, job_id]
+    columns: [state, not_before, priority, id]

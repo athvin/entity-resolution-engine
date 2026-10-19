@@ -78,10 +78,10 @@ async fn job_lifecycle_enqueue_list_get_cancel() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::ACCEPTED);
     let job = json_body(resp).await;
-    let job_id = job["job_id"].as_str().unwrap().to_string();
+    let job_id = job["id"].as_str().unwrap().to_string();
     assert_eq!(job["state"], "queued");
     assert_eq!(job["kind"], "run");
-    assert_eq!(job["org"], "acme");
+    assert_eq!(job["org_id"], "acme");
 
     // list
     let resp = app
@@ -153,10 +153,7 @@ async fn action_colon_spelling_routes_like_the_subpath() {
         ))
         .await
         .unwrap();
-    let job_id = json_body(resp).await["job_id"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    let job_id = json_body(resp).await["id"].as_str().unwrap().to_string();
 
     // Cancel via `{id}:cancel` (NOT the `/cancel` sub-path).
     let resp = app

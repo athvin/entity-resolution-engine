@@ -1,6 +1,6 @@
 SELECT
-  job_id,
-  org,
+  id,
+  org_id,
   kind,
   params,
   state,
@@ -19,4 +19,4 @@ SELECT
   started_at,
   finished_at
 FROM public.jobs
-WHERE org = $org AND job_id = $job_id
+WHERE org_id = $org_id AND id = $job_id

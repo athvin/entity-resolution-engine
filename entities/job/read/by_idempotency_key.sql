@@ -1,6 +1,6 @@
 SELECT
-  job_id,
-  org,
+  id,
+  org_id,
   kind,
   params,
   state,
@@ -19,4 +19,4 @@ SELECT
   started_at,
   finished_at
 FROM public.jobs
-WHERE org = $org AND idempotency_key = $idempotency_key
+WHERE org_id = $org_id AND idempotency_key = $idempotency_key

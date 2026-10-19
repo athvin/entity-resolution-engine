@@ -58,7 +58,7 @@ async fn schedules_crud_and_role_boundary() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
     let created = json_body(resp).await;
-    let schedule_id = created["schedule_id"].as_str().unwrap().to_string();
+    let schedule_id = created["id"].as_str().unwrap().to_string();
     assert_eq!(created["kind"], "run_all_full");
 
     // bad kind / bad cron -> 422.

@@ -3,5 +3,5 @@ operation: read
 mode: full
 description: "An org's config versions, newest first."
 params:
-  - { name: org, type: varchar }
+  - { name: org_id, type: varchar }
 returns: entity

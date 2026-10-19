@@ -13,6 +13,14 @@ use axum::http::{Request, StatusCode, header};
 use er_server::{AppState, app, dispatcher, pg};
 use tower::ServiceExt;
 
+/// The org's id for a test org name (child wrappers key on org_id).
+async fn oid(client: &tokio_postgres::Client, name: &str) -> String {
+    er_server::pg::org_id_by_name(client, name)
+        .await
+        .expect("org lookup")
+        .expect("org exists")
+}
+
 /// The golden-records list data lane is Arrow IPC; decode the page's `entity_id`
 /// column into a plain `Vec<String>`.
 async fn golden_entity_ids(app: &axum::Router) -> Vec<String> {
@@ -206,10 +214,20 @@ async fn suppress_excludes_a_record_and_retract_restores_it() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
-    assert_eq!(pg::pending_count(&client, "acme").await.unwrap(), 1);
-    dispatcher::drain_and_correct(&client, "acme", &env, "01OVCORRECT00000000000000001")
-        .await
-        .unwrap();
+    assert_eq!(
+        pg::pending_count(&client, &oid(&client, "acme").await)
+            .await
+            .unwrap(),
+        1
+    );
+    dispatcher::drain_and_correct(
+        &client,
+        &oid(&client, "acme").await,
+        &env,
+        "01OVCORRECT00000000000000001",
+    )
+    .await
+    .unwrap();
 
     let after = members(&app, &entity_id).await;
     assert!(
@@ -233,9 +251,14 @@ async fn suppress_excludes_a_record_and_retract_restores_it() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
-    dispatcher::drain_and_correct(&client, "acme", &env, "01OVCORRECT00000000000000002")
-        .await
-        .unwrap();
+    dispatcher::drain_and_correct(
+        &client,
+        &oid(&client, "acme").await,
+        &env,
+        "01OVCORRECT00000000000000002",
+    )
+    .await
+    .unwrap();
     let restored = members(&app, &entity_id).await;
     assert!(
         restored.contains(&victim),

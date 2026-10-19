@@ -2,7 +2,7 @@ kind: statement
 operation: read
 description: "The queue view, newest first, optionally filtered by org and/or state (the operator console)."
 params:
-  - { name: org, type: varchar, nullable: true }
+  - { name: org_id, type: varchar, nullable: true }
   - { name: state, type: varchar, nullable: true }
   - { name: limit, type: bigint }
 returns: entity

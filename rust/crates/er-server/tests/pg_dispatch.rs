@@ -11,6 +11,14 @@ use std::path::PathBuf;
 
 use er_server::{dispatch_pg, pg};
 
+/// The org's id for a test org name (child wrappers key on org_id).
+async fn oid(client: &tokio_postgres::Client, name: &str) -> String {
+    er_server::pg::org_id_by_name(client, name)
+        .await
+        .expect("org lookup")
+        .expect("org exists")
+}
+
 const TEST_YAML: &str = include_str!("../../er-cli/tests/fixtures/test.yaml");
 const NICKNAMES: &str = include_str!("../../er-cli/tests/fixtures/nickname_variants.csv");
 
@@ -46,9 +54,16 @@ async fn dispatcher_runs_run_all_over_a_per_org_ducklake() {
     pg::ensure_org(&client, "acme", "/configs/acme.yaml")
         .await
         .unwrap();
-    let queued = pg::enqueue(&client, "acme", "run_all_full", 0, None, None)
-        .await
-        .unwrap();
+    let queued = pg::enqueue(
+        &client,
+        &oid(&client, "acme").await,
+        "run_all_full",
+        0,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
 
     // Data plane: a per-org DuckLake + base_10 inputs (config, lexicon,
     // deliveries, frozen model) — the inputs the production dispatcher resolves
@@ -101,7 +116,7 @@ async fn dispatcher_runs_run_all_over_a_per_org_ducklake() {
     let done = dispatch_pg(
         &client,
         |job| {
-            assert_eq!(job.job_id, queued.job_id, "claimed the queued job");
+            assert_eq!(job.id, queued.id, "claimed the queued job");
             assert_eq!(job.state, "dispatching", "claim moved it to dispatching");
             er_cli::run_all(&session, &config, &inputs).map_err(|e| e.to_string())
         },
@@ -126,23 +141,30 @@ async fn dispatcher_runs_run_all_over_a_per_org_ducklake() {
     );
 
     // The queue reflects the success.
-    let persisted = pg::get_job(&client, "acme", &done.job_id)
+    let persisted = pg::get_job(&client, &oid(&client, "acme").await, &done.id)
         .await
         .unwrap()
         .expect("job present");
     assert_eq!(persisted.state, "succeeded");
 
     // Failure path: a runner error marks the job `failed`.
-    let _ = pg::enqueue(&client, "acme", "run_all_full", 0, None, None)
-        .await
-        .unwrap();
+    let _ = pg::enqueue(
+        &client,
+        &oid(&client, "acme").await,
+        "run_all_full",
+        0,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
     let failed = dispatch_pg(&client, |_job| Err("boom".to_string()), None)
         .await
         .unwrap()
         .expect("a second job to dispatch");
     assert_eq!(failed.state, "failed");
     assert_eq!(
-        pg::get_job(&client, "acme", &failed.job_id)
+        pg::get_job(&client, &oid(&client, "acme").await, &failed.id)
             .await
             .unwrap()
             .unwrap()

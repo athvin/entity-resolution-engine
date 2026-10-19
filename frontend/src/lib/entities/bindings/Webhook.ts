@@ -4,9 +4,9 @@
 /** A tenant webhook endpoint: its URL, subscribed events and signing secret. */
 export interface Webhook {
   /** The webhook's unique id. */
-  webhook_id: string;
+  id: string;
   /** The tenant that owns the webhook. */
-  org: string;
+  org_id: string;
   /** The delivery URL. */
   url: string;
   /** The subscribed event types. */

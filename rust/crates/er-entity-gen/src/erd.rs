@@ -463,12 +463,12 @@ mod tests {
         assert!(erd.contains("## Control plane — Postgres `public`"));
         // jobs.org is NOT NULL, so the edge is solid; the label names both columns.
         assert!(
-            erd.contains("    jobs }o--|| orgs : \"org → name\""),
+            erd.contains("    jobs }o--|| orgs : \"org_id → id\""),
             "{erd}"
         );
         // Key and reference markers land on the attributes.
-        assert!(erd.contains("varchar job_id PK"), "{erd}");
-        assert!(erd.contains("varchar org FK"), "{erd}");
+        assert!(erd.contains("varchar id PK"), "{erd}");
+        assert!(erd.contains("varchar org_id FK"), "{erd}");
     }
 
     #[test]

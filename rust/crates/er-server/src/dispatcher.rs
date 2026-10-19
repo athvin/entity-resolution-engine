@@ -60,11 +60,11 @@ async fn dispatch_once(
     let Some(job) = pg::claim(client).await? else {
         return Ok(false);
     };
-    pg::mark(client, &job.job_id, "running").await?;
+    pg::mark(client, &job.id, "running").await?;
 
-    let Some(org) = pg::get_org(client, &job.org).await? else {
-        pg::mark(client, &job.job_id, "failed").await?;
-        eprintln!("job {} failed: org '{}' not found", job.job_id, job.org);
+    let Some(org) = pg::get_org_by_id(client, &job.org_id).await? else {
+        pg::mark(client, &job.id, "failed").await?;
+        eprintln!("job {} failed: org id '{}' not found", job.id, job.org_id);
         return Ok(true);
     };
 
@@ -75,7 +75,7 @@ async fn dispatch_once(
     // go through the blocking `run_job`.
     let env = org.env.clone();
     let outcome = if job.kind == "apply_corrections" {
-        drain_and_correct(client, &job.org, &env, &job.job_id).await
+        drain_and_correct(client, &job.org_id, &env, &job.id).await
     } else {
         let jb = job.clone();
         let drop_root = org.drop_root.clone();
@@ -89,9 +89,9 @@ async fn dispatch_once(
     } else {
         "failed"
     };
-    pg::mark(client, &job.job_id, state).await?;
+    pg::mark(client, &job.id, state).await?;
     if let Err(e) = &outcome {
-        eprintln!("job {} ({}) failed: {e}", job.job_id, job.kind);
+        eprintln!("job {} ({}) failed: {e}", job.id, job.kind);
     }
     let completed = Job {
         state: state.to_string(),
@@ -150,7 +150,7 @@ fn run_job(job: &Job, env: &Value, drop_root: Option<&str>) -> Result<(), String
     let catalog = env_str(env, "ER_LAKE_CATALOG").ok_or("org env missing ER_LAKE_CATALOG")?;
     let data_path = env_str(env, "ER_LAKE_DATA_PATH").ok_or("org env missing ER_LAKE_DATA_PATH")?;
     let session = er_cli::open_lake(catalog, data_path).map_err(|e| format!("open lake: {e}"))?;
-    let run_id = &job.job_id;
+    let run_id = &job.id;
     let now = fmt_epoch(unix_now());
 
     // Config (needed by every kind except lake_maintain).
@@ -239,11 +239,11 @@ fn run_job(job: &Job, env: &Value, drop_root: Option<&str>) -> Result<(), String
 /// `run_correct` failure (as a human string, like `run_job` returns).
 pub async fn drain_and_correct(
     client: &tokio_postgres::Client,
-    org_name: &str,
+    org_id: &str,
     env: &Value,
     run_id: &str,
 ) -> Result<(), String> {
-    let pending = pg::pending_actions(client, org_name)
+    let pending = pg::pending_actions(client, org_id)
         .await
         .map_err(|e| format!("read pending actions: {e}"))?;
     let env = env.clone();

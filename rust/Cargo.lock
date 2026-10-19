@@ -1551,6 +1551,7 @@ dependencies = [
  "er-config",
  "er-entities",
  "er-golden",
+ "er-ids",
  "er-reconcile",
  "er-schema",
  "er-std",
@@ -1565,7 +1566,6 @@ dependencies = [
  "tokio",
  "tokio-postgres",
  "tower",
- "ulid",
  "utoipa",
 ]
 

@@ -4,7 +4,7 @@ mode: partial
 description: "Create an API-sourced schedule."
 params:
   - { name: schedule_id, type: varchar }
-  - { name: org, type: varchar }
+  - { name: org_id, type: varchar }
   - { name: kind, type: varchar }
   - { name: params, type: json }
   - { name: cron, type: varchar }

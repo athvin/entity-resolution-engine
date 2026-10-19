@@ -122,6 +122,26 @@ async fn connect_pg(dsn: &str) -> Result<tokio_postgres::Client, Box<axum::respo
 }
 
 /// Map a Postgres query error to a 500 response.
+/// Resolve the path org (its NAME — the routing handle) to its row, or the
+/// standard scope-safe 404. Child tables carry `org_id` (the org's UUIDv7), so
+/// every org-scoped handler resolves once and threads `row.id` to the queries.
+async fn org_or_404(
+    client: &tokio_postgres::Client,
+    org: &str,
+) -> Result<pg::OrgDetail, Box<axum::response::Response>> {
+    match pg::get_org(client, org).await {
+        Ok(Some(row)) => Ok(row),
+        Ok(None) => Err(Box::new(
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "detail": format!("no org '{org}'") })),
+            )
+                .into_response(),
+        )),
+        Err(e) => Err(Box::new(pg_err(e))),
+    }
+}
+
 fn pg_err(e: tokio_postgres::Error) -> axum::response::Response {
     (
         StatusCode::INTERNAL_SERVER_ERROR,
@@ -255,12 +275,24 @@ impl FromRequestParts<AppState> for Principal {
             )
         })?;
         match pg::lookup_key(&client, key_id).await {
-            Ok(Some((org, role, key_hash)))
+            Ok(Some((org_id, role, key_hash)))
                 if ct_eq(key_hash.as_bytes(), pg::hash_secret(secret).as_bytes()) =>
             {
+                // Principal.org carries the org NAME (the routing handle every
+                // guard compares against); keys store the org's id.
+                let org_name = match pg::get_org_by_id(&client, &org_id).await {
+                    Ok(Some(o)) => o.name,
+                    Ok(None) => return Err(unauthorized("invalid credential")),
+                    Err(e) => {
+                        return Err((
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({ "detail": format!("db: {e}") })),
+                        ));
+                    }
+                };
                 Ok(Principal {
                     actor: format!("key:{key_id}"),
-                    org: Some(org),
+                    org: Some(org_name),
                     role: Role::parse(&role).unwrap_or(Role::Viewer),
                 })
             }
@@ -422,6 +454,7 @@ async fn list_orgs(principal: Principal, State(state): State<AppState>) -> impl 
                 .iter()
                 .map(|o| {
                     json!({
+                        "id": o.id,
                         "name": o.name,
                         "state": o.state,
                         "active_config_version": o.active_config_version,
@@ -468,6 +501,7 @@ async fn get_org(
     };
     match pg::get_org(&client, &org).await {
         Ok(Some(o)) => Json(json!({
+            "id": o.id,
             "name": o.name,
             "state": o.state,
             "active_config_version": o.active_config_version,
@@ -600,7 +634,12 @@ async fn create_config_version(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    match pg::create_config_version(&client, &org, &body.yaml, &hash, &principal.actor).await {
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    match pg::create_config_version(&client, &org_row.id, &body.yaml, &hash, &principal.actor).await
+    {
         Ok(version) => (
             StatusCode::CREATED,
             Json(json!({
@@ -640,7 +679,11 @@ async fn list_config_versions(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    match pg::list_config_versions(&client, &org).await {
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    match pg::list_config_versions(&client, &org_row.id).await {
         Ok(rows) => {
             let out: Vec<Value> = rows
                 .iter()
@@ -686,7 +729,11 @@ async fn get_config_version(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    match pg::get_config_version(&client, &org, version).await {
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    match pg::get_config_version(&client, &org_row.id, version).await {
         Ok(Some(d)) => Json(config_detail_json(&d)).into_response(),
         Ok(None) => config_version_missing(&org, &version.to_string()).into_response(),
         Err(e) => pg_err(e),
@@ -743,7 +790,11 @@ async fn active_config(
         }
         Err(e) => return pg_err(e),
     };
-    match pg::get_config_version(&client, &org, active).await {
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    match pg::get_config_version(&client, &org_row.id, active).await {
         Ok(Some(d)) => Json(config_detail_json(&d)).into_response(),
         Ok(None) => (
             StatusCode::NOT_FOUND,
@@ -950,13 +1001,21 @@ async fn put_lexicon(
         }
     }
 
-    let idem = format!("lexicon-apply:{}", ulid::Ulid::new());
+    let idem = format!("lexicon-apply:{}", er_ids::new_v7());
     let params = json!({ "skip_ingest": true });
-    let apply_job =
-        match pg::enqueue(&client, &org, "run_all_full", 0, Some(&idem), Some(&params)).await {
-            Ok(j) => j.job_id,
-            Err(e) => return pg_err(e),
-        };
+    let apply_job = match pg::enqueue(
+        &client,
+        &org_row.id,
+        "run_all_full",
+        0,
+        Some(&idem),
+        Some(&params),
+    )
+    .await
+    {
+        Ok(j) => j.id,
+        Err(e) => return pg_err(e),
+    };
     let _ = pg::audit(
         &client,
         &principal.actor,
@@ -1059,8 +1118,13 @@ async fn publish_config_version(
         Err(r) => return *r,
     };
 
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+
     // The version being published + its re-validated config.
-    let detail = match pg::get_config_version(&client, &org, version).await {
+    let detail = match pg::get_config_version(&client, &org_row.id, version).await {
         Ok(Some(d)) => d,
         Ok(None) => return config_version_missing(&org, &version.to_string()).into_response(),
         Err(e) => return pg_err(e),
@@ -1103,7 +1167,7 @@ async fn publish_config_version(
     let (tier, changed): (Option<&str>, Vec<String>) = match active_v {
         None => (Some("C"), Vec::new()),
         Some(av) => {
-            let old_yaml = match pg::get_config_version(&client, &org, av).await {
+            let old_yaml = match pg::get_config_version(&client, &org_row.id, av).await {
                 Ok(Some(d)) => d.yaml,
                 Ok(None) => String::new(),
                 Err(e) => return pg_err(e),
@@ -1150,7 +1214,7 @@ async fn publish_config_version(
         )
             .into_response();
     }
-    if let Err(e) = pg::publish_config_version(&client, &org, version, tier).await {
+    if let Err(e) = pg::publish_config_version(&client, &org_row.id, &org, version, tier).await {
         return pg_err(e);
     }
 
@@ -1160,13 +1224,13 @@ async fn publish_config_version(
     match tier {
         Some("C") => {
             let train_key = format!("publish:{version}:train");
-            match pg::enqueue(&client, &org, "train", 0, Some(&train_key), None).await {
-                Ok(j) => jobs_enqueued.push(j.job_id),
+            match pg::enqueue(&client, &org_row.id, "train", 0, Some(&train_key), None).await {
+                Ok(j) => jobs_enqueued.push(j.id),
                 Err(e) => return pg_err(e),
             }
             match pg::enqueue(
                 &client,
-                &org,
+                &org_row.id,
                 "run_all_full",
                 0,
                 Some(&rebuild_key),
@@ -1174,13 +1238,13 @@ async fn publish_config_version(
             )
             .await
             {
-                Ok(j) => jobs_enqueued.push(j.job_id),
+                Ok(j) => jobs_enqueued.push(j.id),
                 Err(e) => return pg_err(e),
             }
         }
         Some("A" | "B") => match pg::enqueue(
             &client,
-            &org,
+            &org_row.id,
             "run_all_full",
             0,
             Some(&rebuild_key),
@@ -1188,7 +1252,7 @@ async fn publish_config_version(
         )
         .await
         {
-            Ok(j) => jobs_enqueued.push(j.job_id),
+            Ok(j) => jobs_enqueued.push(j.id),
             Err(e) => return pg_err(e),
         },
         _ => {}
@@ -1245,14 +1309,19 @@ async fn create_job(
             Ok(c) => c,
             Err(r) => return *r,
         };
-        return match pg::enqueue(&client, &org, &body.kind, body.priority, None, None).await {
+        let org_row = match org_or_404(&client, &org).await {
+            Ok(r) => r,
+            Err(r) => return *r,
+        };
+        return match pg::enqueue(&client, &org_row.id, &body.kind, body.priority, None, None).await
+        {
             Ok(job) => {
                 let _ = pg::audit(
                     &client,
                     &principal.actor,
                     Some(&org),
                     "job.submit",
-                    &json!({ "job_id": job.job_id, "kind": body.kind }),
+                    &json!({ "job_id": job.id, "kind": body.kind }),
                 )
                 .await;
                 (StatusCode::ACCEPTED, Json(json!(job))).into_response()
@@ -1272,8 +1341,8 @@ pub fn enqueue(state: &AppState, org: &str, kind: &str, priority: i64) -> Job {
     store.next += 1;
     let now = chrono::Utc::now();
     let job = Job {
-        job_id,
-        org: org.to_string(),
+        id: job_id,
+        org_id: org.to_string(),
         kind: kind.to_string(),
         params: serde_json::json!({}),
         state: "queued".to_string(),
@@ -1330,7 +1399,7 @@ pub fn dispatch_next(
     let slot = store
         .jobs
         .iter_mut()
-        .find(|j| j.job_id == job.job_id)
+        .find(|j| j.id == job.id)
         .expect("claimed job still present");
     slot.state = if outcome.is_ok() {
         "succeeded"
@@ -1368,13 +1437,13 @@ where
     let Some(job) = pg::claim(client).await? else {
         return Ok(None);
     };
-    pg::mark(client, &job.job_id, "running").await?;
+    pg::mark(client, &job.id, "running").await?;
     let final_state = if runner(&job).is_ok() {
         "succeeded"
     } else {
         "failed"
     };
-    pg::mark(client, &job.job_id, final_state).await?;
+    pg::mark(client, &job.id, final_state).await?;
     let completed = Job {
         state: final_state.to_string(),
         ..job
@@ -1401,13 +1470,22 @@ async fn list_jobs(
             Ok(c) => c,
             Err(r) => return *r,
         };
-        return match pg::list_jobs(&client, &org).await {
+        let org_row = match org_or_404(&client, &org).await {
+            Ok(r) => r,
+            Err(r) => return *r,
+        };
+        return match pg::list_jobs(&client, &org_row.id).await {
             Ok(jobs) => Json(json!({ "jobs": jobs })).into_response(),
             Err(e) => pg_err(e),
         };
     }
     let store = state.store.lock().unwrap();
-    let jobs: Vec<&Job> = store.jobs.iter().rev().filter(|j| j.org == org).collect();
+    let jobs: Vec<&Job> = store
+        .jobs
+        .iter()
+        .rev()
+        .filter(|j| j.org_id == org)
+        .collect();
     Json(json!({ "jobs": jobs })).into_response()
 }
 
@@ -1425,7 +1503,11 @@ async fn get_job(
             Ok(c) => c,
             Err(r) => return *r,
         };
-        return match pg::get_job(&client, &org, &job_id).await {
+        let org_row = match org_or_404(&client, &org).await {
+            Ok(r) => r,
+            Err(r) => return *r,
+        };
+        return match pg::get_job(&client, &org_row.id, &job_id).await {
             Ok(Some(job)) => (StatusCode::OK, Json(json!(job))).into_response(),
             Ok(None) => (
                 StatusCode::NOT_FOUND,
@@ -1439,7 +1521,7 @@ async fn get_job(
     match store
         .jobs
         .iter()
-        .find(|j| j.org == org && j.job_id == job_id)
+        .find(|j| j.org_id == org && j.id == job_id)
     {
         Some(job) => (StatusCode::OK, Json(json!(job))).into_response(),
         None => (
@@ -1465,7 +1547,11 @@ async fn cancel_job(
             Err(r) => return *r,
         };
         // Scope the cancel to the org (404 if absent / another org's), then mark.
-        return match pg::get_job(&client, &org, &job_id).await {
+        let org_row = match org_or_404(&client, &org).await {
+            Ok(r) => r,
+            Err(r) => return *r,
+        };
+        return match pg::get_job(&client, &org_row.id, &job_id).await {
             Ok(Some(job)) => match pg::mark(&client, &job_id, "canceled").await {
                 Ok(()) => (
                     StatusCode::OK,
@@ -1489,7 +1575,7 @@ async fn cancel_job(
     match store
         .jobs
         .iter_mut()
-        .find(|j| j.org == org && j.job_id == job_id)
+        .find(|j| j.org_id == org && j.id == job_id)
     {
         Some(job) => {
             job.state = "canceled".to_string();
@@ -1521,7 +1607,11 @@ async fn resume_job(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    match pg::resume_job(&client, &org, &job_id).await {
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    match pg::resume_job(&client, &org_row.id, &job_id).await {
         Ok(true) => {
             let _ = pg::audit(
                 &client,
@@ -1582,9 +1672,19 @@ async fn jobs_global(
         Err(r) => return *r,
     };
     let limit = read::parse_limit(params.get("limit").map(String::as_str));
+    // The ?org= filter is the org NAME (the console's handle); resolve it to the
+    // id child rows carry. An unknown name filters to nothing, like before.
+    let org_filter = match params.get("org") {
+        Some(name) => match pg::get_org(&client, name).await {
+            Ok(Some(o)) => Some(o.id),
+            Ok(None) => Some(String::from("\u{0}no-such-org")),
+            Err(e) => return pg_err(e),
+        },
+        None => None,
+    };
     match pg::list_jobs_all(
         &client,
-        params.get("org").map(String::as_str),
+        org_filter.as_deref(),
         params.get("state").map(String::as_str),
         limit,
     )
@@ -2561,16 +2661,15 @@ async fn create_schedule(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    match pg::org_exists(&client, &org).await {
-        Ok(true) => {}
-        Ok(false) => return detail_err(StatusCode::NOT_FOUND, format!("no org '{org}'")),
-        Err(e) => return pg_err(e),
-    }
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
     let params = body.params.unwrap_or_else(|| json!({}));
-    match pg::create_schedule(&client, &org, &body.kind, &body.cron, &params).await {
+    match pg::create_schedule(&client, &org_row.id, &body.kind, &body.cron, &params).await {
         Ok(schedule_id) => (
             StatusCode::CREATED,
-            Json(json!({ "schedule_id": schedule_id, "kind": body.kind, "cron": body.cron })),
+            Json(json!({ "id": schedule_id, "kind": body.kind, "cron": body.cron })),
         )
             .into_response(),
         Err(e) => pg_err(e),
@@ -2593,13 +2692,17 @@ async fn schedules_index(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    match pg::list_schedules(&client, &org).await {
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    match pg::list_schedules(&client, &org_row.id).await {
         Ok(rows) => {
             let out: Vec<Value> = rows
                 .iter()
                 .map(|s| {
                     json!({
-                        "schedule_id": s.schedule_id,
+                        "id": s.id,
                         "kind": s.kind,
                         "cron": s.cron,
                         "enabled": s.enabled,
@@ -2632,10 +2735,12 @@ async fn update_schedule(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    match pg::set_schedule_enabled(&client, &org, &schedule_id, body.enabled).await {
-        Ok(true) => {
-            Json(json!({ "schedule_id": schedule_id, "enabled": body.enabled })).into_response()
-        }
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    match pg::set_schedule_enabled(&client, &org_row.id, &schedule_id, body.enabled).await {
+        Ok(true) => Json(json!({ "id": schedule_id, "enabled": body.enabled })).into_response(),
         Ok(false) => detail_err(
             StatusCode::CONFLICT,
             "schedule is unknown, belongs to another org, or is config-owned",
@@ -2660,7 +2765,11 @@ async fn delete_schedule(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    match pg::delete_schedule(&client, &org, &schedule_id).await {
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    match pg::delete_schedule(&client, &org_row.id, &schedule_id).await {
         Ok(deleted) => Json(json!({ "deleted": deleted })).into_response(),
         Err(e) => pg_err(e),
     }
@@ -2710,17 +2819,16 @@ async fn create_webhook(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    match pg::org_exists(&client, &org).await {
-        Ok(true) => {}
-        Ok(false) => return detail_err(StatusCode::NOT_FOUND, format!("no org '{org}'")),
-        Err(e) => return pg_err(e),
-    }
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
     let secret = body
         .secret
         .filter(|s| !s.is_empty())
         .unwrap_or_else(gen_webhook_secret);
     let events = json!(body.events);
-    match pg::create_webhook(&client, &org, &body.url, &events, &secret).await {
+    match pg::create_webhook(&client, &org_row.id, &body.url, &events, &secret).await {
         Ok(webhook_id) => {
             let _ = pg::audit(
                 &client,
@@ -2733,7 +2841,7 @@ async fn create_webhook(
             (
                 StatusCode::CREATED,
                 Json(json!({
-                    "webhook_id": webhook_id,
+                    "id": webhook_id,
                     "url": body.url,
                     "events": events,
                     "secret": secret,
@@ -2763,13 +2871,17 @@ async fn webhooks_index(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    match pg::list_webhooks(&client, &org).await {
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    match pg::list_webhooks(&client, &org_row.id).await {
         Ok(rows) => {
             let out: Vec<Value> = rows
                 .iter()
                 .map(|w| {
                     json!({
-                        "webhook_id": w.webhook_id,
+                        "id": w.id,
                         "url": w.url,
                         "events": w.events,
                         "active": w.active,
@@ -2798,7 +2910,11 @@ async fn delete_webhook(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    match pg::delete_webhook(&client, &org, &webhook_id).await {
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    match pg::delete_webhook(&client, &org_row.id, &webhook_id).await {
         Ok(deleted) => {
             if deleted {
                 let _ = pg::audit(
@@ -2851,7 +2967,7 @@ async fn steward_stage(
         .and_then(Value::as_str)
         .unwrap_or("unknown")
         .to_string();
-    let action_id = pg::stage_action(client, org, action, actor)
+    let action_id = pg::stage_action(client, &detail.id, action, actor)
         .await
         .map_err(|e| Box::new(pg_err(e)))?;
     let _ = pg::audit(
@@ -2936,11 +3052,15 @@ async fn add_assertion(
     }
     // apply_now: enqueue the steward drain — apply the staged actions into the
     // lake, then correct (reconcile/golden/reviews over the existing scores).
-    let idem = format!("assert-apply:{}", ulid::Ulid::new());
+    let idem = format!("assert-apply:{}", er_ids::new_v7());
     let params = json!({ "skip_ingest": true });
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
     match pg::enqueue(
         &client,
-        &org,
+        &org_row.id,
         "apply_corrections",
         0,
         Some(&idem),
@@ -2954,7 +3074,7 @@ async fn add_assertion(
                 "status": "staged",
                 "action_id": action_id,
                 "pending_until_next_reconcile": false,
-                "apply_job": job.job_id,
+                "apply_job": job.id,
             })),
         )
             .into_response(),
@@ -3020,11 +3140,15 @@ async fn record_overlay_action(
     if !body.apply_now {
         return staged_response(StatusCode::CREATED, &action_id);
     }
-    let idem = format!("{overlay}-apply:{}", ulid::Ulid::new());
+    let idem = format!("{overlay}-apply:{}", er_ids::new_v7());
     let params = json!({ "skip_ingest": true });
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
     match pg::enqueue(
         &client,
-        &org,
+        &org_row.id,
         "apply_corrections",
         0,
         Some(&idem),
@@ -3038,7 +3162,7 @@ async fn record_overlay_action(
                 "status": "staged",
                 "action_id": action_id,
                 "pending_until_next_reconcile": false,
-                "apply_job": job.job_id,
+                "apply_job": job.id,
             })),
         )
             .into_response(),
@@ -3348,11 +3472,15 @@ async fn unmerge_entity(
     }
     // apply_now: enqueue the steward drain — apply the staged never-assertions
     // into the lake, then correct (re-reconcile over the existing scores).
-    let idem = format!("unmerge-apply:{}", ulid::Ulid::new());
+    let idem = format!("unmerge-apply:{}", er_ids::new_v7());
     let params = json!({ "skip_ingest": true });
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
     match pg::enqueue(
         &client,
-        &org,
+        &org_row.id,
         "apply_corrections",
         0,
         Some(&idem),
@@ -3366,7 +3494,7 @@ async fn unmerge_entity(
                 "status": "applied",
                 "pairs": pairs,
                 "action_ids": action_ids,
-                "apply_job": job.job_id,
+                "apply_job": job.id,
             })),
         )
             .into_response(),
@@ -3394,7 +3522,11 @@ async fn staged_count(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    match pg::pending_count(&client, &org).await {
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    match pg::pending_count(&client, &org_row.id).await {
         Ok(n) => Json(json!({ "pending_count": n })).into_response(),
         Err(e) => pg_err(e),
     }
@@ -3493,8 +3625,8 @@ async fn bulk_resolve_reviews(
         Err(r) => return *r,
     };
     // One active-org check for the whole batch.
-    match pg::get_org(&client, &org).await {
-        Ok(Some(o)) if o.state == "active" => {}
+    let org_row = match pg::get_org(&client, &org).await {
+        Ok(Some(o)) if o.state == "active" => o,
         Ok(Some(o)) => {
             return detail_err(
                 StatusCode::CONFLICT,
@@ -3506,7 +3638,7 @@ async fn bulk_resolve_reviews(
         }
         Ok(None) => return detail_err(StatusCode::NOT_FOUND, format!("no org '{org}'")),
         Err(e) => return pg_err(e),
-    }
+    };
     let mut action_ids = Vec::new();
     for item in &body.items {
         let action = json!({
@@ -3514,7 +3646,7 @@ async fn bulk_resolve_reviews(
             "review_id": item.review_id,
             "resolution": item.resolution,
         });
-        match pg::stage_action(&client, &org, &action, &principal.actor).await {
+        match pg::stage_action(&client, &org_row.id, &action, &principal.actor).await {
             Ok(id) => action_ids.push(id),
             Err(e) => return pg_err(e),
         }
@@ -3529,11 +3661,11 @@ async fn bulk_resolve_reviews(
     .await;
     let mut resp = json!({ "status": "staged", "action_ids": action_ids });
     if body.apply_now {
-        let idem = format!("bulk-resolve-apply:{}", ulid::Ulid::new());
+        let idem = format!("bulk-resolve-apply:{}", er_ids::new_v7());
         let params = json!({ "skip_ingest": true });
         match pg::enqueue(
             &client,
-            &org,
+            &org_row.id,
             "apply_corrections",
             0,
             Some(&idem),
@@ -3541,7 +3673,7 @@ async fn bulk_resolve_reviews(
         )
         .await
         {
-            Ok(job) => resp["apply_job"] = json!(job.job_id),
+            Ok(job) => resp["apply_job"] = json!(job.id),
             Err(e) => return pg_err(e),
         }
     }
@@ -3618,8 +3750,8 @@ async fn mass_update(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    match pg::get_org(&client, &org).await {
-        Ok(Some(o)) if o.state == "active" => {}
+    let org_row = match pg::get_org(&client, &org).await {
+        Ok(Some(o)) if o.state == "active" => o,
         Ok(Some(o)) => {
             return detail_err(
                 StatusCode::CONFLICT,
@@ -3631,7 +3763,7 @@ async fn mass_update(
         }
         Ok(None) => return detail_err(StatusCode::NOT_FOUND, format!("no org '{org}'")),
         Err(e) => return pg_err(e),
-    }
+    };
     let mut action_ids = Vec::new();
     for item in &body.items {
         let action = if item.clear {
@@ -3648,7 +3780,7 @@ async fn mass_update(
                 "value": item.value,
             })
         };
-        match pg::stage_action(&client, &org, &action, &principal.actor).await {
+        match pg::stage_action(&client, &org_row.id, &action, &principal.actor).await {
             Ok(id) => action_ids.push(id),
             Err(e) => return pg_err(e),
         }
@@ -3663,11 +3795,11 @@ async fn mass_update(
     .await;
     let mut resp = json!({ "status": "staged", "action_ids": action_ids });
     if body.apply_now {
-        let idem = format!("mass-update-apply:{}", ulid::Ulid::new());
+        let idem = format!("mass-update-apply:{}", er_ids::new_v7());
         let params = json!({ "skip_ingest": true });
         match pg::enqueue(
             &client,
-            &org,
+            &org_row.id,
             "apply_corrections",
             0,
             Some(&idem),
@@ -3675,7 +3807,7 @@ async fn mass_update(
         )
         .await
         {
-            Ok(job) => resp["apply_job"] = json!(job.job_id),
+            Ok(job) => resp["apply_job"] = json!(job.id),
             Err(e) => return pg_err(e),
         }
     }
@@ -3717,7 +3849,11 @@ async fn create_key(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    match pg::issue_key(&client, &org, role.as_str()).await {
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    match pg::issue_key(&client, &org_row.id, role.as_str()).await {
         Ok((key_id, key)) => {
             let _ = pg::audit(
                 &client,
@@ -3729,7 +3865,7 @@ async fn create_key(
             .await;
             (
                 StatusCode::CREATED,
-                Json(json!({ "key_id": key_id, "key": key, "role": role.as_str() })),
+                Json(json!({ "id": key_id, "key": key, "role": role.as_str() })),
             )
                 .into_response()
         }
@@ -3758,7 +3894,11 @@ async fn revoke_key(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    match pg::revoke_key(&client, &key_id, &org).await {
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    match pg::revoke_key(&client, &key_id, &org_row.id).await {
         Ok(revoked) => {
             let _ = pg::audit(
                 &client,

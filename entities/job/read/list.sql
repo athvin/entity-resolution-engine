@@ -1,6 +1,6 @@
 SELECT
-  job_id,
-  org,
+  id,
+  org_id,
   kind,
   params,
   state,
@@ -22,7 +22,7 @@ FROM public.jobs
 -- The `::text` casts let Postgres infer the optional-filter params' type (an
 -- `$x IS NULL` use alone is ambiguous to its planner; DuckDB infers it, Postgres
 -- does not). Casts are planned by DataFusion unchanged.
-WHERE ($org::text IS NULL OR org = $org)
+WHERE ($org_id::text IS NULL OR org_id = $org_id)
   AND ($state::text IS NULL OR state = $state)
-ORDER BY job_id DESC
+ORDER BY id DESC
 LIMIT $limit

@@ -367,15 +367,15 @@ mod tests {
         let job = catalog.by_name("job").expect("job entity");
         let ddl = emit_postgres_ddl(job).expect("renders Postgres DDL");
         assert!(ddl.contains("CREATE TABLE IF NOT EXISTS public.jobs ("));
-        assert!(ddl.contains("org text NOT NULL REFERENCES orgs(name)"));
+        assert!(ddl.contains("org_id text NOT NULL REFERENCES orgs(id)"));
         assert!(ddl.contains("params jsonb NOT NULL DEFAULT '{}'::jsonb"));
         // The five 32-bit columns are widened to bigint (the vocabulary has no i32).
         assert!(ddl.contains("priority bigint NOT NULL DEFAULT 0"));
         assert!(ddl.contains("attempt bigint NOT NULL DEFAULT 0"));
         assert!(ddl.contains("max_attempts bigint NOT NULL DEFAULT 3"));
-        assert!(ddl.contains("PRIMARY KEY (job_id)"));
+        assert!(ddl.contains("PRIMARY KEY (id)"));
         assert!(ddl.contains(
-            "CREATE UNIQUE INDEX IF NOT EXISTS jobs_idempotency ON public.jobs (org, idempotency_key) WHERE idempotency_key IS NOT NULL;"
+            "CREATE UNIQUE INDEX IF NOT EXISTS jobs_idempotency ON public.jobs (org_id, idempotency_key) WHERE idempotency_key IS NOT NULL;"
         ));
     }
 
