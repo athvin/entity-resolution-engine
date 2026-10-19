@@ -12,7 +12,7 @@ columns:
   - name: id
     type: varchar
     nullable: false
-    description: "Persistent entity id (ULID); the survivorship key."
+    description: "Persistent entity id (deterministic UUIDv7, minted by reconcile); the survivorship key."
   - name: company_name
     type: varchar
     description: "Surviving company name."

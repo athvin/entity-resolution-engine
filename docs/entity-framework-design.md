@@ -67,7 +67,7 @@ columns:
   - name: entity_id
     type: varchar
     nullable: false
-    description: "Persistent entity id (ULID)."
+    description: "Persistent entity id (deterministic UUIDv7)."
   - name: given_name
     type: varchar
     description: "Surviving given name."

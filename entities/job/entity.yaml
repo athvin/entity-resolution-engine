@@ -12,7 +12,7 @@ columns:
   - name: id
     type: varchar
     nullable: false
-    description: "The job's unique id (ULID)."
+    description: "The job's unique id (UUIDv7, minted at enqueue)."
   - name: org_id
     type: varchar
     nullable: false

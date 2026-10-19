@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 /// One resolved person: the surviving value per attribute, at a snapshot.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
 pub struct GoldenRecord {
-    /// Persistent entity id (ULID); the survivorship key.
+    /// Persistent entity id (deterministic UUIDv7, minted by reconcile); the survivorship key.
     pub id: String,
     /// Surviving given name.
     pub given_name: Option<String>,

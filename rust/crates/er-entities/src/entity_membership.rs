@@ -14,7 +14,7 @@ pub struct EntityMembership {
     pub source_record_id: String,
     /// The standardized record key.
     pub record_key: String,
-    /// The resolved entity (ULID).
+    /// The resolved entity's id (deterministic UUIDv7).
     pub entity_id: String,
     /// When this membership was assigned.
     pub assigned_at: ::chrono::DateTime<::chrono::Utc>,

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 /// One open question for a steward (S4.4.3): a gray-band pair, an unsatisfiable never, or a coherence flag, with its resolution.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
 pub struct Review {
-    /// The review item id (ULID).
+    /// Content-derived review id: sha256('review_queue:' || rec_a_key || ':' || rec_b_key || ':' || reason).
     pub id: String,
     /// What the review is about: a record pair or an entity.
     pub subject_type: String,
@@ -14,7 +14,7 @@ pub struct Review {
     pub rec_a_key: Option<String>,
     /// The pair's higher record key (canonical order).
     pub rec_b_key: Option<String>,
-    /// The resolved entity (ULID).
+    /// The subject entity's id (UUIDv7) for entity-scoped reviews; NULL on pair reviews.
     pub entity_id: Option<String>,
     /// Why it needs review: gray_band, never_unsatisfiable or coherence.
     pub reason: String,

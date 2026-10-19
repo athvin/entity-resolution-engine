@@ -6,13 +6,13 @@ use serde::{Deserialize, Serialize};
 /// One lifecycle event on an entity (S4.5.5): created/merged/split/retired and membership changes, with the run that caused it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
 pub struct EntityEvent {
-    /// The event id (ULID).
+    /// Content-derived event id: sha256('entity_events:' || run_id || ':' || seq).
     pub id: String,
     /// Dense per-run ordering of the entity's events.
     pub seq: i64,
     /// The run that wrote this row.
     pub run_id: String,
-    /// The resolved entity (ULID).
+    /// The resolved entity's id (deterministic UUIDv7).
     pub entity_id: String,
     /// The lifecycle event type.
     pub event_type: String,

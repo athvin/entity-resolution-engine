@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 /// One steward assertion (S4.4.1): an always/never constraint on a record pair, retractable but never deleted.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
 pub struct Assertion {
-    /// The assertion id (ULID).
+    /// The assertion id (the staged steward action's UUIDv7).
     pub id: String,
     /// The pair's lower record key (canonical order).
     pub rec_a_key: String,

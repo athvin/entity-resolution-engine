@@ -12,7 +12,7 @@ columns:
   - name: id
     type: varchar
     nullable: false
-    description: "The review item id (ULID)."
+    description: "Content-derived review id: sha256('review_queue:' || rec_a_key || ':' || rec_b_key || ':' || reason)."
   - name: subject_type
     type: varchar
     nullable: false
@@ -25,7 +25,7 @@ columns:
     description: "The pair's higher record key (canonical order)."
   - name: entity_id
     type: varchar
-    description: "The resolved entity (ULID)."
+    description: "The subject entity's id (UUIDv7) for entity-scoped reviews; NULL on pair reviews."
   - name: reason
     type: varchar
     nullable: false

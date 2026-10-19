@@ -137,7 +137,7 @@
           },
           "id": {
             "type": "string",
-            "description": "Persistent entity id (ULID); the survivorship key."
+            "description": "Persistent entity id (deterministic UUIDv7, minted by reconcile); the survivorship key."
           },
           "metadata": {
             "description": "Surviving opaque per-source metadata object."
@@ -486,7 +486,7 @@
           },
           "id": {
             "type": "string",
-            "description": "Persistent entity id (ULID); the survivorship key."
+            "description": "Persistent entity id (deterministic UUIDv7, minted by reconcile); the survivorship key."
           },
           "metadata": {
             "description": "Surviving opaque per-source metadata object."
@@ -552,7 +552,7 @@
           },
           "id": {
             "type": "string",
-            "description": "The job's unique id (ULID)."
+            "description": "The job's unique id (UUIDv7, minted at enqueue)."
           },
           "idempotency_key": {
             "type": [

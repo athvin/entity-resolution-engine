@@ -70,7 +70,7 @@ people. Per the locked decision, we keep this deliberately basic:
   `erk_` key or the operator token.
 - **Attribution** — the BFF forwards the acting user into audit context so `audit_log.actor`,
   `assertions.created_by`, and `review_queue.resolved_by` can finally answer "who merged
-  this" with a person, not a key ULID. This is a small backend change (an actor override the
+  this" with a person, not a raw key id. This is a small backend change (an actor override the
   operator/BFF is allowed to assert) and is on the gap list (§7).
 
 Password reset and MFA remain consciously deferred. SSO no longer is — §2.4 specifies it —

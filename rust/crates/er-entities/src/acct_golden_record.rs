@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 /// One resolved account/organization: the surviving value per attribute, at a snapshot.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
 pub struct AcctGoldenRecord {
-    /// Persistent entity id (ULID); the survivorship key.
+    /// Persistent entity id (deterministic UUIDv7, minted by reconcile); the survivorship key.
     pub id: String,
     /// Surviving company name.
     pub company_name: Option<String>,

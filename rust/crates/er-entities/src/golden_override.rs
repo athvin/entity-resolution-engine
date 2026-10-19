@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 pub struct GoldenOverride {
     /// Content-derived row id: sha256('golden_overrides:' || entity_id || ':' || attribute).
     pub id: String,
-    /// The resolved entity (ULID).
+    /// The overridden entity's id (deterministic UUIDv7).
     pub entity_id: String,
     /// The golden attribute the override pins.
     pub attribute: String,

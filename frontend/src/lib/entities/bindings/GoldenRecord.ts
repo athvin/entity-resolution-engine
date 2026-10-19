@@ -3,7 +3,7 @@
 
 /** One resolved person: the surviving value per attribute, at a snapshot. */
 export interface GoldenRecord {
-  /** Persistent entity id (ULID); the survivorship key. */
+  /** Persistent entity id (deterministic UUIDv7, minted by reconcile); the survivorship key. */
   id: string;
   /** Surviving given name. */
   given_name: string | null;

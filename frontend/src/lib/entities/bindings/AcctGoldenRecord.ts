@@ -3,7 +3,7 @@
 
 /** One resolved account/organization: the surviving value per attribute, at a snapshot. */
 export interface AcctGoldenRecord {
-  /** Persistent entity id (ULID); the survivorship key. */
+  /** Persistent entity id (deterministic UUIDv7, minted by reconcile); the survivorship key. */
   id: string;
   /** Surviving company name. */
   company_name: string | null;
