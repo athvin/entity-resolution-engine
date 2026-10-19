@@ -96,43 +96,44 @@ is structurally impossible rather than a per-query concern.
 
 ## Try the complete pipeline
 
-With Docker and Docker Compose available, run from the repository root:
+The engine is a single Rust binary over a DuckLake directory — no services to
+stand up. From the repository root:
 
 ```sh
-bash scripts/ci/profile.sh --case smoke
+cargo build -p er-cli --bin er
+mkdir -p artifacts/demo
+rust/target/debug/er \
+  --catalog artifacts/demo/meta.ducklake --data-path artifacts/demo/data \
+  --config configs/test.yaml \
+  run-all \
+  --drop fixtures/static/base_10/base \
+  --lexicon rust/crates/er-cli/tests/fixtures/nickname_variants.csv \
+  --model fixtures/static/model_test_v1.json \
+  --tf fixtures/static/model_test_v1.tf.csv \
+  --model-version v0001 --tf-snapshot-id tf0001 --run-id demo-run-1
 ```
 
-This builds the image, generates 1,000 source records, and runs ingestion, cleaning,
-training, deduplication, reconciliation and golden record assembly, followed by a
-50-record incremental delivery. It validates the outputs and removes its temporary
-Compose stack. The command prints the report directory under `artifacts/profile/`.
-
-The processing container uses two CPUs and 6 GiB of memory; allow additional memory
-for PostgreSQL and the object store, and at least 4 GiB of free disk for the smoke
-run. To keep a development lake and inspect its golden records, follow the
-[runbook](docs/runbook.md#development-lake). To stand up the full dev stack
-(control plane + UI + a lake) in one command, see `make run`.
+This ingests the committed three-source fixture delivery, standardizes, scores
+with the committed frozen model, reconciles entities and assembles golden
+records — then `… doctor` prints the health report (latest run, per-relation
+row counts). The lake is just the `artifacts/demo` directory; delete it to
+start over. The [runbook](docs/runbook.md) covers training, incremental
+deliveries, corrections and maintenance; `make dev-up` stands up the full dev
+cloud stack (control plane + UI + per-developer lakes).
 
 Training is explicit: `er run-all` runs ingest → standardize → match → reconcile →
 assemble using an existing model. It does not train a model automatically.
 
-## Performance benchmark
+## Performance
 
-**One million records is the standard performance workload.** Run the complete
-initial load, including training and golden-record assembly, with:
-
-```sh
-make benchmark
-```
-
-This uses `configs/default.yaml`, the baseline generator profile and seed 42, and
-reports total time, per-stage durations, CPU/memory use, and match quality. The
-current medians are **91.70s** for the 1M reload and **39.48s** for a 100K
-incremental on the documented local envelope; a 10M reload is ~1h46m. The tuning
-history, evidence-linked backlog, and rejected experiments are consolidated in the
-[performance record](docs/performance.md), with the profiling campaign and native
-query traces described in the [profiling guide](docs/profiling.md) and the
-[analysis skill](.agents/skills/ducklake-performance/SKILL.md).
+The Rust engine (`dedupe-core`) replaced the Python/Splink pipeline
+bit-identically and runs the 1M-record workload faster on a flat memory
+profile (~53% less at 8 threads than the Splink 5 baseline); DuckDB's thread
+count is the main scaling lever. The retired Python stack's tuning record —
+its 1M/10M medians, evidence-linked backlog and rejected experiments — is
+preserved as history in the [performance record](docs/performance.md) and the
+[profiling guide](docs/profiling.md), with the DuckLake analysis methodology in
+the [analysis skill](.agents/skills/ducklake-performance/SKILL.md).
 
 ## Documentation
 

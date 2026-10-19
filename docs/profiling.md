@@ -1,5 +1,11 @@
 # Profiling the complete pipeline
 
+> **Historical record.** This documents the retired Python/Splink pipeline and
+> its Compose-based harness (`docker/compose.yaml`, `scripts/ci/*.sh`), which no
+> longer exist in the tree. It is preserved for its measurements and findings;
+> the live engine is the Rust workspace under `rust/` (see the
+> [README](../README.md#performance)).
+
 *Engine layer — single-tenant pipeline profiling.*
 
 For a controlled baseline/candidate performance comparison, see

@@ -26,26 +26,26 @@ flowchart LR
 | Stage | Work | Main outputs |
 |---|---|---|
 | Ingest | Map source columns, detect changed content and append versions | `raw_records`, `ingest_batches` |
-| Standardize | Normalize values, select current records and generate blocking keys | `int_std_records`, `int_blocking_keys` |
-| Train | Fit Splink parameters and freeze term-frequency lookups | `model_registry`, `tf_lookup`, model JSON in S3 |
+| Standardize | Normalize values and select current record versions | `int_std_records` |
+| Train | Fit the match model (Splink-compatible Fellegi–Sunter) and freeze term frequencies | model JSON + TF snapshot CSV artifacts |
 | Match | Score candidates with a selected model and queue uncertain pairs | `match_scores`, `review_queue` |
 | Reconcile | Apply assertions, cluster records and preserve entity identity | `entities`, `entity_membership`, `entity_events` |
 | Assemble | Select winning values and record their source | `golden_records`, `golden_lineage` |
 
-DuckLake stores data in S3-compatible storage and metadata in PostgreSQL. DuckDB
-executes SQL the engine generates for staging, standardization, blocking and
-golden assembly; the engine orchestrates ingestion, model lifecycle,
-reconciliation and operational writes.
-File scans, hashing, score classification, affected-set discovery, overlap planning
-and membership updates execute as SQL in DuckDB. Only documented compatibility,
-ID-generation, serialization and graph operations process rows in Python; see
-[Python processing exceptions](python-processing-exceptions.md).
+DuckLake stores data in S3-compatible storage (a plain directory in local
+development) and metadata in PostgreSQL or a catalog file. DuckDB executes the
+SQL the engine generates for staging, standardization, blocking, scoring and
+golden assembly; the Rust engine orchestrates ingestion, the model lifecycle,
+reconciliation and every operational write — id minting (`er-ids`), content
+hashing (`er-hash`) and graph clustering (`er-reconcile`) run in Rust.
 Logical keys are enforced by writers and tests because DuckLake does not enforce
 primary-key or unique constraints.
 
 The [specification's data model](../DesignDoc.md#s5) is the normative table
-inventory — DDL, ownership and logical keys; the `REGISTRY` in
-[src/er/lake/model.py](../src/er/lake/model.py) is the code authority.
+inventory; in code, the registry in
+[rust/crates/er-schema/src/model.rs](../rust/crates/er-schema/src/model.rs) and
+the entity catalog under [entities/](../entities/) are the authorities (the
+generated [ERD](erd.md) draws all of it).
 
 ## Identity and golden records
 
@@ -80,9 +80,10 @@ across transitive connections, not just the directly scored pair.
 ## Execution boundaries
 
 A PostgreSQL advisory lock permits one writer per tenant. Native DuckDB connections
-are reused within a command and closed between stages. `runs` and `run_stages`
-record configuration fingerprints, status, counters and snapshot ranges. Failed
-chains can resume from their first unfinished stage with the original configuration.
+are reused within a command and closed between stages. `runs` records each run's
+configuration fingerprints, status and snapshot range. A failed job is resumed
+through the control plane (`resume` re-queues it); runs are deterministic over
+their pinned inputs, so a resumed run reproduces, never approximates.
 
 The engine itself has no serving API or built-in scheduler; the control plane in
 [server/](backend-design.md) provides both, driving the engine per run —
