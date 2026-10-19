@@ -173,7 +173,7 @@ export function CampaignsContent({ org }: { org: string }) {
                 <>
                   Preview (snapshot {preview.data?.snapshot}):{" "}
                   {preview.data?.items
-                    .map((item) => displayName(item, entityType) || item.entity_id)
+                    .map((item) => displayName(item, entityType) || item.id)
                     .join(" · ") || "no matches"}
                   {preview.data?.next_cursor ? " · …more" : ""}
                 </>

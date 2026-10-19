@@ -22,7 +22,7 @@ function goldenRecord(index) {
   const given = GIVEN[index % GIVEN.length];
   const family = FAMILY[Math.floor(index / GIVEN.length) % FAMILY.length];
   return {
-    entity_id: id,
+    id,
     given_name: given,
     family_name: family,
     email: `${given.toLowerCase()}.${family.toLowerCase()}${String(index)}@example.test`,
@@ -36,6 +36,8 @@ function goldenRecord(index) {
     birth_date: "1970-01-01",
     survivorship_version: 1,
     assembled_at: "2026-09-24T06:01:00Z",
+    created_at: "2026-09-24T06:01:00Z",
+    updated_at: "2026-09-24T06:01:00Z",
   };
 }
 
@@ -57,7 +59,7 @@ function accountGoldenRecord(index) {
   const company = COMPANIES[index % COMPANIES.length];
   const slug = company.toLowerCase().replaceAll(/[^a-z0-9]+/g, "");
   return {
-    entity_id: id,
+    id,
     company_name: company,
     domain: `${slug}.example`,
     phone_e164: `+1415555${String(2000 + index)}`,
@@ -67,6 +69,8 @@ function accountGoldenRecord(index) {
     addr_postal: "94103",
     survivorship_version: 1,
     assembled_at: "2026-09-24T06:01:00Z",
+    created_at: "2026-09-24T06:01:00Z",
+    updated_at: "2026-09-24T06:01:00Z",
   };
 }
 
@@ -777,7 +781,7 @@ function isAccountOrg(org) {
 
 function entityDetail(org, entityId) {
   const rows = state.golden[org] ?? [];
-  const golden = rows.find((row) => row.entity_id === entityId);
+  const golden = rows.find((row) => row.id === entityId);
   if (!golden) return null;
   const index = rows.indexOf(golden);
   const multi = index % 3 === 0; // every third entity has two source records
@@ -1203,14 +1207,14 @@ const server = http.createServer((req, res) => {
         try {
           const decoded = decodeCursor(cursor);
           snapshot = decoded.s;
-          filtered = filtered.filter((row) => row.entity_id > decoded.k);
+          filtered = filtered.filter((row) => row.id > decoded.k);
         } catch {
           return send(res, 422, { detail: "invalid cursor" });
         }
       }
       const items = filtered.slice(0, limit);
       const next_cursor =
-        filtered.length > limit ? encodeCursor(snapshot, items[items.length - 1].entity_id) : null;
+        filtered.length > limit ? encodeCursor(snapshot, items[items.length - 1].id) : null;
       // The data lane is binary Arrow IPC (like the real er-server). Pick the
       // projection from the org's rows: account rows carry company_name, person
       // rows do not; an empty lake defaults to the person projection.
@@ -1461,7 +1465,7 @@ const server = http.createServer((req, res) => {
       const account = isAccountOrg(match[1]);
       return send(res, 200, {
         items: rows.slice(0, Number(url.searchParams.get("limit") ?? 50)).map((row, index) => ({
-          entity_id: row.entity_id,
+          entity_id: row.id,
           member_count: 2,
           members: account
             ? [`crm:C-${String(5000 + index * 3)}`, `vendors:V-${String(7000 + index * 3)}`]
@@ -1497,7 +1501,7 @@ const server = http.createServer((req, res) => {
           `webforms:W-${String(7000 + index * 3)}`,
         ];
         return {
-          entity_id: row.entity_id,
+          entity_id: row.id,
           master_key: policy === "most_recent" ? members[1] : members[0],
           member_count: members.length,
           member_records: members,

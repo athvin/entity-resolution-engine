@@ -4,7 +4,7 @@
 /** One resolved account/organization: the surviving value per attribute, at a snapshot. */
 export interface AcctGoldenRecord {
   /** Persistent entity id (ULID); the survivorship key. */
-  entity_id: string;
+  id: string;
   /** Surviving company name. */
   company_name: string | null;
   /** Surviving web domain. */
@@ -25,4 +25,8 @@ export interface AcctGoldenRecord {
   survivorship_version: string;
   /** Assembly time of this row (volatile). */
   assembled_at: string;
+  /** Run-logical creation time (the assembling run's clock; the mart is rebuilt whole). */
+  created_at: string;
+  /** Run-logical last-write time (equals created_at; the mart is rebuilt whole). */
+  updated_at: string;
 }

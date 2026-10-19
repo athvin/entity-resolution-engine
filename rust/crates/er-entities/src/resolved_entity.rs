@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 /// One resolved entity (S4.4): its lifecycle status and, for merge losers, the surviving entity it merged into.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
 pub struct ResolvedEntity {
-    /// The resolved entity (ULID).
-    pub entity_id: String,
+    /// The resolved entity's id (UUIDv7, minted deterministically by reconcile).
+    pub id: String,
     /// The entity's lifecycle status.
     pub status: String,
     /// The surviving entity for a merge loser; NULL otherwise.
@@ -24,7 +24,7 @@ pub struct ResolvedEntity {
 
 impl ResolvedEntity {
     /// The logical key columns.
-    pub const KEY: &'static [&'static str] = &["entity_id"];
+    pub const KEY: &'static [&'static str] = &["id"];
     /// The entity schema version; bumped only on a breaking change.
     pub const VERSION: u64 = 1;
     /// The relation (table) name.
@@ -36,7 +36,7 @@ impl ResolvedEntity {
     #[must_use]
     pub fn columns() -> &'static [&'static str] {
         &[
-            "entity_id",
+            "id",
             "status",
             "merged_into",
             "created_at",
@@ -102,12 +102,12 @@ pub mod update {
         run_id: &str,
     ) -> ::duckdb::Result<usize> {
         const SQL: &str = "MERGE INTO lake.main.entities AS target USING __ent_src AS source
-  ON target.entity_id = source.entity_id
+  ON target.id = source.entity_id
 WHEN MATCHED THEN UPDATE SET status = source.status,
     merged_into = source.merged_into, updated_at = $1::timestamp,
     updated_run_id = $2
 WHEN NOT MATCHED THEN INSERT
-    (entity_id, status, merged_into, created_at, updated_at, created_run_id, updated_run_id)
+    (id, status, merged_into, created_at, updated_at, created_run_id, updated_run_id)
     VALUES (source.entity_id, source.status, source.merged_into,
             $1::timestamp, $1::timestamp, $2, $2)
 ";

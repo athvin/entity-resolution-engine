@@ -55,7 +55,7 @@ export async function fetchGoldenIdsMatching(
     const page = await fetchGoldenPage(`/api/orgs/${org}/golden-records?${params.toString()}`);
     for (const item of page.items) {
       if (ids.length >= MASS_UPDATE_CAP) return { ids, capped: true };
-      ids.push(item.entity_id);
+      ids.push(item.id);
     }
     onProgress?.(ids.length);
     cursor = page.next_cursor;

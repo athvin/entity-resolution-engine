@@ -224,7 +224,7 @@ test.describe("campaigns", () => {
     const chunks: Buffer[] = [];
     for await (const chunk of stream) chunks.push(chunk as Buffer);
     const csv = Buffer.concat(chunks).toString("utf8");
-    expect(csv.split("\n")[0]).toContain("entity_id,given_name,family_name,email");
+    expect(csv.split("\n")[0]).toContain("id,given_name,family_name,email");
   });
 
   test("viewers can export but not create or delete", async ({ page }) => {

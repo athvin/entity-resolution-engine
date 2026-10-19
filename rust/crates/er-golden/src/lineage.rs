@@ -154,7 +154,7 @@ pub fn golden_lineage_sql(
     select m.entity_id, r.*
     from {std_table} as r
     join {membership_table} as m on m.record_key = r.record_key
-    join {entities_table} as e on e.entity_id = m.entity_id and e.status = 'active'
+    join {entities_table} as e on e.id = m.entity_id and e.status = 'active'
 ),
 member_rows as (
     select
@@ -267,7 +267,7 @@ pub fn acct_golden_lineage_sql(
     select m.entity_id, r.*
     from {std_table} as r
     join {membership_table} as m on m.record_key = r.record_key
-    join {entities_table} as e on e.entity_id = m.entity_id and e.status = 'active'
+    join {entities_table} as e on e.id = m.entity_id and e.status = 'active'
 ),
 member_rows as (
     select

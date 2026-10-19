@@ -25,7 +25,7 @@ use er_config::Config;
 use er_ingest::landing::{land_base_delivery, land_full_refresh};
 use std::collections::BTreeMap;
 
-use er_ids::{CountingIdFactory, IdFactory};
+use er_ids::{CountingIdFactory, DeterministicV7Factory, IdFactory};
 use er_match::{build_frozen_tf_tables, load_model};
 use er_reconcile::assertions::{Assertion, AssertionKind};
 use er_reconcile::cluster::label_propagate;
@@ -967,11 +967,12 @@ pub fn run_reconcile(session: &Session, config: &Config, run_id: &str, run_at: &
         .first()
         .and_then(|r| r.n)
         .unwrap_or(0);
-    let plan = reconcile_plan(
-        &p_old,
-        &p_new,
-        &CountingIdFactory::new(minted.max(0) as u128),
-    );
+    // Entity ids are deterministic UUIDv7s: the run's logical clock + a mint
+    // counter continuing past every entity ever minted — rerun-reproducible,
+    // collision-free across runs (a later run mints under a later clock).
+    let ids = DeterministicV7Factory::from_lake_timestamp(run_at, minted.max(0) as u64)
+        .map_err(|e| anyhow::anyhow!("reconcile run_at: {e}"))?;
+    let plan = reconcile_plan(&p_old, &p_new, &ids);
 
     if !plan.assignments.is_empty() {
         let rows: Vec<String> = plan
@@ -1081,6 +1082,7 @@ pub fn run_golden(session: &Session, config: &Config, run_at: &str) -> Result<()
             ACCT_INT_STD_RECORDS,
             ENTITY_MEMBERSHIP,
             ENTITIES,
+            run_at,
         );
         session.execute_batch(&format!(
             "create table {ACCT_GOLDEN_RECORDS} as\n{records_sql}"
@@ -1104,6 +1106,7 @@ pub fn run_golden(session: &Session, config: &Config, run_at: &str) -> Result<()
         INT_STD_RECORDS,
         ENTITY_MEMBERSHIP,
         ENTITIES,
+        run_at,
     );
     session.execute_batch(&format!("create table {GOLDEN_RECORDS} as\n{records_sql}"))?;
 
@@ -1132,7 +1135,7 @@ pub fn run_golden(session: &Session, config: &Config, run_at: &str) -> Result<()
             ov::override_addr_region,
             ov::override_addr_postal,
         ] {
-            apply(conn)?;
+            apply(conn, run_at)?;
         }
     }
     Ok(())

@@ -3,16 +3,15 @@ version: 1
 name: resolved_entity
 relation: entities
 description: "One resolved entity (S4.4): its lifecycle status and, for merge losers, the surviving entity it merged into."
-key: [entity_id]
-identity: legacy
+key: [id]
 generate:
   stores: [duckdb]
   languages: [rust]
 columns:
-  - name: entity_id
+  - name: id
     type: varchar
     nullable: false
-    description: "The resolved entity (ULID)."
+    description: "The resolved entity's id (UUIDv7, minted deterministically by reconcile)."
   - name: status
     type: varchar
     nullable: false

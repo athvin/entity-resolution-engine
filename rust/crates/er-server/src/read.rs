@@ -455,7 +455,7 @@ pub fn duplicates(
                     .map_err(|e| e.to_string())?;
             for r in rows {
                 previews.insert(
-                    r.entity_id,
+                    r.id,
                     vec![
                         r.given_name.map_or(Value::Null, Value::from),
                         r.family_name.map_or(Value::Null, Value::from),
@@ -471,7 +471,7 @@ pub fn duplicates(
             .map_err(|e| e.to_string())?;
             for r in rows {
                 previews.insert(
-                    r.entity_id,
+                    r.id,
                     vec![
                         r.company_name.map_or(Value::Null, Value::from),
                         r.domain.map_or(Value::Null, Value::from),

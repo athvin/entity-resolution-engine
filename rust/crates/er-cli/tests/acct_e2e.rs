@@ -128,7 +128,7 @@ fn acct_run_all_clusters_accounts_and_assembles_golden() {
     let golden: Vec<(String, String)> = session
         .query_strings(
             "select coalesce(company_name, ''), coalesce(domain, '') \
-             from lake.main.acct_golden_records order by entity_id",
+             from lake.main.acct_golden_records order by id",
         )
         .unwrap()
         .into_iter()

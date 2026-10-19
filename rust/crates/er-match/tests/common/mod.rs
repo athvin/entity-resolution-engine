@@ -476,7 +476,7 @@ pub fn resolve_base_10(session: &Session) -> (Config, ReconcilePlan) {
 }
 
 /// Materialize `entity_membership(record_key, entity_id)` and
-/// `entities(entity_id, status)` from a reconcile plan, so the golden stage's SQL
+/// `entities(id, status)` from a reconcile plan, so the golden stage's SQL
 /// can join them exactly as it joins the lake relations.
 pub fn materialize_entities(session: &Session, plan: &ReconcilePlan) {
     let membership: Vec<String> = plan
@@ -511,7 +511,7 @@ pub fn materialize_entities(session: &Session, plan: &ReconcilePlan) {
         .collect();
     session
         .execute_batch(&format!(
-            "create table entities as select * from (values {}) as t(entity_id, status)",
+            "create table entities as select * from (values {}) as t(id, status)",
             entities.join(", ")
         ))
         .unwrap();

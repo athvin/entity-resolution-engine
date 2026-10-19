@@ -57,14 +57,14 @@ mod tests {
     #[test]
     fn probe_baseline_select() {
         assert_eq!(
-            plan("SELECT entity_id, given_name FROM lake.main.golden_records"),
+            plan("SELECT id, given_name FROM lake.main.golden_records"),
             Ok(2)
         );
     }
 
     #[test]
     fn probe_full_projection() {
-        let sql = "SELECT entity_id, given_name, family_name, email, phone_e164, addr_number, \
+        let sql = "SELECT id, given_name, family_name, email, phone_e164, addr_number, \
                    addr_street, addr_unit, addr_city, addr_region, addr_postal, birth_date, \
                    metadata, survivorship_version, assembled_at \
                    FROM lake.main.golden_records";
@@ -73,16 +73,16 @@ mod tests {
 
     #[test]
     fn probe_keyset_and_limit_with_placeholders() {
-        let sql = "SELECT entity_id FROM lake.main.golden_records \
-                   WHERE ($after IS NULL OR entity_id > $after) \
-                   ORDER BY entity_id LIMIT $limit";
+        let sql = "SELECT id FROM lake.main.golden_records \
+                   WHERE ($after IS NULL OR id > $after) \
+                   ORDER BY id LIMIT $limit";
         let r = plan(sql);
         assert!(r.is_ok(), "keyset+limit did not plan: {r:?}");
     }
 
     #[test]
     fn probe_concat_coalesce_ilike() {
-        let sql = "SELECT entity_id FROM lake.main.golden_records \
+        let sql = "SELECT id FROM lake.main.golden_records \
                    WHERE ($q IS NULL OR (coalesce(given_name, '') || ' ' || coalesce(family_name, '') \
                    || ' ' || coalesce(email, '')) ILIKE $q ESCAPE '\\')";
         let r = plan(sql);
@@ -93,8 +93,8 @@ mod tests {
     fn at_version_plans_after_rewrite() {
         // sqlparser 0.59 cannot parse `AT (VERSION => ..)`, so the lake rewrite
         // strips it textually before planning. The `plan` helper applies it.
-        let sql = "SELECT entity_id, given_name FROM lake.main.golden_records AT (VERSION => $snapshot) \
-                   WHERE ($after IS NULL OR entity_id > $after) ORDER BY entity_id LIMIT $limit";
+        let sql = "SELECT id, given_name FROM lake.main.golden_records AT (VERSION => $snapshot) \
+                   WHERE ($after IS NULL OR id > $after) ORDER BY id LIMIT $limit";
         let r = plan(sql);
         assert_eq!(r, Ok(2), "full lake read did not plan after rewrite: {r:?}");
     }

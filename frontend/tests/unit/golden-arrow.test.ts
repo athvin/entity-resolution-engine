@@ -13,7 +13,7 @@ import { encodeAccountGolden, encodePersonGolden } from "../mock-erserver/arrow.
 describe("golden-records Arrow round-trip (mock encoder ↔ generated reader)", () => {
   const person = [
     {
-      entity_id: "01jm0e000000",
+      id: "01jm0e000000",
       given_name: "Ada",
       family_name: "Lovelace",
       email: "ada@example.test",
@@ -27,9 +27,11 @@ describe("golden-records Arrow round-trip (mock encoder ↔ generated reader)", 
       birth_date: "1970-01-01",
       survivorship_version: 1,
       assembled_at: "2026-09-24T06:01:00Z",
+      created_at: "2026-09-24T06:01:00Z",
+      updated_at: "2026-09-24T06:01:00Z",
     },
     {
-      entity_id: "01jm0e000001",
+      id: "01jm0e000001",
       given_name: "Grace",
       family_name: "Hopper",
       email: "grace@example.test",
@@ -43,6 +45,8 @@ describe("golden-records Arrow round-trip (mock encoder ↔ generated reader)", 
       birth_date: "1906-12-09",
       survivorship_version: 1,
       assembled_at: "2026-09-24T06:01:00Z",
+      created_at: "2026-09-24T06:01:00Z",
+      updated_at: "2026-09-24T06:01:00Z",
     },
   ];
 
@@ -51,7 +55,7 @@ describe("golden-records Arrow round-trip (mock encoder ↔ generated reader)", 
     expect(table.schema.metadata.get("er.relation")).toBe("golden_records");
     const rows = readGoldenRecord(table);
     expect(rows).toHaveLength(2);
-    expect(rows[0]?.entity_id).toBe("01jm0e000000");
+    expect(rows[0]?.id).toBe("01jm0e000000");
     expect(rows[0]?.given_name).toBe("Ada");
     expect(rows[0]?.email).toBe("ada@example.test");
     expect(rows[0]?.addr_unit).toBeNull();
@@ -67,7 +71,7 @@ describe("golden-records Arrow round-trip (mock encoder ↔ generated reader)", 
   it("decodes an account page through readAcctGoldenRecord", () => {
     const account = [
       {
-        entity_id: "01jm0a000000",
+        id: "01jm0a000000",
         company_name: "Acme Inc.",
         domain: "acme.example",
         phone_e164: "+14155552000",
@@ -77,6 +81,8 @@ describe("golden-records Arrow round-trip (mock encoder ↔ generated reader)", 
         addr_postal: "94103",
         survivorship_version: 1,
         assembled_at: "2026-09-24T06:01:00Z",
+        created_at: "2026-09-24T06:01:00Z",
+        updated_at: "2026-09-24T06:01:00Z",
       },
     ];
     const table = tableFromIPC(encodeAccountGolden(account));

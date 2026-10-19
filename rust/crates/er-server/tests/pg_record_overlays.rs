@@ -39,7 +39,7 @@ async fn golden_entity_ids(app: &axum::Router) -> Vec<String> {
             .unwrap()
             .map(Result::unwrap)
     {
-        let idx = batch.schema().index_of("entity_id").unwrap();
+        let idx = batch.schema().index_of("id").unwrap();
         let col = batch
             .column(idx)
             .as_any()

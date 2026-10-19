@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
 pub struct AcctGoldenRecord {
     /// Persistent entity id (ULID); the survivorship key.
-    pub entity_id: String,
+    pub id: String,
     /// Surviving company name.
     pub company_name: Option<String>,
     /// Surviving web domain.
@@ -28,11 +28,15 @@ pub struct AcctGoldenRecord {
     pub survivorship_version: String,
     /// Assembly time of this row (volatile).
     pub assembled_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Run-logical creation time (the assembling run's clock; the mart is rebuilt whole).
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Run-logical last-write time (equals created_at; the mart is rebuilt whole).
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
 }
 
 impl AcctGoldenRecord {
     /// The logical key columns.
-    pub const KEY: &'static [&'static str] = &["entity_id"];
+    pub const KEY: &'static [&'static str] = &["id"];
     /// The entity schema version; bumped only on a breaking change.
     pub const VERSION: u64 = 1;
     /// The relation (table) name.
@@ -44,7 +48,7 @@ impl AcctGoldenRecord {
     #[must_use]
     pub fn columns() -> &'static [&'static str] {
         &[
-            "entity_id",
+            "id",
             "company_name",
             "domain",
             "phone_e164",
@@ -55,6 +59,8 @@ impl AcctGoldenRecord {
             "metadata",
             "survivorship_version",
             "assembled_at",
+            "created_at",
+            "updated_at",
         ]
     }
 
@@ -64,7 +70,7 @@ impl AcctGoldenRecord {
     pub fn arrow_schema() -> ::arrow::datatypes::Schema {
         use ::arrow::datatypes::{DataType, Field, Schema, TimeUnit};
         let fields: Vec<Field> = vec![
-            Field::new("entity_id", DataType::Utf8, false),
+            Field::new("id", DataType::Utf8, false),
             Field::new("company_name", DataType::Utf8, true),
             Field::new("domain", DataType::Utf8, true),
             Field::new("phone_e164", DataType::Utf8, true),
@@ -81,9 +87,19 @@ impl AcctGoldenRecord {
                 DataType::Timestamp(TimeUnit::Microsecond, None),
                 false,
             ),
+            Field::new(
+                "created_at",
+                DataType::Timestamp(TimeUnit::Microsecond, None),
+                false,
+            ),
+            Field::new(
+                "updated_at",
+                DataType::Timestamp(TimeUnit::Microsecond, None),
+                false,
+            ),
         ];
         let metadata = ::std::collections::HashMap::from([
-            ("er.key".to_string(), "entity_id".to_string()),
+            ("er.key".to_string(), "id".to_string()),
             ("er.store".to_string(), "lake.main".to_string()),
             ("er.relation".to_string(), "acct_golden_records".to_string()),
             ("er.schema_version".to_string(), "1".to_string()),
@@ -97,7 +113,7 @@ pub mod read {
     /// One row of `by_id`: One account golden record by id at a pinned snapshot, without the volatile assembled_at (the detail surface).
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
     pub struct ByIdRow {
-        pub entity_id: String,
+        pub id: String,
         pub company_name: Option<String>,
         pub domain: Option<String>,
         pub phone_e164: Option<String>,
@@ -114,7 +130,7 @@ pub mod read {
         #[must_use]
         pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
             vec![
-                ("entity_id", ::arrow::datatypes::DataType::Utf8),
+                ("id", ::arrow::datatypes::DataType::Utf8),
                 ("company_name", ::arrow::datatypes::DataType::Utf8),
                 ("domain", ::arrow::datatypes::DataType::Utf8),
                 ("phone_e164", ::arrow::datatypes::DataType::Utf8),
@@ -136,7 +152,7 @@ pub mod read {
             let mut out = Vec::new();
             for batch in batches {
                 crate::batch::check_columns(batch, &expected)?;
-                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "entity_id")?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "id")?;
                 let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "company_name")?;
                 let c2: &::arrow::array::StringArray = crate::batch::col(batch, 2, "domain")?;
                 let c3: &::arrow::array::StringArray = crate::batch::col(batch, 3, "phone_e164")?;
@@ -149,7 +165,7 @@ pub mod read {
                     crate::batch::col(batch, 9, "survivorship_version")?;
                 for i in 0..batch.num_rows() {
                     out.push(Self {
-                        entity_id: crate::batch::req(crate::batch::opt_str(c0, i), "entity_id", i)?,
+                        id: crate::batch::req(crate::batch::opt_str(c0, i), "id", i)?,
                         company_name: crate::batch::opt_str(c1, i),
                         domain: crate::batch::opt_str(c2, i),
                         phone_e164: crate::batch::opt_str(c3, i),
@@ -176,11 +192,11 @@ pub mod read {
         snapshot: i64,
         entity_id: &str,
     ) -> ::duckdb::Result<Vec<ByIdRow>> {
-        const SQL: &str = "SELECT entity_id, company_name, domain, phone_e164,
+        const SQL: &str = "SELECT id, company_name, domain, phone_e164,
        addr_street, addr_city, addr_region, addr_postal,
        metadata, survivorship_version
 FROM lake.main.acct_golden_records AT (VERSION => {snapshot})
-WHERE entity_id = $1
+WHERE id = $1
 ";
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
         let mut stmt = conn.prepare(&sql)?;
@@ -199,7 +215,7 @@ WHERE entity_id = $1
         limit: i64,
     ) -> ::duckdb::Result<Vec<::arrow::record_batch::RecordBatch>> {
         const SQL: &str = "SELECT
-  entity_id,
+  id,
   company_name,
   domain,
   phone_e164,
@@ -209,14 +225,16 @@ WHERE entity_id = $1
   addr_postal,
   metadata,
   survivorship_version,
-  assembled_at
+  assembled_at,
+  created_at,
+  updated_at
 FROM lake.main.acct_golden_records AT (VERSION => {snapshot})
-WHERE ($1 IS NULL OR entity_id > $1)
+WHERE ($1 IS NULL OR id > $1)
   AND (
     $2 IS NULL
     OR (coalesce(company_name, '') || ' ' || coalesce(domain, '')) ILIKE $2 ESCAPE '\\'
   )
-ORDER BY entity_id
+ORDER BY id
 LIMIT $3
 ";
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
@@ -230,7 +248,7 @@ LIMIT $3
     /// One row of `preview_in_range`: The account golden preview columns of every entity in an id range at a pinned snapshot (the duplicates page preview).
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
     pub struct PreviewInRangeRow {
-        pub entity_id: String,
+        pub id: String,
         pub company_name: Option<String>,
         pub domain: Option<String>,
     }
@@ -240,7 +258,7 @@ LIMIT $3
         #[must_use]
         pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
             vec![
-                ("entity_id", ::arrow::datatypes::DataType::Utf8),
+                ("id", ::arrow::datatypes::DataType::Utf8),
                 ("company_name", ::arrow::datatypes::DataType::Utf8),
                 ("domain", ::arrow::datatypes::DataType::Utf8),
             ]
@@ -255,12 +273,12 @@ LIMIT $3
             let mut out = Vec::new();
             for batch in batches {
                 crate::batch::check_columns(batch, &expected)?;
-                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "entity_id")?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "id")?;
                 let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "company_name")?;
                 let c2: &::arrow::array::StringArray = crate::batch::col(batch, 2, "domain")?;
                 for i in 0..batch.num_rows() {
                     out.push(Self {
-                        entity_id: crate::batch::req(crate::batch::opt_str(c0, i), "entity_id", i)?,
+                        id: crate::batch::req(crate::batch::opt_str(c0, i), "id", i)?,
                         company_name: crate::batch::opt_str(c1, i),
                         domain: crate::batch::opt_str(c2, i),
                     });
@@ -277,9 +295,9 @@ LIMIT $3
         first: &str,
         last: &str,
     ) -> ::duckdb::Result<Vec<PreviewInRangeRow>> {
-        const SQL: &str = "SELECT entity_id, company_name, domain
+        const SQL: &str = "SELECT id, company_name, domain
 FROM lake.main.acct_golden_records AT (VERSION => {snapshot})
-WHERE entity_id >= $1 AND entity_id <= $2
+WHERE id >= $1 AND id <= $2
 ";
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
         let mut stmt = conn.prepare(&sql)?;

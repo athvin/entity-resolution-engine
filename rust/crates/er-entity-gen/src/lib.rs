@@ -436,7 +436,7 @@ mod tests {
     fn golden_record_lake_ddl_renders() {
         let ddl = emit_lake_ddl(&golden()).expect("renders DDL");
         assert!(ddl.starts_with("CREATE TABLE IF NOT EXISTS lake.main.golden_records ("));
-        assert!(ddl.contains("  entity_id VARCHAR NOT NULL"));
+        assert!(ddl.contains("  id VARCHAR NOT NULL"));
         assert!(ddl.contains("  given_name VARCHAR,"));
         assert!(ddl.contains("  birth_date DATE,"));
         assert!(ddl.contains("  metadata JSON,"));
@@ -448,11 +448,11 @@ mod tests {
     fn rust_module_has_struct_and_arrow_schema() {
         let module = emit_rust_module(&golden());
         assert!(module.contains("pub struct GoldenRecord {"));
-        assert!(module.contains("pub entity_id: String,"));
+        assert!(module.contains("pub id: String,"));
         assert!(module.contains("pub given_name: Option<String>,"));
         assert!(module.contains("pub birth_date: Option<::chrono::NaiveDate>,"));
         assert!(module.contains("pub assembled_at: ::chrono::DateTime<::chrono::Utc>,"));
-        assert!(module.contains("pub const KEY: &'static [&'static str] = &[\"entity_id\"];"));
+        assert!(module.contains("pub const KEY: &'static [&'static str] = &[\"id\"];"));
         assert!(module.contains("pub fn arrow_schema() -> ::arrow::datatypes::Schema {"));
         assert!(module.contains(
             "Field::new(\"assembled_at\", DataType::Timestamp(TimeUnit::Microsecond, None), false)"
@@ -464,7 +464,7 @@ mod tests {
     fn ts_binding_maps_the_type_vocabulary() {
         let binding = emit_ts_binding(&golden());
         assert!(binding.contains("export interface GoldenRecord {"));
-        assert!(binding.contains("  entity_id: string;"));
+        assert!(binding.contains("  id: string;"));
         assert!(binding.contains("  given_name: string | null;"));
         assert!(binding.contains("  birth_date: string | null;"));
         assert!(binding.contains("  metadata: unknown;"));
@@ -476,7 +476,7 @@ mod tests {
         let reader = emit_ts_reader(&golden());
         assert!(reader.contains("export function readGoldenRecord(table: Table): GoldenRecord[]"));
         assert!(reader.contains("const EXPECTED_VERSION = \"1\";"));
-        assert!(reader.contains("\"entity_id\""));
+        assert!(reader.contains("\"given_name\""));
         assert!(reader.contains("readTimestamp"));
     }
 

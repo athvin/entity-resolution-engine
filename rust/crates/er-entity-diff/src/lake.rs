@@ -81,7 +81,7 @@ mod tests {
         conn.execute_batch(&ddl).unwrap();
 
         let live = read_lake_columns(&conn, &["golden_records".to_string()]).unwrap();
-        assert_eq!(live.get("golden_records").map(Vec::len), Some(15));
+        assert_eq!(live.get("golden_records").map(Vec::len), Some(17));
         assert_eq!(diff_store(&catalog, Store::Duckdb, &live), Vec::new());
     }
 }

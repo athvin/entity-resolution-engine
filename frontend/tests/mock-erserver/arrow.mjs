@@ -16,7 +16,7 @@ import {
 
 // [columnName, kind] in entity (arrow_schema) order. kind ∈ utf8 | date | timestamp.
 const PERSON_COLUMNS = [
-  ["entity_id", "utf8"],
+  ["id", "utf8"],
   ["given_name", "utf8"],
   ["family_name", "utf8"],
   ["email", "utf8"],
@@ -31,10 +31,12 @@ const PERSON_COLUMNS = [
   ["metadata", "utf8"],
   ["survivorship_version", "utf8"],
   ["assembled_at", "timestamp"],
+  ["created_at", "timestamp"],
+  ["updated_at", "timestamp"],
 ];
 
 const ACCOUNT_COLUMNS = [
-  ["entity_id", "utf8"],
+  ["id", "utf8"],
   ["company_name", "utf8"],
   ["domain", "utf8"],
   ["phone_e164", "utf8"],
@@ -45,6 +47,8 @@ const ACCOUNT_COLUMNS = [
   ["metadata", "utf8"],
   ["survivorship_version", "utf8"],
   ["assembled_at", "timestamp"],
+  ["created_at", "timestamp"],
+  ["updated_at", "timestamp"],
 ];
 
 function columnVector(rows, name, kind) {
@@ -76,7 +80,7 @@ function encode(rows, columns, relation) {
       ["er.relation", relation],
       ["er.schema_version", "1"],
       ["er.store", "lake.main"],
-      ["er.key", "entity_id"],
+      ["er.key", "id"],
     ]),
   );
   // Carry the metadata-bearing schema; reuse the built batch when there are rows,

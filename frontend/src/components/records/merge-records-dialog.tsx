@@ -68,9 +68,9 @@ export function MergeRecordsDialog({
     () =>
       (search.data?.pages ?? [])
         .flatMap((page) => page.items)
-        .filter((row) => row.entity_id !== source.golden.entity_id)
+        .filter((row) => row.id !== source.golden.id)
         .slice(0, 8),
-    [search.data, source.golden.entity_id],
+    [search.data, source.golden.id],
   );
 
   if (!open) return null;
@@ -118,7 +118,7 @@ export function MergeRecordsDialog({
       >
         <h2 id={headingId} className="flex items-center gap-2 text-base font-semibold">
           <GitMerge className="size-4" /> Merge{" "}
-          {displayName(source.golden, entityType) || source.golden.entity_id} with…
+          {displayName(source.golden, entityType) || source.golden.id} with…
         </h2>
 
         {targetId === null ? (
@@ -148,15 +148,15 @@ export function MergeRecordsDialog({
                 ) : (
                   candidates.map((row: GoldenRecord) => (
                     <button
-                      key={row.entity_id}
+                      key={row.id}
                       onClick={() => {
-                        setTargetId(row.entity_id);
+                        setTargetId(row.id);
                       }}
                       className="hover:bg-accent flex w-full items-center gap-2 border-b px-3 py-2 text-left text-sm last:border-0"
-                      data-testid={`merge-candidate-${row.entity_id}`}
+                      data-testid={`merge-candidate-${row.id}`}
                     >
                       <span className="min-w-0 flex-1 truncate">
-                        {displayName(row, entityType) || row.entity_id}
+                        {displayName(row, entityType) || row.id}
                       </span>
                       <span className="text-muted-foreground truncate text-xs">
                         {row.email ?? ""}

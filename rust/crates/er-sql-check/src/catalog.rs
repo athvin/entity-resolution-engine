@@ -81,8 +81,8 @@ mod tests {
         let rel = cat
             .get("lake.main.golden_records")
             .expect("keyed by store-qualified name");
-        assert_eq!(rel.columns.len(), 15);
-        let entity_id = rel.find_column("entity_id").expect("has entity_id");
+        assert_eq!(rel.columns.len(), 17);
+        let entity_id = rel.find_column("id").expect("has id");
         assert_eq!(entity_id.nullability, Nullability::NotNull);
         assert!(matches!(
             entity_id.sql_type,

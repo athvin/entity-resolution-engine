@@ -92,7 +92,7 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
           <h1 className="text-xl font-semibold lg:text-2xl" data-testid="entity-name">
             {name}
           </h1>
-          <span className="text-muted-foreground font-mono text-xs">{golden.entity_id}</span>
+          <span className="text-muted-foreground font-mono text-xs">{golden.id}</span>
           {members.length > 1 && (
             <span className="bg-secondary text-secondary-foreground inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs">
               <GitMerge className="size-3" />

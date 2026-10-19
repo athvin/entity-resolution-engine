@@ -149,7 +149,7 @@ fn account_golden_read_serves_acct_projection() {
 
     // Detail: resolve one entity_id from the Arrow page, assert the Account golden
     // + lineage (from acct_golden_lineage) come back.
-    let entity_id = string_values(&page.batches, "entity_id")
+    let entity_id = string_values(&page.batches, "id")
         .into_iter()
         .next()
         .expect("an entity_id in the account page");

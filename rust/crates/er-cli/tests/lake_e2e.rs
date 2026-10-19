@@ -552,7 +552,7 @@ fn combined_list_survivorship_synthesizes_golden_value_through_ducklake() {
 
     let got = session
         .query_strings(&format!(
-            "select email from {gr} where entity_id = '{entity}'",
+            "select email from {gr} where id = '{entity}'",
             gr = er_cli::GOLDEN_RECORDS,
         ))
         .unwrap();

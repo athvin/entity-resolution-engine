@@ -431,6 +431,36 @@ fn implied_edges(specs: &[TableSpec]) -> Vec<(String, String, Vec<String>)> {
         }
     }
 
+    // Convention edges: a child column named `<singular(target)>_id` references
+    // the universally-id-keyed target (the FK naming convention) — the id-keyed
+    // relations the natural-key matching above can no longer reach (their bare
+    // `["id"]` key names nothing). Drawn with an explicit `x_id → id` label.
+    for target in specs {
+        if !target
+            .keys
+            .iter()
+            .any(|k| k.r#where.is_none() && k.columns == ["id"])
+        {
+            continue;
+        }
+        let fk_name = format!("{}_id", er_entity_spec::singular(&target.name));
+        for child in specs {
+            if child.name == target.name
+                || !child.columns.iter().any(|c| c.name == fk_name)
+                || edges
+                    .iter()
+                    .any(|(c, p, _)| c == &child.name && p == &target.name)
+            {
+                continue;
+            }
+            edges.push((
+                child.name.clone(),
+                target.name.clone(),
+                vec![format!("{fk_name} → id")],
+            ));
+        }
+    }
+
     // A mutual match across owners is one derived → source edge (stage child, ddl
     // parent); within one owner the pair is two parallel same-grain relations,
     // not a reference, and both directions are dropped.
@@ -484,8 +514,10 @@ mod tests {
         }
         // Implied edges are dotted and resolve entity_id to the DDL-owned
         // `entities`, never a golden mart.
-        assert!(erd.contains("    entity_membership }o..|| entities : \"entity_id\""));
-        assert!(erd.contains("    golden_records }o..|| entities : \"entity_id\""));
+        assert!(erd.contains("    entity_membership }o..|| entities : \"entity_id → id\""));
+        // golden_records carries no entity_id column anymore — its OWN id IS the
+        // entity id — so no edge; the lineage FK edge survives via the convention.
+        assert!(erd.contains("    golden_lineage }o..|| entities : \"entity_id → id\""));
         assert!(erd.contains("    run_stages }o..|| runs : \"run_id\""));
         // The standardized records reference their raw source rows.
         assert!(

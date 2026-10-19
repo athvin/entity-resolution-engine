@@ -2,6 +2,7 @@ kind: statement
 operation: update
 mode: partial
 description: "Apply the steward email overrides over the assembled golden rows (NULL value = the steward cleared the field); zero overrides match zero rows, so the determinism contract holds."
-params: []
+params:
+  - { name: updated_at, type: varchar }
 reads: [golden_override]
 returns: none

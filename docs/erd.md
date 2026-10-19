@@ -294,7 +294,7 @@ erDiagram
         timestamp updated_at
     }
     entities {
-        varchar entity_id PK
+        varchar id PK
         varchar status "in {active, merged, retired}"
         varchar merged_into
         timestamp created_at
@@ -466,7 +466,7 @@ erDiagram
         timestamp updated_at
     }
     golden_records {
-        varchar entity_id PK
+        varchar id PK
         varchar given_name
         varchar family_name
         varchar email
@@ -481,6 +481,8 @@ erDiagram
         json metadata
         varchar survivorship_version
         timestamp assembled_at
+        timestamp created_at
+        timestamp updated_at
     }
     golden_lineage {
         varchar id PK
@@ -520,7 +522,7 @@ erDiagram
         timestamp updated_at
     }
     acct_golden_records {
-        varchar entity_id PK
+        varchar id PK
         varchar company_name
         varchar domain
         varchar phone_e164
@@ -531,6 +533,8 @@ erDiagram
         json metadata
         varchar survivorship_version
         timestamp assembled_at
+        timestamp created_at
+        timestamp updated_at
     }
     acct_golden_lineage {
         varchar id PK
@@ -547,34 +551,32 @@ erDiagram
     raw_records }o..|| ingest_batches : "ingest_batch_id"
     raw_records }o..|| entity_membership : "source_system, source_record_id"
     match_scores }o..|| runs : "run_id"
-    entity_membership }o..|| entities : "entity_id"
     entity_membership }o..|| runs : "run_id"
-    entity_events }o..|| entities : "entity_id"
     entity_events }o..|| runs : "run_id"
     entity_events }o..|| run_stages : "run_id, seq"
-    review_queue }o..|| entities : "entity_id"
     cut_edges }o..|| assertions : "assertion_id"
     cut_edges }o..|| match_scores : "rec_a_key, rec_b_key, model_version, tf_snapshot_id"
     run_stages }o..|| runs : "run_id"
     ingest_batches }o..|| runs : "run_id"
-    golden_overrides }o..|| entities : "entity_id"
     record_overlays }o..|| int_std_records : "record_key"
     int_std_records }o..|| ingest_batches : "ingest_batch_id"
     int_std_records }o..|| entity_membership : "source_system, source_record_id"
     int_std_records }o..|| raw_records : "source_system, source_record_id, content_hash"
-    golden_records }o..|| entities : "entity_id"
-    golden_lineage }o..|| entities : "entity_id"
     golden_lineage }o..|| golden_overrides : "entity_id, attribute"
     golden_lineage }o..|| int_std_records : "record_key"
     golden_lineage }o..|| entity_membership : "source_system, source_record_id"
     acct_int_std_records }o..|| ingest_batches : "ingest_batch_id"
     acct_int_std_records }o..|| entity_membership : "source_system, source_record_id"
     acct_int_std_records }o..|| raw_records : "source_system, source_record_id, content_hash"
-    acct_golden_records }o..|| entities : "entity_id"
-    acct_golden_lineage }o..|| entities : "entity_id"
     acct_golden_lineage }o..|| golden_overrides : "entity_id, attribute"
     acct_golden_lineage }o..|| acct_int_std_records : "record_key"
     acct_golden_lineage }o..|| entity_membership : "source_system, source_record_id"
+    entity_membership }o..|| entities : "entity_id → id"
+    entity_events }o..|| entities : "entity_id → id"
+    review_queue }o..|| entities : "entity_id → id"
+    golden_overrides }o..|| entities : "entity_id → id"
+    golden_lineage }o..|| entities : "entity_id → id"
+    acct_golden_lineage }o..|| entities : "entity_id → id"
 ```
 
 | relation | owner | description |

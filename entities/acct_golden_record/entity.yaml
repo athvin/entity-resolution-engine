@@ -3,14 +3,13 @@ version: 1
 name: acct_golden_record
 relation: acct_golden_records
 description: "One resolved account/organization: the surviving value per attribute, at a snapshot."
-key: [entity_id]
-identity: legacy
+key: [id]
 generate:
   stores: [duckdb]
   languages: [rust, typescript]
   wire: [arrow, json]
 columns:
-  - name: entity_id
+  - name: id
     type: varchar
     nullable: false
     description: "Persistent entity id (ULID); the survivorship key."
@@ -47,3 +46,11 @@ columns:
     nullable: false
     volatile: true
     description: "Assembly time of this row (volatile)."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical creation time (the assembling run's clock; the mart is rebuilt whole)."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time (equals created_at; the mart is rebuilt whole)."
