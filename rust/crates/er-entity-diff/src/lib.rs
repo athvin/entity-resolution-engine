@@ -53,6 +53,21 @@ fn expected_pg_type(col: &er_entity_spec::Column) -> &'static str {
     col.col_type.postgres_type()
 }
 
+/// The Postgres relations a live read should cover for this catalog: every
+/// declared relation plus the `<relation>_history` companion of each
+/// `history: true` entity (generated DDL the differ checks for existence).
+#[must_use]
+pub fn postgres_relations(catalog: &Catalog) -> Vec<String> {
+    let mut relations = Vec::new();
+    for entity in catalog.for_store(Store::Postgres) {
+        relations.push(entity.relation.clone());
+        if entity.generate.history {
+            relations.push(format!("{}_history", entity.relation));
+        }
+    }
+    relations
+}
+
 /// Compare one store's catalog entities to the live columns read from that store.
 /// `live` maps a bare relation name to its columns in ordinal order.
 #[must_use]
@@ -74,6 +89,26 @@ pub fn diff_store(
             continue;
         };
         diff_entity(entity, store, live_cols, &qualify, &mut diffs);
+    }
+
+    // History companions are generated DDL, not entities: the differ checks
+    // existence only (shape drift is the boot replay's business, like indexes).
+    if store == Store::Postgres {
+        for entity in catalog.for_store(store) {
+            if !entity.generate.history {
+                continue;
+            }
+            let companion = format!("{}_history", entity.relation);
+            if !live.contains_key(&companion) {
+                diffs.push(DiffItem {
+                    relation: qualify(&companion),
+                    severity: Severity::Safe,
+                    message: format!(
+                        "history companion {companion} is absent; create companion + trigger"
+                    ),
+                });
+            }
+        }
     }
     diffs
 }
@@ -216,6 +251,35 @@ mod tests {
                 .message
                 .contains("priority: type integer -> bigint")
         );
+    }
+
+    #[test]
+    fn an_absent_history_companion_is_a_safe_diff() {
+        let webhook: Entity = serde_norway::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../entities/webhook/entity.yaml"
+        )))
+        .unwrap();
+        let live_cols: Vec<LiveColumn> = webhook
+            .columns
+            .iter()
+            .map(|c| LiveColumn {
+                name: c.name.clone(),
+                type_name: c.col_type.postgres_type().to_string(),
+                nullable: c.nullable,
+            })
+            .collect();
+        let catalog = Catalog::from_entities(vec![webhook]).unwrap();
+        let mut live = BTreeMap::new();
+        live.insert("webhooks".to_string(), live_cols);
+
+        let diffs = diff_store(&catalog, Store::Postgres, &live);
+        assert_eq!(diffs.len(), 1, "{diffs:?}");
+        assert_eq!(diffs[0].severity, Severity::Safe);
+        assert!(diffs[0].message.contains("webhooks_history is absent"));
+
+        live.insert("webhooks_history".to_string(), Vec::new());
+        assert_eq!(diff_store(&catalog, Store::Postgres, &live), Vec::new());
     }
 
     #[test]

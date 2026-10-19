@@ -65,6 +65,14 @@ const DDL_LOG_EVENT_TRIGGERS: &str = include_str!("../assets/pg_ddl_log.sql");
 /// always find it.
 const HISTORY_PRELUDE: &str = include_str!("../assets/pg_history.sql");
 
+/// The history-trigger prelude (`public.er_history()`), for callers that apply
+/// companion DDL outside the baseline (the differ's migrate plan). Idempotent
+/// (`CREATE OR REPLACE FUNCTION`).
+#[must_use]
+pub fn history_prelude() -> &'static str {
+    HISTORY_PRELUDE
+}
+
 /// Where each kind of artifact is written, relative to the repository root.
 const RUST_ENTITIES_DIR: &str = "rust/crates/er-entities/src";
 const LAKE_DDL_DIR: &str = "rust/crates/er-entities/ddl/lake";
@@ -308,6 +316,14 @@ pub fn emit_lake_ddl(entity: &Entity) -> Result<String, ConvertError> {
 /// Emit just the Postgres DDL for one control-plane entity.
 pub fn emit_postgres_ddl(entity: &Entity) -> Result<String, ConvertError> {
     pg_ddl::emit_postgres_ddl(entity)
+}
+
+/// Emit just the history companion + trigger for a `history: true` entity
+/// (`None` otherwise) — the differ's migrate plan applies this when the entity
+/// table exists but its companion does not.
+#[must_use]
+pub fn emit_history_companion_ddl(entity: &Entity) -> Option<String> {
+    pg_ddl::emit_history_companion_ddl(entity)
 }
 
 #[cfg(test)]
