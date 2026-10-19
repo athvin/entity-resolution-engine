@@ -230,23 +230,63 @@ fn run_check(root: &Path) -> Result<bool> {
             stale.push(file.path.display().to_string());
         }
     }
-    if stale.is_empty() {
+    let orphans = orphaned_outputs(root, &tree)?;
+    if stale.is_empty() && orphans.is_empty() {
         println!(
             "er-entity check: {} generated files are current",
             tree.files.len()
         );
         Ok(true)
     } else {
-        eprintln!(
-            "er-entity check: {} generated file(s) are stale or missing:",
-            stale.len()
-        );
-        for path in &stale {
-            eprintln!("  {path}");
+        if !stale.is_empty() {
+            eprintln!(
+                "er-entity check: {} generated file(s) are stale or missing:",
+                stale.len()
+            );
+            for path in &stale {
+                eprintln!("  {path}");
+            }
+            eprintln!("run `er-entity gen` and commit the diff.");
         }
-        eprintln!("run `er-entity gen` and commit the diff.");
+        if !orphans.is_empty() {
+            eprintln!(
+                "er-entity check: {} orphaned file(s) in generated directories \
+                 (left behind by a deleted entity/statement — remove them):",
+                orphans.len()
+            );
+            for path in &orphans {
+                eprintln!("  {path}");
+            }
+        }
         Ok(false)
     }
+}
+
+/// Files living in the generated-only destination directories that this gen run
+/// did not emit: stale leftovers from a deleted entity or statement, which
+/// `gen` never removes on its own.
+fn orphaned_outputs(root: &Path, tree: &er_entity_gen::GeneratedTree) -> Result<Vec<String>> {
+    let generated: std::collections::BTreeSet<PathBuf> =
+        tree.files.iter().map(|f| f.path.clone()).collect();
+    let mut orphans = Vec::new();
+    for dir in er_entity_gen::GENERATED_DIRS {
+        let base = root.join(dir);
+        if !base.is_dir() {
+            continue;
+        }
+        for entry in fs::read_dir(&base).with_context(|| format!("reading {}", base.display()))? {
+            let path = entry?.path();
+            if !path.is_file() {
+                continue;
+            }
+            let rel = PathBuf::from(dir).join(path.file_name().unwrap_or_default());
+            if !generated.contains(&rel) {
+                orphans.push(rel.display().to_string());
+            }
+        }
+    }
+    orphans.sort();
+    Ok(orphans)
 }
 
 /// Plan every statement and run the E0xx passes against the two-store catalog.
