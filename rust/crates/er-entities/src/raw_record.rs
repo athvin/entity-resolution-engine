@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 /// One landed delivery row (S4.1): the source record's payload as delivered, content-hashed; append-only, with full-refresh tombstones.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
 pub struct RawRecord {
+    /// Batch-salted content-derived row id: sha256('raw_records:' || source_system || ':' || source_record_id || ':' || content_hash || ':' || ingest_batch_id) — unique even when identical content re-lands in a later batch.
+    pub id: String,
     /// The delivering source system.
     pub source_system: String,
     /// The record's id in its source system.
@@ -22,11 +24,15 @@ pub struct RawRecord {
     pub ingest_batch_id: String,
     /// The delivery's logical landing timestamp.
     pub ingested_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Run-logical creation time (the delivery's landing timestamp; rows are append-only).
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Run-logical last-write time (equals created_at; rows are append-only).
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
 }
 
 impl RawRecord {
     /// The logical key columns.
-    pub const KEY: &'static [&'static str] = &["source_system", "source_record_id", "content_hash"];
+    pub const KEY: &'static [&'static str] = &["id"];
     /// The entity schema version; bumped only on a breaking change.
     pub const VERSION: u64 = 1;
     /// The relation (table) name.
@@ -38,6 +44,7 @@ impl RawRecord {
     #[must_use]
     pub fn columns() -> &'static [&'static str] {
         &[
+            "id",
             "source_system",
             "source_record_id",
             "payload",
@@ -46,6 +53,8 @@ impl RawRecord {
             "deleted_at",
             "ingest_batch_id",
             "ingested_at",
+            "created_at",
+            "updated_at",
         ]
     }
 }
@@ -54,6 +63,8 @@ impl RawRecord {
 /// with explicit casts in the generated SQL (the lake-write convention).
 #[derive(Debug, Clone, PartialEq)]
 pub struct AppendRow {
+    /// Batch-salted content-derived row id: sha256('raw_records:' || source_system || ':' || source_record_id || ':' || content_hash || ':' || ingest_batch_id) — unique even when identical content re-lands in a later batch.
+    pub id: String,
     /// The delivering source system.
     pub source_system: String,
     /// The record's id in its source system.
@@ -70,6 +81,10 @@ pub struct AppendRow {
     pub ingest_batch_id: String,
     /// The delivery's logical landing timestamp.
     pub ingested_at: String,
+    /// Run-logical creation time (the delivery's landing timestamp; rows are append-only).
+    pub created_at: String,
+    /// Run-logical last-write time (equals created_at; rows are append-only).
+    pub updated_at: String,
 }
 
 /// Append rows to `lake.main.raw_records` in bound-parameter chunks (the shape and
@@ -78,15 +93,15 @@ pub struct AppendRow {
 /// # Errors
 /// Propagates the DuckDB prepare/execute error.
 pub fn append_rows(conn: &::duckdb::Connection, rows: &[AppendRow]) -> ::duckdb::Result<usize> {
-    const COLS: usize = 8;
+    const COLS: usize = 11;
     const CHUNK: usize = 500;
     for chunk in rows.chunks(CHUNK) {
         let mut tuples = Vec::with_capacity(chunk.len());
         for i in 0..chunk.len() {
             let base = i * COLS;
             tuples.push(format!(
-                "(${p0}, ${p1}, ${p2}::json, ${p3}, ${p4}, ${p5}::timestamp, ${p6}, ${p7}::timestamp)",
-                p0 = base + 1, p1 = base + 2, p2 = base + 3, p3 = base + 4, p4 = base + 5, p5 = base + 6, p6 = base + 7, p7 = base + 8
+                "(${p0}, ${p1}, ${p2}, ${p3}::json, ${p4}, ${p5}, ${p6}::timestamp, ${p7}, ${p8}::timestamp, ${p9}::timestamp, ${p10}::timestamp)",
+                p0 = base + 1, p1 = base + 2, p2 = base + 3, p3 = base + 4, p4 = base + 5, p5 = base + 6, p6 = base + 7, p7 = base + 8, p8 = base + 9, p9 = base + 10, p10 = base + 11
             ));
         }
         let sql = format!(
@@ -95,6 +110,7 @@ pub fn append_rows(conn: &::duckdb::Connection, rows: &[AppendRow]) -> ::duckdb:
         );
         let mut params: Vec<&dyn ::duckdb::ToSql> = Vec::with_capacity(chunk.len() * COLS);
         for row in chunk {
+            params.push(&row.id);
             params.push(&row.source_system);
             params.push(&row.source_record_id);
             params.push(&row.payload);
@@ -103,6 +119,8 @@ pub fn append_rows(conn: &::duckdb::Connection, rows: &[AppendRow]) -> ::duckdb:
             params.push(&row.deleted_at);
             params.push(&row.ingest_batch_id);
             params.push(&row.ingested_at);
+            params.push(&row.created_at);
+            params.push(&row.updated_at);
         }
         conn.execute(&sql, params.as_slice())?;
     }

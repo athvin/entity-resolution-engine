@@ -95,7 +95,7 @@ fn standardized_lake(tag: &str) -> (Session, Config, PathBuf) {
         )
         .unwrap();
     }
-    er_cli::run_standardize(&session, &config).unwrap();
+    er_cli::run_standardize(&session, &config, "2026-01-01 00:00:00").unwrap();
     (session, config, tmp)
 }
 
@@ -115,7 +115,7 @@ fn resolve_phase_through_lake(
             er_cli::run_ingest(session, config, source, &csv, batch_id, ts, false).unwrap();
         }
     }
-    er_cli::run_standardize(session, config).unwrap();
+    er_cli::run_standardize(session, config, ts).unwrap();
     match_model(session);
     er_cli::run_reconcile(session, config, batch_id, ts).unwrap();
     let rows: Vec<(String, String)> = session
@@ -408,7 +408,7 @@ fn golden_through_ducklake_matches_golden() {
         "2026-01-03 00:00:00",
     )
     .unwrap();
-    er_cli::run_golden(&session, &config).unwrap();
+    er_cli::run_golden(&session, &config, "2026-01-03 00:00:00").unwrap();
 
     // golden_lineage by entity signature {attribute, record_key, rule}.
     let mut got_lineage: BTreeMap<String, BTreeSet<(String, String, String)>> = BTreeMap::new();
@@ -514,7 +514,7 @@ fn combined_list_survivorship_synthesizes_golden_value_through_ducklake() {
     let mut cfg = config.clone();
     cfg.survivorship
         .insert("email".to_string(), vec!["combined_list".to_string()]);
-    er_cli::run_golden(&session, &cfg).unwrap();
+    er_cli::run_golden(&session, &cfg, "2026-01-03 00:00:00").unwrap();
 
     // The entity with the most distinct non-empty member emails (base_10's E1 has
     // four members) — guarantees the union path is exercised.
@@ -1098,7 +1098,7 @@ fn the_lake_contains_only_declared_relations() {
         "2026-01-02 00:00:00",
     )
     .unwrap();
-    er_cli::run_golden(&session, &config).unwrap();
+    er_cli::run_golden(&session, &config, "2026-01-03 00:00:00").unwrap();
 
     let declared: BTreeSet<String> = er_schema::model::all_specs()
         .into_iter()

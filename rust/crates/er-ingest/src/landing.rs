@@ -120,6 +120,10 @@ pub fn land_base_delivery(
             .collect();
         let payload_json = serde_json::to_string(&serde_json::Value::Object(json_map))?;
         rows.push(er_entities::raw_record::AppendRow {
+            id: er_ids::natural_id(
+                "raw_records",
+                &[source, &source_record_id, &content_hash, ingest_batch_id],
+            ),
             source_system: source.to_string(),
             source_record_id,
             payload: Some(payload_json),
@@ -128,6 +132,8 @@ pub fn land_base_delivery(
             deleted_at: None,
             ingest_batch_id: ingest_batch_id.to_string(),
             ingested_at: ingested_at.to_string(),
+            created_at: ingested_at.to_string(),
+            updated_at: ingested_at.to_string(),
         });
     }
 
@@ -175,6 +181,15 @@ pub fn land_full_refresh(
         let rows: Vec<er_entities::raw_record::AppendRow> = omitted
             .into_iter()
             .map(|r| er_entities::raw_record::AppendRow {
+                id: er_ids::natural_id(
+                    "raw_records",
+                    &[
+                        source,
+                        &r.source_record_id,
+                        TOMBSTONE_CONTENT_HASH,
+                        ingest_batch_id,
+                    ],
+                ),
                 source_system: source.to_string(),
                 source_record_id: r.source_record_id,
                 payload: None,
@@ -183,6 +198,8 @@ pub fn land_full_refresh(
                 deleted_at: Some(ingested_at.to_string()),
                 ingest_batch_id: ingest_batch_id.to_string(),
                 ingested_at: ingested_at.to_string(),
+                created_at: ingested_at.to_string(),
+                updated_at: ingested_at.to_string(),
             })
             .collect();
         er_entities::raw_record::append_rows(session.connection(), &rows)

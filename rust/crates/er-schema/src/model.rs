@@ -348,6 +348,7 @@ fn ddl_specs() -> Vec<TableSpec> {
         tspec(
             "raw_records",
             vec![
+                nn("id", VARCHAR),
                 nn("source_system", VARCHAR),
                 nn("source_record_id", VARCHAR),
                 // Nullable: an S4.1.1 full-refresh tombstone row carries no payload.
@@ -357,8 +358,13 @@ fn ddl_specs() -> Vec<TableSpec> {
                 col("deleted_at", TIMESTAMP),
                 nn("ingest_batch_id", VARCHAR),
                 nn("ingested_at", TIMESTAMP),
+                nn("created_at", TIMESTAMP),
+                nn("updated_at", TIMESTAMP),
             ],
-            vec![key(&["source_system", "source_record_id", "content_hash"])],
+            vec![
+                key(&["id"]),
+                key(&["source_system", "source_record_id", "content_hash"]),
+            ],
             BTreeMap::new(),
         ),
         tspec(
@@ -710,12 +716,13 @@ fn acct_std_payload() -> Vec<Column> {
 /// `config_check`), so there is no hand-maintained duplicate to drift.
 #[must_use]
 pub fn int_std_record_columns(account: bool) -> Vec<Column> {
-    let mut cols = vec![nn("record_key", VARCHAR)];
+    let mut cols = vec![nn("id", VARCHAR), nn("record_key", VARCHAR)];
     cols.extend(if account {
         acct_std_payload()
     } else {
         std_payload()
     });
+    cols.extend([nn("created_at", TIMESTAMP), nn("updated_at", TIMESTAMP)]);
     cols
 }
 
@@ -757,8 +764,7 @@ fn stage_specs() -> Vec<TableSpec> {
         TableSpec::new(name, Owner::Stage, columns, keys, enums).expect("valid stage spec")
     };
 
-    let mut int_std_cols = vec![nn("record_key", VARCHAR)];
-    int_std_cols.extend(std_payload());
+    let int_std_cols = int_std_record_columns(false);
 
     let mut golden_cols = vec![nn("entity_id", VARCHAR)];
     golden_cols.extend(golden_survivable());
@@ -772,8 +778,7 @@ fn stage_specs() -> Vec<TableSpec> {
     // person std/golden relations, over the Account attributes. Account records
     // share the entity-agnostic DDL tables (raw_records, match_scores, entities,
     // …); only these standardized/golden projections are entity-specific.
-    let mut acct_int_std_cols = vec![nn("record_key", VARCHAR)];
-    acct_int_std_cols.extend(acct_std_payload());
+    let acct_int_std_cols = int_std_record_columns(true);
 
     let mut acct_golden_cols = vec![nn("entity_id", VARCHAR)];
     acct_golden_cols.extend(acct_golden_survivable());
@@ -787,7 +792,7 @@ fn stage_specs() -> Vec<TableSpec> {
         sspec(
             "int_std_records",
             int_std_cols,
-            vec![key(&["record_key"])],
+            vec![key(&["id"]), key(&["record_key"])],
             BTreeMap::new(),
         ),
         sspec(
@@ -799,6 +804,7 @@ fn stage_specs() -> Vec<TableSpec> {
         sspec(
             "golden_lineage",
             vec![
+                nn("id", VARCHAR),
                 nn("entity_id", VARCHAR),
                 nn("attribute", VARCHAR),
                 nn("record_key", VARCHAR),
@@ -806,9 +812,10 @@ fn stage_specs() -> Vec<TableSpec> {
                 nn("source_record_id", VARCHAR),
                 nn("rule", VARCHAR),
                 nn("survivorship_version", VARCHAR),
-                nn("assembled_at", TIMESTAMP),
+                nn("created_at", TIMESTAMP),
+                nn("updated_at", TIMESTAMP),
             ],
-            vec![key(&["entity_id", "attribute"])],
+            vec![key(&["id"]), key(&["entity_id", "attribute"])],
             enum_map(&[("attribute", GOLDEN_LINEAGE_ATTRIBUTES.as_slice())]),
         ),
         // (`golden_display`/`acct_golden_display` were retired: no producer was
@@ -819,7 +826,7 @@ fn stage_specs() -> Vec<TableSpec> {
         sspec(
             "acct_int_std_records",
             acct_int_std_cols,
-            vec![key(&["record_key"])],
+            vec![key(&["id"]), key(&["record_key"])],
             BTreeMap::new(),
         ),
         sspec(
@@ -831,6 +838,7 @@ fn stage_specs() -> Vec<TableSpec> {
         sspec(
             "acct_golden_lineage",
             vec![
+                nn("id", VARCHAR),
                 nn("entity_id", VARCHAR),
                 nn("attribute", VARCHAR),
                 nn("record_key", VARCHAR),
@@ -838,9 +846,10 @@ fn stage_specs() -> Vec<TableSpec> {
                 nn("source_record_id", VARCHAR),
                 nn("rule", VARCHAR),
                 nn("survivorship_version", VARCHAR),
-                nn("assembled_at", TIMESTAMP),
+                nn("created_at", TIMESTAMP),
+                nn("updated_at", TIMESTAMP),
             ],
-            vec![key(&["entity_id", "attribute"])],
+            vec![key(&["id"]), key(&["entity_id", "attribute"])],
             enum_map(&[(
                 "attribute",
                 ["address", "company_name", "domain", "phone_e164"].as_slice(),

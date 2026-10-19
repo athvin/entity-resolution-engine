@@ -242,14 +242,17 @@ edge with several plausible targets is omitted rather than guessed.
 ```mermaid
 erDiagram
     raw_records {
-        varchar source_system PK
-        varchar source_record_id PK
+        varchar id PK
+        varchar source_system
+        varchar source_record_id
         json payload
-        varchar content_hash PK
+        varchar content_hash
         boolean is_deleted
         timestamp deleted_at
         varchar ingest_batch_id
         timestamp ingested_at
+        timestamp created_at
+        timestamp updated_at
     }
     match_scores {
         varchar id PK
@@ -417,7 +420,8 @@ erDiagram
         timestamp updated_at
     }
     int_std_records {
-        varchar record_key PK
+        varchar id PK
+        varchar record_key
         varchar source_system
         varchar source_record_id
         varchar content_hash
@@ -440,6 +444,8 @@ erDiagram
         timestamp updated_at_source
         varchar ingest_batch_id
         timestamp ingested_at
+        timestamp created_at
+        timestamp updated_at
     }
     golden_records {
         varchar entity_id PK
@@ -459,17 +465,20 @@ erDiagram
         timestamp assembled_at
     }
     golden_lineage {
-        varchar entity_id PK
-        varchar attribute PK "in {address, birth_date, email, family_name, given_name, phone_e164}"
+        varchar id PK
+        varchar entity_id
+        varchar attribute "in {address, birth_date, email, family_name, given_name, phone_e164}"
         varchar record_key
         varchar source_system
         varchar source_record_id
         varchar rule
         varchar survivorship_version
-        timestamp assembled_at
+        timestamp created_at
+        timestamp updated_at
     }
     acct_int_std_records {
-        varchar record_key PK
+        varchar id PK
+        varchar record_key
         varchar source_system
         varchar source_record_id
         varchar content_hash
@@ -489,6 +498,8 @@ erDiagram
         timestamp updated_at_source
         varchar ingest_batch_id
         timestamp ingested_at
+        timestamp created_at
+        timestamp updated_at
     }
     acct_golden_records {
         varchar entity_id PK
@@ -504,14 +515,16 @@ erDiagram
         timestamp assembled_at
     }
     acct_golden_lineage {
-        varchar entity_id PK
-        varchar attribute PK "in {address, company_name, domain, phone_e164}"
+        varchar id PK
+        varchar entity_id
+        varchar attribute "in {address, company_name, domain, phone_e164}"
         varchar record_key
         varchar source_system
         varchar source_record_id
         varchar rule
         varchar survivorship_version
-        timestamp assembled_at
+        timestamp created_at
+        timestamp updated_at
     }
     raw_records }o..|| ingest_batches : "ingest_batch_id"
     raw_records }o..|| entity_membership : "source_system, source_record_id"

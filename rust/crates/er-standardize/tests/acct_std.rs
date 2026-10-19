@@ -24,7 +24,14 @@ fn acct_standardization_normalizes_company_domain_phone() {
         )
         .unwrap();
 
-    build_acct_int_std_records(&session, &config, "raw", "acct_int_std").unwrap();
+    build_acct_int_std_records(
+        &session,
+        &config,
+        "raw",
+        "acct_int_std",
+        "2026-01-01 00:00:00",
+    )
+    .unwrap();
 
     let rows = session
         .query_strings(

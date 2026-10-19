@@ -253,9 +253,18 @@ mod tests {
             &config,
             "lake.main.raw_records",
             "nickname_variants",
+            "2000-01-01 00:00:00",
         );
         let int_cols = plan_stage(&catalog, &int_std);
-        for required in ["record_key", "std_version", "content_hash", "birth_date"] {
+        for required in [
+            "id",
+            "record_key",
+            "std_version",
+            "content_hash",
+            "birth_date",
+            "created_at",
+            "updated_at",
+        ] {
             assert!(
                 int_cols.contains(&required.to_string()),
                 "int_std_records output missing {required}: {int_cols:?}"
@@ -273,9 +282,21 @@ mod tests {
         let config = er_config::load_config_str(ACCT_STD_CONFIG).expect("acct config parses");
         let catalog = standardize_catalog(true);
 
-        let int_std = er_standardize::acct_int_std_records_sql(&config, "lake.main.raw_records");
+        let int_std = er_standardize::acct_int_std_records_sql(
+            &config,
+            "lake.main.raw_records",
+            "2000-01-01 00:00:00",
+        );
         let cols = plan_stage(&catalog, &int_std);
-        for required in ["record_key", "company_name", "domain", "ingested_at"] {
+        for required in [
+            "id",
+            "record_key",
+            "company_name",
+            "domain",
+            "ingested_at",
+            "created_at",
+            "updated_at",
+        ] {
             assert!(
                 cols.contains(&required.to_string()),
                 "acct_int_std_records output missing {required}: {cols:?}"
@@ -363,10 +384,19 @@ mod tests {
             "lake.main.int_std_records",
             "lake.main.entity_membership",
             "lake.main.entities",
+            "2000-01-01 00:00:00",
         )
         .expect("lineage sql renders");
         let lineage_cols = plan_stage(&catalog, &lineage);
-        for required in ["entity_id", "attribute", "record_key", "rule"] {
+        for required in [
+            "id",
+            "entity_id",
+            "attribute",
+            "record_key",
+            "rule",
+            "created_at",
+            "updated_at",
+        ] {
             assert!(
                 lineage_cols.contains(&required.to_string()),
                 "golden_lineage output missing {required}: {lineage_cols:?}"
@@ -409,10 +439,19 @@ mod tests {
             "lake.main.int_std_records",
             "lake.main.entity_membership",
             "lake.main.entities",
+            "2000-01-01 00:00:00",
         )
         .expect("account lineage sql renders");
         let lineage_cols = plan_stage(&catalog, &lineage);
-        for required in ["entity_id", "attribute", "record_key", "rule"] {
+        for required in [
+            "id",
+            "entity_id",
+            "attribute",
+            "record_key",
+            "rule",
+            "created_at",
+            "updated_at",
+        ] {
             assert!(
                 lineage_cols.contains(&required.to_string()),
                 "acct_golden_lineage output missing {required}: {lineage_cols:?}"

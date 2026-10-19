@@ -1488,6 +1488,7 @@ dependencies = [
  "er-config",
  "er-entities",
  "er-hash",
+ "er-ids",
  "er-schema",
  "serde_json",
 ]

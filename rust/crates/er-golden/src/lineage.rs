@@ -84,8 +84,10 @@ pub fn golden_lineage_sql(
     std_table: &str,
     membership_table: &str,
     entities_table: &str,
+    run_at: &str,
 ) -> Result<String> {
     let version = config.versions.survivorship_version.replace('\'', "''");
+    let run_at = run_at.replace('\'', "''");
 
     let address_composite = ADDRESS_COLUMNS
         .iter()
@@ -170,13 +172,16 @@ grid as (
 {grid_block}
 )
 select
+    sha256('golden_lineage:' || g.entity_id || ':' || g.attribute) as id,
     g.entity_id,
     cast(g.attribute as VARCHAR) as attribute,
     cast(g.record_key as VARCHAR) as record_key,
     cast(r.source_system as VARCHAR) as source_system,
     cast(r.source_record_id as VARCHAR) as source_record_id,
     cast(g.rule as VARCHAR) as rule,
-    cast('{version}' as VARCHAR) as survivorship_version
+    cast('{version}' as VARCHAR) as survivorship_version,
+    cast('{run_at}' as timestamp) as created_at,
+    cast('{run_at}' as timestamp) as updated_at
 from grid as g
 join {std_table} as r on r.record_key = g.record_key"
     ))
@@ -192,8 +197,10 @@ pub fn acct_golden_lineage_sql(
     std_table: &str,
     membership_table: &str,
     entities_table: &str,
+    run_at: &str,
 ) -> Result<String> {
     let version = config.versions.survivorship_version.replace('\'', "''");
+    let run_at = run_at.replace('\'', "''");
 
     let address_composite = ACCT_ADDRESS_COLUMNS
         .iter()
@@ -278,13 +285,16 @@ grid as (
 {grid_block}
 )
 select
+    sha256('acct_golden_lineage:' || g.entity_id || ':' || g.attribute) as id,
     g.entity_id,
     cast(g.attribute as VARCHAR) as attribute,
     cast(g.record_key as VARCHAR) as record_key,
     cast(r.source_system as VARCHAR) as source_system,
     cast(r.source_record_id as VARCHAR) as source_record_id,
     cast(g.rule as VARCHAR) as rule,
-    cast('{version}' as VARCHAR) as survivorship_version
+    cast('{version}' as VARCHAR) as survivorship_version,
+    cast('{run_at}' as timestamp) as created_at,
+    cast('{run_at}' as timestamp) as updated_at
 from grid as g
 join {std_table} as r on r.record_key = g.record_key"
     ))

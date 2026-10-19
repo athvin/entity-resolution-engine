@@ -3,13 +3,17 @@ version: 1
 name: raw_record
 relation: raw_records
 description: "One landed delivery row (S4.1): the source record's payload as delivered, content-hashed; append-only, with full-refresh tombstones."
-key: [source_system, source_record_id, content_hash]
-identity: legacy
+key: [id]
+natural_key: [source_system, source_record_id, content_hash]
 generate:
   stores: [duckdb]
   languages: [rust]
   append: true
 columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "Batch-salted content-derived row id: sha256('raw_records:' || source_system || ':' || source_record_id || ':' || content_hash || ':' || ingest_batch_id) — unique even when identical content re-lands in a later batch."
   - name: source_system
     type: varchar
     nullable: false
@@ -40,3 +44,11 @@ columns:
     type: timestamp
     nullable: false
     description: "The delivery's logical landing timestamp."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical creation time (the delivery's landing timestamp; rows are append-only)."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time (equals created_at; rows are append-only)."

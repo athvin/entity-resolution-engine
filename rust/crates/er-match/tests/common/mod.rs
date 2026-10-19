@@ -126,6 +126,7 @@ pub fn rebuild_std(session: &Session, config: &Config) {
         "lake.main.raw_records",
         "nickname_variants",
         "int_std_records",
+        "2026-01-01 00:00:00",
     )
     .unwrap();
 }

@@ -132,10 +132,10 @@ fn populate_lake(catalog: &str, data_path: &str) {
                 er_cli::run_ingest(&session, &config, source, &csv, batch_id, ts, false).unwrap();
             }
         }
-        er_cli::run_standardize(&session, &config).unwrap();
+        er_cli::run_standardize(&session, &config, ts).unwrap();
         er_cli::run_match(&session, &config, &model, 0.60, run_id, ts).unwrap();
         er_cli::run_reconcile(&session, &config, run_id, ts).unwrap();
-        er_cli::run_golden(&session, &config).unwrap();
+        er_cli::run_golden(&session, &config, ts).unwrap();
         er_cli::write_run_end(&session, run_id, ts).unwrap();
     }
 }

@@ -132,17 +132,30 @@ pub fn stg_records_sql(config: &Config, raw_table: &str, lexicon: &str) -> Strin
 }
 
 /// The `int_std_records` SQL over a `stg_records` subquery: supersession (one
-/// current row per key) + tombstone exclusion + the computed `record_key`.
+/// current row per key) + tombstone exclusion + the computed `record_key`,
+/// under the identity conventions: a content-derived `id` leads
+/// (`sha256('int_std_records:' || record_key)`) and the run-logical
+/// `created_at`/`updated_at` stamps close the projection (a CTAS mart is
+/// rebuilt whole, so both carry the building run's clock).
 #[must_use]
-pub fn int_std_records_sql(config: &Config, raw_table: &str, lexicon: &str) -> String {
+pub fn int_std_records_sql(
+    config: &Config,
+    raw_table: &str,
+    lexicon: &str,
+    run_at: &str,
+) -> String {
     let payload = STD_PAYLOAD.join(", ");
     let stg = stg_records_sql(config, raw_table, lexicon);
+    let run_at = single_quote(run_at);
     format!(
         "with versions as (\n{stg}\n),\n\
          current_version as (\n  select {payload} from versions\n  \
          qualify row_number() over (partition by source_system, source_record_id \
          order by ingested_at desc, ingest_batch_id desc) = 1\n)\n\
-         select source_system || ':' || source_record_id as record_key, {payload}\n\
+         select sha256('int_std_records:' || source_system || ':' || source_record_id) as id,\n  \
+         source_system || ':' || source_record_id as record_key, {payload},\n  \
+         cast('{run_at}' as timestamp) as created_at,\n  \
+         cast('{run_at}' as timestamp) as updated_at\n\
          from current_version\nwhere content_hash <> '{TOMBSTONE_CONTENT_HASH}'"
     )
 }
@@ -155,8 +168,9 @@ pub fn build_int_std_records(
     raw_table: &str,
     lexicon: &str,
     out_table: &str,
+    run_at: &str,
 ) -> anyhow::Result<()> {
-    let sql = int_std_records_sql(config, raw_table, lexicon);
+    let sql = int_std_records_sql(config, raw_table, lexicon, run_at);
     session
         .execute_batch(&format!("create table {out_table} as\n{sql}"))
         .map_err(|e| anyhow::anyhow!("build {out_table}: {e}"))?;
@@ -245,17 +259,22 @@ pub fn acct_stg_records_sql(config: &Config, raw_table: &str) -> String {
 }
 
 /// The `acct_int_std_records` SQL: supersession + tombstone + computed record_key
-/// over the Account staging rows (mirror of [`int_std_records_sql`]).
+/// over the Account staging rows (mirror of [`int_std_records_sql`], identity
+/// conventions included: content-derived `id` first, run-logical stamps last).
 #[must_use]
-pub fn acct_int_std_records_sql(config: &Config, raw_table: &str) -> String {
+pub fn acct_int_std_records_sql(config: &Config, raw_table: &str, run_at: &str) -> String {
     let payload = ACCT_STD_PAYLOAD.join(", ");
     let stg = acct_stg_records_sql(config, raw_table);
+    let run_at = single_quote(run_at);
     format!(
         "with versions as (\n{stg}\n),\n\
          current_version as (\n  select {payload} from versions\n  \
          qualify row_number() over (partition by source_system, source_record_id \
          order by ingested_at desc, ingest_batch_id desc) = 1\n)\n\
-         select source_system || ':' || source_record_id as record_key, {payload}\n\
+         select sha256('acct_int_std_records:' || source_system || ':' || source_record_id) as id,\n  \
+         source_system || ':' || source_record_id as record_key, {payload},\n  \
+         cast('{run_at}' as timestamp) as created_at,\n  \
+         cast('{run_at}' as timestamp) as updated_at\n\
          from current_version\nwhere content_hash <> '{TOMBSTONE_CONTENT_HASH}'"
     )
 }
@@ -266,8 +285,9 @@ pub fn build_acct_int_std_records(
     config: &Config,
     raw_table: &str,
     out_table: &str,
+    run_at: &str,
 ) -> anyhow::Result<()> {
-    let sql = acct_int_std_records_sql(config, raw_table);
+    let sql = acct_int_std_records_sql(config, raw_table, run_at);
     session
         .execute_batch(&format!("create table {out_table} as\n{sql}"))
         .map_err(|e| anyhow::anyhow!("build {out_table}: {e}"))?;
