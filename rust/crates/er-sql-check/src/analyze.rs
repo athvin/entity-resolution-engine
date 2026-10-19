@@ -483,7 +483,7 @@ fn assignment_checks(
             diags.push(Diagnostic::new(
                 "E005",
                 &stmt.path,
-                format!("assigns the key column {name}; an entity's identity is never rewritten",),
+                format!("assigns the key column {name}; an entity's identity is never rewritten"),
             ));
         }
     }
