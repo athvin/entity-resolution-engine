@@ -116,6 +116,48 @@ fn check_columns_rejects_a_shape_drift() {
     );
 }
 
+/// The real CTAS-built lake names a list column's Arrow child after the source
+/// expression (`l`), not the declared `item` — `check_columns` must compare list
+/// types structurally (child data type, never its name). The e2e tier proved
+/// this against a live lake; this is the always-run unit pin.
+#[test]
+fn check_columns_ignores_the_list_child_field_name() {
+    use arrow::array::{ArrayRef, ListArray, StringArray};
+    use arrow::datatypes::{DataType, Field, Schema};
+    use std::sync::Arc;
+
+    fn list_batch(child: Field, values: ArrayRef) -> RecordBatch {
+        let offsets = arrow::buffer::OffsetBuffer::new(vec![0, 2].into());
+        let list = ListArray::new(Arc::new(child.clone()), offsets, values, None);
+        let schema = Schema::new(vec![Field::new(
+            "name_variants",
+            DataType::List(Arc::new(child)),
+            true,
+        )]);
+        RecordBatch::try_new(Arc::new(schema), vec![Arc::new(list) as ArrayRef]).expect("batch")
+    }
+
+    let expected = [(
+        "name_variants",
+        DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
+    )];
+    // DuckDB's child name (`l`) passes against the declared `item`.
+    let utf8 = list_batch(
+        Field::new("l", DataType::Utf8, true),
+        Arc::new(StringArray::from(vec!["x", "y"])),
+    );
+    batch::check_columns(&utf8, &expected).expect("child name is not part of the declared shape");
+    // A child TYPE drift is still a shape error.
+    let binary = list_batch(
+        Field::new("l", DataType::Binary, true),
+        Arc::new(arrow::array::BinaryArray::from_vec(vec![b"x", b"y"])),
+    );
+    assert!(
+        batch::check_columns(&binary, &expected).is_err(),
+        "a list child type drift must fail"
+    );
+}
+
 #[test]
 fn the_generated_member_keys_row_converts_and_serializes() {
     let conn = duckdb::Connection::open_in_memory().expect("open duckdb");

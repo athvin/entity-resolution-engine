@@ -8,7 +8,10 @@ use std::path::PathBuf;
 
 use datafusion_common::arrow::datatypes::DataType;
 use er_entity_spec::{Catalog, ColumnType, Entity, Store};
-use ff_analysis::sqlparser::ast::{Query, Select, SelectItem, SetExpr, Statement, TableFactor};
+use ff_analysis::sqlparser::ast::{
+    Assignment, AssignmentTarget, Expr, Insert, MergeAction, Query, Select, SelectItem, SetExpr,
+    Statement, TableFactor, Value,
+};
 use ff_analysis::sqlparser::dialect::{Dialect, DuckDbDialect, PostgreSqlDialect};
 use ff_analysis::sqlparser::parser::Parser;
 use ff_analysis::{FeatherFlowProvider, FunctionRegistry};
@@ -117,25 +120,14 @@ pub fn analyze_statement(
         ));
     }
 
-    // Partial mode: the visible exception DataFusion's parser cannot even read (a
-    // write with ON CONFLICT ... WHERE, FOR UPDATE SKIP LOCKED, and the like).
-    // Checked by text — the SQL's leading verb against its folder (E012), no
-    // `SELECT *` (E011), and the declared parameters cover the `$placeholders`
-    // (E002). The oracle supplies the output schema and the E004/E005 type checks.
+    // Partial mode: the visible exception DataFusion's PLANNER cannot take (a
+    // MERGE, a write with ON CONFLICT ... WHERE, FOR UPDATE SKIP LOCKED, a
+    // DuckDB-only read). The parser usually still can — so a partial statement
+    // gets the full AST passes (E004/E005/E010/E011/E012) whenever it parses,
+    // and only falls back to the text heuristics when it does not. Parameters
+    // are covered by text (E002; no plan, no inference), and the oracle supplies
+    // the output schema.
     if stmt.mode == Mode::Partial {
-        if let Some(code) = leading_verb_mismatch_text(&stmt.sql, stmt.operation) {
-            diags.push(Diagnostic::new("E012", &stmt.path, code));
-        }
-        if regex::Regex::new(r"(?i)SELECT\s+\*")
-            .unwrap()
-            .is_match(&stmt.sql)
-        {
-            diags.push(Diagnostic::new(
-                "E011",
-                &stmt.path,
-                "SELECT * is forbidden; name every column",
-            ));
-        }
         let declared: std::collections::BTreeSet<&str> =
             stmt.params.iter().map(|p| p.name.as_str()).collect();
         let placeholder = regex::Regex::new(r"\$([A-Za-z_]\w*)").unwrap();
@@ -147,6 +139,28 @@ pub fn analyze_statement(
                     &stmt.path,
                     format!("statement uses ${name} but the yaml does not declare it"),
                 ));
+            }
+        }
+        let dialect = dialect_for(store);
+        match Parser::parse_sql(dialect.as_ref(), &rewritten.sql) {
+            Ok(mut stmts) if !stmts.is_empty() => {
+                diags.extend(ast_checks(stmt, entity, &stmts.remove(0)));
+            }
+            _ => {
+                // Truly unparseable: the text heuristics hold the line.
+                if let Some(code) = leading_verb_mismatch_text(&stmt.sql, stmt.operation) {
+                    diags.push(Diagnostic::new("E012", &stmt.path, code));
+                }
+                if regex::Regex::new(r"(?i)SELECT\s+\*")
+                    .unwrap()
+                    .is_match(&stmt.sql)
+                {
+                    diags.push(Diagnostic::new(
+                        "E011",
+                        &stmt.path,
+                        "SELECT * is forbidden; name every column",
+                    ));
+                }
             }
         }
         return diags;
@@ -170,19 +184,9 @@ pub fn analyze_statement(
         }
     };
 
-    // E011 — no SELECT * anywhere.
-    if statement_has_wildcard(&parsed) {
-        diags.push(Diagnostic::new(
-            "E011",
-            &stmt.path,
-            "SELECT * is forbidden; name every column so an added column cannot change the shape",
-        ));
-    }
-
-    // E012 — the SQL's leading verb matches the folder/operation.
-    if let Some(code) = verb_mismatch(&parsed, stmt.operation) {
-        diags.push(Diagnostic::new("E012", &stmt.path, code));
-    }
+    // The AST passes: E011 (no wildcard), E012 (verb matches folder), E004
+    // (INSERT coverage/arity), E005 (assignments), E010 (accepted values).
+    diags.extend(ast_checks(stmt, entity, &parsed));
 
     // Plan, then the plan-dependent checks.
     let plan = match ff_analysis::plan_statement(parsed, provider) {
@@ -224,21 +228,45 @@ pub fn analyze_statement(
         }
     }
 
-    // E003 — the statement's output equals its declaration. For `returns: entity`
-    // that is the entity's columns, in order (type fidelity is the oracle's job).
-    // For `returns: columns` it is the declared typed list: names in order, each
+    // E003 — the statement's output equals its declaration, names in order, each
     // plan type compatible with the declared type, and a declared non-null column
-    // must be provably non-null in the plan.
+    // must be provably non-null in the plan. The declaration is the entity's
+    // column set (`returns: entity`) or the declared typed list (`returns:
+    // columns`); both get the same type/nullability proof (the oracle still holds
+    // the exact DuckDB-type line).
     match &stmt.returns {
         Returns::Entity => {
-            let actual: Vec<String> = plan
-                .schema()
-                .fields()
-                .iter()
-                .map(|f| f.name().clone())
-                .collect();
+            let fields = plan.schema().fields();
+            let actual: Vec<String> = fields.iter().map(|f| f.name().clone()).collect();
             let expected: Vec<String> = entity.columns.iter().map(|c| c.name.clone()).collect();
-            if actual != expected {
+            if actual == expected {
+                for (col, field) in entity.columns.iter().zip(fields.iter()) {
+                    if !arrow_compatible(col.col_type, field.data_type()) {
+                        diags.push(Diagnostic::new(
+                            "E003",
+                            &stmt.path,
+                            format!(
+                                "column {}: entity {} declares {} but the plan output is {:?}",
+                                col.name,
+                                entity.name,
+                                col.col_type.ducklake_type(),
+                                field.data_type()
+                            ),
+                        ));
+                    }
+                    if !col.nullable && field.is_nullable() {
+                        diags.push(Diagnostic::new(
+                            "E003",
+                            &stmt.path,
+                            format!(
+                                "column {} is NOT NULL on entity {} but the plan cannot prove it \
+                                 (an outer join or expression on its path)",
+                                col.name, entity.name
+                            ),
+                        ));
+                    }
+                }
+            } else {
                 diags.push(Diagnostic::new(
                     "E003",
                     &stmt.path,
@@ -360,6 +388,408 @@ pub fn analyze_catalog(
 
 // ── structural helpers over the sqlparser AST ──────────────────────────────
 
+/// The AST passes shared by full and (parseable) partial statements: E011 (no
+/// wildcard), E012 (verb vs folder), E004 (INSERT coverage/arity), E005
+/// (assignment legality) and E010 (accepted-values literals).
+fn ast_checks(stmt: &LoadedStatement, entity: &Entity, parsed: &Statement) -> Vec<Diagnostic> {
+    let mut diags = Vec::new();
+    if statement_has_wildcard(parsed) {
+        diags.push(Diagnostic::new(
+            "E011",
+            &stmt.path,
+            "SELECT * is forbidden; name every column so an added column cannot change the shape",
+        ));
+    }
+    if let Some(code) = verb_mismatch(parsed, stmt.operation) {
+        diags.push(Diagnostic::new("E012", &stmt.path, code));
+    }
+    match parsed {
+        Statement::Insert(insert) => {
+            diags.extend(insert_checks(stmt, entity, insert));
+        }
+        Statement::Update { assignments, .. } => {
+            diags.extend(assignment_checks(stmt, entity, assignments));
+            diags.extend(accepted_values_assignments(stmt, entity, assignments));
+        }
+        Statement::Merge { clauses, .. } => {
+            for clause in clauses {
+                match &clause.action {
+                    MergeAction::Update { assignments } => {
+                        diags.extend(assignment_checks(stmt, entity, assignments));
+                        diags.extend(accepted_values_assignments(stmt, entity, assignments));
+                    }
+                    MergeAction::Insert(insert) => {
+                        if !insert.columns.is_empty() {
+                            diags.extend(insert_coverage_checks(
+                                stmt,
+                                entity,
+                                &insert
+                                    .columns
+                                    .iter()
+                                    .map(|c| c.value.to_lowercase())
+                                    .collect::<Vec<_>>(),
+                            ));
+                        }
+                    }
+                    MergeAction::Delete => {}
+                }
+            }
+        }
+        _ => {}
+    }
+    diags.extend(accepted_values_comparisons(stmt, entity, parsed));
+    diags
+}
+
+/// The accepted-values columns of an entity, lowercased name -> allowed set.
+fn accepted_map(entity: &Entity) -> std::collections::BTreeMap<String, &Vec<String>> {
+    entity
+        .columns
+        .iter()
+        .filter_map(|c| {
+            c.accepted_values
+                .as_ref()
+                .map(|vals| (c.name.to_lowercase(), vals))
+        })
+        .collect()
+}
+
+/// E005 — every assigned column exists on the entity, and a key column is never
+/// assigned (an UPDATE/MERGE may not rewrite identity).
+fn assignment_checks(
+    stmt: &LoadedStatement,
+    entity: &Entity,
+    assignments: &[Assignment],
+) -> Vec<Diagnostic> {
+    let columns: std::collections::BTreeSet<String> = entity
+        .columns
+        .iter()
+        .map(|c| c.name.to_lowercase())
+        .collect();
+    let keys: std::collections::BTreeSet<String> =
+        entity.key.iter().map(|k| k.to_lowercase()).collect();
+    let mut diags = Vec::new();
+    for name in assignment_targets(assignments) {
+        if !columns.contains(&name) {
+            diags.push(Diagnostic::new(
+                "E005",
+                &stmt.path,
+                format!(
+                    "assigns {name}, which entity {} does not declare",
+                    entity.name
+                ),
+            ));
+        } else if keys.contains(&name) {
+            diags.push(Diagnostic::new(
+                "E005",
+                &stmt.path,
+                format!("assigns the key column {name}; an entity's identity is never rewritten",),
+            ));
+        }
+    }
+    diags
+}
+
+/// The lowercased column names an assignment list writes.
+fn assignment_targets(assignments: &[Assignment]) -> Vec<String> {
+    let mut out = Vec::new();
+    for assignment in assignments {
+        match &assignment.target {
+            AssignmentTarget::ColumnName(name) => {
+                if let Some(last) = name.0.last() {
+                    out.push(last.to_string().trim_matches('"').to_lowercase());
+                }
+            }
+            AssignmentTarget::Tuple(names) => {
+                for name in names {
+                    if let Some(last) = name.0.last() {
+                        out.push(last.to_string().trim_matches('"').to_lowercase());
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// E004 — an INSERT supplies every NOT NULL column that has no default: named
+/// columns are checked as a set; a positional insert is checked by arity
+/// against the entity's full column list.
+fn insert_checks(stmt: &LoadedStatement, entity: &Entity, insert: &Insert) -> Vec<Diagnostic> {
+    if !insert.columns.is_empty() {
+        let named: Vec<String> = insert
+            .columns
+            .iter()
+            .map(|c| c.value.to_lowercase())
+            .collect();
+        return insert_coverage_checks(stmt, entity, &named);
+    }
+    // Positional: the supplied arity must equal the entity's column count.
+    let Some(source) = &insert.source else {
+        return Vec::new();
+    };
+    let supplied = match source.body.as_ref() {
+        SetExpr::Values(values) => values.rows.first().map(Vec::len),
+        SetExpr::Select(select) => Some(select.projection.len()),
+        _ => None,
+    };
+    match supplied {
+        Some(n) if n != entity.columns.len() => vec![Diagnostic::new(
+            "E004",
+            &stmt.path,
+            format!(
+                "positional INSERT supplies {n} values but entity {} has {} columns; \
+                 name the columns or supply every one",
+                entity.name,
+                entity.columns.len()
+            ),
+        )],
+        _ => Vec::new(),
+    }
+}
+
+/// The named-columns half of E004: every named column exists, and every
+/// NOT NULL column without a default is among them.
+fn insert_coverage_checks(
+    stmt: &LoadedStatement,
+    entity: &Entity,
+    named: &[String],
+) -> Vec<Diagnostic> {
+    let mut diags = Vec::new();
+    let columns: std::collections::BTreeSet<String> = entity
+        .columns
+        .iter()
+        .map(|c| c.name.to_lowercase())
+        .collect();
+    let named_set: std::collections::BTreeSet<&str> = named.iter().map(String::as_str).collect();
+    for name in named {
+        if !columns.contains(name) {
+            diags.push(Diagnostic::new(
+                "E004",
+                &stmt.path,
+                format!(
+                    "inserts into {name}, which entity {} does not declare",
+                    entity.name
+                ),
+            ));
+        }
+    }
+    for column in &entity.columns {
+        // A serial column's value is database-supplied, like a default.
+        if !column.nullable
+            && column.default.is_none()
+            && !column.serial
+            && !named_set.contains(column.name.to_lowercase().as_str())
+        {
+            diags.push(Diagnostic::new(
+                "E004",
+                &stmt.path,
+                format!(
+                    "column {} is NOT NULL with no default but the INSERT does not supply it",
+                    column.name
+                ),
+            ));
+        }
+    }
+    diags
+}
+
+/// The E010 assignment half: a string literal assigned into an accepted-values
+/// column must be in the set.
+fn accepted_values_assignments(
+    stmt: &LoadedStatement,
+    entity: &Entity,
+    assignments: &[Assignment],
+) -> Vec<Diagnostic> {
+    let accepted = accepted_map(entity);
+    if accepted.is_empty() {
+        return Vec::new();
+    }
+    let mut diags = Vec::new();
+    for assignment in assignments {
+        let targets = assignment_targets(std::slice::from_ref(assignment));
+        let Some(name) = targets.first() else {
+            continue;
+        };
+        if let (Some(allowed), Some(literal)) =
+            (accepted.get(name), string_literal(&assignment.value))
+        {
+            if !allowed.iter().any(|v| v == &literal) {
+                diags.push(Diagnostic::new(
+                    "E010",
+                    &stmt.path,
+                    format!(
+                        "assigns '{literal}' to {name}, outside its accepted values {allowed:?}"
+                    ),
+                ));
+            }
+        }
+    }
+    diags
+}
+
+/// The E010 comparison half: walk the statement's predicates (WHERE / MERGE ON /
+/// clause predicates) for `<column> = '<literal>'` against accepted-values
+/// columns, plus positional/named INSERT VALUES rows.
+fn accepted_values_comparisons(
+    stmt: &LoadedStatement,
+    entity: &Entity,
+    parsed: &Statement,
+) -> Vec<Diagnostic> {
+    let accepted = accepted_map(entity);
+    if accepted.is_empty() {
+        return Vec::new();
+    }
+    let mut diags = Vec::new();
+    let mut check = |name: &str, literal: &str| {
+        if let Some(allowed) = accepted.get(name) {
+            if !allowed.iter().any(|v| v == literal) {
+                diags.push(Diagnostic::new(
+                    "E010",
+                    &stmt.path,
+                    format!("'{literal}' is outside {name}'s accepted values {allowed:?}"),
+                ));
+            }
+        }
+    };
+    match parsed {
+        Statement::Query(query) => comparisons_in_query(query, &mut check),
+        Statement::Update { selection, .. }
+        | Statement::Delete(ff_analysis::sqlparser::ast::Delete { selection, .. }) => {
+            if let Some(expr) = selection {
+                comparisons_in_expr(expr, &mut check);
+            }
+        }
+        Statement::Merge {
+            on,
+            clauses,
+            source,
+            ..
+        } => {
+            comparisons_in_expr(on, &mut check);
+            for clause in clauses {
+                if let Some(predicate) = &clause.predicate {
+                    comparisons_in_expr(predicate, &mut check);
+                }
+            }
+            if let TableFactor::Derived { subquery, .. } = source {
+                comparisons_in_query(subquery, &mut check);
+            }
+        }
+        Statement::Insert(insert) => {
+            // VALUES rows: zip each row against the named columns (or the
+            // entity's full list when positional).
+            let names: Vec<String> = if insert.columns.is_empty() {
+                entity
+                    .columns
+                    .iter()
+                    .map(|c| c.name.to_lowercase())
+                    .collect()
+            } else {
+                insert
+                    .columns
+                    .iter()
+                    .map(|c| c.value.to_lowercase())
+                    .collect()
+            };
+            if let Some(source) = &insert.source {
+                if let SetExpr::Values(values) = source.body.as_ref() {
+                    for row in &values.rows {
+                        for (name, expr) in names.iter().zip(row.iter()) {
+                            if let Some(literal) = string_literal(expr) {
+                                check(name, &literal);
+                            }
+                        }
+                    }
+                } else {
+                    comparisons_in_query(source, &mut check);
+                }
+            }
+        }
+        _ => {}
+    }
+    diags
+}
+
+/// Walk a query's WHERE/HAVING (top level, set-op arms and CTEs) for
+/// column-vs-literal equality comparisons.
+fn comparisons_in_query(query: &Query, check: &mut dyn FnMut(&str, &str)) {
+    if let Some(with) = &query.with {
+        for cte in &with.cte_tables {
+            comparisons_in_query(&cte.query, check);
+        }
+    }
+    comparisons_in_set_expr(&query.body, check);
+}
+
+fn comparisons_in_set_expr(body: &SetExpr, check: &mut dyn FnMut(&str, &str)) {
+    match body {
+        SetExpr::Select(select) => {
+            if let Some(selection) = &select.selection {
+                comparisons_in_expr(selection, check);
+            }
+            if let Some(having) = &select.having {
+                comparisons_in_expr(having, check);
+            }
+            for twj in &select.from {
+                if let TableFactor::Derived { subquery, .. } = &twj.relation {
+                    comparisons_in_query(subquery, check);
+                }
+            }
+        }
+        SetExpr::Query(q) => comparisons_in_query(q, check),
+        SetExpr::SetOperation { left, right, .. } => {
+            comparisons_in_set_expr(left, check);
+            comparisons_in_set_expr(right, check);
+        }
+        _ => {}
+    }
+}
+
+/// Recurse an expression for `<column> =/<> '<literal>'` (either orientation),
+/// reporting through `check`.
+fn comparisons_in_expr(expr: &Expr, check: &mut dyn FnMut(&str, &str)) {
+    use ff_analysis::sqlparser::ast::BinaryOperator;
+    if let Expr::BinaryOp { left, op, right } = expr {
+        if matches!(op, BinaryOperator::Eq | BinaryOperator::NotEq) {
+            let pair = match (column_name(left), string_literal(right)) {
+                (Some(name), Some(literal)) => Some((name, literal)),
+                _ => match (column_name(right), string_literal(left)) {
+                    (Some(name), Some(literal)) => Some((name, literal)),
+                    _ => None,
+                },
+            };
+            if let Some((name, literal)) = pair {
+                check(&name, &literal);
+            }
+        }
+        comparisons_in_expr(left, check);
+        comparisons_in_expr(right, check);
+    } else if let Expr::Nested(inner) = expr {
+        comparisons_in_expr(inner, check);
+    }
+}
+
+/// The lowercased column name of an identifier expression, if it is one.
+fn column_name(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Identifier(ident) => Some(ident.value.to_lowercase()),
+        Expr::CompoundIdentifier(parts) => parts.last().map(|i| i.value.to_lowercase()),
+        _ => None,
+    }
+}
+
+/// The string literal an expression carries, if it is one.
+fn string_literal(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Value(value) => match &value.value {
+            Value::SingleQuotedString(s) => Some(s.clone()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 /// Text-based leading-verb check for partial statements (which do not parse): the
 /// first SQL keyword must match the folder. Returns a message on mismatch.
 fn leading_verb_mismatch_text(sql: &str, op: Operation) -> Option<String> {
@@ -385,15 +815,19 @@ fn leading_verb_mismatch_text(sql: &str, op: Operation) -> Option<String> {
 }
 
 /// The leading verb does not match the folder. Returns an explanatory message
-/// when it mismatches, `None` when it is fine.
+/// when it mismatches, `None` when it is fine. Mirrors the text rule: `read`
+/// holds SELECT and COPY TO; `create` holds INSERT, COPY FROM and a MERGE that
+/// inserts; `update` holds UPDATE and a MERGE that only updates.
 fn verb_mismatch(stmt: &Statement, op: Operation) -> Option<String> {
     let ok = match op {
-        // COPY ... TO is also a read; it is a `Statement::Copy`, handled with exports.
-        Operation::Read => matches!(stmt, Statement::Query(_)),
-        Operation::Create => {
-            matches!(stmt, Statement::Insert(_))
+        Operation::Read => matches!(stmt, Statement::Query(_) | Statement::Copy { .. }),
+        Operation::Create => matches!(
+            stmt,
+            Statement::Insert(_) | Statement::Copy { .. } | Statement::Merge { .. }
+        ),
+        Operation::Update => {
+            matches!(stmt, Statement::Update { .. } | Statement::Merge { .. })
         }
-        Operation::Update => matches!(stmt, Statement::Update { .. }),
         Operation::Delete => matches!(stmt, Statement::Delete(_)),
     };
     if ok {
@@ -518,6 +952,187 @@ mod tests {
         diags.iter().map(|d| d.code).collect()
     }
 
+    /// A partial-mode write statement skeleton over golden_record, bent per test.
+    fn partial_write(op: Operation, sql: &str) -> LoadedStatement {
+        LoadedStatement {
+            entity: "golden_record".to_string(),
+            operation: op,
+            description: "test".to_string(),
+            params: vec![],
+            returns: Returns::None,
+            mode: crate::Mode::Partial,
+            reads: vec![],
+            pin: Pin::Snapshot,
+            pin_reason: String::new(),
+            sql: sql.to_string(),
+            path: PathBuf::from("entities/golden_record/update/test.sql"),
+        }
+    }
+
+    fn golden_diags(stmt: &LoadedStatement) -> Vec<Diagnostic> {
+        let cat = catalog();
+        let entity = cat.by_name("golden_record").unwrap();
+        let lake = build_store_catalog(&cat, Store::Duckdb);
+        let registry = FunctionRegistry::new();
+        let provider = FeatherFlowProvider::new(&lake, &registry);
+        analyze_statement(stmt, entity, Store::Duckdb, &provider)
+    }
+
+    #[test]
+    fn an_update_assigning_an_unknown_column_is_rejected() {
+        let stmt = partial_write(
+            Operation::Update,
+            "UPDATE lake.main.golden_records SET nickname = 'x'",
+        );
+        let diags = golden_diags(&stmt);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.code == "E005" && d.message.contains("does not declare")),
+            "expected the unknown-column E005, got {diags:#?}"
+        );
+    }
+
+    #[test]
+    fn an_update_assigning_the_key_is_rejected() {
+        let stmt = partial_write(
+            Operation::Update,
+            "UPDATE lake.main.golden_records SET entity_id = 'x'",
+        );
+        let diags = golden_diags(&stmt);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.code == "E005" && d.message.contains("key column")),
+            "expected the key-assignment E005, got {diags:#?}"
+        );
+    }
+
+    #[test]
+    fn a_merge_assigning_the_key_is_rejected() {
+        let stmt = partial_write(
+            Operation::Update,
+            "MERGE INTO lake.main.golden_records t USING (SELECT 'a' AS entity_id) s \
+             ON t.entity_id = s.entity_id \
+             WHEN MATCHED THEN UPDATE SET entity_id = s.entity_id",
+        );
+        let diags = golden_diags(&stmt);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.code == "E005" && d.message.contains("key column")),
+            "expected the MERGE key-assignment E005, got {diags:#?}"
+        );
+        // ...and the MERGE itself is a legal verb for the update folder (no E012).
+        assert!(
+            !diags.iter().any(|d| d.code == "E012"),
+            "a MERGE under update/ must pass the verb rule, got {diags:#?}"
+        );
+    }
+
+    #[test]
+    fn a_positional_insert_with_wrong_arity_is_rejected() {
+        let stmt = LoadedStatement {
+            operation: Operation::Create,
+            path: PathBuf::from("entities/golden_record/create/test.sql"),
+            ..partial_write(
+                Operation::Create,
+                "INSERT INTO lake.main.golden_records VALUES ('a', 'b')",
+            )
+        };
+        let diags = golden_diags(&stmt);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.code == "E004" && d.message.contains("positional INSERT")),
+            "expected the arity E004, got {diags:#?}"
+        );
+    }
+
+    #[test]
+    fn a_named_insert_missing_a_not_null_column_is_rejected() {
+        // golden_record: entity_id / survivorship_version / assembled_at are
+        // NOT NULL with no default; naming only entity_id must flag the others.
+        let stmt = LoadedStatement {
+            operation: Operation::Create,
+            path: PathBuf::from("entities/golden_record/create/test.sql"),
+            ..partial_write(
+                Operation::Create,
+                "INSERT INTO lake.main.golden_records (entity_id) VALUES ('a')",
+            )
+        };
+        let diags = golden_diags(&stmt);
+        assert!(
+            diags.iter().any(|d| d.code == "E004"
+                && d.message.contains("survivorship_version")
+                && d.message.contains("NOT NULL with no default")),
+            "expected the coverage E004, got {diags:#?}"
+        );
+    }
+
+    fn org_diags(stmt: &LoadedStatement) -> Vec<Diagnostic> {
+        let cat = catalog();
+        let entity = cat.by_name("org").unwrap();
+        let pg = build_store_catalog(&cat, Store::Postgres);
+        let registry = FunctionRegistry::new();
+        let provider = FeatherFlowProvider::new(&pg, &registry);
+        analyze_statement(stmt, entity, Store::Postgres, &provider)
+    }
+
+    #[test]
+    fn an_accepted_values_violation_is_rejected_in_every_context() {
+        // org.state accepts [provisioning, active, suspended, purging].
+        let mut base = partial_write(Operation::Update, "");
+        base.entity = "org".to_string();
+        base.path = PathBuf::from("entities/org/update/test.sql");
+
+        // 1. assignment
+        let mut assign = base.clone();
+        assign.sql = "UPDATE public.orgs SET state = 'zombie'".to_string();
+        assert!(
+            org_diags(&assign)
+                .iter()
+                .any(|d| d.code == "E010" && d.message.contains("zombie")),
+            "assignment context"
+        );
+
+        // 2. WHERE comparison
+        let mut filter = base.clone();
+        filter.operation = Operation::Read;
+        filter.returns = Returns::Entity;
+        filter.path = PathBuf::from("entities/org/read/test.sql");
+        filter.sql =
+            "SELECT 1 FROM public.orgs WHERE state = 'zombie' FOR UPDATE SKIP LOCKED".to_string();
+        assert!(
+            org_diags(&filter)
+                .iter()
+                .any(|d| d.code == "E010" && d.message.contains("zombie")),
+            "comparison context"
+        );
+
+        // 3. INSERT literal (named columns)
+        let mut insert = base.clone();
+        insert.operation = Operation::Create;
+        insert.path = PathBuf::from("entities/org/create/test.sql");
+        insert.sql = "INSERT INTO public.orgs (name, state) VALUES ('x', 'zombie') \
+                      ON CONFLICT (name) DO NOTHING"
+            .to_string();
+        assert!(
+            org_diags(&insert)
+                .iter()
+                .any(|d| d.code == "E010" && d.message.contains("zombie")),
+            "insert context"
+        );
+
+        // ...and an accepted literal passes all three.
+        let mut fine = base;
+        fine.sql = "UPDATE public.orgs SET state = 'suspended'".to_string();
+        assert!(
+            !org_diags(&fine).iter().any(|d| d.code == "E010"),
+            "an accepted literal must pass"
+        );
+    }
+
     /// A hand-built bad statement proves the passes bite: an unpinned `SELECT *`
     /// read raises E006 (no snapshot) and E011 (wildcard).
     #[test]
@@ -589,6 +1204,31 @@ mod tests {
         assert!(
             e002.iter().any(|d| d.message.contains("LIST binding")),
             "expected the lake list-param E002, got {diags:#?}"
+        );
+    }
+
+    /// `returns: entity` gets the same type/nullability proof as a typed column
+    /// list: an expression that loses a NOT NULL column's provability fails E003
+    /// even when every name lines up.
+    #[test]
+    fn an_entity_read_losing_non_null_provability_is_rejected() {
+        let mut stmt = read_stmt(
+            "SELECT NULLIF(entity_id, '') AS entity_id, given_name, family_name, email, \
+             phone_e164, addr_number, addr_street, addr_unit, addr_city, addr_region, \
+             addr_postal, birth_date, metadata, survivorship_version, assembled_at \
+             FROM lake.main.golden_records AT (VERSION => $snapshot)",
+        );
+        stmt.params = vec![crate::StatementParam {
+            name: "snapshot".to_string(),
+            param_type: ColumnType::Bigint,
+            nullable: false,
+        }];
+        let diags = lake_diags(&stmt);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.code == "E003" && d.message.contains("NOT NULL on entity")),
+            "expected the entity nullability E003, got {diags:#?}"
         );
     }
 

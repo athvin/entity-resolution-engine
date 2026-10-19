@@ -63,6 +63,18 @@ const PG_DDL_DIR: &str = "rust/crates/er-entities/ddl/postgres";
 const TS_BINDINGS_DIR: &str = "frontend/src/lib/entities/bindings";
 const TS_READERS_DIR: &str = "frontend/src/lib/entities/readers";
 
+/// The generated-only destination directories (root-relative). Everything in
+/// them is owned by `er-entity gen`; the CLI's check flags any file it did not
+/// emit (an orphan from a deleted entity/statement). `docs/erd.md` is a single
+/// file in a shared directory, so it cannot orphan.
+pub const GENERATED_DIRS: &[&str] = &[
+    RUST_ENTITIES_DIR,
+    LAKE_DDL_DIR,
+    PG_DDL_DIR,
+    TS_BINDINGS_DIR,
+    TS_READERS_DIR,
+];
+
 /// Generate every artifact the catalog's entities ask for, as an in-memory tree.
 /// Writing it to disk (and the stale-output check) is the CLI's job.
 pub fn generate(catalog: &Catalog) -> Result<GeneratedTree, ConvertError> {
