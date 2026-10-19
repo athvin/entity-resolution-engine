@@ -1,317 +1,132 @@
 # Operating the engine
 
-*Engine layer — operating one tenant's lake via the CLI. The multi-tenant control
-plane that runs these as jobs is [backend-design.md](backend-design.md); the
+*Engine layer — operating one tenant's lake via the `er` CLI. The multi-tenant
+control plane that runs these same operations as jobs is
+[backend-design.md](backend-design.md); the
 [README](../README.md#architecture-at-a-glance) has the whole platform.*
 
-Commands below run from the repository root. Training is always explicit;
-`run-all` uses an existing active model. For an isolated, automatically cleaned-up
-smoke run, use the [README quickstart](../README.md#try-the-complete-pipeline).
+Commands below run from the repository root. Training is always explicit:
+`er run-all` uses an existing model, it never trains one. Every command takes the
+same three globals — a DuckLake catalog path, a data directory, and the S6 config:
+
+```sh
+cargo build -p er-cli --bin er
+er() { rust/target/debug/er \
+  --catalog "$ER_LAKE/meta.ducklake" --data-path "$ER_LAKE/data" \
+  --config configs/test.yaml "$@"; }
+```
+
 ## Development lake
 
-Use a dedicated Compose project to keep this lake separate from integration tests:
+A development lake is just a directory — DuckLake keeps its metadata in the
+`.ducklake` catalog file and its Parquet data under the data path. Nothing to
+provision, nothing to tear down beyond `rm -rf`:
 
 ```sh
-mkdir -p artifacts/demo
-docker compose -p er-demo -f docker/compose.yaml --profile test build pipeline
-
-erdev() {
-  docker compose -p er-demo -f docker/compose.yaml --profile test \
-    run --rm pipeline er "$@"
-}
-
-erdev init
-erdev doctor
+export ER_LAKE=artifacts/demo
+mkdir -p "$ER_LAKE"
 ```
 
-The Compose dependencies initialize PostgreSQL and the object store. `erdev` uses
-`configs/test.yaml` and the container's lake environment. Keep the function in the
-same shell for the remaining examples. The lake survives individual `run --rm`
-commands; removing the stack destroys this development data.
-
-Generate a usable training corpus, then arrange it as source delivery folders:
-
-```sh
-docker compose -p er-demo -f docker/compose.yaml --profile test run --rm pipeline \
-  python -m fixtures.generator.cli --personas 400 --records 1000 \
-  --batch 50 --seed 42 --out /app/artifacts/demo/corpus
-
-for source in crm billing webforms; do
-  mkdir -p "artifacts/demo/base/$source" "artifacts/demo/batch/$source"
-  cp "artifacts/demo/corpus/$source.csv" "artifacts/demo/base/$source/records.csv"
-  cp "artifacts/demo/corpus/batch/$source.csv" "artifacts/demo/batch/$source/records.csv"
-done
-```
-
-For your own deliveries, use the same directory layout and the
-[source mappings](configuration.md#source-data) for their column names.
+The committed `base_10` fixture is a complete three-source delivery (CRM,
+billing, web forms) with a frozen, committed model — the same inputs the e2e
+suites pin byte-exact expectations against.
 
 ## First load
 
-```sh
-ER_INITIAL_RUN_ID=$(docker run --rm er-pipeline:ci python -c 'from ulid import ULID; print(ULID())')
-for source in crm billing webforms; do
-  erdev ingest --run-id "$ER_INITIAL_RUN_ID" \
-    --source "$source" --path /app/artifacts/demo/base
-done
-erdev standardize --run-id "$ER_INITIAL_RUN_ID"
-erdev train --run-id "$ER_INITIAL_RUN_ID"
-erdev run-all --mode full --skip-ingest --run-id "$ER_INITIAL_RUN_ID"
-```
-
-Keep the same run ID across this sequence: reconciliation uses it to find the
-ingested records and assembly uses it to find the touched entities.
-
-The final command standardizes any remaining input, scores all candidates,
-reconciles entities and assembles golden records. Successful stage summaries go to
-stderr; `--json` selects machine-readable stdout. Run metadata lives in `runs` and
-`run_stages`; `(run_id, stage)` holds one row, so repeated ingests under one run
-ID update the ingest stage's counters in place — per-delivery receipts live in
-`ingest_batches`.
-
-The main outputs are `lake.main.golden_records`, `golden_lineage`,
-`entity_membership` and `entity_events`. To export golden records from the demo:
+One command runs the full chain — ingest every `<drop>/<source>.csv`, then
+standardize → match → reconcile → golden — under one run id:
 
 ```sh
-docker compose -p er-demo -f docker/compose.yaml --profile test run --rm -T pipeline python - <<'PYTHON'
-from er.lake.ducklake import connect
-
-with connect() as connection:
-    connection.execute(
-        "COPY lake.main.golden_records TO "
-        "'/app/artifacts/demo/golden_records.csv' (FORMAT CSV, HEADER)"
-    )
-PYTHON
+er run-all \
+  --drop fixtures/static/base_10/base \
+  --lexicon rust/crates/er-cli/tests/fixtures/nickname_variants.csv \
+  --model fixtures/static/model_test_v1.json \
+  --tf fixtures/static/model_test_v1.tf.csv \
+  --model-version v0001 --tf-snapshot-id tf0001 \
+  --run-id demo-run-1
 ```
 
-The CSV appears at `artifacts/demo/golden_records.csv` on the host.
-
-The lake has no standalone `.duckdb` file — run ad-hoc SQL through a connection
-from [`er.lake.ducklake.connect`](../src/er/lake/ducklake.py) as above, which
-loads extensions, configures storage and attaches the lake as `lake`; opening an
-unrelated DuckDB file does not attach this data. To list the persistent
-application relations:
-
-```sql
-SELECT database_name, schema_name, table_name AS object_name, 'table' AS kind
-FROM duckdb_tables() WHERE database_name = 'lake'
-UNION ALL
-SELECT database_name, schema_name, view_name, 'view'
-FROM duckdb_views() WHERE database_name = 'lake'
-ORDER BY kind, object_name;
-```
-
-To trace one golden entity's attribute winners back to the source payloads:
-
-```sql
-WITH chosen AS (
-    SELECT entity_id
-    FROM lake.main.golden_records
-    ORDER BY entity_id
-    LIMIT 1
-)
-SELECT l.entity_id, l.attribute, l.rule, l.record_key, r.payload
-FROM lake.main.golden_lineage l
-JOIN chosen USING (entity_id)
-JOIN lake.main.int_std_records s USING (record_key)
-JOIN lake.main.raw_records r
-  ON r.source_system = s.source_system
- AND r.source_record_id = s.source_record_id
- AND r.content_hash = s.content_hash
-ORDER BY l.attribute;
-```
-
-## Incremental deliveries
-
-For a single source, ingest and process it in one command:
+`er doctor` is the read-only health report: config hash, the latest run, and a
+presence/row-count line per relation:
 
 ```sh
-erdev run-all --mode incremental --source crm --path /app/artifacts/demo/batch
+er doctor
 ```
 
-For a delivery spanning all three sources, use one run ID for the ingests and chain:
+Each stage is also its own subcommand for stepwise operation —
+`er ingest --source crm --path <csv>`, `er standardize --lexicon <csv>`,
+`er match --model <json> --tf <csv> --model-version <v> --tf-snapshot-id <id>`,
+`er reconcile`, `er golden`. Stage commands take the run-logical stamps
+(`--run-at`, `--ingested-at`, `--scored-at`) explicitly; reruns with the same
+inputs and stamps produce byte-identical relations — that determinism contract
+is what the e2e goldens enforce.
+
+## Training
+
+Training fits the match model's parameters over the standardized corpus and
+freezes the term-frequency snapshot beside it. It needs a settings template
+(the comparison + blocking structure), deterministic rules for the prior, and
+EM-session blocking rules:
 
 ```sh
-ER_DELIVERY_RUN_ID=$(docker run --rm er-pipeline:ci python -c 'from ulid import ULID; print(ULID())')
-for source in crm billing webforms; do
-  erdev ingest --run-id "$ER_DELIVERY_RUN_ID" \
-    --source "$source" --path /app/artifacts/demo/batch
-done
-erdev run-all --mode incremental --skip-ingest --run-id "$ER_DELIVERY_RUN_ID"
+er train \
+  --template fixtures/static/model_test_v1.json \
+  --deterministic-rule "l.email = r.email" \
+  --em-rule "l.family_name = r.family_name" \
+  --model-version v0002 --tf-snapshot-id tf0002 \
+  --out-model artifacts/demo/trained.json \
+  --out-tf artifacts/demo/trained.tf.csv
 ```
 
-Choose one of these two examples for a delivery. Repeated unchanged input can return
-exit `10`, a successful no-op. A shell wrapper running individual commands must
-accept both `0` and `10`; `run-all` handles this within its own chain.
+The outputs are plain files: commit or ship them like any artifact, then pass
+them to `run-all`/`match`. Scores are a function of `(model_version,
+tf_snapshot_id)` — a new model is a new identity, never an in-place overwrite.
 
-Use `ingest --full-refresh-keys` only when the delivery contains the source's
-complete current key set. Missing keys are deleted from current membership during
-reconciliation; a later ordinary delivery can resurrect them.
+## Incremental deliveries and corrections
 
-## Full rebuilds and correction
+A later delivery is another `run-all` with a new drop directory and run id;
+ingestion detects changed content per record key and appends versions, and the
+downstream stages rebuild from the current versions.
 
-After configuration or version changes:
+Steward corrections (assertions, overrides, overlays, review resolutions) are
+staged by the control plane and applied by:
 
 ```sh
-erdev run-all --mode full --skip-ingest --reason operator
+er correct --run-id demo-correct-1
 ```
 
-An incremental run normally refuses configuration/model drift. `--allow-escalate`
-permits `run-all` to promote it to a full run. Supported rebuild reasons are
-`operator`, `std_version_bump`, `survivorship_version_bump` and `correction_pass`.
+which re-reconciles and re-assembles over the *existing* scores — no re-ingest,
+no re-score. Full-refresh deliveries tombstone the records a source omitted
+(`er ingest --full-refresh`).
 
-After `erdev train` activates a new model, run the full chain before continuing
-incremental processing. To refresh term frequencies and repair incremental drift
-without retraining:
+## Maintenance
 
 ```sh
-erdev correct
+er maintain                      # flush inlined rows, merge small files,
+er maintain --expire-older-than "14 days"   # expire old snapshots
 ```
 
-Correction runs full matching, reconciliation and assembly against the current
-standardized corpus. It does not ingest or standardize new data. Invoke it from
-your scheduler at the configured `correction_pass.cadence`; the CLI itself does
-not run a scheduler.
+Prints a before/after file-count report. Snapshot expiry bounds the lake's
+history window — the read API pins snapshots, so keep the window longer than
+your longest-lived cursor.
 
-Correction freezes one new TF snapshot without retraining and atomically activates
-it with full score replacement. Scores absent from the replacement are retired;
-reconciliation covers all records, including old-old score changes.
+## Inspecting the lake
 
-After a failed correction, use its run ID:
+The product surfaces (read API + UI) are the supported way to browse golden
+records, lineage, reviews and runs. For ad-hoc inspection, a `duckdb` shell
+(1.1+, with the `ducklake` extension) attaches the same catalog read-only —
+this is the exact ATTACH the engine itself issues:
 
 ```sh
-erdev correct --resume RUN_ID
+duckdb -c "INSTALL ducklake; LOAD ducklake; \
+  ATTACH 'ducklake:artifacts/demo/meta.ducklake' AS lake (DATA_PATH 'artifacts/demo/data', READ_ONLY); \
+  SELECT id, status, mode FROM lake.main.runs;"
 ```
 
-Resume preserves the frozen snapshot and restarts the first unfinished or missing
-stage. A pending correction blocks other pipeline mutations. Assertion edits and
-review resolution remain available under the tenant lock until reconciliation
-succeeds; resolve a reported contradiction before resuming. After reconciliation,
-finish the correction before editing assertions. Maintenance remains available.
-A completed correction cannot be
-resumed. Standardize changed inputs or blocking configuration before starting a
-new correction.
+## The dev cloud stack
 
-## Migrating an existing lake to Splink 5
-
-This release pins `splink==5.0.0` (the stable release; earlier iterations shipped
-against `5.0.0.dev5`, whose scoring it reproduces exactly). Keep the previous
-image and model artifacts available. Validate a copy of your lake and its labeled
-examples before applying the migration to production.
-
-```sh
-erdev init
-erdev standardize
-erdev train
-erdev run-all --mode full --skip-ingest --reason operator
-```
-
-`init` adds the standardization work journal idempotently. Existing model rows
-without the exact Splink version are treated as legacy and cannot be scored by
-the new engine. Training creates a new version and frozen TF snapshot. The full
-chain must successfully finish matching, reconciliation and golden assembly before
-incremental matching is allowed. An interrupted full chain can be resumed using
-its run ID. `train --if-changed` never reuses a legacy model.
-Full assembly also removes stale golden, lineage and display rows for merged or
-retired entities left by earlier runs.
-
-New match evidence contains `gamma_*`, log2 weights `mw_*`, optional
-`mw_tf_adj_*`, and total `match_weight`. Existing review rows with `bf_*` evidence
-remain readable. Consumers displaying score explanations must understand the
-new weight fields; they are logarithms, not Bayes factors.
-
-For rollback, restore the previous image **and its configuration**. Under that
-image, run `er train` without `--if-changed`, then
-`er run-all --mode full --skip-ingest --reason operator`. This activates a compatible
-model and frozen TF snapshot and finishes the full resolution. Switching the image
-alone leaves the Splink 5 model active. The previous image's full-assembly path
-does not reap merge losers; finish with `er assemble --touched-only --run-id RUN_ID`,
-using that full chain's run ID. To reuse the exact pre-migration model and
-state instead, restore the corresponding catalog and object-store backup together.
-Review quality and downstream results before resuming deliveries in either direction.
-
-Standardization journals pending ingestion batches before the stage's SQL begins. A failure
-after staging or current-record updates leaves the journal for the next attempt,
-including an attempt with a new run ID. Do not manually clear this table during
-recovery. Successful processing removes it after current records and blocking
-keys are rebuilt. A retry of an interrupted full refresh remains a full refresh.
-
-## Review and assertions
-
-```sh
-erdev review list --status open --limit 100 --json
-erdev review resolve --review-id REVIEW_ID --as match --by steward
-erdev assert add --a crm:123 --b billing:456 --kind never --by steward
-erdev assert remove --assertion-id ASSERTION_ID --by steward
-erdev run-all --mode incremental --skip-ingest
-```
-
-Replace the sample IDs with real keys. Review resolutions are `match`, `no_match`
-and `dismiss`; match decisions persist an `always` assertion and no-match decisions
-persist a `never` assertion. `assert add` also accepts `--note`. `assert load --path
-FILE` loads an assertion file; see the [assertion contract](../DesignDoc.md#s4-4).
-Reconciliation applies assertion changes to the entity graph. Contradictions fail
-with the conflicting assertions identified for correction.
-
-## Failures and recovery
-
-| Exit | Meaning | Action |
-|---|---|---|
-| `0` | Success | Continue |
-| `1` | Stage or doctor check failed | Inspect the error and failed check/stage |
-| `2` | Invalid arguments, config or environment | Correct the input before rerunning |
-| `3` | Unmet precondition or writer lock conflict | Resolve the named prerequisite |
-| `10` | Nothing to do | Treat as a successful no-op |
-
-`run_stages.error_class` distinguishes `transient_io`, `lock_conflict`,
-`precondition`, `config`, `contradiction`, `non_convergence` and `data` errors.
-Only transient I/O and lock conflicts are classified as retryable; the CLI never
-retries automatically. Inspect stderr and `error_detail` before restarting.
-
-To resume a failed chain, retain its original config and input paths:
-
-```sh
-erdev run-all --mode incremental --source crm --path /app/artifacts/demo/batch \
-  --resume FAILED_RUN_ID
-```
-
-Use `--skip-ingest` if the original chain skipped ingestion. Resume uses the
-recorded mode, run ID and first unfinished stage; the config hash must match.
-An already successful run or a run with no unfinished recorded stage cannot resume.
-
-## Maintenance and shutdown
-
-`erdev lake maintain --retain-days 7` compacts data and expires eligible snapshots;
-seven days is the default. Maintenance refuses to expire snapshots referenced by
-active or failed runs. Resolve failed runs before advancing their retention window.
-
-`erdev lake reset --confirm-tenant test` destroys the selected namespace. The
-confirmation must match the configured tenant. `init --force` does not perform a
-reset and recreates nothing.
-
-When finished with the disposable demo lake:
-
-```sh
-docker compose -p er-demo -f docker/compose.yaml --profile test down -v --remove-orphans
-```
-
-Exported host files remain under `artifacts/demo/` until you remove that directory.
-
-## Individual commands
-
-Every command accepts `--config`, `--run-id`, `--json` and `--help` after its name.
-The chain can also be run as individual stages under a shared run ID:
-
-| Command | Stage-specific options |
-|---|---|
-| `init` | `--force` (non-destructive) |
-| `doctor` | No additional options |
-| `ingest` | Required `--source`, `--path`; optional `--full-refresh-keys` |
-| `standardize` | `--changed-only` |
-| `train` | `--if-changed` skips a known config/corpus snapshot |
-| `match` | Required `--mode`; optional `--model-version`; `--new-tf-snapshot` is reserved for `correct` |
-| `reconcile` | `--reason` |
-| `assemble` | `--touched-only` uses the shared run's touched entity set |
-
-Use `er COMMAND --help` for the full argument list. For detailed diagnostics, see
-[profiling](profiling.md).
+The engine-in-a-directory flow above is for local work. The full stack — API,
+dispatcher, UI, per-developer namespace on the dev EKS cluster with Aurora
+control plane and S3 lakes — is `make dev-up DEV=<name> TAG=<git sha>` (and
+`dev-suspend` / `dev-resume` / `dev-down`); see
+[infrastructure.md](infrastructure.md).
