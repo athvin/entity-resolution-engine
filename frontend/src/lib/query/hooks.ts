@@ -30,7 +30,7 @@ export interface DataQuality {
 }
 
 export interface RunRow {
-  run_id: string;
+  id: string;
   mode?: string;
   status?: string;
   started_at?: string;
@@ -76,7 +76,7 @@ export interface LineageRow {
 }
 
 export interface EntityEvent {
-  event_id: string;
+  id: string;
   seq: number;
   run_id: string;
   event_type: string;

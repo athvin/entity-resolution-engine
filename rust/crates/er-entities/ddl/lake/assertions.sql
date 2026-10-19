@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS lake.main.assertions (
-  assertion_id VARCHAR NOT NULL,
+  id VARCHAR NOT NULL,
   rec_a_key VARCHAR NOT NULL,
   rec_b_key VARCHAR NOT NULL,
   kind VARCHAR NOT NULL,

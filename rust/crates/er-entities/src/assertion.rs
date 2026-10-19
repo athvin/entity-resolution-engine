@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
 pub struct Assertion {
     /// The assertion id (ULID).
-    pub assertion_id: String,
+    pub id: String,
     /// The pair's lower record key (canonical order).
     pub rec_a_key: String,
     /// The pair's higher record key (canonical order).
@@ -32,7 +32,7 @@ pub struct Assertion {
 
 impl Assertion {
     /// The logical key columns.
-    pub const KEY: &'static [&'static str] = &["assertion_id"];
+    pub const KEY: &'static [&'static str] = &["id"];
     /// The entity schema version; bumped only on a breaking change.
     pub const VERSION: u64 = 1;
     /// The relation (table) name.
@@ -44,7 +44,7 @@ impl Assertion {
     #[must_use]
     pub fn columns() -> &'static [&'static str] {
         &[
-            "assertion_id",
+            "id",
             "rec_a_key",
             "rec_b_key",
             "kind",
@@ -73,7 +73,7 @@ pub mod create {
         note: Option<&str>,
     ) -> ::duckdb::Result<usize> {
         const SQL: &str = "INSERT INTO lake.main.assertions
-  (assertion_id, rec_a_key, rec_b_key, kind, active, created_by, created_at, note, updated_at)
+  (id, rec_a_key, rec_b_key, kind, active, created_by, created_at, note, updated_at)
 VALUES ($1, $2, $3, $4, true, $5, $6::timestamp, $7,
   $6::timestamp)
 ";
@@ -100,10 +100,10 @@ VALUES ($1, $2, $3, $4, true, $5, $6::timestamp, $7,
         review_id: &str,
     ) -> ::duckdb::Result<usize> {
         const SQL: &str = "INSERT INTO lake.main.assertions
-  (assertion_id, rec_a_key, rec_b_key, kind, active, created_by, created_at, updated_at)
+  (id, rec_a_key, rec_b_key, kind, active, created_by, created_at, updated_at)
 SELECT $1, rec_a_key, rec_b_key, $2, true, 'steward', $3::timestamp,
   $3::timestamp
-FROM lake.main.review_queue WHERE review_id = $4
+FROM lake.main.review_queue WHERE id = $4
 ";
         conn.execute(
             SQL,
@@ -117,7 +117,7 @@ pub mod read {
     /// One row of `active_pairs`: The active assertions at a pinned snapshot as bare pairs (the unmerge contradiction precheck).
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
     pub struct ActivePairsRow {
-        pub assertion_id: String,
+        pub id: String,
         pub rec_a_key: String,
         pub rec_b_key: String,
         pub kind: String,
@@ -128,7 +128,7 @@ pub mod read {
         #[must_use]
         pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
             vec![
-                ("assertion_id", ::arrow::datatypes::DataType::Utf8),
+                ("id", ::arrow::datatypes::DataType::Utf8),
                 ("rec_a_key", ::arrow::datatypes::DataType::Utf8),
                 ("rec_b_key", ::arrow::datatypes::DataType::Utf8),
                 ("kind", ::arrow::datatypes::DataType::Utf8),
@@ -144,17 +144,13 @@ pub mod read {
             let mut out = Vec::new();
             for batch in batches {
                 crate::batch::check_columns(batch, &expected)?;
-                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "assertion_id")?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "id")?;
                 let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "rec_a_key")?;
                 let c2: &::arrow::array::StringArray = crate::batch::col(batch, 2, "rec_b_key")?;
                 let c3: &::arrow::array::StringArray = crate::batch::col(batch, 3, "kind")?;
                 for i in 0..batch.num_rows() {
                     out.push(Self {
-                        assertion_id: crate::batch::req(
-                            crate::batch::opt_str(c0, i),
-                            "assertion_id",
-                            i,
-                        )?,
+                        id: crate::batch::req(crate::batch::opt_str(c0, i), "id", i)?,
                         rec_a_key: crate::batch::req(crate::batch::opt_str(c1, i), "rec_a_key", i)?,
                         rec_b_key: crate::batch::req(crate::batch::opt_str(c2, i), "rec_b_key", i)?,
                         kind: crate::batch::req(crate::batch::opt_str(c3, i), "kind", i)?,
@@ -170,7 +166,7 @@ pub mod read {
         conn: &::duckdb::Connection,
         snapshot: i64,
     ) -> ::duckdb::Result<Vec<ActivePairsRow>> {
-        const SQL: &str = "SELECT assertion_id, rec_a_key, rec_b_key, kind
+        const SQL: &str = "SELECT id, rec_a_key, rec_b_key, kind
 FROM lake.main.assertions AT (VERSION => {snapshot})
 WHERE active
 ";
@@ -183,7 +179,7 @@ WHERE active
     /// One row of `active_pairs_live`: The active assertions as bare pairs, read live (the reconcile adjustment input).
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
     pub struct ActivePairsLiveRow {
-        pub assertion_id: String,
+        pub id: String,
         pub rec_a_key: String,
         pub rec_b_key: String,
         pub kind: String,
@@ -194,7 +190,7 @@ WHERE active
         #[must_use]
         pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
             vec![
-                ("assertion_id", ::arrow::datatypes::DataType::Utf8),
+                ("id", ::arrow::datatypes::DataType::Utf8),
                 ("rec_a_key", ::arrow::datatypes::DataType::Utf8),
                 ("rec_b_key", ::arrow::datatypes::DataType::Utf8),
                 ("kind", ::arrow::datatypes::DataType::Utf8),
@@ -210,17 +206,13 @@ WHERE active
             let mut out = Vec::new();
             for batch in batches {
                 crate::batch::check_columns(batch, &expected)?;
-                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "assertion_id")?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "id")?;
                 let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "rec_a_key")?;
                 let c2: &::arrow::array::StringArray = crate::batch::col(batch, 2, "rec_b_key")?;
                 let c3: &::arrow::array::StringArray = crate::batch::col(batch, 3, "kind")?;
                 for i in 0..batch.num_rows() {
                     out.push(Self {
-                        assertion_id: crate::batch::req(
-                            crate::batch::opt_str(c0, i),
-                            "assertion_id",
-                            i,
-                        )?,
+                        id: crate::batch::req(crate::batch::opt_str(c0, i), "id", i)?,
                         rec_a_key: crate::batch::req(crate::batch::opt_str(c1, i), "rec_a_key", i)?,
                         rec_b_key: crate::batch::req(crate::batch::opt_str(c2, i), "rec_b_key", i)?,
                         kind: crate::batch::req(crate::batch::opt_str(c3, i), "kind", i)?,
@@ -235,7 +227,7 @@ WHERE active
     pub fn active_pairs_live(
         conn: &::duckdb::Connection,
     ) -> ::duckdb::Result<Vec<ActivePairsLiveRow>> {
-        const SQL: &str = "SELECT assertion_id, rec_a_key, rec_b_key, kind
+        const SQL: &str = "SELECT id, rec_a_key, rec_b_key, kind
 FROM lake.main.assertions
 WHERE active
 ";
@@ -247,7 +239,7 @@ WHERE active
     /// One row of `page`: One keyset page of the assertion ledger at a pinned snapshot, active-only unless retracted rows are included.
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
     pub struct PageRow {
-        pub assertion_id: String,
+        pub id: String,
         pub rec_a_key: String,
         pub rec_b_key: String,
         pub kind: String,
@@ -266,7 +258,7 @@ WHERE active
         #[must_use]
         pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
             vec![
-                ("assertion_id", ::arrow::datatypes::DataType::Utf8),
+                ("id", ::arrow::datatypes::DataType::Utf8),
                 ("rec_a_key", ::arrow::datatypes::DataType::Utf8),
                 ("rec_b_key", ::arrow::datatypes::DataType::Utf8),
                 ("kind", ::arrow::datatypes::DataType::Utf8),
@@ -300,7 +292,7 @@ WHERE active
             let mut out = Vec::new();
             for batch in batches {
                 crate::batch::check_columns(batch, &expected)?;
-                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "assertion_id")?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "id")?;
                 let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "rec_a_key")?;
                 let c2: &::arrow::array::StringArray = crate::batch::col(batch, 2, "rec_b_key")?;
                 let c3: &::arrow::array::StringArray = crate::batch::col(batch, 3, "kind")?;
@@ -314,11 +306,7 @@ WHERE active
                 let c9: &::arrow::array::StringArray = crate::batch::col(batch, 9, "note")?;
                 for i in 0..batch.num_rows() {
                     out.push(Self {
-                        assertion_id: crate::batch::req(
-                            crate::batch::opt_str(c0, i),
-                            "assertion_id",
-                            i,
-                        )?,
+                        id: crate::batch::req(crate::batch::opt_str(c0, i), "id", i)?,
                         rec_a_key: crate::batch::req(crate::batch::opt_str(c1, i), "rec_a_key", i)?,
                         rec_b_key: crate::batch::req(crate::batch::opt_str(c2, i), "rec_b_key", i)?,
                         kind: crate::batch::req(crate::batch::opt_str(c3, i), "kind", i)?,
@@ -351,12 +339,11 @@ WHERE active
         after: Option<&str>,
         limit: i64,
     ) -> ::duckdb::Result<Vec<PageRow>> {
-        const SQL: &str =
-            "SELECT assertion_id, rec_a_key, rec_b_key, kind, active, created_by, created_at,
+        const SQL: &str = "SELECT id, rec_a_key, rec_b_key, kind, active, created_by, created_at,
        retracted_by, retracted_at, note
 FROM lake.main.assertions AT (VERSION => {snapshot})
-WHERE ($1 OR active) AND ($2 IS NULL OR assertion_id > $2)
-ORDER BY assertion_id
+WHERE ($1 OR active) AND ($2 IS NULL OR id > $2)
+ORDER BY id
 LIMIT $3
 ";
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
@@ -379,7 +366,7 @@ pub mod update {
         const SQL: &str =
             "UPDATE lake.main.assertions SET active = false, retracted_at = $1::timestamp,
     updated_at = $1::timestamp
-WHERE assertion_id = $2
+WHERE id = $2
 ";
         conn.execute(SQL, ::duckdb::params![retracted_at, assertion_id])
     }

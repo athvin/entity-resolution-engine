@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS lake.main.entity_events (
-  event_id VARCHAR NOT NULL,
+  id VARCHAR NOT NULL,
   seq BIGINT NOT NULL,
   run_id VARCHAR NOT NULL,
   entity_id VARCHAR NOT NULL,

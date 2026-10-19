@@ -426,7 +426,7 @@ fn ddl_specs() -> Vec<TableSpec> {
         tspec(
             "entity_events",
             vec![
-                nn("event_id", VARCHAR),
+                nn("id", VARCHAR),
                 nn("seq", BIGINT),
                 nn("run_id", VARCHAR),
                 nn("entity_id", VARCHAR),
@@ -438,7 +438,7 @@ fn ddl_specs() -> Vec<TableSpec> {
                 nn("updated_at", TIMESTAMP),
             ],
             vec![
-                key(&["event_id"]),
+                key(&["id"]),
                 key(&["run_id", "entity_id", "event_type", "details_hash"]),
             ],
             enum_map(&[("event_type", &EVENT_TYPES[..])]),
@@ -446,7 +446,7 @@ fn ddl_specs() -> Vec<TableSpec> {
         tspec(
             "assertions",
             vec![
-                nn("assertion_id", VARCHAR),
+                nn("id", VARCHAR),
                 nn("rec_a_key", VARCHAR),
                 nn("rec_b_key", VARCHAR),
                 nn("kind", VARCHAR),
@@ -459,7 +459,7 @@ fn ddl_specs() -> Vec<TableSpec> {
                 nn("updated_at", TIMESTAMP),
             ],
             vec![
-                key(&["assertion_id"]),
+                key(&["id"]),
                 key_where(&["rec_a_key", "rec_b_key"], "active"),
             ],
             enum_map(&[("kind", &ASSERTION_KINDS[..])]),
@@ -467,7 +467,7 @@ fn ddl_specs() -> Vec<TableSpec> {
         tspec(
             "review_queue",
             vec![
-                nn("review_id", VARCHAR),
+                nn("id", VARCHAR),
                 nn("subject_type", VARCHAR),
                 col("rec_a_key", VARCHAR),
                 col("rec_b_key", VARCHAR),
@@ -484,7 +484,8 @@ fn ddl_specs() -> Vec<TableSpec> {
                 nn("updated_at", TIMESTAMP),
             ],
             vec![
-                key(&["review_id"]),
+                key(&["id"]),
+                key(&["rec_a_key", "rec_b_key", "reason"]),
                 key_where(
                     &[
                         "subject_type",
@@ -535,7 +536,7 @@ fn ddl_specs() -> Vec<TableSpec> {
         tspec(
             "runs",
             vec![
-                nn("run_id", VARCHAR),
+                nn("id", VARCHAR),
                 nn("tenant", VARCHAR),
                 nn("mode", VARCHAR),
                 nn("status", VARCHAR),
@@ -554,7 +555,7 @@ fn ddl_specs() -> Vec<TableSpec> {
                 nn("created_at", TIMESTAMP),
                 nn("updated_at", TIMESTAMP),
             ],
-            vec![key(&["run_id"])],
+            vec![key(&["id"])],
             enum_map(&[
                 ("mode", &RUN_MODES[..]),
                 ("status", &RUN_STATUSES[..]),
@@ -574,7 +575,7 @@ fn ddl_specs() -> Vec<TableSpec> {
         tspec(
             "ingest_batches",
             vec![
-                nn("ingest_batch_id", VARCHAR),
+                nn("id", VARCHAR),
                 nn("run_id", VARCHAR),
                 nn("source_system", VARCHAR),
                 nn("path", VARCHAR),
@@ -587,7 +588,7 @@ fn ddl_specs() -> Vec<TableSpec> {
                 nn("created_at", TIMESTAMP),
                 nn("updated_at", TIMESTAMP),
             ],
-            vec![key(&["ingest_batch_id"])],
+            vec![key(&["id"])],
             BTreeMap::new(),
         ),
         // Retired with the dbt-era incremental design: `er_standardize_work`

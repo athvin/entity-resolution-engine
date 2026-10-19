@@ -5,7 +5,7 @@ pin: live
 pin_reason: "er-cli composes this read inside the writer's own transaction; there is no committed snapshot to pin."
 params: []
 returns:
-  - { name: assertion_id, type: varchar, nullable: false }
+  - { name: id, type: varchar, nullable: false }
   - { name: rec_a_key, type: varchar, nullable: false }
   - { name: rec_b_key, type: varchar, nullable: false }
   - { name: kind, type: varchar, nullable: false }

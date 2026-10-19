@@ -5,7 +5,7 @@ params:
   - { name: snapshot, type: bigint }
   - { name: entity_id, type: varchar }
 returns:
-  - { name: event_id, type: varchar, nullable: false }
+  - { name: id, type: varchar, nullable: false }
   - { name: seq, type: bigint, nullable: false }
   - { name: run_id, type: varchar, nullable: false }
   - { name: event_type, type: varchar, nullable: false }

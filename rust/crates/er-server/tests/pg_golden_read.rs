@@ -458,7 +458,7 @@ async fn golden_records_read_over_ducklake() {
     assert_eq!(review_items[0]["reason"], "gray_band");
     assert_eq!(review_items[0]["status"], "open");
     assert_eq!(review_items[0]["subject_type"], "pair");
-    let review_id = review_items[0]["review_id"].as_str().unwrap().to_string();
+    let review_id = review_items[0]["id"].as_str().unwrap().to_string();
 
     // review-by-id resolves that review.
     let resp = app
@@ -467,7 +467,7 @@ async fn golden_records_read_over_ducklake() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_eq!(json_body(resp).await["review_id"], review_id);
+    assert_eq!(json_body(resp).await["id"], review_id);
 
     // assertions are still empty (no steward writes in a base run).
     let resp = app

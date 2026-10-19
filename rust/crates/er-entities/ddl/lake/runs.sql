@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS lake.main.runs (
-  run_id VARCHAR NOT NULL,
+  id VARCHAR NOT NULL,
   tenant VARCHAR NOT NULL,
   mode VARCHAR NOT NULL,
   status VARCHAR NOT NULL,

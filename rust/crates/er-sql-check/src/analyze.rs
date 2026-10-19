@@ -454,13 +454,13 @@ fn ast_checks(
 
 /// E014 — a mutation that rewrites a row advances `updated_at`: every UPDATE,
 /// every MERGE matched-update arm and every `ON CONFLICT … DO UPDATE` must
-/// assign it. Skipped for legacy entities (which may not carry the column yet).
+/// assign it (entities without an updated_at column — none, post-retrofit — skip).
 fn updated_at_checks(
     stmt: &LoadedStatement,
     entity: &Entity,
     parsed: &Statement,
 ) -> Vec<Diagnostic> {
-    if entity.is_legacy() || entity.column("updated_at").is_none() {
+    if entity.column("updated_at").is_none() {
         return Vec::new();
     }
     let sets_updated_at = |assignments: &[Assignment]| {
@@ -508,8 +508,8 @@ fn updated_at_checks(
 /// E015 — a MERGE matches on exactly the declared natural key (or `[id]` when
 /// no natural key is declared): the ON clause's target-side column set must
 /// equal the declared upsert identity, so "what makes two rows the same thing"
-/// lives in the entity file, not ad hoc in each statement. Skipped for legacy
-/// entities and when no target-qualified column is identifiable.
+/// lives in the entity file, not ad hoc in each statement. Skipped when no
+/// target-qualified column is identifiable.
 fn merge_identity_checks(
     stmt: &LoadedStatement,
     entity: &Entity,
@@ -517,9 +517,6 @@ fn merge_identity_checks(
 ) -> Vec<Diagnostic> {
     use std::ops::ControlFlow;
 
-    if entity.is_legacy() {
-        return Vec::new();
-    }
     let Statement::Merge { table, on, .. } = parsed else {
         return Vec::new();
     };
@@ -682,15 +679,11 @@ fn assignment_checks(
         .collect();
     let keys: std::collections::BTreeSet<String> =
         entity.key.iter().map(|k| k.to_lowercase()).collect();
-    let natural: std::collections::BTreeSet<String> = if entity.is_legacy() {
-        std::collections::BTreeSet::new()
-    } else {
-        entity
-            .natural_key
-            .iter()
-            .map(|k| k.to_lowercase())
-            .collect()
-    };
+    let natural: std::collections::BTreeSet<String> = entity
+        .natural_key
+        .iter()
+        .map(|k| k.to_lowercase())
+        .collect();
     let mut diags = Vec::new();
     for name in assignment_targets(assignments) {
         if !columns.contains(&name) {
@@ -717,7 +710,7 @@ fn assignment_checks(
                      at insert"
                 ),
             ));
-        } else if !entity.is_legacy() && name == "created_at" {
+        } else if name == "created_at" {
             diags.push(Diagnostic::new(
                 "E005",
                 &stmt.path,
@@ -1713,14 +1706,6 @@ mod tests {
         assert_eq!(
             codes(&updated_at_checks(&stmt, &entity, &conflict)),
             vec!["E014"]
-        );
-
-        // The legacy ratchet: the same bare UPDATE is accepted while unmigrated
-        // (review still carries the marker until its W5 key rename).
-        let legacy = catalog().by_name("review").unwrap().clone();
-        assert_eq!(
-            codes(&updated_at_checks(&stmt, &legacy, &bare)),
-            Vec::<&str>::new()
         );
     }
 

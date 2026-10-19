@@ -72,7 +72,7 @@ export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolea
 
   const rows = useMemo(() => (inbox.data?.pages ?? []).flatMap((page) => page.items), [inbox.data]);
   const active: ReviewRow | undefined = rows[Math.min(cursor, Math.max(rows.length - 1, 0))];
-  const allLoadedSelected = rows.length > 0 && rows.every((row) => selected.has(row.review_id));
+  const allLoadedSelected = rows.length > 0 && rows.every((row) => selected.has(row.id));
   const headerCheckbox = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -84,10 +84,10 @@ export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolea
   const toggleAllLoaded = useCallback(() => {
     setSelectionNote(null);
     setSelected((current) => {
-      if (rows.length > 0 && rows.every((row) => current.has(row.review_id))) {
+      if (rows.length > 0 && rows.every((row) => current.has(row.id))) {
         return new Set();
       }
-      return new Set(rows.map((row) => row.review_id));
+      return new Set(rows.map((row) => row.id));
     });
   }, [rows]);
 
@@ -111,7 +111,7 @@ export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolea
     (resolution: Resolution) => {
       if (!active || !isSteward) return;
       resolve.mutate(
-        { reviewId: active.review_id, resolution },
+        { reviewId: active.id, resolution },
         {
           onSuccess: (result) => {
             setLastStatus(result.status);
@@ -356,7 +356,7 @@ export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolea
         <div className="min-h-0 overflow-y-auto rounded-xl border" data-testid="review-list">
           {rows.map((row, index) => (
             <div
-              key={row.review_id}
+              key={row.id}
               className={cn(
                 "flex cursor-pointer items-center gap-2 border-b px-3 py-2.5 text-sm last:border-0",
                 index === cursor && "bg-accent",
@@ -364,20 +364,20 @@ export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolea
               onClick={() => {
                 setCursor(index);
               }}
-              data-testid={`review-row-${row.review_id}`}
+              data-testid={`review-row-${row.id}`}
               aria-current={index === cursor ? "true" : undefined}
             >
               {isSteward && (
                 <input
                   type="checkbox"
-                  checked={selected.has(row.review_id)}
+                  checked={selected.has(row.id)}
                   onChange={() => {
-                    toggleSelected(row.review_id);
+                    toggleSelected(row.id);
                   }}
                   onClick={(event) => {
                     event.stopPropagation();
                   }}
-                  aria-label={`Select ${row.review_id}`}
+                  aria-label={`Select ${row.id}`}
                   className="size-4"
                 />
               )}
@@ -413,7 +413,7 @@ export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolea
       <div className="flex min-h-0 flex-1 flex-col gap-3 lg:hidden">
         {active && (
           <>
-            <SwipeCard key={active.review_id} org={org} review={active} onResolve={act} />
+            <SwipeCard key={active.id} org={org} review={active} onResolve={act} />
             <div className="grid grid-cols-3 gap-2" data-testid="mobile-action-bar">
               <Button
                 disabled={!isSteward || resolve.isPending}

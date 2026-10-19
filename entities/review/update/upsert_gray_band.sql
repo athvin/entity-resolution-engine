@@ -1,5 +1,5 @@
 MERGE INTO lake.main.review_queue AS target USING (
-  SELECT 'gray_band:' || rec_a_key || ':' || rec_b_key AS review_id,
+  SELECT sha256('review_queue:' || rec_a_key || ':' || rec_b_key || ':' || 'gray_band') AS id,
          'pair' AS subject_type, rec_a_key, rec_b_key,
          CAST(NULL AS varchar) AS entity_id, 'gray_band' AS reason,
          match_probability, evidence AS waterfall, 'open' AS status,
@@ -14,11 +14,11 @@ WHEN MATCHED THEN UPDATE SET match_probability = source.match_probability,
     waterfall = source.waterfall, last_seen_run_id = source.last_seen_run_id,
     updated_at = $created_at::timestamp
 WHEN NOT MATCHED THEN INSERT
-    (review_id, subject_type, rec_a_key, rec_b_key, entity_id, reason,
+    (id, subject_type, rec_a_key, rec_b_key, entity_id, reason,
      match_probability, waterfall, status, first_seen_run_id, last_seen_run_id,
      resolved_by, resolved_at, created_at, updated_at)
     VALUES
-    (source.review_id, source.subject_type, source.rec_a_key, source.rec_b_key,
+    (source.id, source.subject_type, source.rec_a_key, source.rec_b_key,
      source.entity_id, source.reason, source.match_probability, source.waterfall,
      source.status, source.first_seen_run_id, source.last_seen_run_id,
      source.resolved_by, source.resolved_at, $created_at::timestamp, $created_at::timestamp)

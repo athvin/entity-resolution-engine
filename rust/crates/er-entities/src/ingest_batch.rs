@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
 pub struct IngestBatch {
     /// The delivery batch that landed this row.
-    pub ingest_batch_id: String,
+    pub id: String,
     /// The run that wrote this row.
     pub run_id: String,
     /// The delivering source system.
@@ -34,7 +34,7 @@ pub struct IngestBatch {
 
 impl IngestBatch {
     /// The logical key columns.
-    pub const KEY: &'static [&'static str] = &["ingest_batch_id"];
+    pub const KEY: &'static [&'static str] = &["id"];
     /// The entity schema version; bumped only on a breaking change.
     pub const VERSION: u64 = 1;
     /// The relation (table) name.
@@ -46,7 +46,7 @@ impl IngestBatch {
     #[must_use]
     pub fn columns() -> &'static [&'static str] {
         &[
-            "ingest_batch_id",
+            "id",
             "run_id",
             "source_system",
             "path",
@@ -80,7 +80,7 @@ pub mod create {
         created_at: &str,
     ) -> ::duckdb::Result<usize> {
         const SQL: &str = "INSERT INTO lake.main.ingest_batches
-  (ingest_batch_id, run_id, source_system, path, new_count, changed_count,
+  (id, run_id, source_system, path, new_count, changed_count,
    unchanged_count, tombstone_count, resurrected_count, full_refresh_keys, created_at,
    updated_at)
 VALUES ($1, $2, $3, $4, $5, $6,
@@ -111,7 +111,7 @@ pub mod read {
     /// One row of `page`: One keyset page of ingest-batch receipts at a pinned snapshot, optionally filtered by source system.
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
     pub struct PageRow {
-        pub ingest_batch_id: String,
+        pub id: String,
         pub run_id: String,
         pub source_system: String,
         pub path: String,
@@ -130,7 +130,7 @@ pub mod read {
         #[must_use]
         pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
             vec![
-                ("ingest_batch_id", ::arrow::datatypes::DataType::Utf8),
+                ("id", ::arrow::datatypes::DataType::Utf8),
                 ("run_id", ::arrow::datatypes::DataType::Utf8),
                 ("source_system", ::arrow::datatypes::DataType::Utf8),
                 ("path", ::arrow::datatypes::DataType::Utf8),
@@ -159,8 +159,7 @@ pub mod read {
             let mut out = Vec::new();
             for batch in batches {
                 crate::batch::check_columns(batch, &expected)?;
-                let c0: &::arrow::array::StringArray =
-                    crate::batch::col(batch, 0, "ingest_batch_id")?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "id")?;
                 let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "run_id")?;
                 let c2: &::arrow::array::StringArray =
                     crate::batch::col(batch, 2, "source_system")?;
@@ -179,11 +178,7 @@ pub mod read {
                     crate::batch::col(batch, 10, "created_at")?;
                 for i in 0..batch.num_rows() {
                     out.push(Self {
-                        ingest_batch_id: crate::batch::req(
-                            crate::batch::opt_str(c0, i),
-                            "ingest_batch_id",
-                            i,
-                        )?,
+                        id: crate::batch::req(crate::batch::opt_str(c0, i), "id", i)?,
                         run_id: crate::batch::req(crate::batch::opt_str(c1, i), "run_id", i)?,
                         source_system: crate::batch::req(
                             crate::batch::opt_str(c2, i),
@@ -237,14 +232,13 @@ pub mod read {
         after: Option<&str>,
         limit: i64,
     ) -> ::duckdb::Result<Vec<PageRow>> {
-        const SQL: &str =
-            "SELECT ingest_batch_id, run_id, source_system, path, new_count, changed_count,
+        const SQL: &str = "SELECT id, run_id, source_system, path, new_count, changed_count,
        unchanged_count, tombstone_count, resurrected_count, full_refresh_keys,
        created_at
 FROM lake.main.ingest_batches AT (VERSION => {snapshot})
 WHERE ($1 IS NULL OR source_system = $1)
-  AND ($2 IS NULL OR ingest_batch_id > $2)
-ORDER BY ingest_batch_id
+  AND ($2 IS NULL OR id > $2)
+ORDER BY id
 LIMIT $3
 ";
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());

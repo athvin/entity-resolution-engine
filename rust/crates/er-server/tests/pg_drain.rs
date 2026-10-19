@@ -136,7 +136,7 @@ async fn steward_drain_applies_to_lake() {
         .oneshot(op("GET", "/v1/orgs/acme/reviews", Body::empty()))
         .await
         .unwrap();
-    let review_id = json_body(resp).await["items"][0]["review_id"]
+    let review_id = json_body(resp).await["items"][0]["id"]
         .as_str()
         .unwrap()
         .to_string();

@@ -373,7 +373,7 @@ pub fn active_assertions(
     match er_entities::assertion::read::active_pairs(session.connection(), snapshot) {
         Ok(rows) => Ok(rows
             .into_iter()
-            .map(|r| (r.assertion_id, r.rec_a_key, r.rec_b_key, r.kind))
+            .map(|r| (r.id, r.rec_a_key, r.rec_b_key, r.kind))
             .collect()),
         Err(e) => {
             let s = e.to_string();
@@ -657,7 +657,7 @@ fn typed_page<T: serde::Serialize>(
     (items, next)
 }
 
-/// The open-review queue, FIFO by `review_id` (`readapi.reviews_list`).
+/// The open-review queue, FIFO by `id` (`readapi.reviews_list`).
 ///
 /// # Errors
 /// Propagates a non-missing-table lake query error.
@@ -669,7 +669,7 @@ pub fn reviews_list(
 ) -> Result<(Vec<Value>, Option<String>), String> {
     let limit = limit.clamp(1, MAX_LIMIT);
     match er_entities::review::read::page(session.connection(), snapshot, after, limit + 1) {
-        Ok(rows) => Ok(typed_page(&rows, snapshot, limit, |r| &r.review_id)),
+        Ok(rows) => Ok(typed_page(&rows, snapshot, limit, |r| &r.id)),
         Err(e) => {
             let s = e.to_string();
             if is_missing_table(&s) {
@@ -703,7 +703,7 @@ pub fn review_get(
     }
 }
 
-/// The assertion ledger, keyed by `assertion_id` (`readapi.assertions_list`).
+/// The assertion ledger, keyed by `id` (`readapi.assertions_list`).
 /// Active-only unless `include_retracted`.
 ///
 /// # Errors
@@ -723,7 +723,7 @@ pub fn assertions_list(
         after,
         limit + 1,
     ) {
-        Ok(rows) => Ok(typed_page(&rows, snapshot, limit, |r| &r.assertion_id)),
+        Ok(rows) => Ok(typed_page(&rows, snapshot, limit, |r| &r.id)),
         Err(e) => {
             let s = e.to_string();
             if is_missing_table(&s) {
@@ -735,7 +735,7 @@ pub fn assertions_list(
     }
 }
 
-/// The ingest-batch receipts, keyed by `ingest_batch_id`
+/// The ingest-batch receipts, keyed by `id`
 /// (`readapi.ingest_batches_list`). Optional `source` filter.
 ///
 /// # Errors
@@ -756,7 +756,7 @@ pub fn imports_list(
         after,
         limit + 1,
     ) {
-        Ok(rows) => Ok(typed_page(&rows, snapshot, limit, |r| &r.ingest_batch_id)),
+        Ok(rows) => Ok(typed_page(&rows, snapshot, limit, |r| &r.id)),
         Err(e) => {
             let s = e.to_string();
             if is_missing_table(&s) {
@@ -800,7 +800,7 @@ pub fn runs_list(
         let counts = run_auto_merge_counts(session, snapshot, threshold)?;
         for run in &mut runs {
             if let Value::Object(map) = run {
-                if let Some(id) = map.get("run_id").and_then(Value::as_str) {
+                if let Some(id) = map.get("id").and_then(Value::as_str) {
                     let n = counts.get(id).copied().unwrap_or(0);
                     map.insert("auto_merged_pairs".to_string(), Value::from(n));
                 }

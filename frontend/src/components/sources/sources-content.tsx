@@ -15,7 +15,7 @@ import { useImportFile, useSources } from "@/lib/query/steward";
 import { cn } from "@/lib/utils";
 
 interface ReceiptRow {
-  ingest_batch_id: string;
+  id: string;
   run_id: string;
   source_system: string;
   new_count: number;
@@ -63,7 +63,7 @@ function ReceiptsPanel({ org }: { org: string }) {
                   receipt.changed_count === 0 &&
                   receipt.tombstone_count === 0;
                 return (
-                  <tr key={receipt.ingest_batch_id} className="border-b last:border-0">
+                  <tr key={receipt.id} className="border-b last:border-0">
                     <td className="py-2 pr-4 font-medium">{receipt.source_system}</td>
                     <td className="py-2 pr-4 tabular-nums">{receipt.new_count}</td>
                     <td className="py-2 pr-4 tabular-nums">{receipt.changed_count}</td>

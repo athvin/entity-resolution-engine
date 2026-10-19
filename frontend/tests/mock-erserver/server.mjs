@@ -185,7 +185,7 @@ export function initialState() {
     runs: {
       "acme-dev": [
         {
-          run_id: "01jm0000000000000000000002",
+          id: "01jm0000000000000000000002",
           mode: "incremental",
           status: "succeeded",
           started_at: "2026-09-24T06:00:04Z",
@@ -195,7 +195,7 @@ export function initialState() {
           auto_merged_pairs: 12,
         },
         {
-          run_id: "01jm0000000000000000000001",
+          id: "01jm0000000000000000000001",
           mode: "full",
           status: "succeeded",
           started_at: "2026-09-23T06:00:02Z",
@@ -301,7 +301,7 @@ export function initialState() {
     },
     reviews: {
       "acme-dev": Array.from({ length: 14 }, (_, index) => ({
-        review_id: `01jmrev${String(index + 1).padStart(5, "0")}`,
+        id: `01jmrev${String(index + 1).padStart(5, "0")}`,
         subject_type: "pair",
         rec_a_key: `crm:C-${String(1000 + index)}`,
         rec_b_key: `webforms:W-${String(2000 + index)}`,
@@ -327,7 +327,7 @@ export function initialState() {
       // Enough rows for three parallel device projects to each triage 20
       // without touching acme-dev (whose counts are pixel- and text-asserted).
       "mutable-dev": Array.from({ length: 120 }, (_, index) => ({
-        review_id: `01jmmutrev${String(index + 1).padStart(4, "0")}`,
+        id: `01jmmutrev${String(index + 1).padStart(4, "0")}`,
         subject_type: "pair",
         rec_a_key: `crm:M-${String(index)}`,
         rec_b_key: `billing:B-${String(index)}`,
@@ -411,7 +411,7 @@ export function initialState() {
     receipts: {
       "acme-dev": [
         {
-          ingest_batch_id: "01jmbatch000000000000000003",
+          id: "01jmbatch000000000000000003",
           run_id: "01jm0000000000000000000002",
           source_system: "webforms",
           path: "/drop/webforms.csv",
@@ -424,7 +424,7 @@ export function initialState() {
           created_at: "2026-09-24T06:00:10Z",
         },
         {
-          ingest_batch_id: "01jmbatch000000000000000002",
+          id: "01jmbatch000000000000000002",
           run_id: "01jm0000000000000000000001",
           source_system: "crm",
           path: "/drop/crm.csv",
@@ -564,7 +564,7 @@ export function initialState() {
     state.runs[org] = [];
     state.jobs[org] = [];
     state.reviews[org] = Array.from({ length: 40 }, (_, index) => ({
-      review_id: `01jm${org.slice(-3)}rev${String(index + 1).padStart(4, "0")}`,
+      id: `01jm${org.slice(-3)}rev${String(index + 1).padStart(4, "0")}`,
       subject_type: "pair",
       rec_a_key: `crm:M-${String(index)}`,
       rec_b_key: `billing:B-${String(index)}`,
@@ -598,7 +598,7 @@ export function initialState() {
   // The select-all journey needs a queue deeper than one 50-row page AND past
   // the 100-item typed-confirm threshold: 130 rows, resolved in one action.
   state.reviews["selectall-dev"] = Array.from({ length: 130 }, (_, index) => ({
-    review_id: `01jmselrev${String(index + 1).padStart(4, "0")}`,
+    id: `01jmselrev${String(index + 1).padStart(4, "0")}`,
     subject_type: "pair",
     rec_a_key: `crm:S-${String(index)}`,
     rec_b_key: `billing:B-${String(index)}`,
@@ -823,7 +823,7 @@ function entityDetail(org, entityId) {
   ];
   const events = [
     {
-      event_id: `01jmevent1${entityId.slice(-8)}`,
+      id: `01jmevent1${entityId.slice(-8)}`,
       seq: 1,
       run_id: "01jm0000000000000000000001",
       event_type: "created",
@@ -833,7 +833,7 @@ function entityDetail(org, entityId) {
     ...(multi
       ? [
           {
-            event_id: `01jmevent2${entityId.slice(-8)}`,
+            id: `01jmevent2${entityId.slice(-8)}`,
             seq: 2,
             run_id: "01jm0000000000000000000002",
             event_type: "member_added",
@@ -1325,7 +1325,7 @@ const server = http.createServer((req, res) => {
       if (cursor) {
         try {
           const decoded = decodeCursor(cursor);
-          rows = rows.filter((row) => row.review_id > decoded.k);
+          rows = rows.filter((row) => row.id > decoded.k);
         } catch {
           return send(res, 422, { detail: "invalid cursor" });
         }
@@ -1336,7 +1336,7 @@ const server = http.createServer((req, res) => {
       return send(res, 200, { items, next_cursor });
     }
     if ((match = /^\/v1\/orgs\/([^/]+)\/reviews\/([^/:]+)$/.exec(path)) && req.method === "GET") {
-      const row = (state.reviews[match[1]] ?? []).find((r) => r.review_id === match[2]);
+      const row = (state.reviews[match[1]] ?? []).find((r) => r.id === match[2]);
       return row ? send(res, 200, row) : send(res, 404, { detail: "not found" });
     }
     if (
@@ -1344,7 +1344,7 @@ const server = http.createServer((req, res) => {
       req.method === "POST"
     ) {
       const org = match[1];
-      const row = (state.reviews[org] ?? []).find((r) => r.review_id === match[2]);
+      const row = (state.reviews[org] ?? []).find((r) => r.id === match[2]);
       if (!row || row.status !== "open") return send(res, 404, { detail: "not found" });
       const body = await readBody(req);
       row.status =
@@ -1361,10 +1361,9 @@ const server = http.createServer((req, res) => {
       return send(res, 200, {
         status: staged ? "staged" : "applied",
         applied: "resolve_review",
-        review_id: row.review_id,
+        review_id: row.id,
         resolution: body.resolution,
-        assertion_id:
-          body.resolution === "dismiss" ? null : `01jmassertnew${row.review_id.slice(-4)}`,
+        assertion_id: body.resolution === "dismiss" ? null : `01jmassertnew${row.id.slice(-4)}`,
         pending_until_next_reconcile: !staged,
       });
     }
@@ -1377,7 +1376,7 @@ const server = http.createServer((req, res) => {
       const items = Array.isArray(body.items) ? body.items : [];
       const results = [];
       for (const item of items) {
-        const row = (state.reviews[org] ?? []).find((r) => r.review_id === item.review_id);
+        const row = (state.reviews[org] ?? []).find((r) => r.id === item.review_id);
         if (row && row.status === "open") {
           row.status =
             item.resolution === "match"

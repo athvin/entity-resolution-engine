@@ -3,13 +3,13 @@ version: 1
 name: entity_event
 relation: entity_events
 description: "One lifecycle event on an entity (S4.5.5): created/merged/split/retired and membership changes, with the run that caused it."
-key: [event_id]
-identity: legacy
+key: [id]
+natural_key: [run_id, entity_id, event_type, details_hash]
 generate:
   stores: [duckdb]
   languages: [rust]
 columns:
-  - name: event_id
+  - name: id
     type: varchar
     nullable: false
     description: "The event id (ULID)."

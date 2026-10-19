@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS lake.main.review_queue (
-  review_id VARCHAR NOT NULL,
+  id VARCHAR NOT NULL,
   subject_type VARCHAR NOT NULL,
   rec_a_key VARCHAR,
   rec_b_key VARCHAR,

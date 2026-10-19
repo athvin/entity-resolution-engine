@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS lake.main.ingest_batches (
-  ingest_batch_id VARCHAR NOT NULL,
+  id VARCHAR NOT NULL,
   run_id VARCHAR NOT NULL,
   source_system VARCHAR NOT NULL,
   path VARCHAR NOT NULL,

@@ -13,7 +13,7 @@ mod entity;
 mod types;
 
 pub use catalog::{Catalog, SpecError};
-pub use entity::{Column, Entity, GenerateBlock, Identity, Index, Reference, singular};
+pub use entity::{Column, Entity, GenerateBlock, Index, Reference, singular};
 pub use types::{ColumnType, Language, ParseTypeError, Store, Wire};
 
 #[cfg(test)]
@@ -26,17 +26,16 @@ version: 1
 name: golden_record
 relation: golden_records
 description: "One resolved person: the surviving value per attribute."
-key: [entity_id]
-identity: legacy
+key: [id]
 generate:
   stores: [duckdb]
   languages: [rust, typescript]
   wire: [arrow, json]
 columns:
-  - name: entity_id
+  - name: id
     type: varchar
     nullable: false
-    description: "Persistent entity id (ULID)."
+    description: "Persistent entity id (deterministic UUIDv7)."
   - name: given_name
     type: varchar
     description: "Surviving given name."
@@ -49,6 +48,14 @@ columns:
     nullable: false
     volatile: true
     description: "Assembly time of this row."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical creation time."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time."
 "#;
 
     fn parse(yaml: &str) -> Result<Entity, serde_norway::Error> {
@@ -61,16 +68,13 @@ columns:
         assert_eq!(entity.name, "golden_record");
         assert_eq!(entity.relation, "golden_records");
         assert_eq!(entity.version, 1);
-        assert_eq!(entity.key, vec!["entity_id"]);
-        assert_eq!(entity.columns.len(), 4);
+        assert_eq!(entity.key, vec!["id"]);
+        assert_eq!(entity.columns.len(), 6);
         // nullable defaults to true; the explicit ones are false.
-        assert!(!entity.column("entity_id").unwrap().nullable);
+        assert!(!entity.column("id").unwrap().nullable);
         assert!(entity.column("given_name").unwrap().nullable);
         assert!(entity.column("assembled_at").unwrap().volatile);
-        assert_eq!(
-            entity.column("entity_id").unwrap().col_type,
-            ColumnType::Varchar
-        );
+        assert_eq!(entity.column("id").unwrap().col_type, ColumnType::Varchar);
         assert_eq!(
             entity.qualified_name(Store::Duckdb),
             "lake.main.golden_records"
@@ -117,7 +121,7 @@ columns:
 
     #[test]
     fn a_key_column_must_exist() {
-        let yaml = GOLDEN.replace("key: [entity_id]", "key: [nope]");
+        let yaml = GOLDEN.replace("key: [id]", "key: [nope, id]");
         let entity = parse(&yaml).unwrap();
         let err = Catalog::from_entities(vec![entity]).unwrap_err();
         assert!(matches!(err, SpecError::Invalid { .. }));
@@ -167,16 +171,8 @@ columns:
     #[test]
     fn the_identity_conventions_hold_for_a_v2_entity() {
         let entity = parse(V2_LAKE).expect("parses");
-        assert!(!entity.is_legacy());
         assert_eq!(entity.natural_key, vec!["record_key"]);
         Catalog::from_entities(vec![entity]).expect("a conforming entity validates");
-    }
-
-    #[test]
-    fn legacy_skips_the_conventions_and_the_golden_fixture_uses_it() {
-        let entity = parse(GOLDEN).expect("parses");
-        assert!(entity.is_legacy());
-        Catalog::from_entities(vec![entity]).expect("legacy entities validate as before");
     }
 
     #[test]
@@ -219,7 +215,7 @@ columns:
     }
 
     #[test]
-    fn v10_a_natural_key_is_real_not_null_and_never_the_universal_columns() {
+    fn v10_a_natural_key_is_real_and_never_the_universal_columns() {
         expect_invalid(
             &V2_LAKE.replace("natural_key: [record_key]", "natural_key: [nope]"),
             "natural_key column",
@@ -245,19 +241,30 @@ version: 1
 name: child
 relation: children
 description: "x"
-key: [a]
-identity: legacy
+key: [id]
 generate:
   stores: [postgres]
   languages: [rust]
 columns:
-  - name: a
+  - name: id
     type: varchar
     nullable: false
     description: "x"
   - name: parent_id
     type: varchar
     references: { relation: parents, column: id }
+    description: "x"
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "x"
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
     description: "x"
 "#;
         let catalog = Catalog::from_entities(vec![parse(referrer).unwrap()])

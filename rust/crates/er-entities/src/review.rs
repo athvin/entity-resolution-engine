@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
 pub struct Review {
     /// The review item id (ULID).
-    pub review_id: String,
+    pub id: String,
     /// What the review is about: a record pair or an entity.
     pub subject_type: String,
     /// The pair's lower record key (canonical order).
@@ -40,7 +40,7 @@ pub struct Review {
 
 impl Review {
     /// The logical key columns.
-    pub const KEY: &'static [&'static str] = &["review_id"];
+    pub const KEY: &'static [&'static str] = &["id"];
     /// The entity schema version; bumped only on a breaking change.
     pub const VERSION: u64 = 1;
     /// The relation (table) name.
@@ -52,7 +52,7 @@ impl Review {
     #[must_use]
     pub fn columns() -> &'static [&'static str] {
         &[
-            "review_id",
+            "id",
             "subject_type",
             "rec_a_key",
             "rec_b_key",
@@ -76,7 +76,7 @@ pub mod read {
     /// One row of `by_id`: One review item by id at a pinned snapshot.
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
     pub struct ByIdRow {
-        pub review_id: String,
+        pub id: String,
         pub subject_type: String,
         pub rec_a_key: Option<String>,
         pub rec_b_key: Option<String>,
@@ -97,7 +97,7 @@ pub mod read {
         #[must_use]
         pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
             vec![
-                ("review_id", ::arrow::datatypes::DataType::Utf8),
+                ("id", ::arrow::datatypes::DataType::Utf8),
                 ("subject_type", ::arrow::datatypes::DataType::Utf8),
                 ("rec_a_key", ::arrow::datatypes::DataType::Utf8),
                 ("rec_b_key", ::arrow::datatypes::DataType::Utf8),
@@ -128,7 +128,7 @@ pub mod read {
             let mut out = Vec::new();
             for batch in batches {
                 crate::batch::check_columns(batch, &expected)?;
-                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "review_id")?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "id")?;
                 let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "subject_type")?;
                 let c2: &::arrow::array::StringArray = crate::batch::col(batch, 2, "rec_a_key")?;
                 let c3: &::arrow::array::StringArray = crate::batch::col(batch, 3, "rec_b_key")?;
@@ -148,7 +148,7 @@ pub mod read {
                     crate::batch::col(batch, 12, "resolved_at")?;
                 for i in 0..batch.num_rows() {
                     out.push(Self {
-                        review_id: crate::batch::req(crate::batch::opt_str(c0, i), "review_id", i)?,
+                        id: crate::batch::req(crate::batch::opt_str(c0, i), "id", i)?,
                         subject_type: crate::batch::req(
                             crate::batch::opt_str(c1, i),
                             "subject_type",
@@ -186,11 +186,11 @@ pub mod read {
         snapshot: i64,
         review_id: &str,
     ) -> ::duckdb::Result<Vec<ByIdRow>> {
-        const SQL: &str = "SELECT review_id, subject_type, rec_a_key, rec_b_key, entity_id, reason,
+        const SQL: &str = "SELECT id, subject_type, rec_a_key, rec_b_key, entity_id, reason,
        match_probability, waterfall, status, first_seen_run_id, last_seen_run_id,
        resolved_by, resolved_at
 FROM lake.main.review_queue AT (VERSION => {snapshot})
-WHERE review_id = $1
+WHERE id = $1
 ";
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
         let mut stmt = conn.prepare(&sql)?;
@@ -251,7 +251,7 @@ WHERE status = 'open'
     /// One row of `page`: One keyset page of the review queue at a pinned snapshot, FIFO by review id.
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
     pub struct PageRow {
-        pub review_id: String,
+        pub id: String,
         pub subject_type: String,
         pub rec_a_key: Option<String>,
         pub rec_b_key: Option<String>,
@@ -272,7 +272,7 @@ WHERE status = 'open'
         #[must_use]
         pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
             vec![
-                ("review_id", ::arrow::datatypes::DataType::Utf8),
+                ("id", ::arrow::datatypes::DataType::Utf8),
                 ("subject_type", ::arrow::datatypes::DataType::Utf8),
                 ("rec_a_key", ::arrow::datatypes::DataType::Utf8),
                 ("rec_b_key", ::arrow::datatypes::DataType::Utf8),
@@ -303,7 +303,7 @@ WHERE status = 'open'
             let mut out = Vec::new();
             for batch in batches {
                 crate::batch::check_columns(batch, &expected)?;
-                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "review_id")?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "id")?;
                 let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "subject_type")?;
                 let c2: &::arrow::array::StringArray = crate::batch::col(batch, 2, "rec_a_key")?;
                 let c3: &::arrow::array::StringArray = crate::batch::col(batch, 3, "rec_b_key")?;
@@ -323,7 +323,7 @@ WHERE status = 'open'
                     crate::batch::col(batch, 12, "resolved_at")?;
                 for i in 0..batch.num_rows() {
                     out.push(Self {
-                        review_id: crate::batch::req(crate::batch::opt_str(c0, i), "review_id", i)?,
+                        id: crate::batch::req(crate::batch::opt_str(c0, i), "id", i)?,
                         subject_type: crate::batch::req(
                             crate::batch::opt_str(c1, i),
                             "subject_type",
@@ -362,12 +362,12 @@ WHERE status = 'open'
         after: Option<&str>,
         limit: i64,
     ) -> ::duckdb::Result<Vec<PageRow>> {
-        const SQL: &str = "SELECT review_id, subject_type, rec_a_key, rec_b_key, entity_id, reason,
+        const SQL: &str = "SELECT id, subject_type, rec_a_key, rec_b_key, entity_id, reason,
        match_probability, waterfall, status, first_seen_run_id, last_seen_run_id,
        resolved_by, resolved_at
 FROM lake.main.review_queue AT (VERSION => {snapshot})
-WHERE ($1 IS NULL OR review_id > $1)
-ORDER BY review_id
+WHERE ($1 IS NULL OR id > $1)
+ORDER BY id
 LIMIT $2
 ";
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
@@ -391,7 +391,7 @@ pub mod update {
         const SQL: &str =
             "UPDATE lake.main.review_queue SET status = $1, resolved_at = $2::timestamp,
     updated_at = $2::timestamp
-WHERE review_id = $3
+WHERE id = $3
 ";
         conn.execute(SQL, ::duckdb::params![status, resolved_at, review_id])
     }
@@ -405,7 +405,7 @@ WHERE review_id = $3
         auto_merge: f64,
     ) -> ::duckdb::Result<usize> {
         const SQL: &str = "MERGE INTO lake.main.review_queue AS target USING (
-  SELECT 'gray_band:' || rec_a_key || ':' || rec_b_key AS review_id,
+  SELECT sha256('review_queue:' || rec_a_key || ':' || rec_b_key || ':' || 'gray_band') AS id,
          'pair' AS subject_type, rec_a_key, rec_b_key,
          CAST(NULL AS varchar) AS entity_id, 'gray_band' AS reason,
          match_probability, evidence AS waterfall, 'open' AS status,
@@ -420,11 +420,11 @@ WHEN MATCHED THEN UPDATE SET match_probability = source.match_probability,
     waterfall = source.waterfall, last_seen_run_id = source.last_seen_run_id,
     updated_at = $2::timestamp
 WHEN NOT MATCHED THEN INSERT
-    (review_id, subject_type, rec_a_key, rec_b_key, entity_id, reason,
+    (id, subject_type, rec_a_key, rec_b_key, entity_id, reason,
      match_probability, waterfall, status, first_seen_run_id, last_seen_run_id,
      resolved_by, resolved_at, created_at, updated_at)
     VALUES
-    (source.review_id, source.subject_type, source.rec_a_key, source.rec_b_key,
+    (source.id, source.subject_type, source.rec_a_key, source.rec_b_key,
      source.entity_id, source.reason, source.match_probability, source.waterfall,
      source.status, source.first_seen_run_id, source.last_seen_run_id,
      source.resolved_by, source.resolved_at, $2::timestamp, $2::timestamp)
@@ -444,7 +444,7 @@ WHEN NOT MATCHED THEN INSERT
         created_at: &str,
     ) -> ::duckdb::Result<usize> {
         const SQL: &str = "MERGE INTO lake.main.review_queue AS target USING (
-  SELECT 'never_unsatisfiable:' || $1 || ':' || $2 AS review_id,
+  SELECT sha256('review_queue:' || $1 || ':' || $2 || ':' || 'never_unsatisfiable') AS id,
          'pair' AS subject_type, $1 AS rec_a_key, $2 AS rec_b_key,
          CAST(NULL AS varchar) AS entity_id, 'never_unsatisfiable' AS reason,
          CAST(NULL AS double) AS match_probability, CAST(NULL AS json) AS waterfall,
@@ -456,11 +456,11 @@ WHEN NOT MATCHED THEN INSERT
 WHEN MATCHED THEN UPDATE SET last_seen_run_id = source.last_seen_run_id,
     updated_at = $4::timestamp
 WHEN NOT MATCHED THEN INSERT
-    (review_id, subject_type, rec_a_key, rec_b_key, entity_id, reason,
+    (id, subject_type, rec_a_key, rec_b_key, entity_id, reason,
      match_probability, waterfall, status, first_seen_run_id, last_seen_run_id,
      resolved_by, resolved_at, created_at, updated_at)
     VALUES
-    (source.review_id, source.subject_type, source.rec_a_key, source.rec_b_key,
+    (source.id, source.subject_type, source.rec_a_key, source.rec_b_key,
      source.entity_id, source.reason, source.match_probability, source.waterfall,
      source.status, source.first_seen_run_id, source.last_seen_run_id,
      source.resolved_by, source.resolved_at, $4::timestamp, $4::timestamp)

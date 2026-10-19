@@ -14,7 +14,7 @@ import { queryKeys } from "./keys";
 export type Resolution = "match" | "no_match" | "dismiss";
 
 export interface ReviewRow {
-  review_id: string;
+  id: string;
   subject_type: string;
   rec_a_key: string | null;
   rec_b_key: string | null;
@@ -64,7 +64,7 @@ function dropReviews(
     ...data,
     pages: data.pages.map((page) => ({
       ...page,
-      items: page.items.filter((item) => !ids.has(item.review_id)),
+      items: page.items.filter((item) => !ids.has(item.id)),
     })),
   };
 }
@@ -136,7 +136,7 @@ export async function fetchReviewIdsMatching(
     );
     for (const item of page.items) {
       if (ids.length >= SELECT_ALL_CAP) return { ids, capped: true };
-      ids.push(item.review_id);
+      ids.push(item.id);
     }
     onProgress?.(ids.length);
     cursor = page.next_cursor;

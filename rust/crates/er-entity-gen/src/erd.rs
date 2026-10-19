@@ -518,7 +518,7 @@ mod tests {
         // golden_records carries no entity_id column anymore — its OWN id IS the
         // entity id — so no edge; the lineage FK edge survives via the convention.
         assert!(erd.contains("    golden_lineage }o..|| entities : \"entity_id → id\""));
-        assert!(erd.contains("    run_stages }o..|| runs : \"run_id\""));
+        assert!(erd.contains("    run_stages }o..|| runs : \"run_id → id\""));
         // The standardized records reference their raw source rows.
         assert!(
             erd.contains("    int_std_records }o..|| raw_records"),

@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
 pub struct Run {
     /// The run that wrote this row.
-    pub run_id: String,
+    pub id: String,
     /// The tenant the run belongs to.
     pub tenant: String,
     /// The run mode (full, incremental, correction_pass, ...).
@@ -46,7 +46,7 @@ pub struct Run {
 
 impl Run {
     /// The logical key columns.
-    pub const KEY: &'static [&'static str] = &["run_id"];
+    pub const KEY: &'static [&'static str] = &["id"];
     /// The entity schema version; bumped only on a breaking change.
     pub const VERSION: u64 = 1;
     /// The relation (table) name.
@@ -58,7 +58,7 @@ impl Run {
     #[must_use]
     pub fn columns() -> &'static [&'static str] {
         &[
-            "run_id",
+            "id",
             "tenant",
             "mode",
             "status",
@@ -97,7 +97,7 @@ pub mod create {
         code_version: &str,
     ) -> ::duckdb::Result<usize> {
         const SQL: &str =
-            "INSERT INTO lake.main.runs (run_id, tenant, mode, status, started_at, config_hash,
+            "INSERT INTO lake.main.runs (id, tenant, mode, status, started_at, config_hash,
   model_version, tf_snapshot_id, std_version, survivorship_version, code_version,
   created_at, updated_at)
 VALUES ($1, $2, $3, 'running', $4::timestamp, $5,
@@ -127,7 +127,7 @@ pub mod read {
     /// One row of `latest_live`: The latest run's identity, read live (doctor's status line and the correction pass's model identity), with the run_id tiebreak for same-timestamp runs.
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
     pub struct LatestLiveRow {
-        pub run_id: String,
+        pub id: String,
         pub status: String,
         pub mode: String,
         pub model_version: Option<String>,
@@ -139,7 +139,7 @@ pub mod read {
         #[must_use]
         pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
             vec![
-                ("run_id", ::arrow::datatypes::DataType::Utf8),
+                ("id", ::arrow::datatypes::DataType::Utf8),
                 ("status", ::arrow::datatypes::DataType::Utf8),
                 ("mode", ::arrow::datatypes::DataType::Utf8),
                 ("model_version", ::arrow::datatypes::DataType::Utf8),
@@ -156,7 +156,7 @@ pub mod read {
             let mut out = Vec::new();
             for batch in batches {
                 crate::batch::check_columns(batch, &expected)?;
-                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "run_id")?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "id")?;
                 let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "status")?;
                 let c2: &::arrow::array::StringArray = crate::batch::col(batch, 2, "mode")?;
                 let c3: &::arrow::array::StringArray =
@@ -165,7 +165,7 @@ pub mod read {
                     crate::batch::col(batch, 4, "tf_snapshot_id")?;
                 for i in 0..batch.num_rows() {
                     out.push(Self {
-                        run_id: crate::batch::req(crate::batch::opt_str(c0, i), "run_id", i)?,
+                        id: crate::batch::req(crate::batch::opt_str(c0, i), "id", i)?,
                         status: crate::batch::req(crate::batch::opt_str(c1, i), "status", i)?,
                         mode: crate::batch::req(crate::batch::opt_str(c2, i), "mode", i)?,
                         model_version: crate::batch::opt_str(c3, i),
@@ -179,9 +179,9 @@ pub mod read {
 
     /// The latest run's identity, read live (doctor's status line and the correction pass's model identity), with the run_id tiebreak for same-timestamp runs.
     pub fn latest_live(conn: &::duckdb::Connection) -> ::duckdb::Result<Vec<LatestLiveRow>> {
-        const SQL: &str = "SELECT run_id, status, mode, model_version, tf_snapshot_id
+        const SQL: &str = "SELECT id, status, mode, model_version, tf_snapshot_id
 FROM lake.main.runs
-ORDER BY started_at DESC, run_id DESC
+ORDER BY started_at DESC, id DESC
 LIMIT 1
 ";
         let mut stmt = conn.prepare(SQL)?;
@@ -192,7 +192,7 @@ LIMIT 1
     /// One row of `recent`: The most recent runs at a pinned snapshot, newest first, capped at 20 (the runs surface).
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
     pub struct RecentRow {
-        pub run_id: String,
+        pub id: String,
         pub mode: String,
         pub status: String,
         #[serde(serialize_with = "crate::batch::ser_duckdb_timestamp")]
@@ -210,7 +210,7 @@ LIMIT 1
         #[must_use]
         pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
             vec![
-                ("run_id", ::arrow::datatypes::DataType::Utf8),
+                ("id", ::arrow::datatypes::DataType::Utf8),
                 ("mode", ::arrow::datatypes::DataType::Utf8),
                 ("status", ::arrow::datatypes::DataType::Utf8),
                 (
@@ -243,7 +243,7 @@ LIMIT 1
             let mut out = Vec::new();
             for batch in batches {
                 crate::batch::check_columns(batch, &expected)?;
-                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "run_id")?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "id")?;
                 let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "mode")?;
                 let c2: &::arrow::array::StringArray = crate::batch::col(batch, 2, "status")?;
                 let c3: &::arrow::array::TimestampMicrosecondArray =
@@ -259,7 +259,7 @@ LIMIT 1
                     crate::batch::col(batch, 8, "rebuild_reason")?;
                 for i in 0..batch.num_rows() {
                     out.push(Self {
-                        run_id: crate::batch::req(crate::batch::opt_str(c0, i), "run_id", i)?,
+                        id: crate::batch::req(crate::batch::opt_str(c0, i), "id", i)?,
                         mode: crate::batch::req(crate::batch::opt_str(c1, i), "mode", i)?,
                         status: crate::batch::req(crate::batch::opt_str(c2, i), "status", i)?,
                         started_at: crate::batch::req(
@@ -286,7 +286,7 @@ LIMIT 1
     /// The most recent runs at a pinned snapshot, newest first, capped at 20 (the runs surface).
     pub fn recent(conn: &::duckdb::Connection, snapshot: i64) -> ::duckdb::Result<Vec<RecentRow>> {
         const SQL: &str =
-            "SELECT run_id, mode, status, started_at, ended_at, config_hash, model_version,
+            "SELECT id, mode, status, started_at, ended_at, config_hash, model_version,
        tf_snapshot_id, rebuild_reason
 FROM lake.main.runs AT (VERSION => {snapshot})
 ORDER BY started_at DESC
@@ -310,7 +310,7 @@ pub mod update {
         const SQL: &str =
             "UPDATE lake.main.runs SET status = 'succeeded', ended_at = $1::timestamp,
     updated_at = $1::timestamp
-WHERE run_id = $2
+WHERE id = $2
 ";
         conn.execute(SQL, ::duckdb::params![ended_at, run_id])
     }
