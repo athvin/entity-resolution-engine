@@ -8,13 +8,16 @@ pub enum DedupeError {
     #[error("SQL parse error in {context}: {message}")]
     SqlParse { context: String, message: String },
 
-    #[error("database error: {0}")]
+    // These three carry their cause as a `#[from]` source, so the source is
+    // NOT interpolated into the message: a reporter that walks `.source()`
+    // would otherwise print it twice.
+    #[error("database error")]
     Db(#[from] duckdb::Error),
 
-    #[error("JSON error: {0}")]
+    #[error("JSON error")]
     Json(#[from] serde_json::Error),
 
-    #[error("I/O error: {0}")]
+    #[error("I/O error")]
     Io(#[from] std::io::Error),
 
     #[error("{0}")]

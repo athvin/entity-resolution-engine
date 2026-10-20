@@ -21,7 +21,7 @@ use serde::Deserialize;
 pub enum ErdError {
     /// `frontend/drizzle/meta/<latest>_snapshot.json` is not the shape drizzle-kit
     /// writes (snapshot format 7).
-    #[error("parsing the drizzle snapshot: {0}")]
+    #[error("parsing the drizzle snapshot")]
     Snapshot(#[from] serde_json::Error),
 }
 

@@ -185,12 +185,13 @@ pub struct LoadedStatement {
 /// A statement load/validation failure.
 #[derive(Debug, thiserror::Error)]
 pub enum StmtError {
-    #[error("reading {path:?}: {source}")]
+    // `source` is thiserror's source field: named here, not interpolated.
+    #[error("reading {path:?}")]
     Read {
         path: PathBuf,
         source: std::io::Error,
     },
-    #[error("parsing {path:?}: {source}")]
+    #[error("parsing {path:?}")]
     Parse {
         path: PathBuf,
         source: serde_norway::Error,

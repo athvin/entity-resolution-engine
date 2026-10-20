@@ -277,7 +277,9 @@ pub struct Config {
 /// the S4.0 exit status (2), matching Python's `ConfigValidationError`.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
-    #[error("config is not valid YAML or does not match S6: {0}")]
+    // The serde error is the `#[from]` source; it is not interpolated here, so
+    // a reporter walking `.source()` prints the line/column detail once.
+    #[error("config is not valid YAML or does not match S6")]
     Parse(#[from] serde_norway::Error),
 }
 

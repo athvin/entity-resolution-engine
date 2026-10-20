@@ -23,6 +23,14 @@ COPY --from=build /src/target/release/er-dispatcher /usr/local/bin/er-dispatcher
 COPY --from=build /src/target/release/er /usr/local/bin/er
 # The chart sets the api container port to 8000; default the bind to match.
 ENV ER_SERVER_ADDR=0.0.0.0:8000
+# Panic backtraces on, per-error backtraces off: RUST_BACKTRACE covers a real
+# panic, while RUST_LIB_BACKTRACE=0 stops `anyhow` capturing a backtrace for
+# every Error it constructs — the dispatcher builds those on expected failure
+# paths, so capturing there is pure cost. Set here rather than in the chart so
+# it applies to all three binaries (er-server, er-dispatcher, er) wherever the
+# image runs.
+ENV RUST_BACKTRACE=1 \
+    RUST_LIB_BACKTRACE=0
 EXPOSE 8000
 # uid 1001 == the `er` user the chart's securityContext pins (runAsUser 1001).
 # WORKDIR /app so DuckDB's CWD-relative spill lands in the chart's /app/.tmp mount.

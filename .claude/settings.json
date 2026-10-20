@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "B=\"$CLAUDE_PROJECT_DIR/.tools/bin/cargo-agents\"; [ -x \"$B\" ] || exit 0; cd \"$CLAUDE_PROJECT_DIR/rust\" || exit 0; SYMPOSIUM_HOME=\"$CLAUDE_PROJECT_DIR/.symposium\" exec \"$B\" hook claude session-start"
+          }
+        ]
+      }
+    ]
+  }
+}
