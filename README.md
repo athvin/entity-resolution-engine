@@ -143,6 +143,7 @@ the [analysis skill](.agents/skills/ducklake-performance/SKILL.md).
 | Product | [Frontend design](docs/frontend-design.md) | Cloud UI: personas, access model, screens, BFF, phased plan |
 | Product | [Connectors](docs/connectors.md) | The agnostic ingress/egress seam and the Salesforce connector |
 | Product | [Cloudingo research](docs/research-cloudingo.md) | Competitor and market analysis driving the parity roadmap |
+| Product | [DataGroomr teardown](docs/research-datagroomr.md) | Stack-ranked, Salesforce-free capability matrix of the second competitor, with the gaps a warehouse-native ER service can win on |
 | Engine | [Architecture](docs/architecture.md) | Pipeline stages, data ownership and entity lifecycle |
 | Engine | [ERD](docs/erd.md) | Generated entity-relationship diagram of every store (control plane, erweb, lake); regenerate with `er-entity gen` |
 | Engine | [Technical specification](DesignDoc.md) | Numbered schemas, algorithms and invariants referenced by tests |
