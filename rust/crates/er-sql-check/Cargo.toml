@@ -37,7 +37,7 @@ ff-analysis = { git = "https://github.com/athvin/feather-flow", tag = "er-entity
 # inspects and the plan ff-analysis produces are the same types. sqlparser is used
 # only through ff_analysis::sqlparser (DataFusion's bundled 0.59), never the
 # standalone crate.
-datafusion-common = "52"
+datafusion-common = "55"
 datafusion-expr = "52"
 regex = { workspace = true }
 serde = { workspace = true }
