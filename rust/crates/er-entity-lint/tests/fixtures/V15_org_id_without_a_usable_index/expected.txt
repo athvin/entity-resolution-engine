@@ -1,0 +1,1 @@
+[V15] widget: org_id is tenant scope but no non-partial index leads with it, so every tenant-scoped read is a full scan

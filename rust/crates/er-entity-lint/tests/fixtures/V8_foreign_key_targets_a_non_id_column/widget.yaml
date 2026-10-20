@@ -1,0 +1,34 @@
+kind: entity
+version: 1
+name: widget
+relation: widgets
+description: "A control-plane entity shaped to exercise V8_foreign_key_targets_a_non_id_column."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "The row's id (UUIDv7)."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: name }
+    description: "The tenant the row belongs to."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row appeared."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Wall-clock last-write time."
+indexes:
+  - name: widgets_by_org
+    columns: [org_id, id]

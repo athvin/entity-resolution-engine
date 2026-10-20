@@ -1,0 +1,23 @@
+kind: entity
+version: 1
+name: thing
+relation: things
+description: "A lake entity shaped to exercise V4_missing_updated_at."
+key: [id]
+natural_key: [record_key]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "sha256 natural id."
+  - name: record_key
+    type: varchar
+    nullable: false
+    description: "The natural identity."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical creation time."

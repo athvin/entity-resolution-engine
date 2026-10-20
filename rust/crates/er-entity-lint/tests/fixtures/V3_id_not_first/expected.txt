@@ -1,0 +1,1 @@
+[V3] thing: id must be the first declared column

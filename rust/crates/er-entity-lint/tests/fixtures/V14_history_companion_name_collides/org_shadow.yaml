@@ -1,0 +1,26 @@
+kind: entity
+version: 1
+name: org_shadow
+relation: orgs_history
+description: "Squats on the name orgs' history companion needs."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "The row's id (UUIDv7)."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row appeared."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Wall-clock last-write time."

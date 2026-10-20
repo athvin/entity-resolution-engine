@@ -148,10 +148,25 @@ its golden fixtures — do not add analyser coverage there.
 
 The full rule table with remedies: [references/statements.md](references/statements.md).
 
+Those are the **statement** rules (`E0xx`, in `er-sql-check`). The **entity**
+rules (`V0xx`, in `er-entity-lint`) are a separate family and documented
+differently: every rule carries its own reasoning, so rather than summarising
+them here, ask the tool.
+
+```
+er-entity lint --explain V4    # why the rule exists, plus worked examples
+er-entity lint --list          # the whole registry
+```
+
+[`docs/entity-lint-rules.md`](../../../docs/entity-lint-rules.md) is the same
+content, generated from the registry and byte-compared by `verify` so it cannot
+drift. Adding a rule: [references/gates.md](references/gates.md).
+
 ## When a gate fails
 
 | Failure | Meaning | Fix |
 |---|---|---|
+| `er-entity lint: [V0xx] …` | an `entity.yaml` breaks a convention | `er-entity lint --explain <code>` |
 | `er-entity check: … stale or missing` | definition changed without regen | run gen, commit the diff |
 | `er-entity check: … orphaned file(s)` | a deleted entity/statement left output behind | delete the named files |
 | `er-entity analyse: [E0xx] …` | a statement breaks a rule | see the rule's remedy in references/statements.md |

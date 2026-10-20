@@ -93,6 +93,23 @@ enum Command {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+    /// Run the entity-convention rules (the V-rules) on their own, or ask the
+    /// registry about itself. `verify` runs the same pass first.
+    Lint {
+        /// The repository root (holds `entities/`). Defaults to the current dir.
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+        /// List every registered rule instead of checking the tree.
+        #[arg(long, conflicts_with_all = ["explain", "docs"])]
+        list: bool,
+        /// Explain one rule by code (`--explain V4`), case-insensitive.
+        #[arg(long, value_name = "CODE", conflicts_with = "docs")]
+        explain: Option<String>,
+        /// Print the generated rule reference (`docs/entity-lint-rules.md`),
+        /// which `gen` writes and `verify` byte-compares.
+        #[arg(long)]
+        docs: bool,
+    },
     /// Plan (or `--apply`) the safe migration that reconciles a live store to the
     /// catalog; a breaking difference is refused for a hand-written migration.
     Migrate {
@@ -111,15 +128,48 @@ enum Command {
     },
 }
 
+/// Load the catalog and hold it to the entity conventions.
+///
+/// Every path that reads `entities/` goes through here rather than
+/// [`Catalog::load_dir`] directly, because `load_dir` checks only what makes a
+/// catalog structurally coherent — the conventions the generator relies on (an
+/// `id` to key row images by, the universal timestamps) are `er-entity-lint`'s.
+/// Warnings are not reported here: that would print the same list on every `gen`,
+/// `check`, `diff` and `migrate`. `er-entity lint` is where they surface.
+fn load_catalog(entities_dir: &Path) -> Result<Catalog> {
+    match er_entity_lint::load_linted(entities_dir) {
+        Ok(catalog) => Ok(catalog),
+        Err(er_entity_lint::LintError::Rules { diagnostics }) => {
+            eprintln!("er-entity: {} entity lint error(s):", diagnostics.len());
+            for d in &diagnostics {
+                eprintln!("  [{}] {}: {}", d.code, d.path.display(), d.message);
+            }
+            anyhow::bail!(
+                "the entity conventions are not met — `er-entity lint --explain <code>` \
+                 says why each rule exists"
+            )
+        }
+        Err(err) => {
+            Err(err).with_context(|| format!("loading entities from {}", entities_dir.display()))
+        }
+    }
+}
+
 fn load_tree(root: &Path) -> Result<GeneratedTree> {
     let entities_dir = root.join("entities");
-    let catalog = Catalog::load_dir(&entities_dir)
-        .with_context(|| format!("loading entities from {}", entities_dir.display()))?;
+    let catalog = load_catalog(&entities_dir)?;
     let mut tree = generate(&catalog).context("generating artifacts")?;
     append_query_modules(&entities_dir, &catalog, &mut tree)?;
     tree.files.push(er_entity_gen::GeneratedFile {
         path: PathBuf::from("docs/erd.md"),
         contents: render_erd(root, &catalog)?,
+    });
+    // The rule reference is generated from the registry and byte-compared by
+    // `check`, so the documented rule set cannot drift from the enforced one —
+    // which is how three E-codes came to be documented but never implemented.
+    tree.files.push(er_entity_gen::GeneratedFile {
+        path: PathBuf::from("docs/entity-lint-rules.md"),
+        contents: er_entity_lint::rules_markdown(),
     });
     Ok(tree)
 }
@@ -161,8 +211,7 @@ fn load_erweb_snapshot(root: &Path) -> Result<Option<String>> {
 
 fn run_erd(root: &Path, out: Option<&Path>) -> Result<()> {
     let entities_dir = root.join("entities");
-    let catalog = Catalog::load_dir(&entities_dir)
-        .with_context(|| format!("loading entities from {}", entities_dir.display()))?;
+    let catalog = load_catalog(&entities_dir)?;
     let erd = render_erd(root, &catalog)?;
     match out {
         Some(path) => {
@@ -289,11 +338,80 @@ fn orphaned_outputs(root: &Path, tree: &er_entity_gen::GeneratedTree) -> Result<
     Ok(orphans)
 }
 
-/// Plan every statement and run the E0xx passes against the two-store catalog.
-fn run_analyze(root: &Path) -> Result<bool> {
+/// Run the entity-convention rules and report what they find.
+///
+/// Errors fail the gate; warnings are printed and do not. Returns true when no
+/// error-severity rule fired.
+fn run_lint(root: &Path) -> Result<bool> {
     let entities_dir = root.join("entities");
     let catalog = Catalog::load_dir(&entities_dir)
         .with_context(|| format!("loading entities from {}", entities_dir.display()))?;
+    let diags = er_entity_lint::lint_catalog(&catalog, &entities_dir);
+    let (errors, warnings): (Vec<_>, Vec<_>) = diags
+        .into_iter()
+        .partition(|d| d.severity == er_entity_lint::Severity::Error);
+
+    for d in &warnings {
+        eprintln!(
+            "  [{}] warning: {}: {}",
+            d.code,
+            d.path.display(),
+            d.message
+        );
+    }
+    if !warnings.is_empty() {
+        eprintln!("er-entity lint: {} warning(s)", warnings.len());
+    }
+
+    if errors.is_empty() {
+        // Say "no errors", not "holds every rule": warnings are real findings,
+        // and a summary that ignored them would read as a clean bill of health.
+        println!(
+            "er-entity lint: {} rules over {} entities, no errors",
+            er_entity_lint::rules().len(),
+            catalog.entities().len()
+        );
+        Ok(true)
+    } else {
+        eprintln!("er-entity lint: {} error(s):", errors.len());
+        for d in &errors {
+            eprintln!("  [{}] {}: {}", d.code, d.path.display(), d.message);
+        }
+        eprintln!("`er-entity lint --explain <code>` says why each rule exists.");
+        Ok(false)
+    }
+}
+
+/// `--list`: the registry as a table.
+fn print_rule_list() {
+    let rules = er_entity_lint::rules();
+    println!("{:<6} {:<9} INVARIANT", "CODE", "SEVERITY");
+    for info in &rules {
+        println!("{:<6} {:<9} {}", info.code.0, info.severity, info.title);
+    }
+    println!(
+        "\n{} rules. `--explain <code>` for the reasoning.",
+        rules.len()
+    );
+}
+
+/// `--explain <code>`: one rule in full.
+fn print_rule_explanation(code: &str) -> Result<()> {
+    let Some(info) = er_entity_lint::explain(code) else {
+        anyhow::bail!("no rule {code:?} — `er-entity lint --list` has the registry")
+    };
+    println!("{} ({})\n", info.code, info.severity);
+    println!("{}\n", info.title);
+    println!("{}\n", info.explain);
+    println!("Conforming:\n\n{}", info.conforming.trim_end());
+    println!("\nViolating:\n\n{}", info.violating.trim_end());
+    Ok(())
+}
+
+/// Plan every statement and run the E0xx passes against the two-store catalog.
+fn run_analyze(root: &Path) -> Result<bool> {
+    let entities_dir = root.join("entities");
+    let catalog = load_catalog(&entities_dir)?;
     let diags =
         er_sql_check::analyze_catalog(&entities_dir, &catalog).context("analysing statements")?;
     if diags.is_empty() {
@@ -308,8 +426,19 @@ fn run_analyze(root: &Path) -> Result<bool> {
     }
 }
 
-/// The stale-output check plus the analyser passes (the `check`/`verify` body).
+/// The entity rules, the stale-output check and the analyser passes (the
+/// `check`/`verify` body).
+///
+/// The lint pass runs first and short-circuits, because every later pass needs a
+/// conforming catalog to say anything meaningful: the generator keys row images
+/// by `id` (V1) and the analyser's E005/E014 rules assume the universal
+/// timestamps (V4). Reporting stale artifacts generated from a catalog that
+/// breaks those would be noise on top of the real cause. Check and analyse still
+/// both run, as they always have, so a single pass shows everything.
 fn run_verify(root: &Path) -> Result<bool> {
+    if !run_lint(root)? {
+        return Ok(false);
+    }
     let fresh = run_check(root)?;
     let analysed = run_analyze(root)?;
     Ok(fresh && analysed)
@@ -322,8 +451,7 @@ fn run_diff(root: &Path, store: &str, dsn: Option<&str>) -> Result<bool> {
         anyhow::bail!("only --store postgres is wired today (got {store:?})");
     }
     let entities_dir = root.join("entities");
-    let catalog = er_entity_spec::Catalog::load_dir(&entities_dir)
-        .with_context(|| format!("loading entities from {}", entities_dir.display()))?;
+    let catalog = load_catalog(&entities_dir)?;
     let dsn = dsn
         .map(ToString::to_string)
         .or_else(|| std::env::var("ER_PG_DSN").ok())
@@ -366,8 +494,7 @@ fn run_migrate(root: &Path, store: &str, dsn: Option<&str>, apply: bool) -> Resu
         anyhow::bail!("only --store postgres is wired today (got {store:?})");
     }
     let entities_dir = root.join("entities");
-    let catalog = er_entity_spec::Catalog::load_dir(&entities_dir)
-        .with_context(|| format!("loading entities from {}", entities_dir.display()))?;
+    let catalog = load_catalog(&entities_dir)?;
     let dsn = dsn
         .map(ToString::to_string)
         .or_else(|| std::env::var("ER_PG_DSN").ok())
@@ -441,6 +568,24 @@ fn main() -> ExitCode {
         Command::Gen { root } => run_gen(root).map(|()| true),
         Command::Check { root } | Command::Verify { root } => run_verify(root),
         Command::Erd { root, out } => run_erd(root, out.as_deref()).map(|()| true),
+        Command::Lint {
+            root,
+            list,
+            explain,
+            docs,
+        } => {
+            if *list {
+                print_rule_list();
+                Ok(true)
+            } else if let Some(code) = explain {
+                print_rule_explanation(code).map(|()| true)
+            } else if *docs {
+                print!("{}", er_entity_lint::rules_markdown());
+                Ok(true)
+            } else {
+                run_lint(root)
+            }
+        }
         Command::Diff { root, store, dsn } => run_diff(root, store, dsn.as_deref()),
         Command::Migrate {
             root,

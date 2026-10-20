@@ -1,0 +1,1 @@
+[V13] thing: history: true is control-plane only (lake history is DuckLake snapshots)

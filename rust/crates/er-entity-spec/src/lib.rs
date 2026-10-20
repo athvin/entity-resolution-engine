@@ -1,12 +1,23 @@
-//! `er-entity-spec` — the parsed and validated entity YAML model.
+//! `er-entity-spec` — the parsed entity YAML model.
 //!
-//! One `entity.yaml` per table becomes an [`Entity`]; a validated set of them is a
-//! [`Catalog`]. This crate is the single source the generator, the analyser and the
-//! differ all read, but it is deliberately dependency-light: it knows the closed
-//! eight-type vocabulary ([`ColumnType`]) and the `generate` block, and nothing
-//! about DDL rendering, DataFusion or Arrow. The conversions into `er-schema`'s
-//! `TableSpec` and `ff-analysis`'s `RelSchema` live in the crates that consume them,
-//! so neither a database nor a planner ever enters this build graph.
+//! One `entity.yaml` per table becomes an [`Entity`]; a structurally coherent set
+//! of them is a [`Catalog`]. This crate is the single source the generator, the
+//! analyser and the differ all read, but it is deliberately dependency-light: it
+//! knows the closed eight-type vocabulary ([`ColumnType`]) and the `generate`
+//! block, and nothing about DDL rendering, DataFusion or Arrow. The conversions
+//! into `er-schema`'s `TableSpec` and `ff-analysis`'s `RelSchema` live in the
+//! crates that consume them, so neither a database nor a planner ever enters this
+//! build graph.
+//!
+//! **Loading checks structure, not convention.** [`Catalog::load_dir`] rejects
+//! only what would make a catalog incoherent for its own consumers — a duplicate
+//! column name, a key naming no column, `serial` on a non-bigint. The conventions
+//! every entity must hold (the V-rules: `id` is the key, the universal
+//! timestamps, foreign-key naming, what each store will honour) live in
+//! `er-entity-lint`, which reports every violation at once and carries each
+//! rule's code and reasoning as data. Load through
+//! `er_entity_lint::load_linted` anywhere a generated artifact is about to be
+//! written.
 
 mod catalog;
 mod entity;
@@ -127,155 +138,6 @@ columns:
         assert!(matches!(err, SpecError::Invalid { .. }));
     }
 
-    /// A minimal lake entity that satisfies the identity conventions (V1–V8).
-    const V2_LAKE: &str = r#"
-kind: entity
-version: 1
-name: thing
-relation: things
-description: "x"
-key: [id]
-natural_key: [record_key]
-generate:
-  stores: [duckdb]
-  languages: [rust]
-columns:
-  - name: id
-    type: varchar
-    nullable: false
-    description: "sha256 natural id."
-  - name: record_key
-    type: varchar
-    nullable: false
-    description: "The natural identity."
-  - name: created_at
-    type: timestamp
-    nullable: false
-    description: "Run-logical creation time."
-  - name: updated_at
-    type: timestamp
-    nullable: false
-    description: "Run-logical last-write time."
-"#;
-
-    fn expect_invalid(yaml: &str, needle: &str) {
-        let entity = parse(yaml).unwrap();
-        let err = Catalog::from_entities(vec![entity]).unwrap_err();
-        let text = err.to_string();
-        assert!(
-            text.contains(needle),
-            "expected a {needle:?} failure, got: {text}"
-        );
-    }
-
-    #[test]
-    fn the_identity_conventions_hold_for_a_v2_entity() {
-        let entity = parse(V2_LAKE).expect("parses");
-        assert_eq!(entity.natural_key, vec!["record_key"]);
-        Catalog::from_entities(vec![entity]).expect("a conforming entity validates");
-    }
-
-    #[test]
-    fn v1_v2_v3_the_id_column_is_the_varchar_primary_key_and_leads() {
-        expect_invalid(&V2_LAKE.replace("key: [id]", "key: [record_key]"), "V2");
-        expect_invalid(&V2_LAKE.replace("key: [id]", "key: [id, record_key]"), "V2");
-        expect_invalid(
-            &V2_LAKE.replace(
-                "  - name: id\n    type: varchar",
-                "  - name: id\n    type: bigint",
-            ),
-            "V1",
-        );
-        // id declared, but not first.
-        let moved = V2_LAKE
-            .replace(
-                "columns:\n  - name: id\n    type: varchar\n    nullable: false\n    description: \"sha256 natural id.\"\n",
-                "columns:\n",
-            )
-            .replace(
-                "  - name: updated_at",
-                "  - name: id\n    type: varchar\n    nullable: false\n    description: \"sha256 natural id.\"\n  - name: updated_at",
-            );
-        expect_invalid(&moved, "V3");
-    }
-
-    #[test]
-    fn v4_v6_timestamps_exist_and_lake_ones_are_run_logical() {
-        expect_invalid(
-            &V2_LAKE.replace("- name: updated_at", "- name: upd_at"),
-            "V4",
-        );
-        expect_invalid(
-            &V2_LAKE.replace(
-                "  - name: created_at\n    type: timestamp\n    nullable: false\n",
-                "  - name: created_at\n    type: timestamp\n    nullable: false\n    volatile: true\n",
-            ),
-            "V6",
-        );
-    }
-
-    #[test]
-    fn v10_a_natural_key_is_real_and_never_the_universal_columns() {
-        expect_invalid(
-            &V2_LAKE.replace("natural_key: [record_key]", "natural_key: [nope]"),
-            "natural_key column",
-        );
-        expect_invalid(
-            &V2_LAKE.replace(
-                "natural_key: [record_key]",
-                "natural_key: [record_key, record_key]",
-            ),
-            "repeats",
-        );
-        expect_invalid(
-            &V2_LAKE.replace("natural_key: [record_key]", "natural_key: [created_at]"),
-            "natural_key may not include",
-        );
-    }
-
-    #[test]
-    fn v9_references_must_resolve_against_the_catalog() {
-        let referrer = r#"
-kind: entity
-version: 1
-name: child
-relation: children
-description: "x"
-key: [id]
-generate:
-  stores: [postgres]
-  languages: [rust]
-columns:
-  - name: id
-    type: varchar
-    nullable: false
-    description: "x"
-  - name: parent_id
-    type: varchar
-    references: { relation: parents, column: id }
-    description: "x"
-  - name: created_at
-    type: timestamp
-    nullable: false
-    default: "now()"
-    volatile: true
-    description: "x"
-  - name: updated_at
-    type: timestamp
-    nullable: false
-    default: "now()"
-    volatile: true
-    description: "x"
-"#;
-        let catalog = Catalog::from_entities(vec![parse(referrer).unwrap()])
-            .expect("a subset catalog defers the cross-entity check");
-        let err = catalog.validate_references().unwrap_err();
-        assert!(
-            err.to_string().contains("no Postgres entity declares"),
-            "got: {err}"
-        );
-    }
-
     #[test]
     fn singular_is_mechanical() {
         assert_eq!(singular("orgs"), "org");
@@ -286,16 +148,5 @@ columns:
         assert_eq!(singular("audit_log"), "audit_log");
         assert_eq!(singular("review_queue"), "review_queue");
         assert_eq!(singular("statuses"), "status");
-    }
-
-    #[test]
-    fn a_lake_entity_may_not_carry_a_default() {
-        let yaml = GOLDEN.replace(
-            "    description: \"Surviving given name.\"",
-            "    default: \"'x'\"\n    description: \"Surviving given name.\"",
-        );
-        let entity = parse(&yaml).unwrap();
-        let err = Catalog::from_entities(vec![entity]).unwrap_err();
-        assert!(matches!(err, SpecError::Invalid { .. }));
     }
 }
