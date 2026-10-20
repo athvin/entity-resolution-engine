@@ -3,10 +3,18 @@
 # ECR via OIDC — no stored credentials. The one image serves er-api (server),
 # er-dispatcher (CMD override), and the `er` pipeline CLI (see rust/Dockerfile).
 #
-# This replaces the image-build job of the removed ci.yaml. It builds the Rust
-# backend only; er-web is built by the frontend pipeline, and er-pipeline is
-# gone (the in-process dispatcher runs the pipeline itself). main is branch-
-# protected, so a push here is already a green state.
+# This replaces the image-build job of the removed ci.yaml. Both deployed
+# images are built here: er-api (the Rust control plane) and er-web (the Next.js
+# BFF). er-web used to be nobody's job — the comment here said "built by the
+# frontend pipeline" and frontend.yml had no image job at all, so the ECR repo
+# and frontend/Dockerfile existed while nothing ever pushed a tag, and
+# `make dev-up TAG=<sha>` could not roll the BFF out. er-pipeline is gone (the
+# in-process dispatcher runs the pipeline itself). main is branch-protected, so
+# a push here is already a green state.
+#
+# Each image builds only when its own tree moved, via the `detect` job — the
+# same shape rust.yml uses, rather than a workflow-level `paths:` filter, which
+# cannot distinguish the two trees.
 name: images
 
 on:
@@ -14,6 +22,7 @@ on:
     branches: [main]
     paths:
       - "rust/**"
+      - "frontend/**"
       - ".github/workflows/images.yml"
   workflow_dispatch:
     inputs:
@@ -26,7 +35,53 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Which trees moved in this push. `workflow_dispatch` and anything without a
+  # usable "before" sha (a first push, a force-push) build both rather than
+  # guessing — an unnecessary cached build is cheaper than a missing image.
+  detect:
+    name: detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: |
+          if [ "$EVENT" != "push" ] || [ -z "$BEFORE" ] \
+            || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] \
+            || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            echo "rust=true" >> "$GITHUB_OUTPUT"
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed="$(git diff --name-only "$BEFORE...$SHA")"
+          # `grep -c` (not -q) reads all input: -q closes the pipe early and can
+          # SIGPIPE `git diff` under pipefail, which reads as a false skip.
+          for tree in rust frontend; do
+            n="$(printf '%s\n' "$changed" | grep -cE "^${tree}/" || true)"
+            if [ "${n:-0}" -gt 0 ]; then
+              echo "${tree}=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "${tree}=false" >> "$GITHUB_OUTPUT"
+            fi
+          done
+          # A change to this workflow rebuilds both.
+          if printf '%s\n' "$changed" | grep -qE '^\.github/workflows/images\.yml$'; then
+            echo "rust=true" >> "$GITHUB_OUTPUT"
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+          fi
+
   er-api:
+    needs: detect
+    if: needs.detect.outputs.rust == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -56,3 +111,39 @@ jobs:
           tags: ${{ env.ECR }}/er-api:${{ steps.tag.outputs.sha }}
           cache-from: "type=gha,scope=er-api"
           cache-to: "type=gha,mode=max,scope=er-api"
+
+  er-web:
+    needs: detect
+    if: needs.detect.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC token exchange for the ECR-push role
+    env:
+      ECR: 797781631727.dkr.ecr.us-east-2.amazonaws.com
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.inputs.ref || github.sha }}
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          role-to-assume: arn:aws:iam::797781631727:role/er-ci-ecr-push
+          aws-region: us-east-2
+      - uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
+      - name: Resolve the image tag (full sha of the built ref)
+        id: tag
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      # The context is `frontend` because frontend/Dockerfile's COPY paths are
+      # directory-relative (it says so in its own header), and pnpm comes from
+      # corepack reading `packageManager` — the same single pin the CI gate uses.
+      - name: Build + push er-web
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: frontend
+          file: frontend/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.ECR }}/er-web:${{ steps.tag.outputs.sha }}
+          cache-from: "type=gha,scope=er-web"
+          cache-to: "type=gha,mode=max,scope=er-web"
