@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { operatorFetch, requireSuperAdmin, writeAudit } from "@/lib/bff/admin";
-import { BffFailure, respond } from "@/lib/bff/proxy";
+import { BffFailure, requireOrgSlug, respond } from "@/lib/bff/proxy";
 
 const resourcesSchema = z
   .object({
@@ -28,6 +28,9 @@ export async function PATCH(
   return respond(async () => {
     const identity = await requireSuperAdmin();
     const { org } = await params;
+    // Raw-interpolated into the upstream path with the operator token
+    // attached; these routes do not pass through requireOrgAccess.
+    requireOrgSlug(org);
     const parsed = resourcesSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) {
       throw new BffFailure(422, "validation", parsed.error.issues[0]?.message ?? "invalid body");
