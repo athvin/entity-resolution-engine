@@ -24,6 +24,7 @@ anyhow = { workspace = true }
 # drives the async Postgres read from the otherwise-sync CLI.
 tokio = { workspace = true }
 tokio-postgres = { workspace = true }
+er-pg-tls = { path = "../er-pg-tls" }
 
 [lints]
 workspace = true

@@ -12,7 +12,7 @@
 //! `tests/pg_e2e.rs` (the queue directly) and `tests/pg_http.rs` (the queue
 //! through the HTTP surface), both behind `ER_TEST_PG_DSN`.
 
-use tokio_postgres::{Client, Error as PgError, NoTls};
+use tokio_postgres::{Client, Error as PgError};
 
 use crate::Job;
 
@@ -37,7 +37,7 @@ pub const DISPATCHING: &str = "dispatching";
 /// # Errors
 /// Propagates the connection error.
 pub async fn connect(dsn: &str) -> Result<Client, PgError> {
-    let (client, connection) = tokio_postgres::connect(dsn, NoTls).await?;
+    let (client, connection) = tokio_postgres::connect(dsn, er_pg_tls::make_tls()).await?;
     tokio::spawn(async move {
         let _ = connection.await;
     });

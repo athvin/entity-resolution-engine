@@ -1,0 +1,11 @@
+[package]
+name = "er-pg-tls"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rustls = { workspace = true }
+tokio-postgres-rustls = { workspace = true }
+
+[lints]
+workspace = true

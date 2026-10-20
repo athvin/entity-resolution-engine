@@ -335,7 +335,7 @@ fn run_diff(root: &Path, store: &str, dsn: Option<&str>) -> Result<bool> {
         .build()
         .context("building the tokio runtime")?;
     let diffs = runtime.block_on(async {
-        let (client, connection) = tokio_postgres::connect(&dsn, tokio_postgres::NoTls)
+        let (client, connection) = tokio_postgres::connect(&dsn, er_pg_tls::make_tls())
             .await
             .context("connecting to Postgres")?;
         let handle = tokio::spawn(connection);
@@ -379,7 +379,7 @@ fn run_migrate(root: &Path, store: &str, dsn: Option<&str>, apply: bool) -> Resu
         .build()
         .context("building the tokio runtime")?;
     runtime.block_on(async {
-        let (mut client, connection) = tokio_postgres::connect(&dsn, tokio_postgres::NoTls)
+        let (mut client, connection) = tokio_postgres::connect(&dsn, er_pg_tls::make_tls())
             .await
             .context("connecting to Postgres")?;
         let handle = tokio::spawn(connection);

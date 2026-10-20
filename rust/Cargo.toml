@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/dedupe-core", "crates/dedupe-cli", "crates/er-eval", "crates/er-errors", "crates/er-ids", "crates/er-hash", "crates/er-schema", "crates/er-obs", "crates/er-env", "crates/er-versions", "crates/er-config", "crates/er-std", "crates/er-ingest", "crates/er-standardize", "crates/er-reconcile", "crates/er-match", "crates/er-golden", "crates/er-cli", "crates/er-server", "crates/er-entity-spec", "crates/er-entity-gen", "crates/er-entity-cli", "crates/er-entities", "crates/er-sql-check", "crates/er-entity-diff"]
+members = ["crates/dedupe-core", "crates/dedupe-cli", "crates/er-eval", "crates/er-errors", "crates/er-ids", "crates/er-hash", "crates/er-schema", "crates/er-obs", "crates/er-env", "crates/er-versions", "crates/er-config", "crates/er-std", "crates/er-ingest", "crates/er-standardize", "crates/er-reconcile", "crates/er-match", "crates/er-golden", "crates/er-cli", "crates/er-server", "crates/er-entity-spec", "crates/er-entity-gen", "crates/er-entity-cli", "crates/er-entities", "crates/er-sql-check", "crates/er-entity-diff", "crates/er-pg-tls"]
 
 [workspace.package]
 version = "0.1.0"
@@ -72,6 +72,11 @@ axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
 tower = "0.5"
 tokio-postgres = { version = "0.7", features = ["with-serde_json-1"] }
+# Aurora requires TLS (`sslmode=require`); rustls keeps the image OpenSSL-free,
+# matching reqwest below. The `ring` provider is pinned explicitly so the
+# verifier in er-pg-tls and the ClientConfig agree on one crypto provider.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+tokio-postgres-rustls = "0.13"
 ulid = "1"
 # UUIDv7 minting (the identity convention for application-minted ids).
 uuid = { version = "1", features = ["v7"] }
