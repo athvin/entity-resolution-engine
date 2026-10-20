@@ -3128,7 +3128,7 @@ struct WebhookIn {
 /// A fresh HMAC signing secret: 24 random bytes, hex-encoded (same shape as an
 /// API-key secret).
 fn gen_webhook_secret() -> String {
-    use rand::RngCore;
+    use rand::Rng;
     let mut buf = [0u8; 24];
     rand::rng().fill_bytes(&mut buf);
     hex::encode(buf)

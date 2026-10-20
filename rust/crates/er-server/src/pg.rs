@@ -276,7 +276,7 @@ pub async fn issue_key(
     // 24 random bytes, hex-encoded: url-safe and free of '_', so the token
     // survives the Python `credential.split("_", 2)` decode unambiguously.
     let secret = {
-        use rand::RngCore;
+        use rand::Rng;
         let mut buf = [0u8; 24];
         rand::rng().fill_bytes(&mut buf);
         hex::encode(buf)
