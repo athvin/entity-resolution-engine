@@ -31,6 +31,7 @@
 //! DuckLake paths are gated (`ER_TEST_PG_DSN`, `DEDUPE_E2E_DUCKLAKE`).
 
 pub mod config_check;
+pub mod cron;
 pub mod dispatcher;
 pub mod errfmt;
 pub mod mail;
@@ -1313,6 +1314,16 @@ async fn publish_config_version(
     // History images record the acting principal (er.actor).
     let _ = pg::set_actor(&client, &principal.actor).await;
     if let Err(e) = pg::publish_config_version(&client, &org_row.id, &org, version, tier).await {
+        return pg_err(e);
+    }
+    // The published document's `correction_pass.cadence` becomes a real
+    // schedule. It had been stored by every tenant config and read by nothing,
+    // so the periodic correction pass it describes never ran.
+    if let Ok(config) = load_config_str(&detail.yaml)
+        && let Err(e) =
+            pg::ensure_correction_schedule(&client, &org_row.id, &config.correction_pass.cadence)
+                .await
+    {
         return pg_err(e);
     }
 
@@ -2942,16 +2953,13 @@ const SCHEDULABLE_KINDS: [&str; 5] = [
     "lake_maintain",
 ];
 
-/// A lightweight 5-field cron check (looser than croniter: field count + the
-/// cron character class; it does not validate ranges/step bounds).
+/// Whether a cron expression is one the scheduler can actually run.
+///
+/// This defers to [`cron::Cron::parse`], the same parser the dispatcher's tick
+/// uses, so the API cannot accept a schedule that would never fire. The previous
+/// check was charset-only and happily stored `60 * * * *` and `*/0 * * * *`.
 fn valid_cron(s: &str) -> bool {
-    let fields: Vec<&str> = s.split_whitespace().collect();
-    fields.len() == 5
-        && fields.iter().all(|f| {
-            !f.is_empty()
-                && f.bytes()
-                    .all(|b| b.is_ascii_digit() || b"*/,-".contains(&b))
-        })
+    cron::Cron::parse(s).is_ok()
 }
 
 #[derive(Deserialize)]

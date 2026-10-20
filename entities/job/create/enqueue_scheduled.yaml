@@ -1,0 +1,13 @@
+kind: statement
+operation: create
+mode: partial
+description: "Queue a job on behalf of a schedule: same idempotent upsert as enqueue, but it records the originating schedule_id and a 'scheduler' principal so a scheduled run is attributable to the rule that caused it."
+params:
+  - { name: job_id, type: varchar }
+  - { name: org_id, type: varchar }
+  - { name: kind, type: varchar }
+  - { name: priority, type: bigint }
+  - { name: idempotency_key, type: varchar, nullable: true }
+  - { name: params, type: json, nullable: true }
+  - { name: schedule_id, type: varchar }
+returns: entity

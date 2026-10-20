@@ -255,9 +255,35 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
       `org_active_config`, which takes `&OrgDetail` precisely so the id/name footgun cannot
       recur). Locked by `pg_source_ranks.rs`, verified by reintroducing the bug and watching
       it fail.
-- [ ] **W0.2 scheduler tick** — `schedules` has CRUD and cron validation but **nothing ticks**:
-      no row is ever enqueued and `last_enqueued_at` is never written, so every schedule in the
-      product is inert. `config.correction_pass.cadence` is likewise stored and unused.
+- [x] **W0.2 scheduler tick — schedules now actually fire.** `schedules` shipped as inert
+      storage: the table, its CRUD and its cron validation all existed, but nothing ever read a
+      row to enqueue anything and `last_enqueued_at` was never written. Every schedule in the
+      product was decorative, and `config.correction_pass.cadence` with them — so the periodic
+      correction pass never ran either.
+      **The tick** rides the dispatcher loop (one loop means one thing to stop on SIGTERM),
+      rate-limited to every 20s, and a tick failure is logged rather than taking the job loop
+      down. Two deliberate properties: firings are keyed
+      `sched:<schedule_id>:<yyyymmddhhmm>` and ride the queue's idempotency upsert, so **two
+      dispatcher replicas produce one job** (`last_enqueued_at` is for operators to read, not
+      what makes the firing unique); and there is **no catch-up** — a dispatcher down across a
+      firing does not backfill it, because backfilling converts an outage into a burst of
+      `run_all_full`s. Suspended orgs are excluded in SQL, so a suspended tenant accrues nothing.
+      **A real cron parser** (`er-server/src/cron.rs`) replaces the charset-only `valid_cron`,
+      which accepted `60 * * * *` and `*/0 * * * *` and stored schedules that could never fire.
+      It implements cron(8)'s day rule (day-of-month OR day-of-week when both are restricted)
+      and folds `7` to Sunday; the API now validates through the same parser the tick runs, so
+      an unrunnable schedule cannot be created. 8 unit tests.
+      **Attribution**: scheduled runs set `jobs.schedule_id` and `created_by = 'scheduler'` via
+      a new `enqueue_scheduled` statement — the column existed for exactly this and nothing set
+      it. `enqueue_scheduled` returns whether *this* call inserted (the minted id coming back),
+      because the idempotent upsert returns a replayed row that is otherwise indistinguishable.
+      **The cadence is wired**: publishing a config reconciles one config-owned schedule
+      (`source = 'config:correction_pass'`) — created if absent, re-pointed if the cadence
+      changed, never duplicated across republishes.
+      Tests: `pg_scheduler_tick.rs` (fires on the matching minute, not on others; attribution;
+      `last_enqueued_at` stamped; same-minute repeat is a no-op; next match is a new firing;
+      a long gap does not backfill; disabled and suspended both stop it; `*/15` fires exactly
+      4× an hour) + `pg_publish.rs` extended for the cadence schedule.
 - [ ] **W0.3 `run_all_incremental` is not incremental** — it shares the `run_all_full`
       dispatcher arm, and `job.params` (`skip_ingest`, set by 6 call sites) is never read.
       Behaviour lands in E7; W0.3 stops the lie and wires `er-versions::check_mode_preconditions`

@@ -1,0 +1,11 @@
+kind: statement
+operation: create
+mode: partial
+description: "Create a config-owned schedule (source like 'config:correction_pass') only if that owner does not already have one for the org. Paired with set_config_cron, which refreshes the cron of an existing row, so republishing a config keeps one schedule per owner rather than accumulating duplicates."
+params:
+  - { name: schedule_id, type: varchar }
+  - { name: org_id, type: varchar }
+  - { name: kind, type: varchar }
+  - { name: cron, type: varchar }
+  - { name: source, type: varchar }
+returns: none

@@ -1,0 +1,9 @@
+kind: statement
+operation: update
+mode: partial
+description: "Point a config-owned schedule at the cadence the newly published config declares. Only touches the row when the cron actually changed, so republishing an unchanged cadence does not bump updated_at or write history."
+params:
+  - { name: cron, type: varchar }
+  - { name: org_id, type: varchar }
+  - { name: source, type: varchar }
+returns: none

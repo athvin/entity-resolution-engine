@@ -74,6 +74,27 @@ VALUES ($1, $2, $3, $4, $5, 'api')
             .execute(SQL, &[&schedule_id, &org_id, &kind, &params, &cron])
             .await
     }
+
+    /// Create a config-owned schedule (source like 'config:correction_pass') only if that owner does not already have one for the org. Paired with set_config_cron, which refreshes the cron of an existing row, so republishing a config keeps one schedule per owner rather than accumulating duplicates.
+    pub async fn ensure_config_owned(
+        client: &::tokio_postgres::Client,
+        schedule_id: &str,
+        org_id: &str,
+        kind: &str,
+        cron: &str,
+        source: &str,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str = "INSERT INTO public.schedules (id, org_id, kind, params, cron, source)
+SELECT $1, $2, $3, '{}'::jsonb, $4, $5
+WHERE NOT EXISTS (
+  SELECT 1 FROM public.schedules
+  WHERE org_id = $2 AND source = $5
+)
+";
+        client
+            .execute(SQL, &[&schedule_id, &org_id, &kind, &cron, &source])
+            .await
+    }
 }
 
 pub mod delete {
@@ -92,6 +113,44 @@ pub mod delete {
 
 pub mod read {
     //! @generated query functions for this entity + operation.
+    /// Every enabled schedule belonging to an active org, for the dispatcher's scheduler tick. Suspended orgs are excluded so a suspended tenant does not accumulate scheduled runs.
+    pub async fn due(
+        client: &::tokio_postgres::Client,
+    ) -> ::std::result::Result<Vec<super::Schedule>, ::tokio_postgres::Error> {
+        const SQL: &str = "SELECT
+  s.id,
+  s.org_id,
+  s.kind,
+  s.params,
+  s.cron,
+  s.enabled,
+  s.source,
+  s.last_enqueued_at,
+  s.created_at,
+  s.updated_at
+FROM public.schedules s
+JOIN public.orgs o ON o.id = s.org_id
+WHERE s.enabled AND o.state = 'active'
+ORDER BY s.id
+";
+        let rows = client.query(SQL, &[]).await?;
+        Ok(rows
+            .iter()
+            .map(|row| super::Schedule {
+                id: row.get("id"),
+                org_id: row.get("org_id"),
+                kind: row.get("kind"),
+                params: row.get("params"),
+                cron: row.get("cron"),
+                enabled: row.get("enabled"),
+                source: row.get("source"),
+                last_enqueued_at: row.get("last_enqueued_at"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+            })
+            .collect())
+    }
+
     /// An org's schedules, oldest first.
     pub async fn list(
         client: &::tokio_postgres::Client,
@@ -133,6 +192,30 @@ ORDER BY created_at
 
 pub mod update {
     //! @generated query functions for this entity + operation.
+    /// Record that the scheduler tick enqueued this schedule's job. Observability only — the firing itself is made exactly-once by the job's idempotency key, not by this column.
+    pub async fn mark_enqueued(
+        client: &::tokio_postgres::Client,
+        schedule_id: &str,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str = "UPDATE public.schedules SET last_enqueued_at = now(), updated_at = now()
+WHERE id = $1
+";
+        client.execute(SQL, &[&schedule_id]).await
+    }
+
+    /// Point a config-owned schedule at the cadence the newly published config declares. Only touches the row when the cron actually changed, so republishing an unchanged cadence does not bump updated_at or write history.
+    pub async fn set_config_cron(
+        client: &::tokio_postgres::Client,
+        cron: &str,
+        org_id: &str,
+        source: &str,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str = "UPDATE public.schedules SET cron = $1, updated_at = now()
+WHERE org_id = $2 AND source = $3 AND cron <> $1
+";
+        client.execute(SQL, &[&cron, &org_id, &source]).await
+    }
+
     /// Enable/disable an API-sourced schedule; config/system-owned rows refuse (zero rows changed).
     pub async fn set_enabled(
         client: &::tokio_postgres::Client,

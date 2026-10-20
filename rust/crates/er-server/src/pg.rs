@@ -729,6 +729,98 @@ pub async fn list_schedules(client: &Client, org_id: &str) -> Result<Vec<Schedul
         .collect())
 }
 
+/// Queue a job on behalf of a schedule: the same idempotent upsert as
+/// [`enqueue`], but it stamps `schedule_id` and a `scheduler` principal so the
+/// run is attributable to the rule that caused it.
+///
+/// # Errors
+/// Propagates the insert/select error.
+/// Returns the job and whether THIS call inserted it. The upsert returns the
+/// pre-existing row on a repeat key, and that row is indistinguishable from a
+/// fresh one by its contents — so the freshly minted id is the signal: if it
+/// came back, this call is the one that created the row. The scheduler needs
+/// that distinction to avoid counting (and re-stamping) a replayed firing.
+pub async fn enqueue_scheduled(
+    client: &Client,
+    org_id: &str,
+    kind: &str,
+    idempotency_key: &str,
+    params: Option<&serde_json::Value>,
+    schedule_id: &str,
+) -> Result<(Job, bool), PgError> {
+    let job_id = er_ids::new_v7();
+    let jobs = er_entities::job::create::enqueue_scheduled(
+        client,
+        &job_id,
+        org_id,
+        kind,
+        0,
+        Some(idempotency_key),
+        params,
+        schedule_id,
+    )
+    .await?;
+    let job = jobs
+        .into_iter()
+        .next()
+        .expect("enqueue_scheduled RETURNING yields exactly one row");
+    let inserted = job.id == job_id;
+    Ok((job, inserted))
+}
+
+/// The `source` marking the schedule that a config's `correction_pass.cadence`
+/// owns.
+pub const CORRECTION_PASS_SOURCE: &str = "config:correction_pass";
+
+/// Reconcile the config-owned correction-pass schedule with a newly published
+/// `correction_pass.cadence`: refresh the cron if the row exists, create it if
+/// it does not.
+///
+/// Before this, the cadence was stored in every tenant config and read by
+/// nothing — the periodic correction pass it describes never ran. Publishing is
+/// the right trigger because the cadence is part of the config document.
+///
+/// # Errors
+/// Propagates the insert/update error.
+pub async fn ensure_correction_schedule(
+    client: &Client,
+    org_id: &str,
+    cadence: &str,
+) -> Result<(), PgError> {
+    er_entities::schedule::update::set_config_cron(client, cadence, org_id, CORRECTION_PASS_SOURCE)
+        .await?;
+    er_entities::schedule::create::ensure_config_owned(
+        client,
+        &er_ids::new_v7(),
+        org_id,
+        "correct",
+        cadence,
+        CORRECTION_PASS_SOURCE,
+    )
+    .await?;
+    Ok(())
+}
+
+/// Every enabled schedule belonging to an active org — the dispatcher's
+/// scheduler-tick candidate set, across all tenants.
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn due_schedules(
+    client: &Client,
+) -> Result<Vec<er_entities::schedule::Schedule>, PgError> {
+    er_entities::schedule::read::due(client).await
+}
+
+/// Stamp `last_enqueued_at` after a tick enqueued this schedule's job.
+///
+/// # Errors
+/// Propagates the update error.
+pub async fn mark_schedule_enqueued(client: &Client, schedule_id: &str) -> Result<(), PgError> {
+    er_entities::schedule::update::mark_enqueued(client, schedule_id).await?;
+    Ok(())
+}
+
 /// Enable/disable an API-sourced schedule (`schedules.py` `set_enabled`):
 /// config/system-owned rows (`source != 'api'`) refuse. `true` iff a row
 /// changed.
