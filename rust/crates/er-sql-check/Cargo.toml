@@ -38,7 +38,7 @@ ff-analysis = { git = "https://github.com/athvin/feather-flow", tag = "er-entity
 # only through ff_analysis::sqlparser (DataFusion's bundled 0.59), never the
 # standalone crate.
 datafusion-common = "52"
-datafusion-expr = "52"
+datafusion-expr = "55"
 regex = { workspace = true }
 serde = { workspace = true }
 serde_norway = { workspace = true }
