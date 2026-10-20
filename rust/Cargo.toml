@@ -57,7 +57,7 @@ needless_pass_by_value = "allow"
 [workspace.dependencies]
 # Bundles DuckDB 1.5.5 — the exact engine version the golden fixtures were
 # generated on, so the engine and the baselines execute on identical builds.
-duckdb = { version = "=1.10505.0", features = ["bundled"] }
+duckdb = { version = "=1.10506.1", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 # Maintained serde_yaml fork (serde_yaml itself is deprecated). Reads the S6
@@ -91,7 +91,7 @@ ulid = "1"
 # UUIDv7 minting (the identity convention for application-minted ids).
 uuid = { version = "1", features = ["v7"] }
 # API-key secret generation (SHA-256-hashed at rest; the plaintext is random).
-rand = "0.9"
+rand = "0.10"
 # Opaque keyset read cursors (base64url of the snapshot + last key).
 base64 = "0.22"
 # Parse repeated query params (e.g. ?key=a&key=b) the typed Query extractor can't.

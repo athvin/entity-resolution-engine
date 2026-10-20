@@ -97,7 +97,11 @@ jobs:
     needs: detect
     if: needs.detect.outputs.code == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 45, not 30: on a cold cache this job has to build the bundled duckdb C++
+    # tree before clippy can lint 27 crates and rustdoc can document them, and
+    # it measured 30+ min — the timeout cancelled it mid-run even though every
+    # gate had passed. Any duckdb bump invalidates the cache and hits this.
+    timeout-minutes: 45
     env:
       RUSTC_WRAPPER: sccache
     steps:
@@ -106,7 +110,7 @@ jobs:
         run: rustup update stable --no-self-update && rustup default stable && rustup component add rustfmt clippy
       - name: Install mold
         run: sudo apt-get update && sudo apt-get install -y mold
-      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: rust
@@ -165,7 +169,7 @@ jobs:
         run: rustup update stable --no-self-update && rustup default stable
       - name: Install mold
         run: sudo apt-get update && sudo apt-get install -y mold
-      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: rust
@@ -197,7 +201,9 @@ jobs:
     needs: detect
     if: needs.detect.outputs.code == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 45 for the same reason as `lint`: this measured 29 min on a cold cache,
+    # one minute inside the old limit. It passed by luck, not by margin.
+    timeout-minutes: 45
     env:
       RUSTC_WRAPPER: sccache
       DEDUPE_E2E_DUCKLAKE: "1"
@@ -224,7 +230,7 @@ jobs:
         run: rustup update stable --no-self-update && rustup default stable
       - name: Install mold
         run: sudo apt-get update && sudo apt-get install -y mold
-      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: rust
@@ -259,7 +265,7 @@ jobs:
         run: rustup update stable --no-self-update && rustup default stable
       - name: Install mold
         run: sudo apt-get update && sudo apt-get install -y mold
-      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: rust
@@ -281,7 +287,7 @@ jobs:
         run: rustup update stable --no-self-update && rustup default stable
       - name: Install mold
         run: sudo apt-get update && sudo apt-get install -y mold
-      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: rust
@@ -329,7 +335,7 @@ jobs:
         with:
           workspaces: rust
           shared-key: coverage
-      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cargo-llvm-cov
       - name: Cache DuckDB extensions
