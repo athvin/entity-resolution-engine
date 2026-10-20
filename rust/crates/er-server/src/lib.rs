@@ -2870,6 +2870,113 @@ async fn match_preview(
     }
 }
 
+/// Viewer+: what a run would cost before it runs
+/// (`GET /v1/orgs/{org}/blocking-estimate`). Query: `largest` (how many
+/// pathological blocks to name, default 5).
+///
+/// The competitor's answer to a large corpus is a hard three-hour cap on
+/// analysis, with the documented workaround "split your dataset with filters or
+/// raise the confidence floor" — two guesses made blind. Blocking decides the
+/// entire cost of a run, so the useful thing is the number up front: how many
+/// pairs each rule generates, how many it adds that no earlier rule already
+/// found, and which single key is large enough to dominate everything.
+///
+/// Read-only, and viewer-level for the same reason the pre-merge report is:
+/// estimating a cost writes nothing.
+async fn blocking_estimate(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(
+            StatusCode::NOT_IMPLEMENTED,
+            "blocking estimate requires Postgres",
+        );
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let env = match pg::get_org(&client, &org).await {
+        Ok(Some(o)) if o.state == "active" => o.env,
+        Ok(Some(o)) => {
+            return detail_err(
+                StatusCode::CONFLICT,
+                format!(
+                    "org '{org}' is {}; an estimate needs an active org",
+                    o.state
+                ),
+            );
+        }
+        Ok(None) => return detail_err(StatusCode::NOT_FOUND, format!("no org '{org}'")),
+        Err(e) => return pg_err(e),
+    };
+    let largest = params
+        .get("largest")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(5)
+        .min(50);
+
+    match tokio::task::spawn_blocking(move || blocking_estimate_blocking(&env, largest)).await {
+        Ok(Ok(body)) => Json(body).into_response(),
+        Ok(Err(msg)) => detail_err(StatusCode::CONFLICT, msg),
+        Err(e) => detail_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("estimate task panicked: {e}"),
+        ),
+    }
+}
+
+/// The blocking half of [`blocking_estimate`]: open the org's lake and model,
+/// take the blocking rules from the model the run will actually use, and count.
+///
+/// The rules come from the model rather than the config because the model is
+/// what executes — asking the config would estimate a run nobody is going to
+/// perform.
+fn blocking_estimate_blocking(env: &Value, largest: usize) -> Result<Value, String> {
+    let s = |k: &str| env.get(k).and_then(Value::as_str).filter(|v| !v.is_empty());
+    let catalog = s("ER_LAKE_CATALOG").ok_or("org env missing ER_LAKE_CATALOG")?;
+    let data_path = s("ER_LAKE_DATA_PATH").ok_or("org env missing ER_LAKE_DATA_PATH")?;
+    let model_path =
+        s("ER_MODEL_PATH").ok_or("no model yet (ER_MODEL_PATH); publish or compile one first")?;
+    let settings_json =
+        std::fs::read_to_string(model_path).map_err(|e| format!("read model: {e}"))?;
+
+    // The rules the model blocks on, in its own order — the marginal counts are
+    // order-dependent, so reading them from anywhere else would mislead.
+    let parsed: Value =
+        serde_json::from_str(&settings_json).map_err(|e| format!("model is not JSON: {e}"))?;
+    let rules: Vec<String> = parsed
+        .get("blocking_rules_to_generate_predictions")
+        .and_then(Value::as_array)
+        .map(|rules| {
+            rules
+                .iter()
+                .filter_map(|r| {
+                    r.as_str().map(str::to_string).or_else(|| {
+                        r.get("blocking_rule")
+                            .and_then(Value::as_str)
+                            .map(str::to_string)
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if rules.is_empty() {
+        return Err("the active model declares no blocking rules".to_string());
+    }
+
+    let session = er_cli::open_lake(catalog, data_path).map_err(|e| format!("open lake: {e:#}"))?;
+    let estimate = er_cli::estimate_blocking(&session, &settings_json, &rules, largest)
+        .map_err(|e| format!("{e:#}"))?;
+    serde_json::to_value(&estimate).map_err(|e| format!("rendering the estimate: {e}"))
+}
+
 /// The blocking half of [`match_preview`]: open the org lake + frozen model from
 /// its env, read the thresholds from its config, run the read-only
 /// `er_cli::preview_match`, and render the JSON body. Any missing input (no
@@ -4873,6 +4980,7 @@ fn build_routes(state: AppState) -> Router {
         .route("/v1/orgs/{org}/duplicates", get(duplicates_list))
         .route("/v1/orgs/{org}/match-scores", get(match_scores_list))
         .route("/v1/orgs/{org}/match-preview", get(match_preview))
+        .route("/v1/orgs/{org}/blocking-estimate", get(blocking_estimate))
         .route("/v1/orgs/{org}/records", get(records_by_key))
         .route("/v1/orgs/{org}/reviews", get(reviews_list))
         .route(

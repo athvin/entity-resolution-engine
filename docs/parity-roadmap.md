@@ -476,9 +476,30 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
       rebaseline for a comparator with nothing to read.
 
 ### Waves 2–8 (queued)
-2. **Scale + prevention** — ensembles/cascades (#31), blocking estimates + segment scoping
-   (#3/#54), true incremental (#36/#40), online resolve API (#37), push-records + import-time
-   dedupe (#38/#39/#41), S3 auto-ingestion (#47).
+2. **Scale + prevention**
+   - [x] **E6a blocking estimates (#3).** `GET /v1/orgs/{org}/blocking-estimate` — what a run
+         would cost *before* it runs: pairs per rule, the marginal pairs each rule adds that no
+         earlier rule found, the cartesian total it avoids, and the largest blocks. Viewer-level,
+         because estimating a cost writes nothing.
+         This is the direct answer to the competitor's hard **three-hour analysis cap**, whose
+         documented workaround is "split your dataset with filters or raise the confidence
+         floor" — two guesses made blind. Blocking decides a run's entire cost, so show the
+         number instead of capping the clock.
+         The estimator itself was already in `dedupe-core/blocking_analysis.rs`, reachable only
+         from `dedupe-cli`; this lifts it onto the API, reading the rules from the **model** the
+         run will execute rather than the config, since asking the config would estimate a run
+         nobody is going to perform.
+         The test asserts the claim that makes an estimate worth having: the candidate count
+         **equals the number of pairs the run actually scores** at threshold 0 over the same
+         corpus. An estimate that does not match the work is worse than none.
+         It also found something: **base_10's own model carries a redundant blocking rule** —
+         `birth_date || given_name` contributes zero marginal pairs over the first three. That is
+         exactly the actionable output this feature exists to produce, and it is invisible
+         without the breakdown. The test pins it, so a corpus change that makes the rule useful
+         gets noticed.
+   - [ ] E5 ensembles/cascades (#31), E6b segment scoping (#54), E7 true incremental (#36/#40),
+         E8 online resolve API (#37), E9 push-records + import-time dedupe (#38/#39/#41),
+         E9b S3 auto-ingestion (#47).
 3. **Learning loop** — labels/train/evaluate (#19/#20 + the evaluation-tooling gap),
    related-record features (#26), household/link entities (#33).
 4. **Operating at scale** — job retry + run reports (#58), webhook v2 with an outbox (#43),

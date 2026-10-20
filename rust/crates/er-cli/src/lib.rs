@@ -199,6 +199,113 @@ fn evidence_json(settings: &Settings) -> String {
     format!("json_object({})", parts.join(", "))
 }
 
+/// What a run would cost before it runs: how many pairs each blocking rule
+/// generates, and the largest blocks the first rule produces.
+///
+/// This is the answer to the competitor's hard three-hour analysis cap, whose
+/// documented workaround is "split your dataset with filters or raise the
+/// confidence floor". Both are guesses made blind. Blocking decides the entire
+/// cost of a run — the comparison count is what the engine actually works
+/// through — so the fix is to show the number first rather than to cap the
+/// clock.
+///
+/// `n_largest` surfaces the other half of the problem: one pathological key
+/// (every record with a blank postcode, say) can dominate a run even when the
+/// total looks fine. The largest-block list names it.
+///
+/// Commits nothing. The concat is materialized into the session's scratch space
+/// exactly as `preview_match` does, and the lake is only ever read.
+///
+/// # Errors
+/// Propagates model-load / lake-read errors. A blocking rule that is not a pure
+/// equi-join has no block breakdown; the per-rule counts are still returned and
+/// `largest_blocks` comes back empty rather than failing the whole estimate.
+pub fn estimate_blocking(
+    session: &Session,
+    settings_json: &str,
+    rules: &[String],
+    n_largest: usize,
+) -> Result<BlockingEstimate> {
+    let settings = load_model(settings_json)?;
+    let input = session.register_lake_table("int_std_records", "int_std_records")?;
+    let refs: Vec<(&dedupe_core::session::TableHandle, &str)> = vec![(&input, "int_std_records")];
+    let concat = dedupe_core::predict::materialize_concat_multi(session, &refs, &settings)?;
+
+    let counts = dedupe_core::blocking_analysis::count_comparisons_from_blocking_rules(
+        session, &settings, &concat, rules,
+    )?;
+    let per_rule: Vec<BlockingRuleEstimate> = counts
+        .iter()
+        .map(|c| BlockingRuleEstimate {
+            blocking_rule: c.blocking_rule.clone(),
+            match_key: c.match_key,
+            marginal_pairs: c.marginal_comparison_count,
+            cumulative_pairs: c.cumulative_comparison_count,
+        })
+        .collect();
+    let total_possible = counts
+        .first()
+        .map_or(0, |c| c.total_possible_comparison_count);
+
+    // The largest blocks of the FIRST rule. Only a pure equi-join has blocks to
+    // report, and a rule with a filter is not an error — it just has no
+    // breakdown, so an estimate is still returned.
+    let largest_blocks = match rules.first() {
+        Some(rule) if n_largest > 0 => dedupe_core::blocking_analysis::n_largest_blocks(
+            session, &settings, &concat, rule, n_largest,
+        )
+        .map(|blocks| {
+            blocks
+                .into_iter()
+                .map(|b| LargestBlockEstimate {
+                    key_values: b.key_values,
+                    pairs: b.block_count,
+                })
+                .collect()
+        })
+        .unwrap_or_default(),
+        _ => Vec::new(),
+    };
+
+    Ok(BlockingEstimate {
+        total_possible_pairs: total_possible,
+        candidate_pairs: per_rule.last().map_or(0, |r| r.cumulative_pairs),
+        per_rule,
+        largest_blocks,
+    })
+}
+
+/// One blocking rule's contribution to the candidate set.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct BlockingRuleEstimate {
+    pub blocking_rule: String,
+    pub match_key: i64,
+    /// Pairs this rule adds that no earlier rule already generated — the number
+    /// that says whether the rule is pulling its weight.
+    pub marginal_pairs: i64,
+    pub cumulative_pairs: i64,
+}
+
+/// A blocking key whose block is large enough to dominate a run.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct LargestBlockEstimate {
+    pub key_values: Vec<String>,
+    pub pairs: i64,
+}
+
+/// What a run would cost, before running it.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct BlockingEstimate {
+    /// Every pair the corpus could produce — what resolution would cost with no
+    /// blocking at all.
+    pub total_possible_pairs: i64,
+    /// What the declared rules actually generate: the number that decides the
+    /// run's cost.
+    pub candidate_pairs: i64,
+    pub per_rule: Vec<BlockingRuleEstimate>,
+    pub largest_blocks: Vec<LargestBlockEstimate>,
+}
+
 /// S4.3 match (full mode): score `int_std_records` with FROZEN TF against the
 /// committed model and MERGE the canonical pairs at or above `review_low` into
 /// `lake.main.match_scores` (S5 schema: canonical endpoints, model/snapshot keys,

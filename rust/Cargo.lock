@@ -1728,6 +1728,7 @@ dependencies = [
  "er-standardize",
  "er-std",
  "er-versions",
+ "serde",
  "serde_json",
 ]
 
