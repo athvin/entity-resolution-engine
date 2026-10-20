@@ -1,10 +1,11 @@
 //! The rule registry.
 //!
 //! Adding a rule is three edits and no more: write the value in one of the
-//! modules below, add one line to [`ENTITY_RULES`] or [`CATALOG_RULES`], and add
-//! a fixture directory under `tests/fixtures/`. Everything else —
+//! modules below, add one line to the `ENTITY_RULES` or `CATALOG_RULES` slice in
+//! this file (returned by [`entity_rules`] and [`catalog_rules`]), and add a
+//! fixture directory under `tests/fixtures/`. Everything else —
 //! `er-entity lint`, `--list`, `--explain`, the generated rule reference, and the
-//! `verify` gate — reads these two slices.
+//! `verify` gate — reads those two slices.
 //!
 //! Codes are append-only. A retired rule leaves its code behind rather than
 //! freeing it for reuse, so a review that cited V7 keeps meaning what it said.

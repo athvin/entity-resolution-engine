@@ -11,11 +11,11 @@
 //! worked example pair ([`RuleInfo`]), and it reports [`Violation`]s without
 //! knowing its own code — the harness stamps that, so a code can never disagree
 //! with itself. [`lint_catalog`] runs every rule against every entity and
-//! collects *all* findings, and [`rules`] is the one list that `--list`,
+//! collects *all* findings, and [`rules()`] is the one list that `--list`,
 //! `--explain` and the generated rule reference all read.
 //!
-//! Adding a rule is: one value in [`rules`]'s module, one line in the registry,
-//! one fixture directory under `tests/fixtures/`.
+//! Adding a rule is: one value in a [`mod@rules`] submodule, one line in the
+//! registry, one fixture directory under `tests/fixtures/`.
 //!
 //! Two rule shapes, because two are what the conventions actually need:
 //! [`EntityRule`] sees one entity (V1–V8, V10–V13, V15) and [`CatalogRule`] sees
