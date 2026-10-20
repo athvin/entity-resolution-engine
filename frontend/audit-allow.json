@@ -1,0 +1,21 @@
+{
+  "$comment": [
+    "Approved exceptions to the HIGH/CRITICAL advisory gate (scripts/check-audit.mjs).",
+    "This follows rust/deny.toml's convention: every entry carries a prose reason",
+    "naming why the advisory cannot reach us. An advisory is NOT allowlisted because",
+    "fixing it is inconvenient — it is allowlisted because the vulnerable code path",
+    "does not exist in this application. If you cannot write that sentence honestly,",
+    "upgrade the dependency or pin it through `pnpm.overrides` instead.",
+    "check-audit.mjs reports entries that no longer match any advisory, so stale",
+    "exceptions surface instead of accumulating."
+  ],
+  "allow": [
+    {
+      "id": 1240992,
+      "package": "braces",
+      "severity": "high",
+      "advisory": "GHSA-vfj7-8cjw-p6xm — stack exhaustion via deeply nested brace patterns",
+      "reason": "No fix exists: braces@3.0.3 is the latest published version and the advisory records patched_versions as '<0.0.0'. It is reached only through @next/eslint-plugin-next > fast-glob > micromatch, i.e. devDependencies used at lint time, and the glob patterns fed to it are the ones written in eslint.config.mjs. It is absent from the server bundle and the browser bundle, and no untrusted input ever reaches it. Re-evaluate if braces ever appears outside the lint toolchain."
+    }
+  ]
+}

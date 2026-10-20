@@ -1,32 +1,37 @@
-# The frontend's CI gate. The backend (Rust) is gated by rust.yml; this adds the
+# The frontend's CI gate. The backend (Rust) is gated by rust.yml; this is the
 # equivalent gate for the Next.js app under frontend/, so a merge to main is
-# known to lint, type-check, unit-test, build, and pass the Playwright functional
-# tier. Without this the frontend only ran locally via `make frontend` — the
-# single biggest hole in "merge to master and it works".
+# known to lint, type-check, unit-test, build, pass the Playwright functional
+# tier, and carry no known-vulnerable or wrongly-licensed dependency.
 #
-# Two jobs run in parallel:
-#   - check: eslint + prettier + tsc + vitest (no browser) on the plain runner.
-#   - e2e:   the fast Playwright tier (mock-erserver + PGlite, all three device
-#            projects, incl. the @visual baselines). It runs INSIDE the pinned
-#            Playwright image v1.63.0-jammy so the browsers are preinstalled and,
-#            crucially, the visual snapshots compare against the same
-#            font-rendering environment the committed baselines were generated in
-#            (frontend/dev/update-baselines.sh uses this exact image).
+# WHY THERE IS NO `paths:` FILTER. These jobs are REQUIRED status checks. A
+# workflow that a path filter skips never reports at all, which leaves a required
+# check "pending" forever and blocks every backend-only PR. So, exactly as
+# rust.yml does for its `.claude/**` skip, a `detect` job computes whether the PR
+# touches the frontend and the real jobs gate on it with `if:`. A job skipped by
+# `if:` reports a "skipped" conclusion, which branch protection accepts as
+# satisfied — so a Rust-only PR stays mergeable at zero compute.
+#
+# The jobs:
+#   - check:   eslint + prettier + tsc + vitest (with coverage floor) + the
+#              generated-API drift gate, on the plain runner.
+#   - e2e:     the fast Playwright tier (mock-erserver + PGlite, all three device
+#              projects, incl. the @visual baselines). It runs INSIDE the pinned
+#              Playwright image v1.63.0-jammy so the browsers are preinstalled
+#              and, crucially, the visual snapshots compare against the same
+#              font-rendering environment the committed baselines were generated
+#              in (frontend/dev/update-baselines.sh uses this exact image).
+#   - audit:   the frontend's cargo-deny equivalent — advisories + licenses.
+#   - semgrep: static analysis for the BFF's own risk classes.
 #
 # The heavy full-stack e2e tier (playwright.e2e.config.ts, real backend) stays
-# out of CI. Action refs are SHA-pinned with a `# vTAG` comment, per repo policy.
+# out of CI, and is dormant besides — see docs/frontend-testing.md. Action refs
+# are SHA-pinned with a `# vTAG` comment, per repo policy.
 name: frontend
 
 on:
   pull_request:
-    paths:
-      - "frontend/**"
-      - ".github/workflows/frontend.yml"
   push:
     branches: [main]
-    paths:
-      - "frontend/**"
-      - ".github/workflows/frontend.yml"
   schedule:
     # Nightly coverage at 07:00 UTC (matches rust.yml).
     - cron: "0 7 * * *"
@@ -45,8 +50,48 @@ defaults:
     working-directory: frontend
 
 jobs:
+  # Did this PR touch the frontend? The required jobs below gate on this, so a
+  # backend-only PR skips them (a skipped required check still satisfies branch
+  # protection). Non-PR events (push to main, nightly) always report `true` —
+  # the gate never self-skips on the branch it protects.
+  detect:
+    name: detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: filter
+        working-directory: ${{ github.workspace }}
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # `base...head` = what the PR introduces. Count changed paths under
+          # `frontend/` (or this workflow); any match means the gate must run.
+          # `grep -c` reads all input (unlike `grep -q`, which closes the pipe
+          # early and can SIGPIPE `git diff` under `pipefail` → a flaky false
+          # skip); `|| true` absorbs grep's exit-1-on-zero-matches under `set -e`.
+          changed="$(git diff --name-only "$BASE_SHA...$HEAD_SHA")"
+          hits="$(printf '%s\n' "$changed" | grep -cE '^(frontend/|\.github/workflows/frontend\.yml$)' || true)"
+          if [ "${hits:-0}" -gt 0 ]; then
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "frontend=false" >> "$GITHUB_OUTPUT"
+          fi
+
   check:
     name: lint + types + unit
+    needs: detect
+    if: needs.detect.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -56,11 +101,32 @@ jobs:
           node-version: 22
       - name: Enable corepack (pnpm from packageManager)
         run: corepack enable
+      # Cached explicitly rather than via setup-node's `cache: pnpm`, which
+      # resolves the store path before corepack has installed the pinned pnpm.
+      - name: Resolve pnpm store path
+        run: echo "PNPM_STORE=$(pnpm store path --silent)" >> "$GITHUB_ENV"
+      - name: Cache pnpm store
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.PNPM_STORE }}
+          key: pnpm-store-${{ hashFiles('frontend/pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-store-
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+      # frontend/README.md promises "CI fails on drift" for the generated
+      # erserver types. openapi.json is produced by the Rust side and committed;
+      # this asserts the checked-in schema.d.ts is what openapi-typescript emits
+      # from it, so a stale binding cannot reach main.
+      - name: Generated API types are not stale
+        run: |
+          pnpm gen:api
+          git diff --exit-code -- src/lib/api/schema.d.ts
 
   e2e:
     name: playwright functional tier
+    needs: detect
+    if: needs.detect.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # The same image the committed visual baselines were rendered in; browsers
@@ -74,6 +140,24 @@ jobs:
           node-version: 22
       - name: Enable corepack (pnpm from packageManager)
         run: corepack enable
+      - name: Resolve pnpm store path
+        run: echo "PNPM_STORE=$(pnpm store path --silent)" >> "$GITHUB_ENV"
+      - name: Cache pnpm store
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.PNPM_STORE }}
+          key: pnpm-store-${{ hashFiles('frontend/pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-store-
+      # Next's build cache. Keyed on sources so an unchanged tree restores a warm
+      # cache; the lockfile-only prefix still helps when only sources moved.
+      - name: Cache Next build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: frontend/.next/cache
+          key: next-build-${{ hashFiles('frontend/pnpm-lock.yaml') }}-${{ hashFiles('frontend/src/**') }}
+          restore-keys: |
+            next-build-${{ hashFiles('frontend/pnpm-lock.yaml') }}-
       - run: pnpm install --frozen-lockfile
       # CI=true (set by Actions) makes playwright.config.ts take the `next start`
       # branch, so we build explicitly first; `next start` then serves `.next/`.
@@ -87,10 +171,66 @@ jobs:
           path: frontend/playwright-report/
           retention-days: 7
 
-  # Nightly + on-demand only (never on PRs or main pushes, to keep those fast).
-  # vitest coverage over src/lib/** (the logic the unit tier owns); the floor is
-  # enforced by `coverage.thresholds` in vitest.config.ts. A regression backstop,
-  # not the quality bar — the Playwright functional tier is the real UI gate.
+  # The frontend's mirror of rust.yml's `cargo-deny (advisories + licenses +
+  # bans)`. `pnpm audit` is the advisories half; scripts/check-licenses.mjs is
+  # the licenses half, against the same permissive allowlist rust/deny.toml uses.
+  # Exceptions live in frontend/audit-allow.json and follow deny.toml's house
+  # convention: a prose justification per entry naming why it cannot reach us.
+  audit:
+    name: pnpm audit + licenses
+    needs: detect
+    if: needs.detect.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+      - name: Enable corepack (pnpm from packageManager)
+        run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      # The full advisory picture, including the low/moderate rows the gate
+      # tolerates — informational, never fails the job.
+      - name: Advisory report (all severities)
+        run: pnpm audit || true
+      - name: Advisories gate (high + critical)
+        run: node scripts/check-audit.mjs
+      - name: Licenses gate
+        run: node scripts/check-licenses.mjs
+
+  # Static analysis for the sink classes typescript-eslint does not model: HTML
+  # injection, dynamic code evaluation, and NEXT_PUBLIC_* leakage. Semgrep is
+  # installed with pip at a pinned version rather than via its action, for the
+  # same reason rust.yml installs rustup by hand — the repo requires every
+  # `uses:` to carry an `@<sha> # vTAG` pin.
+  #
+  # The BFF authorization invariant is NOT checked here: see the note at the top
+  # of frontend/.semgrep.yml. It is `pnpm authz:check`, inside the `check` job.
+  #
+  # Registry packs are fetched over the network, so until this has proven stable
+  # it is deliberately NOT in the required-contexts set; the local ruleset is the
+  # part that cannot flake. See docs/frontend-testing.md.
+  semgrep:
+    name: semgrep (static analysis)
+    needs: detect
+    if: needs.detect.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install semgrep
+        run: pip install --quiet semgrep==1.181.0
+      - name: Local ruleset (BFF-specific; no network)
+        run: semgrep scan --config .semgrep.yml --error --metrics=off .
+      - name: Registry packs (typescript + react + nodejs)
+        run: |
+          semgrep scan --config p/typescript --config p/react --config p/nodejs \
+            --error --metrics=off --exclude src/lib/entities --exclude src/lib/api/schema.d.ts .
+
+  # Nightly + on-demand only. The coverage FLOOR is enforced on every PR by
+  # `pnpm check` (vitest.config.ts `coverage.thresholds`); this job exists to
+  # publish the browsable HTML report as an artifact.
   coverage:
     name: coverage (vitest)
     runs-on: ubuntu-latest

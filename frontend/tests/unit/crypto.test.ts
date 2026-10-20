@@ -41,4 +41,16 @@ describe("org-credential vault", () => {
     const sealed = seal(key, "acme", "steward", "erk_abc_secret");
     expect(() => open(randomBytes(32), "acme", "steward", sealed)).toThrow();
   });
+
+  // GCM permits 4-16 byte tags, so a stored ciphertext shorter than the 16-byte
+  // tag slices to a SHORT tag — which Node would accept unless authTagLength is
+  // pinned, and a short tag is far cheaper to forge. The vault's threat model is
+  // someone who can write the row, so this is the case that matters.
+  it("refuses a ciphertext too short to carry a full 16-byte tag", () => {
+    const sealed = seal(key, "acme", "steward", "erk_abc_secret");
+    for (const length of [0, 1, 8, 15]) {
+      const truncated = sealed.ciphertext.subarray(0, length);
+      expect(() => open(key, "acme", "steward", { ...sealed, ciphertext: truncated })).toThrow();
+    }
+  });
 });

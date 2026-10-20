@@ -1,0 +1,59 @@
+# Repo-specific static analysis for the BFF — the risk classes typescript-eslint
+# does not model. The registry packs (p/typescript, p/react, p/nodejs) run
+# alongside this file in .github/workflows/frontend.yml; these are the rules that
+# encode OUR invariants, and they need no network, so they are the half of the
+# semgrep job that cannot flake.
+#
+# House rule, same as rust/deny.toml and the eslint no-restricted-syntax rule:
+# every rule states the invariant and cites where it is designed, so a future
+# reader can tell a real finding from a stale rule. Add a rule only when it is
+# GREEN against the current tree — a rule that lands red teaches people to
+# ignore the job.
+#
+# The BFF authorization invariant ("every tenant route calls requireOrgAccess")
+# is NOT here. It was written as a semgrep `pattern-not` first, and semgrep
+# rejected the pattern as invalid TypeScript while still reporting the rule as
+# run with zero findings — a silent false green over the single most important
+# property in the app. It now lives in scripts/check-bff-authz.mjs, which is
+# tested in both directions by tests/unit/bff-authz-gate.test.ts.
+rules:
+  # --- the no-secrets-in-the-browser invariant ------------------------------
+  # frontend/README.md: "there are deliberately no NEXT_PUBLIC_* variables in
+  # this project". The BFF holds the session, the org API keys, the operator
+  # token and the Anthropic key; anything NEXT_PUBLIC_ is inlined into the client
+  # bundle at build time, which is exactly the boundary tests/functional/
+  # security.spec.ts exists to defend.
+  - id: no-next-public-env
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >-
+      NEXT_PUBLIC_* is inlined into the client bundle. This project has no public
+      env vars by design — the browser talks only to the BFF. Read the value
+      server-side through src/lib/env.ts instead.
+    pattern-regex: \bprocess\.env\.NEXT_PUBLIC_[A-Z0-9_]+
+
+  # --- HTML / code injection sinks ------------------------------------------
+  # Zero occurrences today, across 211 source files. The app renders tenant data
+  # and assistant model output as text (whitespace-pre-wrap), never as markup;
+  # this keeps it that way.
+  - id: no-html-injection-sink
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >-
+      Raw HTML injection sink. Tenant records and assistant output are untrusted
+      and are rendered as text everywhere in this app. If you genuinely need
+      markup, sanitize at the boundary and justify it in review.
+    pattern-either:
+      - pattern: dangerouslySetInnerHTML = $X
+      - pattern: $EL.innerHTML = $X
+      - pattern: $EL.outerHTML = $X
+
+  - id: no-dynamic-code-eval
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >-
+      Dynamic code evaluation. Nothing in this app needs it, and a CSP that
+      forbids unsafe-eval (next.config.ts) would break it at runtime anyway.
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: new Function(...)
