@@ -581,7 +581,29 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          snapshot both flagged the new columns, and five `returns: entity` job statements had to
          select them — the generated row mapper reads every entity column regardless of the
          SELECT list.
-   - [ ] O2b emailed run reports (#58's reporting half), O3 webhook v2 + outbox (#43),
+   - [x] **O3a the webhook event catalog (#43's correctness half).** A subscription was an
+         unvalidated free-form array, and `webhooks_for_delivery` merely tests whether the
+         subscriber's list contains the fired type — so a tenant could subscribe to
+         `entity.merged` (nothing emits it) or `job.suceeded` (a typo) and wait forever for a
+         delivery that was never coming. Nothing told them, and nothing *could*: there was no
+         list of what exists.
+         How invisible that was: the repo's own `pg_webhooks.rs` subscribed to
+         **`run.succeeded` and `review.opened`**, neither of which this system emits. The test
+         suite encoded the hole.
+         Added `webhook::EVENT_CATALOG`, validation at registration (422 naming the events that
+         *do* exist), and `GET /v1/orgs/{org}/webhooks/events` for discovery — the same list
+         registration checks, so the two cannot disagree.
+         **The catalog had to be made true, not just written.** The first draft listed
+         `job.running`; the dispatcher marks a job running and never emits for it, so that would
+         have reproduced the exact bug. And `job.canceled` was listed before it was real —
+         cancel was the one terminal state that delivered *nothing*, so a system waiting on an
+         outcome waited forever. Cancel now emits, and the catalog is exactly the three terminal
+         outcomes. A test reads the emit sites rather than trusting the list, and asserts
+         `job.running` stays unsubscribable until something fires it.
+         Still to come in O3b: the outbox + delivery log + backoff (today a delivery failure is
+         collected and discarded), and entity-level events off the `entity_events` ledger, which
+         wants the outbox first — thousands of un-retried POSTs per run would be worse than none.
+   - [ ] O2b emailed run reports (#58's reporting half), O3b webhook outbox + entity events,
          O4 write-back handler (#44), O5 tags/approval (#51), O6 bulk depth (#9/#62/#52),
          O7 insights + time series (#45/#57/#85), O8 workflows + triggers (#55/#56).
 5. **Cleanse + verify** — transform rules (#61), international standardization (#60),

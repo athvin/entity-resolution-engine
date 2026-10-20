@@ -11,6 +11,60 @@ use sha2::Sha256;
 
 use crate::pg;
 
+/// Every event type this system can emit, with what it means.
+///
+/// This exists because a subscription was previously an unvalidated free-form
+/// array: `webhooks_for_delivery` just tests whether the subscriber's `events`
+/// list contains the fired type, so a tenant could subscribe to
+/// `entity.merged`, or to `job.succeeded` with the typo, and wait forever for a
+/// delivery that was never going to arrive. Nothing told them, and nothing
+/// could — there was no list of what exists.
+///
+/// Adding an event means adding it here, which is also what makes it
+/// subscribable. A type absent from this list is refused at registration
+/// instead of accepted and silently never delivered.
+pub const EVENT_CATALOG: [(&str, &str); 3] = [
+    (
+        "job.succeeded",
+        "A queued job finished successfully. Fired once per OUTCOME, not per \
+         attempt — a job that failed twice and then succeeded delivers one \
+         success.",
+    ),
+    (
+        "job.failed",
+        "A job failed terminally, after exhausting retries if its failure was \
+         retryable. The payload carries the job's `error_class`, so a subscriber \
+         can tell a missing input (precondition) from a real fault.",
+    ),
+    (
+        "job.canceled",
+        "An operator canceled the job. Until this release cancel delivered \
+         nothing at all, so a system waiting on an outcome waited forever.",
+    ),
+];
+
+// Deliberately NOT listed: `job.running`. The dispatcher marks a job running
+// but never emits for it, and listing an event nothing fires is the exact bug
+// this catalog exists to prevent. Add it here when something emits it, not
+// before.
+
+/// Whether `event_type` is one this system can actually emit.
+#[must_use]
+pub fn is_known_event(event_type: &str) -> bool {
+    EVENT_CATALOG.iter().any(|(name, _)| *name == event_type)
+}
+
+/// The catalog as a JSON array, for the discovery endpoint.
+#[must_use]
+pub fn catalog_json() -> Value {
+    Value::Array(
+        EVENT_CATALOG
+            .iter()
+            .map(|(name, description)| json!({ "event": name, "description": description }))
+            .collect(),
+    )
+}
+
 /// The header carrying the payload signature: `sha256=<hex>` (GitHub-style, so
 /// a subscriber recomputes HMAC-SHA256 over the raw body to authenticate it).
 pub const SIGNATURE_HEADER: &str = "X-ER-Signature";
