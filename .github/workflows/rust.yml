@@ -1,6 +1,17 @@
 # The application's CI. The engine, CLI, and control plane are Rust (under
 # `rust/`); the Python/dbt implementation has been removed, so this is the whole
-# backend gate — no longer path-filtered (the frontend keeps its own pnpm gate).
+# backend gate — effectively unfiltered (the frontend keeps its own pnpm gate).
+#
+# The one exception: a PR that only touches `.claude/**` (agent/skill prose, no
+# code and nothing the generators read) runs none of the compile jobs. Because
+# the four jobs below are REQUIRED status checks, a workflow-level path filter
+# would leave them "pending" forever and block the PR; instead a `detect` job
+# computes whether any non-`.claude` file changed and the required jobs gate on
+# it with `if:`. A job skipped by `if:` reports a "skipped" conclusion, which
+# branch protection accepts as satisfied — so the PR stays mergeable with zero
+# compute. The skip is deliberately `.claude`-only: `lint` runs `er-entity
+# verify` (docs/erd.md staleness) and the OpenAPI gate, so docs/ changes must
+# still run the gate.
 #
 # The toolchain is installed with `rustup` rather than an action: dtolnay's
 # rust-toolchain selects the channel through its ref (`@stable`), which cannot
@@ -43,8 +54,48 @@ env:
   SCCACHE_GHA_ENABLED: "true"
 
 jobs:
+  # Did anything outside `.claude/**` change? The required compile jobs below
+  # gate on this so a skills-only PR skips them (a skipped required check still
+  # satisfies branch protection). Non-PR events (push to main, nightly) always
+  # report `true` — the gate never self-skips on the branch it protects.
+  detect:
+    name: detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: filter
+        working-directory: ${{ github.workspace }}
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # `base...head` = what the PR introduces. Count changed paths NOT under
+          # `.claude/`; any such file means the backend gate must run. `grep -c`
+          # reads all input (unlike `grep -q`, which closes the pipe early and can
+          # SIGPIPE `git diff` under `pipefail` → a flaky false skip); `|| true`
+          # absorbs grep's exit-1-on-zero-matches under `set -e`.
+          changed="$(git diff --name-only "$BASE_SHA...$HEAD_SHA")"
+          noncode="$(printf '%s\n' "$changed" | grep -cvE '^\.claude/' || true)"
+          if [ "${noncode:-0}" -gt 0 ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+
   lint:
     name: fmt + clippy + docs
+    needs: detect
+    if: needs.detect.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -85,6 +136,8 @@ jobs:
 
   test:
     name: test
+    needs: detect
+    if: needs.detect.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -104,6 +157,8 @@ jobs:
 
   security:
     name: cargo-deny (advisories + licenses + bans)
+    needs: detect
+    if: needs.detect.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # cargo-deny runs in a musl container that pre-installs only the pinned MSRV,
@@ -122,6 +177,8 @@ jobs:
 
   ducklake-e2e:
     name: DuckLake + extensions e2e
+    needs: detect
+    if: needs.detect.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
