@@ -502,9 +502,43 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          E9b S3 auto-ingestion (#47).
 3. **Learning loop** — labels/train/evaluate (#19/#20 + the evaluation-tooling gap),
    related-record features (#26), household/link entities (#33).
-4. **Operating at scale** — job retry + run reports (#58), webhook v2 with an outbox (#43),
-   write-back handler (#44), tags/approval (#51), bulk depth (#9/#62/#52), insights and
-   time series (#45/#57/#85), workflows + triggers (#55/#56).
+4. **Operating at scale**
+   - [x] **O2a job retry + failure classification (#58's retry half).** `attempt` and
+         `max_attempts` shipped and **nothing ever retried** — a failed job stayed failed until
+         a human hit resume.
+         Worse, the UI was already built for a world where this worked. `job-detail.tsx` renders
+         an error panel keyed on `error_class` and tells the operator "transient failures retry
+         automatically"; `dashboard-content.tsx` counts `precondition` failures and names the
+         last failure's class; the runs and admin-queue tables each have a column for it;
+         `lib/query/hooks.ts` declares the field. **`jobs` had no `error_class` column at all**,
+         so none of it could ever display anything — a failed job showed no reason whatsoever,
+         and the retry promise was false twice over. (Same family as the imports false-green,
+         but a *field* rather than a route, so the W0.4a gate could not catch it.)
+         Added `error_class` + `error_detail`, and a `fail_or_retry` statement that classifies
+         and decides in **one** statement — a read-then-write would let two dispatchers each
+         conclude they were the last attempt. Backoff is exponential and capped (5s→300s).
+         **Only transient failures retry**, which is what makes the UI's promise literally true:
+         retrying a precondition (no model yet) or a bad config burns attempts on something that
+         cannot change without a human, and the dashboard already reframes preconditions as
+         expected rather than alarming. Classification matches the strings this codebase
+         actually emits, and anything unrecognised stays `internal` and is *not* retried —
+         silently retrying an unknown failure turns one confusing log line into three.
+         `claim` now counts the attempt as it hands it out, so a worker that dies without
+         reporting has still used one; `mark` clears a stale error on success, since the UI
+         renders `error_class` whenever it is present. One webhook per **outcome**, not per
+         attempt — three notifications for one incident is how an integration learns to ignore
+         them.
+         Tests: the full classification taxonomy against real dispatcher messages; a transient
+         failure requeues with a deadline and is **provably not claimable yet** (otherwise the
+         "backoff" is a hot loop); attempts run out and the last one fails terminally; a
+         precondition fails immediately without burning attempts; a success clears the error.
+         Caught by the gates on the way: `er-entity-diff`'s live-schema fixture and the OpenAPI
+         snapshot both flagged the new columns, and five `returns: entity` job statements had to
+         select them — the generated row mapper reads every entity column regardless of the
+         SELECT list.
+   - [ ] O2b emailed run reports (#58's reporting half), O3 webhook v2 + outbox (#43),
+         O4 write-back handler (#44), O5 tags/approval (#51), O6 bulk depth (#9/#62/#52),
+         O7 insights + time series (#45/#57/#85), O8 workflows + triggers (#55/#56).
 5. **Cleanse + verify** — transform rules (#61), international standardization (#60),
    per-record DQ (#63/#73), the AWS-native verification suite (#64–#72).
 6. **AI on Bedrock** — Bedrock wiring + per-org BYO LLM (#77), LLM adjudication (#27),

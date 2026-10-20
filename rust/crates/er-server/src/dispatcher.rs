@@ -197,20 +197,43 @@ async fn dispatch_once(
         .unwrap_or_else(|e| Err(format!("dispatcher task panicked: {e}")))
     };
 
-    let state = if outcome.is_ok() {
-        "succeeded"
-    } else {
-        "failed"
+    let completed = match &outcome {
+        Ok(()) => {
+            pg::mark(client, &job.id, "succeeded").await?;
+            Job {
+                state: "succeeded".to_string(),
+                ..job
+            }
+        }
+        Err(message) => {
+            // Classify before deciding: only a transient failure earns a retry.
+            // Retrying a precondition (no model yet) or a bad config would burn
+            // attempts on something that cannot change without a human, and the
+            // UI already tells the operator which of those it is.
+            let class = pg::FailureClass::classify(message);
+            let after = pg::fail_or_retry(client, &job.id, class, message).await?;
+            eprintln!(
+                "job {} ({}) failed [{}] -> {}{}: {message}",
+                job.id,
+                job.kind,
+                class.as_str(),
+                after.state,
+                if after.state == "queued" {
+                    format!(" (attempt {} of {})", after.attempt, after.max_attempts)
+                } else {
+                    String::new()
+                }
+            );
+            after
+        }
     };
-    pg::mark(client, &job.id, state).await?;
-    if let Err(e) = &outcome {
-        eprintln!("job {} ({}) failed: {e}", job.id, job.kind);
+    // One webhook per OUTCOME, not per attempt: a job that fails twice and then
+    // succeeds is one success to a subscriber, and three notifications for one
+    // incident is how an integration learns to ignore them. A requeued job is
+    // not an outcome yet.
+    if completed.state != "queued" {
+        let _ = webhook::emit_job_event(client, http, &completed).await;
     }
-    let completed = Job {
-        state: state.to_string(),
-        ..job
-    };
-    let _ = webhook::emit_job_event(client, http, &completed).await;
     Ok(true)
 }
 

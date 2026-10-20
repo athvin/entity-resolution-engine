@@ -71,6 +71,8 @@ erDiagram
         varchar run_id
         bigint attempt
         bigint max_attempts
+        varchar error_class
+        varchar error_detail
         timestamp not_before
         varchar created_by
         varchar schedule_id
