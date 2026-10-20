@@ -99,7 +99,7 @@ serde_urlencoded = "0.7"
 # Entity framework generated crate (`er-entities`): Arrow schemas, chrono date/time
 # types, and the OpenAPI component derive. `arrow` is pinned to the same 58 line
 # the `duckdb` crate pulls so Arrow types unify across the read path.
-arrow = "58"
+arrow = "60"
 chrono = { version = "0.4", features = ["serde"] }
 utoipa = { version = "5", features = ["chrono"] }
 
