@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { csvFilename, csvRow } from "@/lib/bff/csv";
 import { BffFailure, forward, requireOrgAccess, respond } from "@/lib/bff/proxy";
 import {
   DEFAULT_MASTER_ELECTION_POLICY,
@@ -35,13 +36,10 @@ const COLUMNS = [
  * type error rather than an `[object Object]` in someone's spreadsheet. */
 type PlanValue = MergePlan[(typeof COLUMNS)[number]];
 
-function csvCell(value: PlanValue): string {
-  if (value === null) return "";
-  // `member_records` is the one list, and `;` is the separator the server's own
-  // CSV writer uses for it.
-  const text = Array.isArray(value) ? value.join(";") : String(value);
-  return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
-}
+// csvCell/csvRow live in @/lib/bff/csv — shared with segments/export, and the
+// one place formula injection is neutralized. `member_records` is the only list
+// column, and `;` (the separator the server's own CSV writer uses) is the
+// default there.
 
 /**
  * The pre-merge report (Cloudingo parity): every entity the engine would merge,
@@ -88,14 +86,18 @@ export async function GET(
 
     const lines = [COLUMNS.join(",")];
     for (const plan of items) {
-      lines.push(COLUMNS.map((column) => csvCell(plan[column])).join(","));
+      // Annotated PlanValue rather than left to infer: csvRow takes `unknown[]`,
+      // and this is what keeps the type comment above honest — a field that
+      // stops being a PlanValue is a type error here, not an `[object Object]`
+      // in someone's spreadsheet.
+      lines.push(csvRow(COLUMNS.map((column): PlanValue => plan[column])));
     }
     return new NextResponse(lines.join("\n") + "\n", {
       headers: {
         "content-type": "text/csv; charset=utf-8",
         // The policy is in the filename because the choice is invisible in the
         // rows: two reports of one lake differ only in `master_key`.
-        "content-disposition": `attachment; filename="pre-merge-${org}-${policy}.csv"`,
+        "content-disposition": `attachment; filename="${csvFilename(`pre-merge-${org}-${policy}`)}.csv"`,
       },
     });
   });

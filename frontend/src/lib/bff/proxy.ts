@@ -12,6 +12,47 @@ import type { BffError, BffErrorCode } from "./errors";
 
 const ROLE_RANK: Record<Membership["role"], number> = { viewer: 0, steward: 1, admin: 2 };
 
+/**
+ * The shape erserver mints an org name in — enforced on the provisioning path by
+ * `api/admin/orgs` and re-exported from here so the READ paths share one
+ * definition.
+ */
+export const ORG_SLUG = /^[a-z0-9][a-z0-9_-]*$/;
+
+/** Longest org name the provisioning schema accepts. */
+const ORG_MAX_LENGTH = 128;
+
+/**
+ * Reject an org name that is not a slug, before it reaches a URL.
+ *
+ * Every other path parameter is `encodeURIComponent`-ed at its call site; `org`
+ * never was, at any of the ~46 tenant routes that interpolate it into
+ * `/v1/orgs/${org}/…`. `new URL()` resolves `..` segments, so a name containing
+ * them re-points the upstream request at a different path — with the BFF's
+ * privileged credential attached.
+ *
+ * Membership lookup already made that unreachable for tenant users: a name that
+ * matches no membership 404s. The gap was the super-admin branch below, which
+ * returns access for ANY string. A super admin can already reach every org, so
+ * this is not privilege escalation — but it kept a traversal primitive alive
+ * behind the operator token, and it meant the audit trail could record a request
+ * for an org that does not exist. Both are cheap to close here, once, rather
+ * than at 46 call sites.
+ *
+ * Exported because the four `api/admin/orgs/[org]/…` routes do NOT come through
+ * requireOrgAccess — they authorize with requireSuperAdmin and call
+ * `operatorFetch` with the same raw interpolation — so they call this directly.
+ * operatorFetch cannot do it for them: it receives a whole path and has no way
+ * to know which segment was an org name.
+ */
+export function requireOrgSlug(org: string): void {
+  if (org.length > ORG_MAX_LENGTH || !ORG_SLUG.test(org)) {
+    // 404, not 422: the same answer a non-member gets, so a malformed probe
+    // learns no more than an unauthorized one.
+    throw new BffFailure(404, "not_found", "not found");
+  }
+}
+
 export class BffFailure extends Error {
   readonly body: BffError;
   readonly status: number;
@@ -46,7 +87,10 @@ export async function requireOrgAccess(
   org: string,
   minimum: Membership["role"],
 ): Promise<EffectiveOrgAccess> {
+  // Identity first, so a stale session still gets 401 rather than having a
+  // malformed org name answer 404 and hide that the session expired.
   const identity = await requireIdentity();
+  requireOrgSlug(org);
 
   // An active impersonation REPLACES the super admin's powers entirely: the
   // impersonated role is enforced with the org's real stored key, and every

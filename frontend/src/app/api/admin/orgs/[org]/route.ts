@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
 import { operatorFetch, requireSuperAdmin } from "@/lib/bff/admin";
-import { respond } from "@/lib/bff/proxy";
+import { requireOrgSlug, respond } from "@/lib/bff/proxy";
 import { db, schema } from "@/lib/db";
 
 export async function GET(
@@ -12,6 +12,9 @@ export async function GET(
   return respond(async () => {
     const identity = await requireSuperAdmin();
     const { org } = await params;
+    // Raw-interpolated into the upstream path with the operator token
+    // attached; these routes do not pass through requireOrgAccess.
+    requireOrgSlug(org);
     const detail = await operatorFetch<Record<string, unknown>>(identity, `/v1/orgs/${org}`);
     const database = await db();
     const credentials = await database

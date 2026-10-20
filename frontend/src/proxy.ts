@@ -12,6 +12,9 @@ const PUBLIC_PATHS = [
   "/api/invites",
   "/reset",
   "/api/auth/password-reset",
+  // CSP violation reports: the browser posts these with no credentials, and the
+  // ones from the login page — before any session exists — are the most useful.
+  "/api/csp-report",
 ];
 
 /**

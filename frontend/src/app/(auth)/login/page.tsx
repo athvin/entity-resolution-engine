@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { bffFetch, BffRequestError } from "@/lib/api/client";
+import { safeNextPath } from "@/lib/auth/redirect";
 
 const NO_WORKSPACE_MESSAGE = "this account has no workspace yet — ask an admin for an invite";
 
@@ -35,7 +36,11 @@ function LoginForm() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ email: form.get("email"), password: form.get("password") }),
       });
-      const target = searchParams.get("next") ?? result.redirect;
+      // `next` is attacker-controllable, and `router.push` will happily leave the
+      // origin. Anything that is not a same-origin path falls back to the
+      // redirect the BFF chose, which is ours.
+      const target =
+        safeNextPath(searchParams.get("next"), window.location.origin) ?? result.redirect;
       // A redirect back to /login means the session is live but there is
       // nowhere to land; pushing the same route would leave the spinner on.
       if (target.startsWith("/login")) {

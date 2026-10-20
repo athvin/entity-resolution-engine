@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { csvFilename, csvRow } from "@/lib/bff/csv";
 import { forwardGoldenPage } from "@/lib/bff/golden";
 import { BffFailure, requireOrgAccess, respond } from "@/lib/bff/proxy";
 
@@ -23,15 +24,6 @@ const COLUMNS = [
   "addr_postal",
   "birth_date",
 ] as const;
-
-function csvCell(value: unknown): string {
-  if (value === null || value === undefined) return "";
-  const text =
-    typeof value === "string" || typeof value === "number" || typeof value === "boolean"
-      ? String(value)
-      : JSON.stringify(value);
-  return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
-}
 
 /**
  * Segment CSV export: the BFF pages the snapshot-pinned read API and streams
@@ -65,7 +57,7 @@ export async function POST(
       snapshot ??= page.snapshot;
       for (const item of page.items) {
         const row = item as unknown as Record<string, unknown>;
-        lines.push(COLUMNS.map((column) => csvCell(row[column])).join(","));
+        lines.push(csvRow(COLUMNS.map((column) => row[column])));
       }
       if (!page.nextCursor) break;
       cursor = page.nextCursor;
@@ -74,7 +66,7 @@ export async function POST(
     return new NextResponse(lines.join("\n") + "\n", {
       headers: {
         "content-type": "text/csv; charset=utf-8",
-        "content-disposition": `attachment; filename="segment-${org}.csv"`,
+        "content-disposition": `attachment; filename="${csvFilename(`segment-${org}`)}.csv"`,
         "x-snapshot": String(snapshot ?? ""),
       },
     });
