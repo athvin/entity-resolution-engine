@@ -54,13 +54,12 @@ dedupe-core = { path = "../dedupe-core" }
 # The merge-plan generator statement runs on the lake connection directly
 # (prepare + params! + typed batch extraction).
 duckdb = { workspace = true }
-axum = { workspace = true }
+axum = { workspace = true, features = ["multipart"] }
 # The :action path normalizer wraps the router as an outer tower service.
 tower = { workspace = true }
 base64 = { workspace = true }
 serde_urlencoded = { workspace = true }
-# `signal` (over the workspace features) for the dispatcher's SIGTERM drain.
-tokio = { workspace = true, features = ["signal"] }
+tokio = { workspace = true, features = ["fs", "io-util", "signal"] }
 tokio-postgres = { workspace = true }
 er-pg-tls = { path = "../er-pg-tls" }
 rand = { workspace = true }

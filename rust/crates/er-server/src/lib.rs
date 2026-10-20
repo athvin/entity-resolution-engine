@@ -89,6 +89,11 @@ pub struct AppState {
     /// `POST /v1/email` then answers 503, exactly as an environment with no mail
     /// backend does.
     mail: Arc<mail::Mailer>,
+    /// The `POST /v1/orgs/{org}/imports` body cap, enforced both as the route's
+    /// body limit and while the part streams. Defaults to
+    /// [`DEFAULT_MAX_IMPORT_BYTES`]; configurable so an operator can tighten it
+    /// and so the oversize path is testable without a 256 MiB request.
+    max_import_bytes: usize,
 }
 
 impl AppState {
@@ -100,6 +105,7 @@ impl AppState {
             store: Arc::new(Mutex::new(JobStore::default())),
             dsn: None,
             mail: Arc::new(mail::Mailer::off()),
+            max_import_bytes: DEFAULT_MAX_IMPORT_BYTES,
         }
     }
 
@@ -113,6 +119,7 @@ impl AppState {
             store: Arc::new(Mutex::new(JobStore::default())),
             dsn: Some(dsn),
             mail: Arc::new(mail::Mailer::off()),
+            max_import_bytes: DEFAULT_MAX_IMPORT_BYTES,
         }
     }
 
@@ -121,6 +128,13 @@ impl AppState {
     #[must_use]
     pub fn with_mail(mut self, mailer: mail::Mailer) -> Self {
         self.mail = Arc::new(mailer);
+        self
+    }
+
+    /// Override the import body cap (see [`AppState::max_import_bytes`]).
+    #[must_use]
+    pub fn with_max_import_bytes(mut self, bytes: usize) -> Self {
+        self.max_import_bytes = bytes;
         self
     }
 }
@@ -2520,6 +2534,269 @@ async fn assertions_list(
     ))
 }
 
+/// The upload cap, mirrored client-side by the BFF so an oversize file fails
+/// before it crosses the wire. Enforced here two ways: as the route's body limit
+/// (so a lying `content-length` cannot get past the server) and as a running
+/// count while the part streams to disk. Overridable per state via
+/// [`AppState::with_max_import_bytes`].
+pub const DEFAULT_MAX_IMPORT_BYTES: usize = 256 * 1024 * 1024;
+
+/// An org's ACTIVE published config, parsed. Drafts do not count: a request is
+/// only served against the config the running pipeline actually uses.
+///
+/// Takes the already-fetched [`pg::OrgDetail`] rather than an org name, because
+/// `pg::get_config_version` keys on the org **id** while `pg::org_publish_context`
+/// keys on the **name** — a footgun that reaching through the row avoids, and
+/// that `org_source_ranks` tripped over before this existed.
+async fn org_active_config(
+    client: &tokio_postgres::Client,
+    org_row: &pg::OrgDetail,
+) -> Result<er_config::Config, Box<axum::response::Response>> {
+    let Some(active) = org_row.active_config_version else {
+        return Err(Box::new(detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "no published config; publish a config version first",
+        )));
+    };
+    let yaml = match pg::get_config_version(client, &org_row.id, active).await {
+        Ok(Some(d)) => d.yaml,
+        Ok(None) => {
+            return Err(Box::new(detail_err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!(
+                    "config version {active} is missing for org '{}'",
+                    org_row.name
+                ),
+            )));
+        }
+        Err(e) => return Err(Box::new(pg_err(e))),
+    };
+    load_config_str(&yaml).map_err(|e| Box::new(config_invalid(&e).into_response()))
+}
+
+/// Steward+: upload one source's delivery
+/// (`POST /v1/orgs/{org}/imports?source=<source>`), then enqueue the run that
+/// picks it up.
+///
+/// This is the HTTP half of ingest. The dispatcher reads each configured
+/// source's delivery from `<drop_root>/<source>.csv`, so an upload lands the file
+/// there under a temp name and renames it into place — atomic, so a dispatcher
+/// that claims the run mid-upload cannot read a half-written CSV.
+///
+/// The response mirrors what the BFF and its mock already consume:
+/// `202 {"delivery_id": …, "job": {…}}`.
+///
+/// Status contract (the BFF maps each one): **202** accepted · **409** org not
+/// active · **413** over the state's import cap · **422** missing `source`, no
+/// `file` part, or a source absent from the active config · **503** the org has
+/// no `drop_root` to land into.
+async fn upload_import(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+    mut multipart: axum::extract::Multipart,
+) -> impl IntoResponse {
+    use tokio::io::AsyncWriteExt;
+
+    let cap = state.max_import_bytes;
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
+    let Some(source) = params
+        .get("source")
+        .map(String::as_str)
+        .filter(|s| !s.is_empty())
+    else {
+        return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "source is required");
+    };
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "imports require Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    if org_row.state != "active" {
+        return detail_err(
+            StatusCode::CONFLICT,
+            format!(
+                "org '{org}' is {}; imports are accepted only when active",
+                org_row.state
+            ),
+        );
+    }
+    let config = match org_active_config(&client, &org_row).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    if !config.sources.contains_key(source) {
+        let known: Vec<&str> = config.sources.keys().map(String::as_str).collect();
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!(
+                "source '{source}' is not in the active config (known: {}); \
+                 publish a config version containing sources.{source} first",
+                known.join(", ")
+            ),
+        );
+    }
+    let Some(drop_root) = org_row.drop_root.as_deref() else {
+        return detail_err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!("org '{org}' has no drop_root to land a delivery into"),
+        );
+    };
+    // The source is a key of the active config, so it cannot traverse; assert it
+    // anyway, because this value becomes a path segment.
+    if !source
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("source '{source}' is not a valid path segment"),
+        );
+    }
+
+    if let Err(e) = tokio::fs::create_dir_all(drop_root).await {
+        return detail_err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!("drop_root {drop_root} is not writable: {e}"),
+        );
+    }
+    let delivery_id = er_ids::new_v7();
+    let final_path = format!("{drop_root}/{source}.csv");
+    let temp_path = format!("{drop_root}/.{source}.{delivery_id}.csv.part");
+
+    // Stream the `file` part to the temp path. Chunked rather than buffered: the
+    // cap is 256 MiB and a handler must not hold that per concurrent upload.
+    let mut wrote: Option<u64> = None;
+    loop {
+        let field = match multipart.next_field().await {
+            Ok(Some(f)) => f,
+            Ok(None) => break,
+            Err(e) => {
+                let _ = tokio::fs::remove_file(&temp_path).await;
+                // A body over the route's limit surfaces here, not as a clean EOF.
+                let status = if e.status() == StatusCode::PAYLOAD_TOO_LARGE {
+                    StatusCode::PAYLOAD_TOO_LARGE
+                } else {
+                    StatusCode::UNPROCESSABLE_ENTITY
+                };
+                return detail_err(status, format!("malformed multipart body: {e}"));
+            }
+        };
+        if field.name() != Some("file") {
+            continue;
+        }
+        let mut file = match tokio::fs::File::create(&temp_path).await {
+            Ok(f) => f,
+            Err(e) => {
+                return detail_err(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    format!("cannot write into {drop_root}: {e}"),
+                );
+            }
+        };
+        let mut total: u64 = 0;
+        let mut field = field;
+        loop {
+            match field.chunk().await {
+                Ok(Some(chunk)) => {
+                    total += chunk.len() as u64;
+                    if total > cap as u64 {
+                        let _ = tokio::fs::remove_file(&temp_path).await;
+                        return detail_err(
+                            StatusCode::PAYLOAD_TOO_LARGE,
+                            format!("imports are capped at {cap} bytes"),
+                        );
+                    }
+                    if let Err(e) = file.write_all(&chunk).await {
+                        let _ = tokio::fs::remove_file(&temp_path).await;
+                        return detail_err(
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            format!("cannot write into {drop_root}: {e}"),
+                        );
+                    }
+                }
+                Ok(None) => break,
+                Err(e) => {
+                    let _ = tokio::fs::remove_file(&temp_path).await;
+                    let status = if e.status() == StatusCode::PAYLOAD_TOO_LARGE {
+                        StatusCode::PAYLOAD_TOO_LARGE
+                    } else {
+                        StatusCode::UNPROCESSABLE_ENTITY
+                    };
+                    return detail_err(status, format!("truncated upload: {e}"));
+                }
+            }
+        }
+        if let Err(e) = file.flush().await {
+            let _ = tokio::fs::remove_file(&temp_path).await;
+            return detail_err(
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!("cannot write into {drop_root}: {e}"),
+            );
+        }
+        wrote = Some(total);
+        break;
+    }
+    let Some(bytes_written) = wrote else {
+        let _ = tokio::fs::remove_file(&temp_path).await;
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "a file part named 'file' is required",
+        );
+    };
+    // Rename last: until this succeeds the dispatcher sees no delivery at all.
+    if let Err(e) = tokio::fs::rename(&temp_path, &final_path).await {
+        let _ = tokio::fs::remove_file(&temp_path).await;
+        return detail_err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!("cannot publish the delivery into {drop_root}: {e}"),
+        );
+    }
+
+    // No idempotency key: two uploads of the same source are two deliveries and
+    // must run twice, so an upsert on a per-source key would be wrong.
+    let job = match pg::enqueue(
+        &client,
+        &org_row.id,
+        "run_all_incremental",
+        0,
+        None,
+        Some(&json!({ "source": source, "delivery_id": delivery_id })),
+    )
+    .await
+    {
+        Ok(j) => j,
+        Err(e) => return pg_err(e),
+    };
+    let _ = pg::audit(
+        &client,
+        &principal.actor,
+        Some(&org),
+        "import.upload",
+        &json!({
+            "source": source,
+            "delivery_id": delivery_id,
+            "bytes": bytes_written,
+            "job_id": job.id,
+        }),
+    )
+    .await;
+    (
+        StatusCode::ACCEPTED,
+        Json(json!({ "delivery_id": delivery_id, "job": job })),
+    )
+        .into_response()
+}
+
 /// Viewer+: ingest-batch receipts (`GET /v1/orgs/{org}/imports`), optional
 /// `?source` filter.
 async fn imports_list(
@@ -2585,38 +2862,11 @@ async fn org_source_ranks(
         )));
     };
     let client = connect_pg(dsn).await?;
-    let active = match pg::org_publish_context(&client, org).await {
-        Ok(Some((_, _, Some(v)))) => v,
-        Ok(_) => {
-            return Err(Box::new(detail_err(
-                StatusCode::NOT_FOUND,
-                "no published config",
-            )));
-        }
-        Err(e) => {
-            return Err(Box::new(detail_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("db: {e}"),
-            )));
-        }
-    };
-    let yaml = match pg::get_config_version(&client, org, active).await {
-        Ok(Some(d)) => d.yaml,
-        Ok(None) => {
-            return Err(Box::new(detail_err(
-                StatusCode::NOT_FOUND,
-                "no published config",
-            )));
-        }
-        Err(e) => {
-            return Err(Box::new(detail_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("db: {e}"),
-            )));
-        }
-    };
-    let config =
-        load_config_str(&yaml).map_err(|e| Box::new(config_invalid(&e).into_response()))?;
+    // Via the org row, so the version lookup gets the org id. Passing the NAME
+    // here made this return "no published config" for every org that had one,
+    // which broke the whole `source_priority` policy.
+    let org_row = org_or_404(&client, org).await?;
+    let config = org_active_config(&client, &org_row).await?;
     Ok(config
         .sources
         .iter()
@@ -4019,6 +4269,9 @@ async fn revoke_key(
 /// (axum/matchit forbids a `{param}:action` segment); [`app`] wraps this with a
 /// normalizer that also accepts the BFF's `{id}:action` spelling.
 fn build_routes(state: AppState) -> Router {
+    // Read before `state` is moved into `with_state`: the import route's body
+    // limit is a layer, built here rather than per request.
+    let max_import_bytes = state.max_import_bytes;
     Router::new()
         .route("/healthz", get(healthz))
         .route("/v1/orgs", get(list_orgs).post(create_org))
@@ -4115,7 +4368,15 @@ fn build_routes(state: AppState) -> Router {
             axum::routing::delete(retract_assertion),
         )
         .route("/v1/orgs/{org}/staged", get(staged_count))
-        .route("/v1/orgs/{org}/imports", get(imports_list))
+        // The upload needs its own body limit: axum's default (2 MiB) would
+        // reject every real delivery, and the limit must be enforced by the
+        // server rather than trusted from the BFF.
+        .route(
+            "/v1/orgs/{org}/imports",
+            get(imports_list)
+                .post(upload_import)
+                .layer(axum::extract::DefaultBodyLimit::max(max_import_bytes)),
+        )
         .route("/v1/orgs/{org}/runs", get(runs_list))
         .route("/v1/orgs/{org}/merge-plans", get(merge_plans))
         .route(
@@ -4156,7 +4417,11 @@ const ACTION_VERBS: [&str; 8] = [
 /// colons (an unencoded `review_id` like `gray_band:crm:C001:webforms:W006`) is
 /// left alone, while the BFF's encoded `{id}:action` (the id's own colons arrive
 /// as `%3A`) is normalized. Returns `None` when no rewrite applies.
-fn rewrite_action_path(path: &str) -> Option<String> {
+///
+/// Public so the mock-contract gate (`tests/mock_contract.rs`) can normalize the
+/// frontend mock's `:action` spellings through this exact rule instead of a copy
+/// of it that could drift.
+pub fn rewrite_action_path(path: &str) -> Option<String> {
     let (prefix, last) = path.rsplit_once('/')?;
     let (head, action) = last.rsplit_once(':')?;
     if !ACTION_VERBS.contains(&action) {

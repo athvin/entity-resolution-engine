@@ -211,11 +211,104 @@ assistant. Tenant username/password auth is fully built (argon2id). M6 (PR #56) 
       model-id swap** (`ANTHROPIC_BASE_URL` + `anthropic.claude-opus-5`) — noted as a follow-up, no code change here.
       Unit tests (11, `src/lib/enrich`) + enrichment Playwright spec (steward apply + no-op drop + viewer absence).
 
+## DataGroomr full-parity program (started 2026-10-20)
+
+`docs/research-datagroomr.md` (#202) ranks 88 platform-agnostic capabilities. A verified
+gap pass (three code sweeps against all 88 rows) found ~50 PRs of work in 8 waves; this
+section tracks them. Where our design is already better — non-destructive linking instead of
+delete-the-loser, event-sourced unmerge instead of a 15-day Recycle Bin, frozen TF snapshots,
+warehouse-native instead of Salesforce-locked — parity is recorded as achieved-by-design
+rather than cloned. Full plan: `~/.claude/plans/keep-going-robust-floyd.md`.
+
+Scope note: decision #1 (skip Salesforce-coupled features) still holds, and the AWS-only rule
+now *replaces* rather than defers the third-party rows — Bedrock for AI, SES for mail, Location
+Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for email/website.
+
+### Wave 0 — foundations + the bugs the gap pass found
+- [x] **W0.1 worktree + this tracker section.** All program work happens in a dedicated
+      worktree (`../ere-datagroomr-parity`) so it cannot disturb other local branches.
+- [x] **W0.4 + W0.4a — the CSV upload path, and the gate that hid its absence.**
+      **The bug:** `POST /v1/orgs/{org}/imports` had a complete BFF handler (multipart,
+      256 MiB cap, 202/409/413/422 mapping) and a mock that answered it, while the router
+      registered `get(imports_list)` only and er-server had **no multipart support at all**.
+      Every tier was green; a real upload 405d. Uploading a CSV is how data enters the
+      product, so this was the whole front door.
+      **The fix:** a real `upload_import` handler — steward-gated, validates `source` against
+      the **active published** config (naming the declared sources when it refuses), streams
+      the part to `<drop_root>/.<source>.<delivery>.csv.part` and renames it into
+      `<drop_root>/<source>.csv` so a dispatcher claiming the run mid-upload can never read a
+      half-written file, then enqueues the `run_all_incremental` that picks it up. The cap is
+      enforced twice (route body limit + running count) and lives on `AppState`
+      (`with_max_import_bytes`) so the 413 path is testable without a 256 MiB request.
+      **The gate:** `er-server/tests/mock_contract.rs` parses the router and the frontend mock
+      and fails when the mock answers a route+method the router lacks — observed failing on
+      exactly this one violation (all 44 other mock routes verified) before the fix landed.
+      Tests: `pg_imports.rs` (happy path incl. byte-verbatim landing, no `.part` leftovers,
+      re-upload is a second delivery, job params carry the source) + all six refusals
+      (viewer 403, no `source` 422, undeclared source 422, no `file` part 422, oversize 413,
+      suspended org 409).
+- [x] **Found while testing: `source_priority` merge plans could never load their ranks.**
+      `org_source_ranks` passed the org **name** to `pg::get_config_version`, which keys on the
+      org **id**, so the lookup missed for every org that had a published config and the
+      handler answered `404 no published config`. The whole policy was dead and untested.
+      Fixed by routing both lookups through the already-fetched org row (new
+      `org_active_config`, which takes `&OrgDetail` precisely so the id/name footgun cannot
+      recur). Locked by `pg_source_ranks.rs`, verified by reintroducing the bug and watching
+      it fail.
+- [ ] **W0.2 scheduler tick** — `schedules` has CRUD and cron validation but **nothing ticks**:
+      no row is ever enqueued and `last_enqueued_at` is never written, so every schedule in the
+      product is inert. `config.correction_pass.cadence` is likewise stored and unused.
+- [ ] **W0.3 `run_all_incremental` is not incremental** — it shares the `run_all_full`
+      dispatcher arm, and `job.params` (`skip_ingest`, set by 6 call sites) is never read.
+      Behaviour lands in E7; W0.3 stops the lie and wires `er-versions::check_mode_preconditions`
+      (a crate with zero consumers today).
+- [ ] **W0.5 harness debt** — `make frontend-seed` is documented in the Makefile as "NOT
+      restored" (its `frontend/dev/seed.py` was deleted), which is why the full-stack Playwright
+      tier is dormant; `make check-all` is still cited in `docs/infrastructure.md` +
+      `docs/plan-to-aws.md` and does not exist; `fixtures/static/FORMAT.md` names deleted
+      Python scripts.
+- [ ] **W0.6 `er-web` image push** — the ECR repo and `frontend/Dockerfile` exist but no CI job
+      pushes the image, so the BFF cannot be rolled out to dev EKS for live acceptance.
+
+### Waves 1–8 (queued)
+1. **Matching backbone** — model registry + API (#34/#21/#28), the config→model compiler that
+   makes `comparisons:`/`blocking:` actually execute (#4/#21/#22/#23/#24), hard constraints and
+   relationship exclusions (#18/#32), type-aware comparators (#25).
+2. **Scale + prevention** — ensembles/cascades (#31), blocking estimates + segment scoping
+   (#3/#54), true incremental (#36/#40), online resolve API (#37), push-records + import-time
+   dedupe (#38/#39/#41), S3 auto-ingestion (#47).
+3. **Learning loop** — labels/train/evaluate (#19/#20 + the evaluation-tooling gap),
+   related-record features (#26), household/link entities (#33).
+4. **Operating at scale** — job retry + run reports (#58), webhook v2 with an outbox (#43),
+   write-back handler (#44), tags/approval (#51), bulk depth (#9/#62/#52), insights and
+   time series (#45/#57/#85), workflows + triggers (#55/#56).
+5. **Cleanse + verify** — transform rules (#61), international standardization (#60),
+   per-record DQ (#63/#73), the AWS-native verification suite (#64–#72).
+6. **AI on Bedrock** — Bedrock wiring + per-org BYO LLM (#77), LLM adjudication (#27),
+   NL rule authoring (#29), AI schema mapping + model setup (#48/#35), staged agent
+   write-actions (#81).
+7. **Governance + platform** — config promotion (#76), MCP server + service identity
+   (#79/#78), embeddable widget (#59), saved views (#87), metering (#88), field-value
+   rollback UI (#12/#13).
+8. **Review-UI depth** — group merge editor (#8), pre-load integrity check (#46), insights
+   UI (#45/#57), verify-before-export (#86 de-Salesforced).
+
+**The false-green rule** this program runs under: every new gate is observed *failing* before
+it is trusted, and a mock-tier green is never evidence that a backend exists. Any feature
+spanning BFF → er-server → engine needs at least one test that crosses the whole seam.
+
 ## Explicitly skipped / deferred (not building)
 - Salesforce / Marketo / Lightning / lead-convert (decision #1).
-- ZoomInfo/Apollo enrichment + email verification (outside AWS / no clean AWS API).
-- Public prod ingress (ALB/WAF) + SES email (domain not set up yet — revisit when it is).
-- RevOps analytics, chained workflows, AWS-native address(Location Service)/phone(Pinpoint) verification (beyond the cut).
+- SOC 2 / HIPAA / GDPR attestations (#75) — procurement artifacts, not code. The buildable
+  half (data residency; running inside our own VPC) we already have.
+- Third-party enrichment orchestration (#82–#84) and partner verification APIs
+  (ZoomInfo/Apollo/Melissa) — blocked by the AWS-only rule; the AWS-native equivalents are
+  Waves 5–6.
+- Credit *sales* mechanics (#88) — replaced by a usage-metering ledger.
+- Public prod ingress (ALB/WAF) — domain-blocked, unrelated to parity.
+- ~~SES email~~ — built (`POST /v1/email`, SES API over Pod Identity); the terraform apply is
+  Wave 5's step zero.
+- ~~AWS-native address/phone verification~~ — now in scope (Wave 5, V4).
 
 ## Change log
 - 2026-10-15 — Program kicked off; plan approved; PR 0.1 opened (frontend CI gate + this tracker).
