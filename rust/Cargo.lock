@@ -1978,7 +1978,7 @@ dependencies = [
  "er-std",
  "hex",
  "hmac 0.12.1",
- "rand 0.9.5",
+ "rand 0.10.3",
  "reqwest",
  "serde",
  "serde_json",
