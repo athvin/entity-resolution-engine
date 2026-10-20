@@ -2185,14 +2185,20 @@ async fn cancel_job(
         };
         return match pg::get_job(&client, &org_row.id, &job_id).await {
             Ok(Some(job)) => match pg::mark(&client, &job_id, "canceled").await {
-                Ok(()) => (
-                    StatusCode::OK,
-                    Json(json!(Job {
+                Ok(()) => {
+                    let canceled = Job {
                         state: "canceled".to_string(),
                         ..job
-                    })),
-                )
-                    .into_response(),
+                    };
+                    // Emit, so a subscriber learns the job ended. Cancel was the
+                    // one terminal state that delivered nothing — a downstream
+                    // system waiting on an outcome waited forever. Best-effort
+                    // and built per call: cancelling is rare, and a delivery
+                    // failure must not undo a cancel that is already persisted.
+                    let http = reqwest::Client::new();
+                    let _ = webhook::emit_job_event(&client, &http, &canceled).await;
+                    (StatusCode::OK, Json(json!(canceled))).into_response()
+                }
                 Err(e) => pg_err(e),
             },
             Ok(None) => (
@@ -4126,6 +4132,21 @@ fn gen_webhook_secret() -> String {
 ///
 /// Delivery — signing each event payload with the secret and POSTing it to
 /// `url` — is the infra-bound part (a background sender, not run in this
+/// Viewer+: the event types this system can emit
+/// (`GET /v1/orgs/{org}/webhooks/events`).
+///
+/// Discovery, so a tenant wiring up a subscription can see what exists instead
+/// of guessing. It is the same list registration validates against, so the two
+/// cannot disagree.
+async fn webhook_events_catalog(
+    principal: Principal,
+    Path(org): Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    Json(json!({ "events": webhook::catalog_json() })).into_response()
+}
 /// sandbox); this endpoint manages the registration.
 async fn create_webhook(
     principal: Principal,
@@ -4154,6 +4175,28 @@ async fn create_webhook(
         .secret
         .filter(|s| !s.is_empty())
         .unwrap_or_else(gen_webhook_secret);
+    // Validate against the catalog. Previously `events` was a free-form array
+    // and `webhooks_for_delivery` merely tested containment, so a subscription
+    // to a non-existent type (or a typo like `job.succeeded`) was accepted and
+    // then never delivered to — a silence nobody could diagnose.
+    let unknown: Vec<&str> = body
+        .events
+        .iter()
+        .map(String::as_str)
+        .filter(|e| !webhook::is_known_event(e))
+        .collect();
+    if !unknown.is_empty() {
+        let known: Vec<&str> = webhook::EVENT_CATALOG.iter().map(|(n, _)| *n).collect();
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!(
+                "unknown event type(s) {}; this system emits {} (see \
+                 GET /v1/orgs/{{org}}/webhooks/events)",
+                unknown.join(", "),
+                known.join(", ")
+            ),
+        );
+    }
     let events = json!(body.events);
     // History images record the acting principal (er.actor).
     let _ = pg::set_actor(&client, &principal.actor).await;
@@ -5386,6 +5429,10 @@ fn build_routes(state: AppState) -> Router {
         .route(
             "/v1/orgs/{org}/schedules",
             get(schedules_index).post(create_schedule),
+        )
+        .route(
+            "/v1/orgs/{org}/webhooks/events",
+            get(webhook_events_catalog),
         )
         .route(
             "/v1/orgs/{org}/webhooks",

@@ -62,7 +62,9 @@ async fn webhooks_crud() {
         .oneshot(op(
             "POST",
             "/v1/orgs/acme/webhooks",
-            Body::from(r#"{"url":"https://hooks.example/acme","events":["run.succeeded","review.opened"]}"#),
+            Body::from(
+                r#"{"url":"https://hooks.example/acme","events":["job.succeeded","job.failed"]}"#,
+            ),
         ))
         .await
         .unwrap();
@@ -72,7 +74,7 @@ async fn webhooks_crud() {
     assert!(created["secret"].as_str().is_some_and(|s| !s.is_empty()));
     assert_eq!(
         created["events"],
-        serde_json::json!(["run.succeeded", "review.opened"])
+        serde_json::json!(["job.succeeded", "job.failed"])
     );
     assert_eq!(created["active"], true);
 
