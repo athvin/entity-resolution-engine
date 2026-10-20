@@ -61,6 +61,8 @@ fn acct_run_all_clusters_accounts_and_assembles_golden() {
         &session,
         &config,
         &er_cli::PipelineInputs {
+            mode: "full",
+            rebuild_reason: None,
             lexicon: &lexicon,
             deliveries: &deliveries,
             model: &er_cli::MatchModel {

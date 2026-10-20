@@ -125,6 +125,8 @@ fn populate_lake(catalog: &str, data_path: &str) {
         // Record the run in the `runs` ledger (write_run_start/end wrap run_all;
         // the granular path must do it too, or run_correct has no prior run).
         let inputs = er_cli::PipelineInputs {
+            mode: "full",
+            rebuild_reason: None,
             lexicon: &[],
             deliveries: &[],
             model: &model,

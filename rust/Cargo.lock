@@ -1725,6 +1725,8 @@ dependencies = [
  "er-reconcile",
  "er-schema",
  "er-standardize",
+ "er-std",
+ "er-versions",
  "serde_json",
 ]
 
@@ -1956,6 +1958,7 @@ dependencies = [
  "er-reconcile",
  "er-schema",
  "er-std",
+ "er-versions",
  "hex",
  "hmac 0.12.1",
  "rand 0.10.3",

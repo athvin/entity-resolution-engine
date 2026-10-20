@@ -103,6 +103,8 @@ async fn dispatcher_runs_run_all_over_a_per_org_ducklake() {
         tf_snapshot_id: "01JWMDTFSNAP00000000000001",
     };
     let inputs = er_cli::PipelineInputs {
+        mode: "full",
+        rebuild_reason: None,
         lexicon: &lexicon,
         deliveries: &deliveries,
         model: &model,

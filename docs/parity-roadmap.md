@@ -284,10 +284,27 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
       `last_enqueued_at` stamped; same-minute repeat is a no-op; next match is a new firing;
       a long gap does not backfill; disabled and suspended both stop it; `*/15` fires exactly
       4× an hour) + `pg_publish.rs` extended for the cadence schedule.
-- [ ] **W0.3 `run_all_incremental` is not incremental** — it shares the `run_all_full`
-      dispatcher arm, and `job.params` (`skip_ingest`, set by 6 call sites) is never read.
-      Behaviour lands in E7; W0.3 stops the lie and wires `er-versions::check_mode_preconditions`
-      (a crate with zero consumers today).
+- [x] **W0.3 run modes stop lying, and the drift guard is connected.** Four disconnected
+      things, one gap: `run_all_incremental` shared the `run_all_full` dispatcher arm;
+      `job.params` (`skip_ingest`, set by six call sites) was never read; `write_run_start`
+      hardcoded `mode = "full"` so the ledger could not tell the two apart; `runs.lexicon_hash`
+      and `runs.rebuild_reason` were declared columns nothing ever wrote; and
+      `er-versions::check_mode_preconditions` — the guard that decides whether an incremental
+      run may extend the existing corpus — had **zero callers in the workspace**.
+      **`skip_ingest` is honored**, which fixes a real failure: a publish-triggered rebuild
+      re-read the drop directory and died with "no source deliveries found" whenever the
+      deliveries had been cleaned up after landing.
+      **The ledger is honest**: the executing mode, the lexicon hash the run scored under, and
+      a rebuild reason when the run was promoted.
+      **The guard runs** on every `run_all`, with escalation allowed: an incremental run whose
+      config / model / std / survivorship / lexicon fingerprint drifted is *promoted* to full
+      rather than refused (a refusal is just a failed job; a promotion is what the operator
+      wants) and the ledger records why. Note this is groundwork — until E7 makes incremental
+      genuinely cheaper, a promotion costs nothing. The guard has to exist first, or E7's
+      cheap path would silently extend a corpus scored under different versions.
+      Tests: a `lake_e2e` case asserting the ledger stores the fingerprint the guard computes,
+      that an unchanged fingerprint proceeds as incremental, that a moved lexicon promotes to
+      full and names the drifted field, and that the same drift refuses without escalation.
 - [ ] **W0.5 harness debt** — `make frontend-seed` is documented in the Makefile as "NOT
       restored" (its `frontend/dev/seed.py` was deleted), which is why the full-stack Playwright
       tier is dormant; `make check-all` is still cited in `docs/infrastructure.md` +

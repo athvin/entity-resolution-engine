@@ -1,7 +1,7 @@
 kind: statement
 operation: create
 mode: partial
-description: "Open the run ledger row (status running) with the run's mode, versions and the model identity it scores against."
+description: "Open the run ledger row (status running) with the run's mode, versions, the model identity it scores against, and — when the run was promoted or forced — why it is rebuilding."
 params:
   - { name: run_id, type: varchar }
   - { name: tenant, type: varchar }
@@ -12,5 +12,7 @@ params:
   - { name: tf_snapshot_id, type: varchar }
   - { name: std_version, type: varchar }
   - { name: survivorship_version, type: varchar }
+  - { name: lexicon_hash, type: varchar, nullable: true }
   - { name: code_version, type: varchar }
+  - { name: rebuild_reason, type: varchar, nullable: true }
 returns: none

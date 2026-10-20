@@ -82,7 +82,7 @@ impl Run {
 
 pub mod create {
     //! @generated query functions for this entity + operation.
-    /// Open the run ledger row (status running) with the run's mode, versions and the model identity it scores against.
+    /// Open the run ledger row (status running) with the run's mode, versions, the model identity it scores against, and — when the run was promoted or forced — why it is rebuilding.
     pub fn start(
         conn: &::duckdb::Connection,
         run_id: &str,
@@ -94,15 +94,17 @@ pub mod create {
         tf_snapshot_id: &str,
         std_version: &str,
         survivorship_version: &str,
+        lexicon_hash: Option<&str>,
         code_version: &str,
+        rebuild_reason: Option<&str>,
     ) -> ::duckdb::Result<usize> {
         const SQL: &str =
             "INSERT INTO lake.main.runs (id, tenant, mode, status, started_at, config_hash,
-  model_version, tf_snapshot_id, std_version, survivorship_version, code_version,
-  created_at, updated_at)
+  model_version, tf_snapshot_id, std_version, survivorship_version, lexicon_hash,
+  code_version, rebuild_reason, created_at, updated_at)
 VALUES ($1, $2, $3, 'running', $4::timestamp, $5,
   $6, $7, $8, $9, $10,
-  $4::timestamp, $4::timestamp)
+  $11, $12, $4::timestamp, $4::timestamp)
 ";
         conn.execute(
             SQL,
@@ -116,7 +118,9 @@ VALUES ($1, $2, $3, 'running', $4::timestamp, $5,
                 tf_snapshot_id,
                 std_version,
                 survivorship_version,
-                code_version
+                lexicon_hash,
+                code_version,
+                rebuild_reason
             ],
         )
     }
@@ -124,6 +128,91 @@ VALUES ($1, $2, $3, 'running', $4::timestamp, $5,
 
 pub mod read {
     //! @generated query functions for this entity + operation.
+    /// One row of `latest_fingerprint`: The last SUCCEEDED run's drift fingerprint. An incremental run is only valid against a corpus scored under the same five values, which is what er-versions::check_mode_preconditions compares.
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct LatestFingerprintRow {
+        pub id: String,
+        pub config_hash: String,
+        pub model_version: Option<String>,
+        pub std_version: String,
+        pub survivorship_version: String,
+        pub lexicon_hash: Option<String>,
+    }
+
+    impl LatestFingerprintRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("id", ::arrow::datatypes::DataType::Utf8),
+                ("config_hash", ::arrow::datatypes::DataType::Utf8),
+                ("model_version", ::arrow::datatypes::DataType::Utf8),
+                ("std_version", ::arrow::datatypes::DataType::Utf8),
+                ("survivorship_version", ::arrow::datatypes::DataType::Utf8),
+                ("lexicon_hash", ::arrow::datatypes::DataType::Utf8),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "id")?;
+                let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "config_hash")?;
+                let c2: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 2, "model_version")?;
+                let c3: &::arrow::array::StringArray = crate::batch::col(batch, 3, "std_version")?;
+                let c4: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 4, "survivorship_version")?;
+                let c5: &::arrow::array::StringArray = crate::batch::col(batch, 5, "lexicon_hash")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        id: crate::batch::req(crate::batch::opt_str(c0, i), "id", i)?,
+                        config_hash: crate::batch::req(
+                            crate::batch::opt_str(c1, i),
+                            "config_hash",
+                            i,
+                        )?,
+                        model_version: crate::batch::opt_str(c2, i),
+                        std_version: crate::batch::req(
+                            crate::batch::opt_str(c3, i),
+                            "std_version",
+                            i,
+                        )?,
+                        survivorship_version: crate::batch::req(
+                            crate::batch::opt_str(c4, i),
+                            "survivorship_version",
+                            i,
+                        )?,
+                        lexicon_hash: crate::batch::opt_str(c5, i),
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// The last SUCCEEDED run's drift fingerprint. An incremental run is only valid against a corpus scored under the same five values, which is what er-versions::check_mode_preconditions compares.
+    pub fn latest_fingerprint(
+        conn: &::duckdb::Connection,
+    ) -> ::duckdb::Result<Vec<LatestFingerprintRow>> {
+        const SQL: &str =
+            "SELECT id, config_hash, model_version, std_version, survivorship_version, lexicon_hash
+FROM lake.main.runs
+WHERE status = 'succeeded'
+ORDER BY started_at DESC, id DESC
+LIMIT 1
+";
+        let mut stmt = conn.prepare(SQL)?;
+        let batches = stmt.query_arrow(::duckdb::params![])?.collect::<Vec<_>>();
+        LatestFingerprintRow::from_batches(&batches)
+    }
+
     /// One row of `latest_live`: The latest run's identity, read live (doctor's status line and the correction pass's model identity), with the run_id tiebreak for same-timestamp runs.
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
     pub struct LatestLiveRow {

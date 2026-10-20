@@ -24,6 +24,8 @@ er-ids = { path = "../er-ids" }
 er-golden = { path = "../er-golden" }
 anyhow.workspace = true
 serde_json.workspace = true
+er-versions = { version = "0.1.0", path = "../er-versions" }
+er-std = { version = "0.1.0", path = "../er-std" }
 
 [dev-dependencies]
 er-hash = { path = "../er-hash" }
