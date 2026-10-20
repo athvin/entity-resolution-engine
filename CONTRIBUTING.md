@@ -68,7 +68,7 @@ a typed function; lake reads carry `AT (VERSION => $snapshot)` or a justified
 survivorship/masters, merge plans, the standardize stages — config/tenant-driven
 SQL whose real output the analyser plans over representative vectors), or the
 **engine core's execution-oracle SQL** (dedupe-core's model-derived blocking/
-scoring/clustering, proven against the captured Splink golden fixtures).
+scoring/clustering, proven against the captured golden fixtures).
 `er-schema`'s `freeform_sql` test enforces the boundary: `query_strings` has no
 callers outside the engine core, and `er-server` names no lake relation in
 source. The deliberate exemptions, each visible at the call site: session-temp

@@ -10,7 +10,7 @@ where it competes directly with [Cloudingo](docs/research-cloudingo.md).
 The engine resolves:
 
 - Standardized names, email addresses, phones, addresses and birth dates.
-- Probabilistic matching (Splink) with automatic-merge and manual-review thresholds.
+- Probabilistic matching (Fellegi–Sunter) with automatic-merge and manual-review thresholds.
 - Persistent entity IDs, merge redirects, split history, deletions and resurrection.
 - Golden records with configurable survivorship and attribute-level lineage.
 - Full and incremental processing, steward assertions, run history and recovery.

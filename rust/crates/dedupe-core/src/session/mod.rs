@@ -1,6 +1,6 @@
 //! Session: owns one DuckDB connection, materializes pipelines as temp
 //! tables with run-scoped physical names, and registers input data. The
-//! DuckLake attachment layer lives in `ducklake` (all `__splink__*`
+//! DuckLake attachment layer lives in `ducklake` (all `__dedupe__*`
 //! intermediates stay in the native temp catalog regardless — DuckLake cannot
 //! host temp tables).
 
@@ -25,7 +25,7 @@ fn quote_ident_list(cols: &[String]) -> String {
 
 #[derive(Debug, Clone)]
 pub struct TableHandle {
-    /// Templated pipeline name, e.g. `__splink__df_concat`.
+    /// Templated pipeline name, e.g. `__dedupe__concat`.
     pub templated: String,
     /// Actual table/view name in the database.
     pub physical: String,

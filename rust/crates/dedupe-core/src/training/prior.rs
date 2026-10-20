@@ -78,7 +78,7 @@ pub fn estimate_prior(
             &[],
             None,
         ),
-        "__splink__deterministic_blocked",
+        "__dedupe__deterministic_blocked",
     );
     let blocked = session.materialize(&p)?;
     let num_observed = session.count(&blocked.physical)? as f64;

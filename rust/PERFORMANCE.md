@@ -1,6 +1,6 @@
 # Performance & Scaling
 
-This engine is a **SQL generator**: it builds a `__splink__*`-templated CTE
+This engine is a **SQL generator**: it builds a `__dedupe__*`-templated CTE
 pipeline and executes it on a single DuckDB connection per [`Session`]. DuckDB
 is the compute engine — it is columnar, vectorized, multi-threaded, and spills
 to disk when a workload exceeds memory. So performance tuning is mostly about
@@ -74,7 +74,7 @@ stays flat, throughput rises with cores. The levers:
   non-deterministic in float-sum order); `--threads 1` keeps it on so
   golden-exact reproduction is untouched. Value-safe either way — results are
   compared order-independently.
-- **Explicit temp-table lifecycle** — `__splink__*` intermediates are native
+- **Explicit temp-table lifecycle** — `__dedupe__*` intermediates are native
   temp tables dropped as soon as a stage is done (clustering, for instance,
   drops per-iteration tables), so the live set stays near one stage's data.
 - **Chunked / streamed predict** (below) — bounds the scoring working set, and

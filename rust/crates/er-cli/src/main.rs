@@ -92,7 +92,7 @@ enum Command {
         #[arg(long, default_value = "er-run")]
         run_id: String,
     },
-    /// S4.3.2 — train a Splink model on int_std_records; writes the trained
+    /// S4.3.2 — train a match model on int_std_records; writes the trained
     /// settings JSON + the frozen TF snapshot CSV.
     Train {
         /// Base settings template (comparison + blocking structure).

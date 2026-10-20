@@ -134,7 +134,7 @@ fn sampled_record_set_matches_golden() {
     let mut p = dedupe_core::sql::pipeline::CtePipeline::new().with_input(&concat);
     p.enqueue(
         format!("select *\nfrom {}\nwhere 1=1\n{filter}", concat.templated),
-        "__splink__df_concat_sample",
+        "__dedupe__concat_sample",
     );
     let sample = session.materialize(&p).unwrap();
 

@@ -1,17 +1,17 @@
-//! Term-frequency tables and the `__splink__df_concat_with_tf` join.
+//! Term-frequency tables and the `__dedupe__concat_with_tf` join.
 //!
 //! TF tables are the materialized/cached artifacts in v5;
-//! `__splink__df_concat_with_tf` is a CTE re-derived per pipeline.
+//! `__dedupe__concat_with_tf` is a CTE re-derived per pipeline.
 
 use super::concat::DF_CONCAT;
 
-pub const DF_CONCAT_WITH_TF: &str = "__splink__df_concat_with_tf";
+pub const DF_CONCAT_WITH_TF: &str = "__dedupe__concat_with_tf";
 
 pub fn tf_table_name(column: &str) -> String {
-    format!("__splink__df_tf_{column}")
+    format!("__dedupe__tf_{column}")
 }
 
-/// Matches golden `training_23___splink__df_tf_first_name.sql`:
+/// Matches golden `training_23___dedupe__tf_first_name.sql`:
 /// denominator is `count(col)` (non-null count), numerator `count(*)` per
 /// value, NULL values excluded.
 pub fn tf_table_sql(column: &str, tf_prefix: &str) -> String {
@@ -20,9 +20,9 @@ pub fn tf_table_sql(column: &str, tf_prefix: &str) -> String {
     )
 }
 
-/// Matches golden `predict_03___splink__df_concat_with_tf.sql`: left-join each
+/// Matches golden `predict_03___dedupe__concat_with_tf.sql`: left-join each
 /// TF table onto the concat on the raw column. With no TF columns this
-/// degenerates to `select * from __splink__df_concat`.
+/// degenerates to `select * from __dedupe__concat`.
 pub fn concat_with_tf_sql(tf_columns: &[String], tf_prefix: &str) -> String {
     concat_with_tf_sql_from(DF_CONCAT, tf_columns, tf_prefix)
 }

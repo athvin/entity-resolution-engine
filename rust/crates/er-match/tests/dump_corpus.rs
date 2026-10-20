@@ -15,7 +15,7 @@ mod common;
 
 use dedupe_core::session::{Session, SessionOptions};
 
-/// MATCHING_RECORD_COLUMNS (src/er/lake/columns.py): the corpus Splink scores,
+/// MATCHING_RECORD_COLUMNS (src/er/lake/columns.py): the corpus the matcher scores,
 /// in declared order.
 const MATCHING_RECORD_COLUMNS: &str = "record_key, source_system, source_record_id, \
      content_hash, std_version, given_name, family_name, name_variants, email, email_valid, \

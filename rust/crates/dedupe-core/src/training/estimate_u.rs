@@ -153,17 +153,17 @@ fn count_pipeline(
     );
 
     let gamma = gamma_case_sql(comparison);
-    let cv_sql = format!("select\n{gamma}\nfrom __splink__blocked_id_pairs");
+    let cv_sql = format!("select\n{gamma}\nfrom __dedupe__blocked_id_pairs");
 
     let counts_sql = format!(
-        "select {g} as comparison_vector_value, count(*) as u_count\nfrom __splink__df_comparison_vectors\ngroup by {g}",
+        "select {g} as comparison_vector_value, count(*) as u_count\nfrom __dedupe__comparison_vectors\ngroup by {g}",
         g = comparison.gamma_column_name()
     );
 
     let mut p = CtePipeline::new().with_input(sample);
-    p.enqueue(blocked_sql, "__splink__blocked_id_pairs");
-    p.enqueue(cv_sql, "__splink__df_comparison_vectors");
-    p.enqueue(counts_sql, "__splink__m_u_counts");
+    p.enqueue(blocked_sql, "__dedupe__blocked_id_pairs");
+    p.enqueue(cv_sql, "__dedupe__comparison_vectors");
+    p.enqueue(counts_sql, "__dedupe__m_u_counts");
     p
 }
 
@@ -222,7 +222,7 @@ fn run_chunk(
 }
 
 /// Estimate u for every comparison and write the combined values into the
-/// model. `concat` is `__splink__df_concat`.
+/// model. `concat` is `__dedupe__concat`.
 pub fn estimate_u(
     session: &Session,
     model: &mut TrainedModel,
@@ -258,7 +258,7 @@ pub fn estimate_u(
     let filter = sample_filter_sql(settings, proportion, opts.seed);
     sp.enqueue(
         format!("select *\nfrom {}\nwhere 1=1\n{filter}", concat.templated),
-        "__splink__df_concat_sample",
+        "__dedupe__concat_sample",
     );
     let sample = session.materialize(&sp)?;
 

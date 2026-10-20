@@ -1,14 +1,14 @@
-//! `__splink__blocked_id_pairs`: one UNION ALL arm per blocking rule, with
+//! `__dedupe__blocked_id_pairs`: one UNION ALL arm per blocking rule, with
 //! `match_key` = rule index as a string literal and the cross-rule dedup
-//! trick. Matches golden `predict_01___splink__blocked_id_pairs.sql`.
+//! trick. Matches golden `predict_01___dedupe__blocked_id_pairs.sql`.
 //!
-//! v5 blocks on `__splink__df_concat` (TF is not needed for blocking).
+//! v5 blocks on `__dedupe__concat` (TF is not needed for blocking).
 
 use super::UidExpr;
 use crate::blocking::BlockingRule;
 use crate::settings::json::LinkType;
 
-pub const BLOCKED_ID_PAIRS: &str = "__splink__blocked_id_pairs";
+pub const BLOCKED_ID_PAIRS: &str = "__dedupe__blocked_id_pairs";
 
 /// The WHERE condition by link type (`_sql_gen_where_condition`):
 /// - dedupe_only / link_and_dedupe: `where {uid_l} < {uid_r}`
@@ -101,7 +101,7 @@ pub fn blocked_id_pairs_cross_sql(
     arms.join("\n\nUNION ALL\n\n")
 }
 
-/// `__splink__blocked_id_pairs` arms over `input_table`. `marginals` maps each
+/// `__dedupe__blocked_id_pairs` arms over `input_table`. `marginals` maps each
 /// *exploding* rule's index to the physical name of its pre-materialized
 /// marginal id-pairs table (see [`marginal_exploded_id_pairs_sql`]); scalar
 /// rules ignore it. When any exploding rule is present the caller must wrap
@@ -163,20 +163,20 @@ pub fn blocked_id_pairs_sql(
     arms.join("\n\nUNION ALL\n\n")
 }
 
-/// `__splink__blocked_id_pairs_non_unique` (templated name of the un-deduped
+/// `__dedupe__blocked_id_pairs_non_unique` (templated name of the un-deduped
 /// UNION-ALL when exploding rules are present).
-pub const BLOCKED_ID_PAIRS_NON_UNIQUE: &str = "__splink__blocked_id_pairs_non_unique";
+pub const BLOCKED_ID_PAIRS_NON_UNIQUE: &str = "__dedupe__blocked_id_pairs_non_unique";
 
 /// Templated name for the UNNEST'd concat used to build an exploding rule's
 /// marginal id-pairs table.
-pub const DF_CONCAT_UNNESTED: &str = "__splink__df_concat_unnested";
+pub const DF_CONCAT_UNNESTED: &str = "__dedupe__concat_unnested";
 
 /// Physical/templated name of an exploding rule's marginal id-pairs table.
 pub fn marginal_exploded_table_name(match_key: usize) -> String {
-    format!("__splink__marginal_exploded_ids_blocking_rule_mk_{match_key}")
+    format!("__dedupe__marginal_exploded_ids_blocking_rule_mk_{match_key}")
 }
 
-/// Collapse `__splink__blocked_id_pairs_non_unique` to unique pairs, keeping
+/// Collapse `__dedupe__blocked_id_pairs_non_unique` to unique pairs, keeping
 /// the smallest `match_key` per pair (lexical string min —
 /// `match_key` is a string literal, never cast to int).
 pub fn dedup_non_unique_sql(non_unique_table: &str) -> String {

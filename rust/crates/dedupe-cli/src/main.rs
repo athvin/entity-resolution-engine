@@ -409,9 +409,9 @@ fn cluster(a: ClusterArgs) -> Result<()> {
 
     let predictions = if let Some(parquet) = &a.predictions_parquet {
         let p = parquet.replace('\'', "''");
-        session.register_table(&format!("read_parquet('{p}')"), "__splink__df_predict")?
+        session.register_table(&format!("read_parquet('{p}')"), "__dedupe__predict")?
     } else if let Some(table) = &a.predictions {
-        session.register_lake_table(table, "__splink__df_predict")?
+        session.register_lake_table(table, "__dedupe__predict")?
     } else {
         bail!("no predictions specified: use --predictions (lake) or --predictions-parquet");
     };
@@ -521,9 +521,9 @@ fn cluster_new(a: ClusterNewArgs) -> Result<()> {
 
     let new_predictions = if let Some(parquet) = &a.predictions_parquet {
         let p = parquet.replace('\'', "''");
-        session.register_table(&format!("read_parquet('{p}')"), "__splink__df_predict")?
+        session.register_table(&format!("read_parquet('{p}')"), "__dedupe__predict")?
     } else if let Some(table) = &a.predictions {
-        session.register_lake_table(table, "__splink__df_predict")?
+        session.register_lake_table(table, "__dedupe__predict")?
     } else {
         bail!("no new predictions: use --predictions or --predictions-parquet");
     };
@@ -576,7 +576,7 @@ fn union_tables(session: &Session, parts: &[TableHandle]) -> Result<TableHandle>
     if parts.len() == 1 {
         return Ok(parts[0].clone());
     }
-    let physical = format!("__splink__df_incremental_{}", std::process::id());
+    let physical = format!("__dedupe__incremental_{}", std::process::id());
     let union = parts
         .iter()
         .map(|t| format!("SELECT * FROM {}", t.physical))
@@ -584,7 +584,7 @@ fn union_tables(session: &Session, parts: &[TableHandle]) -> Result<TableHandle>
         .join("\nUNION ALL\n");
     session.execute_batch(&format!("CREATE TEMP TABLE {physical} AS {union}"))?;
     Ok(TableHandle {
-        templated: "__splink__df_incremental".to_string(),
+        templated: "__dedupe__incremental".to_string(),
         physical,
         columns: parts[0].columns.clone(),
     })

@@ -50,7 +50,7 @@ pub fn cluster_at_threshold(
             uid.render_bare(),
             concat.templated
         ),
-        "__splink__df_nodes_with_composite_ids",
+        "__dedupe__nodes_with_composite_ids",
     )?;
 
     // Edges from predictions above threshold.
@@ -63,7 +63,7 @@ pub fn cluster_at_threshold(
             uid.render_suffixed("r"),
             predictions.templated
         ),
-        "__splink__df_edges_from_predict",
+        "__dedupe__edges_from_predict",
     )?;
 
     // Symmetrized neighbours.
@@ -74,7 +74,7 @@ pub fn cluster_at_threshold(
             "select node_id_l as node_rep, node_id_l as node_id, node_id_r as neighbour_rep, node_id_r as neighbour\nfrom {e}\nwhere match_probability >= {threshold}\nunion all\nselect node_id_r as node_rep, node_id_r as node_id, node_id_l as neighbour_rep, node_id_l as neighbour\nfrom {e}\nwhere match_probability >= {threshold}",
             e = edges.templated
         ),
-        "__splink__df_neighbours",
+        "__dedupe__neighbours",
     )?;
 
     // Initial representatives: each node is its own representative.
@@ -85,7 +85,7 @@ pub fn cluster_at_threshold(
             "select distinct node_id as node_id, node_id as representative, 0 as stable\nfrom {}",
             nodes.templated
         ),
-        "__splink__df_representatives",
+        "__dedupe__representatives",
     )?;
 
     let mut neighbours_src = neighbours.clone();
@@ -103,7 +103,7 @@ pub fn cluster_at_threshold(
                 n = neighbours_src.templated,
                 r = representatives.templated
             ),
-            "__splink__rep_updates",
+            "__dedupe__rep_updates",
         )?;
 
         // Push new reps down to nodes. Templated names carry the iteration so
@@ -116,20 +116,20 @@ pub fn cluster_at_threshold(
                 ru = rep_updates.templated,
                 prev = representatives.templated
             ),
-            &format!("__splink__representatives_{iteration}"),
+            &format!("__dedupe__representatives_{iteration}"),
         )?;
 
         let stable = materialize_sql(
             session,
             &[&new_reps],
             format!("select * from {} where stable = 1", new_reps.templated),
-            &format!("__splink__representatives_stable_{iteration}"),
+            &format!("__dedupe__representatives_stable_{iteration}"),
         )?;
         let unstable = materialize_sql(
             session,
             &[&new_reps],
             format!("select * from {} where stable = 0", new_reps.templated),
-            &format!("__splink__representatives_unstable_{iteration}"),
+            &format!("__dedupe__representatives_unstable_{iteration}"),
         )?;
 
         // Re-map neighbour endpoints to new reps; keep only cross-cluster edges.
@@ -141,7 +141,7 @@ pub fn cluster_at_threshold(
                 n = neighbours_src.templated,
                 reps = new_reps.templated
             ),
-            &format!("__splink__filtered_neighbours_{iteration}"),
+            &format!("__dedupe__filtered_neighbours_{iteration}"),
         )?;
 
         let remaining = session.count(&filtered.physical)?;
@@ -185,7 +185,7 @@ pub fn cluster_at_threshold(
         session,
         &inputs,
         union_parts.join("\n\nUNION ALL\n\n"),
-        "__splink__clustering_output_final",
+        "__dedupe__clustering_output_final",
     )?;
 
     for t in &stable_tables {
@@ -210,7 +210,7 @@ pub fn cluster_at_threshold(
 /// then expanding — far cheaper than re-clustering every node and edge.
 ///
 /// Inputs:
-/// - `all_concat`: `__splink__df_concat`-shaped table of ALL records
+/// - `all_concat`: `__dedupe__concat`-shaped table of ALL records
 ///   (existing + new).
 /// - `existing_clusters`: `(node_id, cluster_id)` for the already-clustered
 ///   (existing) records.
@@ -242,7 +242,7 @@ pub fn incremental_cluster(
             concat = all_concat.templated,
             existing = existing_clusters.templated,
         ),
-        "__splink__df_incremental_reps",
+        "__dedupe__incremental_reps",
     )?;
 
     // Super-node graph: distinct seed reps are the nodes, and each new edge
@@ -254,7 +254,7 @@ pub fn incremental_cluster(
             "select distinct seed_rep as \"{uid_col}\" from {}",
             all_reps.templated
         ),
-        "__splink__df_incremental_seed_nodes",
+        "__dedupe__incremental_seed_nodes",
     )?;
     let threshold = pyrepr(opts.threshold_match_probability);
     let seed_edges = materialize_sql(
@@ -267,7 +267,7 @@ pub fn incremental_cluster(
             uid_l = uid.render_suffixed("l"),
             uid_r = uid.render_suffixed("r"),
         ),
-        "__splink__df_incremental_seed_edges",
+        "__dedupe__incremental_seed_edges",
     )?;
 
     // Connected components over the (small) super-node graph.
@@ -282,7 +282,7 @@ pub fn incremental_cluster(
             reps = all_reps.templated,
             seed = seed_clusters.templated,
         ),
-        "__splink__clustering_output_final",
+        "__dedupe__clustering_output_final",
     )?;
 
     session.drop_table(&all_reps)?;
@@ -320,24 +320,24 @@ pub fn graph_metrics(
             "select * from {} where match_probability >= {threshold}",
             predictions.templated
         ),
-        "__splink__truncated_edges",
+        "__dedupe__truncated_edges",
     );
     np.enqueue(
         format!(
-            "select {edge_l} as node, {edge_r} as neighbour from __splink__truncated_edges\nunion all\nselect {edge_r} as node, {edge_l} as neighbour from __splink__truncated_edges"
+            "select {edge_l} as node, {edge_r} as neighbour from __dedupe__truncated_edges\nunion all\nselect {edge_r} as node, {edge_l} as neighbour from __dedupe__truncated_edges"
         ),
-        "__splink__all_nodes",
+        "__dedupe__all_nodes",
     );
     np.enqueue(
         format!(
-            "select {node} as composite_unique_id, c.cluster_id as cluster_id,\n  count(*) filter (where n.neighbour is not null) as node_degree,\n  count(*) over (partition by c.cluster_id) as cluster_size\nfrom {clustered} as c\nleft join __splink__all_nodes n on {node} = n.node\ngroup by composite_unique_id, cluster_id",
+            "select {node} as composite_unique_id, c.cluster_id as cluster_id,\n  count(*) filter (where n.neighbour is not null) as node_degree,\n  count(*) over (partition by c.cluster_id) as cluster_size\nfrom {clustered} as c\nleft join __dedupe__all_nodes n on {node} = n.node\ngroup by composite_unique_id, cluster_id",
             clustered = clustered.templated
         ),
-        "__splink__graph_metrics_node_degree",
+        "__dedupe__graph_metrics_node_degree",
     );
     np.enqueue(
-        "select composite_unique_id, cluster_id, node_degree,\n  case when cluster_size > 1 then (1.0 * node_degree) / (cluster_size - 1) else 0 end as node_centrality\nfrom __splink__graph_metrics_node_degree".to_string(),
-        "__splink__graph_metrics_nodes",
+        "select composite_unique_id, cluster_id, node_degree,\n  case when cluster_size > 1 then (1.0 * node_degree) / (cluster_size - 1) else 0 end as node_centrality\nfrom __dedupe__graph_metrics_node_degree".to_string(),
+        "__dedupe__graph_metrics_nodes",
     );
     let nodes = session.materialize(&np)?;
 
@@ -348,11 +348,11 @@ pub fn graph_metrics(
             "select cluster_id, count(*) as n_nodes, sum(node_degree)/2.0 as n_edges,\n  case when count(*) > 2 then 1.0*(count(*) * max(node_degree) - sum(node_degree)) / ((count(*) - 1) * (count(*) - 2)) else null end as cluster_centralisation\nfrom {} group by cluster_id",
             nodes.templated
         ),
-        "__splink__counts_per_cluster",
+        "__dedupe__counts_per_cluster",
     );
     cp.enqueue(
-        "select cluster_id, n_nodes, n_edges,\n  case when n_nodes > 1 then 1.0*(n_edges * 2)/(n_nodes * (n_nodes-1)) else null end as density,\n  cluster_centralisation\nfrom __splink__counts_per_cluster".to_string(),
-        "__splink__graph_metrics_clusters",
+        "select cluster_id, n_nodes, n_edges,\n  case when n_nodes > 1 then 1.0*(n_edges * 2)/(n_nodes * (n_nodes-1)) else null end as density,\n  cluster_centralisation\nfrom __dedupe__counts_per_cluster".to_string(),
+        "__dedupe__graph_metrics_clusters",
     );
     let clusters = session.materialize(&cp)?;
     Ok((nodes, clusters))
@@ -386,7 +386,7 @@ pub fn edge_bridges(
             r = uid.render_suffixed("r"),
             p = predictions.templated,
         ),
-        "__splink__truncated_edges",
+        "__dedupe__truncated_edges",
     )?;
 
     let rows = session.query_strings(&format!(
@@ -438,7 +438,7 @@ pub fn edge_bridges(
             "select composite_unique_id_l, composite_unique_id_r, ({is_bridge_expr}) as is_bridge from {}",
             truncated.templated
         ),
-        "__splink__graph_metrics_edges",
+        "__dedupe__graph_metrics_edges",
     );
     let out = session.materialize(&p)?;
     session.drop_table(&truncated)?;
@@ -482,7 +482,7 @@ pub fn cluster_summary_at_thresholds(
     let mut p = CtePipeline::new();
     p.enqueue(
         blocks.join("\n\nUNION ALL\n\n"),
-        "__splink__multi_threshold_summary",
+        "__dedupe__multi_threshold_summary",
     );
     session.materialize(&p)
 }
@@ -519,7 +519,7 @@ pub fn cluster_using_single_best_links(
             r = uid.render_suffixed("r"),
             p = predictions.templated,
         ),
-        "__splink__sbl_neighbours",
+        "__dedupe__sbl_neighbours",
     )?;
 
     // "drop" ties: remove edges tied to >1 record in a dup-free dataset.
@@ -537,7 +537,7 @@ pub fn cluster_using_single_best_links(
             node = uid.render_bare(),
             c = concat.templated,
         ),
-        "__splink__sbl_representatives",
+        "__dedupe__sbl_representatives",
     )?;
 
     let contains_expr = dup_free
@@ -561,7 +561,7 @@ pub fn cluster_using_single_best_links(
                 "select representative, {contains_expr} from {} group by representative",
                 representatives.templated
             ),
-            &format!("__splink__sbl_flags_{iteration}"),
+            &format!("__dedupe__sbl_flags_{iteration}"),
         )?;
         let reps_with_flags = materialize_sql(
             session,
@@ -571,7 +571,7 @@ pub fn cluster_using_single_best_links(
                 r = representatives.templated,
                 f = flags.templated,
             ),
-            &format!("__splink__sbl_reps_flags_{iteration}"),
+            &format!("__dedupe__sbl_reps_flags_{iteration}"),
         )?;
         let ranked = materialize_sql(
             session,
@@ -581,7 +581,7 @@ pub fn cluster_using_single_best_links(
                 nb = neighbours.templated,
                 rf = reps_with_flags.templated,
             ),
-            &format!("__splink__sbl_ranked_{iteration}"),
+            &format!("__dedupe__sbl_ranked_{iteration}"),
         )?;
         let best = materialize_sql(
             session,
@@ -590,7 +590,7 @@ pub fn cluster_using_single_best_links(
                 "select node_id, neighbour from {} where rank_l = 1 and rank_r = 1",
                 ranked.templated
             ),
-            &format!("__splink__sbl_best_{iteration}"),
+            &format!("__dedupe__sbl_best_{iteration}"),
         )?;
         let new_reps = materialize_sql(
             session,
@@ -600,7 +600,7 @@ pub fn cluster_using_single_best_links(
                 b = best.templated,
                 prev = representatives.templated,
             ),
-            &format!("__splink__sbl_newrep_{iteration}"),
+            &format!("__dedupe__sbl_newrep_{iteration}"),
         )?;
         let next = materialize_sql(
             session,
@@ -610,7 +610,7 @@ pub fn cluster_using_single_best_links(
                 nr = new_reps.templated,
                 prev = representatives.templated,
             ),
-            &format!("__splink__sbl_repr_{iteration}"),
+            &format!("__dedupe__sbl_repr_{iteration}"),
         )?;
         let remaining = session.query_scalar_f64(&format!(
             "select count(*)::double from {} where needs_updating",
@@ -640,7 +640,7 @@ pub fn cluster_using_single_best_links(
             "select node_id, representative as cluster_id from {}",
             representatives.templated
         ),
-        "__splink__clustering_output_final",
+        "__dedupe__clustering_output_final",
     )?;
     session.drop_table(&neighbours)?;
     session.drop_table(&representatives)?;
@@ -664,7 +664,7 @@ fn drop_ties(
             "select node_id, source_dataset_l, source_dataset_r, match_probability,\n  case when count(distinct neighbour) > 1 and source_dataset_r in ({in_list}) then 1 else 0 end as tie_l\nfrom {n} group by node_id, source_dataset_l, source_dataset_r, match_probability",
             n = neighbours.templated
         ),
-        "__splink__sbl_ties_l",
+        "__dedupe__sbl_ties_l",
     )?;
     let ties_r = materialize_sql(
         session,
@@ -673,7 +673,7 @@ fn drop_ties(
             "select neighbour, source_dataset_l, source_dataset_r, match_probability,\n  case when count(distinct node_id) > 1 and source_dataset_l in ({in_list}) then 1 else 0 end as tie_r\nfrom {n} group by neighbour, source_dataset_l, source_dataset_r, match_probability",
             n = neighbours.templated
         ),
-        "__splink__sbl_ties_r",
+        "__dedupe__sbl_ties_r",
     )?;
     let no_ties = materialize_sql(
         session,
@@ -684,7 +684,7 @@ fn drop_ties(
             l = ties_l.templated,
             r = ties_r.templated,
         ),
-        "__splink__sbl_no_ties",
+        "__dedupe__sbl_no_ties",
     )?;
     session.drop_table(neighbours)?;
     session.drop_table(&ties_l)?;
@@ -710,6 +710,6 @@ pub fn clustered_with_input_data(
         session,
         &[clusters, concat],
         sql,
-        "__splink__df_clustered_with_input_data",
+        "__dedupe__clustered_with_input_data",
     )
 }

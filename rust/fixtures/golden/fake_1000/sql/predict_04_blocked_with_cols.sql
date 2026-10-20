@@ -24,9 +24,9 @@ CREATE TABLE blocked_with_cols_fe8b8962f AS
     "l"."tf_email" AS "tf_email_l",
     "r"."tf_email" AS "tf_email_r",
     b.match_key
-    from __splink__blocked_id_pairs_9732b2e19 as b
-    inner join __splink__df_concat_with_tf as l
+    from __dedupe__blocked_id_pairs_9732b2e19 as b
+    inner join __dedupe__concat_with_tf as l
     on l."unique_id" = b.join_key_l
-    inner join __splink__df_concat_with_tf as r
+    inner join __dedupe__concat_with_tf as r
     on r."unique_id" = b.join_key_r
     

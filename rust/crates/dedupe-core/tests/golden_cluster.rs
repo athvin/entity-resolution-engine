@@ -35,7 +35,7 @@ fn clusters_from_golden_predictions_match() {
     let predictions = session
         .register_table(
             &format!("read_parquet('{predictions_path}')"),
-            "__splink__df_predict",
+            "__dedupe__predict",
         )
         .unwrap();
 
