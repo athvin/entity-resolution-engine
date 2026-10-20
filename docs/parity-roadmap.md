@@ -449,7 +449,31 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
       partition-level, with its escalation-to-review behaviour when every path is protected.
       The machinery is already built for steward assertions; this is wiring plus a
       within-cluster conflict scan.
-- [ ] **E4** type-aware comparators (#25).
+- [x] **E4 type-aware comparators (#25).** Four new level tokens, no schema change — the
+      standardizer already parses addresses into components and stores `birth_date` as a real
+      `DATE`, so these had everything they needed:
+      * `date_within_days:<n>` — a real date difference. A birth date entered a day out is a
+        typo; as text those two values look nothing alike to an edit-distance comparator, and
+        across a month boundary (03-31 vs 04-01) string similarity is actively misleading.
+      * `date_transposed` — the US/EU convention swap, where "04/03/1985" is 4 March or 3 April
+        depending on the form. **Neither existing comparator can see it**: string similarity is
+        high but the dates are a month apart, and a day-window wide enough to catch it would
+        also catch genuinely different people. The test asserts that a 2-day window does *not*
+        match a transposition, which is the justification for the level existing.
+        Note it is only *representable* when both numbers are ≤ 12 — `1985-14-03` is not a date
+        and was never stored — and that is exactly when the ambiguity arises.
+      * `numeric_within:<tol>` / `numeric_within_pct:<pct>` — absolute and relative closeness,
+        `try_cast`-guarded so non-numeric text is rejected rather than erroring, and with a
+        positive-denominator guard so two zeros cannot divide by zero.
+      * `address_components` — compare the parsed number/street/postal jointly. "1420 Judah St
+        Apt 5" and "1420 Judah Street #5" agree component-wise while looking only moderately
+        similar as text.
+      Tested by **running the generated SQL in DuckDB**, not by asserting the emitted string: a
+      comparator that is valid SQL but means the wrong thing — comparing dates as text, dividing
+      by zero — would pass a string assertion and be wrong in production.
+      Deferred with a reason: **geo distance** needs `addr_lat`/`addr_lon`, which arrive with the
+      Location Service geocoder in Wave 5 (V4). Adding the columns now would mean a fixture
+      rebaseline for a comparator with nothing to read.
 
 ### Waves 2–8 (queued)
 2. **Scale + prevention** — ensembles/cascades (#31), blocking estimates + segment scoping

@@ -60,7 +60,9 @@ pub enum CompileError {
     #[error(
         "comparisons.{column} declares level {level:?}, which is not a comparator this engine \
          knows. Known: exact, jaro_winkler:<0..1>, levenshtein:<n>, variant_match, \
-         username_exact, domain_exact, first_n:<n>, dob_same_year_month"
+         username_exact, domain_exact, first_n:<n>, dob_same_year_month, \
+         date_within_days:<n>, date_transposed, numeric_within:<tol>, \
+         numeric_within_pct:<pct>, address_components"
     )]
     UnknownLevel { column: String, level: String },
     #[error("comparisons.{column} level {level:?} has a bad parameter: {reason}")]
@@ -408,6 +410,100 @@ fn resolve_level(column: &str, token: &str) -> Result<Level, CompileError> {
                 label: format!("First {n} characters of {column} agree"),
             })
         }
+        _ if token.starts_with("date_within_days:") => {
+            let arg = parameter(column, token)?;
+            let days: u32 = arg.parse().map_err(|_| CompileError::BadLevelParameter {
+                column: column.to_string(),
+                level: token.to_string(),
+                reason: format!("{arg:?} is not a whole number of days"),
+            })?;
+            // A date is a real DATE in the standardized schema, so this is a
+            // date difference rather than string arithmetic — which is the whole
+            // point of a type-aware comparator. A birth date entered a day or
+            // two out is a typo; the same two digits apart as text look nothing
+            // alike to an edit-distance comparator.
+            Ok(Level {
+                sql: format!("abs(date_diff('day', {l}, {r})) <= {days}"),
+                label: format!("{column} within {days} day(s)"),
+            })
+        }
+        // The classic date-entry error: 03/14 and 14/03 are the same day written
+        // in two conventions. String similarity cannot see it (the digits are
+        // identical but in the wrong places) and a day-tolerance window cannot
+        // either (they are months apart).
+        "date_transposed" => Ok(Level {
+            sql: format!(
+                "extract(year from {l}) = extract(year from {r}) \
+                 AND extract(month from {l}) = extract(day from {r}) \
+                 AND extract(day from {l}) = extract(month from {r})"
+            ),
+            label: format!("{column} with day and month transposed"),
+        }),
+        _ if token.starts_with("numeric_within:") => {
+            let arg = parameter(column, token)?;
+            let tolerance: f64 = arg.parse().map_err(|_| CompileError::BadLevelParameter {
+                column: column.to_string(),
+                level: token.to_string(),
+                reason: format!("{arg:?} is not a number"),
+            })?;
+            if tolerance < 0.0 {
+                return Err(CompileError::BadLevelParameter {
+                    column: column.to_string(),
+                    level: token.to_string(),
+                    reason: "a tolerance cannot be negative".to_string(),
+                });
+            }
+            Ok(Level {
+                sql: format!(
+                    "try_cast({l} AS DOUBLE) IS NOT NULL AND try_cast({r} AS DOUBLE) IS NOT NULL \
+                     AND abs(try_cast({l} AS DOUBLE) - try_cast({r} AS DOUBLE)) <= {tolerance}"
+                ),
+                label: format!("{column} within {tolerance}"),
+            })
+        }
+        _ if token.starts_with("numeric_within_pct:") => {
+            let arg = parameter(column, token)?;
+            let pct: f64 = arg.parse().map_err(|_| CompileError::BadLevelParameter {
+                column: column.to_string(),
+                level: token.to_string(),
+                reason: format!("{arg:?} is not a number"),
+            })?;
+            if !(0.0..=100.0).contains(&pct) {
+                return Err(CompileError::BadLevelParameter {
+                    column: column.to_string(),
+                    level: token.to_string(),
+                    reason: "a percentage tolerance is between 0 and 100".to_string(),
+                });
+            }
+            // Relative closeness, for quantities whose scale varies: a 5%
+            // tolerance means something on both a $50 and a $50,000 balance,
+            // where an absolute one cannot. Guarded against a zero denominator.
+            let fraction = pct / 100.0;
+            Ok(Level {
+                sql: format!(
+                    "try_cast({l} AS DOUBLE) IS NOT NULL AND try_cast({r} AS DOUBLE) IS NOT NULL \
+                     AND greatest(abs(try_cast({l} AS DOUBLE)), abs(try_cast({r} AS DOUBLE))) > 0 \
+                     AND abs(try_cast({l} AS DOUBLE) - try_cast({r} AS DOUBLE)) \
+                       / greatest(abs(try_cast({l} AS DOUBLE)), abs(try_cast({r} AS DOUBLE))) \
+                       <= {fraction}"
+                ),
+                label: format!("{column} within {pct}%"),
+            })
+        }
+        // Compare a whole address by its PARSED components rather than as one
+        // string. The standardizer already splits number / street / unit / city
+        // / region / postal, and comparing them jointly is both stricter and
+        // more forgiving than string distance: "1420 Judah St Apt 5" and
+        // "1420 Judah Street #5" agree component-wise while looking only
+        // moderately similar as text. Declared on any address column; the
+        // components are the schema's, not that column's.
+        "address_components" => Ok(Level {
+            sql: "l.addr_number = r.addr_number AND l.addr_street = r.addr_street \
+                  AND l.addr_postal = r.addr_postal \
+                  AND l.addr_number IS NOT NULL AND l.addr_street IS NOT NULL"
+                .to_string(),
+            label: "Address number, street and postal code all agree".to_string(),
+        }),
         _ => Err(unknown()),
     }
 }
