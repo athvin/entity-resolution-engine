@@ -36,7 +36,7 @@ export function WaterfallChart({ blob }: { blob: Record<string, unknown> | null 
                 <span
                   className={cn(
                     "absolute inset-y-1 w-(--bar-w) rounded-sm",
-                    row.supports ? "left-1/2 bg-emerald-500/70" : "right-1/2 bg-red-500/70",
+                    row.supports ? "bg-foreground/70 left-1/2" : "bg-foreground/70 right-1/2",
                   )}
                   style={
                     { "--bar-w": `${String(Math.max(share * 50, 1.5))}%` } as React.CSSProperties
@@ -48,9 +48,8 @@ export function WaterfallChart({ blob }: { blob: Record<string, unknown> | null 
             <span
               className={cn(
                 "w-12 text-right font-mono text-xs tabular-nums",
-                row.supports
-                  ? "text-emerald-700 dark:text-emerald-400"
-                  : "text-red-600 dark:text-red-400",
+                // No hue: the sign and the bar's side carry the polarity.
+                "text-foreground",
               )}
             >
               {row.weight >= 0 ? "+" : ""}

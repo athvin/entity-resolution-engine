@@ -38,6 +38,31 @@ export default defineConfig([
           message:
             "Do not read pending_until_next_reconcile — derive staged/applied/reconciled chips from the resolve response `status` (see docs/frontend-design.md §4.2).",
         },
+        // "Black and white, period." — docs/frontend-design.md §3.3, repeated in
+        // CLAUDE.md, and until now enforced by nothing: 12 component files had
+        // drifted into emerald/red/amber to encode meaning. The design doc calls
+        // this "a standing constraint on every surface and component, not a
+        // launch-phase simplification", so it gets a gate rather than a note.
+        //
+        // Matches a Tailwind palette utility anywhere in a string or template
+        // literal — className is where these live, and matching the literal
+        // rather than the JSX attribute also catches the cn()/cva() variants and
+        // the class strings built in helper functions.
+        //
+        // What to use instead: the semantic tokens in globals.css (foreground,
+        // muted, muted-foreground, border, primary, secondary, accent, card) —
+        // every one is chroma-0 in both themes. If a state needs to stand out,
+        // §3.3 says to reach for type scale, weight, spacing or motion, not hue.
+        {
+          selector: `Literal[value=/\\b(bg|text|border|ring|from|via|to|fill|stroke|outline|decoration|shadow|accent|caret|divide|placeholder)-(red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|slate|gray|zinc|neutral|stone)-[0-9]{2,3}\\b/]`,
+          message:
+            "The UI is strictly black and white (docs/frontend-design.md §3.3): no Tailwind palette colour. Use a semantic token (foreground/muted/border/primary/secondary/accent) — they are grayscale in both themes — and signal state with weight, scale, spacing or motion instead of hue.",
+        },
+        {
+          selector: `TemplateElement[value.raw=/\\b(bg|text|border|ring|from|via|to|fill|stroke|outline|decoration|shadow|accent|caret|divide|placeholder)-(red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|slate|gray|zinc|neutral|stone)-[0-9]{2,3}\\b/]`,
+          message:
+            "The UI is strictly black and white (docs/frontend-design.md §3.3): no Tailwind palette colour. Use a semantic token (foreground/muted/border/primary/secondary/accent) — they are grayscale in both themes — and signal state with weight, scale, spacing or motion instead of hue.",
+        },
       ],
       // Route handlers legitimately return `Response | NextResponse`.
       "@typescript-eslint/no-misused-promises": [

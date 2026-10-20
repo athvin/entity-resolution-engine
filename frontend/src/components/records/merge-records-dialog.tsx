@@ -186,7 +186,7 @@ export function MergeRecordsDialog({
                   key={row.key}
                   className={cn(
                     "grid grid-cols-[8rem_1fr_1fr] gap-2 border-b px-3 py-1.5 last:border-0",
-                    !row.same && "bg-amber-500/10",
+                    !row.same && "bg-muted",
                   )}
                 >
                   <span className="text-muted-foreground text-xs">{row.label}</span>

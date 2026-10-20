@@ -16,7 +16,7 @@ function ContradictionInspector({ org }: { org: string }) {
     return (
       <Card data-testid="contradictions-clear">
         <CardContent className="text-muted-foreground flex items-center gap-2 p-3 text-sm">
-          <ShieldCheck className="size-4 text-emerald-500" />
+          <ShieldCheck className="text-foreground size-4" />
           No contradictions — every active rule can hold at once.
         </CardContent>
       </Card>
@@ -97,9 +97,11 @@ export function AssertionLibrary({ org, isSteward }: { org: string; isSteward: b
                       <span
                         className={cn(
                           "rounded-full px-2 py-0.5 text-xs font-medium",
+                          // Filled vs outlined rather than green vs red:
+                          // always/never are opposites, not better/worse.
                           assertion.kind === "always"
-                            ? "bg-emerald-500/15 text-emerald-700"
-                            : "bg-red-500/15 text-red-600",
+                            ? "bg-foreground text-background"
+                            : "border-foreground text-foreground border",
                         )}
                       >
                         {assertion.kind}
