@@ -153,6 +153,27 @@ pub struct BlockingRule {
     pub expr: String,
 }
 
+/// What a missing value means for one comparison.
+///
+/// The default is deliberately NOT the competitor's. DataGroomr defaults to
+/// "match if both blank", which its own users hit as a false-positive trap: a
+/// thousand records with no phone number are not a thousand copies of one
+/// person. Here a blank is *no evidence* — the pair is scored on its other
+/// fields — and a tenant that wants the other behaviour asks for it by name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NullPolicy {
+    /// A missing value on either side contributes nothing (the engine's
+    /// `NullLevel`: gamma -1, excluded from the score).
+    #[default]
+    Never,
+    /// Two blanks are treated as agreement and carry weight.
+    BothBlankMatches,
+    /// A blank on either side is treated as agreement. Rarely what anyone
+    /// wants; offered because migrating an existing rule set sometimes needs it.
+    EitherBlankMatches,
+}
+
 /// S6 `comparisons.<column>`: the comparison levels and whether TF adjustment applies.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -162,6 +183,26 @@ pub struct ComparisonSpec {
     pub levels: Vec<Option<String>>,
     #[serde(default)]
     pub tf: bool,
+    /// This field's share of the score, 0..=100. When any comparison declares a
+    /// weight they all must, and they must total 100 — a silently-defaulted
+    /// weight would drop a field out of the model. When none declares one, the
+    /// comparisons share the score equally.
+    ///
+    /// `skip_serializing_if` is load-bearing: the canonical document feeds
+    /// `config_hash`, so an absent weight must not serialize, or every existing
+    /// tenant config would change hash and trigger a rebuild.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weight: Option<f64>,
+    /// What a blank means here. Omitted from the canonical document when it is
+    /// the default, for the same hash-stability reason as `weight`.
+    #[serde(default, skip_serializing_if = "is_default_null_policy")]
+    pub null_policy: NullPolicy,
+}
+
+/// `skip_serializing_if` predicate for [`ComparisonSpec::null_policy`].
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_default_null_policy(policy: &NullPolicy) -> bool {
+    *policy == NullPolicy::Never
 }
 
 /// S6 `training.em`: the arguments of every EM session (S4.3.2).

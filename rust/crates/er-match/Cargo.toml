@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 dedupe-core = { path = "../dedupe-core" }
+thiserror.workspace = true
 
 [dev-dependencies]
 er-config = { path = "../er-config" }

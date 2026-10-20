@@ -915,6 +915,101 @@ fn model_weights(model_json: &str) -> Option<Value> {
     }))
 }
 
+/// Admin+: compile the org's ACTIVE config into a new draft model version
+/// (`POST /v1/orgs/{org}/models:compile`).
+///
+/// This is the endpoint that makes the tenant-facing matching config mean
+/// something. The `comparisons:` / `blocking:` blocks have always been
+/// authored, validated at publish and hashed into `config_hash` — and never
+/// read by anything that runs, because the SQL the engine executed came from a
+/// model file on a disk the tenant cannot reach.
+///
+/// The result lands as a **draft**, like any other authored version: compiling
+/// is not activating, so a config edit can never silently re-cluster a corpus.
+/// The response carries the compiler's notes, which say what it decided that
+/// the config did not state outright — most importantly that the parameters are
+/// declared rather than trained.
+async fn compile_model_version(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Admin) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return model_registry_unavailable();
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    let config = match org_active_config(&client, &org_row).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let compiled = match er_compile::compile(&config) {
+        Ok(c) => c,
+        // A compile failure is the config author's to fix, and the message names
+        // the comparison and the token.
+        Err(e) => return detail_err(StatusCode::UNPROCESSABLE_ENTITY, e.to_string()),
+    };
+    let entity_type = if config.entity_type.is_person() {
+        "person"
+    } else {
+        "account"
+    };
+    // The compiled model keeps the org's current stamp: it scores the same
+    // corpus against the same frozen term-frequency snapshot, so changing the
+    // label here would void the TF lookup.
+    let label = org_row
+        .env
+        .get("ER_MODEL_VERSION")
+        .and_then(Value::as_str)
+        .unwrap_or("v0001")
+        .to_string();
+    let provenance = json!({
+        "origin": "compiled",
+        "from_config_version": org_row.active_config_version,
+        "config_hash": config_hash(&config),
+        "notes": compiled.notes,
+        "by": principal.actor,
+    });
+    let _ = pg::set_actor(&client, &principal.actor).await;
+    match pg::create_model_version(
+        &client,
+        &org_row.id,
+        pg::DEFAULT_MODEL_NAME,
+        entity_type,
+        &compiled.model_json,
+        &label,
+        org_row.env.get("ER_TF_SNAPSHOT_ID").and_then(Value::as_str),
+        &provenance,
+        &principal.actor,
+    )
+    .await
+    {
+        Ok(m) => {
+            let _ = pg::audit(
+                &client,
+                &principal.actor,
+                Some(&org),
+                "model.version.compile",
+                &json!({ "name": m.name, "version": m.version, "model_hash": m.model_hash }),
+            )
+            .await;
+            let mut body = model_summary(&m);
+            body["notes"] = json!(compiled.notes);
+            (StatusCode::CREATED, Json(body)).into_response()
+        }
+        Err(e) => pg_err(e),
+    }
+}
+
 /// Viewer+: the tenant's model versions (`GET /v1/orgs/{org}/models`), newest
 /// version of each name first, plus which one is active.
 async fn models_index(
@@ -4734,6 +4829,10 @@ fn build_routes(state: AppState) -> Router {
         )
         .route("/v1/orgs/{org}/models", get(models_index))
         .route("/v1/orgs/{org}/models/versions", post(create_model_version))
+        // A sub-path, not `models:compile`: matchit cannot match a param and a
+        // literal in one segment. The app()-level rewrite accepts the BFF's
+        // `:compile` spelling and lands it here.
+        .route("/v1/orgs/{org}/models/compile", post(compile_model_version))
         .route(
             "/v1/orgs/{org}/models/{name}/versions/{version}",
             get(get_model_version),
@@ -4843,7 +4942,7 @@ fn build_routes(state: AppState) -> Router {
 
 /// The action verbs the BFF appends as `{id}:action`, each mapping to a
 /// `{id}/action` sub-path route on this server.
-const ACTION_VERBS: [&str; 8] = [
+const ACTION_VERBS: [&str; 10] = [
     "unmerge",
     "resolve",
     "cancel",
@@ -4852,6 +4951,10 @@ const ACTION_VERBS: [&str; 8] = [
     "bulk-resolve",
     "contradictions",
     "suspend",
+    // The model registry's two actions, so `models:compile` and
+    // `.../versions/3:activate` reach their `/compile` and `/activate` routes.
+    "activate",
+    "compile",
 ];
 
 /// Rewrite a Python-style `{id}:action` path into the `{id}/action` sub-path this

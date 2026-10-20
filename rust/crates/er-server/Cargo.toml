@@ -102,6 +102,7 @@ aws-smithy-http-client = { version = "1.1.4", default-features = false, features
 ] }
 thiserror.workspace = true
 er-versions = { version = "0.1.0", path = "../er-versions" }
+er-compile = { version = "0.1.0", path = "../er-compile" }
 
 [lints]
 workspace = true

@@ -382,9 +382,42 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
       incumbent and exactly one version is ever active; re-activating is a no-op; a missing
       version 404s; an account model cannot be activated against a person org, and the refusal
       leaves the active pointer alone.
-- [ ] **E2** the config→model compiler that makes `comparisons:`/`blocking:` actually execute
-      (#4/#21/#22/#23/#24) — the keystone: that DSL is authored, hashed and validated today, and
-      never compiled into a run.
+- [x] **E2 the config→model compiler (#4 rule matching, #21 field weights, #22 null policy,
+      #24 derived keys).** The keystone. The `comparisons:` / `blocking:` DSL was authored,
+      validated at publish, canonicalized into `config_hash` and rendered in the config studio —
+      and **read by nothing that ran**. The level tokens (`exact`, `jaro_winkler:0.90`,
+      `variant_match`, `username_exact`, `dob_same_year_month`) were free strings with no
+      interpreter; the SQL the engine executed came from a model file on a disk the tenant cannot
+      reach. New `er-compile` crate is that interpreter, plus `POST /v1/orgs/{org}/models:compile`
+      which lands the result as a **draft** registry version (compiling is not activating).
+      **Classic models are Fellegi-Sunter models.** A competitor ships two engines here — a
+      weighted-sum "classic" matcher and a trained probabilistic one. We ship one: a declared
+      model is an FS model whose m/u were set from weights instead of estimated, so a
+      hand-weighted model still produces the same evidence waterfall, the same per-pair
+      explanation and the same threshold semantics. No second code path to keep honest.
+      **The scale is calibrated, not guessed.** Summing the trained model's own exact-level Bayes
+      factors comes to ~60 bits, and a grid search over base_10 agrees: at 20 bits the compiled
+      model finds 18 clusters where there are 10 (never enough evidence for pairs that disagree
+      on a field or two); at 120 bits it finds 9 — it has begun *merging distinct people*. 55–60
+      reproduces the committed membership exactly across every ratio tried, so the default sits
+      inside the stable region. Louder is not safer.
+      Two bugs worth recording, both caught by tests rather than review: the first m/u mapping
+      fixed `u` and derived `m` upward, which hit the probability ceiling so an exact level and a
+      fuzzy one came out *equally* weighted; and the first version emitted the config's blocking
+      **key** where the engine wants a join **predicate**, so it blocked on `(email)` as a
+      boolean. Blocking keys are now rewritten to `l.<expr> = r.<expr>` by a qualifier that skips
+      string literals, function names, SQL words and already-qualified references.
+      Determinism: `weight` and `null_policy` are `skip_serializing_if`, so every existing
+      tenant config canonicalizes and hashes byte-identically — verified, no fixture touched.
+      Tests: 11 unit (token→SQL against the committed model's strings, the weight→bits mapping
+      and its monotonicity, probability bounds at the extremes, blocking-predicate rewriting
+      incl. literals/aliases/nested calls, null-policy placement, TF on the exact level only,
+      weight totalling); 7 integration (the compiled structure equals the committed model's
+      level-for-level, the document loads in the engine, declared blocking reaches the model in
+      order, parameters are pinned and labelled declared, equal weights pull equally, 3× weight
+      is 3× the evidence, partial weights refused); and the one that matters — a `lake_e2e` run
+      resolving base_10 with the compiled model and asserting it yields the **same 10 entities**
+      as the trained model.
 - [ ] **E3** hard constraints and relationship exclusions (#18/#32).
 - [ ] **E4** type-aware comparators (#25).
 

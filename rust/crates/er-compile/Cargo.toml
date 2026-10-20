@@ -1,0 +1,20 @@
+[package]
+name = "er-compile"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# The tenant config is the input; the engine's settings document is the output.
+# Those two crates are the whole dependency surface on purpose: compiling is a
+# pure function from one to the other, so it needs no lake, no session and no
+# control plane.
+er-config = { path = "../er-config" }
+dedupe-core = { path = "../dedupe-core" }
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
