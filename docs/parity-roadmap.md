@@ -522,8 +522,29 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          and `entity_membership` has no active flag, so the entity lookup takes the newest row
          per record by `(assigned_at, run_id)` — a plain join would report an entity the record
          has since left.
+   - [x] **E9a push records as JSON (#41's write half).** `POST /v1/orgs/{org}/records:ingest`.
+         Before this, data could only arrive as a **file** — a pipeline had no way to hand
+         records over programmatically, which is the integration a data service is asked for
+         first.
+         It takes the *same* path a file does: rendered into the source's declared CSV shape,
+         staged under a temp name, renamed into the drop root, run enqueued. Landing records into
+         the lake directly from the API would mean the API competing for the per-tenant writer
+         lock the dispatcher holds, plus a second ingest path to keep honest against the first.
+         The two paths now share `delivery_preconditions` and `finish_delivery`, so a delivery
+         accepted one way cannot be refused the other.
+         The CSV header comes from the source's **declared** mapping, not from the records' own
+         keys: a record that omits a column lands as an empty cell rather than shifting every
+         later column, and an **undeclared key is reported rather than dropped** — silently
+         ignoring it would leave a caller believing it sent data the pipeline never saw.
+         Tests: role boundary; the declared-column header; an omitted column lands empty; a value
+         containing a comma, a quote and a newline is CSV-escaped (the failure that would
+         silently corrupt every later column); undeclared column named in the refusal; empty,
+         non-object and unknown-source bodies refused. The existing upload test still passes
+         against the shared helpers, which is what makes the refactor safe.
+         Capped at 10k records per push, because this body is buffered and parsed in memory while
+         the upload path streams — a bigger load belongs in a file.
    - [ ] E5 ensembles/cascades (#31), E6b segment scoping (#54), E7 true incremental (#36/#40),
-         E9 push-records + import-time dedupe (#38/#39/#41), E9b S3 auto-ingestion (#47).
+         E9b import-time screening + update rules (#38/#39), E9c S3 auto-ingestion (#47).
 3. **Learning loop** — labels/train/evaluate (#19/#20 + the evaluation-tooling gap),
    related-record features (#26), household/link entities (#33).
 4. **Operating at scale** — job retry + run reports (#58), webhook v2 with an outbox (#43),

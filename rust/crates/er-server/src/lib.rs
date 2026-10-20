@@ -3346,6 +3346,299 @@ async fn org_active_config(
     load_config_str(&yaml).map_err(|e| Box::new(config_invalid(&e).into_response()))
 }
 
+/// The checks every delivery shares, whatever shape it arrived in: the org
+/// exists and is active, the source is declared in the ACTIVE config, and the
+/// org has a `drop_root` to land into (created if absent).
+///
+/// Shared by the file upload and the JSON push so the two cannot drift: a
+/// delivery accepted one way and refused the other would be a surprise, and the
+/// `source` value becomes a path segment in both.
+async fn delivery_preconditions(
+    client: &tokio_postgres::Client,
+    org: &str,
+    source: &str,
+) -> Result<(pg::OrgDetail, er_config::Config, String), Box<axum::response::Response>> {
+    let org_row = org_or_404(client, org).await?;
+    if org_row.state != "active" {
+        return Err(Box::new(detail_err(
+            StatusCode::CONFLICT,
+            format!(
+                "org '{org}' is {}; imports are accepted only when active",
+                org_row.state
+            ),
+        )));
+    }
+    let config = org_active_config(client, &org_row).await?;
+    if !config.sources.contains_key(source) {
+        let known: Vec<&str> = config.sources.keys().map(String::as_str).collect();
+        return Err(Box::new(detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!(
+                "source '{source}' is not in the active config (known: {}); \
+                 publish a config version containing sources.{source} first",
+                known.join(", ")
+            ),
+        )));
+    }
+    let Some(drop_root) = org_row.drop_root.clone() else {
+        return Err(Box::new(detail_err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!("org '{org}' has no drop_root to land a delivery into"),
+        )));
+    };
+    // The source is a key of the active config, so it cannot traverse; assert it
+    // anyway, because this value becomes a path segment.
+    if !source
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        return Err(Box::new(detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("source '{source}' is not a valid path segment"),
+        )));
+    }
+    if let Err(e) = tokio::fs::create_dir_all(&drop_root).await {
+        return Err(Box::new(detail_err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!("drop_root {drop_root} is not writable: {e}"),
+        )));
+    }
+    Ok((org_row, config, drop_root))
+}
+
+/// Publish a staged delivery and enqueue the run that reads it.
+///
+/// The rename is the point, and it is why both delivery paths end here: the
+/// dispatcher reads `<drop_root>/<source>.csv` directly, so a run claimed
+/// mid-write must never see a half-written file. Until the rename succeeds there
+/// is no delivery at all.
+struct StagedDelivery<'a> {
+    org: &'a str,
+    org_id: &'a str,
+    source: &'a str,
+    delivery_id: &'a str,
+    /// Where the bytes are now. Renamed into place by `finish_delivery`.
+    temp_path: &'a str,
+    bytes: u64,
+    /// The audit action naming how it arrived (`import.upload` / `import.push`).
+    action: &'a str,
+}
+
+async fn finish_delivery(
+    client: &tokio_postgres::Client,
+    actor: &str,
+    d: &StagedDelivery<'_>,
+) -> axum::response::Response {
+    let StagedDelivery {
+        org,
+        org_id,
+        source,
+        delivery_id,
+        temp_path,
+        bytes,
+        action,
+    } = *d;
+    let final_path = format!(
+        "{}/{source}.csv",
+        temp_path.rsplit_once('/').map_or("", |(d, _)| d)
+    );
+    if let Err(e) = tokio::fs::rename(temp_path, &final_path).await {
+        let _ = tokio::fs::remove_file(temp_path).await;
+        return detail_err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!("cannot publish the delivery: {e}"),
+        );
+    }
+    // No idempotency key: two deliveries of the same source are two deliveries
+    // and must run twice, so an upsert on a per-source key would be wrong.
+    let job = match pg::enqueue(
+        client,
+        org_id,
+        "run_all_incremental",
+        0,
+        None,
+        Some(&json!({ "source": source, "delivery_id": delivery_id })),
+    )
+    .await
+    {
+        Ok(j) => j,
+        Err(e) => return pg_err(e),
+    };
+    let _ = pg::audit(
+        client,
+        actor,
+        Some(org),
+        action,
+        &json!({
+            "source": source,
+            "delivery_id": delivery_id,
+            "bytes": bytes,
+            "job_id": job.id,
+        }),
+    )
+    .await;
+    (
+        StatusCode::ACCEPTED,
+        Json(json!({ "delivery_id": delivery_id, "job": job })),
+    )
+        .into_response()
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PushRecordsIn {
+    /// Which declared source these records belong to; their keys are that
+    /// source's raw column names.
+    source: String,
+    /// The records. Each is an object of that source's raw columns — the same
+    /// shape a row of its CSV would have.
+    records: Vec<Value>,
+}
+
+/// Steward+: push records as JSON (`POST /v1/orgs/{org}/records:ingest`).
+///
+/// The write half of the batch API. Before this, data could only arrive as a
+/// file: there was no way for a pipeline to hand records over programmatically,
+/// which is the integration every data service is asked for first.
+///
+/// It deliberately takes the SAME path a file does — the records are rendered
+/// into the source's declared CSV shape, staged into the drop root, and a run
+/// is enqueued. Landing them into the lake directly from the API would mean the
+/// API competing for the per-tenant writer lock the dispatcher holds, and a
+/// second ingest path to keep honest against the first.
+///
+/// The CSV columns come from the source's DECLARED mapping rather than from the
+/// records' own keys, so a record that omits a column lands as empty rather than
+/// shifting every later column — and an unexpected key is reported instead of
+/// being silently dropped.
+async fn push_records(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Json(body): Json<PushRecordsIn>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
+    if body.records.is_empty() {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "records must not be empty",
+        );
+    }
+    if body.records.len() > MAX_PUSHED_RECORDS {
+        return detail_err(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            format!(
+                "{} records exceeds the {MAX_PUSHED_RECORDS}-record cap for one push; \
+                 send a file for a bulk load",
+                body.records.len()
+            ),
+        );
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "imports require Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let (org_row, config, drop_root) =
+        match delivery_preconditions(&client, &org, &body.source).await {
+            Ok(t) => t,
+            Err(r) => return *r,
+        };
+    let spec = &config.sources[&body.source];
+
+    // The columns this source declares, in a stable order: its record id, its
+    // updated-at stamp, then every mapped column. Taken from the config rather
+    // than from the records so a missing value is an empty cell, not a shift.
+    let mut columns: Vec<String> = vec![spec.record_id_column.clone()];
+    if !spec.updated_at_column.is_empty() && spec.updated_at_column != spec.record_id_column {
+        columns.push(spec.updated_at_column.clone());
+    }
+    for raw in spec.columns.values() {
+        if !columns.contains(raw) {
+            columns.push(raw.clone());
+        }
+    }
+
+    let mut csv = String::new();
+    csv.push_str(&columns.join(","));
+    csv.push('\n');
+    for (i, record) in body.records.iter().enumerate() {
+        let Some(object) = record.as_object() else {
+            return detail_err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!("record {i} is not a JSON object"),
+            );
+        };
+        // An unexpected key is reported, not dropped: silently ignoring it would
+        // mean a caller believing it sent data the pipeline never saw.
+        if let Some(unknown) = object.keys().find(|k| !columns.contains(k)) {
+            return detail_err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!(
+                    "record {i} has column {unknown:?}, which source '{}' does not declare \
+                     (declared: {})",
+                    body.source,
+                    columns.join(", ")
+                ),
+            );
+        }
+        let row: Vec<String> = columns
+            .iter()
+            .map(|column| csv_cell(object.get(column)))
+            .collect();
+        csv.push_str(&row.join(","));
+        csv.push('\n');
+    }
+
+    let delivery_id = er_ids::new_v7();
+    let temp_path = format!("{drop_root}/.{}.{delivery_id}.csv.part", body.source);
+    let bytes = csv.len() as u64;
+    if let Err(e) = tokio::fs::write(&temp_path, csv.as_bytes()).await {
+        return detail_err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!("cannot write into {drop_root}: {e}"),
+        );
+    }
+    finish_delivery(
+        &client,
+        &principal.actor,
+        &StagedDelivery {
+            org: &org,
+            org_id: &org_row.id,
+            source: &body.source,
+            delivery_id: &delivery_id,
+            temp_path: &temp_path,
+            bytes,
+            action: "import.push",
+        },
+    )
+    .await
+}
+
+/// Render one JSON value as a CSV cell: quoted when it has to be, empty for
+/// null or a missing key. Numbers and booleans render as themselves so a caller
+/// does not have to stringify everything.
+fn csv_cell(value: Option<&Value>) -> String {
+    let raw = match value {
+        None | Some(Value::Null) => String::new(),
+        Some(Value::String(s)) => s.clone(),
+        Some(other) => other.to_string(),
+    };
+    if raw.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", raw.replace('"', "\"\""))
+    } else {
+        raw
+    }
+}
+
+/// How many records one JSON push may carry. A bigger load belongs in a file:
+/// this body is buffered and parsed in memory, while the upload path streams.
+const MAX_PUSHED_RECORDS: usize = 10_000;
+
 /// Steward+: upload one source's delivery
 /// (`POST /v1/orgs/{org}/imports?source=<source>`), then enqueue the run that
 /// picks it up.
@@ -3389,60 +3682,11 @@ async fn upload_import(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    let org_row = match org_or_404(&client, &org).await {
-        Ok(r) => r,
+    let (org_row, _config, drop_root) = match delivery_preconditions(&client, &org, source).await {
+        Ok(t) => t,
         Err(r) => return *r,
     };
-    if org_row.state != "active" {
-        return detail_err(
-            StatusCode::CONFLICT,
-            format!(
-                "org '{org}' is {}; imports are accepted only when active",
-                org_row.state
-            ),
-        );
-    }
-    let config = match org_active_config(&client, &org_row).await {
-        Ok(c) => c,
-        Err(r) => return *r,
-    };
-    if !config.sources.contains_key(source) {
-        let known: Vec<&str> = config.sources.keys().map(String::as_str).collect();
-        return detail_err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            format!(
-                "source '{source}' is not in the active config (known: {}); \
-                 publish a config version containing sources.{source} first",
-                known.join(", ")
-            ),
-        );
-    }
-    let Some(drop_root) = org_row.drop_root.as_deref() else {
-        return detail_err(
-            StatusCode::SERVICE_UNAVAILABLE,
-            format!("org '{org}' has no drop_root to land a delivery into"),
-        );
-    };
-    // The source is a key of the active config, so it cannot traverse; assert it
-    // anyway, because this value becomes a path segment.
-    if !source
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-    {
-        return detail_err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            format!("source '{source}' is not a valid path segment"),
-        );
-    }
-
-    if let Err(e) = tokio::fs::create_dir_all(drop_root).await {
-        return detail_err(
-            StatusCode::SERVICE_UNAVAILABLE,
-            format!("drop_root {drop_root} is not writable: {e}"),
-        );
-    }
     let delivery_id = er_ids::new_v7();
-    let final_path = format!("{drop_root}/{source}.csv");
     let temp_path = format!("{drop_root}/.{source}.{delivery_id}.csv.part");
 
     // Stream the `file` part to the temp path. Chunked rather than buffered: the
@@ -3525,48 +3769,20 @@ async fn upload_import(
             "a file part named 'file' is required",
         );
     };
-    // Rename last: until this succeeds the dispatcher sees no delivery at all.
-    if let Err(e) = tokio::fs::rename(&temp_path, &final_path).await {
-        let _ = tokio::fs::remove_file(&temp_path).await;
-        return detail_err(
-            StatusCode::SERVICE_UNAVAILABLE,
-            format!("cannot publish the delivery into {drop_root}: {e}"),
-        );
-    }
-
-    // No idempotency key: two uploads of the same source are two deliveries and
-    // must run twice, so an upsert on a per-source key would be wrong.
-    let job = match pg::enqueue(
-        &client,
-        &org_row.id,
-        "run_all_incremental",
-        0,
-        None,
-        Some(&json!({ "source": source, "delivery_id": delivery_id })),
-    )
-    .await
-    {
-        Ok(j) => j,
-        Err(e) => return pg_err(e),
-    };
-    let _ = pg::audit(
+    finish_delivery(
         &client,
         &principal.actor,
-        Some(&org),
-        "import.upload",
-        &json!({
-            "source": source,
-            "delivery_id": delivery_id,
-            "bytes": bytes_written,
-            "job_id": job.id,
-        }),
+        &StagedDelivery {
+            org: &org,
+            org_id: &org_row.id,
+            source,
+            delivery_id: &delivery_id,
+            temp_path: &temp_path,
+            bytes: bytes_written,
+            action: "import.upload",
+        },
     )
-    .await;
-    (
-        StatusCode::ACCEPTED,
-        Json(json!({ "delivery_id": delivery_id, "job": job })),
-    )
-        .into_response()
+    .await
 }
 
 /// Viewer+: ingest-batch receipts (`GET /v1/orgs/{org}/imports`), optional
@@ -5114,6 +5330,7 @@ fn build_routes(state: AppState) -> Router {
         .route("/v1/orgs/{org}/match-preview", get(match_preview))
         .route("/v1/orgs/{org}/blocking-estimate", get(blocking_estimate))
         .route("/v1/orgs/{org}/resolve", post(resolve_record))
+        .route("/v1/orgs/{org}/records/ingest", post(push_records))
         .route("/v1/orgs/{org}/records", get(records_by_key))
         .route("/v1/orgs/{org}/reviews", get(reviews_list))
         .route(
@@ -5185,7 +5402,7 @@ fn build_routes(state: AppState) -> Router {
 
 /// The action verbs the BFF appends as `{id}:action`, each mapping to a
 /// `{id}/action` sub-path route on this server.
-const ACTION_VERBS: [&str; 10] = [
+const ACTION_VERBS: [&str; 11] = [
     "unmerge",
     "resolve",
     "cancel",
@@ -5198,6 +5415,8 @@ const ACTION_VERBS: [&str; 10] = [
     // `.../versions/3:activate` reach their `/compile` and `/activate` routes.
     "activate",
     "compile",
+    // `records:ingest`, the JSON push.
+    "ingest",
 ];
 
 /// Rewrite a Python-style `{id}:action` path into the `{id}/action` sub-path this

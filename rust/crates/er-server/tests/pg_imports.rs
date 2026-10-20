@@ -1,5 +1,11 @@
-//! CSV upload over the real Postgres backend (behind `ER_TEST_PG_DSN`):
-//! `POST /v1/orgs/{org}/imports?source=…`.
+//! Getting data in, over the real Postgres backend (behind `ER_TEST_PG_DSN`):
+//! `POST /v1/orgs/{org}/imports?source=…` (a file) and
+//! `POST /v1/orgs/{org}/records:ingest` (JSON).
+//!
+//! Both land the same way — rendered into the source's declared CSV shape,
+//! staged under a temp name, renamed into the drop root, run enqueued — because
+//! a second ingest path would be a second set of semantics to keep honest
+//! against the first.
 //!
 //! This is the path that the BFF, its mock and the new-source wizard all drove
 //! while the server registered only `get(imports_list)` and had no multipart
@@ -96,7 +102,7 @@ async fn api_key(app: &axum::Router, role: &str) -> String {
 }
 
 #[tokio::test]
-async fn csv_upload_lands_a_delivery_and_enqueues_its_run() {
+async fn deliveries_arrive_as_a_file_or_as_json_and_enqueue_their_run() {
     let Ok(dsn) = std::env::var("ER_TEST_PG_DSN") else {
         eprintln!("skipping Postgres imports e2e (set ER_TEST_PG_DSN to run)");
         return;
@@ -378,6 +384,179 @@ async fn csv_upload_lands_a_delivery_and_enqueues_its_run() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::CONFLICT);
+
+    // ---- the JSON push: the write half of the batch API ----
+    //
+    // Before this, data could only arrive as a file. A pipeline had no way to
+    // hand records over programmatically, which is the integration a data
+    // service is asked for first. It deliberately takes the same path a file
+    // does — rendered into the source's declared CSV shape, staged, run
+    // enqueued — rather than a second ingest path to keep honest.
+    let resume = app
+        .clone()
+        .oneshot(json_req(
+            "POST",
+            "/v1/orgs/acme/resume",
+            "op-secret",
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        resume.status(),
+        StatusCode::OK,
+        "reactivate for the push tests"
+    );
+
+    // A viewer cannot push.
+    let push = serde_json::json!({
+        "source": "crm",
+        "records": [{ "crm_id": "P1", "first_name": "ada", "last_name": "lovelace" }],
+    });
+    let resp = app
+        .clone()
+        .oneshot(json_req(
+            "POST",
+            "/v1/orgs/acme/records/ingest",
+            &viewer_key,
+            Body::from(push.to_string()),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+
+    // The happy path.
+    let resp = app
+        .clone()
+        .oneshot(json_req(
+            "POST",
+            "/v1/orgs/acme/records/ingest",
+            &steward_key,
+            Body::from(push.to_string()),
+        ))
+        .await
+        .unwrap();
+    let status = resp.status();
+    let pushed = json_body(resp).await;
+    assert_eq!(
+        status,
+        StatusCode::ACCEPTED,
+        "push refused: {}",
+        pushed["detail"].as_str().unwrap_or("(no detail)")
+    );
+    assert_ne!(pushed["delivery_id"].as_str().unwrap(), "");
+    assert_eq!(pushed["job"]["kind"], "run_all_incremental");
+    assert_eq!(pushed["job"]["params"]["source"], "crm");
+
+    // The delivery landed as the source's declared CSV shape — a header of the
+    // DECLARED columns, not of whatever keys the record happened to carry, so a
+    // record that omits a column lands as an empty cell rather than shifting
+    // every later one.
+    let landed = std::fs::read_to_string(format!("{drop_root}/crm.csv")).unwrap();
+    let mut lines = landed.lines();
+    let header: Vec<&str> = lines.next().unwrap().split(',').collect();
+    assert!(
+        header.contains(&"crm_id")
+            && header.contains(&"first_name")
+            && header.contains(&"email_address"),
+        "the header must be the source's declared columns: {header:?}"
+    );
+    let row: Vec<&str> = lines.next().unwrap().split(',').collect();
+    assert_eq!(
+        row.len(),
+        header.len(),
+        "every row matches the header width"
+    );
+    let cell = |name: &str| row[header.iter().position(|h| *h == name).unwrap()];
+    assert_eq!(cell("crm_id"), "P1");
+    assert_eq!(cell("first_name"), "ada");
+    assert_eq!(
+        cell("email_address"),
+        "",
+        "an omitted column lands empty, not shifted"
+    );
+    assert_eq!(lines.next(), None, "one record in, one row out");
+
+    // A value with a comma must not break the CSV — the failure mode that would
+    // silently corrupt every column after it.
+    let tricky = serde_json::json!({
+        "source": "crm",
+        "records": [{
+            "crm_id": "P2",
+            "last_name": "O\"Hara, Jr",
+            "first_name": "line\nbreak",
+        }],
+    });
+    let resp = app
+        .clone()
+        .oneshot(json_req(
+            "POST",
+            "/v1/orgs/acme/records/ingest",
+            &steward_key,
+            Body::from(tricky.to_string()),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::ACCEPTED);
+    let landed = std::fs::read_to_string(format!("{drop_root}/crm.csv")).unwrap();
+    assert!(
+        landed.contains("\"O\"\"Hara, Jr\""),
+        "a comma and a quote must be CSV-escaped: {landed}"
+    );
+
+    // An undeclared column is REPORTED, not dropped: silently ignoring it would
+    // mean a caller believing it sent data the pipeline never saw.
+    let unknown = serde_json::json!({
+        "source": "crm",
+        "records": [{ "crm_id": "P3", "favourite_colour": "blue" }],
+    });
+    let resp = app
+        .clone()
+        .oneshot(json_req(
+            "POST",
+            "/v1/orgs/acme/records/ingest",
+            &steward_key,
+            Body::from(unknown.to_string()),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let detail = json_body(resp).await["detail"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        detail.contains("favourite_colour"),
+        "the refusal must name the offending column: {detail}"
+    );
+
+    // Empty, non-object and undeclared-source bodies are refused.
+    for (body, expected) in [
+        (
+            serde_json::json!({ "source": "crm", "records": [] }),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        (
+            serde_json::json!({ "source": "crm", "records": ["not an object"] }),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        (
+            serde_json::json!({ "source": "nosuch", "records": [{ "crm_id": "P4" }] }),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+    ] {
+        let resp = app
+            .clone()
+            .oneshot(json_req(
+                "POST",
+                "/v1/orgs/acme/records/ingest",
+                &steward_key,
+                Body::from(body.to_string()),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), expected, "for body {body}");
+    }
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
