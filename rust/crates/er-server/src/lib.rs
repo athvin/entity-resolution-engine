@@ -1076,11 +1076,10 @@ async fn put_lexicon(
             format!("lexicon write: {e}"),
         );
     }
-    if existing.is_none() {
-        if let Err(e) = pg::merge_org_env(&client, &org, &json!({ "ER_LEXICON_PATH": path })).await
-        {
-            return pg_err(e);
-        }
+    if existing.is_none()
+        && let Err(e) = pg::merge_org_env(&client, &org, &json!({ "ER_LEXICON_PATH": path })).await
+    {
+        return pg_err(e);
     }
 
     let idem = format!("lexicon-apply:{}", er_ids::new_v7());
@@ -2110,10 +2109,10 @@ async fn golden_records_list(
     if let Ok(v) = axum::http::HeaderValue::from_str(&snapshot.to_string()) {
         headers.insert("x-er-snapshot", v);
     }
-    if let Some(cursor) = &page.next_cursor {
-        if let Ok(v) = axum::http::HeaderValue::from_str(cursor) {
-            headers.insert("x-er-next-cursor", v);
-        }
+    if let Some(cursor) = &page.next_cursor
+        && let Ok(v) = axum::http::HeaderValue::from_str(cursor)
+    {
+        headers.insert("x-er-next-cursor", v);
     }
     response
 }

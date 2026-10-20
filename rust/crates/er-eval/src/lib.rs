@@ -139,14 +139,14 @@ pub fn membership_partition(
     let mut seen: BTreeMap<String, String> = BTreeMap::new();
     let mut grouped: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for (record_key, entity_id) in rows {
-        if let Some(prev) = seen.get(record_key) {
-            if prev != entity_id {
-                return Err(MetricsError::DuplicateMembership {
-                    key: record_key.clone(),
-                    first: prev.clone(),
-                    second: entity_id.clone(),
-                });
-            }
+        if let Some(prev) = seen.get(record_key)
+            && prev != entity_id
+        {
+            return Err(MetricsError::DuplicateMembership {
+                key: record_key.clone(),
+                first: prev.clone(),
+                second: entity_id.clone(),
+            });
         }
         seen.insert(record_key.clone(), entity_id.clone());
         grouped

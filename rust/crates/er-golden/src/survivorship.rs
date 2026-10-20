@@ -160,26 +160,26 @@ pub fn survivorship_decision_sql(
     // (`min`, matching the read-path protect tiebreak) so lineage still names a
     // real member; `synthesized_value` carries the computed value for assembly.
     // Only a SOLE rule may synthesize — mixing it with ranking rules is undefined.
-    if rules.len() == 1 {
-        if let Some(agg) = bucket_b_aggregate(rules[0], "value") {
-            if attribute == "address" {
-                bail!(
-                    "survivorship: rule {:?} cannot apply to the composite `address` attribute \
+    if rules.len() == 1
+        && let Some(agg) = bucket_b_aggregate(rules[0], "value")
+    {
+        if attribute == "address" {
+            bail!(
+                "survivorship: rule {:?} cannot apply to the composite `address` attribute \
                      (combined_list/sum synthesize a scalar value)",
-                    rules[0]
-                );
-            }
-            let rule = rules[0].replace('\'', "''");
-            return Ok(format!(
-                "SELECT
+                rules[0]
+            );
+        }
+        let rule = rules[0].replace('\'', "''");
+        return Ok(format!(
+            "SELECT
     entity_id,
     {agg} AS value,
     min(record_key) AS record_key,
     '{rule}' AS rule
 FROM {relation}
 GROUP BY entity_id"
-            ));
-        }
+        ));
     }
     if let Some(bad) = rules
         .iter()
