@@ -303,3 +303,10 @@ fails exactly the case written for it.
   on an all-zeroes or unresolvable `event.before`. Gate: all eight event paths
   exercised against real commits (#206 as a frontend-touching merge, #207 as a
   Rust-only one) before pushing.
+- 2026-10-20 — **Capped cargo Dependabot at 2 open PRs.** Adding the cargo
+  ecosystem in #187 opened five at once; each carries a different `Cargo.lock`,
+  so rust-cache misses and the workspace compiles near-cold, and five in
+  parallel starved the runners enough to time out `fmt + clippy + docs` (30 min)
+  on the dependabot branches and on main. A side effect of this program, fixed
+  here rather than by raising the timeout. npm stays at 5 — those PRs do not
+  compile Rust.

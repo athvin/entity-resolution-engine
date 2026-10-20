@@ -42,7 +42,19 @@ updates:
     directory: "/rust"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 5
+    # Two, not the five this started at. Each cargo PR carries a different
+    # Cargo.lock, so Swatinem/rust-cache (keyed on the lockfile) misses and the
+    # workspace compiles near-cold. Five of those at once starved the runners
+    # badly enough to push `fmt + clippy + docs` past its 30-minute timeout —
+    # on the dependabot branches AND on main. The grouping below batches
+    # minor/patch into one PR, but majors are deliberately separate (a major is
+    # a migration to schedule, not a bump to merge on green), so a week with
+    # several major releases is exactly when the burst happens.
+    #
+    # Dependabot queues the rest and opens them as these merge, so nothing is
+    # lost — it just stops arriving all at once. npm stays at 5: those PRs do
+    # not compile Rust.
+    open-pull-requests-limit: 2
     groups:
       rust-minor-patch:
         patterns: ["*"]
