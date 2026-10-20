@@ -555,6 +555,28 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
 6. **AI on Bedrock** — Bedrock wiring + per-org BYO LLM (#77), LLM adjudication (#27),
    NL rule authoring (#29), AI schema mapping + model setup (#48/#35), staged agent
    write-actions (#81).
+
+   **Blocked on one account-level decision, verified 2026-10-20.** Probed live with the
+   `er-builder` profile against `us-east-2`:
+   * Claude models **are** present in the region — `list-foundation-models --by-provider
+     anthropic` returns Fable 5, Opus 5, Sonnet 4.5/5, Haiku 4.5 and more, and the matching
+     `us.anthropic.*` inference profiles are `ACTIVE`.
+   * But `get-foundation-model-availability` reports
+     `authorizationStatus: NOT_AUTHORIZED`, `agreementAvailability: NOT_AVAILABLE`,
+     `entitlementAvailability: AVAILABLE`, `regionAvailability: AVAILABLE` — i.e. the region
+     and the entitlement are fine and **the account has not accepted the model agreement**.
+     `bedrock-runtime converse` fails with `ValidationException: Operation not allowed` for
+     both the bare model id and the inference-profile id, and
+     `get-use-case-for-model-access` answers "You have not filled out the request form".
+
+   The fix is two calls — `aws bedrock put-use-case-for-model-access` (the Anthropic
+   use-case form: company name, website, intended use) then
+   `aws bedrock create-foundation-model-agreement --model-id … --offer-token …` using a token
+   from `list-foundation-model-agreement-offers`. **Deliberately not run**: it accepts a
+   priced legal agreement on the account and submits company details, which is the owner's
+   decision and not something to fabricate. Everything else in Wave 6 can be built and tested
+   against the existing `ANTHROPIC_BASE_URL` seam and the Playwright mock's scripted
+   `/anthropic/v1/messages`, so this blocks live verification, not progress.
 7. **Governance + platform** — config promotion (#76), MCP server + service identity
    (#79/#78), embeddable widget (#59), saved views (#87), metering (#88), field-value
    rollback UI (#12/#13).
