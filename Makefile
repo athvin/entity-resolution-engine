@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := check
-.PHONY: build fmt lint test check check-e2e entities-check frontend image-api dev-up dev-suspend dev-resume dev-down obs-up clean symposium
+.PHONY: build fmt lint test check check-e2e entities-check frontend frontend-audit frontend-coverage run frontend-dev frontend-e2e frontend-baselines frontend-dev-reset image-api dev-up dev-suspend dev-resume dev-down obs-up clean symposium
 
 # --- Rust backend: the application (engine, CLI, control plane) lives in rust/ ---
 #
@@ -57,10 +57,55 @@ symposium:
 
 # --- frontend (standalone pnpm project; keeps its own gate) ---
 
-# The PR-equivalent gate: lint + format + types + unit, then the mock-backed
-# Playwright tier (visual baselines compare on Linux only; see frontend/README.md).
+# The PR-equivalent gate: lint + format + types + unit (with the coverage floor)
+# + the BFF authz gate, then the mock-backed Playwright tier (visual baselines
+# compare on Linux only; see frontend/README.md).
 frontend:
 	cd frontend && corepack pnpm install --frozen-lockfile && corepack pnpm check && corepack pnpm build && corepack pnpm test:e2e
+
+# The supply-chain gate: HIGH/CRITICAL advisories + the license allowlist. The
+# frontend's mirror of cargo-deny. Needs network, so it is its own target the way
+# check-e2e is (see .github/workflows/frontend.yml, job `pnpm audit + licenses`).
+frontend-audit:
+	cd frontend && corepack pnpm audit:check && corepack pnpm licenses:check
+
+# The browsable coverage report. The FLOOR is enforced by `pnpm check` on every
+# PR (vitest.config.ts coverage.thresholds); this just writes frontend/coverage/.
+frontend-coverage:
+	cd frontend && corepack pnpm exec vitest run --coverage
+
+# --- frontend dev substrate --------------------------------------------------
+#
+# Restored here after the all-Rust cutover (9a55504) dropped them: that commit's
+# message says the frontend targets were "retained", but these five went with the
+# Python ones, leaving frontend/README.md and frontend/dev/run.sh:97 calling
+# commands that no longer existed. Their scripts were never deleted.
+#
+# NOT restored: `frontend-seed`. Its implementation (frontend/dev/seed.py) was
+# deleted in 7cc444f with no replacement, which is why the full-stack e2e tier is
+# dormant — `make frontend-e2e` and tests/e2e/** cannot pass without a seeded
+# tenant. See docs/frontend-testing.md before reviving either.
+
+# The whole dev stack in one command (containers + migrations + erserver).
+run:
+	bash frontend/dev/run.sh
+
+# Containers (Postgres x2 + MinIO) + erweb migrations + erserver api/dispatcher; blocks.
+frontend-dev:
+	bash frontend/dev/up.sh
+
+# The full-stack tier. DORMANT: needs a seeded tenant (see the note above).
+frontend-e2e:
+	cd frontend && FRONTEND_E2E=1 corepack pnpm test:e2e:full
+
+# Regenerate visual baselines inside the pinned Playwright Linux image so they
+# are stable across contributor machines.
+frontend-baselines:
+	bash frontend/dev/update-baselines.sh
+
+frontend-dev-reset:
+	docker compose -f frontend/dev/compose.yaml down -v
+	rm -rf frontend/dev/.state
 
 # --- container images (replaces the deleted ci.yaml image build) ---
 #

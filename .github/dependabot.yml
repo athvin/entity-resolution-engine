@@ -3,13 +3,47 @@
 # opens it: Dependabot resolves each pinned SHA's tag from the trailing comment,
 # proposes the next release's SHA and rewrites the comment with it.
 #
-# Only the `github-actions` ecosystem. Python dependencies are pinned by `uv.lock`
-# against the literal versions of DesignDoc.md S2.1, and a bot bumping one of those
-# would put `uv.lock` and the spec table out of agreement -- which the static job's
-# spec lint fails on. Those bumps are spec amendments, not dependency updates.
+# `npm` and `cargo` are here because nothing else bumps them. The repo's own
+# security notes flagged the hole (.claude/skills/security/references/secrets-iac.md:
+# "Dependabot does not cover cargo or npm"), and the frontend gate found what it
+# cost: at the time npm was added, `next` was four patch releases behind a set of
+# six advisories, one of them a HIGH SSRF in image optimization.
+#
+# Both ecosystems are gated in CI, so a bot PR has to pass the same checks a human
+# does: cargo-deny for Rust (rust.yml), `pnpm audit` + the license allowlist for the
+# frontend (frontend.yml). Updates are grouped to one PR per ecosystem per week,
+# with majors split out — a major is a migration to schedule, not a dependency bump
+# to merge on green.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      frontend-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      # Pinned to the Playwright Docker image tag in frontend/playwright.config.ts's
+      # CI container and frontend/dev/update-baselines.sh. The committed visual
+      # baselines are rendered in that exact image, so the package and the tag must
+      # move together, by hand. See frontend/README.md.
+      - dependency-name: "@playwright/test"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+
+  - package-ecosystem: "cargo"
+    directory: "/rust"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      rust-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
