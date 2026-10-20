@@ -138,7 +138,7 @@ pub fn estimate_m_from_pairwise_labels(
     let mut lp = CtePipeline::new().with_input(labels);
     lp.enqueue(
         format!("select {} from {}", swap.join(", "), labels.templated),
-        "__splink__labels_prepared",
+        "__dedupe__labels_prepared",
     );
     let prepared = session.materialize(&lp)?;
 

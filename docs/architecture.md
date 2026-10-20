@@ -27,7 +27,7 @@ flowchart LR
 |---|---|---|
 | Ingest | Map source columns, detect changed content and append versions | `raw_records`, `ingest_batches` |
 | Standardize | Normalize values and select current record versions | `int_std_records` |
-| Train | Fit the match model (Splink-compatible Fellegi–Sunter) and freeze term frequencies | model JSON + TF snapshot CSV artifacts |
+| Train | Fit the match model (Fellegi–Sunter) and freeze term frequencies | model JSON + TF snapshot CSV artifacts |
 | Match | Score candidates with a selected model and queue uncertain pairs | `match_scores`, `review_queue` |
 | Reconcile | Apply assertions, cluster records and preserve entity identity | `entities`, `entity_membership`, `entity_events` |
 | Assemble | Select winning values and record their source | `golden_records`, `golden_lineage` |

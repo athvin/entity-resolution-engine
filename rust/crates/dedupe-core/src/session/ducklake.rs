@@ -1,7 +1,7 @@
 //! DuckLake attachment layer (completed in milestone M7).
 //!
 //! Architecture: inputs are read from the attached `lake` catalog via
-//! cross-catalog SELECTs; all `__splink__*` intermediates live in the native
+//! cross-catalog SELECTs; all `__dedupe__*` intermediates live in the native
 //! temp catalog (DuckLake cannot host temp tables); final outputs are written
 //! back to the lake in dedicated single-catalog transactions.
 

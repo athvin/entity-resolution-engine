@@ -1,7 +1,7 @@
 //! `blocked_with_cols` (join record columns back onto blocked id pairs) and
-//! `__splink__df_comparison_vectors` (gamma CASE columns).
+//! `__dedupe__comparison_vectors` (gamma CASE columns).
 //! Matches goldens `predict_04_blocked_with_cols.sql` and
-//! `predict_05___splink__df_comparison_vectors.sql`.
+//! `predict_05___dedupe__comparison_vectors.sql`.
 
 use super::UidExpr;
 use super::block::BLOCKED_ID_PAIRS;
@@ -10,7 +10,7 @@ use crate::comparison::Comparison;
 use crate::settings::Settings;
 
 pub const BLOCKED_WITH_COLS: &str = "blocked_with_cols";
-pub const DF_COMPARISON_VECTORS: &str = "__splink__df_comparison_vectors";
+pub const DF_COMPARISON_VECTORS: &str = "__dedupe__comparison_vectors";
 
 fn l_r_select(col: &str) -> [String; 2] {
     [
@@ -108,7 +108,7 @@ pub fn gamma_case_sql(c: &Comparison) -> String {
     )
 }
 
-/// Select list for `__splink__df_comparison_vectors`: uid columns, then per
+/// Select list for `__dedupe__comparison_vectors`: uid columns, then per
 /// comparison [input `x_l`/`x_r` if retain_matching_columns, gamma CASE, TF
 /// columns], then additional-retain columns, then match_key.
 pub fn comparison_vectors_sql(settings: &Settings) -> String {

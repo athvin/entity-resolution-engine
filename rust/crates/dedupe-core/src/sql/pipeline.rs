@@ -96,18 +96,18 @@ mod tests {
 
     #[test]
     fn single_task_rewrites_inputs() {
-        let mut p = CtePipeline::new().with_input(&handle("__splink__df_concat", "concat_abc123"));
-        p.enqueue("select * from __splink__df_concat", "out");
+        let mut p = CtePipeline::new().with_input(&handle("__dedupe__concat", "concat_abc123"));
+        p.enqueue("select * from __dedupe__concat", "out");
         assert_eq!(p.render(), "select * from concat_abc123");
     }
 
     #[test]
     fn prefix_names_do_not_clobber() {
         let mut p = CtePipeline::new()
-            .with_input(&handle("__splink__df_concat", "c_1"))
-            .with_input(&handle("__splink__df_concat_with_tf", "ctf_1"));
+            .with_input(&handle("__dedupe__concat", "c_1"))
+            .with_input(&handle("__dedupe__concat_with_tf", "ctf_1"));
         p.enqueue(
-            "select * from __splink__df_concat join __splink__df_concat_with_tf using (id)",
+            "select * from __dedupe__concat join __dedupe__concat_with_tf using (id)",
             "out",
         );
         assert_eq!(p.render(), "select * from c_1 join ctf_1 using (id)");
@@ -115,8 +115,8 @@ mod tests {
 
     #[test]
     fn multi_task_builds_with_clause() {
-        let mut p = CtePipeline::new().with_input(&handle("__splink__input", "in_1"));
-        p.enqueue("select * from __splink__input", "a");
+        let mut p = CtePipeline::new().with_input(&handle("__dedupe__input", "in_1"));
+        p.enqueue("select * from __dedupe__input", "a");
         p.enqueue("select count(*) as n from a", "b");
         let sql = p.render();
         assert!(sql.starts_with("WITH\na as (\nselect * from in_1\n)\n"));

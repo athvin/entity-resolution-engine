@@ -33,7 +33,7 @@ pub fn completeness(
         })
         .collect();
     let mut p = CtePipeline::new().with_input(concat);
-    p.enqueue(arms.join("\n\nUNION ALL\n\n"), "__splink__completeness");
+    p.enqueue(arms.join("\n\nUNION ALL\n\n"), "__dedupe__completeness");
     session.materialize(&p)
 }
 
@@ -56,7 +56,7 @@ pub fn column_value_frequencies(
     let mut p = CtePipeline::new().with_input(concat);
     p.enqueue(
         arms.join("\n\nUNION ALL\n\n"),
-        "__splink__df_all_column_value_frequencies",
+        "__dedupe__all_column_value_frequencies",
     );
     session.materialize(&p)
 }

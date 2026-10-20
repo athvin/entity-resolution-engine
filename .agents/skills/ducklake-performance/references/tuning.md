@@ -51,9 +51,7 @@ measure PostgreSQL execution plans. Catalog optimization needs catalog-side evid
 - [DuckLake partitioning](https://ducklake.select/docs/stable/duckdb/advanced_features/partitioning)
 - [DuckLake sorted tables](https://ducklake.select/docs/stable/duckdb/advanced_features/sorted_tables)
 - [DuckLake logging](https://ducklake.select/docs/stable/duckdb/advanced_features/logging)
-- [Splink DuckDB performance](https://moj-analytical-services.github.io/splink/topic_guides/performance/optimising_duckdb.html)
 
-The Splink guide may target a different major version. Verify knobs against the
-installed Splink version and this repository's `er.matching.runtime` implementation.
-The Go profiling API is not this Python implementation's interface. Ascend/MotherDuck
-deployment defaults are context, not settings to copy into this Compose stack.
+Verify knobs against the installed DuckDB version and this repository's
+`dedupe-core` session options. Ascend/MotherDuck deployment defaults are
+context, not settings to copy into this Compose stack.

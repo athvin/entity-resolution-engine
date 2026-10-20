@@ -119,9 +119,6 @@ selected config and delivery directories where the process can read them.
 | `ER_S3_USE_SSL` | `true` or `false` |
 | `ER_DUCKDB_THREADS` | Integer worker count |
 | `ER_DUCKDB_MEMORY_LIMIT` | DuckDB buffer limit, below the container memory limit |
-| `ER_SPLINK_NUM_CHUNKS_LEFT`, `ER_SPLINK_NUM_CHUNKS_RIGHT` | Positive integers; full prediction defaults to `1` × `1` |
-| `ER_SPLINK_MATERIALISATION` | `table` (default) or `parquet` for Splink scratch results |
-| `ER_SPLINK_WORK_DIR` | Required absolute local directory for `parquet`; unset for `table` |
 
 `ER_CPU_LIMIT` and `ER_MEM_LIMIT` configure Compose's container limits;
 Compose derives DuckDB's thread count from the CPU limit. The image includes the
@@ -140,23 +137,22 @@ job. Reconciliation is a Python graph step and does not parallelize with threads
 For separate tenants, use separate metadata schemas and object prefixes as well
 as distinct configs. Changing `tenant` alone does not provision another lake.
 
-Splink execution settings are recorded in benchmark fingerprints and do not change
-`config_hash`. Chunk controls apply to full prediction; the pinned incremental APIs
-do not expose chunk arguments. Parquet scratch is local, outside DuckLake, and files
-created by Splink are removed on completion or failure. Use a directory dedicated
-to this job, with sufficient disk space. A process killed by the operating system
-cannot run cleanup; remove that job's abandoned directory before retrying.
+Engine execution settings are recorded in benchmark fingerprints and do not change
+`config_hash`. `dedupe-core` keeps its `__dedupe__*` intermediates in the session's
+native temp catalog, outside DuckLake, and releases them on completion or failure.
 
 ## Training large corpora
 
 The normal config uses exact deterministic-prior estimation, a target of 1,000,000
-random pairs for u, no u early stopping, and uncapped EM sessions.
-`training.u_sampling_method: bernoulli` preserves the previous ordered, seeded
-DuckDB record sample; Splink 5 estimates u over that sample without resampling it.
-The record sample is approximate, so its actual pair count can exceed the target.
-The opt-in `hash` method uses native Splink 5 sampling, which can change quality
-even with the same seed and pair budget. All training
-options and the exact Splink version are stored with the model.
+random pairs for u, no u early stopping, and uncapped EM sessions. u estimation
+samples records with a deterministic bucket filter — `hash(record_key || '_' ||
+u_seed) % 1000000 < threshold`, where `threshold` comes from the pair budget —
+and estimates u over that sample without resampling it, so the same `u_seed` and
+budget always select the same records. The record sample is approximate, so its
+actual pair count can exceed the target. `training.u_sampling_method` is still accepted
+and recorded for `config_hash` stability, but `dedupe-core` implements the single
+deterministic-hash path and does not branch on it. All training options are stored
+with the model.
 
 The shipped training defaults are:
 

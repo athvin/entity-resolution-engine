@@ -37,7 +37,7 @@ fn concat_matches_golden() {
     assert_table_matches_parquet(
         &f.session,
         &f.concat,
-        "stages/__splink__df_concat.parquet",
+        "stages/__dedupe__concat.parquet",
         &["unique_id"],
         &["first_name", "surname", "dob", "city", "email", "cluster"],
         &[],
@@ -66,7 +66,7 @@ fn concat_with_tf_matches_golden() {
     assert_table_matches_parquet(
         &f.session,
         &ctf,
-        "stages/__splink__df_concat_with_tf.parquet",
+        "stages/__dedupe__concat_with_tf.parquet",
         &["unique_id"],
         &["first_name", "surname", "dob", "city", "email", "cluster"],
         &[
@@ -85,7 +85,7 @@ fn blocked_id_pairs_match_golden() {
     assert_table_matches_parquet(
         &f.session,
         &blocked,
-        "stages/__splink__blocked_id_pairs.parquet",
+        "stages/__dedupe__blocked_id_pairs.parquet",
         &["join_key_l", "join_key_r"],
         &["match_key"],
         &[],
@@ -104,7 +104,7 @@ fn comparison_vectors_match_golden() {
     assert_table_matches_parquet(
         &f.session,
         &cv,
-        "stages/__splink__df_comparison_vectors.parquet",
+        "stages/__dedupe__comparison_vectors.parquet",
         &["unique_id_l", "unique_id_r", "match_key"],
         &[
             "gamma_first_name",

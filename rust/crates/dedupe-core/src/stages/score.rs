@@ -1,7 +1,7 @@
-//! `__splink__df_match_weight_parts` (per-comparison `mw_` / `mw_tf_adj_`
-//! CASE columns) and `__splink__df_predict` (summed match weight + stable
-//! match probability). Matches goldens `predict_06___splink__df_match_weight_parts.sql`
-//! and `predict_07___splink__df_predict.sql`.
+//! `__dedupe__match_weight_parts` (per-comparison `mw_` / `mw_tf_adj_`
+//! CASE columns) and `__dedupe__predict` (summed match weight + stable
+//! match probability). Matches goldens `predict_06___dedupe__match_weight_parts.sql`
+//! and `predict_07___dedupe__predict.sql`.
 
 use super::vectors::DF_COMPARISON_VECTORS;
 use crate::comparison::Comparison;
@@ -10,8 +10,8 @@ use crate::scoring;
 use crate::settings::Settings;
 use crate::sql::literals::pyrepr;
 
-pub const DF_MATCH_WEIGHT_PARTS: &str = "__splink__df_match_weight_parts";
-pub const DF_PREDICT: &str = "__splink__df_predict";
+pub const DF_MATCH_WEIGHT_PARTS: &str = "__dedupe__match_weight_parts";
+pub const DF_PREDICT: &str = "__dedupe__predict";
 
 /// The `mw_<name>` CASE: one WHEN arm per level in declaration order (the
 /// ELSE level gets a `WHEN gamma = 0` arm too — no SQL ELSE clause). Null
@@ -91,7 +91,7 @@ fn uid_pass_through(settings: &Settings) -> Vec<String> {
     cols
 }
 
-/// Select list for `__splink__df_match_weight_parts`.
+/// Select list for `__dedupe__match_weight_parts`.
 pub fn match_weight_parts_sql(settings: &Settings) -> Result<String> {
     let mut cols = uid_pass_through(settings);
     for c in &settings.comparisons {
@@ -140,7 +140,7 @@ pub fn match_weight_expr(settings: &Settings, prior: f64) -> String {
     terms.join(" + ")
 }
 
-/// Final `__splink__df_predict` select. `training_mode` keeps gamma columns
+/// Final `__dedupe__predict` select. `training_mode` keeps gamma columns
 /// even when matching columns are not retained (used by EM's E-step).
 /// `threshold_match_weight` filters rows.
 pub fn predict_sql(

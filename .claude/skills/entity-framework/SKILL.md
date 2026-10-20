@@ -22,7 +22,7 @@ declared authorities. Every persistent statement is one of three governed kinds:
    output is planned in CI over representative config vectors
    (`rust/crates/er-sql-check/src/stage.rs` tests).
 3. **The engine core's model plane** — dedupe-core's model-derived
-   blocking/scoring/clustering SQL, governed by captured Splink golden fixtures
+   blocking/scoring/clustering SQL, governed by captured golden fixtures
    (an execution oracle), never by the static analyser.
 
 The three visible exemptions: session-temp scratch reads

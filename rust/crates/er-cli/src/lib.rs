@@ -8,7 +8,7 @@
 //!
 //! DuckLake runs locally: the catalog is a `sqlite:`/`.ducklake` file and
 //! `data_path` a local Parquet directory (no Postgres/object-store needed).
-//! Splink `__splink__*` intermediates stay in the native temp catalog;
+//! Engine `__dedupe__*` intermediates stay in the native temp catalog;
 //! dedupe-core enforces that.
 //!
 //! This is built up stage by stage; ingest + standardize land first.
@@ -169,7 +169,7 @@ pub fn run_standardize(session: &Session, config: &Config, run_at: &str) -> Resu
     }
 }
 
-/// The committed model a `full` match scores against (S4.3.2): the frozen Splink
+/// The committed model a `full` match scores against (S4.3.2): the frozen match
 /// settings + the frozen `tf_lookup` snapshot keyed by `(model_version,
 /// tf_snapshot_id)`.
 pub struct MatchModel<'a> {
@@ -1420,7 +1420,7 @@ fn export_tf_snapshot(
     Ok(())
 }
 
-/// S4.3.2 training (`er train`): fit a Splink model on the lake's
+/// S4.3.2 training (`er train`): fit a match model on the lake's
 /// `int_std_records` and write BOTH artifacts a later `full` match freezes
 /// against — the trained settings JSON (`out_model`) and the TF snapshot CSV
 /// (`out_tf`), stamped with `model_version` / `tf_snapshot_id`. The comparison +

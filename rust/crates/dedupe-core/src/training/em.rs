@@ -204,7 +204,7 @@ fn materialize_training_vectors(
         arrays_to_explode: Vec::new(),
     };
 
-    // Blocked pairs from the single training rule, on __splink__df_concat.
+    // Blocked pairs from the single training rule, on __dedupe__concat.
     let mut bp = CtePipeline::new().with_input(concat);
     bp.enqueue(
         crate::stages::block::blocked_id_pairs_sql(
@@ -284,7 +284,7 @@ fn materialize_training_vectors(
             "select\n    {}\nfrom {BLOCKED_WITH_COLS}",
             cv.join(",\n    ")
         ),
-        "__splink__df_comparison_vectors",
+        "__dedupe__comparison_vectors",
     );
 
     let result = session.materialize(&p)?;
@@ -308,7 +308,7 @@ fn materialize_agreement_patterns(
         vectors.templated
     );
     let mut p = CtePipeline::new().with_input(vectors);
-    p.enqueue(sql, "__splink__agreement_pattern_counts");
+    p.enqueue(sql, "__dedupe__agreement_pattern_counts");
     session.materialize(&p)
 }
 
@@ -365,7 +365,7 @@ fn run_counts(
     );
 
     let predict_sql = format!(
-        "select\n    CASE WHEN ({mw_expr}) >= 0 THEN 1.0 / (1.0 + POWER(cast(2 as float8), -({mw_expr}))) ELSE POWER(cast(2 as float8), ({mw_expr})) / (1.0 + POWER(cast(2 as float8), ({mw_expr}))) END as match_probability,\n    {},\n    agreement_pattern_count\nfrom __splink__df_match_weight_parts",
+        "select\n    CASE WHEN ({mw_expr}) >= 0 THEN 1.0 / (1.0 + POWER(cast(2 as float8), -({mw_expr}))) ELSE POWER(cast(2 as float8), ({mw_expr})) / (1.0 + POWER(cast(2 as float8), ({mw_expr}))) END as match_probability,\n    {},\n    agreement_pattern_count\nfrom __dedupe__match_weight_parts",
         working
             .iter()
             .map(WorkingComparison::gamma_column_name)
@@ -378,20 +378,20 @@ fn run_counts(
         .map(|c| {
             let g = c.gamma_column_name();
             format!(
-                "select {g} as comparison_vector_value, sum(match_probability * agreement_pattern_count) as m_count, sum((1-match_probability) * agreement_pattern_count) as u_count, '{}' as output_column_name from __splink__df_predict group by {g}",
+                "select {g} as comparison_vector_value, sum(match_probability * agreement_pattern_count) as m_count, sum((1-match_probability) * agreement_pattern_count) as u_count, '{}' as output_column_name from __dedupe__predict group by {g}",
                 c.output_column_name
             )
         })
         .collect();
     count_blocks.push(
-        "select 0 as comparison_vector_value, sum(match_probability * agreement_pattern_count) / sum(agreement_pattern_count) as m_count, sum((1-match_probability) * agreement_pattern_count) / sum(agreement_pattern_count) as u_count, '_probability_two_random_records_match' as output_column_name from __splink__df_predict".to_string(),
+        "select 0 as comparison_vector_value, sum(match_probability * agreement_pattern_count) / sum(agreement_pattern_count) as m_count, sum((1-match_probability) * agreement_pattern_count) / sum(agreement_pattern_count) as u_count, '_probability_two_random_records_match' as output_column_name from __dedupe__predict".to_string(),
     );
     let counts_sql = count_blocks.join("\n\nUNION ALL\n\n");
 
     let mut p = CtePipeline::new().with_input(patterns);
-    p.enqueue(mwp_sql, "__splink__df_match_weight_parts");
-    p.enqueue(predict_sql, "__splink__df_predict");
-    p.enqueue(counts_sql, "__splink__m_u_counts");
+    p.enqueue(mwp_sql, "__dedupe__match_weight_parts");
+    p.enqueue(predict_sql, "__dedupe__predict");
+    p.enqueue(counts_sql, "__dedupe__m_u_counts");
     let counts = session.materialize(&p)?;
 
     let rows = session.query_strings(&format!(

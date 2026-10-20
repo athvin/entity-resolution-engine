@@ -1,7 +1,7 @@
 //! The matching stage (port of `src/er/matching/*`, DesignDoc.md S4.3).
 //!
-//! Produces `match_scores` from `int_std_records` + a committed Splink settings
-//! model, via dedupe-core's Splink-parity `predict`. Scenario models are committed
+//! Produces `match_scores` from `int_std_records` + a committed match-settings
+//! model, via dedupe-core's golden-parity `predict`. Scenario models are committed
 //! (`fixtures/static/model_test_v1.json`) — scenario tests never train (S4.3.2:
 //! EM over base_10's 23 records would be degenerate).
 //!
@@ -21,7 +21,7 @@ use dedupe_core::sql::pipeline::CtePipeline;
 use dedupe_core::stages::tf::tf_table_name;
 use dedupe_core::{Result, Settings};
 
-/// Parse a committed Splink settings document (e.g.
+/// Parse a committed match-settings document (e.g.
 /// `fixtures/static/model_test_v1.json`) into dedupe-core `Settings`.
 pub fn load_model(settings_json: &str) -> Result<Settings> {
     Settings::from_json_str(settings_json)

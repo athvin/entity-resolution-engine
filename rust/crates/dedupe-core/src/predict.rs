@@ -1,7 +1,7 @@
 //! Assembles the predict-pipeline stages (single-chunk path): blocked pairs
 //! are materialized from
-//! `__splink__df_concat`; comparison vectors (and later scoring) run as one
-//! CTE pipeline over the blocked pairs with `__splink__df_concat_with_tf`
+//! `__dedupe__concat`; comparison vectors (and later scoring) run as one
+//! CTE pipeline over the blocked pairs with `__dedupe__concat_with_tf`
 //! re-derived as a CTE.
 
 use crate::error::Result;
@@ -15,14 +15,14 @@ use crate::stages::tf::{self, DF_CONCAT_WITH_TF};
 use crate::stages::uid_expr_for;
 use crate::stages::vectors::{self, BLOCKED_WITH_COLS, DF_COMPARISON_VECTORS};
 
-/// Materialize `__splink__df_concat` from a single registered input table.
+/// Materialize `__dedupe__concat` from a single registered input table.
 pub fn materialize_concat(session: &Session, input: &TableHandle) -> Result<TableHandle> {
     let mut p = CtePipeline::new().with_input(input);
     p.enqueue(concat::concat_sql_single(input), DF_CONCAT);
     session.materialize(&p)
 }
 
-/// Materialize `__splink__df_concat` from multiple registered inputs (link
+/// Materialize `__dedupe__concat` from multiple registered inputs (link
 /// types), prepending each dataset's display name as the `source_dataset`
 /// literal. Column order comes from the first input.
 pub fn materialize_concat_multi(
@@ -64,7 +64,7 @@ pub fn materialize_tf_tables(
         .collect()
 }
 
-/// Materialize `__splink__blocked_id_pairs` (blocking reads the concat, not
+/// Materialize `__dedupe__blocked_id_pairs` (blocking reads the concat, not
 /// concat_with_tf). Materialized rather than inlined, sidestepping the
 /// DuckDB UNION-ALL pushdown regression.
 pub fn materialize_blocked_pairs(
@@ -116,7 +116,7 @@ pub fn materialize_blocked_pairs_chunk(
 /// Exploding-rule path: materialize each exploding rule's marginal id-pairs
 /// table (UNNEST the concat, self-join, apply the dedupe where-clause and the
 /// "AND NOT preceding" exclusion), then UNION ALL all arms into
-/// `__splink__blocked_id_pairs_non_unique` and collapse to unique pairs by
+/// `__dedupe__blocked_id_pairs_non_unique` and collapse to unique pairs by
 /// `min(match_key)`. `right_chunk` filters both the scalar arms
 /// and the marginal self-joins on the right record's hash; since a pair's right
 /// record is fixed (`uid_l < uid_r`), both arms land in the same chunk, so the
@@ -195,7 +195,7 @@ fn materialize_blocked_pairs_exploding(
     Ok(out)
 }
 
-/// Pipeline from blocked id pairs through `__splink__df_comparison_vectors`.
+/// Pipeline from blocked id pairs through `__dedupe__comparison_vectors`.
 pub fn comparison_vectors_pipeline(
     settings: &Settings,
     concat: &TableHandle,
@@ -254,7 +254,7 @@ pub fn deterministic_link(
 }
 
 /// Full predict pipeline: comparison vectors -> match weight parts ->
-/// `__splink__df_predict` scored with the settings' current parameters.
+/// `__dedupe__predict` scored with the settings' current parameters.
 pub fn predict_pipeline(
     settings: &Settings,
     concat: &TableHandle,

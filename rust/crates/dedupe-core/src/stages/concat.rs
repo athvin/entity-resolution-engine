@@ -1,13 +1,13 @@
-//! `__splink__df_concat`: vertical concatenation of input tables.
+//! `__dedupe__concat`: vertical concatenation of input tables.
 //! (v1 exercises the single-input dedupe path; the multi-input UNION ALL with
 //! a `source_dataset` literal follows the same shape.)
 
 use crate::session::TableHandle;
 
-pub const DF_CONCAT: &str = "__splink__df_concat";
+pub const DF_CONCAT: &str = "__dedupe__concat";
 
 /// Single input table: a plain projection of its columns, in table order.
-/// Matches golden `predict_00___splink__df_concat.sql`.
+/// Matches golden `predict_00___dedupe__concat.sql`.
 pub fn concat_sql_single(input: &TableHandle) -> String {
     let cols = input
         .columns

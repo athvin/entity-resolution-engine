@@ -34,7 +34,7 @@ pub struct Linker<'a> {
 
 impl<'a> Linker<'a> {
     /// Build a linker over an already-registered input table (e.g. from a CSV
-    /// or a lake table). Materializes `__splink__df_concat` and the TF tables.
+    /// or a lake table). Materializes `__dedupe__concat` and the TF tables.
     pub fn new(session: &'a Session, settings: Settings, input: &TableHandle) -> Result<Self> {
         Self::new_multi(session, settings, &[(input, "")])
     }
@@ -229,7 +229,7 @@ impl<'a> Linker<'a> {
         }
         let back = self
             .session
-            .register_lake_table(target, "__splink__stream_count")?;
+            .register_lake_table(target, "__dedupe__stream_count")?;
         self.session.count(&back.physical)
     }
 

@@ -20,7 +20,7 @@ deep (see §6) but structurally weak in five places its own reviewers name:
 4. **Dated, dense UI** — "a lot going on," no embedded help, slow at volume, mass merge capped at one page at a time.
 5. **Sales-team frictions** — email-your-rep to enable features, weekly-only dashboards, short undo retention, annual-only contracts.
 
-Our engine already out-guns their matching core: probabilistic (Splink-based) scoring with
+Our engine already out-guns their matching core: probabilistic (Fellegi–Sunter) scoring with
 per-pair `match_probability` and a full evidence waterfall, config-versioned thresholds,
 event-sourced entity history, deterministic reproducibility, and multi-source ingestion by
 design. What does not exist yet is the **experience** — the thing this document designs.

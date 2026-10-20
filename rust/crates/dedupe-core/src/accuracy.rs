@@ -147,14 +147,14 @@ fn labelled_predictions(
             "select *,\n  case when \"{label_column}_l\" = \"{label_column}_r\" then cast(1.0 as float8) else cast(0.0 as float8) end as clerical_match_score,\n  not (cast(match_key as int) = {n_model_rules}) as found_by_blocking_rules\nfrom {}",
             predictions.templated
         ),
-        "__splink__labels_with_predictions",
+        "__dedupe__labels_with_predictions",
     );
     let out = session.materialize(&lp)?;
     session.drop_table(&predictions)?;
     Ok(out)
 }
 
-/// The 7-step truth-space SQL over a `__splink__labels_with_predictions`-shaped
+/// The 7-step truth-space SQL over a `__dedupe__labels_with_predictions`-shaped
 /// table (needs `match_weight`, `clerical_match_score`, `found_by_blocking_rules`).
 fn truth_space_sql(
     labels_with_predictions: &str,
@@ -201,43 +201,43 @@ fn truth_space_sql(
 
     format!(
         r"WITH
-__splink__labels_with_pos_neg as (
+__dedupe__labels_with_pos_neg as (
     select *,
         {truth_thres_expr} as truth_threshold,
         case when clerical_match_score >= {ta} then 1 else 0 end as clerical_positive,
         case when clerical_match_score >= {ta} then 0 else 1 end as clerical_negative
     from {labels_with_predictions}
 ),
-__splink__labels_with_pos_neg_tt_adj as (
+__dedupe__labels_with_pos_neg_tt_adj as (
     select *, {tt_adj} as truth_threshold_adj
-    from __splink__labels_with_pos_neg
+    from __dedupe__labels_with_pos_neg
 ),
-__splink__labels_with_pos_neg_grouped as (
+__dedupe__labels_with_pos_neg_grouped as (
     select
         truth_threshold_adj as truth_threshold,
         count(*) as num_records_in_row,
         sum(clerical_positive) as clerical_positive,
         sum(clerical_negative) as clerical_negative
-    from __splink__labels_with_pos_neg_tt_adj
+    from __dedupe__labels_with_pos_neg_tt_adj
     group by truth_threshold_adj
 ),
-__splink__labels_with_pos_neg_grouped_with_stats as (
+__dedupe__labels_with_pos_neg_grouped_with_stats as (
     select
         truth_threshold,
         (sum(clerical_positive) over (order by truth_threshold desc))
             as cumulative_clerical_positives_at_or_above_threshold,
         (sum(clerical_negative) over (order by truth_threshold)) - clerical_negative
             as cumulative_clerical_negatives_below_threshold,
-        (select sum(clerical_positive) from __splink__labels_with_pos_neg_grouped) as total_clerical_positives,
-        (select sum(clerical_negative) from __splink__labels_with_pos_neg_grouped) as total_clerical_negatives,
-        (select sum(num_records_in_row) from __splink__labels_with_pos_neg_grouped) as total_clerical_labels,
+        (select sum(clerical_positive) from __dedupe__labels_with_pos_neg_grouped) as total_clerical_positives,
+        (select sum(clerical_negative) from __dedupe__labels_with_pos_neg_grouped) as total_clerical_negatives,
+        (select sum(num_records_in_row) from __dedupe__labels_with_pos_neg_grouped) as total_clerical_labels,
         -num_records_in_row + sum(num_records_in_row) over (order by truth_threshold)
             as num_labels_scored_below_threshold,
         sum(num_records_in_row) over (order by truth_threshold desc)
             as num_labels_scored_at_or_above_threshold
-    from __splink__labels_with_pos_neg_grouped
+    from __dedupe__labels_with_pos_neg_grouped
 ),
-__splink__labels_with_pos_neg_grouped_with_stats_adj as (
+__dedupe__labels_with_pos_neg_grouped_with_stats_adj as (
     select
         truth_threshold,
         cumulative_clerical_positives_at_or_above_threshold,
@@ -248,9 +248,9 @@ __splink__labels_with_pos_neg_grouped_with_stats_adj as (
         {adj_total_labels} as total_clerical_labels,
         {adj_scored_below} as num_labels_scored_below_threshold,
         num_labels_scored_at_or_above_threshold
-    from __splink__labels_with_pos_neg_grouped_with_stats
+    from __dedupe__labels_with_pos_neg_grouped_with_stats
 ),
-__splink__labels_with_pos_neg_grouped_with_truth_stats as (
+__dedupe__labels_with_pos_neg_grouped_with_truth_stats as (
     select
         truth_threshold,
         total_clerical_labels,
@@ -260,7 +260,7 @@ __splink__labels_with_pos_neg_grouped_with_truth_stats as (
         cumulative_clerical_positives_at_or_above_threshold as TP,
         num_labels_scored_below_threshold - cumulative_clerical_negatives_below_threshold as FN,
         cumulative_clerical_negatives_below_threshold as TN
-    from __splink__labels_with_pos_neg_grouped_with_stats_adj
+    from __dedupe__labels_with_pos_neg_grouped_with_stats_adj
 )
 select
     truth_threshold,
@@ -289,7 +289,7 @@ select
     cast(4.0*TP*TN/((4.0*TP*TN) + ((TP + TN)*(FP + FN))) as float8) as p4,
     case when TN+FN=0 or TP+FP=0 or P=0 or N=0 then 0
         else cast((TP*TN)-(FP*FN) as float8)/sqrt((TP+FP)*P*N*(TN+FN)) end as phi
-from __splink__labels_with_pos_neg_grouped_with_truth_stats
+from __dedupe__labels_with_pos_neg_grouped_with_truth_stats
 where truth_threshold >= cast(-998 as float8)
 order by truth_threshold"
     )
@@ -315,7 +315,7 @@ pub fn truth_space_from_labels_column(
             Some(total_labels),
             opts.positives_not_captured_by_blocking_rules_scored_as_zero,
         ),
-        "__splink__truth_space_table",
+        "__dedupe__truth_space_table",
     );
     let out = session.materialize(&p)?;
     session.drop_table(&labelled)?;
@@ -364,7 +364,7 @@ pub fn labels_table_predictions(
             swap_cols.join(", "),
             labels.templated
         ),
-        "__splink__labels_prepared",
+        "__dedupe__labels_prepared",
     );
     let prepared = session.materialize(&lp)?;
 
@@ -401,7 +401,7 @@ pub fn labels_table_predictions(
             p = predictions.templated,
             lp = prepared.templated,
         ),
-        "__splink__labels_with_predictions",
+        "__dedupe__labels_with_predictions",
     );
     let out = session.materialize(&fp)?;
     session.drop_table(&prepared)?;
@@ -431,7 +431,7 @@ pub fn truth_space_from_labels_table(
             None,
             true,
         ),
-        "__splink__truth_space_table",
+        "__dedupe__truth_space_table",
     );
     let out = session.materialize(&p)?;
     session.drop_table(&lwp)?;
@@ -469,7 +469,7 @@ pub fn prediction_errors_from_labels_table(
             "select *, case when {fp} then 'FP' when {fnn} then 'FN' end as truth_status\nfrom {} where {where_clause}",
             lwp.templated
         ),
-        "__splink__labels_with_fp_fn_status",
+        "__dedupe__labels_with_fp_fn_status",
     );
     let out = session.materialize(&p)?;
     session.drop_table(&lwp)?;
@@ -507,15 +507,15 @@ pub fn unlinkables_data(
             "select round(match_weight, 2) as match_weight, round(match_probability, 5) as match_probability from {}",
             self_link.templated
         ),
-        "__splink__df_round_self_link",
+        "__dedupe__round_self_link",
     );
     p.enqueue(
-        "select max(match_weight) as match_weight, match_probability, count(*) / cast(sum(count(*)) over () as float) as prop\nfrom __splink__df_round_self_link\ngroup by match_probability".to_string(),
-        "__splink__df_unlinkables_proportions",
+        "select max(match_weight) as match_weight, match_probability, count(*) / cast(sum(count(*)) over () as float) as prop\nfrom __dedupe__round_self_link\ngroup by match_probability".to_string(),
+        "__dedupe__unlinkables_proportions",
     );
     p.enqueue(
-        "select *, sum(prop) over (order by match_probability) as cum_prop\nfrom __splink__df_unlinkables_proportions\nwhere match_probability < 1".to_string(),
-        "__splink__df_unlinkables",
+        "select *, sum(prop) over (order by match_probability) as cum_prop\nfrom __dedupe__unlinkables_proportions\nwhere match_probability < 1".to_string(),
+        "__dedupe__unlinkables",
     );
     let out = session.materialize(&p)?;
     session.drop_table(&blocked)?;
@@ -555,7 +555,7 @@ pub fn prediction_errors_from_labels_column(
     let mut p = CtePipeline::new().with_input(&labelled);
     p.enqueue(
         format!("select * from {} where {where_clause}", labelled.templated),
-        "__splink__predictions_from_label_column_fp_fn_only",
+        "__dedupe__predictions_from_label_column_fp_fn_only",
     );
     let out = session.materialize(&p)?;
     session.drop_table(&labelled)?;

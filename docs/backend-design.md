@@ -40,7 +40,7 @@ We already have the hard part — a proven, incremental entity-resolution engine
 
 **Where we structurally exceed Cloudingo** (the pitch, not aspiration — all measured or built):
 
-- Probabilistic ML matching (Splink): 96.4% cluster precision / 99.2% recall at 100k, vs hand-built deterministic filters.
+- Probabilistic ML matching (Fellegi–Sunter): 96.4% cluster precision / 99.2% recall at 100k, vs hand-built deterministic filters.
 - Cross-source resolution as the native model: Salesforce Leads + Contacts + Marketo + CSVs resolve into one entity; Cloudingo dedupes within one object.
 - Full audit trail: per-attribute `golden_lineage`, `entity_events` (merge/split/retire), DuckLake time travel — point-in-time answers Cloudingo cannot give.
 - Durable steward knowledge: always/never assertions are retractable and reapplied on every reconcile, vs one-shot merge decisions.

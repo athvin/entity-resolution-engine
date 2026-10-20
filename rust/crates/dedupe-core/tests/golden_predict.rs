@@ -65,7 +65,7 @@ fn predictions_match_golden() {
     assert_table_matches_parquet(
         &session,
         &mwp,
-        "stages/__splink__df_match_weight_parts.parquet",
+        "stages/__dedupe__match_weight_parts.parquet",
         &["unique_id_l", "unique_id_r", "match_key"],
         &[
             "gamma_first_name",

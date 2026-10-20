@@ -68,7 +68,7 @@ pub static GOLDEN_LINEAGE_ATTRIBUTES: LazyLock<Vec<&'static str>> = LazyLock::ne
 pub const GOLDEN_MART_RELATIONS: [&str; 2] = ["golden_records", "golden_lineage"];
 
 /// The `int_std_records` column list of S5, in DDL order (`record_key` leads: the
-/// logical key and Splink's `unique_id_column_name`).
+/// logical key and the match model's `unique_id_column_name`).
 pub const STD_RECORD_COLUMNS: [&str; 23] = [
     "record_key",
     "source_system",
@@ -96,7 +96,7 @@ pub const STD_RECORD_COLUMNS: [&str; 23] = [
 ];
 
 /// Matching inputs: `STD_RECORD_COLUMNS` minus `metadata` (client-only data never
-/// enters Splink, blocking or term frequencies).
+/// enters matching, blocking or term frequencies).
 pub static MATCHING_RECORD_COLUMNS: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
     STD_RECORD_COLUMNS
         .iter()

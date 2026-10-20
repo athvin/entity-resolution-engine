@@ -1,0 +1,46 @@
+-- templated: __dedupe__representatives_1
+-- physical: __dedupe__representatives_1_225b6c241
+CREATE TABLE __dedupe__representatives_1_225b6c241 AS
+WITH
+
+__dedupe__rep_updates as (
+    select
+
+    old_rep,
+    min(representative) as representative,
+    min(stable) as stable
+
+    from
+    (
+
+        select
+
+            node_rep as old_rep,
+            neighbour_rep as representative,
+            0 as stable
+
+        from __dedupe__neighbours_3192c2212
+
+        union all
+
+        select
+
+            representative as old_rep,
+            representative,
+            1 as stable
+
+        from __dedupe__representatives_f38ff867e
+
+    ) as rep_union
+    group by old_rep
+)
+select
+
+    repr.node_id,
+    r.representative,
+    r.stable
+
+from __dedupe__rep_updates as r
+
+left join __dedupe__representatives_f38ff867e as repr
+on r.old_rep = repr.representative
