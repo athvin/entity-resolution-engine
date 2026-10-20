@@ -710,6 +710,189 @@ fn run_all_base(tag: &str) -> (Session, Config, PathBuf) {
 /// wrote; and `er_versions::check_mode_preconditions` — the guard that decides
 /// whether an incremental run may extend the existing corpus — had zero callers
 /// anywhere in the workspace.
+/// Resolving an unsaved record must find the entity it belongs to, and write
+/// nothing while doing it.
+///
+/// This is the online "resolve this record" capability — the thing that lets a
+/// form or an ingestion pipeline ask "who is this?" *before* saving. Two
+/// properties decide whether it is usable:
+///
+/// 1. It agrees with the batch path. A record that is obviously Robert Chen
+///    must come back pointing at the entity the full run put Robert Chen in,
+///    with a band the caller can branch on. If the online answer and the batch
+///    answer can differ, neither can be trusted.
+/// 2. It commits nothing. A read-only question must not mutate the lake, or the
+///    act of asking changes the corpus.
+#[test]
+fn resolving_an_unsaved_record_finds_its_entity_and_writes_nothing() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let (session, config, tmp) = run_all_base("resolve");
+    let model_json = std::fs::read_to_string(repo_fixture("model_test_v1.json")).unwrap();
+    let tf_csv = repo_fixture("model_test_v1.tf.csv");
+    let model = er_cli::MatchModel {
+        settings_json: &model_json,
+        tf_csv_path: std::path::Path::new(&tf_csv),
+        model_version: "v0001",
+        tf_snapshot_id: "01JWMDTFSNAP00000000000001",
+    };
+    let lexicon: Vec<(String, String)> = include_str!("fixtures/nickname_variants.csv")
+        .lines()
+        .skip(1)
+        .filter(|l| !l.is_empty())
+        .map(|l| {
+            let (a, b) = l.split_once(',').unwrap();
+            (a.to_string(), b.to_string())
+        })
+        .collect();
+
+    // What the batch run decided about the record we are about to impersonate.
+    let before = partition(&membership_rows(&session));
+    let chen_entity: BTreeSet<String> = before
+        .iter()
+        .find(|c| c.contains("crm:C001"))
+        .expect("base_10 resolves crm:C001 into an entity")
+        .clone();
+    assert!(
+        chen_entity.len() > 1,
+        "precondition: crm:C001 is in a multi-record entity"
+    );
+
+    let snapshot_before = session.latest_snapshot_version().unwrap();
+
+    // A record that is plainly the same person as crm:C001 — the CRM source's
+    // own column names, because the payload goes through the declared mapping.
+    let payload = serde_json::json!({
+        "crm_id": "LIVE-1",
+        "first_name": "Robert",
+        "last_name": "Chen",
+        "email_address": "robert.chen@example.com",
+        "phone": "(628) 555-0101",
+        "street_address": "1420 Judah Street Apt 5",
+        "city": "San Francisco",
+        "state": "CA",
+        "zip": "94107",
+        "dob": "1985-03-14",
+        "last_modified": "2026-01-01 00:00:00",
+    });
+    let result =
+        er_cli::resolve_record(&session, &config, &model, "crm", &payload, &lexicon, 10).unwrap();
+
+    assert_ne!(
+        result.candidates.len(),
+        0,
+        "an obvious duplicate must produce candidates"
+    );
+    assert_eq!(
+        result.decision,
+        "auto_merge",
+        "a record identical to an existing one should clear the auto-merge band, got {:?} at {:?}",
+        result.decision,
+        result.candidates.first().map(|c| c.match_probability)
+    );
+
+    // It agrees with the batch path: the top candidate belongs to the entity the
+    // full run built for Robert Chen.
+    let top = &result.candidates[0];
+    assert!(
+        chen_entity.contains(&top.record_key),
+        "the top candidate ({}) should be a member of the Chen entity {chen_entity:?}",
+        top.record_key
+    );
+    let entity_id = top
+        .entity_id
+        .as_deref()
+        .expect("a reconciled record reports its entity");
+    assert_ne!(entity_id, "");
+    // Every candidate that is in the Chen entity reports the SAME entity id —
+    // the caller is told one answer, not one per matching record.
+    let ids: BTreeSet<&str> = result
+        .candidates
+        .iter()
+        .filter(|c| chen_entity.contains(&c.record_key))
+        .filter_map(|c| c.entity_id.as_deref())
+        .collect();
+    assert_eq!(
+        ids.len(),
+        1,
+        "candidates inside one entity must all report that entity: {ids:?}"
+    );
+    // The evidence waterfall comes back, so a caller can explain its decision.
+    assert!(
+        top.evidence.is_object(),
+        "the per-comparison evidence must be returned: {:?}",
+        top.evidence
+    );
+
+    // Candidates are ordered best-first, which is what makes `[0]` meaningful.
+    let probabilities: Vec<f64> = result
+        .candidates
+        .iter()
+        .map(|c| c.match_probability)
+        .collect();
+    let mut sorted = probabilities.clone();
+    sorted.sort_by(|a, b| b.partial_cmp(a).unwrap());
+    assert_eq!(probabilities, sorted, "candidates must be best-first");
+
+    // NOTHING WAS WRITTEN. The partition, the scored pairs and the snapshot are
+    // all untouched, and no probe row leaked into the corpus.
+    assert_eq!(
+        partition(&membership_rows(&session)),
+        before,
+        "resolving must not change the partition"
+    );
+    assert_eq!(
+        session.latest_snapshot_version().unwrap(),
+        snapshot_before,
+        "resolving must not advance the lake snapshot"
+    );
+    let probe_rows: i64 = session
+        .query_strings(&format!(
+            "select count(*) from {} where source_record_id like '%resolve%' \
+             or source_record_id = 'LIVE-1'",
+            er_cli::RAW_RECORDS
+        ))
+        .unwrap()[0][0]
+        .parse()
+        .unwrap();
+    assert_eq!(probe_rows, 0, "the probe record must not reach raw_records");
+
+    // A record that is nobody gets an honest rejection rather than a weak match.
+    let stranger = serde_json::json!({
+        "crm_id": "LIVE-2",
+        "first_name": "Ingeborg",
+        "last_name": "Zyzzyva",
+        "email_address": "ingeborg.zyzzyva@elsewhere.example",
+        "phone": "(907) 555-7788",
+        "street_address": "9912 Tundra Road",
+        "city": "Nome",
+        "state": "AK",
+        "zip": "99762",
+        "dob": "1943-11-02",
+        "last_modified": "2026-01-01 00:00:00",
+    });
+    let miss =
+        er_cli::resolve_record(&session, &config, &model, "crm", &stranger, &lexicon, 10).unwrap();
+    assert_eq!(
+        miss.decision, "reject",
+        "a record matching nobody must be rejected, not weakly matched: {:?}",
+        miss.candidates
+    );
+
+    // An undeclared source is refused, naming the ones that exist.
+    let err = er_cli::resolve_record(&session, &config, &model, "nosuch", &payload, &lexicon, 10)
+        .expect_err("an undeclared source cannot be resolved");
+    let message = format!("{err:#}");
+    assert!(
+        message.contains("crm"),
+        "the refusal should name the declared sources: {message}"
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
 /// The blocking estimate must agree with what a run actually generates.
 ///
 /// This is the answer to the competitor's hard three-hour analysis cap, whose

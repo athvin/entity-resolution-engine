@@ -199,6 +199,242 @@ fn evidence_json(settings: &Settings) -> String {
     format!("json_object({})", parts.join(", "))
 }
 
+/// One candidate entity for an unsaved record.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ResolveCandidate {
+    /// The record the payload matched.
+    pub record_key: String,
+    /// The entity that record currently belongs to, when it belongs to one. A
+    /// record that has never been through reconcile has no entity yet, and
+    /// saying `null` is more honest than inventing one.
+    pub entity_id: Option<String>,
+    pub match_probability: f64,
+    /// Which band the score falls in under the org's thresholds:
+    /// `auto_merge` / `review` / `reject`.
+    pub band: String,
+    /// The per-comparison evidence behind the score — the same waterfall the
+    /// review queue shows, so a caller can explain the decision it just made.
+    pub evidence: serde_json::Value,
+}
+
+/// What resolving an unsaved record returned.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ResolveResult {
+    pub candidates: Vec<ResolveCandidate>,
+    /// The best candidate's band, or `reject` when there are none — the single
+    /// value a form or an ingestion pipeline actually branches on.
+    pub decision: String,
+    /// The lake snapshot the corpus was read at, so a caller can tell whether it
+    /// resolved against fresh data.
+    pub snapshot: i64,
+}
+
+/// Score an UNSAVED record against the resolved corpus and return its candidate
+/// entities, without writing anything.
+///
+/// This is the online "resolve this record" capability: a form, an ingestion
+/// pipeline or a middleware layer posts a record and learns, before saving it,
+/// which entity it belongs to and how confident that is. It is how the engine
+/// embeds in someone else's system rather than owning the data.
+///
+/// The payload goes through **the same standardization the corpus went
+/// through** — the same normalizers, the same nickname lexicon, the same
+/// declared source column mapping — because a score is only meaningful between
+/// comparably prepared values. That is why this reuses
+/// `build_int_std_records` against a temp table instead of normalizing the
+/// payload some cheaper way.
+///
+/// Nothing is committed: the payload lands in the session's own catalog (never
+/// `lake.main`), and the only lake access is a read. A caller that wants the
+/// record saved sends it to the import path afterwards.
+///
+/// # Errors
+/// Returns an error when the source is not declared in the config, when the
+/// model will not load, or when the lake read fails. A corpus that has never
+/// been standardized yields no candidates rather than an error — a first record
+/// legitimately matches nothing.
+pub fn resolve_record(
+    session: &Session,
+    config: &Config,
+    model: &MatchModel,
+    source: &str,
+    payload: &serde_json::Value,
+    lexicon: &[(String, String)],
+    limit: usize,
+) -> Result<ResolveResult> {
+    if !config.sources.contains_key(source) {
+        let known: Vec<&str> = config.sources.keys().map(String::as_str).collect();
+        anyhow::bail!(
+            "source {source:?} is not in the active config (known: {})",
+            known.join(", ")
+        );
+    }
+    let mut settings = load_model(model.settings_json)?;
+    settings.retain_intermediate = true;
+
+    // The corpus. A lake that has never standardized has nothing to match
+    // against, which is a legitimate answer rather than a failure.
+    let corpus = match session.register_lake_table("int_std_records", "int_std_records") {
+        Ok(handle) => handle,
+        Err(e) if is_missing_table(&e.to_string()) => {
+            return Ok(ResolveResult {
+                candidates: Vec::new(),
+                decision: "reject".to_string(),
+                snapshot: 0,
+            });
+        }
+        Err(e) => return Err(e.into()),
+    };
+
+    // The payload, standardized exactly as an ingested record would be. The
+    // synthetic ids are deliberately recognisable: if one ever shows up in the
+    // lake, something wrote what it should not have.
+    // Re-seed rather than seed: this session may already have run a pipeline
+    // (the server reuses one per request, and a test may resolve after a full
+    // run), and `seed_lexicon` creates the table outright. Re-seeding with the
+    // same pairs is a no-op in content, and the lexicon has to be present or
+    // standardization cannot expand nicknames — which would make the probe
+    // incomparable to the corpus it is being scored against.
+    session.execute_batch(&format!("drop table if exists {LEXICON}"))?;
+    seed_lexicon(session, lexicon)?;
+    let probe_id = "__resolve_probe";
+    let raw = "__resolve_raw";
+    let std = "__resolve_std";
+    session.execute_batch(&format!("drop table if exists {raw}"))?;
+    session.execute_batch(&format!("drop table if exists {std}"))?;
+    let payload_literal = payload.to_string().replace('\'', "''");
+    let source_literal = source.replace('\'', "''");
+    session.execute_batch(&format!(
+        "create table {raw} as select
+             '{probe_id}' as id,
+             '{source_literal}' as source_system,
+             '{probe_id}' as source_record_id,
+             '{payload_literal}'::json as payload,
+             '{probe_id}' as content_hash,
+             false as is_deleted,
+             cast(null as timestamp) as deleted_at,
+             '{probe_id}' as ingest_batch_id,
+             now() as ingested_at,
+             now() as created_at,
+             now() as updated_at"
+    ))?;
+    build_int_std_records(session, config, raw, LEXICON, std, "1970-01-01 00:00:00")?;
+
+    let probe = session.register_table(std, std)?;
+    let corpus_concat = dedupe_core::predict::materialize_concat(session, &corpus)?;
+    let probe_concat = dedupe_core::predict::materialize_concat(session, &probe)?;
+    let tf_tables = build_frozen_tf_tables(
+        session,
+        &settings,
+        model.tf_csv_path,
+        model.model_version,
+        model.tf_snapshot_id,
+    )?;
+    let scored = dedupe_core::incremental::predict_between(
+        session,
+        &settings,
+        &corpus_concat,
+        &probe_concat,
+        &tf_tables,
+        None,
+    )?;
+
+    // Project the corpus side, its current entity, and the evidence. The
+    // membership join is a LEFT join: a record that has not been reconciled yet
+    // is still a legitimate candidate, it just has no entity id to report.
+    let uid = &settings.unique_id_column;
+    let evidence = evidence_json(&settings);
+    let review_low = config.thresholds.review_low;
+    let auto_merge = config.thresholds.auto_merge;
+    let membership_ok = session
+        .register_lake_table("entity_membership", "entity_membership")
+        .is_ok();
+    // Newest membership row per record. `entity_membership` carries
+    // `assigned_at` + `run_id` rather than an active flag, so a record that has
+    // been through several runs has several rows and the latest is the one that
+    // describes it now. A plain join would report an entity the record has since
+    // left.
+    let membership_join = if membership_ok {
+        format!(
+            "left join (
+                 select record_key, entity_id,
+                        row_number() over (
+                            partition by record_key
+                            order by assigned_at desc, run_id desc
+                        ) as rn
+                 from {ENTITY_MEMBERSHIP}
+             ) m on m.record_key = corpus_key and m.rn = 1"
+        )
+    } else {
+        String::new()
+    };
+    let entity_select = if membership_ok {
+        "m.entity_id"
+    } else {
+        "cast(null as varchar)"
+    };
+    let rows = session.query_scratch_strings(&format!(
+        "with scored as (
+             select case when \"{uid}_l\" = '{probe_id}' then \"{uid}_r\" else \"{uid}_l\" end
+                        as corpus_key,
+                    match_probability,
+                    {evidence} as evidence
+             from {preds}
+             where \"{uid}_l\" <> \"{uid}_r\" and match_probability >= {review_low}
+         )
+         select corpus_key,
+                {entity_select},
+                cast(match_probability as varchar),
+                cast(evidence as varchar)
+         from scored
+         {membership_join}
+         order by match_probability desc, corpus_key
+         limit {limit}",
+        preds = scored.physical,
+    ))?;
+
+    let candidates: Vec<ResolveCandidate> = rows
+        .iter()
+        .map(|r| {
+            let probability: f64 = r[2].parse().unwrap_or(0.0);
+            ResolveCandidate {
+                record_key: r[0].clone(),
+                entity_id: Some(r[1].clone()).filter(|v| !v.is_empty()),
+                match_probability: probability,
+                band: band_for(probability, review_low, auto_merge).to_string(),
+                evidence: serde_json::from_str(&r[3]).unwrap_or(serde_json::Value::Null),
+            }
+        })
+        .collect();
+
+    // Clean up the probe tables so a reused session cannot leak one resolve into
+    // the next.
+    session.execute_batch(&format!("drop table if exists {raw}"))?;
+    session.execute_batch(&format!("drop table if exists {std}"))?;
+
+    let decision = candidates
+        .first()
+        .map_or("reject", |c| c.band.as_str())
+        .to_string();
+    Ok(ResolveResult {
+        candidates,
+        decision,
+        snapshot: session.latest_snapshot_version().unwrap_or(0),
+    })
+}
+
+/// Which threshold band a probability falls in. The same three-band policy the
+/// batch path applies, so an online decision and a batch one agree.
+fn band_for(probability: f64, review_low: f64, auto_merge: f64) -> &'static str {
+    if probability >= auto_merge {
+        "auto_merge"
+    } else if probability >= review_low {
+        "review"
+    } else {
+        "reject"
+    }
+}
+
 /// What a run would cost before it runs: how many pairs each blocking rule
 /// generates, and the largest blocks the first rule produces.
 ///

@@ -2870,6 +2870,138 @@ async fn match_preview(
     }
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResolveIn {
+    /// Which declared source's column names the record uses. Required, because
+    /// the payload is mapped through that source's declared columns — the same
+    /// mapping an ingested file goes through.
+    source: String,
+    /// The record itself, in that source's raw column names.
+    record: Value,
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+/// Viewer+: resolve an UNSAVED record against the corpus
+/// (`POST /v1/orgs/{org}/resolve`).
+///
+/// The online half of the product: a form, an ingestion pipeline or a
+/// middleware layer posts a record and learns which entity it belongs to, and
+/// how confident that is, **before** saving it. This is how the engine embeds
+/// in someone else's system rather than owning their data, and it is table
+/// stakes for offering resolution as a service.
+///
+/// Viewer-level and read-only: asking who a record is writes nothing, the same
+/// reasoning that makes the pre-merge report and the blocking estimate
+/// viewer-accessible. A caller that wants the record *stored* sends it to the
+/// import path afterwards — resolving and ingesting are deliberately separate,
+/// so a lookup can never mutate the corpus it is asking about.
+///
+/// The payload goes through the same standardization and the same model the
+/// batch path uses, so an online decision and a batch one agree. The response
+/// carries the per-comparison evidence, so a caller can explain the decision it
+/// just made.
+async fn resolve_record(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Json(body): Json<ResolveIn>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    if !body.record.is_object() {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "record must be a JSON object of the source's columns",
+        );
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "resolve requires Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let env = match pg::get_org(&client, &org).await {
+        Ok(Some(o)) if o.state == "active" => o.env,
+        Ok(Some(o)) => {
+            return detail_err(
+                StatusCode::CONFLICT,
+                format!("org '{org}' is {}; resolve needs an active org", o.state),
+            );
+        }
+        Ok(None) => return detail_err(StatusCode::NOT_FOUND, format!("no org '{org}'")),
+        Err(e) => return pg_err(e),
+    };
+    let limit = body.limit.unwrap_or(10).clamp(1, 100);
+    let source = body.source.clone();
+    let record = body.record.clone();
+
+    match tokio::task::spawn_blocking(move || resolve_blocking(&env, &source, &record, limit)).await
+    {
+        Ok(Ok(body)) => Json(body).into_response(),
+        Ok(Err(msg)) => detail_err(StatusCode::CONFLICT, msg),
+        Err(e) => detail_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("resolve task panicked: {e}"),
+        ),
+    }
+}
+
+/// The blocking half of [`resolve_record`].
+fn resolve_blocking(
+    env: &Value,
+    source: &str,
+    record: &Value,
+    limit: usize,
+) -> Result<Value, String> {
+    let s = |k: &str| env.get(k).and_then(Value::as_str).filter(|v| !v.is_empty());
+    let catalog = s("ER_LAKE_CATALOG").ok_or("org env missing ER_LAKE_CATALOG")?;
+    let data_path = s("ER_LAKE_DATA_PATH").ok_or("org env missing ER_LAKE_DATA_PATH")?;
+    let model_path =
+        s("ER_MODEL_PATH").ok_or("no model yet (ER_MODEL_PATH); run a full run first")?;
+    let tf_path = s("ER_TF_PATH").ok_or("no model yet (ER_TF_PATH); run a full run first")?;
+    let config_path = s("ER_CONFIG_PATH").ok_or("org env missing ER_CONFIG_PATH")?;
+
+    let settings_json =
+        std::fs::read_to_string(model_path).map_err(|e| format!("read model: {e}"))?;
+    let config_text =
+        std::fs::read_to_string(config_path).map_err(|e| format!("read config: {e}"))?;
+    let config = er_config::load_config_str(&config_text)
+        .map_err(|e| format!("config: {}", errfmt::chain(&e)))?;
+    let lexicon = s("ER_LEXICON_PATH")
+        .map(load_lexicon_file)
+        .unwrap_or_default();
+    let session = er_cli::open_lake(catalog, data_path).map_err(|e| format!("open lake: {e:#}"))?;
+    let model = er_cli::MatchModel {
+        settings_json: &settings_json,
+        tf_csv_path: std::path::Path::new(tf_path),
+        model_version: s("ER_MODEL_VERSION").unwrap_or("v0001"),
+        tf_snapshot_id: s("ER_TF_SNAPSHOT_ID").unwrap_or("tf"),
+    };
+    let result = er_cli::resolve_record(&session, &config, &model, source, record, &lexicon, limit)
+        .map_err(|e| format!("{e:#}"))?;
+    serde_json::to_value(&result).map_err(|e| format!("rendering the result: {e}"))
+}
+
+/// Read a nickname lexicon CSV the way the dispatcher does. Resolve needs the
+/// same lexicon the corpus was standardized with, or the probe record's name
+/// variants would not line up with the corpus it is scored against.
+fn load_lexicon_file(path: &str) -> Vec<(String, String)> {
+    std::fs::read_to_string(path)
+        .unwrap_or_default()
+        .lines()
+        .skip(1)
+        .filter(|l| !l.is_empty())
+        .filter_map(|l| {
+            l.split_once(',')
+                .map(|(a, b)| (a.to_string(), b.to_string()))
+        })
+        .collect()
+}
+
 /// Viewer+: what a run would cost before it runs
 /// (`GET /v1/orgs/{org}/blocking-estimate`). Query: `largest` (how many
 /// pathological blocks to name, default 5).
@@ -4981,6 +5113,7 @@ fn build_routes(state: AppState) -> Router {
         .route("/v1/orgs/{org}/match-scores", get(match_scores_list))
         .route("/v1/orgs/{org}/match-preview", get(match_preview))
         .route("/v1/orgs/{org}/blocking-estimate", get(blocking_estimate))
+        .route("/v1/orgs/{org}/resolve", post(resolve_record))
         .route("/v1/orgs/{org}/records", get(records_by_key))
         .route("/v1/orgs/{org}/reviews", get(reviews_list))
         .route(

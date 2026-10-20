@@ -497,9 +497,33 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          exactly the actionable output this feature exists to produce, and it is invisible
          without the breakdown. The test pins it, so a corpus change that makes the rule useful
          gets noticed.
+   - [x] **E8 online resolve API (#37).** `POST /v1/orgs/{org}/resolve` — post an **unsaved**
+         record, learn which entity it belongs to and how confident that is, before storing it.
+         This is how the engine embeds in someone else's system instead of owning their data,
+         and it is table stakes for offering resolution as a service.
+         Viewer-level and read-only, the same reasoning as the pre-merge report: asking who a
+         record is writes nothing. Resolving and ingesting stay deliberately separate, so a
+         lookup can never mutate the corpus it is asking about.
+         The payload goes through **the same standardization the corpus went through** — the
+         declared source column mapping, the same normalizers, the same nickname lexicon — via
+         `build_int_std_records` over a temp table, because a score is only meaningful between
+         comparably prepared values. Candidates come from `predict_between`, which was built,
+         golden-tested and reachable only from `dedupe-cli`. The response carries the
+         per-comparison evidence waterfall, so a caller can explain the decision it just made,
+         and the lake snapshot it read, so it can tell whether the corpus was fresh.
+         The test asserts the two properties that decide whether it is usable: it **agrees with
+         the batch path** (an obvious duplicate returns `auto_merge` and points at the entity the
+         full run built, with every candidate inside that entity reporting the *same* entity id),
+         and it **commits nothing** (partition unchanged, snapshot unchanged, no probe row in
+         `raw_records`). Plus: a stranger is rejected rather than weakly matched, candidates come
+         back best-first, and an undeclared source is refused naming the ones that exist.
+         Two things fixed while building it: `seed_lexicon` creates its table outright, so the
+         resolve path re-seeds (a session that already ran a pipeline would otherwise collide);
+         and `entity_membership` has no active flag, so the entity lookup takes the newest row
+         per record by `(assigned_at, run_id)` — a plain join would report an entity the record
+         has since left.
    - [ ] E5 ensembles/cascades (#31), E6b segment scoping (#54), E7 true incremental (#36/#40),
-         E8 online resolve API (#37), E9 push-records + import-time dedupe (#38/#39/#41),
-         E9b S3 auto-ingestion (#47).
+         E9 push-records + import-time dedupe (#38/#39/#41), E9b S3 auto-ingestion (#47).
 3. **Learning loop** — labels/train/evaluate (#19/#20 + the evaluation-tooling gap),
    related-record features (#26), household/link entities (#33).
 4. **Operating at scale** — job retry + run reports (#58), webhook v2 with an outbox (#43),
