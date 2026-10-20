@@ -105,7 +105,31 @@ Every entity has the same identity shape, validated at catalog load (the V rules
 - **`history: true` generates a row-image ledger.** A control-plane entity may opt into a `<relation>_history` companion (generated DDL, not an entity): `history_id bigserial`, `row_id` (the entity's `id`), `op` (insert/update/delete), `changed_at`, `actor`, and whole-row `old_row`/`new_row` jsonb images, written by one generic `public.er_history()` trigger function (the baseline's entry 0) parameterized by `TG_ARGV[0]`. Schema-evolution-proof — the trigger names no entity columns, so ADD/DROP/ALTER COLUMN never breaks it and old images keep dropped values. The actor comes from the `er.actor` GUC (handlers declare the principal; the dispatcher declares itself) with a `session_user` fallback, and the trigger is deliberately NOT exception-swallowed: if history cannot be written, the write fails. Lake entities refuse the flag — lake history is DuckLake snapshots. Flagged today: org, api_key, config_version, schedule, webhook (not job — claim/heartbeat churn).
 - **Domain linkage columns keep their names.** Only primary-key columns renamed to `id`; a column that *stores* another entity's id keeps its descriptive name everywhere (`record_key`, `rec_a_key`/`rec_b_key`, `entity_id` as an FK on membership/lineage, `run_id`, `master_key`).
 
-The V rules: V1 `id` exists, `NOT NULL`, varchar (or bigint + `serial` for a database-minted ledger); V2 `key: [id]` exactly; V3 `id` leads the declaration; V4 `created_at`/`updated_at` exist as `NOT NULL` timestamps; V5 control timestamps are defaulted and volatile; V6 lake timestamps are run-logical (not volatile); V7 FK naming; V8 FKs reference `id`; V9 reference targets resolve in the catalog (a whole-tree property, enforced on `load_dir` — a programmatic subset catalog defers it); V10 a declared `natural_key` is well-formed. All ten are unconditional: the retrofit completed and the temporary `identity: legacy` ratchet field was deleted with its last marker.
+**The V rules are no longer listed here.** They live in `er-entity-lint` as a
+registry of rule values, each carrying its own code, title, reasoning and a
+worked conforming/violating example pair, and
+**[`docs/entity-lint-rules.md`](entity-lint-rules.md) is generated from that
+registry** by `er-entity lint --docs`. `er-entity verify` byte-compares the
+committed file against the registry, so the reference cannot drift from what is
+enforced — which is exactly how `E007`/`E008`/`E013` below came to be documented
+but never implemented. `er-entity lint --list` is the same table at the terminal
+and `er-entity lint --explain V4` prints one rule in full.
+
+What is worth recording here is the shape rather than the list: V1–V8 are the
+identity conventions above, V9–V10 the cross-tree and natural-key ones, V11–V13
+what each store will actually honour, V14 the history-companion name, and V15 the
+first rule at `Severity::Warning` — a severity the previous fail-fast design could
+not express, so a rule was either absent or it blocked every command in the repo.
+All the error-severity rules are unconditional: the identity retrofit completed
+and the temporary `identity: legacy` ratchet field was deleted with its last
+marker.
+
+Two consequences of the registry living outside `er-entity-spec`. `Catalog::load_dir`
+now checks only what makes a catalog *structurally* coherent (a duplicate column
+name, a key naming no column); anything about to write a generated artifact loads
+through `er_entity_lint::load_linted` instead, as every `er-entity` subcommand
+does. And the pass **collects every violation** rather than returning the first,
+so a new entity converges in one run instead of one error per run.
 
 ### Generation
 
@@ -334,7 +358,9 @@ One command, `er-entity verify`, runs in the existing `rust.yml` test job, which
 
 | Failure | Meaning | Fix |
 |---|---|---|
+| entity lint error (V0xx) | an `entity.yaml` breaks one of the conventions | `er-entity lint --explain <code>` says why the rule exists; fix the YAML. The pass runs first and short-circuits, because the later passes all assume a conforming catalog |
 | generated file differs | an entity or a statement changed and `er-entity gen` was not run, or was run with a different tool version | run `er-entity gen`, commit the diff |
+| `docs/entity-lint-rules.md` differs | a lint rule was added or its prose edited without regenerating the reference | run `er-entity gen` (or `er-entity lint --docs`), commit the diff |
 | statement diagnostic (E0xx or A0xx) | a `.sql` file references a column or type the catalog does not have, or breaks an entity rule | fix the statement or the entity, in the same PR |
 | oracle mismatch | DataFusion's planned schema differs from what DuckDB or Postgres returned for a statement | fix the built-in stub or the type map; never the query |
 | non-empty diff on the control store | the committed migrations do not produce the declared schema | run `er-entity migrate plan`, commit the new migration |

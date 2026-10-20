@@ -1420,6 +1420,7 @@ dependencies = [
  "clap",
  "er-entity-diff",
  "er-entity-gen",
+ "er-entity-lint",
  "er-entity-spec",
  "er-pg-tls",
  "er-sql-check",
@@ -1448,6 +1449,15 @@ dependencies = [
  "er-schema",
  "serde",
  "serde_json",
+ "serde_norway",
+ "thiserror",
+]
+
+[[package]]
+name = "er-entity-lint"
+version = "0.1.0"
+dependencies = [
+ "er-entity-spec",
  "serde_norway",
  "thiserror",
 ]

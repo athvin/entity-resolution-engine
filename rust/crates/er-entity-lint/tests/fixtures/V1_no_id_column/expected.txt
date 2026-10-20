@@ -1,0 +1,2 @@
+[V1] thing: an entity must declare an id column
+[V2] thing: key must be exactly [id], got ["record_key"]

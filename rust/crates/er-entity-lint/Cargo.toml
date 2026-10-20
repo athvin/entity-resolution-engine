@@ -1,0 +1,29 @@
+[package]
+name = "er-entity-lint"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# The entity-convention lint pass: the V-rules as a registry rather than a
+# hand-rolled fail-fast function. Each rule is a value carrying its code, title
+# and explain prose, so `er-entity lint --list` / `--explain` / `--docs` all read
+# the same source the gate enforces — the rule reference cannot drift from the
+# rules. `lint_catalog` collects every diagnostic instead of stopping at the
+# first, which is what `er-entity-spec`'s `SpecError` could not express.
+#
+# Depends on er-entity-spec and nothing else: a rule sees only the parsed
+# catalog, never a database, a planner or the generator. (The statement-level
+# E0xx passes are a separate family and live in er-sql-check, which needs a
+# planner.)
+[dependencies]
+er-entity-spec = { version = "0.1.0", path = "../er-entity-spec" }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+# The fixture tests parse a minimal `entity.yaml` per rule case.
+serde_norway = { workspace = true }
+
+[lints]
+workspace = true

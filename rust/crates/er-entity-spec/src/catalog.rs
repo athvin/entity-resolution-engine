@@ -1,14 +1,28 @@
-//! The [`Catalog`]: the validated set of entities, loaded from an `entities/`
-//! tree. Loading is where every deliberate, loud default lives — a missing
-//! `generate` block, a key column that is not a column, a control-only feature on
-//! a lake entity each fail here with a named cause, never a silent guess.
+//! The [`Catalog`]: the structurally coherent set of entities, loaded from an
+//! `entities/` tree. Loading is where every deliberate, loud default lives — a
+//! missing `generate` block, a key column that is not a column, a duplicate
+//! relation each fail here with a named cause, never a silent guess.
+//!
+//! What loading checks is deliberately narrow: only the invariants a [`Catalog`]'s
+//! own consumers would otherwise trip over — a duplicate column name would emit a
+//! duplicate struct field, a key naming no column would emit an unsatisfiable
+//! primary key. The *conventions* (the V-rules: `id` is the key, the universal
+//! timestamps, foreign-key naming, what each store will honour) live in
+//! `er-entity-lint`, which reports every violation at once instead of the first
+//! and carries each rule's code and reasoning as data.
+//!
+//! The consequence worth knowing: [`Catalog::load_dir`] no longer enforces the
+//! conventions, so anything about to *write a generated artifact* should load
+//! through `er_entity_lint::load_linted` instead. `er-entity verify` does, and
+//! `er-entity-lint`'s own `tree_is_clean` test holds the committed tree to them
+//! for every consumer that still calls `load_dir` directly.
 
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::entity::Entity;
-use crate::types::{ColumnType, Language, Store};
+use crate::types::{ColumnType, Store};
 
 /// A spec validation or load failure, always naming the offending entity/file.
 #[derive(Debug, thiserror::Error)]
@@ -74,60 +88,7 @@ impl Catalog {
                 }
             }
         }
-        // A history companion's name must stay free: `<relation>_history` is
-        // generated DDL, and a declared entity claiming it would collide.
-        for entity in &entities {
-            if !entity.generate.history {
-                continue;
-            }
-            let companion = format!("{}_history", entity.relation);
-            if entities.iter().any(|e| e.relation == companion) {
-                return Err(invalid(
-                    entity,
-                    format!("history companion {companion:?} collides with a declared relation"),
-                ));
-            }
-        }
         Ok(Self { entities })
-    }
-
-    /// V9 — every reference points at a declared Postgres relation and one of
-    /// its real columns (references were previously taken on faith). A property
-    /// of the *whole* tree: [`Catalog::load_dir`] enforces it; a programmatic
-    /// subset catalog (the differ's tests, a focused tool) may skip it.
-    pub fn validate_references(&self) -> Result<(), SpecError> {
-        for entity in &self.entities {
-            for column in &entity.columns {
-                let Some(reference) = &column.references else {
-                    continue;
-                };
-                let Some(target) = self
-                    .entities
-                    .iter()
-                    .find(|e| e.relation == reference.relation && e.has_store(Store::Postgres))
-                else {
-                    return Err(invalid(
-                        entity,
-                        format!(
-                            "column {:?} references {}({}), but no Postgres entity declares \
-                             that relation",
-                            column.name, reference.relation, reference.column
-                        ),
-                    ));
-                };
-                if target.column(&reference.column).is_none() {
-                    return Err(invalid(
-                        entity,
-                        format!(
-                            "column {:?} references {}({}), but the target declares no such \
-                             column",
-                            column.name, reference.relation, reference.column
-                        ),
-                    ));
-                }
-            }
-        }
-        Ok(())
     }
 
     /// Load every `<root>/*/entity.yaml`, parse and validate it, and build the
@@ -162,9 +123,7 @@ impl Catalog {
                 })?;
             entities.push(entity);
         }
-        let catalog = Self::from_entities(entities)?;
-        catalog.validate_references()?;
-        Ok(catalog)
+        Self::from_entities(entities)
     }
 
     /// Every entity, in load order.
@@ -271,47 +230,7 @@ fn validate(entity: &Entity) -> Result<(), SpecError> {
         }
     }
 
-    // A wire implies rust on both ends; a json or arrow wire with no rust reader is
-    // a shape no one can read.
-    let has_wire = !entity.generate.wire.is_empty();
-    if has_wire && !entity.has_language(Language::Rust) {
-        return Err(invalid(
-            entity,
-            "a wire (arrow/json) requires generate.languages to include rust",
-        ));
-    }
-    // (The browser-facing rule — a read-API entity that returns through the data
-    // lane must emit typescript — is enforced in the generator, where the set of
-    // read statements that return this entity is known. Arrow + typescript without
-    // json is a valid data-lane-only entity, so it is not an error here.)
-
-    // DuckLake enforces nothing but NOT NULL: a lake entity may not carry a
-    // default, a reference, accepted_values or an index.
-    if entity.has_store(Store::Duckdb) {
-        for column in &entity.columns {
-            if column.default.is_some()
-                || column.references.is_some()
-                || column.accepted_values.is_some()
-                || column.serial
-            {
-                return Err(invalid(
-                    entity,
-                    format!(
-                        "column {:?} carries a control-plane feature (default/references/accepted_values/serial) but the entity is on the lake, which enforces only NOT NULL",
-                        column.name
-                    ),
-                ));
-            }
-        }
-        if !entity.indexes.is_empty() {
-            return Err(invalid(
-                entity,
-                "indexes are a control-plane feature; the lake has none",
-            ));
-        }
-    }
-
-    // References and index columns, where present, must be real columns.
+    // Index columns, where present, must be real columns.
     for index in &entity.indexes {
         for col in &index.columns {
             if !names.contains(col.as_str()) {
@@ -320,148 +239,6 @@ fn validate(entity: &Entity) -> Result<(), SpecError> {
                     format!("index column {col:?} is not a column"),
                 ));
             }
-        }
-    }
-
-    // V10 — a natural_key, where declared, is well-formed: real columns, no
-    // duplicates, never the universal id/timestamps (those are row identity and
-    // bookkeeping, not what makes two rows the same thing). Nullable columns
-    // are allowed: a MERGE identity can be partial (review_queue's pair keys
-    // are NULL on entity-subject rows; the upserts only ever produce pairs).
-    let mut nk_seen = std::collections::BTreeSet::new();
-    for nk_col in &entity.natural_key {
-        if !nk_seen.insert(nk_col.as_str()) {
-            return Err(invalid(
-                entity,
-                format!("natural_key repeats column {nk_col:?}"),
-            ));
-        }
-        if entity.column(nk_col).is_none() {
-            return Err(invalid(
-                entity,
-                format!("natural_key column {nk_col:?} is not a column"),
-            ));
-        }
-        if matches!(nk_col.as_str(), "id" | "created_at" | "updated_at") {
-            return Err(invalid(
-                entity,
-                format!(
-                    "natural_key may not include {nk_col:?} — the universal columns are row \
-                     identity and bookkeeping, not natural identity"
-                ),
-            ));
-        }
-    }
-
-    // The identity conventions (V1–V8) — unconditional since the retrofit
-    // completed and the `identity: legacy` ratchet was deleted.
-    validate_identity(entity)?;
-
-    // History companions ride the control plane's triggers; the lake's history
-    // is DuckLake snapshots. The trigger keys rows by `id` (V1 guarantees it).
-    if entity.generate.history && !entity.has_store(Store::Postgres) {
-        return Err(invalid(
-            entity,
-            "history: true is control-plane only (lake history is DuckLake snapshots)",
-        ));
-    }
-
-    Ok(())
-}
-
-/// V1–V8: the identity conventions for a migrated (non-legacy) entity.
-fn validate_identity(entity: &Entity) -> Result<(), SpecError> {
-    // V1 — a NOT NULL `id` column exists: varchar (UUIDv7 or sha256 text), or
-    // bigint+serial for database-minted ledgers (audit_log, ddl_log).
-    let Some(id) = entity.column("id") else {
-        return Err(invalid(entity, "V1: an entity must declare an id column"));
-    };
-    if id.nullable {
-        return Err(invalid(entity, "V1: id must be NOT NULL"));
-    }
-    let id_ok =
-        id.col_type == ColumnType::Varchar || (id.col_type == ColumnType::Bigint && id.serial);
-    if !id_ok {
-        return Err(invalid(
-            entity,
-            "V1: id must be varchar (UUIDv7/sha256 text) or bigint with serial: true \
-             (a database-minted ledger)",
-        ));
-    }
-
-    // V2 — the primary key is exactly [id]; natural identity lives in natural_key.
-    if entity.key != ["id"] {
-        return Err(invalid(
-            entity,
-            format!("V2: key must be exactly [id], got {:?}", entity.key),
-        ));
-    }
-
-    // V3 — id leads the declaration (uniform shape across every entity).
-    if entity.columns.first().map(|c| c.name.as_str()) != Some("id") {
-        return Err(invalid(entity, "V3: id must be the first declared column"));
-    }
-
-    // V4 — created_at and updated_at exist as NOT NULL timestamps.
-    for name in ["created_at", "updated_at"] {
-        let Some(column) = entity.column(name) else {
-            return Err(invalid(
-                entity,
-                format!("V4: an entity must declare {name} (timestamp, NOT NULL)"),
-            ));
-        };
-        if column.col_type != ColumnType::Timestamp || column.nullable {
-            return Err(invalid(
-                entity,
-                format!("V4: {name} must be a NOT NULL timestamp"),
-            ));
-        }
-        if entity.has_store(Store::Postgres) {
-            // V5 — control-plane timestamps are wall-clock: defaulted, volatile.
-            if column.default.is_none() || !column.volatile {
-                return Err(invalid(
-                    entity,
-                    format!(
-                        "V5: control-plane {name} must carry a default (now()) and be \
-                         volatile (wall-clock)"
-                    ),
-                ));
-            }
-        } else if column.volatile {
-            // V6 — lake timestamps are run-logical, written by statements and
-            // part of the determinism contract: never volatile (and the lake
-            // default ban already holds).
-            return Err(invalid(
-                entity,
-                format!("V6: lake {name} is run-logical and must not be volatile"),
-            ));
-        }
-    }
-
-    // V7/V8 — FK columns are named for what they point at, and point at id.
-    for column in &entity.columns {
-        let Some(reference) = &column.references else {
-            continue;
-        };
-        let expected = format!("{}_id", crate::entity::singular(&reference.relation));
-        if column.name != expected && !column.name.ends_with(&format!("_{expected}")) {
-            return Err(invalid(
-                entity,
-                format!(
-                    "V7: foreign-key column {:?} must be named {expected:?} (or \
-                     <role>_{expected}) after the relation it references",
-                    column.name
-                ),
-            ));
-        }
-        if reference.column != "id" {
-            return Err(invalid(
-                entity,
-                format!(
-                    "V8: foreign keys reference id, not {}({})",
-                    reference.relation, reference.column
-                ),
-            ));
         }
     }
 

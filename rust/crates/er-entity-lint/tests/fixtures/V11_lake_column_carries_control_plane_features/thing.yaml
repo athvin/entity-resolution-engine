@@ -1,0 +1,29 @@
+kind: entity
+version: 1
+name: thing
+relation: things
+description: "A lake entity shaped to exercise V11_lake_column_carries_control_plane_features."
+key: [id]
+natural_key: [record_key]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "sha256 natural id."
+  - name: record_key
+    type: varchar
+    nullable: false
+    default: "'x'"
+    accepted_values: [x, y]
+    description: "The natural identity."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical creation time."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time."

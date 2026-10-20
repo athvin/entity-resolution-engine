@@ -1,0 +1,27 @@
+kind: entity
+version: 1
+name: org
+relation: orgs
+description: "The tenant registry, present so references can resolve."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust]
+  history: true
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "The tenant's id (UUIDv7)."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the tenant was created."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Wall-clock last-write time."

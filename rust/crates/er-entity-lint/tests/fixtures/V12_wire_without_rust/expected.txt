@@ -1,0 +1,1 @@
+[V12] thing: a wire (arrow/json) requires generate.languages to include rust

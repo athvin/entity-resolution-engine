@@ -50,6 +50,26 @@ every persistent SQL statement is a declared `.sql` + `.yaml` pair;
 bindings. Never hand-edit a generated file. See the `entity-framework` skill and
 `docs/entity-framework-design.md`.
 
+**The entity conventions are a lint registry, not prose.** Every rule an
+`entity.yaml` must hold lives in `rust/crates/er-entity-lint` as a value carrying
+its own code, reasoning and worked examples:
+
+```
+er-entity lint                 # run the pass alone (verify runs it first)
+er-entity lint --list          # the registry as a table
+er-entity lint --explain V4    # one rule, with why it exists
+```
+
+`docs/entity-lint-rules.md` is **generated** from that registry and byte-compared
+by `er-entity verify`, so the reference cannot drift from what is enforced. Adding
+a rule is one file in `er-entity-lint/src/rules/`, one line in the registry, and
+one fixture directory under `tests/fixtures/` — nothing else changes. Codes are
+append-only; a retired rule leaves its code behind.
+
+A consequence worth knowing: `Catalog::load_dir` now checks only structural
+coherence. Anything about to write a generated artifact should load through
+`er_entity_lint::load_linted` instead.
+
 **Errors must not interpolate their own source.** A `#[error("...")]` string must
 not include the `#[from]`/`#[source]` field (or a field named `source` —
 thiserror treats that name as the source automatically). Reporters walk

@@ -1,0 +1,1 @@
+[V11] thing: column "record_key" carries the control-plane feature(s) default/accepted_values but the entity is on the lake, which enforces only NOT NULL

@@ -1,0 +1,1 @@
+[V10] thing: natural_key may not include "created_at" — the universal columns are row identity and bookkeeping, not natural identity

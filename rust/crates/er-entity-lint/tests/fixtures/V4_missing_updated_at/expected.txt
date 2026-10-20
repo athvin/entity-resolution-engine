@@ -1,0 +1,1 @@
+[V4] thing: an entity must declare updated_at (timestamp, NOT NULL)
