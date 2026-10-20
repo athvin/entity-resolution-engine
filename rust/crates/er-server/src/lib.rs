@@ -462,9 +462,102 @@ async fn create_org(
                 &json!({}),
             )
             .await;
-            (StatusCode::CREATED, Json(json!({ "name": body.name }))).into_response()
+            let seeded = seed_starter_model(&client, &body.name, &env, &principal.actor).await;
+            (
+                StatusCode::CREATED,
+                Json(json!({ "name": body.name, "starter_model": seeded })),
+            )
+                .into_response()
         }
         Err(e) => pg_err(e),
+    }
+}
+
+/// Seed the tenant's starter matching model into the registry from the model
+/// file its env already points at, and activate it.
+///
+/// This is the matrix's "zero-config starter model" row, and it is deliberately
+/// seeded from `ER_MODEL_PATH` rather than from a copy of the document: that is
+/// the exact file the dispatcher used to read on every run, so a tenant created
+/// after the registry exists scores against byte-identical settings to one
+/// created before it. From here on, versions are managed through the API.
+///
+/// Best-effort by design. An org whose env names no model (or an unreadable
+/// path) is still created — it simply has no registry model yet, and the
+/// dispatcher falls back to the env file exactly as it always did. Returns what
+/// happened, for the response body and the operator.
+async fn seed_starter_model(
+    client: &tokio_postgres::Client,
+    org: &str,
+    env: &Value,
+    actor: &str,
+) -> Value {
+    let Some(path) = env.get("ER_MODEL_PATH").and_then(Value::as_str) else {
+        return json!({ "seeded": false, "reason": "org env names no ER_MODEL_PATH" });
+    };
+    let Ok(model_json) = std::fs::read_to_string(path) else {
+        return json!({ "seeded": false, "reason": format!("cannot read {path}") });
+    };
+    if dedupe_core::Settings::from_json_str(&model_json).is_err() {
+        return json!({ "seeded": false, "reason": format!("{path} is not a loadable model") });
+    }
+    let Ok(Some(org_row)) = pg::get_org(client, org).await else {
+        return json!({ "seeded": false, "reason": "org row not readable" });
+    };
+    // `POST /v1/orgs` is an idempotent upsert, so a replay must not mint a
+    // second version: versions auto-increment, which would otherwise make
+    // re-registering an org silently accumulate identical models.
+    match pg::list_model_versions(client, &org_row.id).await {
+        Ok(existing) if !existing.is_empty() => {
+            return json!({
+                "seeded": false,
+                "reason": "the org already has model versions",
+                "versions": existing.len(),
+            });
+        }
+        Ok(_) => {}
+        Err(e) => return json!({ "seeded": false, "reason": format!("{e}") }),
+    }
+    // The entity type the lake will resolve. No published config yet at
+    // create-org time, so fall back to the env's declared type, then person.
+    let entity_type = env
+        .get("ER_ENTITY_TYPE")
+        .and_then(Value::as_str)
+        .unwrap_or("person");
+    let provenance = json!({
+        "origin": "seeded",
+        "source_path": path,
+        "model_version_env": env.get("ER_MODEL_VERSION"),
+        "by": actor,
+    });
+    let created = pg::create_model_version(
+        client,
+        &org_row.id,
+        pg::DEFAULT_MODEL_NAME,
+        entity_type,
+        &model_json,
+        env.get("ER_MODEL_VERSION")
+            .and_then(Value::as_str)
+            .unwrap_or("v0001"),
+        env.get("ER_TF_SNAPSHOT_ID").and_then(Value::as_str),
+        &provenance,
+        actor,
+    )
+    .await;
+    match created {
+        Ok(m) => {
+            if let Err(e) = pg::activate_model_version(client, &org_row.id, &m.id).await {
+                return json!({ "seeded": false, "reason": format!("activate failed: {e}") });
+            }
+            json!({
+                "seeded": true,
+                "name": m.name,
+                "version": m.version,
+                "model_hash": m.model_hash,
+            })
+        }
+        // A re-POST of the same org (the upsert path) already has its seed.
+        Err(e) => json!({ "seeded": false, "reason": format!("{e}") }),
     }
 }
 
@@ -750,6 +843,337 @@ async fn create_config_version(
             .into_response(),
         Err(e) => pg_err(e),
     }
+}
+
+/// The model registry's wire projection. `model_json` is omitted from list
+/// responses — it is the largest field by far and a list of twenty versions
+/// would be mostly settings documents nobody asked for.
+fn model_summary(m: &er_entities::matching_model::MatchingModel) -> Value {
+    json!({
+        "id": m.id,
+        "name": m.name,
+        "version": m.version,
+        "entity_type": m.entity_type,
+        "model_hash": m.model_hash,
+        "model_version_label": m.model_version_label,
+        "tf_snapshot_id": m.tf_snapshot_id,
+        "state": m.state,
+        "provenance": m.provenance,
+        "created_by": m.created_by,
+        "activated_at": m.activated_at.as_ref().map(pg::ts),
+        "created_at": pg::ts(&m.created_at),
+    })
+}
+
+/// A model version's per-field weights: for each comparison, each level's
+/// `m`/`u` probabilities and the log-odds they imply.
+///
+/// This is the matrix's "configurable field weights" surface. The engine has
+/// always carried these numbers and could round-trip them, but nothing outside
+/// it could read them — `grep m_probability` over the server and the frontend
+/// returned nothing at all. Derived from the stored document rather than
+/// duplicated into columns, so it cannot drift from what the engine loads.
+fn model_weights(model_json: &str) -> Option<Value> {
+    let settings = dedupe_core::settings::json::SettingsJson::from_json_str(model_json).ok()?;
+    let comparisons: Vec<Value> = settings
+        .comparisons
+        .iter()
+        .map(|c| {
+            let levels: Vec<Value> = c
+                .comparison_levels
+                .iter()
+                .map(|l| {
+                    json!({
+                        "label": l.label_for_charts,
+                        "sql_condition": l.sql_condition,
+                        "is_null_level": l.is_null_level,
+                        "m_probability": l.m_probability,
+                        "u_probability": l.u_probability,
+                        // log2(m/u) is the weight the level contributes to a
+                        // pair's score; shown so a reviewer can read the model
+                        // without recomputing it.
+                        "log2_bayes_factor": match (l.m_probability, l.u_probability) {
+                            (Some(m), Some(u)) if u > 0.0 && m > 0.0 => Some((m / u).log2()),
+                            _ => None,
+                        },
+                        "tf_adjustment_column": l.tf_adjustment_column,
+                    })
+                })
+                .collect();
+            json!({
+                "output_column_name": c.output_column_name,
+                "comparison_description": c.comparison_description,
+                "levels": levels,
+            })
+        })
+        .collect();
+    Some(json!({
+        "link_type": settings.link_type,
+        "probability_two_random_records_match": settings.probability_two_random_records_match,
+        "blocking_rules": settings.blocking_rules_to_generate_predictions,
+        "comparisons": comparisons,
+    }))
+}
+
+/// Viewer+: the tenant's model versions (`GET /v1/orgs/{org}/models`), newest
+/// version of each name first, plus which one is active.
+async fn models_index(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return model_registry_unavailable();
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    match pg::list_model_versions(&client, &org_row.id).await {
+        Ok(rows) => {
+            let active = rows.iter().find(|m| m.state == "active").map(
+                |m| json!({ "name": m.name, "version": m.version, "model_hash": m.model_hash }),
+            );
+            Json(json!({
+                "items": rows.iter().map(model_summary).collect::<Vec<_>>(),
+                "active": active,
+            }))
+            .into_response()
+        }
+        Err(e) => pg_err(e),
+    }
+}
+
+/// The 501 for model-registry routes when no Postgres backend is configured.
+fn model_registry_unavailable() -> axum::response::Response {
+    (
+        StatusCode::NOT_IMPLEMENTED,
+        Json(json!({ "detail": "model registry requires Postgres" })),
+    )
+        .into_response()
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ModelVersionIn {
+    /// The settings document. Validated by loading it through the engine's own
+    /// parser, so an unusable model cannot be stored.
+    model_json: String,
+    /// The identity stamped onto rows this model scores. Required, not derived:
+    /// it must agree with the term-frequency snapshot's `model_version`, and a
+    /// guess that disagrees changes scores silently instead of failing.
+    model_version_label: String,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    tf_snapshot_id: Option<String>,
+    #[serde(default)]
+    provenance: Option<Value>,
+}
+
+/// Admin+: mint a new model version (`POST /v1/orgs/{org}/models/versions`).
+///
+/// Versions are immutable — this is the only way a model changes, and it always
+/// lands as a `draft`. Activation is a separate, explicit step so that uploading
+/// a model can never silently re-cluster a tenant's corpus.
+async fn create_model_version(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Json(body): Json<ModelVersionIn>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Admin) {
+        return e.into_response();
+    }
+    // Validate by loading it the way the engine will. A document that cannot be
+    // parsed here would fail inside a dispatcher job later, where the only
+    // symptom is a failed run.
+    // `Settings::from_json_str` is exactly what the engine calls at run time.
+    if let Err(e) = dedupe_core::Settings::from_json_str(&body.model_json) {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("model_json is not a loadable model: {}", errfmt::chain(&e)),
+        );
+    }
+    let Some(dsn) = &state.dsn else {
+        return model_registry_unavailable();
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    // The entity type comes from the org's active config, not the caller: a
+    // model scores against one canonical schema and the lake has exactly one.
+    let entity_type = match org_active_config(&client, &org_row).await {
+        Ok(c) => {
+            if c.entity_type.is_person() {
+                "person"
+            } else {
+                "account"
+            }
+        }
+        Err(r) => return *r,
+    };
+    let name = body
+        .name
+        .as_deref()
+        .unwrap_or(pg::DEFAULT_MODEL_NAME)
+        .to_string();
+    let provenance = body
+        .provenance
+        .unwrap_or_else(|| json!({ "origin": "uploaded", "by": principal.actor }));
+    let _ = pg::set_actor(&client, &principal.actor).await;
+    match pg::create_model_version(
+        &client,
+        &org_row.id,
+        &name,
+        entity_type,
+        &body.model_json,
+        &body.model_version_label,
+        body.tf_snapshot_id.as_deref(),
+        &provenance,
+        &principal.actor,
+    )
+    .await
+    {
+        Ok(m) => {
+            let _ = pg::audit(
+                &client,
+                &principal.actor,
+                Some(&org),
+                "model.version.create",
+                &json!({ "name": m.name, "version": m.version, "model_hash": m.model_hash }),
+            )
+            .await;
+            (StatusCode::CREATED, Json(model_summary(&m))).into_response()
+        }
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Viewer+: one model version with its document and weights
+/// (`GET /v1/orgs/{org}/models/{name}/versions/{version}`).
+async fn get_model_version(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, name, version)): Path<(String, String, i64)>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return model_registry_unavailable();
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    match pg::model_version(&client, &org_row.id, &name, version).await {
+        Ok(Some(m)) => {
+            let mut body = model_summary(&m);
+            body["model_json"] = json!(m.model_json);
+            body["weights"] = model_weights(&m.model_json).unwrap_or(Value::Null);
+            Json(body).into_response()
+        }
+        Ok(None) => detail_err(
+            StatusCode::NOT_FOUND,
+            format!("no model version {name}/{version}"),
+        ),
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Admin+: activate a model version
+/// (`POST /v1/orgs/{org}/models/{name}/versions/{version}/activate`).
+///
+/// Activation is explicit and recorded, because it decides what the next run
+/// scores against — the thing DataGroomr avoids by pinning old models rather
+/// than letting a model change re-cluster silently.
+async fn activate_model_version(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, name, version)): Path<(String, String, i64)>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Admin) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return model_registry_unavailable();
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    let target = match pg::model_version(&client, &org_row.id, &name, version).await {
+        Ok(Some(m)) => m,
+        Ok(None) => {
+            return detail_err(
+                StatusCode::NOT_FOUND,
+                format!("no model version {name}/{version}"),
+            );
+        }
+        Err(e) => return pg_err(e),
+    };
+    // A model scores one canonical schema; activating the other entity type's
+    // model against this lake would produce SQL referring to columns that do
+    // not exist, discovered inside a run.
+    let configured = match org_active_config(&client, &org_row).await {
+        Ok(c) => {
+            if c.entity_type.is_person() {
+                "person"
+            } else {
+                "account"
+            }
+        }
+        Err(r) => return *r,
+    };
+    if target.entity_type != configured {
+        return detail_err(
+            StatusCode::CONFLICT,
+            format!(
+                "model {name}/{version} is a {} model but this org resolves {configured} entities",
+                target.entity_type
+            ),
+        );
+    }
+    let _ = pg::set_actor(&client, &principal.actor).await;
+    if let Err(e) = pg::activate_model_version(&client, &org_row.id, &target.id).await {
+        return pg_err(e);
+    }
+    let _ = pg::audit(
+        &client,
+        &principal.actor,
+        Some(&org),
+        "model.version.activate",
+        &json!({ "name": name, "version": version, "model_hash": target.model_hash }),
+    )
+    .await;
+    Json(json!({
+        "name": name,
+        "version": version,
+        "state": "active",
+        "model_hash": target.model_hash,
+    }))
+    .into_response()
 }
 
 /// The 501 for config routes when no Postgres backend is configured.
@@ -4307,6 +4731,16 @@ fn build_routes(state: AppState) -> Router {
         .route(
             "/v1/orgs/{org}/api-keys/{key_id}",
             axum::routing::delete(revoke_key),
+        )
+        .route("/v1/orgs/{org}/models", get(models_index))
+        .route("/v1/orgs/{org}/models/versions", post(create_model_version))
+        .route(
+            "/v1/orgs/{org}/models/{name}/versions/{version}",
+            get(get_model_version),
+        )
+        .route(
+            "/v1/orgs/{org}/models/{name}/versions/{version}/activate",
+            post(activate_model_version),
         )
         .route(
             "/v1/orgs/{org}/config/versions",

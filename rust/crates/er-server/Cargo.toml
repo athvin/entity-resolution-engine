@@ -34,7 +34,7 @@ er-std = { path = "../er-std" }
 # The generated entity structs + typed control query functions (job, org, …): the
 # read/write path no longer hand-writes SQL or row mapping.
 er-entities = { path = "../er-entities" }
-er-ids = { path = "../er-ids" }
+er-ids = { version = "0.1.0", path = "../er-ids" }
 # The OpenAPI document references the generated structs' `ToSchema`, so
 # `openapi.json` (and the frontend's `schema.d.ts`) follow the entities.
 utoipa = { workspace = true }

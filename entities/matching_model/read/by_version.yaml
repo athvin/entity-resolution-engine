@@ -1,0 +1,9 @@
+kind: statement
+operation: read
+mode: partial
+description: "One model version by its natural key."
+params:
+  - { name: org_id, type: varchar }
+  - { name: name, type: varchar }
+  - { name: version, type: bigint }
+returns: entity

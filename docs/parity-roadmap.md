@@ -341,10 +341,54 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
       was cited three times in `docs/plan-to-aws.md` and once in `docs/infrastructure.md`,
       alongside two Python contract tests deleted with the Python tree.
 
-### Waves 1–8 (queued)
-1. **Matching backbone** — model registry + API (#34/#21/#28), the config→model compiler that
-   makes `comparisons:`/`blocking:` actually execute (#4/#21/#22/#23/#24), hard constraints and
-   relationship exclusions (#18/#32), type-aware comparators (#25).
+### Wave 1 — matching backbone
+- [x] **E1 model registry + API (#34 model versioning, #21 field weights, #28 starter models).**
+      A tenant's model was a **file path in its env** (`ER_MODEL_PATH`). There was no way to see
+      which model an org scored against, no way to change it without editing the org's env, no
+      history of what it used to be, and no way to read the m/u probabilities the engine had
+      always carried — `grep m_probability` over the server and the frontend returned nothing.
+      New `matching_model` entity: immutable versions, monotonic within a name, with
+      `model_json` stored as text so it round-trips byte-exact (`model_hash` is taken over those
+      bytes and determinism depends on them), provenance, and `state` draft→active→archived.
+      `GET /models`, `POST /models/versions`, `GET /models/{name}/versions/{v}`,
+      `POST .../activate`.
+      Three decisions worth keeping:
+      * **`model_version_label` is a column, and required on upload.** It is the identity
+        stamped onto scored rows, and it must equal the `model_version` the frozen TF snapshot
+        CSV is keyed by — the TF lookup joins `(model_version, tf_snapshot_id)` and a mismatch
+        silently returns *no* term frequencies, changing scores rather than failing. Too
+        dangerous to derive, so the caller states it. (Pleasant consequence: activating a new
+        label is fingerprint drift, so W0.3's guard promotes the next incremental run to full.)
+      * **Activation is one statement**, `CASE`-updating the target and the incumbent together.
+        Two statements would leave a window with no active model; a partial unique index would
+        be worse, since a single UPDATE moving both rows can transiently violate a
+        non-deferrable unique index even when the end state is legal.
+      * **Seeded from `ER_MODEL_PATH`, not from a copy.** Creating an org reads the exact file
+        the dispatcher used to read and activates it, so a tenant created after the registry
+        scores identically to one created before. Seeding is skipped when the org already has
+        versions, because `POST /v1/orgs` is an idempotent upsert and versions auto-increment.
+      The dispatcher resolves the active version in its async half (the blocking half cannot
+      touch Postgres) and **falls back to the env file** when an org has no registry row — which
+      is what keeps every pre-existing org and every fixture unchanged. The TF snapshot itself
+      stays a file; the registry stores the settings document and the stamp, not the frozen
+      frequencies.
+      Weights (#21) are *derived* from the stored document rather than duplicated into columns,
+      so they cannot drift from what the engine loads: per level, `m`, `u`, and the
+      `log2(m/u)` the level contributes.
+      Tests (`pg_model_registry.rs`): seeding + activation on org create; an upsert does not
+      accumulate versions; the stored document is byte-identical to the seeded file; the weights
+      view exposes m/u and log-odds; an unloadable document is refused at the API rather than
+      inside a run; a missing label is refused; uploads land as drafts; activation archives the
+      incumbent and exactly one version is ever active; re-activating is a no-op; a missing
+      version 404s; an account model cannot be activated against a person org, and the refusal
+      leaves the active pointer alone.
+- [ ] **E2** the config→model compiler that makes `comparisons:`/`blocking:` actually execute
+      (#4/#21/#22/#23/#24) — the keystone: that DSL is authored, hashed and validated today, and
+      never compiled into a run.
+- [ ] **E3** hard constraints and relationship exclusions (#18/#32).
+- [ ] **E4** type-aware comparators (#25).
+
+### Waves 2–8 (queued)
 2. **Scale + prevention** — ensembles/cascades (#31), blocking estimates + segment scoping
    (#3/#54), true incremental (#36/#40), online resolve API (#37), push-records + import-time
    dedupe (#38/#39/#41), S3 auto-ingestion (#47).

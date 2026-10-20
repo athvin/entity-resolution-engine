@@ -21,6 +21,7 @@ pub mod ingest_batch;
 pub mod int_std_record;
 pub mod job;
 pub mod match_score;
+pub mod matching_model;
 pub mod org;
 pub mod raw_record;
 pub mod record_overlay;

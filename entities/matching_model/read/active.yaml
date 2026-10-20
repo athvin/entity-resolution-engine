@@ -1,0 +1,7 @@
+kind: statement
+operation: read
+mode: partial
+description: "The tenant's active model version — what a run scores against. Ordered by version so that even if two rows were ever active (which activation makes impossible), the newer one is served rather than an arbitrary one."
+params:
+  - { name: org_id, type: varchar }
+returns: entity

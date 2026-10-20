@@ -133,6 +133,16 @@ pub async fn schedule_tick(
     Ok(enqueued)
 }
 
+/// A tenant's active registry model, resolved before the blocking half runs.
+/// Owned rather than borrowed because it crosses a `spawn_blocking` boundary.
+struct ActiveModel {
+    model_json: String,
+    model_version_label: String,
+    tf_snapshot_id: Option<String>,
+    name: String,
+    version: i64,
+}
+
 /// Claim + run one job. `Ok(true)` ran a job (outcome persisted), `Ok(false)`
 /// the queue was empty, `Err` a Postgres failure (fatal to the caller).
 async fn dispatch_once(
@@ -159,11 +169,32 @@ async fn dispatch_once(
     let outcome = if job.kind == "apply_corrections" {
         drain_and_correct(client, &job.org_id, &env, &job.id).await
     } else {
+        // The active model comes from the registry, read here because `run_job`
+        // is the blocking half and cannot touch the async Postgres client. An
+        // org with no registry version resolves `None` and `run_job` falls back
+        // to the env file, which is what every org did before the registry
+        // existed.
+        let model = match pg::active_model_version(client, &job.org_id).await {
+            Ok(m) => m.map(|m| ActiveModel {
+                model_json: m.model_json,
+                model_version_label: m.model_version_label,
+                tf_snapshot_id: m.tf_snapshot_id,
+                name: m.name,
+                version: m.version,
+            }),
+            Err(e) => {
+                pg::mark(client, &job.id, "failed").await?;
+                eprintln!("job {} failed: reading the model registry: {e}", job.id);
+                return Ok(true);
+            }
+        };
         let jb = job.clone();
         let drop_root = org.drop_root.clone();
-        tokio::task::spawn_blocking(move || run_job(&jb, &env, drop_root.as_deref()))
-            .await
-            .unwrap_or_else(|e| Err(format!("dispatcher task panicked: {e}")))
+        tokio::task::spawn_blocking(move || {
+            run_job(&jb, &env, drop_root.as_deref(), model.as_ref())
+        })
+        .await
+        .unwrap_or_else(|e| Err(format!("dispatcher task panicked: {e}")))
     };
 
     let state = if outcome.is_ok() {
@@ -228,7 +259,12 @@ fn load_lexicon(path: &str) -> Vec<(String, String)> {
 
 /// Dispatch one job to its `er-cli` op over the org's lake. Synchronous (runs on
 /// a blocking thread). Returns a human error string on any failure.
-fn run_job(job: &Job, env: &Value, drop_root: Option<&str>) -> Result<(), String> {
+fn run_job(
+    job: &Job,
+    env: &Value,
+    drop_root: Option<&str>,
+    active_model: Option<&ActiveModel>,
+) -> Result<(), String> {
     let catalog = env_str(env, "ER_LAKE_CATALOG").ok_or("org env missing ER_LAKE_CATALOG")?;
     let data_path = env_str(env, "ER_LAKE_DATA_PATH").ok_or("org env missing ER_LAKE_DATA_PATH")?;
     let session = er_cli::open_lake(catalog, data_path).map_err(|e| format!("open lake: {e:#}"))?;
@@ -284,19 +320,40 @@ fn run_job(job: &Job, env: &Value, drop_root: Option<&str>) -> Result<(), String
                 }
                 found
             };
-            let model_path =
-                env_str(env, "ER_MODEL_PATH").ok_or("org env missing ER_MODEL_PATH")?;
+            // The TF snapshot is still a file on disk: the registry stores the
+            // settings document and the identity it stamps, not the frozen term
+            // frequencies, so `ER_TF_PATH` stays the source for those.
             let tf_path = env_str(env, "ER_TF_PATH").ok_or("org env missing ER_TF_PATH")?;
-            let settings_json =
-                std::fs::read_to_string(model_path).map_err(|e| format!("read model: {e}"))?;
             let lexicon = env_str(env, "ER_LEXICON_PATH")
                 .map(load_lexicon)
                 .unwrap_or_default();
+            // Registry first, env file second. The fallback is what keeps an org
+            // created before the registry existed scoring exactly as it did.
+            let from_env;
+            let settings_json: &str = if let Some(m) = active_model {
+                eprintln!(
+                    "run {run_id}: model {}/{} ({})",
+                    m.name, m.version, m.model_version_label
+                );
+                &m.model_json
+            } else {
+                let model_path =
+                    env_str(env, "ER_MODEL_PATH").ok_or("org env missing ER_MODEL_PATH")?;
+                from_env =
+                    std::fs::read_to_string(model_path).map_err(|e| format!("read model: {e}"))?;
+                &from_env
+            };
             let model = er_cli::MatchModel {
-                settings_json: &settings_json,
+                settings_json,
                 tf_csv_path: Path::new(tf_path),
-                model_version: env_str(env, "ER_MODEL_VERSION").unwrap_or("v0001"),
-                tf_snapshot_id: env_str(env, "ER_TF_SNAPSHOT_ID").unwrap_or("tf"),
+                model_version: active_model.map_or_else(
+                    || env_str(env, "ER_MODEL_VERSION").unwrap_or("v0001"),
+                    |m| m.model_version_label.as_str(),
+                ),
+                tf_snapshot_id: active_model
+                    .and_then(|m| m.tf_snapshot_id.as_deref())
+                    .or_else(|| env_str(env, "ER_TF_SNAPSHOT_ID"))
+                    .unwrap_or("tf"),
             };
 
             // The mode the job asked for, then the drift guard's verdict on it.
