@@ -25,13 +25,15 @@
 //! NOT YET PORTED: the steward WRITE surface (assertion create/delete, review
 //! resolve, unmerge, job resume) and merge-plans — they need the review /
 //! assertion / run-tracking data-plane stages that were removed with the Python.
-//! OIDC BFF auth, the k8s launcher, the mailer, and webhook delivery are
-//! infrastructure-bound. Unit tests are network-free (`tests/http.rs`); the
-//! Postgres + DuckLake paths are gated (`ER_TEST_PG_DSN`, `DEDUPE_E2E_DUCKLAKE`).
+//! OIDC BFF auth and the k8s launcher are infrastructure-bound. The mailer is
+//! live ([`mail`], `POST /v1/email`) but inert until an environment configures a
+//! backend. Unit tests are network-free (`tests/http.rs`); the Postgres +
+//! DuckLake paths are gated (`ER_TEST_PG_DSN`, `DEDUPE_E2E_DUCKLAKE`).
 
 pub mod config_check;
 pub mod dispatcher;
 pub mod errfmt;
+pub mod mail;
 pub mod openapi;
 pub mod pg;
 pub mod read;
@@ -82,6 +84,11 @@ pub struct AppState {
     pub operator_token: String,
     store: Arc<Mutex<JobStore>>,
     dsn: Option<String>,
+    /// Outbound email. Defaults to [`mail::Mailer::off`], which is why the
+    /// network-free unit tests can construct a state without configuring one:
+    /// `POST /v1/email` then answers 503, exactly as an environment with no mail
+    /// backend does.
+    mail: Arc<mail::Mailer>,
 }
 
 impl AppState {
@@ -92,6 +99,7 @@ impl AppState {
             operator_token,
             store: Arc::new(Mutex::new(JobStore::default())),
             dsn: None,
+            mail: Arc::new(mail::Mailer::off()),
         }
     }
 
@@ -104,7 +112,16 @@ impl AppState {
             operator_token,
             store: Arc::new(Mutex::new(JobStore::default())),
             dsn: Some(dsn),
+            mail: Arc::new(mail::Mailer::off()),
         }
+    }
+
+    /// Attach a mail backend. Separate from the constructors because building a
+    /// SES client is async and these are not.
+    #[must_use]
+    pub fn with_mail(mut self, mailer: mail::Mailer) -> Self {
+        self.mail = Arc::new(mailer);
+        self
     }
 }
 
@@ -432,6 +449,64 @@ async fn create_org(
             (StatusCode::CREATED, Json(json!({ "name": body.name }))).into_response()
         }
         Err(e) => pg_err(e),
+    }
+}
+
+/// Operator: send one transactional email (`POST /v1/email`).
+///
+/// The BFF's only mail path (`frontend/src/lib/bff/relay.ts`), so the platform
+/// keeps one transport and one template set. Operator-only because the BFF holds
+/// the operator token and nothing else should be able to make this service send
+/// mail to an arbitrary address.
+///
+/// The status codes matter to the caller, which treats failure as data:
+/// **422** a template or parameter the caller got wrong — a real bug, fix the
+/// call site; **503** this environment has no mail backend, which is the normal
+/// state in dev and the case `relayEmail` turns into `false`; **502** the
+/// transport rejected it. On success **202**: SES has accepted the message, and
+/// delivery is its problem from there.
+async fn send_email(
+    principal: Principal,
+    State(state): State<AppState>,
+    Json(body): Json<mail::Message>,
+) -> impl IntoResponse {
+    if let Err(e) = operator_only(&principal) {
+        return e.into_response();
+    }
+    if body.to.trim().is_empty() {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "detail": "a recipient is required" })),
+        )
+            .into_response();
+    }
+    match state.mail.send(&body).await {
+        Ok(()) => (StatusCode::ACCEPTED, Json(json!({}))).into_response(),
+        Err(e @ mail::MailError::Invalid(_)) => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "detail": e.to_string() })),
+        )
+            .into_response(),
+        Err(e @ mail::MailError::NotConfigured) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "detail": e.to_string() })),
+        )
+            .into_response(),
+        Err(e @ mail::MailError::Transport { .. }) => {
+            // The recipient is deliberately absent from the log line: this runs
+            // for password resets, so the address is the one thing worth not
+            // writing down on every transport hiccup.
+            eprintln!(
+                "er-server: email transport failed (template={}): {}",
+                body.template,
+                errfmt::chain(&e)
+            );
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({ "detail": "the mail transport rejected the message" })),
+            )
+                .into_response()
+        }
     }
 }
 
@@ -1001,11 +1076,10 @@ async fn put_lexicon(
             format!("lexicon write: {e}"),
         );
     }
-    if existing.is_none() {
-        if let Err(e) = pg::merge_org_env(&client, &org, &json!({ "ER_LEXICON_PATH": path })).await
-        {
-            return pg_err(e);
-        }
+    if existing.is_none()
+        && let Err(e) = pg::merge_org_env(&client, &org, &json!({ "ER_LEXICON_PATH": path })).await
+    {
+        return pg_err(e);
     }
 
     let idem = format!("lexicon-apply:{}", er_ids::new_v7());
@@ -2035,10 +2109,10 @@ async fn golden_records_list(
     if let Ok(v) = axum::http::HeaderValue::from_str(&snapshot.to_string()) {
         headers.insert("x-er-snapshot", v);
     }
-    if let Some(cursor) = &page.next_cursor {
-        if let Ok(v) = axum::http::HeaderValue::from_str(cursor) {
-            headers.insert("x-er-next-cursor", v);
-        }
+    if let Some(cursor) = &page.next_cursor
+        && let Ok(v) = axum::http::HeaderValue::from_str(cursor)
+    {
+        headers.insert("x-er-next-cursor", v);
     }
     response
 }
@@ -3948,6 +4022,7 @@ fn build_routes(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/v1/orgs", get(list_orgs).post(create_org))
+        .route("/v1/email", post(send_email))
         .route("/v1/jobs", get(jobs_global))
         .route("/v1/audit", get(audit_global))
         .route("/v1/orgs/{org}", get(get_org))
@@ -4123,12 +4198,15 @@ pub fn app(state: AppState) -> Router {
 /// (`ER_OPERATOR_TOKEN`) and, if `ER_PG_DSN` is set, the Postgres job-queue
 /// backend (otherwise the in-memory store).
 #[must_use]
-pub fn state_from_env() -> AppState {
+pub async fn state_from_env() -> AppState {
     let operator = std::env::var("ER_OPERATOR_TOKEN").unwrap_or_default();
-    match std::env::var("ER_PG_DSN") {
+    let state = match std::env::var("ER_PG_DSN") {
         Ok(dsn) if !dsn.is_empty() => AppState::with_pg(operator, dsn),
         _ => AppState::new(operator),
-    }
+    };
+    // Async because a SES backend resolves credentials at construction; `off`
+    // and `log` do not await anything.
+    state.with_mail(mail::Mailer::from_env().await)
 }
 
 #[cfg(test)]

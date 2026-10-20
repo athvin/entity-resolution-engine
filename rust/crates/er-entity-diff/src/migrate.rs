@@ -47,10 +47,10 @@ fn topo_order<'a>(entities: &[&'a Entity]) -> Vec<&'a Entity> {
             return;
         }
         for col in &entity.columns {
-            if let Some(reference) = &col.references {
-                if let Some(dep) = by_rel.get(reference.relation.as_str()) {
-                    visit(dep, by_rel, visited, ordered);
-                }
+            if let Some(reference) = &col.references
+                && let Some(dep) = by_rel.get(reference.relation.as_str())
+            {
+                visit(dep, by_rel, visited, ordered);
             }
         }
         ordered.push(entity);
@@ -142,11 +142,10 @@ pub fn plan_migration(
                 if store == Store::Postgres
                     && entity.generate.history
                     && !live.contains_key(&format!("{}_history", entity.relation))
+                    && let Some(companion) = er_entity_gen::emit_history_companion_ddl(entity)
                 {
-                    if let Some(companion) = er_entity_gen::emit_history_companion_ddl(entity) {
-                        needs_history_prelude = true;
-                        plan.statements.push(companion);
-                    }
+                    needs_history_prelude = true;
+                    plan.statements.push(companion);
                 }
             }
         }

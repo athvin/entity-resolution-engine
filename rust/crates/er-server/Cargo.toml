@@ -71,6 +71,37 @@ sha2 = { workspace = true }
 hmac = { workspace = true }
 reqwest = { workspace = true }
 hex = { workspace = true }
+# Email (§7.5): SES via the API, not the SMTP interface, so the pod's EKS Pod
+# Identity credentials sign the call and no static access key is ever minted
+# (this is infrastructure.md §9.3's scheduled exit, taken before the credential
+# it retires was created).
+#
+# `default-features = false` throughout, deliberately — the defaults are
+# expensive and none of what they add is reachable here:
+#   * `default-https-client` resolves TLS to aws-lc-rs, whose `aws-lc-sys`
+#     needs cmake and a C toolchain the `rust:1-bookworm` build image does not
+#     carry. We pass an explicit ring-backed client instead, which is also the
+#     provider reqwest already uses, so the image links one crypto library.
+#   * `sso`/`credentials-process` pull aws-sdk-sso + aws-sdk-ssooidc and two
+#     more credential providers the server cannot use: it authenticates by EKS
+#     Pod Identity, which is the container-credentials provider in the base
+#     chain. The consequence to know: `aws sso login` credentials will NOT work
+#     for a locally-run er-server — use ER_MAIL_BACKEND=log, which is what dev
+#     wants anyway. (These crates also require Rust 1.88, which was a second
+#     reason to exclude them until `time`'s RUSTSEC-2026-0009 fix forced the
+#     workspace floor to 1.88 regardless — see rust/Cargo.toml.)
+aws-config = { version = "1.8.11", default-features = false, features = [
+  "rt-tokio",
+  "behavior-version-latest",
+] }
+aws-sdk-sesv2 = { version = "1.85.0", default-features = false, features = [
+  "rt-tokio",
+  "behavior-version-latest",
+] }
+aws-smithy-http-client = { version = "1.1.4", default-features = false, features = [
+  "rustls-ring",
+] }
+thiserror.workspace = true
 
 [lints]
 workspace = true

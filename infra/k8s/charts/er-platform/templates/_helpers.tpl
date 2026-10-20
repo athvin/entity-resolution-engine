@@ -75,13 +75,27 @@ app.kubernetes.io/instance: {{ .root.Release.Name }}
     secretKeyRef:
       name: er-erserver-env
       key: ERSERVER_OPERATOR_TOKEN
-{{- with .Values.erserver.email.from }}
-- name: ERSERVER_EMAIL_FROM
+{{/* Email (§7.5). Transport is the SES API, signed by the pod's EKS Pod
+     Identity credentials, so there is no credential here to mount — only the
+     backend selector, the verified From address and the configuration set.
+     An unset backend leaves POST /v1/email answering 503, which the BFF's
+     relay already treats as "not configured" and falls back from.
+
+     The Python-era ERSERVER_EMAIL_FROM / ERSERVER_EMAIL_BASE_URL were replaced
+     rather than kept beside these: nothing read either one, and BASE_URL
+     implied the server builds the links, which it does not — every link
+     arrives fully formed in the request's `params`. */}}
+{{- with .Values.erserver.email.backend }}
+- name: ER_MAIL_BACKEND
   value: {{ . | quote }}
 {{- end }}
-{{- if or .Values.erserver.email.baseUrl .Values.ingress.enabled }}
-- name: ERSERVER_EMAIL_BASE_URL
-  value: {{ .Values.erserver.email.baseUrl | default (printf "https://%s" (include "er-platform.host" .)) | quote }}
+{{- with .Values.erserver.email.from }}
+- name: ER_MAIL_FROM
+  value: {{ . | quote }}
+{{- end }}
+{{- with .Values.erserver.email.configurationSet }}
+- name: ER_MAIL_CONFIGURATION_SET
+  value: {{ . | quote }}
 {{- end }}
 {{- end }}
 

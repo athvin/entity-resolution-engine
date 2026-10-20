@@ -181,3 +181,165 @@ async fn action_colon_spelling_routes_like_the_subpath() {
         "{{org}}:suspend must route to the suspend handler"
     );
 }
+
+// --- POST /v1/email ---------------------------------------------------------
+//
+// The BFF's only mail path. These lock the contract `relayEmail` depends on:
+// it treats a non-2xx as `false` and falls back, so the distinction that
+// matters is 422 (the caller's bug, visible in review) versus 503 (this
+// environment simply has no mail backend, which is normal in dev).
+
+fn email_body(template: &str, params: serde_json::Value) -> Body {
+    Body::from(
+        serde_json::json!({ "to": "person@example.com", "template": template, "params": params })
+            .to_string(),
+    )
+}
+
+fn invite_params() -> serde_json::Value {
+    serde_json::json!({
+        "org": "acme",
+        "role": "steward",
+        "invited_by": "admin@acme.com",
+        "link": "https://app.example.com/invite/tok",
+    })
+}
+
+#[tokio::test]
+async fn email_is_operator_only() {
+    // No credential at all.
+    let anon = Request::builder()
+        .method("POST")
+        .uri("/v1/email")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(email_body("invite", invite_params()))
+        .unwrap();
+    assert_eq!(
+        test_app().oneshot(anon).await.unwrap().status(),
+        StatusCode::UNAUTHORIZED
+    );
+
+    // A bearer that is not the operator token. Nothing short of the operator
+    // may make this service send mail to an arbitrary address.
+    let not_operator = Request::builder()
+        .method("POST")
+        .uri("/v1/email")
+        .header(header::AUTHORIZATION, "Bearer erk_someone_elses")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(email_body("invite", invite_params()))
+        .unwrap();
+    assert_ne!(
+        test_app().oneshot(not_operator).await.unwrap().status(),
+        StatusCode::ACCEPTED,
+        "a non-operator credential must not be able to send mail"
+    );
+}
+
+#[tokio::test]
+async fn email_without_a_backend_is_503_not_a_silent_success() {
+    // AppState::new defaults to Mailer::off() — the state of every environment
+    // that has not configured mail, including the whole repo before this route
+    // existed. 503 is what relayEmail turns into `false`.
+    let resp = test_app()
+        .oneshot(op_request(
+            "POST",
+            "/v1/email",
+            email_body("invite", invite_params()),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert!(
+        json_body(resp).await["detail"]
+            .as_str()
+            .unwrap()
+            .contains("not configured")
+    );
+}
+
+#[tokio::test]
+async fn a_caller_side_mistake_is_422_in_every_environment() {
+    // Rendering runs before the backend is consulted, so a bad template is
+    // reported as the caller's bug even where mail is switched off. Otherwise a
+    // typo would be invisible until someone enabled a backend.
+    let resp = test_app()
+        .oneshot(op_request(
+            "POST",
+            "/v1/email",
+            email_body("welcome_aboard", serde_json::json!({})),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        json_body(resp).await["detail"]
+            .as_str()
+            .unwrap()
+            .contains("welcome_aboard")
+    );
+
+    // A known template missing the one parameter that carries its payload.
+    let resp = test_app()
+        .oneshot(op_request(
+            "POST",
+            "/v1/email",
+            email_body("password_reset", serde_json::json!({})),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        json_body(resp).await["detail"]
+            .as_str()
+            .unwrap()
+            .contains("link")
+    );
+
+    // An empty recipient.
+    let resp = test_app()
+        .oneshot(op_request(
+            "POST",
+            "/v1/email",
+            Body::from(
+                serde_json::json!({ "to": "  ", "template": "password_reset",
+                                    "params": { "link": "https://x/y" } })
+                .to_string(),
+            ),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn email_with_a_backend_is_accepted() {
+    let app =
+        app(AppState::new("op-secret".to_string()).with_mail(er_server::mail::Mailer::logging()));
+    for (template, params) in [
+        ("invite", invite_params()),
+        (
+            "password_reset",
+            serde_json::json!({ "link": "https://app.example.com/reset/tok" }),
+        ),
+        (
+            "signup_verify",
+            serde_json::json!({ "workspace": "acme",
+                                "link": "https://app.example.com/signup/verify/tok" }),
+        ),
+    ] {
+        let resp = app
+            .clone()
+            .oneshot(op_request(
+                "POST",
+                "/v1/email",
+                email_body(template, params),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::ACCEPTED,
+            "{template} must be accepted"
+        );
+    }
+}

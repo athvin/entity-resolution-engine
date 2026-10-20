@@ -484,20 +484,19 @@ fn updated_at_checks(
         }
         Statement::Merge { clauses, .. } => {
             for clause in clauses {
-                if let MergeAction::Update { assignments } = &clause.action {
-                    if !sets_updated_at(assignments) {
-                        push("a MERGE matched-update arm");
-                    }
+                if let MergeAction::Update { assignments } = &clause.action
+                    && !sets_updated_at(assignments)
+                {
+                    push("a MERGE matched-update arm");
                 }
             }
         }
         Statement::Insert(insert) => {
-            if let Some(OnInsert::OnConflict(conflict)) = &insert.on {
-                if let OnConflictAction::DoUpdate(do_update) = &conflict.action {
-                    if !sets_updated_at(&do_update.assignments) {
-                        push("the ON CONFLICT DO UPDATE");
-                    }
-                }
+            if let Some(OnInsert::OnConflict(conflict)) = &insert.on
+                && let OnConflictAction::DoUpdate(do_update) = &conflict.action
+                && !sets_updated_at(&do_update.assignments)
+            {
+                push("the ON CONFLICT DO UPDATE");
             }
         }
         _ => {}
@@ -534,10 +533,11 @@ fn merge_identity_checks(
 
     let mut matched: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     let _ = ff_analysis::sqlparser::ast::visit_expressions(on, |expr: &Expr| {
-        if let Expr::CompoundIdentifier(parts) = expr {
-            if parts.len() >= 2 && parts[parts.len() - 2].value.to_lowercase() == target {
-                matched.insert(parts[parts.len() - 1].value.to_lowercase());
-            }
+        if let Expr::CompoundIdentifier(parts) = expr
+            && parts.len() >= 2
+            && parts[parts.len() - 2].value.to_lowercase() == target
+        {
+            matched.insert(parts[parts.len() - 1].value.to_lowercase());
         }
         ControlFlow::<()>::Continue(())
     });
@@ -844,16 +844,13 @@ fn accepted_values_assignments(
         };
         if let (Some(allowed), Some(literal)) =
             (accepted.get(name), string_literal(&assignment.value))
+            && !allowed.iter().any(|v| v == &literal)
         {
-            if !allowed.iter().any(|v| v == &literal) {
-                diags.push(Diagnostic::new(
-                    "E010",
-                    &stmt.path,
-                    format!(
-                        "assigns '{literal}' to {name}, outside its accepted values {allowed:?}"
-                    ),
-                ));
-            }
+            diags.push(Diagnostic::new(
+                "E010",
+                &stmt.path,
+                format!("assigns '{literal}' to {name}, outside its accepted values {allowed:?}"),
+            ));
         }
     }
     diags
@@ -873,14 +870,14 @@ fn accepted_values_comparisons(
     }
     let mut diags = Vec::new();
     let mut check = |name: &str, literal: &str| {
-        if let Some(allowed) = accepted.get(name) {
-            if !allowed.iter().any(|v| v == literal) {
-                diags.push(Diagnostic::new(
-                    "E010",
-                    &stmt.path,
-                    format!("'{literal}' is outside {name}'s accepted values {allowed:?}"),
-                ));
-            }
+        if let Some(allowed) = accepted.get(name)
+            && !allowed.iter().any(|v| v == literal)
+        {
+            diags.push(Diagnostic::new(
+                "E010",
+                &stmt.path,
+                format!("'{literal}' is outside {name}'s accepted values {allowed:?}"),
+            ));
         }
     };
     match parsed {
@@ -1081,14 +1078,13 @@ fn statement_has_wildcard(stmt: &Statement) -> bool {
 }
 
 fn query_has_wildcard(query: &Query) -> bool {
-    if let Some(with) = &query.with {
-        if with
+    if let Some(with) = &query.with
+        && with
             .cte_tables
             .iter()
             .any(|cte| query_has_wildcard(&cte.query))
-        {
-            return true;
-        }
+    {
+        return true;
     }
     set_expr_has_wildcard(&query.body)
 }

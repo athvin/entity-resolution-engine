@@ -137,14 +137,12 @@ fn run_phases(scenario: &str, phases: &[(&str, bool, bool)]) {
             partition_csv(&expected(scenario, phase, "membership")),
             "{scenario}/{phase}: membership differs from golden"
         );
-        if *gate_events {
-            if let Some(golden) = expected_opt(scenario, phase, "events") {
-                assert_eq!(
-                    events_of(&plan),
-                    events_csv(&golden),
-                    "{scenario}/{phase}: events differ from golden"
-                );
-            }
+        if *gate_events && let Some(golden) = expected_opt(scenario, phase, "events") {
+            assert_eq!(
+                events_of(&plan),
+                events_csv(&golden),
+                "{scenario}/{phase}: events differ from golden"
+            );
         }
         p_old = mem;
     }

@@ -37,6 +37,14 @@ internet ──▶ BFF (Next.js, frontend/src/)  ──erk_ key / operator token
 - **Authorization** `guard(p, org, minimum)` and `operator_only(p)`. Every handler was confirmed to
   guard (some via delegation — `record_overlay_action`, `transition_org`). No unguarded handler was
   found; a posterity gate should keep it that way.
+- **Outbound email** `POST /v1/email` → `mail.rs`. `operator_only`, and the recipient is entirely
+  caller-controlled, so anything holding the operator token can make this service send
+  DupeZero-branded mail to any address — treat the operator token's blast radius as including that.
+  Rendering happens before the backend is consulted, so an unknown template or missing parameter is a
+  422 rather than a blank delivery. Two things to weigh in any review that touches a *caller* of the
+  relay: whether an unauthenticated flow can reach it (self-serve signup will — that is what its rate
+  limiting is for), and that `Backend::Log` writes the rendered body, which carries a single-use
+  credential, to the pod log. `Log` is dev-only for exactly that reason.
 - **No middleware**: no CORS, no rate limiting, no request timeout, no concurrency limit, no explicit
   body-size layer beyond axum's 2 MB `Json` default. `/healthz` is the only anonymous route.
 - **Connect-per-request Postgres** (`connect_pg`) — no pool. A connection-exhaustion lever.

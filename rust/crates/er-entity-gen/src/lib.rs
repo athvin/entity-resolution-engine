@@ -215,10 +215,10 @@ fn topo_order<'a>(entities: &[&'a Entity]) -> Vec<&'a Entity> {
             return;
         }
         for col in &entity.columns {
-            if let Some(reference) = &col.references {
-                if let Some(dep) = by_rel.get(reference.relation.as_str()) {
-                    visit(dep, by_rel, visited, ordered);
-                }
+            if let Some(reference) = &col.references
+                && let Some(dep) = by_rel.get(reference.relation.as_str())
+            {
+                visit(dep, by_rel, visited, ordered);
             }
         }
         ordered.push(entity);

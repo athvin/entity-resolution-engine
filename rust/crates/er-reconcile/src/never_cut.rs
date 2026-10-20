@@ -127,13 +127,12 @@ pub fn choose_cut_edge(
     let mut candidates: Vec<PathEdge> = Vec::new();
     for window in path.windows(2) {
         let pair = canon(&window[0], &window[1]);
-        if let Some(&value) = probability.get(&pair) {
-            if value < cut_protect_probability
-                && !protected.contains(&pair.0)
-                && !protected.contains(&pair.1)
-            {
-                candidates.push((pair.0, pair.1, value));
-            }
+        if let Some(&value) = probability.get(&pair)
+            && value < cut_protect_probability
+            && !protected.contains(&pair.0)
+            && !protected.contains(&pair.1)
+        {
+            candidates.push((pair.0, pair.1, value));
         }
     }
     candidates.into_iter().min_by(|a, b| {

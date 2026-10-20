@@ -799,11 +799,11 @@ pub fn runs_list(
     if let Some(threshold) = auto_merge {
         let counts = run_auto_merge_counts(session, snapshot, threshold)?;
         for run in &mut runs {
-            if let Value::Object(map) = run {
-                if let Some(id) = map.get("id").and_then(Value::as_str) {
-                    let n = counts.get(id).copied().unwrap_or(0);
-                    map.insert("auto_merged_pairs".to_string(), Value::from(n));
-                }
+            if let Value::Object(map) = run
+                && let Some(id) = map.get("id").and_then(Value::as_str)
+            {
+                let n = counts.get(id).copied().unwrap_or(0);
+                map.insert("auto_merged_pairs".to_string(), Value::from(n));
             }
         }
     }
