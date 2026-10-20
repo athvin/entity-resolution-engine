@@ -1,4 +1,4 @@
-# cargo-deny configuration. Run locally with `cargo deny check`.
+# cargo-deny configuration. (temporary: verifying frontend detect-skip) Run locally with `cargo deny check`.
 # CI runs advisories (RustSec) + licenses + bans on every push/PR.
 
 [advisories]
