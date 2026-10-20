@@ -1,0 +1,39 @@
+# Repo-local Symposium configuration (https://github.com/symposium-dev/symposium).
+#
+# This file is only read when SYMPOSIUM_HOME points at <repo>/.symposium, which
+# is what scripts/symposium and the `env` block in .claude/settings.json do.
+# Nothing here is installed into ~/.symposium or ~/.cargo/bin — the cargo-agents
+# binary lives in <repo>/.tools/bin (gitignored; run `scripts/symposium install`
+# to fetch it).
+#
+# Symposium resolves the "project root" from `cargo metadata`, so every path it
+# writes is relative to rust/ (the cargo workspace root), NOT the repo root:
+#   rust/.claude/skills/<name>/   skills  — Claude Code reads these as nested,
+#                                           directory-scoped skills
+#   rust/.claude/settings.json    hooks   — INERT, Claude Code only reads the
+#                                           repo-root settings file
+#   rust/.mcp.json                MCP     — INERT, same reason
+# The repo-root .claude/settings.json carries the bridging hook entries that
+# actually fire; see the comment there.
+
+# Re-sync skills automatically during hook invocations, so a dependency change
+# in rust/ updates the installed skills without a manual run.
+auto-sync = true
+
+# Mirror skills authored in <workspace>/.agents/skills into .claude/skills.
+agents-syncing = true
+
+# Write hooks/MCP into the project rather than ~/.claude. See the path note
+# above: "project" means rust/, and those files are bridged from the root.
+hook-scope = "project"
+
+# MUST stay "off". The default ("on") self-updates via `cargo install`, which
+# would drop a binary in ~/.cargo/bin and defeat the repo-local install.
+# To update deliberately: scripts/symposium install <version>
+auto-update = "off"
+
+[[agent]]
+name = "claude"
+
+[logging]
+level = "info"

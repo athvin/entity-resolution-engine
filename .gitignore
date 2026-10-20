@@ -27,3 +27,19 @@ infra/**/.terraform/
 infra/**/*.tfstate
 infra/**/*.tfstate.*
 infra/**/*.tfvars
+
+# Repo-local agent tooling (`make symposium`). The cargo-agents binary is a
+# 15MB per-platform artifact — fetched, never committed — and everything under
+# .symposium except the config is machine-local cache/logs/state. The installed
+# skills in rust/.claude/ are all symposium-generated and regenerable, so the
+# whole directory is ignored (each skill dir also self-ignores with its own
+# `*` .gitignore); rust/.claude/settings.json in particular is inert, since
+# Claude Code only reads the settings file at the repository root.
+.tools/
+.symposium/*
+!.symposium/config.toml
+rust/.claude/
+
+# Per-developer Claude Code settings. The shared .claude/settings.json IS
+# committed; this one holds locally-granted permissions and must not be.
+.claude/settings.local.json

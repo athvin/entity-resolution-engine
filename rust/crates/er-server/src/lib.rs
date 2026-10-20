@@ -31,6 +31,7 @@
 
 pub mod config_check;
 pub mod dispatcher;
+pub mod errfmt;
 pub mod openapi;
 pub mod pg;
 pub mod read;
@@ -2266,8 +2267,9 @@ fn match_preview_blocking(env: &Value, limit: usize) -> Result<Value, String> {
         std::fs::read_to_string(model_path).map_err(|e| format!("read model: {e}"))?;
     let config_text =
         std::fs::read_to_string(config_path).map_err(|e| format!("read config: {e}"))?;
-    let config = er_config::load_config_str(&config_text).map_err(|e| format!("config: {e}"))?;
-    let session = er_cli::open_lake(catalog, data_path).map_err(|e| format!("open lake: {e}"))?;
+    let config = er_config::load_config_str(&config_text)
+        .map_err(|e| format!("config: {}", errfmt::chain(&e)))?;
+    let session = er_cli::open_lake(catalog, data_path).map_err(|e| format!("open lake: {e:#}"))?;
     let model = er_cli::MatchModel {
         settings_json: &settings_json,
         tf_csv_path: std::path::Path::new(tf_path),
@@ -2281,7 +2283,7 @@ fn match_preview_blocking(env: &Value, limit: usize) -> Result<Value, String> {
         config.thresholds.auto_merge,
         limit,
     )
-    .map_err(|e| format!("preview: {e}"))?;
+    .map_err(|e| format!("preview: {e:#}"))?;
 
     let sample: Vec<Value> = preview
         .sample

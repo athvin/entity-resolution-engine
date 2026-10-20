@@ -149,7 +149,7 @@ fn load_lexicon(path: &str) -> Vec<(String, String)> {
 fn run_job(job: &Job, env: &Value, drop_root: Option<&str>) -> Result<(), String> {
     let catalog = env_str(env, "ER_LAKE_CATALOG").ok_or("org env missing ER_LAKE_CATALOG")?;
     let data_path = env_str(env, "ER_LAKE_DATA_PATH").ok_or("org env missing ER_LAKE_DATA_PATH")?;
-    let session = er_cli::open_lake(catalog, data_path).map_err(|e| format!("open lake: {e}"))?;
+    let session = er_cli::open_lake(catalog, data_path).map_err(|e| format!("open lake: {e:#}"))?;
     let run_id = &job.id;
     let now = fmt_epoch(unix_now());
 
@@ -157,7 +157,8 @@ fn run_job(job: &Job, env: &Value, drop_root: Option<&str>) -> Result<(), String
     let load_config = || -> Result<er_config::Config, String> {
         let path = env_str(env, "ER_CONFIG_PATH").ok_or("org env missing ER_CONFIG_PATH")?;
         let text = std::fs::read_to_string(path).map_err(|e| format!("read config {path}: {e}"))?;
-        er_config::load_config_str(&text).map_err(|e| format!("config: {e}"))
+        er_config::load_config_str(&text)
+            .map_err(|e| format!("config: {}", crate::errfmt::chain(&e)))
     };
 
     match job.kind.as_str() {
@@ -165,11 +166,11 @@ fn run_job(job: &Job, env: &Value, drop_root: Option<&str>) -> Result<(), String
             let expire = env_str(env, "ER_EXPIRE_OLDER_THAN").unwrap_or("7 days");
             er_cli::run_maintain(&session, expire)
                 .map(|_| ())
-                .map_err(|e| e.to_string())
+                .map_err(|e| format!("{e:#}"))
         }
         "correct" => {
             let config = load_config()?;
-            er_cli::run_correct(&session, &config, run_id, &now).map_err(|e| e.to_string())
+            er_cli::run_correct(&session, &config, run_id, &now).map_err(|e| format!("{e:#}"))
         }
         // Incremental and full both resolve + score the delivered corpus; the
         // incremental semantics come from the prior membership in the lake.
@@ -215,7 +216,7 @@ fn run_job(job: &Job, env: &Value, drop_root: Option<&str>) -> Result<(), String
                     run_at: &now,
                 },
             )
-            .map_err(|e| e.to_string())
+            .map_err(|e| format!("{e:#}"))
         }
         other => Err(format!("dispatcher does not handle job kind '{other}'")),
     }
@@ -300,12 +301,14 @@ fn apply_and_correct(
         .and_then(|path| {
             std::fs::read_to_string(path).map_err(|e| format!("read config {path}: {e}"))
         })
-        .and_then(|text| er_config::load_config_str(&text).map_err(|e| format!("config: {e}")))
-    {
+        .and_then(|text| {
+            er_config::load_config_str(&text)
+                .map_err(|e| format!("config: {}", crate::errfmt::chain(&e)))
+        }) {
         Ok(c) => c,
         Err(e) => return (applied, Err(e)),
     };
-    let correct = er_cli::run_correct(&session, &config, run_id, now).map_err(|e| e.to_string());
+    let correct = er_cli::run_correct(&session, &config, run_id, now).map_err(|e| format!("{e:#}"));
     (applied, correct)
 }
 

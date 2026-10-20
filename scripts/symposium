@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# Repo-local Symposium (https://github.com/symposium-dev/symposium) driver.
+#
+# Symposium normally scatters itself across the user's home directory: the
+# cargo-agents binary into ~/.cargo/bin, config/cache/logs into ~/.symposium,
+# and hooks/MCP into ~/.claude. This wrapper keeps all three inside the repo:
+#
+#   .tools/bin/cargo-agents   the binary      (gitignored; `symposium install`)
+#   .symposium/config.toml    the config      (committed)
+#   .symposium/{cache,logs,state.toml}        (gitignored)
+#   rust/.claude/skills/      installed skills
+#
+# It does that with two environment variables and a cd:
+#   SYMPOSIUM_HOME  redirects config/cache/logs away from ~/.symposium. It
+#                   takes precedence over the XDG variables.
+#   PATH            prepends .tools/bin so `cargo agents …` resolves the
+#                   repo-local binary, and so the hook command that symposium
+#                   registers (the bare string `cargo-agents hook claude …`)
+#                   finds it too.
+#   cd rust         symposium locates the project via `cargo metadata`, and the
+#                   cargo workspace is rust/, not the repo root. Run from the
+#                   root it would just report "not in a Rust workspace".
+#
+# Usage: scripts/symposium <cargo-agents args...>   e.g. `sync`, `status`
+#        scripts/symposium install [version]        (re)fetch the binary
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export SYMPOSIUM_HOME="$REPO_ROOT/.symposium"
+export PATH="$REPO_ROOT/.tools/bin:$PATH"
+BIN="$REPO_ROOT/.tools/bin/cargo-agents"
+
+# Pinned so an unattended fetch can't drift; bump deliberately.
+DEFAULT_VERSION="0.5.1"
+
+# Script-scoped, not local to install_binary: the EXIT trap below runs after
+# the function has returned, and `set -u` would reject an unbound local.
+WORKDIR=""
+cleanup() { [[ -n "$WORKDIR" ]] && rm -rf "$WORKDIR"; }
+trap cleanup EXIT
+
+install_binary() {
+  local version="${1:-$DEFAULT_VERSION}" target
+
+  case "$(uname -s)/$(uname -m)" in
+    Darwin/arm64)  target="aarch64-apple-darwin" ;;
+    Linux/aarch64) target="aarch64-unknown-linux-musl" ;;
+    Linux/x86_64)  target="x86_64-unknown-linux-musl" ;;
+    *)
+      echo "symposium: no prebuilt binary for $(uname -s)/$(uname -m)." >&2
+      echo "  Build from source instead, keeping it out of ~/.cargo/bin:" >&2
+      echo "  cargo install --root '$REPO_ROOT/.tools' --version $version symposium" >&2
+      exit 1
+      ;;
+  esac
+
+  local url="https://github.com/symposium-dev/symposium/releases/download/symposium-v${version}/cargo-agents-${target}.tar.gz"
+  WORKDIR="$(mktemp -d)"
+
+  echo "symposium: fetching cargo-agents $version ($target)" >&2
+  curl -fsSL "$url" -o "$WORKDIR/cargo-agents.tar.gz"
+  mkdir -p "$REPO_ROOT/.tools/bin"
+  tar xzf "$WORKDIR/cargo-agents.tar.gz" -C "$REPO_ROOT/.tools/bin"
+  chmod +x "$BIN"
+  # Gatekeeper quarantines curl'd binaries on macOS; the attribute is absent on
+  # Linux and on a re-extract, so a failure here is not an error.
+  xattr -d com.apple.quarantine "$BIN" 2>/dev/null || true
+
+  echo "symposium: installed $("$BIN" --version) at ${BIN#"$REPO_ROOT"/}" >&2
+}
+
+if [[ "${1:-}" == "install" ]]; then
+  install_binary "${2:-}"
+  exit 0
+fi
+
+if [[ ! -x "$BIN" ]]; then
+  echo "symposium: $BIN missing — run 'scripts/symposium install' first." >&2
+  exit 1
+fi
+
+cd "$REPO_ROOT/rust"
+exec "$BIN" "$@"

@@ -14,19 +14,22 @@ use crate::types::{ColumnType, Language, Store};
 #[derive(Debug, thiserror::Error)]
 pub enum SpecError {
     /// The `entities/` root could not be read.
-    #[error("reading entities root {path:?}: {source}")]
+    // A field named `source` IS the error source to thiserror, so these
+    // messages name only what was attempted and the offending path; the cause
+    // comes from `.source()` and must not be interpolated as well.
+    #[error("reading entities root {path:?}")]
     ReadRoot {
         path: PathBuf,
         source: std::io::Error,
     },
     /// An `entity.yaml` could not be read.
-    #[error("reading {path:?}: {source}")]
+    #[error("reading {path:?}")]
     ReadFile {
         path: PathBuf,
         source: std::io::Error,
     },
     /// An `entity.yaml` did not parse.
-    #[error("parsing {path:?}: {source}")]
+    #[error("parsing {path:?}")]
     Parse {
         path: PathBuf,
         source: serde_norway::Error,
