@@ -18,3 +18,7 @@ thiserror.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+er-config = { path = "../er-config" }
+serde_json.workspace = true
