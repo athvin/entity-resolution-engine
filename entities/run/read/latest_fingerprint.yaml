@@ -1,0 +1,13 @@
+kind: statement
+operation: read
+description: "The last SUCCEEDED run's drift fingerprint. An incremental run is only valid against a corpus scored under the same five values, which is what er-versions::check_mode_preconditions compares."
+pin: live
+pin_reason: "er-cli reads this at run-start inside the writer's own transaction, before any snapshot for this run exists."
+params: []
+returns:
+  - { name: id, type: varchar, nullable: false }
+  - { name: config_hash, type: varchar, nullable: false }
+  - { name: model_version, type: varchar }
+  - { name: std_version, type: varchar, nullable: false }
+  - { name: survivorship_version, type: varchar, nullable: false }
+  - { name: lexicon_hash, type: varchar }

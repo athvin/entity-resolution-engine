@@ -682,6 +682,8 @@ fn run_all_base(tag: &str) -> (Session, Config, PathBuf) {
         &session,
         &config,
         &er_cli::PipelineInputs {
+            mode: "full",
+            rebuild_reason: None,
             lexicon: &lexicon,
             deliveries: &deliveries,
             model: &er_cli::MatchModel {
@@ -698,6 +700,115 @@ fn run_all_base(tag: &str) -> (Session, Config, PathBuf) {
     )
     .unwrap();
     (session, config, tmp)
+}
+
+/// The run ledger's version columns, and the drift guard that reads them.
+///
+/// Three things were disconnected before this: `write_run_start` hardcoded
+/// `mode = "full"` so an incremental run was indistinguishable in the ledger;
+/// `lexicon_hash` and `rebuild_reason` were declared columns that nothing ever
+/// wrote; and `er_versions::check_mode_preconditions` — the guard that decides
+/// whether an incremental run may extend the existing corpus — had zero callers
+/// anywhere in the workspace.
+#[test]
+fn the_run_ledger_records_the_fingerprint_the_drift_guard_reads() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let (session, config, tmp) = run_all_base("ledger_fingerprint");
+
+    // The full run wrote its real mode and a lexicon hash.
+    let rows: Vec<(String, Option<String>)> = session
+        .connection()
+        .prepare("select mode, lexicon_hash from lake.main.runs order by started_at desc")
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert_eq!(rows.len(), 1, "one run so far");
+    assert_eq!(rows[0].0, "full");
+    let lexicon_hash = rows[0]
+        .1
+        .clone()
+        .expect("the ledger must record the lexicon hash the run scored under");
+    assert_ne!(lexicon_hash, "");
+
+    // The run has not been marked succeeded, so there is no prior fingerprint to
+    // guard against yet — and a first run is never guarded.
+    let lexicon: Vec<(String, String)> = include_str!("fixtures/nickname_variants.csv")
+        .lines()
+        .skip(1)
+        .filter(|l| !l.is_empty())
+        .map(|l| {
+            let (a, b) = l.split_once(',').unwrap();
+            (a.to_string(), b.to_string())
+        })
+        .collect();
+    let current = er_cli::current_fingerprint(&config, "v0001", &lexicon);
+    assert_eq!(
+        current.lexicon_hash.as_deref(),
+        Some(lexicon_hash.as_str()),
+        "the fingerprint the guard computes must equal the one the ledger stored"
+    );
+
+    er_cli::write_run_end(
+        &session,
+        "01RUNALLFULL0000000000000000",
+        "2026-01-04 00:00:00",
+    )
+    .unwrap();
+    let prior = er_cli::prior_fingerprint(&session)
+        .unwrap()
+        .expect("a succeeded run is a prior fingerprint");
+    assert_eq!(prior, current, "nothing drifted between the two reads");
+
+    // An unchanged fingerprint lets an incremental run proceed as incremental.
+    let decision = er_versions::check_mode_preconditions(
+        Some(&prior),
+        &current,
+        er_versions::MODE_INCREMENTAL,
+        true,
+    )
+    .unwrap();
+    assert_eq!(decision.mode, er_versions::MODE_INCREMENTAL);
+    assert!(!decision.escalated(), "no drift -> no promotion");
+
+    // A moved lexicon is drift: the same names no longer mean the same thing, so
+    // the corpus cannot be extended incrementally. With escalation allowed, the
+    // run is promoted to full instead of refused.
+    let mut moved = lexicon.clone();
+    moved.push(("zelda".to_string(), "zel".to_string()));
+    let drifted = er_cli::current_fingerprint(&config, "v0001", &moved);
+    assert_ne!(drifted.lexicon_hash, prior.lexicon_hash);
+    let decision = er_versions::check_mode_preconditions(
+        Some(&prior),
+        &drifted,
+        er_versions::MODE_INCREMENTAL,
+        true,
+    )
+    .unwrap();
+    assert!(decision.escalated(), "a moved lexicon must promote the run");
+    assert_eq!(decision.mode, er_versions::MODE_FULL);
+    assert!(
+        decision.drift.iter().any(|d| d.field == "lexicon_hash"),
+        "the drift must name the field that moved: {:?}",
+        decision.drift
+    );
+
+    // Without escalation the same drift is a refusal, which is what the CLI's
+    // --mode incremental does for an operator.
+    let decision = er_versions::check_mode_preconditions(
+        Some(&prior),
+        &drifted,
+        er_versions::MODE_INCREMENTAL,
+        false,
+    )
+    .unwrap();
+    assert!(decision.refused());
+
+    let _ = std::fs::remove_dir_all(&tmp);
 }
 
 #[test]

@@ -151,6 +151,8 @@ fn populate_lake(catalog: &str, data_path: &str) {
         tf_snapshot_id: "01JWMDTFSNAP00000000000001",
     };
     let inputs = er_cli::PipelineInputs {
+        mode: "full",
+        rebuild_reason: None,
         lexicon: &lexicon,
         deliveries: &deliveries,
         model: &model,

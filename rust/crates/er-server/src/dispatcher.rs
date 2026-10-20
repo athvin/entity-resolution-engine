@@ -254,23 +254,36 @@ fn run_job(job: &Job, env: &Value, drop_root: Option<&str>) -> Result<(), String
             let config = load_config()?;
             er_cli::run_correct(&session, &config, run_id, &now).map_err(|e| format!("{e:#}"))
         }
-        // Incremental and full both resolve + score the delivered corpus; the
-        // incremental semantics come from the prior membership in the lake.
         "run_all_full" | "run_all_incremental" => {
             let config = load_config()?;
-            let drop_root = drop_root.ok_or("org has no drop_root for a run_all")?;
-            let deliveries: Vec<(String, String)> = config
-                .sources
-                .keys()
-                .filter_map(|source| {
-                    std::fs::read_to_string(format!("{drop_root}/{source}.csv"))
-                        .ok()
-                        .map(|csv| (source.clone(), csv))
-                })
-                .collect();
-            if deliveries.is_empty() {
-                return Err(format!("no source deliveries found under {drop_root}"));
-            }
+            // `{"skip_ingest": true}` — set by every publish-triggered rebuild —
+            // means "re-run the pipeline over the corpus already landed". It was
+            // written by six call sites and read by none, so a rebuild re-read the
+            // drop directory and FAILED with "no source deliveries found" whenever
+            // the deliveries had been cleaned up after landing.
+            let skip_ingest = job
+                .params
+                .get("skip_ingest")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let deliveries: Vec<(String, String)> = if skip_ingest {
+                Vec::new()
+            } else {
+                let drop_root = drop_root.ok_or("org has no drop_root for a run_all")?;
+                let found: Vec<(String, String)> = config
+                    .sources
+                    .keys()
+                    .filter_map(|source| {
+                        std::fs::read_to_string(format!("{drop_root}/{source}.csv"))
+                            .ok()
+                            .map(|csv| (source.clone(), csv))
+                    })
+                    .collect();
+                if found.is_empty() {
+                    return Err(format!("no source deliveries found under {drop_root}"));
+                }
+                found
+            };
             let model_path =
                 env_str(env, "ER_MODEL_PATH").ok_or("org env missing ER_MODEL_PATH")?;
             let tf_path = env_str(env, "ER_TF_PATH").ok_or("org env missing ER_TF_PATH")?;
@@ -285,6 +298,32 @@ fn run_job(job: &Job, env: &Value, drop_root: Option<&str>) -> Result<(), String
                 model_version: env_str(env, "ER_MODEL_VERSION").unwrap_or("v0001"),
                 tf_snapshot_id: env_str(env, "ER_TF_SNAPSHOT_ID").unwrap_or("tf"),
             };
+
+            // The mode the job asked for, then the drift guard's verdict on it.
+            // An incremental run may only extend a corpus scored under the same
+            // config / model / std / survivorship / lexicon fingerprint; when any
+            // of those moved, the run is PROMOTED to full (rather than refused —
+            // a refusal here is just a failed job, while a promotion is the thing
+            // the operator actually wants) and the ledger records why.
+            let asked = if job.kind == "run_all_incremental" {
+                er_versions::MODE_INCREMENTAL
+            } else {
+                er_versions::MODE_FULL
+            };
+            let prior = er_cli::prior_fingerprint(&session).map_err(|e| format!("{e:#}"))?;
+            let current = er_cli::current_fingerprint(&config, model.model_version, &lexicon);
+            let decision =
+                er_versions::check_mode_preconditions(prior.as_ref(), &current, asked, true)
+                    .map_err(|e| format!("mode guard: {e}"))?;
+            if decision.escalated() {
+                eprintln!("run {run_id}: {}", decision.message);
+            }
+            let rebuild_reason = if decision.escalated() {
+                Some(er_versions::REBUILD_OPERATOR)
+            } else {
+                None
+            };
+
             er_cli::run_all(
                 &session,
                 &config,
@@ -296,6 +335,8 @@ fn run_job(job: &Job, env: &Value, drop_root: Option<&str>) -> Result<(), String
                     ingested_at: &now,
                     scored_at: &now,
                     run_at: &now,
+                    mode: &decision.mode,
+                    rebuild_reason,
                 },
             )
             .map_err(|e| format!("{e:#}"))

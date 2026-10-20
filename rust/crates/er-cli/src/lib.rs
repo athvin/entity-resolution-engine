@@ -418,9 +418,14 @@ fn create_ddl_table(session: &Session, name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Record the `runs` row at the start of a full run (status `running`): the run
+/// Record the `runs` row at the start of a run (status `running`): the run
 /// ledger the read API's `GET /runs` surfaces. `started_at` is the run's logical
 /// timestamp; `code_version` is this crate's version.
+///
+/// The mode written is the mode the run is actually executing, which is why it
+/// comes from `inputs` rather than being hardcoded: this used to write `"full"`
+/// for every run, including incremental ones, so the ledger could not be used to
+/// tell them apart.
 ///
 /// # Errors
 /// Propagates lake DDL / insert errors.
@@ -430,14 +435,65 @@ pub fn write_run_start(session: &Session, config: &Config, inputs: &PipelineInpu
         config,
         inputs.run_id,
         inputs.run_at,
-        "full",
+        inputs.mode,
         inputs.model.model_version,
         inputs.model.tf_snapshot_id,
+        Some(&lexicon_fingerprint(inputs.lexicon)),
+        inputs.rebuild_reason,
     )
+}
+
+/// The lexicon's contribution to the run fingerprint. A change here changes
+/// which names are treated as variants of each other, so a corpus scored under
+/// one lexicon cannot be incrementally extended under another.
+fn lexicon_fingerprint(pairs: &[(String, String)]) -> String {
+    er_std::lexicon::lexicon_hash(pairs.iter().map(|(a, b)| (a.as_str(), b.as_str())))
+}
+
+/// The five `runs` columns the drift guard compares, read from the last
+/// SUCCEEDED run. `None` when nothing has succeeded yet (the first run is never
+/// guarded).
+///
+/// # Errors
+/// Propagates the lake read error; a missing `runs` table reads as `None`.
+pub fn prior_fingerprint(session: &Session) -> Result<Option<er_versions::RunFingerprint>> {
+    let rows = match er_entities::run::read::latest_fingerprint(session.connection()) {
+        Ok(rows) => rows,
+        Err(e) if is_missing_table(&e.to_string()) => return Ok(None),
+        Err(e) => return Err(e.into()),
+    };
+    Ok(rows
+        .into_iter()
+        .next()
+        .map(|r| er_versions::RunFingerprint {
+            config_hash: r.config_hash,
+            model_version: r.model_version,
+            std_version: r.std_version,
+            survivorship_version: r.survivorship_version,
+            lexicon_hash: r.lexicon_hash,
+        }))
+}
+
+/// The fingerprint this run would carry, for comparison against
+/// [`prior_fingerprint`].
+#[must_use]
+pub fn current_fingerprint(
+    config: &Config,
+    model_version: &str,
+    lexicon: &[(String, String)],
+) -> er_versions::RunFingerprint {
+    er_versions::RunFingerprint {
+        config_hash: er_config::config_hash(config),
+        model_version: Some(model_version.to_string()),
+        std_version: config.versions.std_version.clone(),
+        survivorship_version: config.versions.survivorship_version.clone(),
+        lexicon_hash: Some(lexicon_fingerprint(lexicon)),
+    }
 }
 
 /// Insert one `running` row into the `runs` ledger with the given `mode` and the
 /// model identity the run scored against. `code_version` is this crate's version.
+#[allow(clippy::too_many_arguments)]
 fn write_run_row(
     session: &Session,
     config: &Config,
@@ -446,6 +502,8 @@ fn write_run_row(
     mode: &str,
     model_version: &str,
     tf_snapshot_id: &str,
+    lexicon_hash: Option<&str>,
+    rebuild_reason: Option<&str>,
 ) -> Result<()> {
     create_ddl_table(session, "runs")?;
     er_entities::run::create::start(
@@ -459,7 +517,9 @@ fn write_run_row(
         tf_snapshot_id,
         &config.versions.std_version,
         &config.versions.survivorship_version,
+        lexicon_hash,
         env!("CARGO_PKG_VERSION"),
+        rebuild_reason,
     )?;
     Ok(())
 }
@@ -1266,6 +1326,36 @@ pub struct PipelineInputs<'a> {
     pub ingested_at: &'a str,
     pub scored_at: &'a str,
     pub run_at: &'a str,
+    /// The mode this run is actually executing (`full` / `incremental`), written
+    /// to the ledger. Defaults to `full` via [`PipelineInputs::full`].
+    pub mode: &'a str,
+    /// Why this run is rebuilding, when it is not the ordinary case: an
+    /// incremental run promoted by the drift guard records the drift here.
+    pub rebuild_reason: Option<&'a str>,
+}
+
+impl<'a> PipelineInputs<'a> {
+    /// The ordinary full-mode inputs: mode `full`, no rebuild reason.
+    #[must_use]
+    pub fn full(
+        lexicon: &'a [(String, String)],
+        deliveries: &'a [(String, String)],
+        model: &'a MatchModel<'a>,
+        run_id: &'a str,
+        stamp: &'a str,
+    ) -> Self {
+        PipelineInputs {
+            lexicon,
+            deliveries,
+            model,
+            run_id,
+            ingested_at: stamp,
+            scored_at: stamp,
+            run_at: stamp,
+            mode: er_versions::MODE_FULL,
+            rebuild_reason: None,
+        }
+    }
 }
 
 /// The S4.0 full-mode chain over the lake: seed lexicon -> ingest every delivery
@@ -1351,6 +1441,8 @@ pub fn run_correct(session: &Session, config: &Config, run_id: &str, run_at: &st
         "correct",
         &model_version,
         &tf_snapshot_id,
+        None,
+        Some(er_versions::REBUILD_CORRECTION_PASS),
     )?;
     run_reconcile(session, config, run_id, run_at)?;
     run_golden(session, config, run_at)?;

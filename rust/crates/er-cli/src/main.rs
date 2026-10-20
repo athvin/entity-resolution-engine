@@ -247,6 +247,8 @@ fn main() -> Result<()> {
                 &session,
                 &config,
                 &er_cli::PipelineInputs {
+                    mode: "full",
+                    rebuild_reason: None,
                     lexicon: &lexicon,
                     deliveries: &deliveries,
                     model: &er_cli::MatchModel {
