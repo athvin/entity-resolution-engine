@@ -305,11 +305,29 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
       Tests: a `lake_e2e` case asserting the ledger stores the fingerprint the guard computes,
       that an unchanged fingerprint proceeds as incremental, that a moved lexicon promotes to
       full and names the drifted field, and that the same drift refuses without escalation.
-- [ ] **W0.5 harness debt** — `make frontend-seed` is documented in the Makefile as "NOT
-      restored" (its `frontend/dev/seed.py` was deleted), which is why the full-stack Playwright
-      tier is dormant; `make check-all` is still cited in `docs/infrastructure.md` +
-      `docs/plan-to-aws.md` and does not exist; `fixtures/static/FORMAT.md` names deleted
-      Python scripts.
+- [~] **W0.5 harness debt — partly done, the seed deliberately deferred.** The stale
+      `make check-all` references are fixed (see W0.6). The full-stack tier stays dormant, but
+      the reason is now understood rather than just noted.
+      Recovering the deleted `frontend/dev/seed.py` was itself informative: step 4 of its
+      documented happy path **uploaded the three sources over HTTP** to the Python server, which
+      had that route. The Rust port dropped it, and the seed that exercised it was deleted at
+      about the same time — so nothing was left to notice. That is the same hole W0.4 fixed,
+      seen from the other side, and it is the clearest evidence for this program's false-green
+      rule.
+      What a revived seed needs, now that the upload endpoint exists: a workspace (lake catalog
+      + data dir + drop dir + config file); `POST /v1/orgs` with the lake/model env; three API
+      keys written to `.state/keys.json`; a published config version; the three committed
+      `base_10` CSVs uploaded through `POST /imports`; a wait on the dispatcher; and
+      `.state/expected.json` ground truth. Two things the old script did are no longer needed —
+      the corpus generator (the `base_10` fixtures are committed) and `train` (point
+      `ER_MODEL_PATH` at the committed `model_test_v1.json`, which is what every pg/lake test
+      does). **One blocker remains**: the dispatcher has no `train` arm at all, so a seed that
+      trains cannot work — `train` is in `SCHEDULABLE_KINDS` and falls straight through to
+      "dispatcher does not handle job kind 'train'". That arm lands in Wave 3 (E10), which is
+      the natural time to revive this tier.
+      Deferred knowingly: the BFF→er-server seam that this tier would cover is now held by the
+      W0.4a mock-contract gate plus the `pg_*` tests (real server, real Postgres), so the tier's
+      unique value is smaller than it was before W0.4a existed.
 - [x] **W0.6 `er-web` image push.** The ECR repo and `frontend/Dockerfile` both existed, and
       `images.yml`'s own header said er-web "is built by the frontend pipeline" — but
       `frontend.yml` had no image job at all, so nothing ever pushed an `er-web` tag and
