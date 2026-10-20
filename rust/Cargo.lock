@@ -1715,6 +1715,7 @@ dependencies = [
  "assert_cmd",
  "clap",
  "dedupe-core",
+ "er-compile",
  "er-config",
  "er-entities",
  "er-golden",
@@ -1728,6 +1729,16 @@ dependencies = [
  "er-std",
  "er-versions",
  "serde_json",
+]
+
+[[package]]
+name = "er-compile"
+version = "0.1.0"
+dependencies = [
+ "dedupe-core",
+ "er-config",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]
@@ -1895,6 +1906,7 @@ dependencies = [
  "er-reconcile",
  "er-standardize",
  "serde_json",
+ "thiserror",
 ]
 
 [[package]]
@@ -1950,6 +1962,7 @@ dependencies = [
  "dedupe-core",
  "duckdb",
  "er-cli",
+ "er-compile",
  "er-config",
  "er-entities",
  "er-golden",

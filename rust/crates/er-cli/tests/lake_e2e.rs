@@ -710,6 +710,103 @@ fn run_all_base(tag: &str) -> (Session, Config, PathBuf) {
 /// wrote; and `er_versions::check_mode_preconditions` — the guard that decides
 /// whether an incremental run may extend the existing corpus — had zero callers
 /// anywhere in the workspace.
+/// A model compiled from the tenant config must RESOLVE, not merely parse.
+///
+/// The config's `comparisons:` / `blocking:` blocks were authored, validated at
+/// publish, hashed into `config_hash` — and never read by anything that ran.
+/// `er-compile` reads them, and its own tests prove the emitted document has the
+/// committed model's structure. Structure is not the claim that matters, though:
+/// what matters is whether the compiled model finds the same entities.
+///
+/// So this runs the whole pipeline twice over base_10 — once with the committed
+/// EM-trained model, once with the model compiled out of the config that
+/// describes it — and compares the partitions. Agreement means the DSL was an
+/// accurate description of the matching all along, and that a tenant editing
+/// `comparisons:` now gets the behaviour the config claims.
+#[test]
+fn a_model_compiled_from_the_config_resolves_base_10_like_the_trained_one() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+
+    /// Resolve base_10 with the given settings document and return the partition.
+    fn resolve_with(tag: &str, settings_json: &str) -> BTreeSet<BTreeSet<String>> {
+        let tmp = std::env::temp_dir().join(format!("er_cli_{tag}_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(tmp.join("data")).unwrap();
+        let catalog = tmp.join("catalog.ducklake").to_string_lossy().into_owned();
+        let data_path = tmp.join("data").to_string_lossy().into_owned();
+        let session = er_cli::open_lake(&catalog, &data_path).unwrap();
+        let config = load_config_str(include_str!("fixtures/test.yaml")).unwrap();
+
+        let lexicon: Vec<(String, String)> = include_str!("fixtures/nickname_variants.csv")
+            .lines()
+            .skip(1)
+            .filter(|l| !l.is_empty())
+            .map(|l| {
+                let (a, b) = l.split_once(',').unwrap();
+                (a.to_string(), b.to_string())
+            })
+            .collect();
+        let deliveries: Vec<(String, String)> = ["crm", "billing", "webforms"]
+            .iter()
+            .map(|s| {
+                (
+                    (*s).to_string(),
+                    std::fs::read_to_string(repo_fixture(&format!("base_10/base/{s}.csv")))
+                        .unwrap(),
+                )
+            })
+            .collect();
+        let tf_csv = repo_fixture("model_test_v1.tf.csv");
+        er_cli::run_all(
+            &session,
+            &config,
+            &er_cli::PipelineInputs {
+                mode: "full",
+                rebuild_reason: None,
+                lexicon: &lexicon,
+                deliveries: &deliveries,
+                model: &er_cli::MatchModel {
+                    settings_json,
+                    tf_csv_path: std::path::Path::new(&tf_csv),
+                    model_version: "v0001",
+                    tf_snapshot_id: "01JWMDTFSNAP00000000000001",
+                },
+                run_id: "01RUNALLFULL0000000000000000",
+                ingested_at: "2026-01-01 00:00:00",
+                scored_at: "2026-01-02 00:00:00",
+                run_at: "2026-01-03 00:00:00",
+            },
+        )
+        .unwrap();
+        let partition = partition(&membership_rows(&session));
+        drop(session);
+        let _ = std::fs::remove_dir_all(&tmp);
+        partition
+    }
+
+    let config = load_config_str(include_str!("fixtures/test.yaml")).unwrap();
+    let compiled = er_compile::compile(&config).expect("the committed config compiles");
+
+    let trained_json = std::fs::read_to_string(repo_fixture("model_test_v1.json")).unwrap();
+    let trained = resolve_with("compile_trained", &trained_json);
+    let from_config = resolve_with("compile_declared", &compiled.model_json);
+
+    // The committed golden is the reference both must meet.
+    let golden = membership_golden("base_10", "base");
+    assert_eq!(
+        trained, golden,
+        "sanity: the trained model must still reproduce base_10's committed membership"
+    );
+    assert_eq!(
+        from_config, golden,
+        "a model compiled from the config must resolve base_10 into the same entities as the \
+         trained model.\n  compiled: {from_config:#?}\n  golden: {golden:#?}"
+    );
+}
+
 #[test]
 fn the_run_ledger_records_the_fingerprint_the_drift_guard_reads() {
     if !enabled() {

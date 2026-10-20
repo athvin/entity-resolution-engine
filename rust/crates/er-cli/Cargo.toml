@@ -30,6 +30,7 @@ er-std = { version = "0.1.0", path = "../er-std" }
 [dev-dependencies]
 er-hash = { path = "../er-hash" }
 assert_cmd = "2"
+er-compile = { path = "../er-compile" }
 
 [lints]
 workspace = true

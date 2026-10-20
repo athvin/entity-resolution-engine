@@ -508,5 +508,133 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         "a refused activation must not disturb the active model"
     );
 
+    // ---- compiling the config into a model ----
+    //
+    // This is the endpoint that makes the tenant-facing `comparisons:` /
+    // `blocking:` blocks mean something: they were authored, validated at
+    // publish and hashed, and never read by anything that runs.
+    let resp = app
+        .clone()
+        .oneshot(req(
+            "POST",
+            "/v1/orgs/acme/models/compile",
+            &viewer_key,
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::FORBIDDEN,
+        "compiling mints a model version, so it is an admin action"
+    );
+
+    let resp = app
+        .clone()
+        .oneshot(req(
+            "POST",
+            "/v1/orgs/acme/models/compile",
+            &admin_key,
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    let compile_status = resp.status();
+    let compiled = json_body(resp).await;
+    assert_eq!(
+        compile_status,
+        StatusCode::CREATED,
+        "compile refused: {}",
+        compiled["detail"].as_str().unwrap_or("(no detail)")
+    );
+    assert_eq!(
+        compiled["state"], "draft",
+        "compiling must not activate: a config edit cannot be allowed to re-cluster silently"
+    );
+    assert_eq!(compiled["provenance"]["origin"], "compiled");
+    assert_eq!(
+        compiled["model_version_label"], "v0001",
+        "a compiled model keeps the org's stamp, or the TF lookup would find nothing"
+    );
+    assert!(
+        compiled["notes"].as_array().unwrap().iter().any(|n| n
+            .as_str()
+            .unwrap_or_default()
+            .contains("DECLARED, not estimated")),
+        "the response must say the parameters were not trained: {compiled}"
+    );
+
+    // The compiled document is a real model the engine loads, and it carries the
+    // comparisons the config declared.
+    let compiled_version = compiled["version"].as_i64().unwrap();
+    let resp = app
+        .clone()
+        .oneshot(req(
+            "GET",
+            &format!("/v1/orgs/acme/models/default/versions/{compiled_version}"),
+            &viewer_key,
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let detail = json_body(resp).await;
+    let columns: Vec<&str> = detail["weights"]["comparisons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["output_column_name"].as_str().unwrap())
+        .collect();
+    // The fixture config declares exactly these six comparisons.
+    assert_eq!(
+        columns,
+        vec![
+            "addr_postal",
+            "birth_date",
+            "email",
+            "family_name",
+            "given_name",
+            "phone_e164"
+        ],
+        "the compiled model must compare what the config declared"
+    );
+    // And the blocking rules the config declared reached it.
+    assert_ne!(
+        detail["weights"]["blocking_rules"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0,
+        "the config's blocking rules must reach the compiled model"
+    );
+
+    // Activating it is the same explicit step as any other version.
+    let resp = app
+        .clone()
+        .oneshot(req(
+            "POST",
+            &format!("/v1/orgs/acme/models/default/versions/{compiled_version}/activate"),
+            &admin_key,
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let resp = app
+        .clone()
+        .oneshot(req(
+            "GET",
+            "/v1/orgs/acme/models",
+            &viewer_key,
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        json_body(resp).await["active"]["version"],
+        compiled_version,
+        "the compiled model is now what runs score against"
+    );
+
     let _ = std::fs::remove_file(&config_path);
 }
