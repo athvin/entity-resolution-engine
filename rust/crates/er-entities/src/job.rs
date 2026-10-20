@@ -26,7 +26,11 @@ pub struct Job {
     pub attempt: i64,
     /// Maximum attempts before the job fails.
     pub max_attempts: i64,
-    /// Earliest time the job may be claimed.
+    /// Why the job failed, as a class the UI can act on: precondition (an input is missing — expected during onboarding), transient_io (worth retrying), config (the tenant config is wrong), internal (a bug). Null until a failure.
+    pub error_class: Option<String>,
+    /// The failure's human text, already chain-flattened. Kept beside error_class so a steward sees the reason without reading pod logs.
+    pub error_detail: Option<String>,
+    /// Earliest time the job may be claimed. A retry sets it to the backoff deadline.
     pub not_before: Option<::chrono::DateTime<::chrono::Utc>>,
     /// Principal that created the job.
     pub created_by: Option<String>,
@@ -70,6 +74,8 @@ impl Job {
             "run_id",
             "attempt",
             "max_attempts",
+            "error_class",
+            "error_detail",
             "not_before",
             "created_by",
             "schedule_id",
@@ -111,6 +117,8 @@ RETURNING
   run_id,
   attempt,
   max_attempts,
+  error_class,
+  error_detail,
   not_before,
   created_by,
   schedule_id,
@@ -147,6 +155,8 @@ RETURNING
                 run_id: row.get("run_id"),
                 attempt: row.get("attempt"),
                 max_attempts: row.get("max_attempts"),
+                error_class: row.get("error_class"),
+                error_detail: row.get("error_detail"),
                 not_before: row.get("not_before"),
                 created_by: row.get("created_by"),
                 schedule_id: row.get("schedule_id"),
@@ -189,6 +199,8 @@ RETURNING
   run_id,
   attempt,
   max_attempts,
+  error_class,
+  error_detail,
   not_before,
   created_by,
   schedule_id,
@@ -226,6 +238,8 @@ RETURNING
                 run_id: row.get("run_id"),
                 attempt: row.get("attempt"),
                 max_attempts: row.get("max_attempts"),
+                error_class: row.get("error_class"),
+                error_detail: row.get("error_detail"),
                 not_before: row.get("not_before"),
                 created_by: row.get("created_by"),
                 schedule_id: row.get("schedule_id"),
@@ -259,6 +273,8 @@ pub mod read {
   run_id,
   attempt,
   max_attempts,
+  error_class,
+  error_detail,
   not_before,
   created_by,
   schedule_id,
@@ -285,6 +301,8 @@ WHERE org_id = $1 AND id = $2
                 run_id: row.get("run_id"),
                 attempt: row.get("attempt"),
                 max_attempts: row.get("max_attempts"),
+                error_class: row.get("error_class"),
+                error_detail: row.get("error_detail"),
                 not_before: row.get("not_before"),
                 created_by: row.get("created_by"),
                 schedule_id: row.get("schedule_id"),
@@ -315,6 +333,8 @@ WHERE org_id = $1 AND id = $2
   run_id,
   attempt,
   max_attempts,
+  error_class,
+  error_detail,
   not_before,
   created_by,
   schedule_id,
@@ -341,6 +361,8 @@ WHERE org_id = $1 AND idempotency_key = $2
                 run_id: row.get("run_id"),
                 attempt: row.get("attempt"),
                 max_attempts: row.get("max_attempts"),
+                error_class: row.get("error_class"),
+                error_detail: row.get("error_detail"),
                 not_before: row.get("not_before"),
                 created_by: row.get("created_by"),
                 schedule_id: row.get("schedule_id"),
@@ -372,6 +394,8 @@ WHERE org_id = $1 AND idempotency_key = $2
   run_id,
   attempt,
   max_attempts,
+  error_class,
+  error_detail,
   not_before,
   created_by,
   schedule_id,
@@ -404,6 +428,8 @@ LIMIT $3
                 run_id: row.get("run_id"),
                 attempt: row.get("attempt"),
                 max_attempts: row.get("max_attempts"),
+                error_class: row.get("error_class"),
+                error_detail: row.get("error_detail"),
                 not_before: row.get("not_before"),
                 created_by: row.get("created_by"),
                 schedule_id: row.get("schedule_id"),
@@ -425,7 +451,10 @@ pub mod update {
         client: &::tokio_postgres::Client,
     ) -> ::std::result::Result<Vec<super::Job>, ::tokio_postgres::Error> {
         const SQL: &str = "UPDATE public.jobs
-SET state = 'dispatching', started_at = now(), updated_at = now()
+SET state = 'dispatching', started_at = now(), updated_at = now(),
+    -- Count the attempt as it is handed out: a worker that dies without
+    -- reporting has still used one, which is what stops an infinite retry.
+    attempt = jobs.attempt + 1
 WHERE id = (
   SELECT j.id FROM public.jobs j
   WHERE j.state = 'queued' AND (j.not_before IS NULL OR j.not_before <= now())
@@ -446,6 +475,8 @@ RETURNING
   run_id,
   attempt,
   max_attempts,
+  error_class,
+  error_detail,
   not_before,
   created_by,
   schedule_id,
@@ -470,6 +501,86 @@ RETURNING
                 run_id: row.get("run_id"),
                 attempt: row.get("attempt"),
                 max_attempts: row.get("max_attempts"),
+                error_class: row.get("error_class"),
+                error_detail: row.get("error_detail"),
+                not_before: row.get("not_before"),
+                created_by: row.get("created_by"),
+                schedule_id: row.get("schedule_id"),
+                resource_class: row.get("resource_class"),
+                trace_context: row.get("trace_context"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+                started_at: row.get("started_at"),
+                finished_at: row.get("finished_at"),
+            })
+            .collect())
+    }
+
+    /// Record a job failure and decide, in one statement, whether it retries: a retryable class with attempts left goes back to queued behind an exponential backoff, anything else fails terminally. One statement rather than a read-then-write so two dispatchers cannot both conclude they are the last attempt.
+    pub async fn fail_or_retry(
+        client: &::tokio_postgres::Client,
+        retryable: bool,
+        error_class: Option<&str>,
+        error_detail: Option<&str>,
+        job_id: &str,
+    ) -> ::std::result::Result<Vec<super::Job>, ::tokio_postgres::Error> {
+        const SQL: &str = "UPDATE public.jobs
+SET state = CASE WHEN $1 AND attempt < max_attempts THEN 'queued' ELSE 'failed' END,
+    -- Exponential backoff from the attempt already made, capped so a job cannot
+    -- drift hours into the future: 5s, 10s, 20s, … 300s.
+    not_before = CASE WHEN $1 AND attempt < max_attempts
+                      THEN now() + make_interval(
+                             secs => least(300, 5 * power(2, greatest(attempt - 1, 0)))::int)
+                      ELSE not_before END,
+    -- A retry is a fresh attempt, so the previous attempt's stamps are cleared;
+    -- a terminal failure keeps them for the audit trail.
+    started_at = CASE WHEN $1 AND attempt < max_attempts THEN NULL ELSE started_at END,
+    finished_at = CASE WHEN $1 AND attempt < max_attempts THEN NULL ELSE now() END,
+    error_class = $2,
+    error_detail = $3,
+    updated_at = now()
+WHERE id = $4
+RETURNING
+  id,
+  org_id,
+  kind,
+  params,
+  state,
+  priority,
+  idempotency_key,
+  run_id,
+  attempt,
+  max_attempts,
+  error_class,
+  error_detail,
+  not_before,
+  created_by,
+  schedule_id,
+  resource_class,
+  trace_context,
+  created_at,
+  updated_at,
+  started_at,
+  finished_at
+";
+        let rows = client
+            .query(SQL, &[&retryable, &error_class, &error_detail, &job_id])
+            .await?;
+        Ok(rows
+            .iter()
+            .map(|row| super::Job {
+                id: row.get("id"),
+                org_id: row.get("org_id"),
+                kind: row.get("kind"),
+                params: row.get("params"),
+                state: row.get("state"),
+                priority: row.get("priority"),
+                idempotency_key: row.get("idempotency_key"),
+                run_id: row.get("run_id"),
+                attempt: row.get("attempt"),
+                max_attempts: row.get("max_attempts"),
+                error_class: row.get("error_class"),
+                error_detail: row.get("error_detail"),
                 not_before: row.get("not_before"),
                 created_by: row.get("created_by"),
                 schedule_id: row.get("schedule_id"),
@@ -492,6 +603,10 @@ RETURNING
         const SQL: &str = "UPDATE public.jobs
 SET state = $1,
     updated_at = now(),
+    -- A job that finally succeeds must not still show the failure that made it
+    -- retry; the UI renders error_class whenever it is present.
+    error_class = CASE WHEN $1 = 'succeeded' THEN NULL ELSE error_class END,
+    error_detail = CASE WHEN $1 = 'succeeded' THEN NULL ELSE error_detail END,
     finished_at = CASE WHEN $1 IN ('succeeded', 'failed', 'canceled') THEN now() ELSE finished_at END
 WHERE id = $2
 ";

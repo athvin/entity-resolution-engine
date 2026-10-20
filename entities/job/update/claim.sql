@@ -1,5 +1,8 @@
 UPDATE public.jobs
-SET state = 'dispatching', started_at = now(), updated_at = now()
+SET state = 'dispatching', started_at = now(), updated_at = now(),
+    -- Count the attempt as it is handed out: a worker that dies without
+    -- reporting has still used one, which is what stops an infinite retry.
+    attempt = jobs.attempt + 1
 WHERE id = (
   SELECT j.id FROM public.jobs j
   WHERE j.state = 'queued' AND (j.not_before IS NULL OR j.not_before <= now())
@@ -20,6 +23,8 @@ RETURNING
   run_id,
   attempt,
   max_attempts,
+  error_class,
+  error_detail,
   not_before,
   created_by,
   schedule_id,

@@ -180,6 +180,113 @@ pub async fn claim(client: &Client) -> Result<Option<Job>, PgError> {
     }
 }
 
+/// How a job failure should be treated. The classes are the ones the UI already
+/// renders — `job-detail.tsx` shows an error panel keyed on `error_class`, the
+/// dashboard counts `precondition` failures, and the runs table has a column for
+/// it — none of which could ever display anything, because the column did not
+/// exist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FailureClass {
+    /// An input the job needs is not there yet: no model, no deliveries, no
+    /// prior run. Expected during onboarding, which is why the dashboard
+    /// reframes it rather than alarming about it. Retrying cannot help — the
+    /// input appears when a human provides it.
+    Precondition,
+    /// A lake open, an object-store read, a connection: the kind of failure that
+    /// is usually gone a few seconds later. The ONLY class that retries, which
+    /// is what makes the UI's "transient failures retry automatically" true.
+    TransientIo,
+    /// The tenant's config does not load or does not validate. Retrying would
+    /// just fail identically.
+    Config,
+    /// Anything else — a bug until proven otherwise.
+    Internal,
+}
+
+impl FailureClass {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FailureClass::Precondition => "precondition",
+            FailureClass::TransientIo => "transient_io",
+            FailureClass::Config => "config",
+            FailureClass::Internal => "internal",
+        }
+    }
+
+    /// Whether a job in this class should be retried.
+    #[must_use]
+    pub fn retryable(self) -> bool {
+        self == FailureClass::TransientIo
+    }
+
+    /// Classify a dispatcher failure string.
+    ///
+    /// Matched on the messages this codebase actually produces rather than on a
+    /// generic taxonomy: "org env missing …" and "no prior run to correct" are
+    /// preconditions by construction, `open lake` / `read model` are IO, and
+    /// `config:` is the config loader's own prefix. Anything unrecognised is
+    /// deliberately `Internal` and NOT retried — silently retrying an unknown
+    /// failure three times turns one confusing log line into three.
+    #[must_use]
+    pub fn classify(message: &str) -> Self {
+        let m = message.to_ascii_lowercase();
+        if m.contains("org env missing")
+            || m.contains("no prior run")
+            || m.contains("no source deliveries")
+            || m.contains("no trained model")
+            || m.contains("no model yet")
+            || m.contains("has no drop_root")
+        {
+            FailureClass::Precondition
+        } else if m.starts_with("config:") || m.contains("read config") {
+            FailureClass::Config
+        } else if m.contains("open lake")
+            || m.contains("read model")
+            || m.contains("connection")
+            || m.contains("timed out")
+            || m.contains("timeout")
+            || m.contains("temporarily")
+            || m.contains("i/o error")
+        {
+            FailureClass::TransientIo
+        } else {
+            FailureClass::Internal
+        }
+    }
+}
+
+/// Record a job failure and let Postgres decide whether it retries.
+///
+/// Returns the job in its resulting state, so the caller can tell a retry from
+/// a terminal failure — the dispatcher only emits `job.failed` for the latter,
+/// because a webhook per attempt would turn one incident into three.
+///
+/// # Errors
+/// Propagates the update error.
+pub async fn fail_or_retry(
+    client: &Client,
+    job_id: &str,
+    class: FailureClass,
+    detail: &str,
+) -> Result<Job, PgError> {
+    // Keep the stored detail bounded: it is rendered in a panel, and a runaway
+    // engine error can be enormous.
+    let truncated: String = detail.chars().take(2000).collect();
+    let jobs = er_entities::job::update::fail_or_retry(
+        client,
+        class.retryable(),
+        Some(class.as_str()),
+        Some(truncated.as_str()),
+        job_id,
+    )
+    .await?;
+    Ok(jobs
+        .into_iter()
+        .next()
+        .expect("fail_or_retry RETURNING yields exactly one row"))
+}
+
 /// Record a terminal/next state on a job (`running`, `succeeded`, `failed`,
 /// `canceled`), stamping `finished_at` for terminal states.
 ///

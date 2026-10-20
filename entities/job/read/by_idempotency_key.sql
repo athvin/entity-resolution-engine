@@ -9,6 +9,8 @@ SELECT
   run_id,
   attempt,
   max_attempts,
+  error_class,
+  error_detail,
   not_before,
   created_by,
   schedule_id,

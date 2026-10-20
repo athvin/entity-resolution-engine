@@ -53,9 +53,15 @@ columns:
     nullable: false
     default: "3"
     description: "Maximum attempts before the job fails."
+  - name: error_class
+    type: varchar
+    description: "Why the job failed, as a class the UI can act on: precondition (an input is missing — expected during onboarding), transient_io (worth retrying), config (the tenant config is wrong), internal (a bug). Null until a failure."
+  - name: error_detail
+    type: varchar
+    description: "The failure's human text, already chain-flattened. Kept beside error_class so a steward sees the reason without reading pod logs."
   - name: not_before
     type: timestamp
-    description: "Earliest time the job may be claimed."
+    description: "Earliest time the job may be claimed. A retry sets it to the backoff deadline."
   - name: created_by
     type: varchar
     description: "Principal that created the job."

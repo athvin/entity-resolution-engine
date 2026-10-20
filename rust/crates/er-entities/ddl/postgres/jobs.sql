@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS public.jobs (
   run_id text,
   attempt bigint NOT NULL DEFAULT 0,
   max_attempts bigint NOT NULL DEFAULT 3,
+  error_class text,
+  error_detail text,
   not_before timestamptz,
   created_by text,
   schedule_id text,

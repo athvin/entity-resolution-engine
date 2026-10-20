@@ -1981,6 +1981,8 @@ pub fn enqueue(state: &AppState, org: &str, kind: &str, priority: i64) -> Job {
         run_id: None,
         attempt: 0,
         max_attempts: 3,
+        error_class: None,
+        error_detail: None,
         not_before: None,
         created_by: None,
         schedule_id: None,

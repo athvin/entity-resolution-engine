@@ -1,0 +1,10 @@
+kind: statement
+operation: update
+mode: partial
+description: "Record a job failure and decide, in one statement, whether it retries: a retryable class with attempts left goes back to queued behind an exponential backoff, anything else fails terminally. One statement rather than a read-then-write so two dispatchers cannot both conclude they are the last attempt."
+params:
+  - { name: retryable, type: boolean }
+  - { name: error_class, type: varchar, nullable: true }
+  - { name: error_detail, type: varchar, nullable: true }
+  - { name: job_id, type: varchar }
+returns: entity

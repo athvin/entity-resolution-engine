@@ -255,6 +255,10 @@ export interface components {
             created_at: string;
             /** @description Principal that created the job. */
             created_by?: string | null;
+            /** @description Why the job failed, as a class the UI can act on: precondition (an input is missing — expected during onboarding), transient_io (worth retrying), config (the tenant config is wrong), internal (a bug). Null until a failure. */
+            error_class?: string | null;
+            /** @description The failure's human text, already chain-flattened. Kept beside error_class so a steward sees the reason without reading pod logs. */
+            error_detail?: string | null;
             /**
              * Format: date-time
              * @description When the job finished.
@@ -273,7 +277,7 @@ export interface components {
             max_attempts: number;
             /**
              * Format: date-time
-             * @description Earliest time the job may be claimed.
+             * @description Earliest time the job may be claimed. A retry sets it to the backoff deadline.
              */
             not_before?: string | null;
             /** @description The tenant this job runs for. */

@@ -157,13 +157,22 @@ jobs:
         # build a `-p`-scoped subset. These preinstalled toolchains are unused
         # here and return ~25 GB. Written inline rather than pulling a
         # third-party action, to keep every `uses:` in this workflow SHA-pinned.
-        # The hosted tool cache is deliberately left alone: it is worth ~10 GB
-        # but backs the `setup-*` actions, and dotnet + android already return
-        # far more than this job needs.
+        # The hosted tool cache goes too, now. Dotnet + android + ghc + boost +
+        # swift stopped being enough the moment the workspace reached 28 crates:
+        # one crate's test build alone measures ~12.6 GB of `target`, most of it
+        # the bundled duckdb C++ objects. (Shaving Rust debuginfo was tried and
+        # rejected first — `CARGO_PROFILE_{DEV,TEST}_DEBUG=line-tables-only`
+        # measured 12631 MB -> 11766 MB, about 7%, because cargo's debug
+        # settings do not reach those C++ objects. Worth recording so the next
+        # person reaching for that knob does not repeat the experiment.)
+        # Removing the tool cache is safe for THIS job specifically: it installs
+        # Rust with rustup and mold with apt, and the two actions it does use
+        # (sccache, rust-cache) are JS, so nothing here reads `setup-*`'s cache.
         run: |
           df -h / | tail -1
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-                      /usr/local/share/boost /usr/share/swift
+                      /usr/local/share/boost /usr/share/swift \
+                      /opt/hostedtoolcache
           df -h / | tail -1
       - name: Install stable toolchain
         run: rustup update stable --no-self-update && rustup default stable

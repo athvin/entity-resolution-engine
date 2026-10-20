@@ -23,7 +23,11 @@ export interface Job {
   attempt: number;
   /** Maximum attempts before the job fails. */
   max_attempts: number;
-  /** Earliest time the job may be claimed. */
+  /** Why the job failed, as a class the UI can act on: precondition (an input is missing — expected during onboarding), transient_io (worth retrying), config (the tenant config is wrong), internal (a bug). Null until a failure. */
+  error_class: string | null;
+  /** The failure's human text, already chain-flattened. Kept beside error_class so a steward sees the reason without reading pod logs. */
+  error_detail: string | null;
+  /** Earliest time the job may be claimed. A retry sets it to the backoff deadline. */
   not_before: string | null;
   /** Principal that created the job. */
   created_by: string | null;

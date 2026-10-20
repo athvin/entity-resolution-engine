@@ -208,6 +208,8 @@ mod tests {
             ("run_id", "text", true),
             ("attempt", "bigint", false),
             ("max_attempts", "bigint", false),
+            ("error_class", "text", true),
+            ("error_detail", "text", true),
             ("not_before", "timestamptz", true),
             ("created_by", "text", true),
             ("schedule_id", "text", true),
