@@ -1558,6 +1558,7 @@ name = "er-pg-tls"
 version = "0.1.0"
 dependencies = [
  "rustls",
+ "tokio-postgres",
  "tokio-postgres-rustls",
 ]
 
