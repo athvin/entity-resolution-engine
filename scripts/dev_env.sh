@@ -14,7 +14,9 @@
 # (§8.5). Optional inputs, each parked as an empty/placeholder value otherwise:
 #   ER_DEV_S3_KEY / ER_DEV_S3_SECRET   the §9.2 per-environment lake IAM user's
 #                                      static key pair (placeholder CHANGEME)
-#   ER_DEV_SMTP_URL                    the §9.3 SES SMTP relay URL
+#   (no SMTP credential: §7.5 email is the SES API, signed by the pod's EKS
+#    Pod Identity credentials. Set the chart's erserver.email.backend to `log`
+#    for a dev namespace and the links land in the pod log.)
 #   ER_DEV_ANTHROPIC_API_KEY           the assistant's key (feature off without)
 #
 # Usage: scripts/dev_env.sh up <developer>     # stdout: eval-able exports
@@ -170,7 +172,6 @@ print(json.dumps({
     "ERSERVER_OPERATOR_TOKEN": secrets.token_hex(32),
     "ERSERVER_SECRET_S3_KEY": os.environ.get("ER_DEV_S3_KEY", "CHANGEME"),
     "ERSERVER_SECRET_S3_SECRET": os.environ.get("ER_DEV_S3_SECRET", "CHANGEME"),
-    "ERSERVER_SMTP_URL": os.environ.get("ER_DEV_SMTP_URL", ""),
     "ERSERVER_TENANT_ENV_JSON": json.dumps(tenant_env),
 }))
 PY

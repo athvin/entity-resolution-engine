@@ -5,7 +5,17 @@ members = ["crates/dedupe-core", "crates/dedupe-cli", "crates/er-eval", "crates/
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+# 1.88, raised from 1.85 when the SES mailer landed (§7.5). This is not taste:
+# `time` 0.3.45 carries RUSTSEC-2026-0009 (stack exhaustion parsing RFC 2822),
+# the AWS SDK depends on `time`, and the first patched release — 0.3.47 —
+# requires 1.88. Declaring 1.85 is what pinned cargo's resolver to the
+# vulnerable version, so the choice was a real advisory or an honest floor.
+#
+# Nothing verifies the floor downward: `rust-toolchain.toml` asks for `stable`,
+# every CI job installs stable, and the image is `rust:1-bookworm`. The field's
+# live effect is on dependency resolution, where a higher floor lets cargo pick
+# newer and safer versions.
+rust-version = "1.88"
 license = "MIT"
 repository = "https://github.com/athvin/dedupe-engine"
 

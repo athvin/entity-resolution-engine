@@ -59,8 +59,15 @@ erserver:
   # ERSERVER_TENANT_DB_PREFIX; empty keeps the erserver default ("er_").
   tenantDbPrefix: ""
   email:
-    from: "" # ERSERVER_EMAIL_FROM; empty leaves email disabled (outbox parks — §7.5)
-    baseUrl: "" # ERSERVER_EMAIL_BASE_URL; defaults to https://{host} when ingress host is known
+    # §7.5. `ses` sends through the SES API, signed by the pod's EKS Pod
+    # Identity credentials (no key to mount, and none exists — see
+    # infra/terraform/envs/dev/ses.tf). `log` renders to the pod log, which is
+    # how a dev namespace gets the invite/verify links without AWS. Empty
+    # leaves POST /v1/email answering 503, which the BFF's relay treats as
+    # "not configured" and falls back from.
+    backend: "" # ER_MAIL_BACKEND: ses | log | off
+    from: "" # ER_MAIL_FROM; required by `ses`, which disables itself without it
+    configurationSet: "" # ER_MAIL_CONFIGURATION_SET; terraform output ses_configuration_set_name
 
 api:
   replicas: 1
