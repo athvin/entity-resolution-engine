@@ -159,6 +159,85 @@ RETURNING
             })
             .collect())
     }
+
+    /// Queue a job on behalf of a schedule: same idempotent upsert as enqueue, but it records the originating schedule_id and a 'scheduler' principal so a scheduled run is attributable to the rule that caused it.
+    pub async fn enqueue_scheduled(
+        client: &::tokio_postgres::Client,
+        job_id: &str,
+        org_id: &str,
+        kind: &str,
+        priority: i64,
+        idempotency_key: Option<&str>,
+        params: Option<&::serde_json::Value>,
+        schedule_id: &str,
+    ) -> ::std::result::Result<Vec<super::Job>, ::tokio_postgres::Error> {
+        const SQL: &str = "INSERT INTO public.jobs
+  (id, org_id, kind, priority, idempotency_key, params, schedule_id, created_by)
+VALUES
+  ($1, $2, $3, $4, $5, coalesce($6, '{}'::jsonb),
+   $7, 'scheduler')
+ON CONFLICT (org_id, idempotency_key) WHERE idempotency_key IS NOT NULL
+  DO UPDATE SET kind = jobs.kind, updated_at = now()
+RETURNING
+  id,
+  org_id,
+  kind,
+  params,
+  state,
+  priority,
+  idempotency_key,
+  run_id,
+  attempt,
+  max_attempts,
+  not_before,
+  created_by,
+  schedule_id,
+  resource_class,
+  trace_context,
+  created_at,
+  updated_at,
+  started_at,
+  finished_at
+";
+        let rows = client
+            .query(
+                SQL,
+                &[
+                    &job_id,
+                    &org_id,
+                    &kind,
+                    &priority,
+                    &idempotency_key,
+                    &params,
+                    &schedule_id,
+                ],
+            )
+            .await?;
+        Ok(rows
+            .iter()
+            .map(|row| super::Job {
+                id: row.get("id"),
+                org_id: row.get("org_id"),
+                kind: row.get("kind"),
+                params: row.get("params"),
+                state: row.get("state"),
+                priority: row.get("priority"),
+                idempotency_key: row.get("idempotency_key"),
+                run_id: row.get("run_id"),
+                attempt: row.get("attempt"),
+                max_attempts: row.get("max_attempts"),
+                not_before: row.get("not_before"),
+                created_by: row.get("created_by"),
+                schedule_id: row.get("schedule_id"),
+                resource_class: row.get("resource_class"),
+                trace_context: row.get("trace_context"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+                started_at: row.get("started_at"),
+                finished_at: row.get("finished_at"),
+            })
+            .collect())
+    }
 }
 
 pub mod read {

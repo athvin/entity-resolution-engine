@@ -24,6 +24,11 @@ use crate::{Job, pg, webhook};
 const IDLE_MIN: Duration = Duration::from_millis(500);
 const IDLE_MAX: Duration = Duration::from_secs(5);
 
+/// How often the scheduler tick runs. Cron's resolution is one minute and the
+/// tick is idempotent per minute, so this only has to be comfortably under a
+/// minute — it is not the firing precision.
+const SCHEDULE_TICK_EVERY: Duration = Duration::from_secs(20);
+
 /// Poll + run jobs until `term` is set or a Postgres failure occurs. Returns
 /// `Ok(())` on a clean (term-requested) exit; `Err` on a control-plane failure
 /// (the caller decides whether that's fatal — the standalone binary exits
@@ -39,7 +44,21 @@ pub async fn run_loop(
 ) -> Result<(), tokio_postgres::Error> {
     eprintln!("dispatcher up");
     let mut idle = IDLE_MIN;
+    let mut next_schedule_tick = tokio::time::Instant::now();
     while !term.load(Ordering::SeqCst) {
+        // Schedules fire from here. Cheap (one query when nothing is due) and
+        // rate-limited, so it rides the job loop rather than owning a task: one
+        // loop means one place that stops on SIGTERM.
+        if tokio::time::Instant::now() >= next_schedule_tick {
+            next_schedule_tick = tokio::time::Instant::now() + SCHEDULE_TICK_EVERY;
+            match schedule_tick(client, chrono::Utc::now()).await {
+                Ok(0) => {}
+                Ok(n) => eprintln!("scheduler enqueued {n} job(s)"),
+                // A tick failure must not take the job loop down with it: the
+                // queue keeps draining and the next tick retries.
+                Err(e) => eprintln!("scheduler tick failed: {e}"),
+            }
+        }
         if dispatch_once(client, http).await? {
             idle = IDLE_MIN; // ran a job; poll again immediately
         } else {
@@ -49,6 +68,69 @@ pub async fn run_loop(
     }
     eprintln!("dispatcher draining -> exit");
     Ok(())
+}
+
+/// Enqueue a job for every enabled schedule whose cron matches `now`'s minute.
+/// Returns how many were enqueued.
+///
+/// Before this existed, `schedules` was inert storage: the table, its CRUD and
+/// its cron validation all shipped, but nothing ever read a row to enqueue
+/// anything and `last_enqueued_at` was never written. Every schedule in the
+/// product — including `config.correction_pass.cadence` — simply never fired.
+///
+/// Two properties worth stating, because both are deliberate:
+///
+/// **Exactly once per minute, even with several dispatchers.** The firing is
+/// keyed `sched:<schedule_id>:<yyyymmddhhmm>` and `pg::enqueue` upserts on the
+/// idempotency key, so two replicas ticking the same minute produce one job and
+/// both see it. `last_enqueued_at` is written for operators to read; it is not
+/// what makes the firing unique.
+///
+/// **No catch-up.** A dispatcher down across a firing does not backfill it on
+/// return, exactly like cron(8). Backfilling would convert an outage into a
+/// burst of identical runs, which for a `run_all_full` is the most expensive
+/// thing this system can do.
+///
+/// # Errors
+/// Propagates a Postgres read/enqueue failure.
+pub async fn schedule_tick(
+    client: &tokio_postgres::Client,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<usize, tokio_postgres::Error> {
+    let minute_key = now.format("%Y%m%d%H%M").to_string();
+    let mut enqueued = 0usize;
+    for schedule in pg::due_schedules(client).await? {
+        // A row whose cron cannot be parsed is reported, not silently skipped —
+        // the API rejects these on the way in, so one here is a data-level
+        // surprise worth seeing.
+        let Ok(expr) = crate::cron::Cron::parse(&schedule.cron) else {
+            eprintln!(
+                "schedule {} has an unrunnable cron {:?}; skipping",
+                schedule.id, schedule.cron
+            );
+            continue;
+        };
+        if !expr.matches_at(now) {
+            continue;
+        }
+        let key = format!("sched:{}:{minute_key}", schedule.id);
+        let (_job, inserted) = pg::enqueue_scheduled(
+            client,
+            &schedule.org_id,
+            &schedule.kind,
+            &key,
+            Some(&schedule.params),
+            &schedule.id,
+        )
+        .await?;
+        // A replayed firing (same minute, another tick or another replica) comes
+        // back as the existing row and must not be counted or re-stamped.
+        if inserted {
+            pg::mark_schedule_enqueued(client, &schedule.id).await?;
+            enqueued += 1;
+        }
+    }
+    Ok(enqueued)
 }
 
 /// Claim + run one job. `Ok(true)` ran a job (outcome persisted), `Ok(false)`

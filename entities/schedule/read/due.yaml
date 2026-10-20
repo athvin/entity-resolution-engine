@@ -1,0 +1,7 @@
+kind: statement
+operation: read
+mode: full
+description: "Every enabled schedule belonging to an active org, for the dispatcher's scheduler tick. Suspended orgs are excluded so a suspended tenant does not accumulate scheduled runs."
+params: []
+reads: [org]
+returns: entity

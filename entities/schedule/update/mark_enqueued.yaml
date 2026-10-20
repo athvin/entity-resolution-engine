@@ -1,0 +1,7 @@
+kind: statement
+operation: update
+mode: partial
+description: "Record that the scheduler tick enqueued this schedule's job. Observability only — the firing itself is made exactly-once by the job's idempotency key, not by this column."
+params:
+  - { name: schedule_id, type: varchar }
+returns: none

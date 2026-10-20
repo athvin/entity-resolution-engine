@@ -141,6 +141,34 @@ async fn config_publish_tiers_and_authz() {
     assert_eq!(active["version"], 1);
     assert_eq!(active["state"], "published");
 
+    // Publishing turns `correction_pass.cadence` into a real schedule. The
+    // cadence had been stored by every tenant config and read by nothing, so the
+    // periodic correction pass it describes never ran.
+    let read_schedules = async |bearer: &str| -> Vec<serde_json::Value> {
+        let resp = app
+            .clone()
+            .oneshot(req("GET", "/v1/orgs/acme/schedules", bearer, Body::empty()))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        json_body(resp).await.as_array().cloned().unwrap()
+    };
+    let rows = read_schedules(&admin_key).await;
+    let owned: Vec<&serde_json::Value> = rows
+        .iter()
+        .filter(|r| r["source"] == "config:correction_pass")
+        .collect();
+    assert_eq!(
+        owned.len(),
+        1,
+        "publishing must own exactly one correction-pass schedule"
+    );
+    assert_eq!(owned[0]["kind"], "correct");
+    assert_eq!(
+        owned[0]["cron"], "0 3 * * 0",
+        "the schedule must carry the published cadence"
+    );
+
     // v2 changes only thresholds (an A-tier block). Publish -> tier A, 1 job.
     let v2_yaml = DEFAULT_YAML.replace("review_low: 0.60", "review_low: 0.55");
     assert_ne!(v2_yaml, DEFAULT_YAML, "the threshold edit must apply");
@@ -203,6 +231,34 @@ async fn config_publish_tiers_and_authz() {
     // Publishing a non-existent version is a 404.
     let resp = publish(&app, "op-secret", 99).await;
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
+    // Three publishes later there is still exactly one correction-pass schedule:
+    // the owner is reconciled, not re-created.
+    let rows = read_schedules("op-secret").await;
+    assert_eq!(
+        rows.iter()
+            .filter(|r| r["source"] == "config:correction_pass")
+            .count(),
+        1,
+        "republishing must not accumulate correction-pass schedules"
+    );
+
+    // Changing the cadence re-points that same schedule.
+    let v4_yaml = DEFAULT_YAML.replace("cadence: \"0 3 * * 0\"", "cadence: \"30 4 * * 1\"");
+    assert_ne!(v4_yaml, DEFAULT_YAML, "the cadence edit must apply");
+    let v4 = create_version(&app, "op-secret", &v4_yaml).await;
+    let resp = publish(&app, "op-secret", v4).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let rows = read_schedules("op-secret").await;
+    let owned: Vec<&serde_json::Value> = rows
+        .iter()
+        .filter(|r| r["source"] == "config:correction_pass")
+        .collect();
+    assert_eq!(owned.len(), 1, "still one schedule after a cadence change");
+    assert_eq!(
+        owned[0]["cron"], "30 4 * * 1",
+        "the schedule must follow the newly published cadence"
+    );
 
     let _ = std::fs::remove_file(&config_path);
 }
