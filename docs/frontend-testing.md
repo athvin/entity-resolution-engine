@@ -24,6 +24,16 @@ setup (how to run things, the dev substrate) stays in
    `rust.yml` already does for its `.claude/**` skip. *Verified:* a backend-only
    PR reports those three contexts as `conclusion=skipped` (completed, not
    pending), which branch protection accepts.
+
+   **`detect` filters pushes to main too**, which is where this diverges from
+   `rust.yml` — that workflow always runs on main because it *is* the gate
+   protecting it. This one's main run only re-tests what the just-merged PR
+   already tested (a squash commit and the PR head are near-identical trees), so
+   re-running the Playwright container for a Rust-only merge cost ~5 minutes and
+   proved nothing. It fails *safe*: an all-zeroes `event.before` (a branch's
+   first push) or an unresolvable one (after a force-push) runs the gate rather
+   than skipping it. Nightly and manual runs always run. All eight event paths
+   are exercised against real commits before changing this job.
 3. **Coverage is enforced per-PR, not nightly.** `pnpm check` runs
    `vitest run --coverage`; the floor lives in `vitest.config.ts`. This
    deliberately diverges from the Rust side (`rust.yml` runs llvm-cov nightly)
@@ -286,3 +296,10 @@ fails exactly the case written for it.
   the measurement. 12 component files converted to grayscale and 30 visual
   baselines regenerated in the pinned Linux image. Gate: `pnpm check` (coverage
   enforced) + the functional tier.
+- 2026-10-20 — **`detect` now filters pushes to main as well**, not just PRs.
+  Removing the `paths:` filter (needed to make the checks required) had made
+  every backend-only merge run the full frontend gate, Playwright container
+  included, re-testing a tree the just-merged PR had already tested. Fails safe
+  on an all-zeroes or unresolvable `event.before`. Gate: all eight event paths
+  exercised against real commits (#206 as a frontend-touching merge, #207 as a
+  Rust-only one) before pushing.

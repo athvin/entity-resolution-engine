@@ -50,10 +50,17 @@ defaults:
     working-directory: frontend
 
 jobs:
-  # Did this PR touch the frontend? The required jobs below gate on this, so a
-  # backend-only PR skips them (a skipped required check still satisfies branch
-  # protection). Non-PR events (push to main, nightly) always report `true` —
-  # the gate never self-skips on the branch it protects.
+  # Did this change touch the frontend? The required jobs below gate on this, so
+  # a backend-only PR skips them (a skipped required check still satisfies branch
+  # protection).
+  #
+  # Pushes to main are filtered the same way, unlike rust.yml, which always runs
+  # on main. The difference is deliberate: rust.yml IS the gate protecting main,
+  # so it must never self-skip there, whereas this workflow's main run only ever
+  # re-tests what the just-merged PR already tested — the squash commit and the
+  # PR head are near-identical trees. Running the Playwright container again for
+  # a Rust-only merge cost ~5 minutes and proved nothing. Nightly and manual runs
+  # still always report `true`.
   detect:
     name: detect changes
     runs-on: ubuntu-latest
@@ -70,17 +77,41 @@ jobs:
           EVENT: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.event.after }}
         run: |
-          if [ "$EVENT" != "pull_request" ]; then
-            echo "frontend=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # `base...head` = what the PR introduces. Count changed paths under
-          # `frontend/` (or this workflow); any match means the gate must run.
-          # `grep -c` reads all input (unlike `grep -q`, which closes the pipe
-          # early and can SIGPIPE `git diff` under `pipefail` → a flaky false
-          # skip); `|| true` absorbs grep's exit-1-on-zero-matches under `set -e`.
-          changed="$(git diff --name-only "$BASE_SHA...$HEAD_SHA")"
+          # Which two commits bound "what changed" depends on the event.
+          case "$EVENT" in
+            pull_request)
+              # `base...head` = what the PR introduces.
+              RANGE="$BASE_SHA...$HEAD_SHA"
+              ;;
+            push)
+              # The merge that just landed. A squash-merged PR already ran this
+              # same gate against an all-but-identical tree, so re-running it
+              # for a backend-only merge buys nothing and costs the Playwright
+              # container every time. `before` is all-zeroes on a branch's first
+              # push and unresolvable after a force-push, so fall back to
+              # running rather than skipping — a wasted run beats a silent one.
+              if [ -z "$PUSH_BEFORE" ] || [ "$PUSH_BEFORE" = "0000000000000000000000000000000000000000" ] \
+                 || ! git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null; then
+                echo "frontend=true" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              RANGE="$PUSH_BEFORE...$PUSH_AFTER"
+              ;;
+            *)
+              # schedule / workflow_dispatch: nothing to diff against.
+              echo "frontend=true" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
+          # Count changed paths under `frontend/` (or this workflow); any match
+          # means the gate must run. `grep -c` reads all input (unlike `grep -q`,
+          # which closes the pipe early and can SIGPIPE `git diff` under
+          # `pipefail` → a flaky false skip); `|| true` absorbs grep's
+          # exit-1-on-zero-matches under `set -e`.
+          changed="$(git diff --name-only "$RANGE")"
           hits="$(printf '%s\n' "$changed" | grep -cE '^(frontend/|\.github/workflows/frontend\.yml$)' || true)"
           if [ "${hits:-0}" -gt 0 ]; then
             echo "frontend=true" >> "$GITHUB_OUTPUT"
