@@ -1,0 +1,18 @@
+[package]
+name = "er-pg-tls"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rustls = { workspace = true }
+tokio-postgres-rustls = { workspace = true }
+# tokio-postgres-rustls declares tokio-postgres default-features = false; the
+# direct dependency turns the default `runtime` feature back on so the
+# MakeTlsConnect impl exists when this crate is built standalone.
+tokio-postgres = { workspace = true }
+
+[lints]
+workspace = true

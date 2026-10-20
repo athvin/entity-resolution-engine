@@ -115,8 +115,14 @@ spec:
               psql -v ON_ERROR_STOP=1 -tAc \
                 "SELECT 1 FROM pg_roles WHERE rolname='$role'" | grep -q 1 \
                 || psql -v ON_ERROR_STOP=1 -c "CREATE ROLE \"$role\" LOGIN"
-              psql -v ON_ERROR_STOP=1 -v pw="$ROLE_PW" \
-                -c "ALTER ROLE \"$role\" WITH LOGIN PASSWORD :'pw'"
+              # :'pw' interpolation only happens for SQL read from stdin/-f --
+              # psql sends -c strings to the server verbatim -- so pipe it in.
+              echo "ALTER ROLE \"$role\" WITH LOGIN PASSWORD :'pw'" \
+                | psql -v ON_ERROR_STOP=1 -v pw="$ROLE_PW"
+              # The Aurora master is not a superuser: CREATE DATABASE ... OWNER
+              # needs SET ROLE on the owner, so grant the role to the master
+              # first (idempotent; the standard RDS pattern).
+              psql -v ON_ERROR_STOP=1 -c "GRANT \"$role\" TO \"$PGUSER\""
               psql -v ON_ERROR_STOP=1 -tAc \
                 "SELECT 1 FROM pg_database WHERE datname='$db'" | grep -q 1 \
                 || psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"$db\" OWNER \"$role\""
