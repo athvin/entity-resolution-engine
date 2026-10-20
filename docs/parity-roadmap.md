@@ -418,7 +418,37 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
       is 3× the evidence, partial weights refused); and the one that matters — a `lake_e2e` run
       resolving base_10 with the compiled model and asserting it yields the **same 10 entities**
       as the trained model.
-- [ ] **E3** hard constraints and relationship exclusions (#18/#32).
+- [x] **E3 hard constraints and relationship exclusions (#18, #32).** One mechanism for all
+      three shapes, because all three are the same kind of statement: *not a weight*. A weight
+      says "this field matters more" and can always be outvoted by enough weak agreement — which
+      is how a matcher merges two different people who share a city and a first name. A
+      constraint cannot be outvoted.
+      New `constraints:` config block, compiled into a conjunct on **every** blocking rule, so a
+      violating pair is never generated as a candidate — the cheapest place to enforce it and
+      the only place where "before similarity counts" is literally true:
+      * `required_match: [tax_id]` — equal **and non-blank** on both sides. The presence half
+        matters: without it, two records that both lack a tax id would "agree" on it.
+      * `veto: [ssn]` — tolerate missing, refuse conflicting. Different from required_match
+        because plenty of records have no SSN, but two *different* non-null ones are proof these
+        are different people. This is the catastrophic-false-merge guard.
+      * `exclude_when_equal: [household_id]` — the relationship exclusion. Records sharing a
+        household or parent account are related, not duplicates, and they are the classic false
+        positive in person resolution.
+      Tier B (same as `blocking`: a re-score, not a retrain). Hash-safe — the block is
+      `skip_serializing_if` empty, so existing configs are byte-identical.
+      **A limit found by testing, and now asserted rather than discovered later:** a
+      candidate-level veto does *not* survive transitive closure. On base_10, C001 and C009 have
+      different emails so they are never compared — but both are compared to W001, whose
+      placeholder email normalizes to NULL and so triggers no veto, and connected components
+      then puts all three in one entity. The lake test asserts both halves: the vetoed pair is
+      absent from `match_scores` (the real guarantee), *and* the three still co-cluster (the
+      limit), with a message telling the next person that a passing stronger assertion means
+      entity-level enforcement has landed.
+- [ ] **E3b entity-level constraint enforcement** — feed config-declared vetoes into reconcile
+      as synthetic `never` rules so the existing `never_cut` fixpoint separates them
+      partition-level, with its escalation-to-review behaviour when every path is protected.
+      The machinery is already built for steward assertions; this is wiring plus a
+      within-cluster conflict scan.
 - [ ] **E4** type-aware comparators (#25).
 
 ### Waves 2–8 (queued)

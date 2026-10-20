@@ -1651,7 +1651,9 @@ async fn put_lexicon(
 
 /// Change tiers (`configsvc.py` `classify_tier`), biggest-blast-radius first.
 const TIER_C_BLOCKS: [&str; 3] = ["comparisons", "standardization", "sources"];
-const TIER_B_BLOCKS: [&str; 1] = ["blocking"];
+// `constraints` sits with `blocking` because it changes the same thing: which
+// pairs are candidates. Editing it needs a re-score, not a retrain.
+const TIER_B_BLOCKS: [&str; 2] = ["blocking", "constraints"];
 const TIER_A_BLOCKS: [&str; 2] = ["thresholds", "survivorship"];
 /// Blocks only an operator may change (`configsvc.py`): everything structural.
 const OPERATOR_ONLY_BLOCKS: [&str; 7] = [
