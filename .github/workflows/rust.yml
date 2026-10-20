@@ -144,6 +144,23 @@ jobs:
       RUSTC_WRAPPER: sccache
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Reclaim runner disk
+        # `cargo test --workspace` links a separate debug binary per crate, and
+        # with bundled duckdb and full debug info that exceeds ubuntu-latest's
+        # ~14 GB of free space — the link step then dies with "No space left on
+        # device" (which reads as an unrelated `linking with cc failed`). Only
+        # this job is affected: `lint` never links, and the e2e/bench/scale jobs
+        # build a `-p`-scoped subset. These preinstalled toolchains are unused
+        # here and return ~25 GB. Written inline rather than pulling a
+        # third-party action, to keep every `uses:` in this workflow SHA-pinned.
+        # The hosted tool cache is deliberately left alone: it is worth ~10 GB
+        # but backs the `setup-*` actions, and dotnet + android already return
+        # far more than this job needs.
+        run: |
+          df -h / | tail -1
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost /usr/share/swift
+          df -h / | tail -1
       - name: Install stable toolchain
         run: rustup update stable --no-self-update && rustup default stable
       - name: Install mold
