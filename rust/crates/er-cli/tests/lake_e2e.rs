@@ -710,6 +710,144 @@ fn run_all_base(tag: &str) -> (Session, Config, PathBuf) {
 /// wrote; and `er_versions::check_mode_preconditions` — the guard that decides
 /// whether an incremental run may extend the existing corpus — had zero callers
 /// anywhere in the workspace.
+/// The blocking estimate must agree with what a run actually generates.
+///
+/// This is the answer to the competitor's hard three-hour analysis cap, whose
+/// documented workaround is "split your dataset with filters or raise the
+/// confidence floor" — two guesses made blind. An estimate is only worth having
+/// if it is the same number the run works through, so this asserts exactly
+/// that: the cumulative candidate count equals the number of distinct pairs the
+/// pipeline scores at threshold 0 over the same corpus.
+#[test]
+fn the_blocking_estimate_matches_what_a_run_actually_scores() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let (session, config, tmp) = standardized_lake("blocking_estimate");
+    let model_json = std::fs::read_to_string(repo_fixture("model_test_v1.json")).unwrap();
+    let rules: Vec<String> = serde_json::from_str::<serde_json::Value>(&model_json).unwrap()
+        ["blocking_rules_to_generate_predictions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| {
+            r.as_str().map_or_else(
+                || r["blocking_rule"].as_str().unwrap().to_string(),
+                str::to_string,
+            )
+        })
+        .collect();
+    assert_eq!(
+        rules.len(),
+        4,
+        "base_10's model declares four blocking rules"
+    );
+
+    let estimate = er_cli::estimate_blocking(&session, &model_json, &rules, 3).unwrap();
+
+    // Blocking is a reduction: it must be cheaper than comparing everything.
+    assert!(
+        estimate.candidate_pairs < estimate.total_possible_pairs,
+        "blocking must generate fewer pairs ({}) than the cartesian product ({})",
+        estimate.candidate_pairs,
+        estimate.total_possible_pairs
+    );
+    assert_ne!(estimate.candidate_pairs, 0, "and more than none");
+
+    // Per-rule accounting: marginal counts sum to the cumulative total, and the
+    // cumulative figure only ever grows.
+    assert_eq!(estimate.per_rule.len(), rules.len());
+    let marginal_sum: i64 = estimate.per_rule.iter().map(|r| r.marginal_pairs).sum();
+    assert_eq!(
+        marginal_sum, estimate.candidate_pairs,
+        "the marginal counts must account for every candidate pair"
+    );
+    let mut previous = 0i64;
+    for rule in &estimate.per_rule {
+        // Non-DECREASING, not increasing: a rule may legitimately add nothing,
+        // and saying so is the most actionable thing this estimate produces.
+        assert!(
+            rule.cumulative_pairs >= previous,
+            "cumulative counts must be non-decreasing: {:?}",
+            estimate.per_rule
+        );
+        assert!(rule.marginal_pairs >= 0);
+        previous = rule.cumulative_pairs;
+    }
+
+    // base_10's own model carries a REDUNDANT rule, and the estimate finds it:
+    // `birth_date || given_name` generates nothing the first three rules did not
+    // already generate. That is precisely what a tenant needs told — it is
+    // paying for a blocking pass that contributes no candidates — and it is
+    // invisible without this breakdown. If a corpus change ever makes this rule
+    // useful, this assertion is the thing that notices.
+    let redundant: Vec<&str> = estimate
+        .per_rule
+        .iter()
+        .filter(|r| r.marginal_pairs == 0)
+        .map(|r| r.blocking_rule.as_str())
+        .collect();
+    assert_eq!(
+        redundant.len(),
+        1,
+        "expected exactly one redundant rule over base_10: {:?}",
+        estimate.per_rule
+    );
+    assert!(
+        redundant[0].contains("birth_date"),
+        "the redundant rule should be the dob/given-name one: {redundant:?}"
+    );
+
+    // THE CLAIM: the estimate is the number the run works through. Scoring with
+    // a zero threshold keeps every candidate pair the blocking produced, so the
+    // count of distinct scored pairs is exactly what was estimated.
+    er_cli::run_match(
+        &session,
+        &config,
+        &er_cli::MatchModel {
+            settings_json: &model_json,
+            tf_csv_path: std::path::Path::new(&repo_fixture("model_test_v1.tf.csv")),
+            model_version: "v0001",
+            tf_snapshot_id: "01JWMDTFSNAP00000000000001",
+        },
+        0.0,
+        "01RUNESTIMATE000000000000000",
+        "2026-01-02 00:00:00",
+    )
+    .unwrap();
+    let scored: i64 = session
+        .query_strings(&format!(
+            "select count(*) from {} where rec_a_key <> rec_b_key",
+            er_cli::MATCH_SCORES
+        ))
+        .unwrap()[0][0]
+        .parse()
+        .unwrap();
+    assert_eq!(
+        estimate.candidate_pairs, scored,
+        "the estimate ({}) must equal the pairs the run actually scored ({scored}) — an \
+         estimate that does not match the work is worse than none",
+        estimate.candidate_pairs
+    );
+
+    // The largest-block list names the keys that would dominate a run. base_10
+    // is small, so the point is the shape: at most what was asked for, each
+    // with a positive pair count, biggest first.
+    assert!(estimate.largest_blocks.len() <= 3);
+    let mut last = i64::MAX;
+    for block in &estimate.largest_blocks {
+        assert!(block.pairs > 0, "a reported block must contain pairs");
+        assert!(
+            block.pairs <= last,
+            "largest blocks must come biggest-first"
+        );
+        last = block.pairs;
+    }
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
 /// A hard constraint must actually keep a pair out of scoring — and this test
 /// also pins down exactly how far that goes.
 ///
