@@ -131,7 +131,8 @@ impl AppState {
         self
     }
 
-    /// Override the import body cap (see [`AppState::max_import_bytes`]).
+    /// Override the import body cap: the `POST /v1/orgs/{org}/imports` route's
+    /// body limit and the running byte count while the part streams.
     #[must_use]
     pub fn with_max_import_bytes(mut self, bytes: usize) -> Self {
         self.max_import_bytes = bytes;
@@ -4413,7 +4414,7 @@ const ACTION_VERBS: [&str; 8] = [
 
 /// Rewrite a Python-style `{id}:action` path into the `{id}/action` sub-path this
 /// server routes on. Splits the LAST segment on its LAST `:` and only rewrites
-/// when the suffix is one of [`ACTION_VERBS`] — so an id that itself contains
+/// when the suffix is one of the known action verbs — so an id that itself contains
 /// colons (an unencoded `review_id` like `gray_band:crm:C001:webforms:W006`) is
 /// left alone, while the BFF's encoded `{id}:action` (the id's own colons arrive
 /// as `%3A`) is normalized. Returns `None` when no rewrite applies.
