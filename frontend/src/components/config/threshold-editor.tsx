@@ -48,7 +48,7 @@ export function ThresholdEditor({
           y={0}
           width={Math.max(x(value.auto_merge) - x(Math.max(value.review_low, 0.5)), 0)}
           height={28}
-          className="fill-amber-400/20"
+          className="fill-foreground/10"
           data-testid="gray-band"
         />
         {buckets.map((count, index) => {
@@ -64,9 +64,12 @@ export function ThresholdEditor({
               width={100 / BUCKETS - 0.8}
               height={height}
               className={cn(
+                // Three zones, three lightness steps: below / gray band /
+                // auto-merge. Hue was carrying no information the ordering
+                // does not already carry.
                 "fill-muted-foreground/40",
-                above && "fill-emerald-500/70",
-                inGray && "fill-amber-500/70",
+                above && "fill-foreground/80",
+                inGray && "fill-foreground/45",
               )}
             />
           );
@@ -76,7 +79,7 @@ export function ThresholdEditor({
           x2={x(value.review_low)}
           y1={0}
           y2={28}
-          className="stroke-amber-600"
+          className="stroke-foreground/55"
           strokeWidth={0.6}
         />
         <line
@@ -84,7 +87,7 @@ export function ThresholdEditor({
           x2={x(value.auto_merge)}
           y1={0}
           y2={28}
-          className="stroke-emerald-600"
+          className="stroke-foreground"
           strokeWidth={0.6}
         />
         <text x={1} y={31.5} className="fill-muted-foreground text-[2.4px]">
@@ -114,7 +117,7 @@ export function ThresholdEditor({
             onChange={(event) => {
               onChange({ ...value, review_low: Number(event.target.value) });
             }}
-            className="accent-amber-500"
+            className="accent-foreground/55"
           />
         </label>
         <label className="flex flex-col gap-1 text-sm">
@@ -135,7 +138,7 @@ export function ThresholdEditor({
             onChange={(event) => {
               onChange({ ...value, auto_merge: Number(event.target.value) });
             }}
-            className="accent-emerald-600"
+            className="accent-foreground"
           />
         </label>
       </div>

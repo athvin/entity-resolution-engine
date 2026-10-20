@@ -44,10 +44,12 @@ also seeds a basic convenience login for manual poking — `admin@dupezone.com` 
 
 ## Tests
 
-Three escalating tiers, mirroring the server's bare / +Postgres / +lake prose:
+Four tiers. Which one a change belongs in, and what each gate is for, is
+[docs/frontend-testing.md](../docs/frontend-testing.md).
 
 ```sh
-# bare (seconds, no services): lib logic, components, BFF handlers
+# bare (seconds, no services): lib logic, components, BFF handlers.
+# The coverage FLOOR is enforced here — `pnpm check` runs --coverage.
 corepack pnpm test
 
 # + mock erserver (~minutes, no Docker): the bulk of coverage — every screen and
@@ -55,10 +57,20 @@ corepack pnpm test
 # (desktop Chromium 1440x900, iPhone 15 WebKit, Pixel 7)
 corepack pnpm build && corepack pnpm test:e2e
 
-# + full substrate (the release gate, ~15 min): the real journey against the
-# seeded dev stack, gated on FRONTEND_E2E=1
-make frontend-dev && make frontend-seed && make frontend-e2e
+# the supply chain (needs network): HIGH/CRITICAL advisories + the licence
+# allowlist — the frontend's cargo-deny equivalent
+make frontend-audit
 ```
+
+**The full-stack tier (`tests/e2e/`) is dormant.** It needs a seeded tenant, and
+`make frontend-seed` has neither a Makefile target nor an implementation —
+`frontend/dev/seed.py` was deleted in the all-Rust cutover with no replacement.
+See [docs/frontend-testing.md](../docs/frontend-testing.md#dormant-the-full-stack-tier)
+before reviving it.
+
+The gate runs on every PR and **blocks the merge**: `lint + types + unit`,
+`playwright functional tier` and `pnpm audit + licenses` are required status
+checks. `make frontend` is the local equivalent of the first two.
 
 The mock tier exists because BFF→erserver calls happen server-side, where
 browser-level route interception can't reach: `tests/mock-erserver/server.mjs`

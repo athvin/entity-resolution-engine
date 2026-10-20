@@ -51,13 +51,13 @@ export function SwipeCard({ org, review, onResolve }: SwipeCardProps) {
     >
       <motion.span
         style={{ opacity: matchOpacity }}
-        className="absolute top-3 left-3 rounded border-2 border-emerald-500 px-2 py-0.5 text-sm font-bold text-emerald-500 uppercase"
+        className="border-foreground text-foreground absolute top-3 left-3 rounded border-2 px-2 py-0.5 text-sm font-bold uppercase"
       >
         Match
       </motion.span>
       <motion.span
         style={{ opacity: noMatchOpacity }}
-        className="absolute top-3 right-3 rounded border-2 border-red-500 px-2 py-0.5 text-sm font-bold text-red-500 uppercase"
+        className="border-foreground text-foreground absolute top-3 right-3 rounded border-2 px-2 py-0.5 text-sm font-bold uppercase"
       >
         Not a match
       </motion.span>

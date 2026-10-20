@@ -264,7 +264,7 @@ export function NewSourceWizard({ org }: { org: string }) {
             {rows.map((row, index) => (
               <div key={row.key} className="flex items-center gap-2">
                 {index < phaseIndex ? (
-                  <CheckCircle2 className="size-4 text-emerald-500" />
+                  <CheckCircle2 className="text-foreground size-4" />
                 ) : index === phaseIndex && activation.running ? (
                   <Loader2 className="text-primary size-4 animate-spin" />
                 ) : index === phaseIndex && activation.error ? (
@@ -353,7 +353,7 @@ export function NewSourceWizard({ org }: { org: string }) {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-lg">
-              <CheckCircle2 className="size-5 text-emerald-500" />
+              <CheckCircle2 className="text-foreground size-5" />
               {state.name} — draft saved for review
             </CardTitle>
             <CardDescription>

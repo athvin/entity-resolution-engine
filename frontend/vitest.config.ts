@@ -8,22 +8,32 @@ export default defineConfig({
     include: ["tests/unit/**/*.test.{ts,tsx}", "tests/component/**/*.test.{ts,tsx}"],
     setupFiles: ["tests/setup.ts"],
     coverage: {
-      // Measured + enforced in the NIGHTLY CI run only (never on the hot PR
-      // path — see .github/workflows/frontend.yml). Scoped to src/lib/** on
-      // purpose: that is the pure logic the vitest unit tier targets. Pages,
-      // components, and BFF routes are exercised by the Playwright functional
-      // tier, which is not instrumented here, so including them would report a
-      // misleadingly low number and enforce nothing useful.
+      // Measured + enforced on EVERY PR: `pnpm check` runs with --coverage, so
+      // the floor below is part of the same gate as lint and tsc. (The nightly
+      // job in .github/workflows/frontend.yml still runs, but only to publish
+      // the browsable HTML report as an artifact.) v8 instrumentation of this
+      // tier costs under a second, so there is no latency argument for deferring
+      // it to the next morning.
+      //
+      // Scoped to src/lib/** on purpose: that is the logic the vitest tier
+      // targets. Pages, components, and BFF routes are exercised by the
+      // Playwright functional tier, which is not instrumented here, so including
+      // them would report a misleadingly low number and enforce nothing useful.
       provider: "v8",
       reporter: ["text-summary", "json-summary", "html"],
       reportsDirectory: "./coverage",
       include: ["src/lib/**/*.{ts,tsx}"],
       exclude: ["**/*.d.ts"],
-      // Non-regression floor, set just below the current measurement. This is a
-      // backstop against *regression*, not the quality bar — the real gate is the
-      // per-PR behavioral suites (vitest units + the Playwright functional tier).
-      // Ratchet these up as unit coverage grows; never down.
-      thresholds: { lines: 28, functions: 15, statements: 29, branches: 35 },
+      // Non-regression floor, set just below the current measurement (lines
+      // 49.3, functions 34.9, statements 49.4, branches 50.1). A backstop
+      // against *regression*, not the quality bar — the real gate is the
+      // behavioral suites. Ratchet up as coverage grows; never down.
+      //
+      // Why this is not ~70%: roughly 1,300 of src/lib's lines are
+      // src/lib/query/** — TanStack Query hooks that need a QueryClient and a
+      // backend to say anything, and which the Playwright tier already drives.
+      // Chasing them in jsdom would raise the number without raising confidence.
+      thresholds: { lines: 48, functions: 33, statements: 48, branches: 49 },
     },
   },
   resolve: {

@@ -26,8 +26,21 @@ Other gates, each run on its own because they need external services:
 |---|---|---|
 | `make check` | the backend PR gate | — |
 | `make check-e2e` | DuckLake pipeline + Postgres control plane | DuckDB extensions, a local Postgres via `ER_TEST_PG_DSN` |
-| `make frontend` | lint + types + unit + mock-backed Playwright | corepack pnpm |
+| `make frontend` | the frontend PR gate: lint + format + types + authz + unit/component with the coverage floor, then the mock-backed Playwright tier | corepack pnpm |
+| `make frontend-audit` | the frontend supply chain: HIGH/CRITICAL advisories + the license allowlist | network |
 | `make entities-check` | just the entity-framework gate | — |
+
+**The frontend gate blocks merges now.** `lint + types + unit`, `playwright
+functional tier` and `pnpm audit + licenses` are required status checks on `main`
+alongside the four Rust ones — before 2026-10-20 the frontend CI ran and was then
+ignored at merge time. `.github/workflows/frontend.yml` therefore has no `paths:`
+filter: it uses the same `detect`-job pattern `rust.yml` does, because a workflow
+a path filter skips never reports, and a required check that never reports blocks
+every backend-only PR forever.
+
+`docs/frontend-testing.md` is the frontend standard — which test tier a change
+belongs in, what each gate is for, and the rule that every gate must be observed
+*failing* before it is trusted.
 
 ## Layout
 
@@ -93,6 +106,15 @@ this for job-failure text and HTTP bodies — walk the chain at that point:
 
 **The UI is strictly black and white.** Both themes are grayscale — no brand
 accent, no colored chips or badges, no palette (`docs/frontend-design.md` §3.3).
+
+This is enforced, not just documented: a `no-restricted-syntax` rule in
+`frontend/eslint.config.mjs` rejects Tailwind palette utilities
+(`bg-emerald-500`, `text-red-600`, …) in string and template literals, so
+`make frontend` fails on a reintroduction. Use the semantic tokens in
+`globals.css` — all chroma-0 in both themes — and signal state with weight,
+scale, spacing or motion rather than hue. The techniques that replaced the 47
+colour utilities this rule found are tabulated in `docs/frontend-testing.md`,
+along with the one known exception (`--destructive` is still red).
 
 **Use `cargo add`** to add dependencies or features rather than editing
 `Cargo.toml` by hand.

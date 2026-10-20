@@ -100,14 +100,14 @@ export function FieldCompareGrid({
               layout === "grid"
                 ? "grid grid-cols-[7rem_1fr_1fr] items-baseline gap-2"
                 : "flex flex-col gap-0.5",
-              !row.same && "bg-amber-500/10",
+              !row.same && "bg-muted",
             )}
             data-testid={`compare-${row.key}`}
           >
             <span className="text-muted-foreground flex items-center gap-1 text-xs">
               {!row.same && (
                 <>
-                  <AlertTriangle className="size-3 shrink-0 text-amber-600" aria-hidden />
+                  <AlertTriangle className="text-foreground size-3 shrink-0" aria-hidden />
                   {/* Real text, not just the tint or the icon: the difference
                       has to survive both colour blindness and a screen reader. */}
                   <span className="sr-only">differs — </span>

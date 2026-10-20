@@ -27,9 +27,9 @@ function StagedBanner({ org }: { org: string }) {
   const staged = useStagedCount(org);
   if (!staged.data) return null;
   return (
-    <Card className="border-amber-500/40" data-testid="staged-banner">
+    <Card className="border-foreground/40" data-testid="staged-banner">
       <CardContent className="flex items-center gap-2 p-3 text-sm">
-        <Layers className="size-4 text-amber-500" />
+        <Layers className="text-foreground size-4" />
         {staged.data} decision{staged.data === 1 ? "" : "s"} queued — they apply when the current
         run finishes.
       </CardContent>
@@ -43,7 +43,7 @@ function LastResult({ status }: { status: "applied" | "staged" | null }) {
     <span
       className={cn(
         "rounded-full px-2 py-0.5 text-xs font-medium",
-        status === "applied" ? "bg-primary/10 text-primary" : "bg-amber-500/15 text-amber-600",
+        status === "applied" ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground",
       )}
       data-testid="last-resolution-chip"
       title={

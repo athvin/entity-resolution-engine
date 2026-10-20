@@ -34,7 +34,7 @@
     "audit:check": "node scripts/check-audit.mjs",
     "licenses:check": "node scripts/check-licenses.mjs",
     "authz:check": "node scripts/check-bff-authz.mjs",
-    "check": "eslint . --max-warnings 0 && prettier --check . && tsc --noEmit && node scripts/check-bff-authz.mjs && vitest run"
+    "check": "eslint . --max-warnings 0 && prettier --check . && tsc --noEmit && node scripts/check-bff-authz.mjs && vitest run --coverage"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.128.0",

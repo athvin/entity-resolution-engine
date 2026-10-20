@@ -62,8 +62,10 @@ function VersionHistory({ org }: { org: string }) {
             <span
               className={cn(
                 "rounded-full px-2 py-0.5 text-xs",
+                // Filled vs muted: the live version has to be findable at a
+                // glance, and fill is what a grayscale theme has instead of hue.
                 row.state === "published"
-                  ? "bg-emerald-500/15 text-emerald-700"
+                  ? "bg-foreground text-background font-medium"
                   : "bg-muted text-muted-foreground",
               )}
             >
@@ -113,9 +115,10 @@ function VersionHistory({ org }: { org: string }) {
                   <div
                     key={index}
                     className={cn(
-                      line.kind === "added" &&
-                        "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
-                      line.kind === "removed" && "bg-red-500/15 text-red-700 dark:text-red-400",
+                      // The rendered "+ " / "- " prefix is the direction; these
+                      // only need to separate changed lines from context.
+                      line.kind === "added" && "bg-foreground/10 text-foreground font-medium",
+                      line.kind === "removed" && "bg-muted text-muted-foreground",
                     )}
                   >
                     {line.kind === "added" ? "+ " : line.kind === "removed" ? "- " : "  "}
@@ -251,9 +254,9 @@ export function ConfigStudio({ org }: { org: string }) {
         </p>
       )}
       {published && (
-        <Card className="border-emerald-500/40" data-testid="publish-result">
+        <Card className="border-foreground/40" data-testid="publish-result">
           <CardContent className="flex flex-wrap items-center gap-2 p-3 text-sm">
-            <Rocket className="size-4 text-emerald-600" />v{published.version} published (tier{" "}
+            <Rocket className="text-foreground size-4" />v{published.version} published (tier{" "}
             {published.tier ?? "—"}) — {published.jobs.length} job
             {published.jobs.length === 1 ? "" : "s"} enqueued.
             <Link href={`/${org}/runs`} className="underline underline-offset-2">

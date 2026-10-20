@@ -36,7 +36,7 @@ export function ImpersonationBanner({ impersonation }: { impersonation: Imperson
 
   return (
     <div
-      className="flex items-center gap-2 bg-amber-500 px-4 py-1.5 text-sm font-medium text-amber-950"
+      className="bg-foreground text-background flex items-center gap-2 px-4 py-1.5 text-sm font-medium"
       data-testid="impersonation-banner"
     >
       <Eye className="size-4 shrink-0" />
@@ -48,7 +48,7 @@ export function ImpersonationBanner({ impersonation }: { impersonation: Imperson
       <Button
         size="sm"
         variant="outline"
-        className="h-7 border-amber-900/30 bg-transparent text-amber-950 hover:bg-amber-400"
+        className="border-background/40 text-background hover:bg-background/15 h-7 bg-transparent"
         onClick={() => {
           exit.mutate();
         }}

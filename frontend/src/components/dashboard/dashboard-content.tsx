@@ -95,7 +95,7 @@ function OnboardingChecklist({ org, jobs }: { org: string; jobs: JobRow[] }) {
         {steps.map((step) => (
           <div key={step.label} className="flex items-start gap-2">
             {step.done ? (
-              <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-600" />
+              <CheckCircle2 className="text-foreground mt-0.5 size-4 shrink-0" />
             ) : (
               <Circle className="text-muted-foreground mt-0.5 size-4 shrink-0" />
             )}
