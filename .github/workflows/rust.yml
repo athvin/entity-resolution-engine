@@ -146,6 +146,22 @@ jobs:
     timeout-minutes: 30
     env:
       RUSTC_WRAPPER: sccache
+      # Dependencies build WITHOUT debug info, which is the whole ballgame on
+      # this workspace. `libduckdb-sys` compiles bundled DuckDB C++ through
+      # cc-rs, which emits `-g` whenever cargo tells it the profile wants debug
+      # info — and the resulting rlib is ~1.5 GB, linked into every test binary.
+      # Measured on `cargo test -p er-server --no-run`: the duckdb rlib goes
+      # 1480 MB -> 240 MB and the whole build 12631 MB -> 7234 MB.
+      #
+      # Nobody debugs into bundled DuckDB from CI, and workspace code keeps its
+      # line tables below, so backtraces still name a file and a line.
+      #
+      # Recorded because the obvious knob is the wrong one:
+      # `CARGO_PROFILE_DEV_DEBUG=line-tables-only` saves only ~7%, since any
+      # non-false debug setting still makes cargo pass DEBUG=true to build
+      # scripts and cc keeps emitting full C++ symbols. It has to be 0.
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Reclaim runner disk
@@ -157,14 +173,10 @@ jobs:
         # build a `-p`-scoped subset. These preinstalled toolchains are unused
         # here and return ~25 GB. Written inline rather than pulling a
         # third-party action, to keep every `uses:` in this workflow SHA-pinned.
-        # The hosted tool cache goes too, now. Dotnet + android + ghc + boost +
-        # swift stopped being enough the moment the workspace reached 28 crates:
-        # one crate's test build alone measures ~12.6 GB of `target`, most of it
-        # the bundled duckdb C++ objects. (Shaving Rust debuginfo was tried and
-        # rejected first — `CARGO_PROFILE_{DEV,TEST}_DEBUG=line-tables-only`
-        # measured 12631 MB -> 11766 MB, about 7%, because cargo's debug
-        # settings do not reach those C++ objects. Worth recording so the next
-        # person reaching for that knob does not repeat the experiment.)
+        # Headroom, not the fix. Measured: this frees the runner from 86 GB to
+        # 111 GB available — and `cargo test --workspace` still exhausted it,
+        # which is what sent the search to the debug-info settings in `env`
+        # above. Keep both: the build is large even without C++ symbols.
         # Removing the tool cache is safe for THIS job specifically: it installs
         # Rust with rustup and mold with apt, and the two actions it does use
         # (sccache, rust-cache) are JS, so nothing here reads `setup-*`'s cache.
@@ -215,6 +227,10 @@ jobs:
     timeout-minutes: 45
     env:
       RUSTC_WRAPPER: sccache
+      # Same reasoning as `test`: this job links bundled DuckDB into every test
+      # binary it builds, so it is one crate away from the same disk wall.
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
       DEDUPE_E2E_DUCKLAKE: "1"
       DEDUPE_E2E_EXTENSIONS: "1"
       # The er-server control-plane queue gate runs against this service.
