@@ -32,12 +32,13 @@ pub const RESERVED_SOURCE_PREFIX: &str = "_";
 /// The fourteen top-level blocks of S6, in document order. [`Config`]'s S6 block
 /// fields MUST equal this set; the `entity_type` discriminator (added for the
 /// Account entity type) is a meta-field, not an S6 block, and is excluded.
-pub const CONFIG_BLOCKS: [&str; 14] = [
+pub const CONFIG_BLOCKS: [&str; 15] = [
     "tenant",
     "thresholds",
     "standardization",
     "sources",
     "blocking",
+    "constraints",
     "comparisons",
     "survivorship",
     "training",
@@ -174,6 +175,60 @@ pub enum NullPolicy {
     EitherBlankMatches,
 }
 
+/// S6 `constraints`: hard rules about which pairs may be considered at all,
+/// applied BEFORE any similarity is scored.
+///
+/// These are not weights. A weight says "this field matters more"; a constraint
+/// says "without this, do not even look". That distinction is the whole point:
+/// a probabilistic score can always be outvoted by enough weak agreement, which
+/// is how a matcher merges two different people who happen to share a city and
+/// a first name. A constraint cannot be outvoted.
+///
+/// All three compile to conjuncts on every blocking rule, so a pair that
+/// violates one is never generated as a candidate — the cheapest possible place
+/// to enforce it, and the only place where "before similarity counts" is
+/// literally true.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MatchConstraints {
+    /// Columns that must be EQUAL and NON-BLANK for a pair to be a candidate.
+    /// The matrix's "required match" / "must-match key": a tax id or account
+    /// number that has to agree before similarity means anything.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required_match: Vec<String>,
+    /// Columns that VETO a pair when both sides are present and they differ.
+    /// Different from `required_match`: a missing value is tolerated (plenty of
+    /// records have no SSN), but two different non-null values are proof these
+    /// are different people. This is what prevents the catastrophic false merge
+    /// on a strong identifier.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub veto: Vec<String>,
+    /// Columns whose EQUALITY excludes a pair — the relationship exclusion.
+    /// Records sharing a household, a parent account or a joint-account id are
+    /// related, not duplicates, and they are the classic false positive in
+    /// person resolution: two people at one address with one surname.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude_when_equal: Vec<String>,
+}
+
+impl MatchConstraints {
+    /// Whether anything is declared. An empty block compiles to no conjuncts at
+    /// all, which is what keeps an existing config's model byte-identical.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.required_match.is_empty() && self.veto.is_empty() && self.exclude_when_equal.is_empty()
+    }
+
+    /// Every column the block names, for validating them against the schema.
+    pub fn columns(&self) -> impl Iterator<Item = &str> {
+        self.required_match
+            .iter()
+            .chain(&self.veto)
+            .chain(&self.exclude_when_equal)
+            .map(String::as_str)
+    }
+}
+
 /// S6 `comparisons.<column>`: the comparison levels and whether TF adjustment applies.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -303,6 +358,10 @@ pub struct Config {
     pub standardization: Standardization,
     pub sources: BTreeMap<String, SourceSpec>,
     pub blocking: Vec<BlockingRule>,
+    /// Hard candidate rules. Omitted from the canonical document when empty, so
+    /// every config written before constraints existed hashes identically.
+    #[serde(default, skip_serializing_if = "MatchConstraints::is_empty")]
+    pub constraints: MatchConstraints,
     pub comparisons: BTreeMap<String, ComparisonSpec>,
     pub survivorship: BTreeMap<String, Vec<String>>,
     pub training: Training,
@@ -383,9 +442,13 @@ mod tests {
 
     #[test]
     fn blocks_and_constants() {
-        assert_eq!(CONFIG_BLOCKS.len(), 14);
+        assert_eq!(CONFIG_BLOCKS.len(), 15);
         assert_eq!(CONFIG_BLOCKS[0], "tenant");
-        assert_eq!(CONFIG_BLOCKS[13], "correction_pass");
+        assert_eq!(CONFIG_BLOCKS[14], "correction_pass");
+        // `constraints` sits beside `blocking` because it changes the same
+        // thing — which pairs are candidates — and so carries the same publish
+        // tier.
+        assert!(CONFIG_BLOCKS.contains(&"constraints"));
         assert_eq!(CANONICAL_ATTRIBUTES.len(), 9);
         assert_eq!(TERMINAL_SURVIVORSHIP_RULE, "record_key ASC");
     }

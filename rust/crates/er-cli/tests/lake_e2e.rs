@@ -710,6 +710,214 @@ fn run_all_base(tag: &str) -> (Session, Config, PathBuf) {
 /// wrote; and `er_versions::check_mode_preconditions` — the guard that decides
 /// whether an incremental run may extend the existing corpus — had zero callers
 /// anywhere in the workspace.
+/// A hard constraint must actually keep a pair out of scoring — and this test
+/// also pins down exactly how far that goes.
+///
+/// base_10's first golden cluster is four records for one person (Robert /
+/// Bobby / Bob Chen) that agree on phone, address and date of birth and differ
+/// only in email. Declaring `veto: [email]` says "two different non-blank
+/// emails are proof these are different people", and the conjunct it compiles
+/// into every blocking rule means such a pair is **never generated as a
+/// candidate and never scored**. That is what this asserts, by looking for the
+/// pair in `match_scores`.
+///
+/// What it does NOT do, and the second half of this test proves it rather than
+/// leaving it to be discovered: candidate-level enforcement does not survive
+/// transitive closure. C001 and C009 are never compared to each other, but both
+/// are compared to W001 — whose email is a `test@test.com` placeholder that
+/// normalizes to NULL, so no veto applies to either pairing — and connected
+/// components then puts all three in one entity. Keeping vetoed records in
+/// different ENTITIES needs the never-rule path at reconcile (the `never_cut`
+/// fixpoint this repo already has for steward assertions), which is a separate
+/// piece of work. Until then this is a candidate constraint, and the test says
+/// so out loud.
+#[test]
+fn a_declared_veto_keeps_a_pair_out_of_scoring_but_not_out_of_a_transitive_cluster() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+
+    /// Resolve base_10 under a config, with the model compiled from that config.
+    /// Returns the partition and the scored pairs.
+    fn resolve_compiled(
+        tag: &str,
+        yaml: &str,
+    ) -> (BTreeSet<BTreeSet<String>>, BTreeSet<(String, String)>) {
+        let config = load_config_str(yaml).expect("the config loads");
+        let compiled = er_compile::compile(&config).expect("the config compiles");
+        let tmp = std::env::temp_dir().join(format!("er_cli_{tag}_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(tmp.join("data")).unwrap();
+        let catalog = tmp.join("catalog.ducklake").to_string_lossy().into_owned();
+        let data_path = tmp.join("data").to_string_lossy().into_owned();
+        let session = er_cli::open_lake(&catalog, &data_path).unwrap();
+        let lexicon: Vec<(String, String)> = include_str!("fixtures/nickname_variants.csv")
+            .lines()
+            .skip(1)
+            .filter(|l| !l.is_empty())
+            .map(|l| {
+                let (a, b) = l.split_once(',').unwrap();
+                (a.to_string(), b.to_string())
+            })
+            .collect();
+        let deliveries: Vec<(String, String)> = ["crm", "billing", "webforms"]
+            .iter()
+            .map(|s| {
+                (
+                    (*s).to_string(),
+                    std::fs::read_to_string(repo_fixture(&format!("base_10/base/{s}.csv")))
+                        .unwrap(),
+                )
+            })
+            .collect();
+        let tf_csv = repo_fixture("model_test_v1.tf.csv");
+        er_cli::run_all(
+            &session,
+            &config,
+            &er_cli::PipelineInputs {
+                mode: "full",
+                rebuild_reason: None,
+                lexicon: &lexicon,
+                deliveries: &deliveries,
+                model: &er_cli::MatchModel {
+                    settings_json: &compiled.model_json,
+                    tf_csv_path: std::path::Path::new(&tf_csv),
+                    model_version: "v0001",
+                    tf_snapshot_id: "01JWMDTFSNAP00000000000001",
+                },
+                run_id: "01RUNALLFULL0000000000000000",
+                ingested_at: "2026-01-01 00:00:00",
+                scored_at: "2026-01-02 00:00:00",
+                run_at: "2026-01-03 00:00:00",
+            },
+        )
+        .unwrap();
+        let partition = partition(&membership_rows(&session));
+        let scored: BTreeSet<(String, String)> = session
+            .query_strings(&format!(
+                "select rec_a_key, rec_b_key from {}",
+                er_cli::MATCH_SCORES
+            ))
+            .unwrap()
+            .into_iter()
+            .map(|r| (r[0].clone(), r[1].clone()))
+            .collect();
+        drop(session);
+        let _ = std::fs::remove_dir_all(&tmp);
+        (partition, scored)
+    }
+
+    let pair = ("crm:C001".to_string(), "crm:C009".to_string());
+    let base_yaml = include_str!("fixtures/test.yaml");
+    let (unconstrained, scored_before) = resolve_compiled("veto_off", base_yaml);
+    assert!(
+        scored_before.contains(&pair),
+        "precondition: without the veto this pair IS scored"
+    );
+    assert!(
+        unconstrained
+            .iter()
+            .any(|c| c.contains("crm:C001") && c.contains("crm:C009")),
+        "precondition: without the veto these two Chen records resolve together"
+    );
+
+    // Declare the veto. Inserted as YAML so the whole config path runs.
+    let vetoed_yaml = base_yaml.replace(
+        "comparisons:\n",
+        "constraints:\n  veto: [email]\n\ncomparisons:\n",
+    );
+    assert_ne!(
+        vetoed_yaml, base_yaml,
+        "the constraints block must be added"
+    );
+    let config = load_config_str(&vetoed_yaml).expect("the constrained config loads");
+    assert_eq!(
+        config.constraints.veto,
+        vec!["email".to_string()],
+        "the veto must survive config loading"
+    );
+
+    let (vetoed, scored_after) = resolve_compiled("veto_on", &vetoed_yaml);
+
+    // THE GUARANTEE: the conflicting pair is never scored.
+    assert!(
+        !scored_after.contains(&pair),
+        "a veto on email must keep two records with DIFFERENT non-blank emails out of scoring \
+         entirely, but the pair was scored"
+    );
+    assert!(
+        scored_after.len() < scored_before.len(),
+        "a veto can only remove candidates: {} scored with the veto vs {} without",
+        scored_after.len(),
+        scored_before.len()
+    );
+    // A record whose email normalizes to NULL is still eligible — a veto refuses
+    // a conflict, it does not require a value.
+    assert!(
+        scored_after
+            .iter()
+            .any(|(a, b)| a == "webforms:W001" || b == "webforms:W001"),
+        "the placeholder-email record must remain a candidate: a veto tolerates a missing value"
+    );
+
+    // THE LIMIT, asserted rather than assumed: the two are still co-clustered,
+    // because each reaches the other through the NULL-email record.
+    assert!(
+        vetoed
+            .iter()
+            .any(|c| c.contains("crm:C001") && c.contains("crm:C009")),
+        "candidate-level vetoes do not survive transitive closure; if this now passes, \
+         entity-level enforcement has landed and this test should assert the stronger property"
+    );
+
+    // And a constraint changes how records group, never which records exist.
+    let members = |p: &BTreeSet<BTreeSet<String>>| -> BTreeSet<String> {
+        p.iter().flatten().cloned().collect()
+    };
+    assert_eq!(members(&vetoed), members(&unconstrained));
+}
+
+/// `required_match` is the stricter sibling: a pair is not a candidate unless
+/// the named column is equal AND present on both sides. Declaring it on email
+/// means only records with the same non-blank email can ever merge, which on
+/// base_10 should collapse almost every cluster.
+#[test]
+fn a_required_match_restricts_candidates_to_pairs_that_agree_on_it() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let base_yaml = include_str!("fixtures/test.yaml");
+    let required_yaml = base_yaml.replace(
+        "comparisons:\n",
+        "constraints:\n  required_match: [email]\n\ncomparisons:\n",
+    );
+    assert_ne!(required_yaml, base_yaml);
+    let config = load_config_str(&required_yaml).unwrap();
+    let compiled = er_compile::compile(&config).unwrap();
+    // The conjunct reached every blocking rule, including its presence half —
+    // without that, two records both missing an email would "agree".
+    let rules: Vec<String> = match serde_json::from_str::<serde_json::Value>(&compiled.model_json) {
+        Ok(v) => v["blocking_rules_to_generate_predictions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["blocking_rule"].as_str().unwrap().to_string())
+            .collect(),
+        Err(e) => panic!("the compiled model must be JSON: {e}"),
+    };
+    assert_ne!(rules.len(), 0);
+    for rule in &rules {
+        assert!(
+            rule.contains("l.email = r.email")
+                && rule.contains("l.email IS NOT NULL")
+                && rule.contains("r.email IS NOT NULL"),
+            "every blocking rule must carry the required-match conjunct: {rule}"
+        );
+    }
+}
+
 /// A model compiled from the tenant config must RESOLVE, not merely parse.
 ///
 /// The config's `comparisons:` / `blocking:` blocks were authored, validated at

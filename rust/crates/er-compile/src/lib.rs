@@ -48,7 +48,7 @@ use std::collections::BTreeMap;
 use dedupe_core::settings::json::{
     BlockingRuleJson, ComparisonJson, ComparisonLevelJson, LinkType, SettingsJson,
 };
-use er_config::{ComparisonSpec, Config, NullPolicy};
+use er_config::{ComparisonSpec, Config, MatchConstraints, NullPolicy};
 
 /// Why a config could not be compiled. No `#[from]` sources to interpolate —
 /// every variant is self-describing, because the message is shown to whoever
@@ -237,6 +237,44 @@ fn qualify(expr: &str, side: char) -> String {
         }
         out.push(c);
         i += 1;
+    }
+    out
+}
+
+/// The conjuncts a constraints block adds to every blocking rule.
+///
+/// Returned as a list so the caller can `AND` them onto each rule and so each
+/// one is individually testable. Empty when nothing is declared, which is what
+/// keeps an existing config's compiled model unchanged.
+///
+/// Why blocking and not scoring: a constraint has to hold *before* similarity
+/// is considered, and the only place that is literally true is candidate
+/// generation. Enforcing it later would mean scoring pairs we have already
+/// decided cannot match — slower, and a score that has to be overridden
+/// afterwards tends to leak into something that reads it.
+#[must_use]
+pub fn constraint_conjuncts(constraints: &MatchConstraints) -> Vec<String> {
+    let mut out = Vec::new();
+    for column in &constraints.required_match {
+        // Equal AND present on both sides. The NOT NULL half matters: without
+        // it, two records that both lack a tax id would "agree" on it.
+        out.push(format!(
+            "(l.{column} = r.{column} AND l.{column} IS NOT NULL AND r.{column} IS NOT NULL)"
+        ));
+    }
+    for column in &constraints.veto {
+        // Tolerate missing, refuse conflicting. Written as NOT(conflict) so a
+        // NULL on either side leaves the pair eligible.
+        out.push(format!(
+            "NOT (l.{column} IS NOT NULL AND r.{column} IS NOT NULL AND l.{column} <> r.{column})"
+        ));
+    }
+    for column in &constraints.exclude_when_equal {
+        // Related, not duplicate. A NULL key excludes nothing — records with no
+        // household are not all in the same household.
+        out.push(format!(
+            "NOT (l.{column} = r.{column} AND l.{column} IS NOT NULL)"
+        ));
     }
     out
 }
@@ -593,6 +631,7 @@ pub fn compile(config: &Config) -> Result<Compiled, CompileError> {
 /// As [`compile`].
 pub fn compile_with(config: &Config, options: &CompileOptions) -> Result<Compiled, CompileError> {
     let weights = resolve_weights(&config.comparisons)?;
+    let conjuncts = constraint_conjuncts(&config.constraints);
     let mut notes = Vec::new();
     if config.comparisons.values().all(|s| s.weight.is_none()) {
         notes.push(format!(
@@ -634,7 +673,11 @@ pub fn compile_with(config: &Config, options: &CompileOptions) -> Result<Compile
             .blocking
             .iter()
             .map(|b| BlockingRuleJson::Detailed {
-                blocking_rule: blocking_predicate(&b.expr),
+                blocking_rule: {
+                    let mut parts = vec![blocking_predicate(&b.expr)];
+                    parts.extend(conjuncts.iter().cloned());
+                    parts.join(" AND ")
+                },
                 sql_dialect: Some("duckdb".to_string()),
                 // No array-valued blocking keys from the config DSL yet: a
                 // declared key is a scalar expression. `arrays_to_explode` is
@@ -649,6 +692,14 @@ pub fn compile_with(config: &Config, options: &CompileOptions) -> Result<Compile
     };
     let model_json = serde_json::to_string_pretty(&settings)
         .expect("a SettingsJson built here always serializes");
+    if !conjuncts.is_empty() {
+        notes.push(format!(
+            "{} hard constraint(s) are enforced during candidate generation, so a violating pair \
+             is never scored at all: {}",
+            conjuncts.len(),
+            conjuncts.join(" AND ")
+        ));
+    }
     notes.push(
         "parameters are DECLARED, not estimated: every level is pinned (fix_m/fix_u) so a later \
          training pass mints a new version instead of moving this one's numbers"
@@ -660,6 +711,82 @@ pub fn compile_with(config: &Config, options: &CompileOptions) -> Result<Compile
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn constraints_compile_to_candidate_conjuncts() {
+        // Nothing declared -> nothing added, which is what leaves an existing
+        // config's compiled model untouched.
+        assert_eq!(constraint_conjuncts(&MatchConstraints::default()).len(), 0);
+
+        // required_match: equal AND present. The presence half matters — without
+        // it two records that both lack a tax id would "agree" on it.
+        let required = MatchConstraints {
+            required_match: vec!["tax_id".to_string()],
+            ..MatchConstraints::default()
+        };
+        assert_eq!(
+            constraint_conjuncts(&required),
+            vec![
+                "(l.tax_id = r.tax_id AND l.tax_id IS NOT NULL AND r.tax_id IS NOT NULL)"
+                    .to_string()
+            ]
+        );
+
+        // veto: tolerate missing, refuse conflicting.
+        let veto = MatchConstraints {
+            veto: vec!["ssn".to_string()],
+            ..MatchConstraints::default()
+        };
+        assert_eq!(
+            constraint_conjuncts(&veto),
+            vec!["NOT (l.ssn IS NOT NULL AND r.ssn IS NOT NULL AND l.ssn <> r.ssn)".to_string()]
+        );
+
+        // exclude_when_equal: related, not duplicate.
+        let exclude = MatchConstraints {
+            exclude_when_equal: vec!["household_id".to_string()],
+            ..MatchConstraints::default()
+        };
+        assert_eq!(
+            constraint_conjuncts(&exclude),
+            vec![
+                "NOT (l.household_id = r.household_id AND l.household_id IS NOT NULL)".to_string()
+            ]
+        );
+
+        // All three at once, in declaration order.
+        let all = MatchConstraints {
+            required_match: vec!["tax_id".to_string()],
+            veto: vec!["ssn".to_string()],
+            exclude_when_equal: vec!["household_id".to_string()],
+        };
+        assert_eq!(constraint_conjuncts(&all).len(), 3);
+    }
+
+    #[test]
+    fn a_veto_tolerates_a_missing_value_but_not_a_conflicting_one() {
+        // The semantic difference between veto and required_match, stated as the
+        // truth table the SQL has to produce. Evaluated here as plain logic
+        // rather than through DuckDB, which the lake e2e does.
+        let veto = |l: Option<&str>, r: Option<&str>| -> bool {
+            // NOT (l IS NOT NULL AND r IS NOT NULL AND l <> r)
+            !(l.is_some() && r.is_some() && l != r)
+        };
+        assert!(veto(None, None), "both missing: eligible");
+        assert!(veto(Some("1"), None), "one missing: eligible");
+        assert!(veto(Some("1"), Some("1")), "agreeing: eligible");
+        assert!(!veto(Some("1"), Some("2")), "conflicting: vetoed");
+
+        let required =
+            |l: Option<&str>, r: Option<&str>| -> bool { l.is_some() && r.is_some() && l == r };
+        assert!(!required(None, None), "both missing: NOT a candidate");
+        assert!(!required(Some("1"), None), "one missing: NOT a candidate");
+        assert!(required(Some("1"), Some("1")), "agreeing: candidate");
+        assert!(
+            !required(Some("1"), Some("2")),
+            "conflicting: not a candidate"
+        );
+    }
 
     #[test]
     fn blocking_keys_become_join_predicates() {
