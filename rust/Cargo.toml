@@ -47,7 +47,7 @@ needless_pass_by_value = "allow"
 [workspace.dependencies]
 # Bundles DuckDB 1.5.5 — the exact engine version the golden fixtures were
 # generated on, so the engine and the baselines execute on identical builds.
-duckdb = { version = "=1.10505.0", features = ["bundled"] }
+duckdb = { version = "=1.10506.1", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 # Maintained serde_yaml fork (serde_yaml itself is deprecated). Reads the S6
