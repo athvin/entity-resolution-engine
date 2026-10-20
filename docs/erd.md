@@ -81,6 +81,23 @@ erDiagram
         timestamp started_at
         timestamp finished_at
     }
+    matching_models {
+        varchar id PK
+        varchar org_id FK
+        varchar name
+        bigint version
+        varchar entity_type "in {account, person}"
+        varchar model_json
+        varchar model_hash
+        varchar model_version_label
+        varchar tf_snapshot_id
+        varchar state "in {active, archived, draft}"
+        json provenance
+        varchar created_by
+        timestamp activated_at
+        timestamp created_at
+        timestamp updated_at
+    }
     orgs {
         varchar id PK
         varchar name
@@ -128,6 +145,7 @@ erDiagram
     api_keys }o--|| orgs : "org_id → id"
     config_versions }o--|| orgs : "org_id → id"
     jobs }o--|| orgs : "org_id → id"
+    matching_models }o--|| orgs : "org_id → id"
     schedules }o--|| orgs : "org_id → id"
     staged_steward_actions }o--|| orgs : "org_id → id"
     webhooks }o--|| orgs : "org_id → id"
@@ -140,6 +158,7 @@ erDiagram
 | `config_versions` | A versioned config document for a tenant: its YAML, hash and publish state. |
 | `ddl_log` | The DDL ledger: one row per DDL command executed against the control database, captured by the er_ddl_audit event triggers (migrations, operator DDL — boot replays are suppressed). |
 | `jobs` | A unit of work on the dispatcher's queue: its kind, params, lifecycle state and retry bookkeeping. |
+| `matching_models` | An immutable version of a tenant's matching model: the settings document the engine scores against, its hash, provenance and activation state. |
 | `orgs` | A tenant: its config pointer, lake env, lifecycle state and active config version. |
 | `schedules` | A recurring job schedule for a tenant: its kind, cron and source. |
 | `staged_steward_actions` | A steward action staged for review/apply: its payload, state and outcome. |

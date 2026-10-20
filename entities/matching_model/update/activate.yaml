@@ -1,0 +1,8 @@
+kind: statement
+operation: update
+mode: partial
+description: "Activate one version and archive whichever version was active, in a single statement. One statement rather than two so there is no window in which the tenant has no active model, and no transaction needed around the generated query functions."
+params:
+  - { name: model_id, type: varchar }
+  - { name: org_id, type: varchar }
+returns: none

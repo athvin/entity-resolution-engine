@@ -305,11 +305,29 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
       Tests: a `lake_e2e` case asserting the ledger stores the fingerprint the guard computes,
       that an unchanged fingerprint proceeds as incremental, that a moved lexicon promotes to
       full and names the drifted field, and that the same drift refuses without escalation.
-- [ ] **W0.5 harness debt** — `make frontend-seed` is documented in the Makefile as "NOT
-      restored" (its `frontend/dev/seed.py` was deleted), which is why the full-stack Playwright
-      tier is dormant; `make check-all` is still cited in `docs/infrastructure.md` +
-      `docs/plan-to-aws.md` and does not exist; `fixtures/static/FORMAT.md` names deleted
-      Python scripts.
+- [~] **W0.5 harness debt — partly done, the seed deliberately deferred.** The stale
+      `make check-all` references are fixed (see W0.6). The full-stack tier stays dormant, but
+      the reason is now understood rather than just noted.
+      Recovering the deleted `frontend/dev/seed.py` was itself informative: step 4 of its
+      documented happy path **uploaded the three sources over HTTP** to the Python server, which
+      had that route. The Rust port dropped it, and the seed that exercised it was deleted at
+      about the same time — so nothing was left to notice. That is the same hole W0.4 fixed,
+      seen from the other side, and it is the clearest evidence for this program's false-green
+      rule.
+      What a revived seed needs, now that the upload endpoint exists: a workspace (lake catalog
+      + data dir + drop dir + config file); `POST /v1/orgs` with the lake/model env; three API
+      keys written to `.state/keys.json`; a published config version; the three committed
+      `base_10` CSVs uploaded through `POST /imports`; a wait on the dispatcher; and
+      `.state/expected.json` ground truth. Two things the old script did are no longer needed —
+      the corpus generator (the `base_10` fixtures are committed) and `train` (point
+      `ER_MODEL_PATH` at the committed `model_test_v1.json`, which is what every pg/lake test
+      does). **One blocker remains**: the dispatcher has no `train` arm at all, so a seed that
+      trains cannot work — `train` is in `SCHEDULABLE_KINDS` and falls straight through to
+      "dispatcher does not handle job kind 'train'". That arm lands in Wave 3 (E10), which is
+      the natural time to revive this tier.
+      Deferred knowingly: the BFF→er-server seam that this tier would cover is now held by the
+      W0.4a mock-contract gate plus the `pg_*` tests (real server, real Postgres), so the tier's
+      unique value is smaller than it was before W0.4a existed.
 - [x] **W0.6 `er-web` image push.** The ECR repo and `frontend/Dockerfile` both existed, and
       `images.yml`'s own header said er-web "is built by the frontend pipeline" — but
       `frontend.yml` had no image job at all, so nothing ever pushed an `er-web` tag and
@@ -323,10 +341,54 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
       was cited three times in `docs/plan-to-aws.md` and once in `docs/infrastructure.md`,
       alongside two Python contract tests deleted with the Python tree.
 
-### Waves 1–8 (queued)
-1. **Matching backbone** — model registry + API (#34/#21/#28), the config→model compiler that
-   makes `comparisons:`/`blocking:` actually execute (#4/#21/#22/#23/#24), hard constraints and
-   relationship exclusions (#18/#32), type-aware comparators (#25).
+### Wave 1 — matching backbone
+- [x] **E1 model registry + API (#34 model versioning, #21 field weights, #28 starter models).**
+      A tenant's model was a **file path in its env** (`ER_MODEL_PATH`). There was no way to see
+      which model an org scored against, no way to change it without editing the org's env, no
+      history of what it used to be, and no way to read the m/u probabilities the engine had
+      always carried — `grep m_probability` over the server and the frontend returned nothing.
+      New `matching_model` entity: immutable versions, monotonic within a name, with
+      `model_json` stored as text so it round-trips byte-exact (`model_hash` is taken over those
+      bytes and determinism depends on them), provenance, and `state` draft→active→archived.
+      `GET /models`, `POST /models/versions`, `GET /models/{name}/versions/{v}`,
+      `POST .../activate`.
+      Three decisions worth keeping:
+      * **`model_version_label` is a column, and required on upload.** It is the identity
+        stamped onto scored rows, and it must equal the `model_version` the frozen TF snapshot
+        CSV is keyed by — the TF lookup joins `(model_version, tf_snapshot_id)` and a mismatch
+        silently returns *no* term frequencies, changing scores rather than failing. Too
+        dangerous to derive, so the caller states it. (Pleasant consequence: activating a new
+        label is fingerprint drift, so W0.3's guard promotes the next incremental run to full.)
+      * **Activation is one statement**, `CASE`-updating the target and the incumbent together.
+        Two statements would leave a window with no active model; a partial unique index would
+        be worse, since a single UPDATE moving both rows can transiently violate a
+        non-deferrable unique index even when the end state is legal.
+      * **Seeded from `ER_MODEL_PATH`, not from a copy.** Creating an org reads the exact file
+        the dispatcher used to read and activates it, so a tenant created after the registry
+        scores identically to one created before. Seeding is skipped when the org already has
+        versions, because `POST /v1/orgs` is an idempotent upsert and versions auto-increment.
+      The dispatcher resolves the active version in its async half (the blocking half cannot
+      touch Postgres) and **falls back to the env file** when an org has no registry row — which
+      is what keeps every pre-existing org and every fixture unchanged. The TF snapshot itself
+      stays a file; the registry stores the settings document and the stamp, not the frozen
+      frequencies.
+      Weights (#21) are *derived* from the stored document rather than duplicated into columns,
+      so they cannot drift from what the engine loads: per level, `m`, `u`, and the
+      `log2(m/u)` the level contributes.
+      Tests (`pg_model_registry.rs`): seeding + activation on org create; an upsert does not
+      accumulate versions; the stored document is byte-identical to the seeded file; the weights
+      view exposes m/u and log-odds; an unloadable document is refused at the API rather than
+      inside a run; a missing label is refused; uploads land as drafts; activation archives the
+      incumbent and exactly one version is ever active; re-activating is a no-op; a missing
+      version 404s; an account model cannot be activated against a person org, and the refusal
+      leaves the active pointer alone.
+- [ ] **E2** the config→model compiler that makes `comparisons:`/`blocking:` actually execute
+      (#4/#21/#22/#23/#24) — the keystone: that DSL is authored, hashed and validated today, and
+      never compiled into a run.
+- [ ] **E3** hard constraints and relationship exclusions (#18/#32).
+- [ ] **E4** type-aware comparators (#25).
+
+### Waves 2–8 (queued)
 2. **Scale + prevention** — ensembles/cascades (#31), blocking estimates + segment scoping
    (#3/#54), true incremental (#36/#40), online resolve API (#37), push-records + import-time
    dedupe (#38/#39/#41), S3 auto-ingestion (#47).

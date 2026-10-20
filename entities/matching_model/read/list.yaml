@@ -1,0 +1,7 @@
+kind: statement
+operation: read
+mode: full
+description: "Every model version a tenant has, grouped by name with the newest version of each first."
+params:
+  - { name: org_id, type: varchar }
+returns: entity

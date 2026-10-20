@@ -18,7 +18,8 @@ use crate::Job;
 
 /// Render a timestamp the way the entity wire contract declares (RFC 3339 /
 /// OpenAPI `date-time`), for the projection structs that carry text timestamps.
-fn ts(t: &chrono::DateTime<chrono::Utc>) -> String {
+#[must_use]
+pub fn ts(t: &chrono::DateTime<chrono::Utc>) -> String {
     t.to_rfc3339_opts(chrono::SecondsFormat::Micros, true)
 }
 
@@ -766,6 +767,111 @@ pub async fn enqueue_scheduled(
         .expect("enqueue_scheduled RETURNING yields exactly one row");
     let inserted = job.id == job_id;
     Ok((job, inserted))
+}
+
+/// The model-registry name a tenant's starter model is seeded under. One name
+/// per tenant is enough until a tenant wants a second model beside it; versions
+/// accumulate under this name.
+pub const DEFAULT_MODEL_NAME: &str = "default";
+
+/// SHA-256 hex of a model document — the version's identity, taken over the
+/// exact bytes the engine will load.
+#[must_use]
+pub fn model_hash(model_json: &str) -> String {
+    hash_secret(model_json)
+}
+
+/// Mint the next version of a named matching model.
+///
+/// # Errors
+/// Propagates the insert error (incl. the natural-key unique violation two
+/// concurrent creates would race into).
+#[allow(clippy::too_many_arguments)]
+pub async fn create_model_version(
+    client: &Client,
+    org_id: &str,
+    name: &str,
+    entity_type: &str,
+    model_json: &str,
+    model_version_label: &str,
+    tf_snapshot_id: Option<&str>,
+    provenance: &serde_json::Value,
+    created_by: &str,
+) -> Result<er_entities::matching_model::MatchingModel, PgError> {
+    let rows = er_entities::matching_model::create::create(
+        client,
+        &er_ids::new_v7(),
+        org_id,
+        name,
+        entity_type,
+        model_json,
+        &model_hash(model_json),
+        model_version_label,
+        tf_snapshot_id,
+        provenance,
+        created_by,
+    )
+    .await?;
+    Ok(rows
+        .into_iter()
+        .next()
+        .expect("create RETURNING yields exactly one row"))
+}
+
+/// Every model version a tenant has.
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn list_model_versions(
+    client: &Client,
+    org_id: &str,
+) -> Result<Vec<er_entities::matching_model::MatchingModel>, PgError> {
+    er_entities::matching_model::read::list(client, org_id).await
+}
+
+/// The tenant's active model version, if it has one.
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn active_model_version(
+    client: &Client,
+    org_id: &str,
+) -> Result<Option<er_entities::matching_model::MatchingModel>, PgError> {
+    Ok(er_entities::matching_model::read::active(client, org_id)
+        .await?
+        .into_iter()
+        .next())
+}
+
+/// One model version by its natural key.
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn model_version(
+    client: &Client,
+    org_id: &str,
+    name: &str,
+    version: i64,
+) -> Result<Option<er_entities::matching_model::MatchingModel>, PgError> {
+    Ok(
+        er_entities::matching_model::read::by_version(client, org_id, name, version)
+            .await?
+            .into_iter()
+            .next(),
+    )
+}
+
+/// Activate one version, archiving whichever was active, atomically.
+///
+/// # Errors
+/// Propagates the update error.
+pub async fn activate_model_version(
+    client: &Client,
+    org_id: &str,
+    model_id: &str,
+) -> Result<(), PgError> {
+    er_entities::matching_model::update::activate(client, model_id, org_id).await?;
+    Ok(())
 }
 
 /// The `source` marking the schedule that a config's `correction_pass.cadence`

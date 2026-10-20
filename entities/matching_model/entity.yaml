@@ -1,0 +1,87 @@
+kind: entity
+version: 1
+name: matching_model
+relation: matching_models
+description: "An immutable version of a tenant's matching model: the settings document the engine scores against, its hash, provenance and activation state."
+key: [id]
+natural_key: [org_id, name, version]
+generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+  wire: [json]
+  history: true
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "The version row's unique id (UUIDv7, minted when the version is created)."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant this model version belongs to."
+  - name: name
+    type: varchar
+    nullable: false
+    description: "The model's name within the tenant; versions are monotonic within a name, so one tenant can keep several models (a classic rule model beside a trained one) and switch between them."
+  - name: version
+    type: bigint
+    nullable: false
+    description: "The monotonic version number within (org, name). Versions are immutable: a retrain or a weight override mints the next one rather than editing this."
+  - name: entity_type
+    type: varchar
+    nullable: false
+    default: "'person'"
+    accepted_values: [person, account]
+    description: "Which canonical schema the model scores against; a model cannot be activated for a lake of the other entity type."
+  - name: model_json
+    type: varchar
+    nullable: false
+    description: "The settings document the engine loads (comparison levels, their SQL, m/u probabilities, blocking rules). Stored as text, not jsonb, so it round-trips byte-exact — model_hash is taken over these bytes and the engine's determinism depends on them."
+  - name: model_hash
+    type: varchar
+    nullable: false
+    description: "SHA-256 of model_json, so a scored row can be tied back to the exact document that produced it."
+  - name: model_version_label
+    type: varchar
+    nullable: false
+    description: "The identity stamped onto every row this model scores (match_scores.model_version, runs.model_version). It is NOT the version number: it must equal the model_version the frozen term-frequency snapshot CSV is keyed by, because the TF lookup joins on (model_version, tf_snapshot_id) and a mismatch silently returns no term frequencies — changing a pair's score rather than failing. Seeded from the org's ER_MODEL_VERSION; required when uploading a model, for the same reason."
+  - name: tf_snapshot_id
+    type: varchar
+    description: "The frozen term-frequency snapshot this model scores against, when it has one. Paired with model_version_label by the TF lookup."
+  - name: state
+    type: varchar
+    nullable: false
+    default: "'draft'"
+    accepted_values: [draft, active, archived]
+    description: "Draft until activated; exactly one version of a name is active at a time, and activating the next archives the previous. There is deliberately no partial unique index enforcing that: a single UPDATE that moves both rows can transiently violate a non-deferrable unique index even when the end state is legal, so activation is instead one atomic statement that cannot produce two actives, and the active read orders by version so a hypothetical second one could never be served silently."
+  - name: provenance
+    type: json
+    nullable: false
+    default: "'{}'::jsonb"
+    description: "Where this version came from: the seeded starter file, a training run (corpus digest, args, seed), an authored upload, or the version it was derived from."
+  - name: created_by
+    type: varchar
+    nullable: false
+    description: "Principal that created the version."
+  - name: activated_at
+    type: timestamp
+    description: "When this version was activated, if it ever was."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the version was created."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Wall-clock last-write time (database default; advanced by mutations once the entity migrates)."
+indexes:
+  - name: matching_models_org_name_version
+    columns: [org_id, name, version]
+    unique: true
+  - name: matching_models_org_state
+    columns: [org_id, state]
