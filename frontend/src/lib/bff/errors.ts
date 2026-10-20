@@ -34,7 +34,12 @@ export interface BffError {
 }
 
 export function isBffError(value: unknown): value is BffError {
-  if (typeof value !== "object" || value === null || !("code" in value)) return false;
-  const code = value.code;
+  // Object.hasOwn rather than `in`, which walks the prototype chain. This is
+  // belt-and-braces, not a fix for a live bug: the only thing this guard is ever
+  // handed is `JSON.parse` output, which has no inherited properties. But a
+  // trust-boundary guard should mean "this object carries a code", and `in` does
+  // not say that.
+  if (typeof value !== "object" || value === null || !Object.hasOwn(value, "code")) return false;
+  const code = (value as { code: unknown }).code;
   return typeof code === "string" && (BFF_ERROR_CODES as readonly string[]).includes(code);
 }
