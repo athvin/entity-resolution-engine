@@ -310,8 +310,18 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
       tier is dormant; `make check-all` is still cited in `docs/infrastructure.md` +
       `docs/plan-to-aws.md` and does not exist; `fixtures/static/FORMAT.md` names deleted
       Python scripts.
-- [ ] **W0.6 `er-web` image push** — the ECR repo and `frontend/Dockerfile` exist but no CI job
-      pushes the image, so the BFF cannot be rolled out to dev EKS for live acceptance.
+- [x] **W0.6 `er-web` image push.** The ECR repo and `frontend/Dockerfile` both existed, and
+      `images.yml`'s own header said er-web "is built by the frontend pipeline" — but
+      `frontend.yml` had no image job at all, so nothing ever pushed an `er-web` tag and
+      `make dev-up TAG=<sha>` (which needs both images) could not roll the BFF out. Added the
+      `er-web` job beside `er-api`, with a `detect` job so each image builds only when its own
+      tree moved (a workflow-level `paths:` filter cannot tell the two trees apart). Verified
+      by building the image locally — it passes the Dockerfile's own
+      `ERWEB_DATABASE_URL is required` migrate-script check — and by unit-testing the detect
+      filter's cases, including the `frontend-notes/` prefix trap.
+      Also cleaned the stale gate references this turned up: `make check-all` does not exist and
+      was cited three times in `docs/plan-to-aws.md` and once in `docs/infrastructure.md`,
+      alongside two Python contract tests deleted with the Python tree.
 
 ### Waves 1–8 (queued)
 1. **Matching backbone** — model registry + API (#34/#21/#28), the config→model compiler that

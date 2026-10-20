@@ -137,14 +137,14 @@ activation takes up to 24h and never backfills (§16.1).
 All from §14.1. No cluster required; CI is the harness. These merge into Phase 1 at 1.8.
 
 - [ ] **A.1 Two new images** — `docker/Dockerfile.api` (slim: no dbt, no MinIO), `frontend/Dockerfile` (Next standalone, Node 22)
-  - CI builds and pushes all three images; `make check-all` passes, including `test_dockerfile_contract.py` and `test_dbt_profiles.py` untouched.
+  - CI builds and pushes both deployed images (`er-api`, `er-web`) from `.github/workflows/images.yml`; `make check` passes.
   - Both new images run as non-root (`docker run --rm <img> whoami` ≠ root) (§5.6).
 - [ ] **A.2 `ERSERVER_TENANT_DB_PREFIX`** (§7.2) — default `er_`, behaviour bit-for-bit unchanged without the var; a unit test proves both the default and an override.
 - [ ] **A.3 Lake prefix normalization** (§7.3) — one layout across CI compose, dev stack, and settings default; the integration tier passes.
 - [ ] **A.4 FastAPI docs off outside dev** (§4.1) — `/docs`, `/redoc`, `/openapi.json` return 404 under prod settings; still served in dev.
 - [ ] **A.5 Non-root `USER` in `docker/Dockerfile`** — the compose `pipeline` service (whose command is pytest) still passes the full integration tier.
 
-**Track A exit:** a full integration-tier run (`make check-all` plus the 2h08m single-session
+**Track A exit:** a full integration-tier run (`make check` + `make check-e2e` plus the 2h08m single-session
 pass) is green on the branch that carries all five — that tier, not the fast tiers, is what
 catches cross-module leaks here.
 
@@ -325,7 +325,7 @@ behavioural check — Phases 0 through 3 — has been re-run green within the la
 
 ## Standing rules while executing
 
-1. **`make check-all` and the integration tier gate every merge** that touches images,
+1. **`make check` and the e2e tiers gate every merge** that touches images,
    compose, or the S3 config sites — the fast tiers pass while integration fails
    (established project history; see memory/CI notes).
 2. **Measurements before scaling decisions**: §18.2 (thread knee) before widening the class

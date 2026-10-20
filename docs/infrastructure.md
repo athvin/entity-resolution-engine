@@ -715,7 +715,7 @@ kubectl -n alice exec deploy/er-api -- df -h /app/.tmp   # NVMe, not the root fi
 
 **Phase 3 — refresh and spot resilience.** Run `make refresh-dev` and diff golden-record counts against prod. Then terminate a runner node mid-job and confirm the job requeues with `--resume` and completes — this validates the assumption §16 prices spot against. Separately, confirm a spill-heavy run is *not* evicted (§5.3).
 
-**The existing test tiers remain the gate.** `make check-all` must pass unchanged. Two contract tests sit in the blast radius of the image work: `tests/unit/test_dockerfile_contract.py` fails if the runner image drops its dev dependencies, and `tests/unit/test_dbt_profiles.py` holds the three S3 configuration sites field-for-field identical. The integration tier, not the fast tiers, is what catches cross-module regressions — run the full pass before merging Dockerfile changes.
+**The existing test tiers remain the gate.** `make check` (fmt + clippy + entities-check + test) must pass unchanged, plus `make check-e2e` for the DuckLake + Postgres tiers and `make frontend` for the BFF. The Python-era contract tests named here previously (`test_dockerfile_contract.py`, `test_dbt_profiles.py`) went with the Python tree; the image contract is now asserted by the Dockerfiles' own build-time checks and by `make dev-up` rolling the built tag. The e2e tiers, not the fast one, are what catch cross-module regressions — run them before merging Dockerfile changes.
 
 ## 18. Open items
 
