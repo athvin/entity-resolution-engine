@@ -1,0 +1,6 @@
+kind: statement
+operation: update
+mode: partial
+description: "Bring the scored-record ledger up to the corpus the match pass just scored, from the session's __scored_src staging (one row per standardized record). Keyed on record_key, so a changed record's hash is rewritten in place rather than duplicated."
+params: []
+returns: none

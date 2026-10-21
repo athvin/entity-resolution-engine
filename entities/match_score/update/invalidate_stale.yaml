@@ -1,0 +1,6 @@
+kind: statement
+operation: update
+mode: partial
+description: "Deactivate every active score touching a record whose content changed or which left the corpus, from the session's __match_stale staging. An incremental pass re-scores the changed record's pairs immediately afterwards, so a pair that is still above threshold comes back active; one that is not, or whose endpoint is gone, correctly stays invalidated."
+params: []
+returns: none

@@ -30,5 +30,6 @@ pub mod review;
 pub mod run;
 pub mod schedule;
 pub mod schema;
+pub mod scored_record;
 pub mod staged_steward_action;
 pub mod webhook;

@@ -53,6 +53,17 @@ impl EntityMembership {
     }
 }
 
+pub mod delete {
+    //! @generated query functions for this entity + operation.
+    /// Drop membership rows for records the standardized corpus no longer has, from the session's __membership_live staging (which the caller fills from the person or Account corpus by entity_type). Membership is upsert-only, so without this a tombstoned record keeps its row forever and still reads as a member of an entity.
+    pub fn absent_from_corpus(conn: &::duckdb::Connection) -> ::duckdb::Result<usize> {
+        const SQL: &str = "DELETE FROM lake.main.entity_membership
+WHERE record_key NOT IN (SELECT record_key FROM __membership_live)
+";
+        conn.execute(SQL, ::duckdb::params![])
+    }
+}
+
 pub mod read {
     //! @generated query functions for this entity + operation.
     /// One row of `all_pairs_live`: Every (entity, record) membership pair, ordered, read live (the prior partition reconcile diffs against).

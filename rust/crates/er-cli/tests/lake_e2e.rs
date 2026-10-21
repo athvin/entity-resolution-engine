@@ -130,6 +130,78 @@ fn resolve_phase_through_lake(
     partition(&rows)
 }
 
+/// A fresh lake with one scenario phase delivered and standardized, matched
+/// through `run_all` in `mode` — the whole chain, so the mode dispatch in
+/// `run_all` is what is under test rather than a stage called directly.
+fn run_all_phase(
+    session: &Session,
+    config: &Config,
+    scenario: &str,
+    phase: &str,
+    run_id: &str,
+    ts: &str,
+    mode: &str,
+) {
+    let deliveries: Vec<(String, String)> = ["crm", "billing", "webforms"]
+        .iter()
+        .filter_map(|s| {
+            std::fs::read_to_string(repo_fixture(&format!("{scenario}/{phase}/{s}.csv")))
+                .ok()
+                .map(|csv| ((*s).to_string(), csv))
+        })
+        .collect();
+    let model_json = std::fs::read_to_string(repo_fixture("model_test_v1.json")).unwrap();
+    let tf_csv = repo_fixture("model_test_v1.tf.csv");
+    er_cli::run_all(
+        session,
+        config,
+        &er_cli::PipelineInputs {
+            mode,
+            rebuild_reason: None,
+            lexicon: &lexicon_pairs(),
+            deliveries: &deliveries,
+            model: &er_cli::MatchModel {
+                settings_json: &model_json,
+                tf_csv_path: std::path::Path::new(&tf_csv),
+                model_version: "v0001",
+                tf_snapshot_id: "01JWMDTFSNAP00000000000001",
+            },
+            run_id,
+            ingested_at: ts,
+            scored_at: ts,
+            run_at: ts,
+        },
+    )
+    .unwrap();
+}
+
+fn lexicon_pairs() -> Vec<(String, String)> {
+    include_str!("fixtures/nickname_variants.csv")
+        .lines()
+        .skip(1)
+        .filter(|l| !l.is_empty())
+        .map(|l| {
+            let (a, b) = l.split_once(',').unwrap();
+            (a.to_string(), b.to_string())
+        })
+        .collect()
+}
+
+/// Every ACTIVE score as `(rec_a_key, rec_b_key) -> probability`, rendered as a
+/// string so the comparison is bit-exact rather than within a tolerance.
+fn active_scores(session: &Session) -> BTreeMap<(String, String), String> {
+    session
+        .query_strings(&format!(
+            "select rec_a_key, rec_b_key, cast(match_probability as varchar)
+             from {} where is_active order by rec_a_key, rec_b_key",
+            er_cli::MATCH_SCORES
+        ))
+        .unwrap()
+        .into_iter()
+        .map(|r| ((r[0].clone(), r[1].clone()), r[2].clone()))
+        .collect()
+}
+
 fn membership_golden(scenario: &str, phase: &str) -> BTreeSet<BTreeSet<String>> {
     let csv = std::fs::read_to_string(repo_fixture(&format!(
         "{scenario}/expected/{phase}/membership.csv"
@@ -612,6 +684,372 @@ fn incremental_merge_through_ducklake_matches_golden() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
+/// THE equivalence gate: an incremental batch must land the corpus in exactly
+/// the state a full re-run over base ∪ batch would.
+///
+/// This is DesignDoc §4.5.6's INV-EQ and T-INC-3, and it is the only thing that
+/// makes incremental mode safe to default to. The `incremental_batch` fixture
+/// was committed for this test and had no consumer: its six batch records carry
+/// declared roles (`attribution.csv`) — three join an existing entity, two form
+/// a new entity between themselves, one bridges two existing entities — chosen
+/// so that an implementation can fail each way distinguishably.
+///
+/// Two universes, same inputs, different route: A ingests the batch and scores
+/// it incrementally; B scores the union from scratch. Both the active scores
+/// (bit-exact probabilities, not a tolerance) and the resulting partition must
+/// agree, and the partition must equal the fixture's ground truth so that "the
+/// two paths agree" cannot be satisfied by both being wrong.
+#[test]
+fn an_incremental_batch_lands_where_a_full_rerun_would() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let truth = membership_golden("incremental_batch", "batch");
+
+    // Universe A — base, then the batch INCREMENTALLY.
+    let (sa, config, tmp_a) = open_seeded_lake("inc_eq_a");
+    run_all_phase(
+        &sa,
+        &config,
+        "incremental_batch",
+        "base",
+        "01INCEQA000000000000BASE000",
+        "2026-01-01 00:00:00",
+        "full",
+    );
+    run_all_phase(
+        &sa,
+        &config,
+        "incremental_batch",
+        "batch",
+        "01INCEQA00000000000BATCH000",
+        "2026-06-01 00:00:00",
+        "incremental",
+    );
+    let scores_a = active_scores(&sa);
+    let partition_a = partition(&membership_rows(&sa));
+
+    // Universe B — the same corpus, scored whole.
+    let (sb, _, tmp_b) = open_seeded_lake("inc_eq_b");
+    run_all_phase(
+        &sb,
+        &config,
+        "incremental_batch",
+        "base",
+        "01INCEQB000000000000BASE000",
+        "2026-01-01 00:00:00",
+        "full",
+    );
+    run_all_phase(
+        &sb,
+        &config,
+        "incremental_batch",
+        "batch",
+        "01INCEQB00000000000BATCH000",
+        "2026-06-01 00:00:00",
+        "full",
+    );
+    let scores_b = active_scores(&sb);
+    let partition_b = partition(&membership_rows(&sb));
+
+    assert!(
+        !scores_b.is_empty(),
+        "precondition: the full run scored something"
+    );
+    // Compare the pair SETS first: a missing pair and a mis-scored pair are
+    // different bugs and the key-set diff names which one happened.
+    let keys_a: BTreeSet<_> = scores_a.keys().collect();
+    let keys_b: BTreeSet<_> = scores_b.keys().collect();
+    assert_eq!(
+        keys_a,
+        keys_b,
+        "incremental and full disagree on WHICH pairs are scored; \
+         only-incremental={:?} only-full={:?}",
+        keys_a.difference(&keys_b).collect::<Vec<_>>(),
+        keys_b.difference(&keys_a).collect::<Vec<_>>(),
+    );
+    assert_eq!(
+        scores_a, scores_b,
+        "incremental and full agree on the pairs but not their probabilities"
+    );
+    assert_eq!(
+        partition_a, partition_b,
+        "incremental and full produce different entities"
+    );
+    assert_eq!(
+        partition_a, truth,
+        "both paths agree, but neither matches the fixture's ground truth"
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp_a);
+    let _ = std::fs::remove_dir_all(&tmp_b);
+}
+
+/// The incremental pass must be CHEAPER, and both of its passes must be live.
+///
+/// Equivalence alone is satisfiable by a pass that quietly re-scores everything,
+/// which is the most likely way for this feature to rot: it would stay green
+/// forever while delivering nothing. So assert the delta directly — six records
+/// scored out of twenty-nine — and assert that the new-vs-new pass found the
+/// pair the fixture built for it. `attribution.csv` names which records that is,
+/// and names the pass that MUST discover each, so the fixture decides what this
+/// test asserts rather than the implementation.
+#[test]
+fn an_incremental_pass_scores_only_the_batch_and_still_finds_new_vs_new_pairs() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let (session, config, tmp) = open_seeded_lake("inc_delta");
+    run_all_phase(
+        &session,
+        &config,
+        "incremental_batch",
+        "base",
+        "01INCDELTA0000000000BASE000",
+        "2026-01-01 00:00:00",
+        "full",
+    );
+
+    // Deliver the batch, then run the match pass directly so its report is
+    // observable (run_all logs it; a test needs the value).
+    for source in ["crm", "billing", "webforms"] {
+        if let Ok(csv) = std::fs::read_to_string(repo_fixture(&format!(
+            "incremental_batch/batch/{source}.csv"
+        ))) {
+            er_cli::run_ingest(
+                &session,
+                &config,
+                source,
+                &csv,
+                "01INCDELTA000000000BATCH000",
+                "2026-06-01 00:00:00",
+                false,
+            )
+            .unwrap();
+        }
+    }
+    er_cli::run_standardize(&session, &config, "2026-06-01 00:00:00").unwrap();
+    let model_json = std::fs::read_to_string(repo_fixture("model_test_v1.json")).unwrap();
+    let tf_csv = repo_fixture("model_test_v1.tf.csv");
+    let delta = er_cli::run_match_incremental(
+        &session,
+        &config,
+        &er_cli::MatchModel {
+            settings_json: &model_json,
+            tf_csv_path: std::path::Path::new(&tf_csv),
+            model_version: "v0001",
+            tf_snapshot_id: "01JWMDTFSNAP00000000000001",
+        },
+        config.thresholds.review_low,
+        "01INCDELTA000000000BATCH000",
+        "2026-06-01 00:00:00",
+    )
+    .unwrap();
+
+    let attribution = std::fs::read_to_string(repo_fixture("incremental_batch/attribution.csv"))
+        .expect("the fixture declares each batch record's role and pass");
+    let batch_keys: Vec<&str> = attribution
+        .lines()
+        .skip(1)
+        .filter(|l| !l.is_empty())
+        .map(|l| l.split(',').next().unwrap())
+        .collect();
+
+    assert_eq!(delta.mode, "incremental", "{:?}", delta.full_reason);
+    assert_eq!(
+        delta.delta_records,
+        batch_keys.len(),
+        "exactly the batch should have been scored, not the corpus"
+    );
+    assert!(
+        delta.corpus_records > delta.delta_records * 2,
+        "the corpus ({}) should dwarf the delta ({}) or this proves nothing",
+        delta.corpus_records,
+        delta.delta_records
+    );
+
+    // Pass 2 coverage: the records the fixture marks `pass2` match each other
+    // and nothing in the base corpus, so they are reachable ONLY by scoring the
+    // delta against itself. If pass 2 were dropped, everything above would still
+    // pass and these two records would silently become two entities.
+    let pass2: Vec<&str> = attribution
+        .lines()
+        .skip(1)
+        .filter(|l| !l.is_empty())
+        .filter(|l| l.ends_with(",pass2"))
+        .map(|l| l.split(',').next().unwrap())
+        .collect();
+    assert_eq!(pass2.len(), 2, "the fixture declares one new-vs-new pair");
+    let scored = active_scores(&session);
+    let (a, b) = (pass2[0].min(pass2[1]), pass2[0].max(pass2[1]));
+    assert!(
+        scored.contains_key(&(a.to_string(), b.to_string())),
+        "the new-vs-new pair ({a}, {b}) that attribution.csv marks `pass2` was \
+         never scored — predict_within over the delta is not running. Scored \
+         pairs touching them: {:?}",
+        scored
+            .keys()
+            .filter(|(x, y)| [a, b].contains(&x.as_str()) || [a, b].contains(&y.as_str()))
+            .collect::<Vec<_>>()
+    );
+
+    er_cli::run_reconcile(
+        &session,
+        &config,
+        "01INCDELTA000000000BATCH000",
+        "2026-06-01 00:00:00",
+    )
+    .unwrap();
+    let partition_now = partition(&membership_rows(&session));
+    assert!(
+        partition_now
+            .iter()
+            .any(|c| c.contains(&a.to_string()) && c.contains(&b.to_string())),
+        "the new-vs-new pair scored but did not end up in one entity"
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// A deleted record must leave its entity — and before this it could not.
+///
+/// `is_active` on `match_scores` was written `true` and never `false` by
+/// anything in the workspace. Standardize drops a tombstoned record from the
+/// corpus, but `run_reconcile` rebuilds its node universe from the node list
+/// PLUS every surviving edge endpoint (its own comment says so, about
+/// suppressions), so the deleted record's still-active scores dragged it back
+/// into its old entity on every subsequent run. Deletion did not delete.
+///
+/// Both passes now deactivate what they are about to supersede before they
+/// re-score, which is what makes `is_active` mean "the model currently says
+/// this" rather than "the model said this once".
+#[test]
+fn a_deleted_record_stops_being_resurrected_by_its_own_stale_scores() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let (session, config, tmp) = open_seeded_lake("inc_delete");
+    run_all_phase(
+        &session,
+        &config,
+        "incremental_batch",
+        "base",
+        "01INCDEL0000000000000BASE00",
+        "2026-01-01 00:00:00",
+        "full",
+    );
+
+    // Pick a record that shares an entity with others, so its removal is
+    // observable as the entity shrinking rather than disappearing.
+    let before = partition(&membership_rows(&session));
+    let victim = before
+        .iter()
+        .find(|c| c.len() >= 2)
+        .map(|c| c.iter().next().unwrap().clone())
+        .expect("the base corpus has a multi-record entity");
+    let (source, record_id) = victim.split_once(':').unwrap();
+
+    // A full refresh of that source WITHOUT the victim row tombstones it, which
+    // is how deletion reaches the lake (S4.1.1).
+    let csv = std::fs::read_to_string(repo_fixture(&format!(
+        "incremental_batch/base/{source}.csv"
+    )))
+    .unwrap();
+    let mut kept: Vec<&str> = csv.lines().take(1).collect();
+    kept.extend(
+        csv.lines()
+            .skip(1)
+            .filter(|l| !l.is_empty() && !l.starts_with(&format!("{record_id},"))),
+    );
+    assert_eq!(
+        kept.len(),
+        csv.lines().filter(|l| !l.is_empty()).count() - 1,
+        "the victim row must actually have been removed from the delivery"
+    );
+    er_cli::run_ingest(
+        &session,
+        &config,
+        source,
+        &format!("{}\n", kept.join("\n")),
+        "01INCDEL000000000000DEL000",
+        "2026-06-01 00:00:00",
+        true,
+    )
+    .unwrap();
+    er_cli::run_standardize(&session, &config, "2026-06-01 00:00:00").unwrap();
+    // Precondition: the tombstone really did remove it from the matched corpus.
+    // Without this, a failure below cannot be told apart from "the delivery was
+    // never tombstoned in the first place".
+    let corpus: BTreeSet<String> = session
+        .query_strings(&format!(
+            "select record_key from {}",
+            er_cli::INT_STD_RECORDS
+        ))
+        .unwrap()
+        .into_iter()
+        .map(|r| r[0].clone())
+        .collect();
+    assert!(
+        !corpus.contains(&victim),
+        "precondition: the tombstoned record {victim} should be out of the \
+         standardized corpus"
+    );
+
+    let model_json = std::fs::read_to_string(repo_fixture("model_test_v1.json")).unwrap();
+    let tf_csv = repo_fixture("model_test_v1.tf.csv");
+    let delta = er_cli::run_match_incremental(
+        &session,
+        &config,
+        &er_cli::MatchModel {
+            settings_json: &model_json,
+            tf_csv_path: std::path::Path::new(&tf_csv),
+            model_version: "v0001",
+            tf_snapshot_id: "01JWMDTFSNAP00000000000001",
+        },
+        config.thresholds.review_low,
+        "01INCDEL000000000000DEL000",
+        "2026-06-01 00:00:00",
+    )
+    .unwrap();
+    assert!(
+        delta.invalidated_scores > 0,
+        "the deleted record's scores should have been invalidated"
+    );
+    er_cli::run_reconcile(
+        &session,
+        &config,
+        "01INCDEL000000000000DEL000",
+        "2026-06-01 00:00:00",
+    )
+    .unwrap();
+
+    let after = partition(&membership_rows(&session));
+    assert!(
+        !after.iter().any(|c| c.contains(&victim)),
+        "the deleted record {victim} is still a member of an entity: {after:?}"
+    );
+    // And its former partners are still clustered together, so the invalidation
+    // removed the deleted record's edges and not every edge it touched.
+    let partners: BTreeSet<String> = before
+        .iter()
+        .find(|c| c.contains(&victim))
+        .unwrap()
+        .iter()
+        .filter(|k| **k != victim)
+        .cloned()
+        .collect();
+    assert!(
+        after.iter().any(|c| partners.is_subset(c)),
+        "deleting {victim} also broke up its entity's surviving members \
+         {partners:?}: {after:?}"
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
 #[test]
 fn doctor_reports_an_empty_lake_as_not_ok() {
     if !enabled() {
@@ -702,14 +1140,6 @@ fn run_all_base(tag: &str) -> (Session, Config, PathBuf) {
     (session, config, tmp)
 }
 
-/// The run ledger's version columns, and the drift guard that reads them.
-///
-/// Three things were disconnected before this: `write_run_start` hardcoded
-/// `mode = "full"` so an incremental run was indistinguishable in the ledger;
-/// `lexicon_hash` and `rebuild_reason` were declared columns that nothing ever
-/// wrote; and `er_versions::check_mode_preconditions` — the guard that decides
-/// whether an incremental run may extend the existing corpus — had zero callers
-/// anywhere in the workspace.
 /// Resolving an unsaved record must find the entity it belongs to, and write
 /// nothing while doing it.
 ///
@@ -1336,6 +1766,14 @@ fn a_model_compiled_from_the_config_resolves_base_10_like_the_trained_one() {
     );
 }
 
+/// The run ledger's version columns, and the drift guard that reads them.
+///
+/// Three things were disconnected before this: `write_run_start` hardcoded
+/// `mode = "full"` so an incremental run was indistinguishable in the ledger;
+/// `lexicon_hash` and `rebuild_reason` were declared columns that nothing ever
+/// wrote; and `er_versions::check_mode_preconditions` — the guard that decides
+/// whether an incremental run may extend the existing corpus — had zero callers
+/// anywhere in the workspace.
 #[test]
 fn the_run_ledger_records_the_fingerprint_the_drift_guard_reads() {
     if !enabled() {

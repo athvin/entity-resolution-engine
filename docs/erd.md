@@ -303,6 +303,17 @@ erDiagram
         timestamp created_at
         timestamp updated_at
     }
+    scored_records {
+        varchar id PK
+        varchar record_key
+        varchar content_hash
+        varchar model_version
+        varchar tf_snapshot_id
+        varchar run_id
+        timestamp scored_at
+        timestamp created_at
+        timestamp updated_at
+    }
     entity_membership {
         varchar id PK
         varchar source_system
@@ -570,18 +581,21 @@ erDiagram
         timestamp updated_at
     }
     raw_records }o..|| entity_membership : "source_system, source_record_id"
+    entity_membership }o..|| scored_records : "record_key"
     entity_events }o..|| run_stages : "run_id, seq"
     cut_edges }o..|| match_scores : "rec_a_key, rec_b_key, model_version, tf_snapshot_id"
-    record_overlays }o..|| int_std_records : "record_key"
+    record_overlays }o..|| scored_records : "record_key"
+    int_std_records }o..|| scored_records : "record_key"
     int_std_records }o..|| entity_membership : "source_system, source_record_id"
     int_std_records }o..|| raw_records : "source_system, source_record_id, content_hash"
     golden_lineage }o..|| golden_overrides : "entity_id, attribute"
-    golden_lineage }o..|| int_std_records : "record_key"
+    golden_lineage }o..|| scored_records : "record_key"
     golden_lineage }o..|| entity_membership : "source_system, source_record_id"
+    acct_int_std_records }o..|| scored_records : "record_key"
     acct_int_std_records }o..|| entity_membership : "source_system, source_record_id"
     acct_int_std_records }o..|| raw_records : "source_system, source_record_id, content_hash"
     acct_golden_lineage }o..|| golden_overrides : "entity_id, attribute"
-    acct_golden_lineage }o..|| acct_int_std_records : "record_key"
+    acct_golden_lineage }o..|| scored_records : "record_key"
     acct_golden_lineage }o..|| entity_membership : "source_system, source_record_id"
     entity_membership }o..|| entities : "entity_id → id"
     entity_events }o..|| entities : "entity_id → id"
@@ -591,6 +605,7 @@ erDiagram
     acct_golden_lineage }o..|| entities : "entity_id → id"
     cut_edges }o..|| assertions : "assertion_id → id"
     match_scores }o..|| runs : "run_id → id"
+    scored_records }o..|| runs : "run_id → id"
     entity_membership }o..|| runs : "run_id → id"
     entity_events }o..|| runs : "run_id → id"
     run_stages }o..|| runs : "run_id → id"
@@ -604,6 +619,7 @@ erDiagram
 | --- | --- | --- |
 | `raw_records` | ddl | One landed delivery row (S4.1): the source record's payload as delivered, content-hashed; append-only, with full-refresh tombstones. |
 | `match_scores` | ddl | One scored candidate pair (S4.3): the frozen model's match probability with its evidence waterfall, keyed by model and TF snapshot. |
+| `scored_records` | ddl | What the last successful match pass actually scored: one row per record in the corpus at the moment it was scored, with the content hash and model identity it was scored under. This is what makes an incremental run safe — a record is new or changed precisely when the standardized corpus disagrees with this ledger. |
 | `entity_membership` | ddl | One membership row per record (S4.4): which resolved entity the record's current version belongs to. |
 | `entities` | ddl | One resolved entity (S4.4): its lifecycle status and, for merge losers, the surviving entity it merged into. |
 | `entity_events` | ddl | One lifecycle event on an entity (S4.5.5): created/merged/split/retired and membership changes, with the run that caused it. |

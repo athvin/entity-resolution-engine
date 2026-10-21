@@ -1,0 +1,6 @@
+kind: statement
+operation: delete
+mode: partial
+description: "Retire ledger rows for records the corpus no longer has (a tombstoned or withdrawn record), so the next pass does not keep treating them as scored. Reads the same __scored_src staging as the upsert."
+params: []
+returns: none

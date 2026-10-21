@@ -543,7 +543,64 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          against the shared helpers, which is what makes the refactor safe.
          Capped at 10k records per push, because this body is buffered and parsed in memory while
          the upload path streams — a bigger load belongs in a file.
-   - [ ] E5 ensembles/cascades (#31), E6b segment scoping (#54), E7 true incremental (#36/#40),
+   - [x] **E7 true incremental (#36/#40) — and three bugs it exposed.** `run_all_incremental`
+         re-scored the whole corpus: `dedupe-core::incremental::{predict_between,predict_within}`
+         were built and golden-tested, and **no production caller existed** outside the
+         single-record `resolve_record` probe. `PipelineInputs.mode` only labelled the ledger row.
+         **What ships:** the two-pass path DesignDoc §4.3.4 specifies —
+         `predict_between(unchanged, delta)` then `predict_within(delta)` — unioned into the
+         existing `__match_src` staging and the same declared MERGE, so the write path is
+         unchanged. Pairs between two unchanged records are *not* re-scored: with the model and
+         the TF snapshot both frozen, re-scoring them could only reproduce the stored number.
+         That is what makes this **equal to** a full pass rather than an approximation, which is
+         DesignDoc §4.5.6's INV-EQ. Pass 2 is load-bearing on its own — without it two new
+         records that match each other but nothing in the corpus are never compared, so "this
+         batch contains a new duplicate pair" silently resolves to two entities.
+         **The delta is the `scored_records` ledger** (new lake entity), not the ingest batch id:
+         a run that lands records and then dies before scoring them would leave them looking
+         "already ingested" to any batch-based definition and they would never be scored at all.
+         Diffing the corpus against *what was actually scored* has no such hole, and it makes a
+         changed record (same key, new `content_hash`) and a departed one (tombstoned, so
+         standardize drops it) fall out of the same comparison. The ledger is written only at the
+         END of a successful pass, and when it is absent or was written under another model
+         identity the pass says so in `MatchDelta::full_reason` and scores everything.
+         **Reconcile and golden stay whole-corpus, deliberately.** Clustering is a function of
+         the edge set and connected components over the above-threshold graph is linear in edges;
+         the cost incremental exists to avoid is the *quadratic* pair generation in match.
+         Re-clustering from the full edge set is also what makes the partition provably equal to
+         a full run's. `clustering::incremental_cluster` therefore stays unwired, with reason.
+         **Bug 1 — `is_active` was a lie.** Written `true`, never written `false` by anything in
+         the workspace. Both passes now deactivate what they are about to supersede *before*
+         re-scoring (`match_score/update/invalidate_stale`), so a pair that falls below
+         `review_low`, or whose record left the corpus, stops reading as current. A full pass
+         supersedes everything and the MERGE brings back whatever still clears the threshold.
+         **Bug 2 — deletion did not delete.** `entity_membership` is upsert-only, so a tombstoned
+         record kept its row and still read as a member of an entity. Pruned against the
+         standardized corpus (`entity_membership/delete/absent_from_corpus`) — not against the
+         clustering node set, because that also excludes *suppressed* records, which are still in
+         the corpus and must keep their membership. Found by writing the test, not by reading.
+         **Bug 3 — `run_all` could not run twice in one session.** `seed_lexicon` used a bare
+         `CREATE TABLE`, so the second call died on "table nickname_variants already exists" —
+         and a base run followed by an incremental batch *is* two runs in one session. Now
+         re-seedable.
+         Tests (all four failure modes observed failing first): `an_incremental_batch_lands_where_a_full_rerun_would`
+         resolves the **`incremental_batch` fixture** — committed for T-INC-3 and left with no
+         consumer when the Python tests were removed — through two universes and asserts
+         bit-exact agreement on which pairs are scored, on their probabilities, on the partition,
+         *and* that the shared answer equals the fixture's ground truth, so "both paths agree"
+         cannot be satisfied by both being wrong. Sabotaging pass 1 loses exactly the ten
+         new-vs-corpus pairs including the declared bridge; sabotaging pass 2 loses exactly
+         `(billing:B009, webforms:W010)` — the pair `attribution.csv` marks `pass2`.
+         `an_incremental_pass_scores_only_the_batch_and_still_finds_new_vs_new_pairs` asserts the
+         pass is actually cheap (6 records of 29) and reads the roles from `attribution.csv`
+         rather than from the implementation, because equivalence alone is satisfiable by a pass
+         that quietly re-scores everything — the most likely way for this to rot.
+         `a_deleted_record_stops_being_resurrected_by_its_own_stale_scores` covers bugs 1 and 2.
+         `er run-all` gains `--mode` and `--allow-escalate`, behind the same drift guard the
+         control plane applies; DesignDoc specified both and neither existed.
+         Still unbuilt: tombstone *event* attribution in `entity_events` (already a documented
+         gap in `run_reconcile`'s own note), and retiring `entities` rows that lose every member.
+   - [ ] E5 ensembles/cascades (#31), E6b segment scoping (#54),
          E9b import-time screening + update rules (#38/#39), E9c S3 auto-ingestion (#47).
 3. **Learning loop** — labels/train/evaluate (#19/#20 + the evaluation-tooling gap),
    related-record features (#26), household/link entities (#33).

@@ -1,0 +1,11 @@
+kind: statement
+operation: read
+description: "The ledger's size and model identity, which together decide whether an incremental pass may reuse the existing scores. `identities > 1` means the ledger spans models and cannot be trusted as a whole."
+pin: live
+pin_reason: "er-cli reads this at match time inside the writer's own transaction, before any snapshot for this run exists."
+params: []
+returns:
+  - { name: n, type: bigint }
+  - { name: identities, type: bigint }
+  - { name: model_version, type: varchar }
+  - { name: tf_snapshot_id, type: varchar }

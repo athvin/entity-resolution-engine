@@ -1,0 +1,47 @@
+kind: entity
+version: 1
+name: scored_record
+relation: scored_records
+description: "What the last successful match pass actually scored: one row per record in the corpus at the moment it was scored, with the content hash and model identity it was scored under. This is what makes an incremental run safe — a record is new or changed precisely when the standardized corpus disagrees with this ledger."
+key: [id]
+natural_key: [record_key]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "Content-derived row id: sha256('scored_records:' || record_key)."
+  - name: record_key
+    type: varchar
+    nullable: false
+    description: "The standardized record this row accounts for."
+  - name: content_hash
+    type: varchar
+    nullable: false
+    description: "The record's content hash at scoring time. A differing hash in int_std_records is what identifies a changed record."
+  - name: model_version
+    type: varchar
+    nullable: false
+    description: "The trained model the record was scored under. An incremental pass over a different model cannot reuse these scores."
+  - name: tf_snapshot_id
+    type: varchar
+    nullable: false
+    description: "The frozen term-frequency snapshot the scoring used; frozen TF is what makes a reused score equal to a re-computed one."
+  - name: run_id
+    type: varchar
+    nullable: false
+    description: "The run whose match pass scored this record."
+  - name: scored_at
+    type: timestamp
+    nullable: false
+    description: "That run's logical scoring timestamp."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical creation time (the scoring run's clock)."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time (the latest scoring run's clock)."
