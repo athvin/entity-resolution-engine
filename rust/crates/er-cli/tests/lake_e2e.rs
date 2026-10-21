@@ -2667,3 +2667,109 @@ fn the_labeling_queue_offers_the_least_certain_pairs_first() {
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+/// A run must leave its metrics behind, and they must agree with the corpus.
+///
+/// Every dashboard number has always been computed live from the lake, so the
+/// product could say what is true now and nothing about the direction of
+/// travel — and "is the duplicate rate going up" is the question an operator
+/// actually has. Nothing was retained to answer it.
+///
+/// The counts are checked against the lake they describe rather than against
+/// constants, so the test says "the snapshot is true" instead of "the snapshot
+/// is what it was when I wrote this".
+#[test]
+fn a_run_records_metrics_that_agree_with_the_corpus() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let (session, config, tmp) = run_all_base("metrics");
+
+    let snapshots = er_entities::metric_snapshot::read::recent(
+        session.connection(),
+        session.latest_snapshot_version().unwrap(),
+        10,
+    )
+    .unwrap();
+    assert_eq!(
+        snapshots.len(),
+        1,
+        "a run should leave exactly one snapshot, got {}",
+        snapshots.len()
+    );
+    let snap = &snapshots[0];
+    assert_eq!(snap.run_id, "01RUNALLFULL0000000000000000");
+
+    // Against the corpus it describes, not against constants.
+    let one = |sql: &str| -> i64 {
+        session.query_strings(sql).unwrap()[0][0]
+            .parse()
+            .unwrap_or(-1)
+    };
+    let records = one(&format!("select count(*) from {}", er_cli::INT_STD_RECORDS));
+    let partition = partition(&membership_rows(&session));
+    let entities = i64::try_from(partition.len()).unwrap();
+    let dup_groups = i64::try_from(partition.iter().filter(|c| c.len() > 1).count()).unwrap();
+    let dup_records: i64 = partition
+        .iter()
+        .filter(|c| c.len() > 1)
+        .map(|c| i64::try_from(c.len()).unwrap())
+        .sum();
+    let largest = partition
+        .iter()
+        .map(|c| i64::try_from(c.len()).unwrap())
+        .max()
+        .unwrap_or(0);
+
+    assert_eq!(snap.records, records, "records");
+    assert_eq!(snap.entities, entities, "entities");
+    assert_eq!(snap.duplicate_groups, dup_groups, "duplicate groups");
+    assert_eq!(
+        snap.duplicate_records, dup_records,
+        "duplicate RECORDS, not groups — counting groups calls a five-record \
+         cluster and a two-record cluster the same amount of duplication"
+    );
+    assert_eq!(snap.largest_group, largest, "largest group");
+    assert!(
+        snap.duplicate_records > snap.duplicate_groups,
+        "base_10 has clusters bigger than two, so these must differ — if they \
+         are equal the test cannot tell the two definitions apart"
+    );
+
+    // The threshold bands, against the scores they summarise.
+    let auto = one(&format!(
+        "select count(*) from {} where is_active and match_probability >= {}",
+        er_cli::MATCH_SCORES,
+        config.thresholds.auto_merge
+    ));
+    assert_eq!(snap.auto_merge_pairs, auto, "auto-merge pairs");
+    assert!(
+        snap.auto_merge_pairs > 0,
+        "base_10 should have merged something"
+    );
+
+    // Re-running the same id CORRECTS the snapshot instead of adding a second —
+    // a correction pass and a retry both reuse a run id.
+    er_cli::write_metric_snapshot(
+        &session,
+        &config,
+        "01RUNALLFULL0000000000000000",
+        "2026-02-01 00:00:00",
+    )
+    .unwrap();
+    let after = er_entities::metric_snapshot::read::recent(
+        session.connection(),
+        session.latest_snapshot_version().unwrap(),
+        10,
+    )
+    .unwrap();
+    assert_eq!(after.len(), 1, "re-running a run id must not double-count");
+    assert!(
+        after[0].captured_at.to_string().starts_with("2026-02-01"),
+        "the correction should have moved the captured_at, got {}",
+        after[0].captured_at
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}

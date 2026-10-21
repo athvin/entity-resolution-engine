@@ -3,6 +3,7 @@
   "raw_records",
   "match_scores",
   "scored_records",
+  "metric_snapshots",
   "entity_membership",
   "entities",
   "entity_events",
@@ -1249,6 +1250,92 @@
       "rec_b_key",
       "model_version",
       "tf_snapshot_id"
+     ],
+     "where": null
+    }
+   ],
+   "owner": "ddl"
+  },
+  "metric_snapshots": {
+   "columns": [
+    {
+     "name": "id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "run_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "captured_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "records",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "entities",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "duplicate_records",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "duplicate_groups",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "largest_group",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "review_backlog",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "auto_merge_pairs",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "review_band_pairs",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "created_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "updated_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    }
+   ],
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.metric_snapshots (\n  id VARCHAR NOT NULL,\n  run_id VARCHAR NOT NULL,\n  captured_at TIMESTAMP NOT NULL,\n  records BIGINT NOT NULL,\n  entities BIGINT NOT NULL,\n  duplicate_records BIGINT NOT NULL,\n  duplicate_groups BIGINT NOT NULL,\n  largest_group BIGINT NOT NULL,\n  review_backlog BIGINT NOT NULL,\n  auto_merge_pairs BIGINT NOT NULL,\n  review_band_pairs BIGINT NOT NULL,\n  created_at TIMESTAMP NOT NULL,\n  updated_at TIMESTAMP NOT NULL\n);",
+   "enums": {},
+   "keys": [
+    {
+     "columns": [
+      "id"
+     ],
+     "where": null
+    },
+    {
+     "columns": [
+      "run_id"
      ],
      "where": null
     }

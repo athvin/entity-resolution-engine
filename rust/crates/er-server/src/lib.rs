@@ -2832,6 +2832,43 @@ async fn duplicates_list(
     }
 }
 
+/// Viewer+: the resolution metrics over time (`GET /v1/orgs/{org}/insights`).
+///
+/// Every dashboard number has always been computed live, so it could say what
+/// is true now and nothing about the direction of travel — and "is the
+/// duplicate rate going up" is the question an operator actually has. Nothing
+/// was retained to answer it until runs started leaving a snapshot behind.
+///
+/// Newest first, `?limit=` to widen the window.
+async fn insights(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let session = match org_lake(&state, &org).await {
+        Ok(s) => s,
+        Err(r) => return *r,
+    };
+    let snapshot = match read::page_start(&session, None) {
+        Ok((snap, _)) => snap,
+        Err(read::PageStartError::BadCursor) => {
+            return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "invalid cursor");
+        }
+        Err(read::PageStartError::Lake(e)) => {
+            return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
+        }
+    };
+    let limit = read::parse_limit(params.get("limit").map(String::as_str));
+    match read::insights(&session, snapshot, limit) {
+        Ok(series) => Json(json!({ "snapshot": snapshot, "series": series })).into_response(),
+        Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
+    }
+}
+
 /// Viewer+: active pairwise match scores (`GET /v1/orgs/{org}/match-scores`).
 /// Keyset page; query `cursor`, `limit`, `min`/`max` (probability band).
 async fn match_scores_list(
@@ -5886,6 +5923,7 @@ fn build_routes(state: AppState) -> Router {
         )
         .route("/v1/orgs/{org}/labeling/next", get(labeling_next))
         .route("/v1/orgs/{org}/labels", post(create_label).get(labels_list))
+        .route("/v1/orgs/{org}/insights", get(insights))
         .route("/v1/orgs/{org}/segments", get(segments_catalog))
         .route(
             "/v1/orgs/{org}/webhooks/deliveries",

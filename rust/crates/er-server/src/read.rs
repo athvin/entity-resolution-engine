@@ -603,6 +603,57 @@ pub fn uncertain_pairs(
     Ok(rows_to_values(&unlabelled))
 }
 
+/// The retained metric series, newest first, with the derived rates a caller
+/// would otherwise compute wrong.
+///
+/// `duplicate_rate` is duplicate RECORDS over records, not groups over
+/// entities: counting groups calls a five-record cluster and a two-record
+/// cluster the same amount of duplication, which is how a worsening corpus
+/// looks flat. Derived here rather than stored so a definition change does not
+/// need a backfill.
+///
+/// # Errors
+/// Propagates the lake query error.
+pub fn insights(session: &Session, snapshot: i64, limit: i64) -> Result<Vec<Value>, String> {
+    let limit = limit.clamp(1, MAX_LIMIT);
+    let rows = er_entities::metric_snapshot::read::recent(session.connection(), snapshot, limit)
+        .map_err(|e| e.to_string())?;
+    Ok(rows
+        .iter()
+        .map(|r| {
+            let rate = |num: i64, den: i64| {
+                if den > 0 {
+                    #[expect(
+                        clippy::cast_precision_loss,
+                        reason = "a corpus large enough to lose f64 precision here is far \
+                                  past what a rate reported to three decimals can express"
+                    )]
+                    Some(num as f64 / den as f64)
+                } else {
+                    // No records is not a 0% duplicate rate — it is no answer.
+                    // Reporting 0.0 would draw a reassuring flat line for an
+                    // empty corpus.
+                    None
+                }
+            };
+            json!({
+                "run_id": r.run_id,
+                "captured_at": r.captured_at.to_string(),
+                "records": r.records,
+                "entities": r.entities,
+                "duplicate_records": r.duplicate_records,
+                "duplicate_groups": r.duplicate_groups,
+                "largest_group": r.largest_group,
+                "review_backlog": r.review_backlog,
+                "auto_merge_pairs": r.auto_merge_pairs,
+                "review_band_pairs": r.review_band_pairs,
+                "duplicate_rate": rate(r.duplicate_records, r.records),
+                "records_per_entity": rate(r.records, r.entities),
+            })
+        })
+        .collect())
+}
+
 /// Parse an optional `f64` query value (e.g. a probability band bound).
 #[must_use]
 pub fn parse_f64(raw: Option<&str>) -> Option<f64> {

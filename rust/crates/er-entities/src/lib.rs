@@ -22,6 +22,7 @@ pub mod int_std_record;
 pub mod job;
 pub mod match_score;
 pub mod matching_model;
+pub mod metric_snapshot;
 pub mod org;
 pub mod pair_label;
 pub mod raw_record;

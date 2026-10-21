@@ -1,0 +1,6 @@
+kind: statement
+operation: create
+mode: partial
+description: "Record this run's metrics from the session's __metric_src staging. Keyed on run_id, so re-running the same id corrects the snapshot rather than double-counting it — which matters because a correction pass and a retry both reuse a run id."
+params: []
+returns: none
