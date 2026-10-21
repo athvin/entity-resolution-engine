@@ -36,7 +36,7 @@ async fn webhooks_crud() {
     let mut client = pg::connect(&dsn).await.unwrap();
     client
         .batch_execute(
-            "DROP TABLE IF EXISTS staged_steward_actions, audit_log, webhooks, schedules, \
+            "DROP TABLE IF EXISTS webhook_deliveries, staged_steward_actions, audit_log, webhooks, schedules, \
              config_versions, api_keys, jobs, orgs CASCADE;",
         )
         .await

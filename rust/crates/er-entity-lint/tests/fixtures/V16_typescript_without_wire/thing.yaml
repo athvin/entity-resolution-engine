@@ -1,0 +1,26 @@
+kind: entity
+version: 1
+name: thing
+relation: things
+description: "A control-plane entity shaped to exercise V16_typescript_without_wire: it asks for a TypeScript binding without declaring the wire the emitter needs, so nothing is generated and nothing complains."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "UUIDv7."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    volatile: true
+    default: now()
+    description: "Wall-clock creation time."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    volatile: true
+    default: now()
+    description: "Wall-clock last-write time."

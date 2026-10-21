@@ -95,7 +95,7 @@ async fn registration_refuses_an_event_nothing_emits() {
     let mut client = pg::connect(&dsn).await.unwrap();
     client
         .batch_execute(
-            "DROP TABLE IF EXISTS webhooks, staged_steward_actions, audit_log, schedules, config_versions, api_keys, jobs, orgs CASCADE;",
+            "DROP TABLE IF EXISTS webhook_deliveries, webhooks, staged_steward_actions, audit_log, schedules, config_versions, api_keys, jobs, orgs CASCADE;",
         )
         .await
         .unwrap();

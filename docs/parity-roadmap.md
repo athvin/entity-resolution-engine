@@ -785,6 +785,44 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          (#19/#20), E10c per-version evaluation (precision/recall/ROC — `accuracy.rs` is built
          and has no API), related-record features (#26), household/link entities (#33).
 4. **Operating at scale**
+   - [x] **O3b webhook delivery becomes an outbox (#43's reliability half).** Delivery was
+         `let _ = webhook::emit_job_event(...)` at three call sites: the POST happened **inline**
+         and its outcome was **discarded** — the per-target results were computed and thrown
+         away. So a subscriber unreachable for one second missed the event permanently, and
+         neither the tenant nor an operator could find out. Nothing retried, nothing was
+         recorded, and `DeliveryResult` had no consumer.
+         Now the event is written to a new `webhook_deliveries` table **before any network
+         call**, and a bounded drain on the dispatcher loop delivers it with exponential
+         backoff (5s→300s, the same curve as jobs, six attempts ≈ ten minutes). The split is
+         what makes a transient failure recoverable at all: the event is already durable, so a
+         503 becomes a backoff instead of a loss.
+         **Classification, not blanket retry.** A 2xx is terminal-delivered; 408/429/5xx and
+         transport errors retry; **any other 4xx fails immediately**, because a subscriber
+         rejecting the request itself will reject it identically five more times and spending
+         the attempts is pure waste; and a destination the outbound-URL guard refuses is never
+         retried, because it will still be refused in five minutes.
+         Two details that matter more than they look. The **payload is stored, not rebuilt** —
+         the signature is computed over those bytes, so a rebuilt body would fail the
+         subscriber's verification on exactly the deliveries that needed retrying. And the
+         **url and secret are read at delivery time**, so rotating a secret or correcting a URL
+         takes effect on the next attempt rather than being frozen into the queued row.
+         `GET /v1/orgs/{org}/webhooks/deliveries` is the log, filterable by subscription and
+         state — the question the old path could not answer.
+         Tests: three phases of `pg_webhook_deliver` (recording does not send; the guard refuses
+         the loopback subscriber terminally; a 503 retries twice then delivers while a 400 fails
+         after one attempt, with the retried bytes asserted byte-identical). Sabotaging the
+         classification to retry everything is observed failing.
+         **Two test-isolation constraints learned the hard way**, both invisible under
+         `--test-threads=1`: `claim` is global across orgs **by design** (one queue, one
+         drainer, oldest first), so concurrent test binaries *steal each other's deliveries* —
+         which is why these are phases of one test, as `pg_scheduler_tick` already was for the
+         same reason about `schedule_tick`. And `DROP TABLE webhooks CASCADE` drops the
+         dependent FK **constraint**, not the referencing table, so `webhook_deliveries` kept
+         orphan rows from earlier runs and the global oldest-first claim picked one of those up
+         instead of the test's own event. Every webhook test now clears the outbox explicitly.
+         Still unbuilt: the frontend surface for webhooks (there is none), and the non-`job.*`
+         event types (`entity.*`, `review.*`, `import.*`, `config.*`) — the catalog (#223)
+         deliberately lists only what something emits.
    - [x] **O2a job retry + failure classification (#58's retry half).** `attempt` and
          `max_attempts` shipped and **nothing ever retried** — a failed job stayed failed until
          a human hit resume.

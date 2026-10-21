@@ -1,0 +1,11 @@
+kind: statement
+operation: update
+mode: partial
+description: "Record what one attempt did. A 2xx is terminal-delivered; a transport error or 5xx goes back to pending behind a backoff until max_attempts; anything not retryable (a 4xx the subscriber will reject again, or the outbound-URL guard refusing the destination) fails immediately rather than burning five more attempts."
+params:
+  - { name: delivered, type: boolean }
+  - { name: retryable, type: boolean }
+  - { name: response_code, type: bigint, nullable: true }
+  - { name: error, type: varchar, nullable: true }
+  - { name: delivery_id, type: varchar }
+returns: entity

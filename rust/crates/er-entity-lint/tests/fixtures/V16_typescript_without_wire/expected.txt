@@ -1,0 +1,1 @@
+[V16] thing: generate.languages includes typescript but no wire is declared, so no binding is emitted — add `wire: [json]` (or drop typescript)

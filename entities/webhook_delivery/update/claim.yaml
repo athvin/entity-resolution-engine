@@ -1,0 +1,6 @@
+kind: statement
+operation: update
+mode: partial
+description: "Take the oldest due pending delivery, counting the attempt as it is handed out (a drainer that dies without reporting has still used one, which is what stops an infinite retry). FOR UPDATE SKIP LOCKED so several dispatcher replicas drain the same outbox without delivering twice."
+params: []
+returns: entity

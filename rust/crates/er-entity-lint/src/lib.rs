@@ -18,7 +18,7 @@
 //! registry, one fixture directory under `tests/fixtures/`.
 //!
 //! Two rule shapes, because two are what the conventions actually need:
-//! [`EntityRule`] sees one entity (V1–V8, V10–V13, V15) and [`CatalogRule`] sees
+//! [`EntityRule`] sees one entity (V1–V8, V10–V13, V15, V16) and [`CatalogRule`] sees
 //! the whole tree (V9, V14).
 
 use std::fmt;

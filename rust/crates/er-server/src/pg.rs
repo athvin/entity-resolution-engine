@@ -1129,6 +1129,24 @@ pub async fn webhooks_for_delivery(
     )
 }
 
+/// One subscriber's `(url, secret)`, or `None` if it has been deleted.
+///
+/// Read at DELIVERY time rather than frozen into the queued row, so rotating a
+/// secret or correcting a URL takes effect on the next attempt.
+///
+/// # Errors
+/// Propagates the read error.
+pub async fn webhook_endpoint(
+    client: &Client,
+    webhook_id: &str,
+) -> Result<Option<(String, String)>, PgError> {
+    Ok(er_entities::webhook::read::by_id(client, webhook_id)
+        .await?
+        .into_iter()
+        .next()
+        .map(|w| (w.url, w.secret)))
+}
+
 /// Delete a webhook (`webhooks.py` `delete`). `true` iff a row was removed.
 ///
 /// # Errors

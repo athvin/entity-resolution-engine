@@ -51,7 +51,7 @@ async fn a_run_names_a_segment_and_an_unknown_name_is_refused_at_submit() {
     let mut client = pg::connect(&dsn).await.unwrap();
     client
         .batch_execute(
-            "DROP TABLE IF EXISTS webhooks, staged_steward_actions, audit_log, schedules, config_versions, api_keys, jobs, orgs CASCADE;",
+            "DROP TABLE IF EXISTS webhook_deliveries, webhooks, staged_steward_actions, audit_log, schedules, config_versions, api_keys, jobs, orgs CASCADE;",
         )
         .await
         .unwrap();
@@ -274,7 +274,7 @@ async fn a_segment_whose_sql_is_broken_cannot_be_published() {
     let mut client = pg::connect(&dsn).await.unwrap();
     client
         .batch_execute(
-            "DROP TABLE IF EXISTS webhooks, staged_steward_actions, audit_log, schedules, config_versions, api_keys, jobs, orgs CASCADE;",
+            "DROP TABLE IF EXISTS webhook_deliveries, webhooks, staged_steward_actions, audit_log, schedules, config_versions, api_keys, jobs, orgs CASCADE;",
         )
         .await
         .unwrap();

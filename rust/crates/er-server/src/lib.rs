@@ -2120,10 +2120,14 @@ where
         state: final_state.to_string(),
         ..job
     };
-    // Best-effort webhook emit — a subscriber lookup / delivery failure never
-    // fails the job (the outcome is already persisted).
+    // Record the job's outcome event, then — when given a client — drain it.
+    // The real dispatcher splits these across its loop; doing both here keeps
+    // this helper's contract "dispatch, and deliver what that produced", which
+    // is what its tests observe. Best-effort: a subscriber lookup or delivery
+    // failure never fails the job, whose outcome is already persisted.
+    let _ = webhook::emit_job_event(client, &completed).await;
     if let Some(http) = webhook_http {
-        let _ = webhook::emit_job_event(client, http, &completed).await;
+        let _ = webhook::drain(client, http, 16).await;
     }
     Ok(Some(completed))
 }
@@ -2230,13 +2234,13 @@ async fn cancel_job(
                         state: "canceled".to_string(),
                         ..job
                     };
-                    // Emit, so a subscriber learns the job ended. Cancel was the
-                    // one terminal state that delivered nothing — a downstream
-                    // system waiting on an outcome waited forever. Best-effort
-                    // and built per call: cancelling is rare, and a delivery
-                    // failure must not undo a cancel that is already persisted.
-                    let http = webhook::client();
-                    let _ = webhook::emit_job_event(&client, &http, &canceled).await;
+                    // Record the event, so a subscriber learns the job ended.
+                    // Cancel was the one terminal state that delivered nothing
+                    // — a downstream system waiting on an outcome waited
+                    // forever. Only RECORDED here: the dispatcher's drain does
+                    // the sending, so a slow or dead subscriber cannot hold up
+                    // the response to a cancel that is already persisted.
+                    let _ = webhook::emit_job_event(&client, &canceled).await;
                     (StatusCode::OK, Json(json!(canceled))).into_response()
                 }
                 Err(e) => pg_err(e),
@@ -4225,6 +4229,70 @@ async fn segments_catalog(
     Json(json!({ "segments": segments })).into_response()
 }
 
+/// Viewer+: the delivery log (`GET /v1/orgs/{org}/webhooks/deliveries`),
+/// newest first, optionally narrowed by `webhook_id` or `state`.
+///
+/// This answers the question the old inline-and-discard path could not: did my
+/// endpoint actually receive the event, and if not, why. Every emit site used
+/// to POST inline and drop the result with `let _ =`, so a subscriber that was
+/// unreachable for a moment missed the event permanently and silently.
+///
+/// The payload is included: it is the tenant's own event body, and seeing what
+/// was actually sent is most of the value of a delivery log. The subscriber's
+/// SECRET is not — it lives on the webhook row and is returned once, at
+/// registration, like an API key.
+async fn webhook_deliveries(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Query(q): Query<DeliveryQuery>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "webhooks require Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    if let Some(bad) = q
+        .state
+        .as_deref()
+        .filter(|s| !["pending", "delivered", "failed"].contains(s))
+    {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("unknown state '{bad}' (pending, delivered, failed)"),
+        );
+    }
+    let limit = q.limit.unwrap_or(50).clamp(1, 200);
+    match er_entities::webhook_delivery::read::page(
+        &client,
+        &org_row.id,
+        q.webhook_id.as_deref(),
+        q.state.as_deref(),
+        limit,
+    )
+    .await
+    {
+        Ok(rows) => Json(json!({ "deliveries": rows })).into_response(),
+        Err(e) => pg_err(e),
+    }
+}
+
+#[derive(Deserialize)]
+struct DeliveryQuery {
+    webhook_id: Option<String>,
+    state: Option<String>,
+    limit: Option<i64>,
+}
+
 /// Admin+: register an outbound webhook (`POST /v1/orgs/{org}/webhooks`). The
 /// HMAC signing `secret` is caller-supplied or generated, and returned ONCE
 /// (never listed thereafter, like an API key).
@@ -5524,6 +5592,10 @@ fn build_routes(state: AppState) -> Router {
             get(schedules_index).post(create_schedule),
         )
         .route("/v1/orgs/{org}/segments", get(segments_catalog))
+        .route(
+            "/v1/orgs/{org}/webhooks/deliveries",
+            get(webhook_deliveries),
+        )
         .route(
             "/v1/orgs/{org}/webhooks/events",
             get(webhook_events_catalog),

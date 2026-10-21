@@ -24,6 +24,7 @@ in `er-sql-check`.
 | [V13](#v13) | error | `history: true` appears only on an entity with a `postgres` store |
 | [V14](#v14) | error | no declared relation collides with a `history: true` entity's `<relation>_history` companion |
 | [V15](#v15) | warning | a control-plane entity with an `org_id` column declares a non-partial index leading with `org_id` |
+| [V16](#v16) | error | an entity generating for `typescript` declares an arrow or json `wire` |
 
 ## V1
 
@@ -427,4 +428,29 @@ indexes:
     columns: [org_id]
     unique: true
     where: "state IN ('running')"
+```
+
+## V16
+
+an entity generating for `typescript` declares an arrow or json `wire`
+
+The TypeScript binding emitter is gated on a wire: with none declared, `languages: [typescript]` emits nothing at all and no gate notices, so the YAML claims a frontend type that does not exist and the frontend hand-writes one instead — which is the drift the generated bindings were introduced to stop. This was found the honest way: a new entity declared `typescript`, no binding appeared, and `verify` was perfectly happy. V12 covers the other direction (a wire needs a Rust end); together they make the stores/languages/wire triple consistent.
+
+Severity: **error**
+
+Conforming:
+
+```yaml
+generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+  wire: [json]
+```
+
+Violating:
+
+```yaml
+generate:
+  stores: [postgres]
+  languages: [rust, typescript]
 ```

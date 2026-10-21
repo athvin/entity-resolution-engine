@@ -33,6 +33,7 @@ static ENTITY_RULES: &[&dyn EntityRule] = &[
     &store::WireRequiresRust,
     &store::HistoryIsControlPlaneOnly,
     &tenancy::TenantScopeIsIndexed,
+    &store::TypescriptRequiresWire,
 ];
 
 /// Rules that need the whole tree at once, in code order.
