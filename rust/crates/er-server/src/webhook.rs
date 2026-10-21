@@ -90,6 +90,36 @@ pub struct DeliveryResult {
     pub error: Option<String>,
 }
 
+/// How long a single delivery may take before it is abandoned. A subscriber
+/// that accepts the connection and then stalls would otherwise hold a
+/// dispatcher thread for `reqwest`'s default, which is forever.
+const DELIVERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// The HTTP client every webhook delivery must use.
+///
+/// `reqwest::Client::new()` follows up to ten redirects, which is a complete
+/// bypass of the URL guard: register `https://public.example/` and have it 302
+/// to `http://169.254.169.254/latest/meta-data/`, and the guard only ever
+/// inspected the first hop. Redirects are therefore refused outright rather
+/// than re-checked per hop — a webhook endpoint has no reason to redirect, so
+/// the simpler rule is also the right one, and a 3xx surfaces as a status the
+/// tenant can see instead of a silent fetch somewhere else.
+///
+/// `egress_guard.rs` forbids `reqwest::Client::new()` anywhere in this crate's
+/// sources so a future caller cannot quietly reintroduce the default policy.
+#[must_use]
+pub fn client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(DELIVERY_TIMEOUT)
+        .build()
+        // The builder only fails on TLS backend initialisation, which would
+        // break every outbound request anyway; falling back to the default
+        // would silently restore redirect-following, so this must not be
+        // papered over.
+        .expect("a reqwest client with redirects disabled")
+}
+
 /// POST `body` to `url` with the signature + JSON content-type headers.
 async fn post(
     http: &reqwest::Client,
@@ -125,6 +155,40 @@ pub async fn emit(
     event_type: &str,
     data: &Value,
 ) -> Result<Vec<DeliveryResult>, tokio_postgres::Error> {
+    emit_with_egress(
+        pg_client,
+        http,
+        org_id,
+        org_name,
+        event_type,
+        data,
+        crate::urlguard::Egress::Guarded,
+    )
+    .await
+}
+
+/// [`emit`] with the outbound-URL guard made explicit.
+///
+/// `Egress::Unguarded` exists for ONE caller — the delivery integration test,
+/// which has to POST to a listener on `127.0.0.1` to observe that a delivery
+/// really happens. `tests/egress_guard.rs` fails if any file under
+/// `er-server/src` names this function or `Egress::Unguarded`, so the seam
+/// cannot quietly become a production path. There is deliberately no
+/// environment variable or config flag: a guard that configuration can switch
+/// off is a guard that gets found off.
+///
+/// # Errors
+/// Propagates only the Postgres subscriber lookup error.
+#[doc(hidden)]
+pub async fn emit_with_egress(
+    pg_client: &tokio_postgres::Client,
+    http: &reqwest::Client,
+    org_id: &str,
+    org_name: &str,
+    event_type: &str,
+    data: &Value,
+    egress: crate::urlguard::Egress,
+) -> Result<Vec<DeliveryResult>, tokio_postgres::Error> {
     let targets = pg::webhooks_for_delivery(pg_client, org_id, event_type).await?;
 
     let mut body_doc = json!({ "event": event_type, "org": org_name });
@@ -137,6 +201,19 @@ pub async fn emit(
 
     let mut results = Vec::with_capacity(targets.len());
     for (webhook_id, url, secret) in targets {
+        // Re-checked HERE, not only at registration. A hostname that resolved
+        // to a public address when the webhook was created can resolve to a
+        // private one now — that is DNS rebinding, and a registration-time-only
+        // guard does nothing about it.
+        if let Err(rejection) = crate::urlguard::check(&url, egress).await {
+            results.push(DeliveryResult {
+                webhook_id,
+                url,
+                status: None,
+                error: Some(format!("refused: {rejection}")),
+            });
+            continue;
+        }
         let signature = sign(&secret, &body);
         let (status, error) = match post(http, &url, body.clone(), &signature).await {
             Ok(code) => (Some(code), None),
@@ -161,6 +238,22 @@ pub async fn emit_job_event(
     http: &reqwest::Client,
     job: &crate::Job,
 ) -> Result<Vec<DeliveryResult>, tokio_postgres::Error> {
+    emit_job_event_with_egress(pg_client, http, job, crate::urlguard::Egress::Guarded).await
+}
+
+/// [`emit_job_event`] with the outbound-URL guard made explicit; see
+/// [`emit_with_egress`] for why this exists and what forbids its use in
+/// product code.
+///
+/// # Errors
+/// Propagates the Postgres subscriber lookup error.
+#[doc(hidden)]
+pub async fn emit_job_event_with_egress(
+    pg_client: &tokio_postgres::Client,
+    http: &reqwest::Client,
+    job: &crate::Job,
+    egress: crate::urlguard::Egress,
+) -> Result<Vec<DeliveryResult>, tokio_postgres::Error> {
     let event_type = format!("job.{}", job.state);
     let data = json!({
         "job_id": job.id,
@@ -172,7 +265,16 @@ pub async fn emit_job_event(
     let org_name = crate::pg::get_org_by_id(pg_client, &job.org_id)
         .await?
         .map_or_else(|| job.org_id.clone(), |o| o.name);
-    emit(pg_client, http, &job.org_id, &org_name, &event_type, &data).await
+    emit_with_egress(
+        pg_client,
+        http,
+        &job.org_id,
+        &org_name,
+        &event_type,
+        &data,
+        egress,
+    )
+    .await
 }
 
 #[cfg(test)]

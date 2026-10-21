@@ -147,6 +147,7 @@ async fn webhooks_crud() {
 
     // Unknown org -> 404.
     let resp = app
+        .clone()
         .oneshot(op(
             "POST",
             "/v1/orgs/ghost/webhooks",
@@ -155,4 +156,87 @@ async fn webhooks_crud() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
+    // ------------------------------------------------------------------------
+    // The outbound-URL guard, as part of the registration contract. Folded in
+    // here rather than a second `#[tokio::test]`: cargo runs a binary's tests
+    // on parallel threads, and two tests that each `DROP TABLE ... CASCADE`
+    // this schema deadlock against each other through the `orgs_history`
+    // trigger. `pg_scheduler_tick.rs` notes the same constraint.
+    //
+    // Before the guard, the only validation was `!url.trim().is_empty()`, so an
+    // admin in any tenant could register
+    // `http://169.254.169.254/latest/meta-data/...` and the dispatcher would
+    // POST job payloads to cloud instance metadata from inside the cluster,
+    // where egress is deliberately unrestricted.
+    //
+    // Refusing at registration is the CONVENIENT half — it gives an immediate,
+    // legible error instead of a webhook that silently never delivers. The half
+    // that secures it is the delivery-time re-check, because DNS can change
+    // afterwards: that is `pg_webhook_deliver`'s phase 2.
+    for (url, expect) in [
+        // The headline: cloud instance metadata.
+        (
+            "https://169.254.169.254/latest/meta-data/iam/security-credentials/",
+            "link-local",
+        ),
+        ("https://127.0.0.1/hook", "loopback"),
+        ("https://[::1]/hook", "loopback"),
+        // A loopback address wearing IPv6 — the standard way past a naive filter.
+        ("https://[::ffff:127.0.0.1]/hook", "loopback"),
+        ("https://10.0.0.5/hook", "private"),
+        ("https://192.168.1.1/hook", "private"),
+        ("http://example.com/hook", "scheme"),
+        ("file:///etc/passwd", "scheme"),
+        ("https://user:pass@example.com/hook", "credentials"),
+        ("not-a-url", "absolute URL"),
+    ] {
+        let resp = app
+            .clone()
+            .oneshot(op(
+                "POST",
+                "/v1/orgs/acme/webhooks",
+                Body::from(
+                    serde_json::json!({ "url": url, "events": ["job.succeeded"] }).to_string(),
+                ),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{url} must be refused"
+        );
+        let detail = json_body(resp).await["detail"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        assert!(
+            detail.contains(expect),
+            "refusing {url} should say {expect:?}, said: {detail}"
+        );
+    }
+
+    // And an ordinary https endpoint still registers — the guard must not have
+    // simply broken webhooks.
+    let resp = app
+        .clone()
+        .oneshot(op(
+            "POST",
+            "/v1/orgs/acme/webhooks",
+            Body::from(
+                serde_json::json!({
+                    "url": "https://hooks.example.com/er",
+                    "events": ["job.succeeded"],
+                })
+                .to_string(),
+            ),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::CREATED,
+        "a normal https endpoint must still be accepted"
+    );
 }

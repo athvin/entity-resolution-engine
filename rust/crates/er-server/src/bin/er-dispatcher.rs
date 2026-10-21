@@ -20,7 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     // The dispatcher's writes identify themselves to the history/DDL ledgers.
     pg::set_actor(&client, "er-dispatcher").await?;
-    let http = reqwest::Client::new();
+    let http = er_server::webhook::client();
 
     // SIGTERM -> drain: finish the in-flight job, then exit at the next loop top.
     let term = Arc::new(AtomicBool::new(false));
