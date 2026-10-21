@@ -1,0 +1,6 @@
+kind: statement
+operation: update
+mode: partial
+description: "Deactivate every active score that came from a model identity this run is not using, from the session's __live_models staging (one row per live model) and __retire_stamp (exactly one row, the run's clock). Scores are keyed by model, so a run under a new version writes new rows and would otherwise leave the previous version's rows live forever — and no edge read filters by model, so both versions' verdicts would be clustered together."
+params: []
+returns: none

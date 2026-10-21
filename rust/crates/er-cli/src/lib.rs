@@ -596,6 +596,14 @@ pub fn run_match(
     // reconcile rebuilds its node universe from edge endpoints (see
     // `run_reconcile`), which resurrects deleted records into their old entity.
     invalidate_superseded_scores(session, model, run_id, scored_at, StaleScope::EveryActive)?;
+    // And retire any OTHER model's scores, so activating a new version takes
+    // effect instead of being unioned with the one it replaced.
+    retire_other_models(
+        session,
+        &[(model.model_version, model.tf_snapshot_id)],
+        run_id,
+        scored_at,
+    )?;
     stage_and_upsert_scores(
         session,
         &ScorePass {
@@ -612,6 +620,64 @@ pub fn run_match(
     // claim.
     sync_scored_ledger(session, model, run_id, scored_at, std_qual, std_qual)?;
     Ok(())
+}
+
+/// Retire the scores of every model this run is not using, so that activating a
+/// new model version actually takes effect. Returns the number retired.
+///
+/// Scores are keyed by `(pair, model_version, tf_snapshot_id)`, so a run under a
+/// new model writes NEW rows and leaves the previous model's rows `is_active`.
+/// Neither edge read filters by model — `auto_merge_edges_live` (what reconcile
+/// clusters from) and `active_page` (what the duplicates surface reads) both take
+/// every active row — so without this the two models' verdicts are unioned,
+/// silently and for good. The sharp end of that: a new model built to be
+/// STRICTER could not change anything, because the old model's looser edges went
+/// on merging the records.
+///
+/// `live` is the set of model identities this run scores with. It is one today
+/// and a list because an ensemble is a list — the plural shape is the point, not
+/// speculation.
+fn retire_other_models(
+    session: &Session,
+    live: &[(&str, &str)],
+    run_id: &str,
+    scored_at: &str,
+) -> Result<usize> {
+    create_ddl_table(session, "match_scores")?;
+    assert!(
+        !live.is_empty(),
+        "a run always scores with at least one model; an empty live set would \
+         retire every score in the lake"
+    );
+    let run_id = run_id.replace('\'', "''");
+    let scored_at = scored_at.replace('\'', "''");
+    let rows: Vec<String> = live
+        .iter()
+        .map(|(mv, snap)| {
+            format!(
+                "('{}', '{}')",
+                mv.replace('\'', "''"),
+                snap.replace('\'', "''")
+            )
+        })
+        .collect();
+    for t in ["__live_models", "__retire_stamp"] {
+        session.execute_batch(&format!("drop table if exists {t}"))?;
+    }
+    session.execute_batch(&format!(
+        "create temp table __live_models as select * from (values {}) \
+         as t(model_version, tf_snapshot_id)",
+        rows.join(", ")
+    ))?;
+    session.execute_batch(&format!(
+        "create temp table __retire_stamp as
+         select '{run_id}' as run_id, cast('{scored_at}' as timestamp) as invalidated_at"
+    ))?;
+    let n = er_entities::match_score::update::retire_other_models(session.connection())?;
+    for t in ["__live_models", "__retire_stamp"] {
+        session.execute_batch(&format!("drop table {t}"))?;
+    }
+    Ok(n)
 }
 
 /// Which previously-scored records a pass is about to supersede.
@@ -1013,7 +1079,7 @@ fn run_match_partial(
     // and pairs touching a record the corpus no longer has at all (a tombstone
     // standardize dropped). The second half is why a deletion stops resurrecting
     // itself through reconcile's edge endpoints.
-    let invalidated = invalidate_superseded_scores(
+    let mut invalidated = invalidate_superseded_scores(
         session,
         model,
         run_id,
@@ -1024,6 +1090,14 @@ fn run_match_partial(
              select record_key from {SCORED_RECORDS}
               where record_key not in (select record_key from {std_qual})"
         )),
+    )?;
+    // Other models' scores go whether or not this pass touches their pairs: they
+    // are not from a model this run uses, so they must not keep clustering.
+    invalidated += retire_other_models(
+        session,
+        &[(model.model_version, model.tf_snapshot_id)],
+        run_id,
+        scored_at,
     )?;
 
     if delta_records > 0 {

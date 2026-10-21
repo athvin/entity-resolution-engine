@@ -329,6 +329,23 @@ pub mod update {
         conn.execute(SQL, ::duckdb::params![])
     }
 
+    /// Deactivate every active score that came from a model identity this run is not using, from the session's __live_models staging (one row per live model) and __retire_stamp (exactly one row, the run's clock). Scores are keyed by model, so a run under a new version writes new rows and would otherwise leave the previous version's rows live forever — and no edge read filters by model, so both versions' verdicts would be clustered together.
+    pub fn retire_other_models(conn: &::duckdb::Connection) -> ::duckdb::Result<usize> {
+        const SQL: &str = "UPDATE lake.main.match_scores AS target
+   SET is_active = false,
+       invalidated_at = stamp.invalidated_at,
+       invalidated_run_id = stamp.run_id,
+       updated_at = stamp.invalidated_at
+  FROM __retire_stamp AS stamp
+ WHERE target.is_active
+   AND NOT EXISTS (
+         SELECT 1 FROM __live_models AS m
+          WHERE m.model_version = target.model_version
+            AND m.tf_snapshot_id = target.tf_snapshot_id)
+";
+        conn.execute(SQL, ::duckdb::params![])
+    }
+
     /// The S4.3.4 single write: MERGE the scored pairs (the session's __match_src staging) on the logical key; a re-scored pair is rewritten in place, clearing any invalidation.
     pub fn upsert_from_scored(conn: &::duckdb::Connection) -> ::duckdb::Result<usize> {
         const SQL: &str = "MERGE INTO lake.main.match_scores AS target USING __match_src AS source
