@@ -3969,7 +3969,12 @@ async fn merge_plans(
 }
 
 /// Job kinds that may be scheduled (`erserver.policy.SCHEDULABLE_KINDS`).
-const SCHEDULABLE_KINDS: [&str; 5] = [
+///
+/// Public so `tests/dispatch_coverage.rs` can check every one of them is
+/// actually routed. `train` sat in this list with no dispatcher arm, failing
+/// every time it fired; a list of kinds the scheduler will enqueue is a promise
+/// that something handles them.
+pub const SCHEDULABLE_KINDS: [&str; 5] = [
     "run_all_full",
     "run_all_incremental",
     "correct",
