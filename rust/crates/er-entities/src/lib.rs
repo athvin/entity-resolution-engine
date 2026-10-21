@@ -23,6 +23,7 @@ pub mod job;
 pub mod match_score;
 pub mod matching_model;
 pub mod org;
+pub mod pair_label;
 pub mod raw_record;
 pub mod record_overlay;
 pub mod resolved_entity;

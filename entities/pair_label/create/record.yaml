@@ -1,0 +1,16 @@
+kind: statement
+operation: create
+mode: partial
+description: "Record a verdict on one pair, correcting any previous one. An upsert rather than an append because a label is a current belief, not an event log: two contradictory rows for the same pair would make the training set ambiguous and there would be no principled way to pick. `created_at` survives the correction so the first time anyone looked is still recoverable."
+params:
+  - { name: label_id, type: varchar }
+  - { name: org_id, type: varchar }
+  - { name: rec_a_key, type: varchar }
+  - { name: rec_b_key, type: varchar }
+  - { name: verdict, type: varchar }
+  - { name: origin, type: varchar }
+  - { name: labeled_by, type: varchar }
+  - { name: model_version, type: varchar, nullable: true }
+  - { name: score_at_label, type: double, nullable: true }
+  - { name: note, type: varchar, nullable: true }
+returns: entity

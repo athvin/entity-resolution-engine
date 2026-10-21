@@ -1,0 +1,9 @@
+kind: statement
+operation: read
+description: "The tenant's labels, newest first, optionally narrowed to one verdict or one origin. The explicit ::varchar casts are needed because Postgres cannot infer a parameter's type from `$x IS NULL` alone and resolves left to right."
+params:
+  - { name: org_id, type: varchar }
+  - { name: verdict, type: varchar, nullable: true }
+  - { name: origin, type: varchar, nullable: true }
+  - { name: limit, type: bigint }
+returns: entity

@@ -1,0 +1,17 @@
+kind: statement
+operation: read
+description: "Active pairs ordered by how UNSURE the model is about them — nearest the decision threshold first. This is uncertainty sampling, and it is the difference between a labelling session that teaches the model something and one that does not: pairs it already scores at 0.99 or 0.01 confirm what it knows, while the pairs either side of the threshold are where its m/u estimates are actually wrong. Tie-broken by the pair so the order is deterministic and a second request returns the same page."
+params:
+  - { name: snapshot, type: bigint }
+  - { name: threshold, type: double }
+  - { name: band_low, type: double }
+  - { name: band_high, type: double }
+  - { name: limit, type: bigint }
+returns:
+  - { name: rec_a_key, type: varchar, nullable: false }
+  - { name: rec_b_key, type: varchar, nullable: false }
+  - { name: match_probability, type: double, nullable: false }
+  - { name: model_version, type: varchar, nullable: false }
+  - { name: evidence, type: json, nullable: false }
+  - { name: run_id, type: varchar, nullable: false }
+  - { name: scored_at, type: timestamp, nullable: false }

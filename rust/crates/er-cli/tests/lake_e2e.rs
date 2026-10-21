@@ -2565,3 +2565,105 @@ fn activating_a_new_model_retires_the_one_it_replaces() {
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+/// The labelling queue must offer the pairs the model is UNSURE about.
+///
+/// This is uncertainty sampling, and it is the difference between a labelling
+/// session that teaches the model something and one that wastes a human's
+/// attention. A queue ordered by score descending offers the pairs it is
+/// already most confident about — which confirm what it knows and move its m/u
+/// estimates almost not at all. The pairs either side of the decision threshold
+/// are where it is actually wrong.
+///
+/// Asserted here rather than in the Postgres tier because it needs real scores
+/// to order: the ordering is a property of `match_scores`, and a test over an
+/// empty or synthetic table could not tell the two orderings apart.
+#[test]
+fn the_labeling_queue_offers_the_least_certain_pairs_first() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let (session, config, tmp) = run_all_base("labeling_queue");
+    let threshold = config.thresholds.auto_merge;
+
+    let page = er_entities::match_score::read::uncertain_page(
+        session.connection(),
+        session.latest_snapshot_version().unwrap(),
+        threshold,
+        config.thresholds.review_low,
+        1.0,
+        50,
+    )
+    .unwrap();
+    assert!(
+        page.len() >= 5,
+        "base_10 should offer several scored pairs to label, got {}",
+        page.len()
+    );
+
+    // Non-decreasing distance from the threshold — the ordering claim itself.
+    let distance = |p: f64| (p - threshold).abs();
+    let mut previous = f64::NEG_INFINITY;
+    for row in &page {
+        let d = distance(row.match_probability);
+        assert!(
+            d >= previous - 1e-12,
+            "pairs must arrive least-certain first, but the distance from the \
+             threshold went {previous} then {d}"
+        );
+        previous = d;
+    }
+
+    // And the ordering is not accidentally the same as by-probability, or the
+    // assertion above would hold for a queue that does the useless thing.
+    let by_probability: Vec<String> = {
+        let mut rows: Vec<_> = page.iter().collect();
+        rows.sort_by(|a, b| b.match_probability.total_cmp(&a.match_probability));
+        rows.iter()
+            .map(|r| format!("{}|{}", r.rec_a_key, r.rec_b_key))
+            .collect()
+    };
+    let as_served: Vec<String> = page
+        .iter()
+        .map(|r| format!("{}|{}", r.rec_a_key, r.rec_b_key))
+        .collect();
+    assert_ne!(
+        as_served, by_probability,
+        "the uncertainty order must differ from score order on this corpus, or \
+         this test cannot distinguish the two"
+    );
+
+    // The first pair offered really is the closest to the threshold in the
+    // whole active set, not merely first in whatever order came back.
+    let closest = page
+        .iter()
+        .map(|r| distance(r.match_probability))
+        .fold(f64::INFINITY, f64::min);
+    assert!(
+        (distance(page[0].match_probability) - closest).abs() < 1e-12,
+        "the first pair offered is not the least certain one"
+    );
+
+    // Deterministic: the same request returns the same page, so a labeller who
+    // reloads does not get a reshuffled list.
+    let again = er_entities::match_score::read::uncertain_page(
+        session.connection(),
+        session.latest_snapshot_version().unwrap(),
+        threshold,
+        config.thresholds.review_low,
+        1.0,
+        50,
+    )
+    .unwrap();
+    assert_eq!(
+        again
+            .iter()
+            .map(|r| format!("{}|{}", r.rec_a_key, r.rec_b_key))
+            .collect::<Vec<_>>(),
+        as_served,
+        "the queue must be deterministic across identical requests"
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}

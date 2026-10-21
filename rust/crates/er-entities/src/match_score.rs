@@ -309,6 +309,118 @@ ORDER BY rec_a_key, rec_b_key
             .collect::<Vec<_>>();
         AutoMergeEdgesLiveRow::from_batches(&batches)
     }
+
+    /// One row of `uncertain_page`: Active pairs ordered by how UNSURE the model is about them — nearest the decision threshold first. This is uncertainty sampling, and it is the difference between a labelling session that teaches the model something and one that does not: pairs it already scores at 0.99 or 0.01 confirm what it knows, while the pairs either side of the threshold are where its m/u estimates are actually wrong. Tie-broken by the pair so the order is deterministic and a second request returns the same page.
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct UncertainPageRow {
+        pub rec_a_key: String,
+        pub rec_b_key: String,
+        pub match_probability: f64,
+        pub model_version: String,
+        pub evidence: ::serde_json::Value,
+        pub run_id: String,
+        #[serde(serialize_with = "crate::batch::ser_duckdb_timestamp")]
+        pub scored_at: ::chrono::DateTime<::chrono::Utc>,
+    }
+
+    impl UncertainPageRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("rec_a_key", ::arrow::datatypes::DataType::Utf8),
+                ("rec_b_key", ::arrow::datatypes::DataType::Utf8),
+                ("match_probability", ::arrow::datatypes::DataType::Float64),
+                ("model_version", ::arrow::datatypes::DataType::Utf8),
+                ("evidence", ::arrow::datatypes::DataType::Utf8),
+                ("run_id", ::arrow::datatypes::DataType::Utf8),
+                (
+                    "scored_at",
+                    ::arrow::datatypes::DataType::Timestamp(
+                        ::arrow::datatypes::TimeUnit::Microsecond,
+                        None,
+                    ),
+                ),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "rec_a_key")?;
+                let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "rec_b_key")?;
+                let c2: &::arrow::array::Float64Array =
+                    crate::batch::col(batch, 2, "match_probability")?;
+                let c3: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 3, "model_version")?;
+                let c4: &::arrow::array::StringArray = crate::batch::col(batch, 4, "evidence")?;
+                let c5: &::arrow::array::StringArray = crate::batch::col(batch, 5, "run_id")?;
+                let c6: &::arrow::array::TimestampMicrosecondArray =
+                    crate::batch::col(batch, 6, "scored_at")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        rec_a_key: crate::batch::req(crate::batch::opt_str(c0, i), "rec_a_key", i)?,
+                        rec_b_key: crate::batch::req(crate::batch::opt_str(c1, i), "rec_b_key", i)?,
+                        match_probability: crate::batch::req(
+                            crate::batch::opt_f64(c2, i),
+                            "match_probability",
+                            i,
+                        )?,
+                        model_version: crate::batch::req(
+                            crate::batch::opt_str(c3, i),
+                            "model_version",
+                            i,
+                        )?,
+                        evidence: crate::batch::req(
+                            crate::batch::opt_json(c4, i, "evidence")?,
+                            "evidence",
+                            i,
+                        )?,
+                        run_id: crate::batch::req(crate::batch::opt_str(c5, i), "run_id", i)?,
+                        scored_at: crate::batch::req(crate::batch::opt_ts(c6, i), "scored_at", i)?,
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// Active pairs ordered by how UNSURE the model is about them — nearest the decision threshold first. This is uncertainty sampling, and it is the difference between a labelling session that teaches the model something and one that does not: pairs it already scores at 0.99 or 0.01 confirm what it knows, while the pairs either side of the threshold are where its m/u estimates are actually wrong. Tie-broken by the pair so the order is deterministic and a second request returns the same page.
+    pub fn uncertain_page(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+        threshold: f64,
+        band_low: f64,
+        band_high: f64,
+        limit: i64,
+    ) -> ::duckdb::Result<Vec<UncertainPageRow>> {
+        const SQL: &str = "SELECT rec_a_key, rec_b_key, match_probability, model_version, evidence, run_id, scored_at
+FROM lake.main.match_scores AT (VERSION => {snapshot})
+WHERE is_active
+  AND match_probability >= $2
+  AND match_probability <= $3
+-- Distance from the threshold, written as a CASE rather than abs(): DuckDB has
+-- abs, but the entity analyser's planner does not, and a statement that cannot
+-- be planned cannot be declared.
+ORDER BY (CASE WHEN match_probability >= $1
+               THEN match_probability - $1
+               ELSE $1 - match_probability END),
+         rec_a_key, rec_b_key
+LIMIT $4
+";
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = conn.prepare(&sql)?;
+        let batches = stmt
+            .query_arrow(::duckdb::params![threshold, band_low, band_high, limit])?
+            .collect::<Vec<_>>();
+        UncertainPageRow::from_batches(&batches)
+    }
 }
 
 pub mod update {
