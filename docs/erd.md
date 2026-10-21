@@ -364,6 +364,18 @@ erDiagram
         timestamp created_at
         timestamp updated_at
     }
+    record_qualities {
+        varchar id PK
+        varchar record_key
+        double score
+        double completeness
+        double validity
+        double freshness
+        varchar run_id
+        timestamp scored_at
+        timestamp created_at
+        timestamp updated_at
+    }
     entity_membership {
         varchar id PK
         varchar source_system
@@ -633,25 +645,20 @@ erDiagram
     raw_records }o..|| entity_membership : "source_system, source_record_id"
     match_scores }o..|| metric_snapshots : "run_id"
     scored_records }o..|| metric_snapshots : "run_id"
-    entity_membership }o..|| scored_records : "record_key"
+    record_qualities }o..|| metric_snapshots : "run_id"
     entity_membership }o..|| metric_snapshots : "run_id"
     entity_events }o..|| metric_snapshots : "run_id"
     entity_events }o..|| run_stages : "run_id, seq"
     cut_edges }o..|| match_scores : "rec_a_key, rec_b_key, model_version, tf_snapshot_id"
     run_stages }o..|| metric_snapshots : "run_id"
     ingest_batches }o..|| metric_snapshots : "run_id"
-    record_overlays }o..|| scored_records : "record_key"
-    int_std_records }o..|| scored_records : "record_key"
     int_std_records }o..|| entity_membership : "source_system, source_record_id"
     int_std_records }o..|| raw_records : "source_system, source_record_id, content_hash"
     golden_lineage }o..|| golden_overrides : "entity_id, attribute"
-    golden_lineage }o..|| scored_records : "record_key"
     golden_lineage }o..|| entity_membership : "source_system, source_record_id"
-    acct_int_std_records }o..|| scored_records : "record_key"
     acct_int_std_records }o..|| entity_membership : "source_system, source_record_id"
     acct_int_std_records }o..|| raw_records : "source_system, source_record_id, content_hash"
     acct_golden_lineage }o..|| golden_overrides : "entity_id, attribute"
-    acct_golden_lineage }o..|| scored_records : "record_key"
     acct_golden_lineage }o..|| entity_membership : "source_system, source_record_id"
     entity_membership }o..|| entities : "entity_id → id"
     entity_events }o..|| entities : "entity_id → id"
@@ -663,6 +670,7 @@ erDiagram
     match_scores }o..|| runs : "run_id → id"
     scored_records }o..|| runs : "run_id → id"
     metric_snapshots }o..|| runs : "run_id → id"
+    record_qualities }o..|| runs : "run_id → id"
     entity_membership }o..|| runs : "run_id → id"
     entity_events }o..|| runs : "run_id → id"
     run_stages }o..|| runs : "run_id → id"
@@ -678,6 +686,7 @@ erDiagram
 | `match_scores` | ddl | One scored candidate pair (S4.3): the frozen model's match probability with its evidence waterfall, keyed by model and TF snapshot. |
 | `scored_records` | ddl | What the last successful match pass actually scored: one row per record in the corpus at the moment it was scored, with the content hash and model identity it was scored under. This is what makes an incremental run safe — a record is new or changed precisely when the standardized corpus disagrees with this ledger. |
 | `metric_snapshots` | ddl | One run's resolution metrics, kept so the dashboard can show a TREND rather than only a current value. The dashboard has always computed its numbers live from the lake, which means it can say what is true now and nothing about whether that is better or worse than last week — which is the question an operator actually has. |
+| `record_qualities` | ddl | A per-record data-quality score, 0-100, with the three dimensions kept separately. The dimensions are kept because a single number says a record is bad and not what to do about it: complete-but-invalid, valid-but-empty and simply old are three different jobs. |
 | `entity_membership` | ddl | One membership row per record (S4.4): which resolved entity the record's current version belongs to. |
 | `entities` | ddl | One resolved entity (S4.4): its lifecycle status and, for merge losers, the surviving entity it merged into. |
 | `entity_events` | ddl | One lifecycle event on an entity (S4.5.5): created/merged/split/retired and membership changes, with the run that caused it. |

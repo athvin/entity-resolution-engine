@@ -27,6 +27,7 @@ pub mod org;
 pub mod pair_label;
 pub mod raw_record;
 pub mod record_overlay;
+pub mod record_quality;
 pub mod resolved_entity;
 pub mod review;
 pub mod run;

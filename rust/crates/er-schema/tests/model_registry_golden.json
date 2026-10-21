@@ -4,6 +4,7 @@
   "match_scores",
   "scored_records",
   "metric_snapshots",
+  "record_qualities",
   "entity_membership",
   "entities",
   "entity_events",
@@ -1481,6 +1482,77 @@
      "columns": [
       "record_key",
       "kind"
+     ],
+     "where": null
+    }
+   ],
+   "owner": "ddl"
+  },
+  "record_qualities": {
+   "columns": [
+    {
+     "name": "id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "record_key",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "score",
+     "nullable": false,
+     "type": "DOUBLE"
+    },
+    {
+     "name": "completeness",
+     "nullable": false,
+     "type": "DOUBLE"
+    },
+    {
+     "name": "validity",
+     "nullable": true,
+     "type": "DOUBLE"
+    },
+    {
+     "name": "freshness",
+     "nullable": true,
+     "type": "DOUBLE"
+    },
+    {
+     "name": "run_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "scored_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "created_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "updated_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    }
+   ],
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.record_qualities (\n  id VARCHAR NOT NULL,\n  record_key VARCHAR NOT NULL,\n  score DOUBLE NOT NULL,\n  completeness DOUBLE NOT NULL,\n  validity DOUBLE,\n  freshness DOUBLE,\n  run_id VARCHAR NOT NULL,\n  scored_at TIMESTAMP NOT NULL,\n  created_at TIMESTAMP NOT NULL,\n  updated_at TIMESTAMP NOT NULL\n);",
+   "enums": {},
+   "keys": [
+    {
+     "columns": [
+      "id"
+     ],
+     "where": null
+    },
+    {
+     "columns": [
+      "record_key"
      ],
      "where": null
     }

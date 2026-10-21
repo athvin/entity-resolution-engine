@@ -1,0 +1,18 @@
+kind: statement
+operation: read
+description: "The lowest-scoring records first — the work queue. Tie-broken by record_key so the page is deterministic and a second request returns the same rows."
+params:
+  - { name: snapshot, type: bigint }
+  - { name: max_score, type: double }
+  - { name: limit, type: bigint }
+returns:
+  - { name: id, type: varchar, nullable: false }
+  - { name: record_key, type: varchar, nullable: false }
+  - { name: score, type: double, nullable: false }
+  - { name: completeness, type: double, nullable: false }
+  - { name: validity, type: double }
+  - { name: freshness, type: double }
+  - { name: run_id, type: varchar, nullable: false }
+  - { name: scored_at, type: timestamp, nullable: false }
+  - { name: created_at, type: timestamp, nullable: false }
+  - { name: updated_at, type: timestamp, nullable: false }

@@ -951,8 +951,41 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
    - [ ] O2b emailed run reports (#58's reporting half), O3b webhook outbox + entity events,
          O4 write-back handler (#44), O5 tags/approval (#51), O6 bulk depth (#9/#62/#52),
          O7 insights + time series (#45/#57/#85), O8 workflows + triggers (#55/#56).
-5. **Cleanse + verify** — transform rules (#61), international standardization (#60),
-   per-record DQ (#63/#73), the AWS-native verification suite (#64–#72).
+5. **Cleanse + verify**
+   - [x] **V3 per-record data-quality scoring (#63/#73).** 0-100 per record, with the three
+         dimensions kept separately — because they fail independently and a single number says a
+         record is bad without saying what to do about it: a record can be COMPLETE and wrong, 
+         VALID and nearly empty, or both and five years stale.
+         New optional `data_quality` config block (weights per attribute, per-dimension weights,
+         freshness window) and a `record_quality` lake table written at the end of each run.
+         Unset writes nothing, so the table's absence is a byte-exact no-op; `GET
+         /v1/orgs/{org}/quality` answers `configured: false` rather than erroring, because
+         scoring is opt-in and asking about it is a fair question either way.
+         **The judgement that makes the score mean anything is what happens when a dimension does
+         not APPLY.** Validity is measured over the validatable fields that are PRESENT: a record
+         with no email is already penalised by completeness, and scoring its validity zero as well
+         penalises one absence twice and makes "fill in the blanks" look like it improves
+         validity. A record with none of them scores NULL and is averaged over the other
+         dimensions rather than handed a zero it did not earn. Freshness is NULL when the source
+         carries no timestamp, because unknown age is not old — otherwise a source that simply
+         does not publish `updated_at` drags every one of its records to the bottom of the work
+         queue. `email_valid`/`phone_valid` are reused, not recomputed: standardize already
+         decided, and a second opinion that could disagree would be a bug with two plausible
+         answers.
+         The read reports BUCKETS and per-dimension means, not just a mean — a mean of 70 can be
+         every record at 70 or half at 95 and half at 45, and those need different work — plus
+         the worst records as a queue. Scores are upserted on `record_key` and pruned when a
+         record leaves the corpus, so a tombstoned record does not keep a score for good (the
+         same upsert-only trap E7 found in membership).
+         Test: `record_quality_scores_each_dimension_only_where_it_applies` asserts the scores
+         DISCRIMINATE (a constant would satisfy every range check), that base_10's
+         email-less `crm:C008` loses completeness while keeping validity 1.0, that re-scoring the
+         same corpus five months later LOWERS the total (so freshness is computed rather than
+         stubbed), that re-scoring corrects rather than duplicates, and that every scored record
+         lands in exactly one bucket.
+   - [ ] V0 SES apply (one input away — the account has no domain; recommend the sandbox
+         email-identity path), V1 transform rules (#61), V2 international standardization (#60),
+         V4 AWS-native verification suite (#64-#72).
 6. **AI on Bedrock** — Bedrock wiring + per-org BYO LLM (#77), LLM adjudication (#27),
    NL rule authoring (#29), AI schema mapping + model setup (#48/#35), staged agent
    write-actions (#81).

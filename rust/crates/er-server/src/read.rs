@@ -654,6 +654,65 @@ pub fn insights(session: &Session, snapshot: i64, limit: i64) -> Result<Vec<Valu
         .collect())
 }
 
+/// The corpus's data-quality distribution and its worst records.
+///
+/// Buckets as well as a mean, because a mean of 70 can be every record at 70 or
+/// half at 95 and half at 45, and those need different work. The per-dimension
+/// means say WHICH dimension is dragging, which a single score cannot.
+///
+/// # Errors
+/// Propagates the lake query error. A lake with no `record_qualities` relation —
+/// quality scoring unconfigured — reads as unscored rather than failing.
+pub fn quality(session: &Session, snapshot: i64, limit: i64) -> Result<Value, String> {
+    let limit = limit.clamp(1, MAX_LIMIT);
+    let dist = match er_entities::record_quality::read::distribution(session.connection(), snapshot)
+    {
+        Ok(rows) => rows,
+        // An unconfigured tenant has no relation at all, and "nothing has been
+        // scored" is the honest answer to the question rather than an error.
+        Err(e) if is_missing_relation(&e.to_string()) => {
+            return Ok(json!({ "scored": 0, "configured": false }));
+        }
+        Err(e) => return Err(e.to_string()),
+    };
+    let worst =
+        er_entities::record_quality::read::worst(session.connection(), snapshot, 100.0, limit)
+            .map_err(|e| e.to_string())?;
+    let d = dist.first();
+    Ok(json!({
+        "configured": true,
+        "scored": d.and_then(|r| r.scored).unwrap_or(0),
+        "mean_score": d.and_then(|r| r.mean_score),
+        "min_score": d.and_then(|r| r.min_score),
+        "max_score": d.and_then(|r| r.max_score),
+        "buckets": {
+            "below_50": d.and_then(|r| r.below_50).unwrap_or(0),
+            "between_50_80": d.and_then(|r| r.between_50_80).unwrap_or(0),
+            "at_least_80": d.and_then(|r| r.at_least_80).unwrap_or(0),
+        },
+        "dimensions": {
+            "completeness": d.and_then(|r| r.mean_completeness),
+            "validity": d.and_then(|r| r.mean_validity),
+            "freshness": d.and_then(|r| r.mean_freshness),
+        },
+        "worst": worst.iter().map(|r| json!({
+            "record_key": r.record_key,
+            "score": r.score,
+            "completeness": r.completeness,
+            "validity": r.validity,
+            "freshness": r.freshness,
+        })).collect::<Vec<_>>(),
+    }))
+}
+
+/// Whether a lake error is "that relation does not exist", which for an
+/// optional relation means "not configured" rather than "broken".
+fn is_missing_relation(message: &str) -> bool {
+    let m = message.to_ascii_lowercase();
+    (m.contains("does not exist") || m.contains("not found") || m.contains("no such"))
+        && m.contains("record_qualities")
+}
+
 /// Parse an optional `f64` query value (e.g. a probability band bound).
 #[must_use]
 pub fn parse_f64(raw: Option<&str>) -> Option<f64> {
