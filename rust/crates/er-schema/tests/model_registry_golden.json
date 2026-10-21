@@ -2,6 +2,7 @@
  "ddl_owned": [
   "raw_records",
   "match_scores",
+  "scored_records",
   "entity_membership",
   "entities",
   "entity_events",
@@ -1795,6 +1796,72 @@
     {
      "columns": [
       "id"
+     ],
+     "where": null
+    }
+   ],
+   "owner": "ddl"
+  },
+  "scored_records": {
+   "columns": [
+    {
+     "name": "id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "record_key",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "content_hash",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "model_version",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "tf_snapshot_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "run_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "scored_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "created_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "updated_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    }
+   ],
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.scored_records (\n  id VARCHAR NOT NULL,\n  record_key VARCHAR NOT NULL,\n  content_hash VARCHAR NOT NULL,\n  model_version VARCHAR NOT NULL,\n  tf_snapshot_id VARCHAR NOT NULL,\n  run_id VARCHAR NOT NULL,\n  scored_at TIMESTAMP NOT NULL,\n  created_at TIMESTAMP NOT NULL,\n  updated_at TIMESTAMP NOT NULL\n);",
+   "enums": {},
+   "keys": [
+    {
+     "columns": [
+      "id"
+     ],
+     "where": null
+    },
+    {
+     "columns": [
+      "record_key"
      ],
      "where": null
     }

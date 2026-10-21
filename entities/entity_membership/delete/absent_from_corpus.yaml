@@ -1,0 +1,6 @@
+kind: statement
+operation: delete
+mode: partial
+description: "Drop membership rows for records the standardized corpus no longer has, from the session's __membership_live staging (which the caller fills from the person or Account corpus by entity_type). Membership is upsert-only, so without this a tombstoned record keeps its row forever and still reads as a member of an entity."
+params: []
+returns: none

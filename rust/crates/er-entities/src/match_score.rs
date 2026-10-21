@@ -313,6 +313,22 @@ ORDER BY rec_a_key, rec_b_key
 
 pub mod update {
     //! @generated query functions for this entity + operation.
+    /// Deactivate every active score touching a record whose content changed or which left the corpus, from the session's __match_stale staging. An incremental pass re-scores the changed record's pairs immediately afterwards, so a pair that is still above threshold comes back active; one that is not, or whose endpoint is gone, correctly stays invalidated.
+    pub fn invalidate_stale(conn: &::duckdb::Connection) -> ::duckdb::Result<usize> {
+        const SQL: &str = "UPDATE lake.main.match_scores AS target
+   SET is_active = false,
+       invalidated_at = source.invalidated_at,
+       invalidated_run_id = source.run_id,
+       updated_at = source.invalidated_at
+  FROM __match_stale AS source
+ WHERE target.is_active
+   AND target.model_version = source.model_version
+   AND target.tf_snapshot_id = source.tf_snapshot_id
+   AND (target.rec_a_key = source.record_key OR target.rec_b_key = source.record_key)
+";
+        conn.execute(SQL, ::duckdb::params![])
+    }
+
     /// The S4.3.4 single write: MERGE the scored pairs (the session's __match_src staging) on the logical key; a re-scored pair is rewritten in place, clearing any invalidation.
     pub fn upsert_from_scored(conn: &::duckdb::Connection) -> ::duckdb::Result<usize> {
         const SQL: &str = "MERGE INTO lake.main.match_scores AS target USING __match_src AS source

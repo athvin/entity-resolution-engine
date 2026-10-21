@@ -394,6 +394,22 @@ fn ddl_specs() -> Vec<TableSpec> {
             BTreeMap::new(),
         ),
         tspec(
+            "scored_records",
+            vec![
+                nn("id", VARCHAR),
+                nn("record_key", VARCHAR),
+                nn("content_hash", VARCHAR),
+                nn("model_version", VARCHAR),
+                nn("tf_snapshot_id", VARCHAR),
+                nn("run_id", VARCHAR),
+                nn("scored_at", TIMESTAMP),
+                nn("created_at", TIMESTAMP),
+                nn("updated_at", TIMESTAMP),
+            ],
+            vec![key(&["id"]), key(&["record_key"])],
+            BTreeMap::new(),
+        ),
+        tspec(
             "entity_membership",
             vec![
                 nn("id", VARCHAR),

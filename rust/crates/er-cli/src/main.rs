@@ -74,8 +74,8 @@ enum Command {
         #[arg(long, default_value = "2026-01-01 00:00:00")]
         run_at: String,
     },
-    /// The S4.0 full-mode chain: ingest every `<drop>/<source>.csv` → standardize
-    /// → match → reconcile → golden, under one run id.
+    /// The S4.0 run chain: ingest every `<drop>/<source>.csv` → standardize →
+    /// match → reconcile → golden, under one run id.
     RunAll {
         #[arg(long)]
         drop: PathBuf,
@@ -91,6 +91,17 @@ enum Command {
         tf_snapshot_id: String,
         #[arg(long, default_value = "er-run")]
         run_id: String,
+        /// `full` re-scores the corpus; `incremental` scores only the pairs
+        /// touching new, changed and departed records (S4.3.4) and reuses the
+        /// rest, which is equal to a full pass because the model and the TF
+        /// snapshot are frozen.
+        #[arg(long, default_value = er_versions::MODE_FULL)]
+        mode: String,
+        /// Let the drift guard PROMOTE an incremental run to full when the
+        /// config / model / std / survivorship / lexicon fingerprint has moved
+        /// since the last successful run, instead of refusing it.
+        #[arg(long)]
+        allow_escalate: bool,
     },
     /// S4.3.2 — train a match model on int_std_records; writes the trained
     /// settings JSON + the frozen TF snapshot CSV.
@@ -230,6 +241,8 @@ fn main() -> Result<()> {
             model_version,
             tf_snapshot_id,
             run_id,
+            mode,
+            allow_escalate,
         } => {
             let lexicon = load_lexicon(&lexicon)?;
             let mut deliveries: Vec<(String, String)> = Vec::new();
@@ -243,12 +256,33 @@ fn main() -> Result<()> {
             }
             let settings = std::fs::read_to_string(&model)
                 .with_context(|| format!("reading {}", model.display()))?;
+            // The same drift guard the control plane applies, so `er run-all
+            // --mode incremental` cannot extend a corpus that was scored under a
+            // different config / model / std / survivorship / lexicon.
+            let prior = er_cli::prior_fingerprint(&session)?;
+            let current = er_cli::current_fingerprint(&config, &model_version, &lexicon);
+            let decision = er_versions::check_mode_preconditions(
+                prior.as_ref(),
+                &current,
+                &mode,
+                allow_escalate,
+            )?;
+            if decision.refused() {
+                anyhow::bail!("{}", decision.message);
+            }
+            if decision.escalated() {
+                eprintln!("{}", decision.message);
+            }
             er_cli::run_all(
                 &session,
                 &config,
                 &er_cli::PipelineInputs {
-                    mode: "full",
-                    rebuild_reason: None,
+                    mode: &decision.mode,
+                    rebuild_reason: if decision.escalated() {
+                        Some(er_versions::REBUILD_OPERATOR)
+                    } else {
+                        None
+                    },
                     lexicon: &lexicon,
                     deliveries: &deliveries,
                     model: &er_cli::MatchModel {
@@ -263,7 +297,7 @@ fn main() -> Result<()> {
                     run_at: "2026-01-01 00:00:00",
                 },
             )?;
-            println!("run-all complete ({run_id})");
+            println!("run-all complete ({run_id}, mode {})", decision.mode);
         }
         Command::Train {
             template,

@@ -41,6 +41,9 @@ pub const INT_STD_RECORDS: &str = "lake.main.int_std_records";
 /// [`INT_STD_RECORDS`].
 pub const ACCT_INT_STD_RECORDS: &str = "lake.main.acct_int_std_records";
 pub const MATCH_SCORES: &str = "lake.main.match_scores";
+/// What the last successful match pass scored, and under which model — the
+/// ledger an incremental pass diffs the corpus against.
+pub const SCORED_RECORDS: &str = "lake.main.scored_records";
 pub const ENTITY_MEMBERSHIP: &str = "lake.main.entity_membership";
 pub const ENTITIES: &str = "lake.main.entities";
 pub const ENTITY_EVENTS: &str = "lake.main.entity_events";
@@ -86,6 +89,12 @@ pub fn open_lake(catalog: &str, data_path: &str) -> Result<Session> {
 /// # Errors
 /// Propagates the session SQL error.
 pub fn seed_lexicon(session: &Session, rows: &[(String, String)]) -> Result<()> {
+    // Re-seedable. A session that runs the pipeline twice — which is what an
+    // incremental batch after a base run IS — otherwise died here on "table
+    // nickname_variants already exists", because this used a bare CREATE. The
+    // lexicon is a session-local projection of the caller's rows, so replacing
+    // it is a no-op in content whenever the rows are the same.
+    session.execute_batch(&format!("drop table if exists {LEXICON}"))?;
     if rows.is_empty() {
         // Empty VALUES is a syntax error; an entity type with no nickname lexicon
         // (e.g. accounts) seeds an empty typed table instead. The non-empty path
@@ -579,6 +588,123 @@ pub fn run_match(
     )?;
     let predictions = run_predict_with_tf(session, &settings, &input, &tf_tables, None)?;
 
+    // A full pass recomputes every pair, so everything this model previously
+    // scored is about to be superseded: deactivate it all, then let the MERGE
+    // bring back whatever still clears the threshold. Without this, a score can
+    // only ever be created — so a pair that drops below `review_low`, or whose
+    // record was deleted from the corpus, keeps an active row forever, and
+    // reconcile rebuilds its node universe from edge endpoints (see
+    // `run_reconcile`), which resurrects deleted records into their old entity.
+    invalidate_superseded_scores(session, model, run_id, scored_at, StaleScope::EveryActive)?;
+    stage_and_upsert_scores(
+        session,
+        &ScorePass {
+            settings: &settings,
+            model,
+            review_low,
+            run_id,
+            scored_at,
+            std_qual,
+            predictions: std::slice::from_ref(&predictions.physical),
+        },
+    )?;
+    sync_scored_ledger(session, model, run_id, scored_at, std_qual)?;
+    Ok(())
+}
+
+/// Which previously-scored records a pass is about to supersede.
+enum StaleScope<'a> {
+    /// A full pass recomputes the whole corpus: every active score for this
+    /// model identity is superseded.
+    EveryActive,
+    /// An incremental pass recomputes only the pairs touching these records —
+    /// the new, the changed and the departed.
+    Records(&'a str),
+}
+
+/// Deactivate the scores a pass is about to recompute, so that `is_active`
+/// means "this is what the model currently says" rather than "this was true
+/// once". Returns the number of rows deactivated.
+///
+/// The ordering matters: invalidate first, re-score second. A pair that still
+/// clears the threshold is re-activated by the MERGE in the same pass; one that
+/// no longer does, or whose endpoint has left the corpus, correctly stays
+/// inactive.
+fn invalidate_superseded_scores(
+    session: &Session,
+    model: &MatchModel,
+    run_id: &str,
+    scored_at: &str,
+    scope: StaleScope,
+) -> Result<usize> {
+    // Nothing to invalidate before the first pass creates the relation.
+    create_ddl_table(session, "match_scores")?;
+    let run_id = run_id.replace('\'', "''");
+    let scored_at = scored_at.replace('\'', "''");
+    let (mv, snap) = (
+        model.model_version.replace('\'', "''"),
+        model.tf_snapshot_id.replace('\'', "''"),
+    );
+    // Both scopes stage the same shape — the record keys whose pairs are being
+    // superseded — so one declared statement serves both. For a full pass that
+    // is every endpoint this model has an active score for, which is exactly
+    // "all of them".
+    let keys = match scope {
+        StaleScope::EveryActive => format!(
+            "select rec_a_key as record_key from {MATCH_SCORES}
+              where is_active and model_version = '{mv}' and tf_snapshot_id = '{snap}'
+             union
+             select rec_b_key as record_key from {MATCH_SCORES}
+              where is_active and model_version = '{mv}' and tf_snapshot_id = '{snap}'"
+        ),
+        StaleScope::Records(sql) => sql.to_string(),
+    };
+    session.execute_batch("drop table if exists __match_stale")?;
+    session.execute_batch(&format!(
+        "create temp table __match_stale as
+         select record_key,
+                '{mv}' as model_version, '{snap}' as tf_snapshot_id,
+                '{run_id}' as run_id, cast('{scored_at}' as timestamp) as invalidated_at
+         from ({keys})"
+    ))?;
+    let n = er_entities::match_score::update::invalidate_stale(session.connection())?;
+    session.execute_batch("drop table __match_stale")?;
+    Ok(n)
+}
+
+/// Write one or more prediction tables into `match_scores` through the declared
+/// MERGE: canonicalise the endpoints, keep the highest-probability row per pair,
+/// threshold at `review_low`, join both endpoint content hashes, and render the
+/// evidence — exactly er.matching.full's `_selected_predictions_sql` +
+/// `_source_sql`.
+///
+/// `predictions` is a list rather than a single table because an incremental
+/// pass scores in two shots (existing x delta, then delta x delta) whose results
+/// are disjoint by construction: a pair's two endpoints are either both in the
+/// delta or not, so no pair can appear in both and the union needs no
+/// cross-table deduplication beyond the per-pair `distinct on` already here.
+struct ScorePass<'a> {
+    settings: &'a Settings,
+    model: &'a MatchModel<'a>,
+    review_low: f64,
+    run_id: &'a str,
+    scored_at: &'a str,
+    /// The qualified standardized relation the content hashes are joined from.
+    std_qual: &'a str,
+    /// Physical names of the prediction tables to union.
+    predictions: &'a [String],
+}
+
+fn stage_and_upsert_scores(session: &Session, pass: &ScorePass) -> Result<()> {
+    let ScorePass {
+        settings,
+        model,
+        review_low,
+        run_id,
+        scored_at,
+        std_qual,
+        predictions,
+    } = *pass;
     let spec = er_schema::model::all_specs()
         .into_iter()
         .find(|s| s.name == "match_scores")
@@ -586,29 +712,38 @@ pub fn run_match(
     session.execute_batch(
         &er_schema::model::create_table_sql(&spec).map_err(|e| anyhow::anyhow!("{e}"))?,
     )?;
+    if predictions.is_empty() {
+        return Ok(());
+    }
 
-    // Canonicalise, keep the highest-probability row per pair, threshold at
-    // review_low, join both endpoint content hashes, and render the evidence —
-    // exactly er.matching.full's _selected_predictions_sql + _source_sql.
     let uid = &settings.unique_id_column;
-    let evidence = evidence_json(&settings);
+    let evidence = evidence_json(settings);
     let run_id = run_id.replace('\'', "''");
     let scored_at = scored_at.replace('\'', "''");
     let (mv, snap) = (
         model.model_version.replace('\'', "''"),
         model.tf_snapshot_id.replace('\'', "''"),
     );
+    let raw = predictions
+        .iter()
+        .map(|p| {
+            format!(
+                "select least(\"{uid}_l\", \"{uid}_r\") as rec_a_key,
+                        greatest(\"{uid}_l\", \"{uid}_r\") as rec_b_key,
+                        match_probability, {evidence} as evidence, rowid as _rid
+                 from {p}
+                 where \"{uid}_l\" <> \"{uid}_r\" and match_probability >= {review_low}"
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n             union all\n             ");
     session.execute_batch(&format!(
         "create temp table __match_src as
          with scored as (
              select distinct on (rec_a_key, rec_b_key)
                     rec_a_key, rec_b_key, match_probability, evidence
              from (
-                 select least(\"{uid}_l\", \"{uid}_r\") as rec_a_key,
-                        greatest(\"{uid}_l\", \"{uid}_r\") as rec_b_key,
-                        match_probability, {evidence} as evidence, rowid as _rid
-                 from {preds}
-                 where \"{uid}_l\" <> \"{uid}_r\" and match_probability >= {review_low}
+             {raw}
              )
              order by rec_a_key, rec_b_key, match_probability desc, _rid
          )
@@ -621,7 +756,6 @@ pub fn run_match(
          from scored s
          join {std_qual} ra on ra.record_key = s.rec_a_key
          join {std_qual} rb on rb.record_key = s.rec_b_key",
-        preds = predictions.physical,
     ))?;
 
     // S4.3.4 single write: the declared MERGE on the logical key, over the
@@ -630,6 +764,252 @@ pub fn run_match(
     er_entities::match_score::update::upsert_from_scored(session.connection())?;
     session.execute_batch("drop table __match_src")?;
     Ok(())
+}
+
+/// Record what this match pass scored, so the next one can tell new from
+/// unchanged. Written at the END of a successful pass and never before, which is
+/// what makes the ledger safe: a run that lands records and then dies while
+/// scoring leaves the ledger untouched, so the next pass still treats those
+/// records as unscored.
+fn sync_scored_ledger(
+    session: &Session,
+    model: &MatchModel,
+    run_id: &str,
+    scored_at: &str,
+    std_qual: &str,
+) -> Result<()> {
+    create_ddl_table(session, "scored_records")?;
+    let run_id = run_id.replace('\'', "''");
+    let scored_at = scored_at.replace('\'', "''");
+    let (mv, snap) = (
+        model.model_version.replace('\'', "''"),
+        model.tf_snapshot_id.replace('\'', "''"),
+    );
+    session.execute_batch("drop table if exists __scored_src")?;
+    session.execute_batch(&format!(
+        "create temp table __scored_src as
+         select record_key, content_hash,
+                '{mv}' as model_version, '{snap}' as tf_snapshot_id,
+                '{run_id}' as run_id, cast('{scored_at}' as timestamp) as scored_at
+         from {std_qual}"
+    ))?;
+    er_entities::scored_record::update::upsert_from_std(session.connection())?;
+    er_entities::scored_record::delete::absent_from_std(session.connection())?;
+    session.execute_batch("drop table __scored_src")?;
+    Ok(())
+}
+
+/// What an incremental match pass did, for the ledger and for operators who
+/// need to know whether they got the cheap path.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct MatchDelta {
+    /// `incremental` when the two-pass path ran, `full` when the pass had to
+    /// score the whole corpus (the honest answer, not the asked-for one).
+    pub mode: &'static str,
+    /// Records in the corpus after this pass.
+    pub corpus_records: usize,
+    /// Records that were new or changed — the ones whose pairs were scored.
+    pub delta_records: usize,
+    /// Previously-active scores deactivated because an endpoint changed or left.
+    pub invalidated_scores: usize,
+    /// Why the pass could not be incremental, when it could not be.
+    pub full_reason: Option<String>,
+}
+
+/// S4.3.4 match (incremental mode): score only the pairs that could have
+/// changed, and reuse the rest.
+///
+/// The two passes are `predict_between(unchanged, delta)` and
+/// `predict_within(delta)`; their union is every pair with at least one endpoint
+/// in the delta. Pairs between two unchanged records are not re-scored — they
+/// are already in `match_scores` and, because the model and the term-frequency
+/// snapshot are both frozen, re-scoring them could only reproduce the number
+/// already stored. That is what makes this equal to a full pass rather than an
+/// approximation of one, and it is the half of DesignDoc §4.3.4 that was
+/// specified but never built: `predict_between` / `predict_within` existed and
+/// were golden-tested, and nothing in the pipeline called them.
+///
+/// `predict_within` over the delta is load-bearing on its own: without it, two
+/// new records that match each other but nothing in the corpus would never be
+/// compared, so "a batch contains a new duplicate pair" would silently resolve
+/// to two entities.
+///
+/// The delta comes from the `scored_records` ledger, not from the ingest batch
+/// id: a run that lands records and then fails before scoring them would leave
+/// them looking "already ingested" to any batch-based definition, and they would
+/// never be scored at all. Comparing the corpus against what was actually
+/// scored cannot have that hole — and it makes a *changed* record (same key, new
+/// content hash) and a *departed* one (tombstoned, so standardize drops it)
+/// fall out of the same comparison.
+///
+/// Falls back to a full pass, saying so in [`MatchDelta::full_reason`], when
+/// there is nothing to reuse: no ledger yet, or a ledger written under a
+/// different model identity (whose scores are different rows in `match_scores`
+/// anyway).
+///
+/// # Errors
+/// Propagates model-load / predict / lake DDL+MERGE errors.
+pub fn run_match_incremental(
+    session: &Session,
+    config: &Config,
+    model: &MatchModel,
+    review_low: f64,
+    run_id: &str,
+    scored_at: &str,
+) -> Result<MatchDelta> {
+    let std_qual = if config.entity_type.is_person() {
+        INT_STD_RECORDS
+    } else {
+        ACCT_INT_STD_RECORDS
+    };
+    create_ddl_table(session, "scored_records")?;
+    let state = er_entities::scored_record::read::state(session.connection())?;
+    let ledger = state.first();
+    let scored_rows = ledger.and_then(|s| s.n).unwrap_or(0);
+    let identities = ledger.and_then(|s| s.identities).unwrap_or(0);
+    let same_model = ledger.is_some_and(|s| {
+        identities == 1
+            && s.model_version.as_deref() == Some(model.model_version)
+            && s.tf_snapshot_id.as_deref() == Some(model.tf_snapshot_id)
+    });
+
+    let full_reason = if scored_rows == 0 {
+        Some("nothing has been scored yet".to_string())
+    } else if !same_model {
+        Some(format!(
+            "the corpus was scored under a different model identity than {}/{}",
+            model.model_version, model.tf_snapshot_id
+        ))
+    } else {
+        None
+    };
+    if let Some(reason) = full_reason {
+        run_match(session, config, model, review_low, run_id, scored_at)?;
+        return Ok(MatchDelta {
+            mode: er_versions::MODE_FULL,
+            corpus_records: count_rows(session, std_qual)?,
+            delta_records: count_rows(session, std_qual)?,
+            invalidated_scores: 0,
+            full_reason: Some(reason),
+        });
+    }
+
+    let mut settings = load_model(model.settings_json)?;
+    settings.retain_intermediate = true;
+
+    // The delta and its complement, as projections of the standardized corpus.
+    // A record is in the delta when the ledger has no row claiming that exact
+    // (record_key, content_hash) — which covers both "never scored" and
+    // "scored, then edited".
+    let delta_std = "__inc_delta_std";
+    let kept_std = "__inc_kept_std";
+    for t in [delta_std, kept_std] {
+        session.execute_batch(&format!("drop table if exists {t}"))?;
+    }
+    let matched = format!(
+        "select 1 from {SCORED_RECORDS} l
+          where l.record_key = s.record_key and l.content_hash = s.content_hash"
+    );
+    session.execute_batch(&format!(
+        "create table {delta_std} as
+         select s.* from {std_qual} s where not exists ({matched})"
+    ))?;
+    session.execute_batch(&format!(
+        "create table {kept_std} as
+         select s.* from {std_qual} s where exists ({matched})"
+    ))?;
+    let delta_records = count_rows(session, delta_std)?;
+    let corpus_records = delta_records + count_rows(session, kept_std)?;
+
+    // Every score that is about to be superseded: pairs touching a delta record,
+    // and pairs touching a record the corpus no longer has at all (a tombstone
+    // standardize dropped). The second half is why a deletion stops resurrecting
+    // itself through reconcile's edge endpoints.
+    let invalidated = invalidate_superseded_scores(
+        session,
+        model,
+        run_id,
+        scored_at,
+        StaleScope::Records(&format!(
+            "select record_key from {delta_std}
+             union
+             select record_key from {SCORED_RECORDS}
+              where record_key not in (select record_key from {std_qual})"
+        )),
+    )?;
+
+    if delta_records > 0 {
+        let tf_tables = build_frozen_tf_tables(
+            session,
+            &settings,
+            model.tf_csv_path,
+            model.model_version,
+            model.tf_snapshot_id,
+        )?;
+        let delta = session.register_table(delta_std, delta_std)?;
+        let delta_concat = dedupe_core::predict::materialize_concat(session, &delta)?;
+        let mut predictions = Vec::new();
+        // Pass 1 — new/changed against the rest of the corpus. Skipped when the
+        // whole corpus is the delta, since there is no other side to join to and
+        // a cross join against nothing is an empty table either way.
+        if corpus_records > delta_records {
+            let kept = session.register_table(kept_std, kept_std)?;
+            let kept_concat = dedupe_core::predict::materialize_concat(session, &kept)?;
+            let between = dedupe_core::incremental::predict_between(
+                session,
+                &settings,
+                &kept_concat,
+                &delta_concat,
+                &tf_tables,
+                None,
+            )?;
+            predictions.push(between.physical.clone());
+        }
+        // Pass 2 — new/changed against each other.
+        let within = dedupe_core::incremental::predict_within(
+            session,
+            &settings,
+            &delta_concat,
+            &tf_tables,
+            None,
+        )?;
+        predictions.push(within.physical.clone());
+
+        stage_and_upsert_scores(
+            session,
+            &ScorePass {
+                settings: &settings,
+                model,
+                review_low,
+                run_id,
+                scored_at,
+                std_qual,
+                predictions: &predictions,
+            },
+        )?;
+    }
+
+    sync_scored_ledger(session, model, run_id, scored_at, std_qual)?;
+    for t in [delta_std, kept_std] {
+        session.execute_batch(&format!("drop table if exists {t}"))?;
+    }
+    Ok(MatchDelta {
+        mode: er_versions::MODE_INCREMENTAL,
+        corpus_records,
+        delta_records,
+        invalidated_scores: invalidated,
+        full_reason: None,
+    })
+}
+
+/// `count(*)` over a relation, for the delta report.
+fn count_rows(session: &Session, relation: &str) -> Result<usize> {
+    let rows = session.query_scratch_strings(&format!("select count(*) from {relation}"))?;
+    Ok(rows
+        .first()
+        .and_then(|r| r.first())
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(0))
 }
 
 /// One candidate pair from a score-only preview: canonical endpoints, the
@@ -1408,6 +1788,24 @@ pub fn run_reconcile(session: &Session, config: &Config, run_id: &str, run_at: &
         session.execute_batch("drop table __mem_src")?;
     }
 
+    // Membership is upsert-only, so a record that has LEFT the corpus (a
+    // tombstone, which standardize drops) keeps its row and still reads as a
+    // member of an entity — deletion did not delete. Prune against the
+    // standardized corpus rather than against the clustering node set, because
+    // the node set also excludes suppressed records, and a suppressed record is
+    // still in the corpus and must keep its membership.
+    session.execute_batch("drop table if exists __membership_live")?;
+    session.execute_batch(&format!(
+        "create temp table __membership_live as select record_key from {}",
+        if config.entity_type.is_person() {
+            INT_STD_RECORDS
+        } else {
+            ACCT_INT_STD_RECORDS
+        }
+    ))?;
+    er_entities::entity_membership::delete::absent_from_corpus(session.connection())?;
+    session.execute_batch("drop table __membership_live")?;
+
     if !plan.transitions.is_empty() {
         let rows: Vec<String> = plan
             .transitions
@@ -1701,9 +2099,16 @@ impl<'a> PipelineInputs<'a> {
     }
 }
 
-/// The S4.0 full-mode chain over the lake: seed lexicon -> ingest every delivery
-/// -> standardize -> match -> reconcile -> golden, under one run id. The single
+/// The S4.0 run chain over the lake: seed lexicon -> ingest every delivery ->
+/// standardize -> match -> reconcile -> golden, under one run id. The single
 /// entry point the `er run-all` binary and the control-plane dispatcher share.
+///
+/// `inputs.mode` now decides which match pass runs, where before it only
+/// labelled the ledger row: `incremental` scores the pairs touching new, changed
+/// and departed records (S4.3.4) instead of re-scoring the corpus. Everything
+/// downstream of match is unchanged and deliberately so — see
+/// [`run_match_incremental`] for why that is equal to a full pass rather than
+/// cheaper-but-approximate, and the note below for why reconcile stays whole.
 ///
 /// # Errors
 /// Propagates any stage error.
@@ -1730,14 +2135,44 @@ pub fn run_all(session: &Session, config: &Config, inputs: &PipelineInputs) -> R
         )?;
     }
     run_standardize(session, config, inputs.run_at)?;
-    run_match(
-        session,
-        config,
-        inputs.model,
-        config.thresholds.review_low,
-        inputs.run_id,
-        inputs.scored_at,
-    )?;
+    if inputs.mode == er_versions::MODE_INCREMENTAL {
+        let delta = run_match_incremental(
+            session,
+            config,
+            inputs.model,
+            config.thresholds.review_low,
+            inputs.run_id,
+            inputs.scored_at,
+        )?;
+        eprintln!(
+            "run {}: {} match over {}/{} records, {} scores invalidated{}",
+            inputs.run_id,
+            delta.mode,
+            delta.delta_records,
+            delta.corpus_records,
+            delta.invalidated_scores,
+            delta
+                .full_reason
+                .map(|r| format!(" ({r})"))
+                .unwrap_or_default(),
+        );
+    } else {
+        run_match(
+            session,
+            config,
+            inputs.model,
+            config.thresholds.review_low,
+            inputs.run_id,
+            inputs.scored_at,
+        )?;
+    }
+    // Reconcile and golden stay whole-corpus in both modes. That is a choice,
+    // not an omission: clustering is a function of the edge set, and connected
+    // components over the whole (small) above-threshold graph is linear in edges
+    // and exactly reproducible, while the cost incremental mode exists to avoid
+    // is the QUADRATIC pair generation in match. Re-clustering from the full
+    // edge set also means the partition cannot drift from what a full run would
+    // produce, which is the property the equivalence gate asserts.
     run_reconcile(session, config, inputs.run_id, inputs.run_at)?;
     run_golden(session, config, inputs.run_at)?;
     write_reviews(session, config, inputs.run_id, inputs.run_at)?;
