@@ -262,25 +262,29 @@ async fn a_run_names_a_segment_and_an_unknown_name_is_refused_at_submit() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
 
+    a_segment_whose_sql_is_broken_cannot_be_published(&dsn).await;
+
     let _ = std::fs::remove_file(&config_path);
 }
 
-#[tokio::test]
-async fn a_segment_whose_sql_is_broken_cannot_be_published() {
-    let Ok(dsn) = std::env::var("ER_TEST_PG_DSN") else {
-        eprintln!("skipping Postgres segment publish test (set ER_TEST_PG_DSN to run)");
-        return;
-    };
-    let mut client = pg::connect(&dsn).await.unwrap();
-    client
-        .batch_execute(
-            "DROP TABLE IF EXISTS webhook_deliveries, webhooks, staged_steward_actions, audit_log, schedules, config_versions, api_keys, jobs, orgs CASCADE;",
-        )
-        .await
-        .unwrap();
-    pg::ensure_schema(&mut client).await.unwrap();
-
-    let app = app(AppState::with_pg("op-secret".to_string(), dsn.clone()));
+/// Phase 2, called from the test above rather than being its own
+/// `#[tokio::test]`.
+///
+/// Cargo runs the tests in one binary CONCURRENTLY, and every Postgres test
+/// here shares one schema, so two tests in this file are two tests racing on
+/// the same tables: phase 1 publishes a VALID config, and the assertion below
+/// — that a refused version never became active — then reads phase 1's config
+/// and sees 200 where it demands 422. It failed exactly that way in the
+/// DuckLake tier, which is the only tier with a Postgres, while the `test` job
+/// self-skipped and stayed green.
+///
+/// Every other `pg_*.rs` in this crate is one test with sequential phases for
+/// this reason. This one had drifted.
+///
+/// It also uses its own org, so it cannot inherit phase 1's published config
+/// even if the serialisation is ever lost again.
+async fn a_segment_whose_sql_is_broken_cannot_be_published(dsn: &str) {
+    let app = app(AppState::with_pg("op-secret".to_string(), dsn.to_string()));
     let config_path = std::env::temp_dir().join(format!("er_segbad_{}.yaml", std::process::id()));
     let resp = app
         .clone()
@@ -290,7 +294,7 @@ async fn a_segment_whose_sql_is_broken_cannot_be_published() {
             "op-secret",
             Body::from(
                 serde_json::json!({
-                    "name": "acme",
+                    "name": "segbad",
                     "config_path": config_path.to_string_lossy(),
                 })
                 .to_string(),
@@ -303,7 +307,7 @@ async fn a_segment_whose_sql_is_broken_cannot_be_published() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/api-keys",
+            "/v1/orgs/segbad/api-keys",
             "op-secret",
             Body::from(r#"{"role":"admin"}"#),
         ))
@@ -323,7 +327,7 @@ async fn a_segment_whose_sql_is_broken_cannot_be_published() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/config/versions",
+            "/v1/orgs/segbad/config/versions",
             &admin_key,
             Body::from(serde_json::json!({ "yaml": bad }).to_string()),
         ))
@@ -340,7 +344,7 @@ async fn a_segment_whose_sql_is_broken_cannot_be_published() {
         .clone()
         .oneshot(req(
             "POST",
-            &format!("/v1/orgs/acme/config/versions/{version}/publish"),
+            &format!("/v1/orgs/segbad/config/versions/{version}/publish"),
             &admin_key,
             Body::empty(),
         ))
@@ -363,7 +367,7 @@ async fn a_segment_whose_sql_is_broken_cannot_be_published() {
         .clone()
         .oneshot(req(
             "GET",
-            "/v1/orgs/acme/segments",
+            "/v1/orgs/segbad/segments",
             &admin_key,
             Body::empty(),
         ))
