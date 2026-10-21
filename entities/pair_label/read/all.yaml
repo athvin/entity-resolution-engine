@@ -1,0 +1,6 @@
+kind: statement
+operation: read
+description: "Every label a tenant has, for the training pass to materialise into the lake and for the labelling queue to exclude from what it offers. Coverage is counted from these rows in Rust rather than aggregated in SQL, because a control-plane read declares `returns: entity` — and reading them whole is what training needs anyway. Deliberately unbounded: labels are human-authored, so the set is thousands at most, and a LIMIT here would silently train on a prefix. Ordered by pair so a trained model's bytes do not depend on Postgres's scan order."
+params:
+  - { name: org_id, type: varchar }
+returns: entity

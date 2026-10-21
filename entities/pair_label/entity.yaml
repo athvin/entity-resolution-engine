@@ -1,0 +1,73 @@
+kind: entity
+version: 1
+name: pair_label
+relation: pair_labels
+description: "A human (or model) verdict on one candidate pair — the training signal the engine has always been able to learn from and never had. One row per (org, pair): a re-label corrects the previous verdict rather than stacking another."
+key: [id]
+natural_key: [org_id, rec_a_key, rec_b_key]
+generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+  wire: [json]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "UUIDv7, minted by the application."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant whose corpus the pair belongs to; every read is scoped by it."
+  - name: rec_a_key
+    type: varchar
+    nullable: false
+    description: "The pair's lower record key, canonical order — the same ordering match_scores uses, so a label and a score describe the same pair."
+  - name: rec_b_key
+    type: varchar
+    nullable: false
+    description: "The pair's higher record key, canonical order."
+  - name: verdict
+    type: varchar
+    nullable: false
+    accepted_values: [match, no_match]
+    description: "Whether these two records are the same entity. Deliberately binary: a labeller who is unsure should skip rather than guess, because a guessed label trains the model on noise and is indistinguishable afterwards from a confident one."
+  - name: origin
+    type: varchar
+    nullable: false
+    default: "'human'"
+    accepted_values: [human, reviewer, llm]
+    description: "Where the verdict came from. `human` is an explicit labelling session; `reviewer` is implicit feedback from resolving a review item; `llm` is a model's suggestion. Kept apart so training can weight or exclude a source, and so an accuracy number can say whose labels it was measured against."
+  - name: labeled_by
+    type: varchar
+    nullable: false
+    description: "The actor that recorded the verdict."
+  - name: model_version
+    type: varchar
+    description: "The model whose score prompted this label, when there was one. Null for a label recorded without a score in front of it."
+  - name: score_at_label
+    type: double
+    description: "The match probability shown to the labeller, so a later accuracy pass can tell what the model thought at the time rather than what it thinks now."
+  - name: note
+    type: varchar
+    description: "Optional free text from the labeller."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    volatile: true
+    default: now()
+    description: "When the verdict was first recorded."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    volatile: true
+    default: now()
+    description: "When it was last corrected."
+indexes:
+  # The tenant's label set, and the natural-key upsert target.
+  - name: pair_labels_org_pair
+    columns: [org_id, rec_a_key, rec_b_key]
+    unique: true
+  # "what has this tenant labelled lately", and the training read.
+  - name: pair_labels_org_recent
+    columns: [org_id, created_at]

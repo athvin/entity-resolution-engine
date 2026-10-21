@@ -111,6 +111,20 @@ erDiagram
         timestamp created_at
         timestamp updated_at
     }
+    pair_labels {
+        varchar id PK
+        varchar org_id FK
+        varchar rec_a_key
+        varchar rec_b_key
+        varchar verdict "in {match, no_match}"
+        varchar origin "in {human, llm, reviewer}"
+        varchar labeled_by
+        varchar model_version
+        double score_at_label
+        varchar note
+        timestamp created_at
+        timestamp updated_at
+    }
     schedules {
         varchar id PK
         varchar org_id FK
@@ -164,6 +178,7 @@ erDiagram
     config_versions }o--|| orgs : "org_id → id"
     jobs }o--|| orgs : "org_id → id"
     matching_models }o--|| orgs : "org_id → id"
+    pair_labels }o--|| orgs : "org_id → id"
     schedules }o--|| orgs : "org_id → id"
     staged_steward_actions }o--|| orgs : "org_id → id"
     webhooks }o--|| orgs : "org_id → id"
@@ -180,6 +195,7 @@ erDiagram
 | `jobs` | A unit of work on the dispatcher's queue: its kind, params, lifecycle state and retry bookkeeping. |
 | `matching_models` | An immutable version of a tenant's matching model: the settings document the engine scores against, its hash, provenance and activation state. |
 | `orgs` | A tenant: its config pointer, lake env, lifecycle state and active config version. |
+| `pair_labels` | A human (or model) verdict on one candidate pair — the training signal the engine has always been able to learn from and never had. One row per (org, pair): a re-label corrects the previous verdict rather than stacking another. |
 | `schedules` | A recurring job schedule for a tenant: its kind, cron and source. |
 | `staged_steward_actions` | A steward action staged for review/apply: its payload, state and outcome. |
 | `webhooks` | A tenant webhook endpoint: its URL, subscribed events and signing secret. |

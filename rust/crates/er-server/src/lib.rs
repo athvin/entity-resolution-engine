@@ -2871,6 +2871,299 @@ async fn match_scores_list(
     }
 }
 
+/// Viewer+: what to label next (`GET /v1/orgs/{org}/labeling/next`).
+///
+/// Serves the pairs the model is LEAST sure about — nearest the decision
+/// threshold first — with a coverage summary of the labels already recorded.
+/// Pairs already labelled are excluded, so a session makes progress instead of
+/// re-offering the same ten pairs.
+///
+/// The engine has always been able to learn from labels (`m_from_labels`,
+/// `truth_space_from_labels_*` in dedupe-core) and there was no way to produce
+/// any: the whole accuracy module had no caller outside dedupe-cli and its own
+/// tests. This endpoint and `POST .../labels` are the missing input.
+///
+/// Coverage is reported rather than just a count because the SPLIT is what
+/// decides whether the labels are worth training on: a set that is 95%
+/// `no_match` teaches a model almost nothing about matches, and a single total
+/// hides that completely.
+async fn labeling_next(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "labeling requires Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    let config = match org_active_config(&client, &org_row).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let labels = match er_entities::pair_label::read::all(&client, &org_row.id).await {
+        Ok(l) => l,
+        Err(e) => return pg_err(e),
+    };
+    let coverage = label_coverage(&labels);
+    let labelled: std::collections::BTreeSet<(String, String)> = labels
+        .iter()
+        .map(|l| (l.rec_a_key.clone(), l.rec_b_key.clone()))
+        .collect();
+
+    let session = match org_lake(&state, &org).await {
+        Ok(s) => s,
+        Err(r) => return *r,
+    };
+    let snapshot = match read::page_start(&session, None) {
+        Ok((snap, _)) => snap,
+        Err(read::PageStartError::BadCursor) => {
+            return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "invalid cursor");
+        }
+        Err(read::PageStartError::Lake(e)) => {
+            return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
+        }
+    };
+    // The gray band is where a label is worth having: above `auto_merge` the
+    // engine merges without asking and below `review_low` it never scored the
+    // pair at all, so neither end teaches it anything. A caller may narrow
+    // further but not widen past what was scored.
+    let threshold = config.thresholds.auto_merge;
+    let band_low = read::parse_f64(params.get("min").map(String::as_str))
+        .unwrap_or(config.thresholds.review_low)
+        .max(config.thresholds.review_low);
+    let band_high = read::parse_f64(params.get("max").map(String::as_str)).unwrap_or(1.0);
+    let limit = read::parse_limit(params.get("limit").map(String::as_str));
+    match read::uncertain_pairs(
+        &session,
+        snapshot,
+        threshold,
+        (band_low, band_high),
+        &labelled,
+        limit,
+    ) {
+        Ok(items) => Json(json!({
+            "items": items,
+            "snapshot": snapshot,
+            "threshold": threshold,
+            "band": { "min": band_low, "max": band_high },
+            "coverage": coverage,
+        }))
+        .into_response(),
+        Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
+    }
+}
+
+/// How much labelled signal a tenant has, split by verdict and origin.
+///
+/// Counted in Rust rather than aggregated in SQL because a control-plane read
+/// declares `returns: entity`, and the training pass needs the rows whole
+/// anyway.
+fn label_coverage(labels: &[er_entities::pair_label::PairLabel]) -> serde_json::Value {
+    let count = |f: &dyn Fn(&er_entities::pair_label::PairLabel) -> bool| {
+        labels.iter().filter(|l| f(l)).count()
+    };
+    json!({
+        "total": labels.len(),
+        "matches": count(&|l| l.verdict == "match"),
+        "non_matches": count(&|l| l.verdict == "no_match"),
+        "by_origin": {
+            "human": count(&|l| l.origin == "human"),
+            "reviewer": count(&|l| l.origin == "reviewer"),
+            "llm": count(&|l| l.origin == "llm"),
+        },
+    })
+}
+
+#[derive(Deserialize)]
+struct LabelIn {
+    rec_a_key: String,
+    rec_b_key: String,
+    verdict: String,
+    #[serde(default)]
+    note: Option<String>,
+    #[serde(default)]
+    model_version: Option<String>,
+    #[serde(default)]
+    score_at_label: Option<f64>,
+}
+
+/// Steward+: record a verdict on a pair (`POST /v1/orgs/{org}/labels`).
+///
+/// Upserts on the pair, so re-labelling corrects rather than stacks — two
+/// contradictory rows for one pair would make the training set ambiguous with
+/// no principled way to choose between them.
+///
+/// The endpoint canonicalises the pair (lower key first) before writing, because
+/// `match_scores` stores pairs that way and a label recorded the other way round
+/// would silently describe a pair nothing ever scored.
+async fn create_label(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Json(body): Json<LabelIn>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
+    if !["match", "no_match"].contains(&body.verdict.as_str()) {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!(
+                "verdict must be 'match' or 'no_match', not '{}' — a labeller who is unsure                  should skip, because a guessed label is indistinguishable afterwards from a                  confident one",
+                body.verdict
+            ),
+        );
+    }
+    let (a, b) = canonical_pair(&body.rec_a_key, &body.rec_b_key);
+    if a.is_empty() || b.is_empty() {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "rec_a_key and rec_b_key are both required",
+        );
+    }
+    if a == b {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "a record cannot be labelled against itself",
+        );
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "labeling requires Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    match record_label(
+        &client,
+        &org_row.id,
+        (&a, &b),
+        &body.verdict,
+        "human",
+        &principal.actor,
+        body.model_version.as_deref(),
+        body.score_at_label,
+        body.note.as_deref(),
+    )
+    .await
+    {
+        Ok(label) => {
+            let _ = pg::audit(
+                &client,
+                &principal.actor,
+                Some(&org),
+                "label.record",
+                &json!({ "pair": [a, b], "verdict": body.verdict }),
+            )
+            .await;
+            (StatusCode::CREATED, Json(json!(label))).into_response()
+        }
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Viewer+: the labels a tenant has recorded (`GET /v1/orgs/{org}/labels`),
+/// newest first, filterable by `verdict` and `origin`.
+async fn labels_list(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "labeling requires Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    let limit = read::parse_limit(params.get("limit").map(String::as_str));
+    match er_entities::pair_label::read::page(
+        &client,
+        &org_row.id,
+        params.get("verdict").map(String::as_str),
+        params.get("origin").map(String::as_str),
+        limit,
+    )
+    .await
+    {
+        Ok(rows) => Json(json!({ "labels": rows })).into_response(),
+        Err(e) => pg_err(e),
+    }
+}
+
+/// The pair, in the canonical order `match_scores` stores it.
+fn canonical_pair(a: &str, b: &str) -> (String, String) {
+    let (a, b) = (a.trim(), b.trim());
+    if a <= b {
+        (a.to_string(), b.to_string())
+    } else {
+        (b.to_string(), a.to_string())
+    }
+}
+
+/// Record one label, upserting on the pair.
+///
+/// Shared by the explicit labelling endpoint and the implicit feedback a review
+/// resolution produces, so both land in one table with their `origin` recorded
+/// — which is what lets training weight or exclude a source later.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "every one is a column of the row being written; a struct here would               be indirection for its own sake"
+)]
+async fn record_label(
+    client: &tokio_postgres::Client,
+    org_id: &str,
+    pair: (&str, &str),
+    verdict: &str,
+    origin: &str,
+    actor: &str,
+    model_version: Option<&str>,
+    score_at_label: Option<f64>,
+    note: Option<&str>,
+) -> Result<er_entities::pair_label::PairLabel, tokio_postgres::Error> {
+    let rows = er_entities::pair_label::create::record(
+        client,
+        &er_ids::new_v7(),
+        org_id,
+        pair.0,
+        pair.1,
+        verdict,
+        origin,
+        actor,
+        model_version,
+        score_at_label,
+        note,
+    )
+    .await?;
+    Ok(rows
+        .into_iter()
+        .next()
+        .expect("the upsert always returns its row"))
+}
+
 /// Steward+: a READ-ONLY score-only match preview (frontend §7.16,
 /// `GET /v1/orgs/{org}/match-preview`). Runs the committed model over the current
 /// corpus and returns the pairs it WOULD score, bucketed by the config
@@ -5591,6 +5884,8 @@ fn build_routes(state: AppState) -> Router {
             "/v1/orgs/{org}/schedules",
             get(schedules_index).post(create_schedule),
         )
+        .route("/v1/orgs/{org}/labeling/next", get(labeling_next))
+        .route("/v1/orgs/{org}/labels", post(create_label).get(labels_list))
         .route("/v1/orgs/{org}/segments", get(segments_catalog))
         .route(
             "/v1/orgs/{org}/webhooks/deliveries",

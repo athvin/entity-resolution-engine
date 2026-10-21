@@ -781,9 +781,54 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          the arms are string literals and the compiler has no opinion about a missing one. It
          self-checks that its own scan can see a `match`-arm kind, a pre-branch kind, and not an
          invented one — then observed failing with `["train"]` when the arm is removed.
-   - [ ] E10b pair labels + uncertainty-sampled labelling queue + label-driven training
-         (#19/#20), E10c per-version evaluation (precision/recall/ROC — `accuracy.rs` is built
-         and has no API), related-record features (#26), household/link entities (#33).
+   - [x] **E10b labels, and the queue that decides what to ask about (#19).** The engine has
+         always been able to learn from labels — `m_from_labels`,
+         `truth_space_from_labels_column`, `prediction_errors_from_labels_table` all live in
+         `dedupe-core::accuracy` — and there was **no way to produce any**: that whole module had
+         no caller outside `dedupe-cli` and its own golden tests. The product shipped a trainable
+         engine with no training signal and no accuracy number.
+         New `pair_label` entity (Postgres), plus `POST`/`GET /v1/orgs/{org}/labels` and
+         `GET /v1/orgs/{org}/labeling/next`.
+         **The queue is uncertainty-sampled**, nearest the decision threshold first, and that is
+         the entire point: pairs the model already scores at 0.99 or 0.01 only confirm what it
+         knows, while the ones either side of the threshold are where its m/u estimates are
+         actually wrong. A score-ordered queue spends a human's attention on the easy cases.
+         Scores live in the lake, so it is a declared lake read
+         (`match_score/read/uncertain_page`); already-labelled pairs are filtered in Rust,
+         because labels are control-plane and there is no join across the two.
+         Three details worth keeping. **A label is upserted on the pair**, not appended — two
+         contradictory rows would make the training set ambiguous with no principled way to
+         choose — and `created_at` survives a correction. **The pair is canonicalised** (lower key
+         first) on the way in, because `match_scores` stores it that way and a label recorded the
+         other way round would describe a pair nothing ever scored. **`verdict` is binary on
+         purpose**: a labeller who is unsure should skip, because a guessed label is
+         indistinguishable afterwards from a confident one.
+         **Coverage is reported split by verdict and origin**, not just totalled: a set that is
+         95% `no_match` teaches a model almost nothing about matches and a single total hides it
+         completely. `origin` keeps explicit labelling, review feedback and LLM suggestions apart
+         so training can weight or exclude a source, and so an accuracy number can say whose
+         labels it was measured against.
+         Two SQL constraints met on the way, both worth knowing: a **control-plane read must
+         declare `returns: entity`** (explicit column lists are lake-only in this phase), so
+         coverage is counted in Rust from one deterministic unbounded read — which is what
+         training needs anyway; and the entity analyser's planner **has no `abs`**, so the
+         distance-from-threshold ordering is written as a `CASE` (DuckDB has `abs`, but a
+         statement that cannot be planned cannot be declared).
+         Tests: `pg_labels.rs` (canonicalisation with the keys deliberately reversed; correction
+         replaces rather than stacks and keeps `created_at`; three distinct refusals — unknown
+         verdict, self-pair, empty key; viewer 403; and the queue failing on the *lake* rather
+         than earlier when none is attached) and
+         `lake_e2e::the_labeling_queue_offers_the_least_certain_pairs_first`, which asserts the
+         ordering against real base_10 scores, asserts it **differs from score order** so the
+         test can tell the two apart, and asserts determinism across identical requests.
+         Replacing the ordering with `match_probability DESC` is observed failing.
+   - [ ] E10b-2 implicit feedback from review resolutions (#20) — belongs in the DRAIN, not the
+         staging endpoint: `resolve_review` only stages an action and the pair lives in the lake,
+         while `drain_and_correct` holds both the Postgres client and the lake session, and a
+         resolution staged but never applied should not become training signal.
+         E10c per-version evaluation (precision/recall/ROC over the labels), label-driven
+         training (`m_from_labels` into `train_and_register`), related-record features (#26),
+         household/link entities (#33).
 4. **Operating at scale**
    - [x] **O3b webhook delivery becomes an outbox (#43's reliability half).** Delivery was
          `let _ = webhook::emit_job_event(...)` at three call sites: the POST happened **inline**

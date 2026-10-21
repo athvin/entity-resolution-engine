@@ -561,6 +561,48 @@ pub fn match_scores_list(
     Ok((items, next_cursor))
 }
 
+/// Pairs the model is least sure about, nearest the decision threshold first,
+/// excluding any whose pair is already labelled.
+///
+/// Uncertainty sampling is the whole point: pairs the model already scores at
+/// 0.99 or 0.01 only confirm what it knows, while the ones either side of the
+/// threshold are where its m/u estimates are actually wrong. Labelling in score
+/// order instead would spend a human's attention on the easy cases.
+///
+/// `labelled` is the set of `(rec_a_key, rec_b_key)` already recorded; it is
+/// filtered HERE rather than in SQL because labels live in the control plane and
+/// scores live in the lake, and there is no join across them. Over-fetching by
+/// the number already labelled keeps a full page coming back.
+///
+/// # Errors
+/// Propagates the lake query error.
+pub fn uncertain_pairs(
+    session: &Session,
+    snapshot: i64,
+    threshold: f64,
+    band: (f64, f64),
+    labelled: &std::collections::BTreeSet<(String, String)>,
+    limit: i64,
+) -> Result<Vec<Value>, String> {
+    let limit = limit.clamp(1, MAX_LIMIT);
+    let over = limit.saturating_add(i64::try_from(labelled.len()).unwrap_or(0));
+    let rows = er_entities::match_score::read::uncertain_page(
+        session.connection(),
+        snapshot,
+        threshold,
+        band.0,
+        band.1,
+        over.clamp(1, MAX_LIMIT * 4),
+    )
+    .map_err(|e| e.to_string())?;
+    let unlabelled: Vec<_> = rows
+        .into_iter()
+        .filter(|r| !labelled.contains(&(r.rec_a_key.clone(), r.rec_b_key.clone())))
+        .take(usize::try_from(limit).unwrap_or(0))
+        .collect();
+    Ok(rows_to_values(&unlabelled))
+}
+
 /// Parse an optional `f64` query value (e.g. a probability band bound).
 #[must_use]
 pub fn parse_f64(raw: Option<&str>) -> Option<f64> {
