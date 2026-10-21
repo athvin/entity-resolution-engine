@@ -986,6 +986,39 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
    - [ ] V0 SES apply (one input away — the account has no domain; recommend the sandbox
          email-identity path), V1 transform rules (#61), V2 international standardization (#60),
          V4 AWS-native verification suite (#64-#72).
+   - [x] **V1 transform (cleanse) rules (#61).** Ordered per-attribute rules — `lower`, `upper`,
+         `trim`, `replace`, `regex_replace`, `strip`, `substring`, `default`, `dictionary` —
+         compiled into the staging projection and applied to the RAW value **before**
+         standardization.
+         **Before, not after, and that ordering is the feature.** The normalizers decide what an
+         email or a phone number *is*; feeding them `"  BOB@EXAMPLE.COM "` spends their judgement
+         on noise a cleanse rule removes for free. A rule that ran afterwards would be editing the
+         engine's conclusion rather than its input.
+         The test asserts that interaction rather than hiding it: a **case** rule on `given_name`
+         is deliberately asserted to have **no visible effect**, because `name_norm` lowercases
+         and has the last word — an operator reaching for "upper-case the names" will see nothing
+         change, and the reason is the ordering. A `dictionary` rule (base_10's `Bob` → `Robert`)
+         *does* survive, changing exactly one record and one column.
+         Two small judgements. `strip` is a chain of literal replacements rather than a character
+         class, so there is no escaping to get wrong and `-` or `]` behave like any other
+         character. A `dictionary` passes **unmatched values through** — it is a correction list,
+         not an allowlist, and nulling the rest would silently delete most of a column.
+         `GET`-able preview via `er_cli::preview_transform`, which reads `raw_records` and returns
+         **only the rows the rules change**: previewing against standardized values would answer
+         the wrong question, and padding with unaffected rows makes a rule look inert.
+         Validated at publish (new `regex-lite` dep, licence/advisory gates clean): an attribute
+         that is not canonical, an empty rule list, an uncompilable regex, a non-positive
+         substring, an empty `strip` or `dictionary`. A misspelled attribute key is otherwise
+         **completely silent** — the rule simply never applies and the tenant concludes the
+         feature is broken.
+         Empty by default, so `config_hash` and every `std_hashes` golden are unchanged; the test
+         re-standardizes with no rules and asserts byte-identical output. A config that *does*
+         declare rules moves `config_hash`, which promotes the next incremental run to a full one
+         through the existing drift guard — correct, because the corpus was standardized
+         differently.
+   - [ ] V0 SES apply (one input away — the account has no domain; recommend the sandbox
+         email-identity path), V2 international standardization (#60), V4 AWS-native verification
+         suite (#64-#72).
 6. **AI on Bedrock** — Bedrock wiring + per-org BYO LLM (#77), LLM adjudication (#27),
    NL rule authoring (#29), AI schema mapping + model setup (#48/#35), staged agent
    write-actions (#81).

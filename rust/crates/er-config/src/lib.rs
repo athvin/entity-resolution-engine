@@ -32,10 +32,11 @@ pub const RESERVED_SOURCE_PREFIX: &str = "_";
 /// The fourteen top-level blocks of S6, in document order. [`Config`]'s S6 block
 /// fields MUST equal this set; the `entity_type` discriminator (added for the
 /// Account entity type) is a meta-field, not an S6 block, and is excluded.
-pub const CONFIG_BLOCKS: [&str; 17] = [
+pub const CONFIG_BLOCKS: [&str; 18] = [
     "tenant",
     "thresholds",
     "standardization",
+    "transforms",
     "sources",
     "blocking",
     "constraints",
@@ -51,6 +52,106 @@ pub const CONFIG_BLOCKS: [&str; 17] = [
     "coherence",
     "correction_pass",
 ];
+
+/// S6 `transforms`: ordered cleanse rules per canonical attribute, applied to
+/// the raw value BEFORE standardization.
+///
+/// Before standardization, not after, and that ordering is the point: the
+/// normalizers decide what an email or a phone number IS, and feeding them
+/// `"  BOB@EXAMPLE.COM "` or `"(415) 555-0100"` wastes their judgement on
+/// noise a cleanse rule removes for free. A rule that ran afterwards would be
+/// editing the engine's conclusion instead of its input.
+///
+/// Every rule is a pure scalar expression over one column, so the whole chain
+/// compiles into the staging projection and costs nothing extra to run. Ops
+/// that need two columns (concat) are deliberately absent for now rather than
+/// half-present: they change the projection's shape, not just a value.
+///
+/// Absent from the canonical document when empty, so `config_hash` — and every
+/// `std_hashes` golden — is unchanged for a config with no rules. A config that
+/// DOES declare rules changes the standardized corpus, which moves
+/// `config_hash` and so promotes the next incremental run to a full one through
+/// the existing drift guard. That is correct: the corpus was standardized
+/// differently.
+pub type Transforms = BTreeMap<String, Vec<TransformRule>>;
+
+/// One cleanse operation. `op` is the discriminator.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TransformRule {
+    /// Lowercase.
+    Lower,
+    /// Uppercase.
+    Upper,
+    /// Strip leading and trailing whitespace.
+    Trim,
+    /// Literal substring replacement.
+    Replace { from: String, to: String },
+    /// Regular-expression replacement, every occurrence.
+    RegexReplace {
+        pattern: String,
+        #[serde(default)]
+        replacement: String,
+    },
+    /// Remove every one of these characters. A chain of literal replacements
+    /// rather than a character class, so there is no escaping to get wrong and
+    /// `-` or `]` behave like any other character.
+    Strip { chars: String },
+    /// 1-based substring.
+    Substring { start: i64, length: i64 },
+    /// Replace an empty or missing value with a constant. Trims first, so a
+    /// whitespace-only cell counts as missing.
+    Default { value: String },
+    /// Map exact values to replacements; anything unmatched passes through.
+    Dictionary { map: BTreeMap<String, String> },
+}
+
+impl TransformRule {
+    /// Wrap `expr` in this rule, returning a scalar SQL expression.
+    ///
+    /// String literals are escaped by doubling quotes — these values come from a
+    /// tenant's config, which is authored by an admin but is still input.
+    #[must_use]
+    pub fn apply_sql(&self, expr: &str) -> String {
+        let lit = |v: &str| format!("'{}'", v.replace('\'', "''"));
+        match self {
+            Self::Lower => format!("lower({expr})"),
+            Self::Upper => format!("upper({expr})"),
+            Self::Trim => format!("trim({expr})"),
+            Self::Replace { from, to } => {
+                format!("replace({expr}, {}, {})", lit(from), lit(to))
+            }
+            Self::RegexReplace {
+                pattern,
+                replacement,
+            } => format!(
+                "regexp_replace({expr}, {}, {}, 'g')",
+                lit(pattern),
+                lit(replacement)
+            ),
+            Self::Strip { chars } => chars.chars().fold(expr.to_string(), |acc, c| {
+                format!("replace({acc}, {}, '')", lit(&c.to_string()))
+            }),
+            Self::Substring { start, length } => {
+                format!("substr({expr}, {start}, {length})")
+            }
+            Self::Default { value } => {
+                format!("coalesce(nullif(trim({expr}), ''), {})", lit(value))
+            }
+            Self::Dictionary { map } => {
+                let mut arms = String::new();
+                for (from, to) in map {
+                    use std::fmt::Write as _;
+                    let _ = write!(arms, " when {} then {}", lit(from), lit(to));
+                }
+                // `else` passes the value through: a dictionary is a correction
+                // list, not an allowlist, and nulling the unmatched values would
+                // silently delete most of a column.
+                format!("case {expr}{arms} else {expr} end")
+            }
+        }
+    }
+}
 
 /// The canonical attributes the S4.2 standardization macros consume; every
 /// `sources.<name>.columns` mapping must cover all of them (V11).
@@ -460,6 +561,11 @@ pub struct Config {
     pub tenant: String,
     pub thresholds: Thresholds,
     pub standardization: Standardization,
+    /// Cleanse rules per canonical attribute, applied before standardization.
+    /// Omitted from the canonical document when empty, so a config written
+    /// before transforms existed hashes identically.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub transforms: Transforms,
     pub sources: BTreeMap<String, SourceSpec>,
     pub blocking: Vec<BlockingRule>,
     /// Hard candidate rules. Omitted from the canonical document when empty, so
@@ -556,9 +662,9 @@ mod tests {
 
     #[test]
     fn blocks_and_constants() {
-        assert_eq!(CONFIG_BLOCKS.len(), 17);
+        assert_eq!(CONFIG_BLOCKS.len(), 18);
         assert_eq!(CONFIG_BLOCKS[0], "tenant");
-        assert_eq!(CONFIG_BLOCKS[16], "correction_pass");
+        assert_eq!(CONFIG_BLOCKS[17], "correction_pass");
         // `constraints` sits beside `blocking` because it changes the same
         // thing — which pairs are candidates — and so carries the same publish
         // tier.

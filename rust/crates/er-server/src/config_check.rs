@@ -16,7 +16,7 @@
 
 use std::collections::BTreeSet;
 
-use er_config::{Config, EntityType};
+use er_config::{Config, EntityType, canonical_attributes};
 
 /// The problems found in a config's column references (empty = the config is
 /// consistent with the standardized schema). Each is a human-readable reason the
@@ -57,6 +57,66 @@ pub fn config_reference_problems(config: &Config) -> Vec<String> {
             problems.push(format!(
                 "comparison column `{key}` is not a standardized column"
             ));
+        }
+    }
+
+    // Transforms: keyed by CANONICAL attribute, not by standardized column —
+    // they run on the raw value before standardization, so `given_name` is in
+    // range and `name_variants` (which standardization computes) is not. A
+    // misspelled key is otherwise completely silent: the rule simply never
+    // applies, and the tenant concludes the feature is broken.
+    let canonical: BTreeSet<&str> = canonical_attributes(config.entity_type)
+        .iter()
+        .copied()
+        .collect();
+    for (attribute, rules) in &config.transforms {
+        if !canonical.contains(attribute.as_str()) {
+            problems.push(format!(
+                "transform on `{attribute}` is not a canonical attribute (one of: {})",
+                canonical.iter().copied().collect::<Vec<_>>().join(", ")
+            ));
+        }
+        if rules.is_empty() {
+            problems.push(format!(
+                "transform on `{attribute}` declares no rules, so it does nothing"
+            ));
+        }
+        for rule in rules {
+            match rule {
+                er_config::TransformRule::RegexReplace { pattern, .. } => {
+                    if pattern.is_empty() {
+                        problems.push(format!(
+                            "transform on `{attribute}`: regex_replace needs a pattern"
+                        ));
+                    } else if let Err(e) = regex_lite::Regex::new(pattern) {
+                        // Checked at PUBLISH because the alternative is a
+                        // standardize pass that fails for the whole corpus.
+                        problems.push(format!(
+                            "transform on `{attribute}`: regex_replace pattern `{pattern}` \
+                             is invalid: {e}"
+                        ));
+                    }
+                }
+                er_config::TransformRule::Substring { start, length } => {
+                    if *start < 1 || *length < 1 {
+                        problems.push(format!(
+                            "transform on `{attribute}`: substring is 1-based and needs a \
+                             positive length, got start={start} length={length}"
+                        ));
+                    }
+                }
+                er_config::TransformRule::Strip { chars } if chars.is_empty() => {
+                    problems.push(format!(
+                        "transform on `{attribute}`: strip needs characters to remove"
+                    ));
+                }
+                er_config::TransformRule::Dictionary { map } if map.is_empty() => {
+                    problems.push(format!(
+                        "transform on `{attribute}`: dictionary needs at least one mapping"
+                    ));
+                }
+                _ => {}
+            }
         }
     }
 

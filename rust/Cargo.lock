@@ -1976,6 +1976,7 @@ dependencies = [
  "hex",
  "hmac 0.12.1",
  "rand 0.10.3",
+ "regex-lite",
  "reqwest",
  "serde",
  "serde_json",
