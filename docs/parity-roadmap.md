@@ -225,6 +225,38 @@ now *replaces* rather than defers the third-party rows — Bedrock for AI, SES f
 Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for email/website.
 
 ### Wave 0 — foundations + the bugs the gap pass found
+- [x] **W0.8 Bedrock IAM — and the correction that it was never un-terraformable.**
+      This program recorded Bedrock as "blocked on an account decision", which was half wrong.
+      Probed 2026-10-21: the AWS provider (already pinned at 6.68.0, no bump needed) has
+      `aws_bedrock_use_case_for_model_access` and `aws_bedrock_foundation_model_agreement` as
+      first-class resources plus an `..._agreement_offers` data source, so model access is fully
+      declarative. The mechanism was never the blocker; only the *content* is.
+      Split accordingly, because only one half is a decision:
+      **The permission half is BUILT AND APPLIED.** New `pod_identity.tf` + `bedrock.tf`:
+      `er-dev-api-pod` role, an `invoke-claude` policy, and the Pod Identity association. Verified
+      live — `aws iam get-role-policy` shows all three statements. Planned clean against real
+      state (2 add, 0 change, 0 destroy) before applying. No cost, nothing outward-facing.
+      Two design points worth keeping. The policy must allow the **foundation model in any
+      region**, not just `us-east-2`: every current Claude model is reachable only through a
+      cross-region inference profile (`us.*`/`global.*`), and Bedrock authorizes the underlying
+      model in whichever region the profile routes to — pinning the region makes the call fail
+      exactly when the profile does its job. And `ses.tf`'s own `er-dev-mail` role and association
+      were **folded into one shared pod role**: the web+api Deployment has a single
+      ServiceAccount (`er-api`), and Pod Identity binds one role per (cluster, namespace, service
+      account), so mail and Bedrock have to be two policies on one role rather than two roles.
+      **The model-access half is one input away**, gated on `var.bedrock_use_case_form` so
+      everything else applies without it. That variable is the raw body of
+      `PutUseCaseForModelAccess` — an opaque blob carrying a legal entity's name, website and
+      intended use — and the agreement it unlocks is usage-priced (Claude Sonnet 4.6 in us-east-2
+      listed $3/M input, $15/M output on 2026-10-21). Supplying it is the account owner's act, not
+      something this repo can fabricate.
+      **SES is blocked differently, and more honestly.** The account has **zero** Route53 hosted
+      zones, zero registered domains and zero SES identities, so `var.ses_domain` has nothing to
+      point at — this is an absent input, not a permissions gap. Note also that `ses.tf`'s runbook
+      assumes Cloudflare DNS, which contradicts the program's own AWS-only rule; a Route53 zone
+      would keep it inside AWS. For a dev instance the cheapest path needs no domain at all: SES
+      sandbox can verify a single *email address* identity, which costs nothing and needs one
+      click in the inbox.
 - [x] **W0.1 worktree + this tracker section.** All program work happens in a dedicated
       worktree (`../ere-datagroomr-parity`) so it cannot disturb other local branches.
 - [x] **W0.7 the webhook SSRF — the repo's own headline finding, closed.**

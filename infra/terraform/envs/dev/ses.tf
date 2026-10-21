@@ -27,61 +27,22 @@ module "ses" {
   domain = var.ses_domain
 }
 
+# Attached to the SHARED er-api pod role (pod_identity.tf), not to a role of
+# its own. The web+api Deployment has one ServiceAccount, and Pod Identity
+# binds one role per (cluster, namespace, service account) — so mail and
+# Bedrock have to be two policies on one role, not two roles.
+resource "aws_iam_role_policy" "mail" {
+  name   = "send-transactional-mail"
+  role   = aws_iam_role.er_api_pod.id
+  policy = module.ses.send_policy_json
+}
+
 variable "ses_domain" {
   description = <<-EOT
     The domain dev sends from. Must be a domain whose DNS is ours to publish
     (Cloudflare, §18.8) — SES verification needs three CNAMEs under it.
   EOT
   type        = string
-}
-
-variable "mail_pod_namespaces" {
-  description = <<-EOT
-    Namespaces whose `er-api` ServiceAccount may send mail.
-
-    Empty by default, and that is the honest default: a Pod Identity
-    association binds one (cluster, namespace, service account) triple, while
-    dev namespaces are per-developer and created by `scripts/dev_env.sh`/Helm
-    rather than by Terraform. There is no wildcard. A developer who wants real
-    SES delivery adds their namespace here; everyone else uses
-    ER_MAIL_BACKEND=log, which needs no AWS at all.
-
-    Prod has one fixed namespace, so this becomes a one-element list there.
-  EOT
-  type        = list(string)
-  default     = []
-}
-
-data "aws_iam_policy_document" "mail_pod_trust" {
-  statement {
-    effect  = "Allow"
-    actions = ["sts:AssumeRole", "sts:TagSession"]
-
-    principals {
-      type        = "Service"
-      identifiers = ["pods.eks.amazonaws.com"]
-    }
-  }
-}
-
-resource "aws_iam_role" "mail" {
-  name               = "er-dev-mail"
-  assume_role_policy = data.aws_iam_policy_document.mail_pod_trust.json
-}
-
-resource "aws_iam_role_policy" "mail" {
-  name   = "send-transactional-mail"
-  role   = aws_iam_role.mail.id
-  policy = module.ses.send_policy_json
-}
-
-resource "aws_eks_pod_identity_association" "mail" {
-  for_each = toset(var.mail_pod_namespaces)
-
-  cluster_name    = module.eks.cluster_name
-  namespace       = each.value
-  service_account = "er-api"
-  role_arn        = aws_iam_role.mail.arn
 }
 
 output "ses_configuration_set_name" {
