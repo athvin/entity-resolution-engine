@@ -5,12 +5,6 @@
 # Fail on any security advisory or unmaintained/yanked crate.
 yanked = "deny"
 version = 2
-# zip 6.0.0 was yanked upstream with no 6.x replacement published, and it is pinned
-# transitively by libduckdb-sys (=1.10505.0) — the exact DuckDB our determinism/golden
-# baselines depend on, which we deliberately do not bump. A yank is a registry
-# withdrawal, not a vulnerability; this is a narrow exception (yanked = "deny" still
-# applies to every other crate) until a replacement 6.x publishes.
-#
 # The two RUSTSEC entries below are *unmaintained* notices (not vulnerabilities),
 # pulled transitively by the entity framework's analyser (ff-analysis's DataFusion
 # 52 + arrow 57 subtree). We do not control either and neither is a safe-upgrade:
@@ -19,20 +13,17 @@ version = 2
 #     crates deliberately use `serde_norway` instead; this reaches us only through
 #     ff-analysis. Retire when feather-flow moves off serde_yaml.
 #
-# The three RUSTSEC-2026 entries are ZIP-extraction vulnerabilities in `zip` 6.0.0
-# (symlink-escaping / SUID-SGID / Unix-permission-through-symlink in
-# `ZipArchive::extract`). `zip` reaches us only transitively through
-# libduckdb-sys's build (the pinned =1.10505.0 DuckDB), and nothing in this
-# workspace extracts an untrusted archive at runtime — the vulnerable extract
-# paths are never called. Retire when libduckdb-sys pulls a patched zip.
-#   - RUSTSEC-2026-0367 / -0368 / -0369: `zip` 6.0.0 extract-time path handling.
+# There is deliberately no `zip` exception here any more. One existed for `zip`
+# 6.0.0 — a registry yank plus three extract-time path-handling advisories
+# (RUSTSEC-2026-0367/-0368/-0369) — held open because libduckdb-sys pinned that
+# version and nothing here extracts an untrusted archive. libduckdb-sys has since
+# moved to zip 9.0.5, so all four entries were dead, and cargo-deny said so
+# ("advisory was not encountered", "yanked crate not detected"). A dead `yanked`
+# exception is worse than none: it keeps `yanked = "deny"` switched off for that
+# crate for good, and its comment misinforms the next reader.
 ignore = [
-    "zip@6.0.0",
     "RUSTSEC-2024-0436",
     "RUSTSEC-2024-0449",
-    "RUSTSEC-2026-0367",
-    "RUSTSEC-2026-0368",
-    "RUSTSEC-2026-0369",
 ]
 
 [licenses]
