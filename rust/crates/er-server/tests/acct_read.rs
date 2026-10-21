@@ -85,6 +85,7 @@ fn account_golden_read_serves_acct_projection() {
         &er_cli::PipelineInputs {
             mode: "full",
             rebuild_reason: None,
+            segment: None,
             lexicon: &Vec::new(),
             deliveries: &deliveries,
             model: &er_cli::MatchModel {

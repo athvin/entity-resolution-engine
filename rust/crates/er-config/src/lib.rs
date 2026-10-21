@@ -32,7 +32,7 @@ pub const RESERVED_SOURCE_PREFIX: &str = "_";
 /// The fourteen top-level blocks of S6, in document order. [`Config`]'s S6 block
 /// fields MUST equal this set; the `entity_type` discriminator (added for the
 /// Account entity type) is a meta-field, not an S6 block, and is excluded.
-pub const CONFIG_BLOCKS: [&str; 15] = [
+pub const CONFIG_BLOCKS: [&str; 16] = [
     "tenant",
     "thresholds",
     "standardization",
@@ -40,6 +40,7 @@ pub const CONFIG_BLOCKS: [&str; 15] = [
     "blocking",
     "constraints",
     "comparisons",
+    "segments",
     "survivorship",
     "training",
     "storage",
@@ -344,6 +345,27 @@ pub struct CorrectionPass {
     pub cadence: String,
 }
 
+/// S6 `segments`: named slices of the corpus, `name -> SQL predicate` over the
+/// standardized columns (e.g. `west: "addr_region in ('CA','OR','WA')"`).
+///
+/// A segment bounds how much work ONE run does, not what it is allowed to see.
+/// The scoped pass scores the segment against the **whole** corpus — segment ×
+/// everything, plus segment × segment — and reuses the stored scores for pairs
+/// where neither endpoint is in the segment. With the model and the TF snapshot
+/// frozen those stored numbers are exactly what a re-score would produce, so a
+/// scoped run leaves `match_scores` in the state a full run would, and running
+/// each segment in turn covers the corpus with no pair left unscored. That is
+/// the one thing an operator actually needs from "split your dataset", and the
+/// obvious reading — filter the corpus down to the segment and resolve that —
+/// cannot give it, because every cross-segment duplicate would be invisible and
+/// records outside the slice would lose the entities they are already in.
+///
+/// The predicate is declared in config and referenced **by name** at run time,
+/// never supplied with the request: a job carrying raw SQL would be an injection
+/// surface, and a name can be checked against the published config. Every
+/// predicate is parsed and column-checked at publish, like a blocking rule.
+pub type Segments = BTreeMap<String, String>;
+
 /// The whole S6 document, validated. `config_hash` is NOT a field of it (S6).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -363,6 +385,11 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "MatchConstraints::is_empty")]
     pub constraints: MatchConstraints,
     pub comparisons: BTreeMap<String, ComparisonSpec>,
+    /// Named slices of the corpus a run may be restricted to. Omitted from the
+    /// canonical document when empty, so a config written before segments
+    /// existed hashes identically.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub segments: BTreeMap<String, String>,
     pub survivorship: BTreeMap<String, Vec<String>>,
     pub training: Training,
     pub storage: Storage,
@@ -442,13 +469,17 @@ mod tests {
 
     #[test]
     fn blocks_and_constants() {
-        assert_eq!(CONFIG_BLOCKS.len(), 15);
+        assert_eq!(CONFIG_BLOCKS.len(), 16);
         assert_eq!(CONFIG_BLOCKS[0], "tenant");
-        assert_eq!(CONFIG_BLOCKS[14], "correction_pass");
+        assert_eq!(CONFIG_BLOCKS[15], "correction_pass");
         // `constraints` sits beside `blocking` because it changes the same
         // thing — which pairs are candidates — and so carries the same publish
         // tier.
         assert!(CONFIG_BLOCKS.contains(&"constraints"));
+        // `segments` sits after `comparisons` because it changes neither what a
+        // pair scores nor which pairs are candidates — only how much of the
+        // corpus one run re-scores.
+        assert!(CONFIG_BLOCKS.contains(&"segments"));
         assert_eq!(CANONICAL_ATTRIBUTES.len(), 9);
         assert_eq!(TERMINAL_SURVIVORSHIP_RULE, "record_key ASC");
     }

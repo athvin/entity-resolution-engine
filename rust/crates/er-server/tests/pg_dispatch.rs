@@ -105,6 +105,7 @@ async fn dispatcher_runs_run_all_over_a_per_org_ducklake() {
     let inputs = er_cli::PipelineInputs {
         mode: "full",
         rebuild_reason: None,
+        segment: None,
         lexicon: &lexicon,
         deliveries: &deliveries,
         model: &model,

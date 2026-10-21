@@ -404,6 +404,32 @@ fn run_job(
                 None
             };
 
+            // `{"segment": "<name>"}` restricts the match pass to a slice of the
+            // corpus (#54). The job carries the NAME; the predicate is looked up
+            // in the org's own config, which was parsed and column-checked at
+            // publish. A job carrying SQL would be an injection surface, and the
+            // enqueueing endpoint validates the name too — this is the second
+            // check, because a schedule stores its params and the config can be
+            // republished without it.
+            let segment_name = job.params.get("segment").and_then(Value::as_str);
+            let segment = match segment_name {
+                Some(name) => {
+                    let predicate = config.segments.get(name).ok_or_else(|| {
+                        let known: Vec<&str> = config.segments.keys().map(String::as_str).collect();
+                        format!(
+                            "segment '{name}' is not in the active config (known: {})",
+                            if known.is_empty() {
+                                "none declared".to_string()
+                            } else {
+                                known.join(", ")
+                            }
+                        )
+                    })?;
+                    Some((name, predicate.as_str()))
+                }
+                None => None,
+            };
+
             er_cli::run_all(
                 &session,
                 &config,
@@ -417,6 +443,7 @@ fn run_job(
                     run_at: &now,
                     mode: &decision.mode,
                     rebuild_reason,
+                    segment,
                 },
             )
             .map_err(|e| format!("{e:#}"))

@@ -153,6 +153,7 @@ fn populate_lake(catalog: &str, data_path: &str) {
     let inputs = er_cli::PipelineInputs {
         mode: "full",
         rebuild_reason: None,
+        segment: None,
         lexicon: &lexicon,
         deliveries: &deliveries,
         model: &model,

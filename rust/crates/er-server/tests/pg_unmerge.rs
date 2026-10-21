@@ -92,6 +92,7 @@ fn populate_lake(tag: &str) -> (PathBuf, String, String) {
     let inputs = er_cli::PipelineInputs {
         mode: "full",
         rebuild_reason: None,
+        segment: None,
         lexicon: &lexicon,
         deliveries: &deliveries,
         model: &model,

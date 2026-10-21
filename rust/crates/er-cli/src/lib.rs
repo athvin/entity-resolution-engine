@@ -608,7 +608,9 @@ pub fn run_match(
             predictions: std::slice::from_ref(&predictions.physical),
         },
     )?;
-    sync_scored_ledger(session, model, run_id, scored_at, std_qual)?;
+    // A full pass scored the whole corpus, so the whole corpus is what it may
+    // claim.
+    sync_scored_ledger(session, model, run_id, scored_at, std_qual, std_qual)?;
     Ok(())
 }
 
@@ -771,12 +773,20 @@ fn stage_and_upsert_scores(session: &Session, pass: &ScorePass) -> Result<()> {
 /// what makes the ledger safe: a run that lands records and then dies while
 /// scoring leaves the ledger untouched, so the next pass still treats those
 /// records as unscored.
+///
+/// `scored` is the relation holding the records this pass actually scored, and
+/// it is NOT always the whole corpus — a segment pass scores a slice. Claiming
+/// the corpus would make the ledger assert that an unscored record had been
+/// scored, and the next pass would believe it and never score it. The retirement
+/// half compares against the whole corpus instead (`std_qual`), because what a
+/// pass may claim to have scored and what still exists are two different sets.
 fn sync_scored_ledger(
     session: &Session,
     model: &MatchModel,
     run_id: &str,
     scored_at: &str,
     std_qual: &str,
+    scored: &str,
 ) -> Result<()> {
     create_ddl_table(session, "scored_records")?;
     let run_id = run_id.replace('\'', "''");
@@ -786,16 +796,21 @@ fn sync_scored_ledger(
         model.tf_snapshot_id.replace('\'', "''"),
     );
     session.execute_batch("drop table if exists __scored_src")?;
+    session.execute_batch("drop table if exists __scored_live")?;
     session.execute_batch(&format!(
         "create temp table __scored_src as
          select record_key, content_hash,
                 '{mv}' as model_version, '{snap}' as tf_snapshot_id,
                 '{run_id}' as run_id, cast('{scored_at}' as timestamp) as scored_at
-         from {std_qual}"
+         from {scored}"
+    ))?;
+    session.execute_batch(&format!(
+        "create temp table __scored_live as select record_key from {std_qual}"
     ))?;
     er_entities::scored_record::update::upsert_from_std(session.connection())?;
     er_entities::scored_record::delete::absent_from_std(session.connection())?;
     session.execute_batch("drop table __scored_src")?;
+    session.execute_batch("drop table __scored_live")?;
     Ok(())
 }
 
@@ -814,6 +829,10 @@ pub struct MatchDelta {
     pub invalidated_scores: usize,
     /// Why the pass could not be incremental, when it could not be.
     pub full_reason: Option<String>,
+    /// The predicate this pass was restricted to, when it was. The engine only
+    /// ever sees the predicate; the segment NAME belongs to the layer that
+    /// resolved it against the config, which is where it is logged.
+    pub scope_predicate: Option<String>,
 }
 
 /// S4.3.4 match (incremental mode): score only the pairs that could have
@@ -857,6 +876,62 @@ pub fn run_match_incremental(
     run_id: &str,
     scored_at: &str,
 ) -> Result<MatchDelta> {
+    run_match_partial(session, config, model, review_low, run_id, scored_at, None)
+}
+
+/// S4.3.4 match restricted to a named segment (#54): score `segment × corpus`
+/// and `segment × segment`, reuse everything else.
+///
+/// This is the answer to "my corpus is too big for one run" — the problem the
+/// incumbent answers with a run-duration cap and the advice to split your data.
+/// Splitting the *corpus* loses every cross-segment duplicate and strands the
+/// records outside the slice; splitting the *work* does not. The segment is the
+/// side that gets re-scored, and it is scored against the whole corpus, so no
+/// pair goes unexamined and `match_scores` ends up where a full run would leave
+/// it. Run each segment in turn and the corpus is covered.
+///
+/// The scope is widened to include anything new or changed wherever it lives.
+/// That is deliberate: the alternative is to score a slice and then write a
+/// ledger claiming the records outside it were scored, which the next pass would
+/// believe. A pass that leaves no record unscored cannot lie in that way, and
+/// the extra cost is the batch, which is the cheap part.
+///
+/// `predicate` is a SQL boolean over the standardized columns. It must come from
+/// the published config's `segments` block, which is parsed and column-checked at
+/// publish — never from a request.
+///
+/// # Errors
+/// Propagates model-load / predict / lake DDL+MERGE errors, including an invalid
+/// segment predicate (as the lake's own SQL error).
+pub fn run_match_segment(
+    session: &Session,
+    config: &Config,
+    model: &MatchModel,
+    review_low: f64,
+    run_id: &str,
+    scored_at: &str,
+    predicate: &str,
+) -> Result<MatchDelta> {
+    run_match_partial(
+        session,
+        config,
+        model,
+        review_low,
+        run_id,
+        scored_at,
+        Some(predicate),
+    )
+}
+
+fn run_match_partial(
+    session: &Session,
+    config: &Config,
+    model: &MatchModel,
+    review_low: f64,
+    run_id: &str,
+    scored_at: &str,
+    segment: Option<&str>,
+) -> Result<MatchDelta> {
     let std_qual = if config.entity_type.is_person() {
         INT_STD_RECORDS
     } else {
@@ -884,6 +959,10 @@ pub fn run_match_incremental(
         None
     };
     if let Some(reason) = full_reason {
+        // A segment cannot help when there is nothing to reuse: the whole corpus
+        // has to be scored either way, so scope it to everything rather than
+        // leave the records outside the slice unscored with a ledger that says
+        // otherwise.
         run_match(session, config, model, review_low, run_id, scored_at)?;
         return Ok(MatchDelta {
             mode: er_versions::MODE_FULL,
@@ -891,6 +970,7 @@ pub fn run_match_incremental(
             delta_records: count_rows(session, std_qual)?,
             invalidated_scores: 0,
             full_reason: Some(reason),
+            scope_predicate: segment.map(ToOwned::to_owned),
         });
     }
 
@@ -900,7 +980,7 @@ pub fn run_match_incremental(
     // The delta and its complement, as projections of the standardized corpus.
     // A record is in the delta when the ledger has no row claiming that exact
     // (record_key, content_hash) — which covers both "never scored" and
-    // "scored, then edited".
+    // "scored, then edited" — or when a segment predicate selects it.
     let delta_std = "__inc_delta_std";
     let kept_std = "__inc_kept_std";
     for t in [delta_std, kept_std] {
@@ -910,13 +990,21 @@ pub fn run_match_incremental(
         "select 1 from {SCORED_RECORDS} l
           where l.record_key = s.record_key and l.content_hash = s.content_hash"
     );
+    // `in scope` and `not in scope` are written as negations of one expression so
+    // the two sides cannot drift into overlapping or leaving a gap. A predicate
+    // that is NULL for a row counts as out of scope, which `not (p)` would make
+    // NULL rather than true — hence the explicit `coalesce`.
+    let in_scope = match segment {
+        Some(p) => format!("coalesce({p}, false)"),
+        None => "false".to_string(),
+    };
     session.execute_batch(&format!(
         "create table {delta_std} as
-         select s.* from {std_qual} s where not exists ({matched})"
+         select s.* from {std_qual} s where not exists ({matched}) or {in_scope}"
     ))?;
     session.execute_batch(&format!(
         "create table {kept_std} as
-         select s.* from {std_qual} s where exists ({matched})"
+         select s.* from {std_qual} s where exists ({matched}) and not {in_scope}"
     ))?;
     let delta_records = count_rows(session, delta_std)?;
     let corpus_records = delta_records + count_rows(session, kept_std)?;
@@ -989,7 +1077,11 @@ pub fn run_match_incremental(
         )?;
     }
 
-    sync_scored_ledger(session, model, run_id, scored_at, std_qual)?;
+    // The ledger earns rows for the delta only — the records this pass actually
+    // scored. Claiming the whole corpus would be harmless for an ordinary
+    // incremental pass (the rest already have matching rows) but a lie for a
+    // segment pass, and the next pass would act on it.
+    sync_scored_ledger(session, model, run_id, scored_at, std_qual, delta_std)?;
     for t in [delta_std, kept_std] {
         session.execute_batch(&format!("drop table if exists {t}"))?;
     }
@@ -999,6 +1091,7 @@ pub fn run_match_incremental(
         delta_records,
         invalidated_scores: invalidated,
         full_reason: None,
+        scope_predicate: segment.map(ToOwned::to_owned),
     })
 }
 
@@ -2073,6 +2166,12 @@ pub struct PipelineInputs<'a> {
     /// Why this run is rebuilding, when it is not the ordinary case: an
     /// incremental run promoted by the drift guard records the drift here.
     pub rebuild_reason: Option<&'a str>,
+    /// A `config.segments` name to restrict the match pass to (#54). The caller
+    /// resolves the name against the published config and passes the predicate,
+    /// so no SQL arrives from a request. Implies an incremental-shaped pass:
+    /// restricting a FULL pass to a slice would be the destructive reading of
+    /// scoping (see [`run_match_segment`]).
+    pub segment: Option<(&'a str, &'a str)>,
 }
 
 impl<'a> PipelineInputs<'a> {
@@ -2095,6 +2194,7 @@ impl<'a> PipelineInputs<'a> {
             run_at: stamp,
             mode: er_versions::MODE_FULL,
             rebuild_reason: None,
+            segment: None,
         }
     }
 }
@@ -2135,22 +2235,27 @@ pub fn run_all(session: &Session, config: &Config, inputs: &PipelineInputs) -> R
         )?;
     }
     run_standardize(session, config, inputs.run_at)?;
-    if inputs.mode == er_versions::MODE_INCREMENTAL {
-        let delta = run_match_incremental(
+    if inputs.mode == er_versions::MODE_INCREMENTAL || inputs.segment.is_some() {
+        let delta = run_match_partial(
             session,
             config,
             inputs.model,
             config.thresholds.review_low,
             inputs.run_id,
             inputs.scored_at,
+            inputs.segment.map(|(_, predicate)| predicate),
         )?;
         eprintln!(
-            "run {}: {} match over {}/{} records, {} scores invalidated{}",
+            "run {}: {} match over {}/{} records, {} scores invalidated{}{}",
             inputs.run_id,
             delta.mode,
             delta.delta_records,
             delta.corpus_records,
             delta.invalidated_scores,
+            inputs
+                .segment
+                .map(|(name, _)| format!(", segment {name}"))
+                .unwrap_or_default(),
             delta
                 .full_reason
                 .map(|r| format!(" ({r})"))

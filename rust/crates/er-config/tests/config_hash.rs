@@ -37,3 +37,53 @@ fn matches_python_golden() {
         );
     }
 }
+
+/// A new optional block must be invisible to `config_hash` until a tenant
+/// actually uses it, or every existing config silently re-hashes and every
+/// tenant's next run is promoted to a full rebuild by the drift guard.
+///
+/// `segments` is the block under test here; the property is the one every
+/// `skip_serializing_if` block in `Config` relies on, so this also guards the
+/// next one added.
+#[test]
+fn an_unused_segments_block_does_not_move_the_config_hash() {
+    let plain = load_config_str(fixture("test.yaml")).unwrap();
+    let with_empty = load_config_str(&format!("{}\nsegments: {{}}\n", fixture("test.yaml")))
+        .expect("an explicitly empty segments block parses");
+
+    assert!(plain.segments.is_empty());
+    assert!(with_empty.segments.is_empty());
+    assert_eq!(
+        config_hash(&plain),
+        config_hash(&with_empty),
+        "an empty segments block must hash like no segments block at all"
+    );
+    assert!(
+        !canonical_document(&plain).contains("segments"),
+        "an unused block must not appear in the canonical document"
+    );
+}
+
+/// And a *used* one must change the hash, or republishing a config with a new
+/// segment would not be recognised as a change at all.
+#[test]
+fn a_declared_segment_parses_and_does_move_the_config_hash() {
+    let plain = load_config_str(fixture("test.yaml")).unwrap();
+    let scoped = load_config_str(&format!(
+        "{}\nsegments:\n  west: \"addr_region in ('CA','OR','WA')\"\n  by_source: \"source_system = 'crm'\"\n",
+        fixture("test.yaml")
+    ))
+    .expect("a segments block parses");
+
+    assert_eq!(scoped.segments.len(), 2);
+    assert_eq!(
+        scoped.segments.get("west").map(String::as_str),
+        Some("addr_region in ('CA','OR','WA')")
+    );
+    assert_ne!(
+        config_hash(&plain),
+        config_hash(&scoped),
+        "declaring a segment is a config change and must hash differently"
+    );
+    assert!(canonical_document(&scoped).contains("segments"));
+}

@@ -55,10 +55,10 @@ impl ScoredRecord {
 
 pub mod delete {
     //! @generated query functions for this entity + operation.
-    /// Retire ledger rows for records the corpus no longer has (a tombstoned or withdrawn record), so the next pass does not keep treating them as scored. Reads the same __scored_src staging as the upsert.
+    /// Retire ledger rows for records the corpus no longer has (a tombstoned or withdrawn record), so the next pass does not keep treating them as scored. Reads __scored_live — the whole current corpus — which is deliberately a DIFFERENT staging table from the upsert's __scored_src: a partial pass scores only part of the corpus, so what it may claim to have scored and what still exists are two different sets.
     pub fn absent_from_std(conn: &::duckdb::Connection) -> ::duckdb::Result<usize> {
         const SQL: &str = "DELETE FROM lake.main.scored_records
-WHERE record_key NOT IN (SELECT record_key FROM __scored_src)
+WHERE record_key NOT IN (SELECT record_key FROM __scored_live)
 ";
         conn.execute(SQL, ::duckdb::params![])
     }

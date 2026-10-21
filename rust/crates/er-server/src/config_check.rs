@@ -60,6 +60,29 @@ pub fn config_reference_problems(config: &Config) -> Vec<String> {
         }
     }
 
+    // Segments: a predicate over the standardized columns, checked exactly like
+    // a blocking expression. This is the only check a segment ever gets — a run
+    // names a segment rather than supplying SQL, so if a bad predicate can be
+    // published it will fail the tenant's run instead of their publish, with no
+    // second chance to catch it.
+    for (name, predicate) in &config.segments {
+        match dedupe_core::sql::columns::columns_used(predicate, "segment") {
+            Err(e) => problems.push(format!(
+                "segment `{name}` has invalid SQL (`{predicate}`): {e}"
+            )),
+            Ok(refs) => {
+                for col in refs {
+                    if !valid.contains(&col.column) {
+                        problems.push(format!(
+                            "segment `{name}` references unknown standardized column `{}`",
+                            col.column
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
     problems.sort();
     problems.dedup();
     problems
@@ -78,6 +101,41 @@ mod tests {
     #[test]
     fn a_valid_config_has_no_reference_problems() {
         assert_eq!(config_reference_problems(&load(GOOD)), Vec::<String>::new());
+    }
+
+    /// A segment predicate gets exactly one chance to be caught, and this is it:
+    /// a run names a segment rather than supplying SQL, so a predicate that gets
+    /// published will fail the tenant's run instead of their publish.
+    #[test]
+    fn a_segment_predicate_is_checked_like_a_blocking_expression() {
+        let good = load(&format!(
+            "{GOOD}\nsegments:\n  west: \"addr_region in ('CA','OR')\"\n"
+        ));
+        assert_eq!(config_reference_problems(&good), Vec::<String>::new());
+
+        // An unknown column.
+        let typo = load(&format!(
+            "{GOOD}\nsegments:\n  west: \"addr_regoin = 'CA'\"\n"
+        ));
+        let problems = config_reference_problems(&typo);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("segment `west`") && p.contains("`addr_regoin`")),
+            "{problems:?}"
+        );
+
+        // SQL that does not parse at all.
+        let broken = load(&format!(
+            "{GOOD}\nsegments:\n  west: \"addr_region = = 'CA'\"\n"
+        ));
+        let problems = config_reference_problems(&broken);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("segment `west`") && p.contains("invalid SQL")),
+            "{problems:?}"
+        );
     }
 
     #[test]
