@@ -689,8 +689,33 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          viewer 403, and a bad predicate refused at publish with nothing going live) and
          er-config tests that an unused `segments` block leaves `config_hash` untouched while a
          declared one moves it.
-   - [ ] E5 ensembles/cascades (#31), E9b import-time screening + update rules (#38/#39),
-         E9c S3 auto-ingestion (#47).
+   - [x] **E5a — activating a model version now actually takes effect.** Found while scoping
+         ensembles, which forced the question "which models' scores are allowed to cluster?"
+         and revealed that nothing had ever answered it. Scores are keyed by
+         `(pair, model_version, tf_snapshot_id)`, so a run under a new model writes **new**
+         rows and left the old model's rows `is_active` — and neither edge read filters by
+         model (`auto_merge_edges_live`, which reconcile clusters from, and `active_page`,
+         which the duplicates surface pages, both take every active row). Measured on base_10:
+         19 pairs became **38 active scores**, two models voting at once, silently and for good.
+         The sharp consequence is not the row count: **a model built to be stricter could not
+         change anything**, because the looser model it replaced went on merging the records —
+         which negates the point of the registry (#214), where activation is the explicit,
+         audited act. A run now retires every active score whose model identity is not in its
+         live set (`match_score/update/retire_other_models`). Retiring, not deleting: the
+         previous model's verdicts stay in the table, inactive and stamped with the run that
+         retired them, so a review can still cite them. Rolling back to an earlier model means
+         a re-score, which the drift guard already forces on any model change.
+         The live set is a *list* in the signature because an ensemble is a list — that is the
+         seam E5b plugs into, not speculation.
+         Test: `activating_a_new_model_retires_the_one_it_replaces` activates a deliberately
+         stricter model (a much harder prior) and asserts the thing an operator cares about —
+         exactly one model identity active, the old scores retired-not-dropped and stamped, and
+         the partition **splitting** into more entities than the loose model produced.
+         Sabotaging the retirement reproduces the original bug exactly (`v0001` 19 active beside
+         `v0002-strict` 17).
+   - [ ] E5b ensembles + cascades (#31 — N models per run, `then_run` cascade vs `and_run`
+         union, per-model threshold; E5a's live-set seam is the entry point),
+         E9b import-time screening + update rules (#38/#39), E9c S3 auto-ingestion (#47).
 3. **Learning loop** — labels/train/evaluate (#19/#20 + the evaluation-tooling gap),
    related-record features (#26), household/link entities (#33).
 4. **Operating at scale**

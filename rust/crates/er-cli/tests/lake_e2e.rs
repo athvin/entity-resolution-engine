@@ -2437,3 +2437,131 @@ fn the_lake_contains_only_declared_relations() {
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+/// Activating a new model version must retire the model it replaces — and the
+/// consequence that matters is that a STRICTER model can actually tighten the
+/// result.
+///
+/// Scores are keyed by `(pair, model_version, tf_snapshot_id)`, so a run under a
+/// new model writes NEW rows and left the previous model's rows `is_active`.
+/// Neither edge read filters by model — `auto_merge_edges_live`, which reconcile
+/// clusters from, and `active_page`, which the duplicates surface reads, both
+/// take every active row. So two models' verdicts were unioned, silently and for
+/// good: 19 pairs became 38 active scores. The sharp end is this test's second
+/// half — a model built to be stricter could not change anything, because the
+/// looser model it replaced went on merging the records.
+#[test]
+fn activating_a_new_model_retires_the_one_it_replaces() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let (session, config, tmp) = open_seeded_lake("model_retire");
+    run_all_phase(
+        &session,
+        &config,
+        "incremental_batch",
+        "base",
+        "01MODRET00000000000BASE000",
+        "2026-01-01 00:00:00",
+        "full",
+    );
+    let loose = active_scores(&session);
+    let loose_partition = partition(&membership_rows(&session));
+    assert!(!loose.is_empty(), "precondition: the first model scored");
+
+    // A second model identity whose settings are deliberately STRICTER: every
+    // comparison level is kept, but the match weights are scaled down so fewer
+    // pairs clear `review_low`. Same corpus, same TF snapshot id is NOT reused —
+    // identity is (model_version, tf_snapshot_id) and both move.
+    let model_json = std::fs::read_to_string(repo_fixture("model_test_v1.json")).unwrap();
+    let mut settings: serde_json::Value = serde_json::from_str(&model_json).unwrap();
+    // Drop the prior hard, which shifts every posterior down.
+    settings["probability_two_random_records_match"] = serde_json::json!(1.0e-9);
+    let strict_json = settings.to_string();
+    let tf_csv = repo_fixture("model_test_v1.tf.csv");
+
+    er_cli::run_match(
+        &session,
+        &config,
+        &er_cli::MatchModel {
+            settings_json: &strict_json,
+            tf_csv_path: std::path::Path::new(&tf_csv),
+            model_version: "v0002-strict",
+            tf_snapshot_id: "01JWMDTFSNAP00000000000002",
+        },
+        config.thresholds.review_low,
+        "01MODRET0000000000STRICT00",
+        "2026-02-01 00:00:00",
+    )
+    .unwrap();
+
+    // Exactly one model identity may be active.
+    let by_model = session
+        .query_strings(&format!(
+            "select model_version, cast(count(*) as varchar)
+             from {} where is_active group by model_version order by model_version",
+            er_cli::MATCH_SCORES
+        ))
+        .unwrap();
+    assert_eq!(
+        by_model.len(),
+        1,
+        "only the live model's scores may be active, found {by_model:?}"
+    );
+    assert_eq!(by_model[0][0], "v0002-strict");
+
+    // The retired rows are still THERE — retiring is not deleting, so the
+    // previous model's verdicts stay auditable and a review can still cite them.
+    let retired = session
+        .query_strings(&format!(
+            "select cast(count(*) as varchar) from {} \
+             where not is_active and model_version = 'v0001'",
+            er_cli::MATCH_SCORES
+        ))
+        .unwrap();
+    assert_eq!(
+        retired[0][0],
+        loose.len().to_string(),
+        "every one of the old model's scores should be retired, not dropped"
+    );
+    let stamped = session
+        .query_strings(&format!(
+            "select cast(count(*) as varchar) from {} \
+             where not is_active and invalidated_run_id = '01MODRET0000000000STRICT00' \
+               and invalidated_at is not null",
+            er_cli::MATCH_SCORES
+        ))
+        .unwrap();
+    assert_eq!(
+        stamped[0][0],
+        loose.len().to_string(),
+        "retirement must record which run did it and when"
+    );
+
+    // And the point of all of it: the stricter model now decides the clustering.
+    let strict = active_scores(&session);
+    assert!(
+        strict.len() < loose.len(),
+        "precondition: the second model must really be stricter ({} vs {} pairs)",
+        strict.len(),
+        loose.len()
+    );
+    er_cli::run_reconcile(
+        &session,
+        &config,
+        "01MODRET000000000000RECON0",
+        "2026-02-01 00:00:00",
+    )
+    .unwrap();
+    let strict_partition = partition(&membership_rows(&session));
+    assert!(
+        strict_partition.len() > loose_partition.len(),
+        "a stricter model must split entities the looser one merged; \
+         {} entities before, {} after",
+        loose_partition.len(),
+        strict_partition.len()
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
