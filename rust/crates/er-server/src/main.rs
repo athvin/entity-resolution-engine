@@ -42,7 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let never = std::sync::atomic::AtomicBool::new(false);
             match er_server::pg::connect(&dsn).await {
                 Ok(client) => {
-                    let http = reqwest::Client::new();
+                    let http = er_server::webhook::client();
                     if let Err(e) = er_server::dispatcher::run_loop(&client, &http, &never).await {
                         eprintln!("in-process dispatcher stopped (control-plane): {e}");
                     }

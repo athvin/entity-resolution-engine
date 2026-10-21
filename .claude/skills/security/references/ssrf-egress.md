@@ -10,15 +10,18 @@ design — so an unfiltered URL is a direct line to cloud metadata and internal 
 - The URL guard to build
 - How to prove / how to lock
 
-## Webhook SSRF (the headline)
+## Webhook SSRF (the headline) — FIXED at the application layer
 
-`POST /v1/orgs/{org}/webhooks` (`er-server/src/lib.rs` `create_webhook`, `Role::Admin`) validates the
-URL only as `!url.trim().is_empty()`. The dispatcher then POSTs job payloads to it
-(`er-server/src/webhook.rs` `post`/`emit`, plain `reqwest`, no scheme/host/IP filter, no redirect
-limit). Infra gives no containment: `infra/k8s/charts/er-dev-namespace/templates/networkpolicy.yaml`
-says "Egress is deliberately unrestricted."
+**Status: the application-layer guard is built** (`er-server/src/urlguard.rs`). What follows is kept
+because the reasoning still governs any NEW outbound path, and because the network leg is still open.
 
-High-value targets an attacker webhook URL can reach from inside the cluster:
+Before the fix, `POST /v1/orgs/{org}/webhooks` (`er-server/src/lib.rs` `create_webhook`, `Role::Admin`)
+validated the URL only as `!url.trim().is_empty()`, and the dispatcher then POSTed job payloads to it
+(`er-server/src/webhook.rs` `post`/`emit`, plain `reqwest`, no scheme/host/IP filter). Infra gives no
+containment: `infra/k8s/charts/er-dev-namespace/templates/networkpolicy.yaml` says "Egress is
+deliberately unrestricted."
+
+High-value targets an attacker webhook URL could reach from inside the cluster:
 - `http://169.254.169.254/latest/meta-data/...` — cloud instance metadata (IMDS). On EKS this can
   surface role credentials.
 - cluster-internal services (`http://<svc>.<ns>.svc.cluster.local`), `http://localhost:<port>`.
@@ -52,9 +55,11 @@ on a dev box, and the NetworkPolicy isn't exercised. So split the finding, and s
 Never fire a real request at `169.254.169.254` except in `/pentest live` against a confirmed-local
 target — see [../../pentest/references/modes.md](../../pentest/references/modes.md).
 
-## The URL guard to build
+## The URL guard, as built
 
-The fix is a single function the webhook registration and the dispatcher both call before any request:
+`er-server/src/urlguard.rs` — `check(url, Egress) -> Result<(), UrlRejection>`, called by
+`create_webhook` (so a bad URL is a 422 and never reaches the table) **and** by the delivery loop
+before every POST (so DNS rebinding does not get a second chance). What it enforces:
 
 - scheme must be `https` (reject `http`, `file`, `gopher`, etc.)
 - **resolve the host, then check every resolved IP** (not the hostname) against deny ranges:
@@ -65,11 +70,28 @@ The fix is a single function the webhook registration and the dispatcher both ca
 
 Resolve-then-check is what defeats DNS rebinding; a name-only check is bypassable.
 
+Two traps found while building it, both now locked by enumerated unit tests:
+
+- **`::1` was allowed.** `Ipv6Addr::to_ipv4` also maps the deprecated IPv4-*compatible* form
+  `::a.b.c.d`, and `::1` is in that form — so unwrapping IPv4-in-IPv6 *before* judging turned THE IPv6
+  loopback into `0.0.0.1`, which is not loopback, not private and not unspecified. Judge `::1` / `::`
+  as IPv6 first, unwrap second.
+- **`https://[::1]/` was allowed.** `Url::host_str` keeps the brackets on an IPv6 literal, which is not
+  a resolvable name, so `lookup_host` failed — and "a lookup failure is not a rejection" (right for a
+  domain that is not stood up yet) then waved it through. IP literals are parsed and judged directly,
+  before any resolution.
+
+**There is no off switch.** No env var, no config field: a guard configuration can disable is a guard
+that gets found disabled. The one unguarded path is `webhook::emit_with_egress(.., Egress::Unguarded)`,
+which exists so the delivery test can POST to `127.0.0.1`, and `er-server/tests/egress_guard.rs` fails
+if any file under `er-server/src` names it.
+
 ## How to prove / how to lock
 
 | Claim | PoC | Test |
 |---|---|---|
-| Webhook accepts an SSRF URL | register `http://169.254.169.254/...` → currently 2xx | **(a)** unit in `webhook.rs` for the guard; **(b)** extend `er-server/tests/pg_webhooks.rs` → register blocked URL = 422 |
-| Delivery hits a blocked host | queue a job; delivery attempts loopback | extend `er-server/tests/pg_webhook_deliver.rs` → delivery refused |
+| Webhook accepts an SSRF URL | ~~register `http://169.254.169.254/...` → 2xx~~ **locked** | `urlguard.rs` unit tests (every denied range, enumerated) + `pg_webhooks::registration_refuses_an_url_the_server_may_not_reach` → 422 |
+| Delivery hits a blocked host | ~~queue a job; delivery attempts loopback~~ **locked** | `pg_webhook_deliver::the_guarded_path_refuses_a_delivery_to_a_blocked_address` — refused, recorded, and the job still succeeds |
+| The guard has no bypass | n/a | `er-server/tests/egress_guard.rs` scans `er-server/src` for the test-only seam |
 | IMDS reachable from a pod | (live, EKS only — out of scope for the fence) | manual §17 probe, *not* a unit test |
 | Assistant tool org is caller-bound | injected "fetch org X" prompt still targets the session org | `frontend/tests/unit/assistant-tools.test.ts` + `frontend/tests/functional/assistant.spec.ts` |

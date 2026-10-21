@@ -227,6 +227,55 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
 ### Wave 0 — foundations + the bugs the gap pass found
 - [x] **W0.1 worktree + this tracker section.** All program work happens in a dedicated
       worktree (`../ere-datagroomr-parity`) so it cannot disturb other local branches.
+- [x] **W0.7 the webhook SSRF — the repo's own headline finding, closed.**
+      `.claude/skills/security/references/ssrf-egress.md` has described this since the security
+      suite was written (2026-10-19) and nothing had been built: `create_webhook` validated its
+      URL as `!url.trim().is_empty()`, the dispatcher then POSTed job payloads to it with plain
+      `reqwest`, and `networkpolicy.yaml` says egress is *deliberately* unrestricted. An admin in
+      any tenant could aim the control plane at `http://169.254.169.254/latest/meta-data/...`, at
+      `localhost`, or at any `*.svc.cluster.local` service. Found while scoping O3b (the webhook
+      outbox): adding a delivery log with response codes would have turned a blind SSRF into a
+      usable internal scanner, so the guard had to come first.
+      New `er-server/src/urlguard.rs`: https-only, no embedded credentials, and — the part that
+      matters — it **resolves the host and checks every resolved address**, not the name. Called
+      at registration (so a bad URL is a 422 and never reaches the table) *and* before every
+      delivery, because a name that resolved public at registration can resolve private at
+      delivery; a registration-time-only guard does nothing about DNS rebinding. A host that does
+      not resolve is deliberately *not* refused — registering an endpoint before standing it up is
+      legitimate, and the delivery-time check is what makes that safe.
+      **Redirects closed too.** `reqwest::Client::new()` follows up to ten hops, so
+      `https://public.example/` 302-ing to IMDS defeated a first-hop check entirely. New
+      `webhook::client()` disables redirect-following and adds a 10s timeout; every construction
+      site uses it.
+      **No off switch** — no env var, no config field, because a guard configuration can disable
+      is a guard that gets found disabled. The one unguarded path exists so the delivery test can
+      POST to `127.0.0.1`, and `tests/egress_guard.rs` fails if any file under `er-server/src`
+      names it or builds a default client (comment lines excluded — the first version flagged its
+      own explanation).
+      Two bugs the enumerated tests caught while building it, both the kind a review would pass
+      over: **`::1` was allowed**, because `to_ipv4` also maps the deprecated IPv4-*compatible*
+      form and `::1` is in it, so unwrapping before judging turned THE IPv6 loopback into
+      `0.0.0.1`; and **`https://[::1]/` was allowed**, because `host_str` keeps the brackets, the
+      resolver failed on them, and "a lookup failure is not a rejection" waved it through.
+      Tests, exactly where the security reference said they belonged: `urlguard.rs` units over
+      every denied range one-by-one; ten refusal shapes folded into `pg_webhooks::webhooks_crud`
+      (nothing stored, and an ordinary https endpoint still accepted); and a second phase of
+      `pg_webhook_deliver` — refused, recorded legibly, and **the job still succeeds**, because a
+      webhook pointed somewhere it may not go is the tenant's configuration problem and not a
+      reason to fail their run.
+      **Both are phases of existing tests, not new `#[tokio::test]`s, and that is a constraint
+      worth knowing:** cargo runs a binary's tests on parallel threads, so two tests that each
+      `DROP TABLE … CASCADE` the shared control-plane schema deadlock against each other — one's
+      drop takes a lock the other's insert needs through the `orgs_history` trigger.
+      `pg_scheduler_tick.rs` has said so since #211; this PR broke the rule in two files and CI
+      caught it. The reason it got past local verification is sharper than the rule: **running the
+      Postgres tier with `--test-threads=1` hides the whole class, and CI does not pass that
+      flag.** Verify with the exact CI invocation
+      (`cargo test -p dedupe-cli -p er-cli -p er-server -p er-entity-diff`), not a serialized one.
+      **The honest limit, unchanged:** this is the application layer. Whether a pod can reach IMDS
+      at all is a NetworkPolicy question answered by the manual `docs/infrastructure.md` §17
+      probe, and none of these tests speak to it. The reference doc now says which legs are locked
+      and which is not.
 - [x] **W0.4 + W0.4a — the CSV upload path, and the gate that hid its absence.**
       **The bug:** `POST /v1/orgs/{org}/imports` had a complete BFF handler (multipart,
       256 MiB cap, 202/409/413/422 mapping) and a mock that answered it, while the router

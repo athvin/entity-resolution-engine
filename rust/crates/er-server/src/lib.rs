@@ -38,6 +38,7 @@ pub mod mail;
 pub mod openapi;
 pub mod pg;
 pub mod read;
+pub mod urlguard;
 pub mod webhook;
 
 use std::collections::{BTreeSet, HashMap};
@@ -2195,7 +2196,7 @@ async fn cancel_job(
                     // system waiting on an outcome waited forever. Best-effort
                     // and built per call: cancelling is rare, and a delivery
                     // failure must not undo a cancel that is already persisted.
-                    let http = reqwest::Client::new();
+                    let http = webhook::client();
                     let _ = webhook::emit_job_event(&client, &http, &canceled).await;
                     (StatusCode::OK, Json(json!(canceled))).into_response()
                 }
@@ -4159,6 +4160,15 @@ async fn create_webhook(
     }
     if body.url.trim().is_empty() {
         return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "url is required");
+    }
+    // The outbound-URL guard. Without it an admin in any tenant could aim the
+    // control plane at cloud instance metadata or a cluster-internal service
+    // and the dispatcher would POST job payloads to it — the egress policy is
+    // deliberately unrestricted, so nothing else was stopping this. Refused
+    // here so a bad URL never reaches the table; the delivery path re-checks,
+    // because DNS can change between the two.
+    if let Err(rejection) = urlguard::check(&body.url, urlguard::Egress::Guarded).await {
+        return detail_err(StatusCode::UNPROCESSABLE_ENTITY, rejection.to_string()).into_response();
     }
     let Some(dsn) = &state.dsn else {
         return detail_err(StatusCode::NOT_IMPLEMENTED, "webhooks require Postgres");
