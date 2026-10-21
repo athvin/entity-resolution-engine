@@ -1916,6 +1916,11 @@ struct EnqueueJob {
     kind: String,
     #[serde(default)]
     priority: i64,
+    /// Restrict the run to a `segments` entry of the active config (#54). A
+    /// NAME, not a predicate: the SQL lives in the published config, which has
+    /// been parsed and column-checked, so a request can never introduce any.
+    #[serde(default)]
+    segment: Option<String>,
 }
 
 /// Enqueue a job for an org (S-queue enqueue). Requires steward+ in the org.
@@ -1944,7 +1949,41 @@ async fn create_job(
             Ok(r) => r,
             Err(r) => return *r,
         };
-        return match pg::enqueue(&client, &org_row.id, &body.kind, body.priority, None, None).await
+        // Resolve the segment NAME against the published config here, so an
+        // unknown name is a 422 at submit time naming the segments that do
+        // exist — rather than a job that sits in the queue and then fails.
+        let mut params = None;
+        if let Some(name) = &body.segment {
+            let config = match org_active_config(&client, &org_row).await {
+                Ok(c) => c,
+                Err(r) => return *r,
+            };
+            if !config.segments.contains_key(name) {
+                let known: Vec<&str> = config.segments.keys().map(String::as_str).collect();
+                return detail_err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    format!(
+                        "segment '{name}' is not in the published config (declared: {})",
+                        if known.is_empty() {
+                            "none".to_string()
+                        } else {
+                            known.join(", ")
+                        }
+                    ),
+                )
+                .into_response();
+            }
+            params = Some(json!({ "segment": name }));
+        }
+        return match pg::enqueue(
+            &client,
+            &org_row.id,
+            &body.kind,
+            body.priority,
+            None,
+            params.as_ref(),
+        )
+        .await
         {
             Ok(job) => {
                 let _ = pg::audit(
@@ -1952,7 +1991,7 @@ async fn create_job(
                     &principal.actor,
                     Some(&org),
                     "job.submit",
-                    &json!({ "job_id": job.id, "kind": body.kind }),
+                    &json!({ "job_id": job.id, "kind": body.kind, "segment": body.segment }),
                 )
                 .await;
                 (StatusCode::ACCEPTED, Json(json!(job))).into_response()
@@ -4127,12 +4166,6 @@ fn gen_webhook_secret() -> String {
     hex::encode(buf)
 }
 
-/// Admin+: register an outbound webhook (`POST /v1/orgs/{org}/webhooks`). The
-/// HMAC signing `secret` is caller-supplied or generated, and returned ONCE
-/// (never listed thereafter, like an API key).
-///
-/// Delivery — signing each event payload with the secret and POSTing it to
-/// `url` — is the infra-bound part (a background sender, not run in this
 /// Viewer+: the event types this system can emit
 /// (`GET /v1/orgs/{org}/webhooks/events`).
 ///
@@ -4148,6 +4181,51 @@ async fn webhook_events_catalog(
     }
     Json(json!({ "events": webhook::catalog_json() })).into_response()
 }
+
+/// Viewer+: the segments the active config declares
+/// (`GET /v1/orgs/{org}/segments`).
+///
+/// The same discovery reason as the webhook catalog: a run names a segment, so
+/// the names have to be obtainable. Returning the predicate alongside each name
+/// is deliberate — it is the tenant's own published config, and an operator
+/// choosing how to split a long run needs to see what each slice covers.
+async fn segments_catalog(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return Json(json!({ "segments": [] })).into_response();
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    let config = match org_active_config(&client, &org_row).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let segments: Vec<serde_json::Value> = config
+        .segments
+        .iter()
+        .map(|(name, predicate)| json!({ "name": name, "predicate": predicate }))
+        .collect();
+    Json(json!({ "segments": segments })).into_response()
+}
+
+/// Admin+: register an outbound webhook (`POST /v1/orgs/{org}/webhooks`). The
+/// HMAC signing `secret` is caller-supplied or generated, and returned ONCE
+/// (never listed thereafter, like an API key).
+///
+/// Delivery — signing each event payload with the secret and POSTing it to
+/// `url` — is the infra-bound part (a background sender, not run in this
 /// sandbox); this endpoint manages the registration.
 async fn create_webhook(
     principal: Principal,
@@ -5440,6 +5518,7 @@ fn build_routes(state: AppState) -> Router {
             "/v1/orgs/{org}/schedules",
             get(schedules_index).post(create_schedule),
         )
+        .route("/v1/orgs/{org}/segments", get(segments_catalog))
         .route(
             "/v1/orgs/{org}/webhooks/events",
             get(webhook_events_catalog),

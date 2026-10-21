@@ -1,6 +1,6 @@
 kind: statement
 operation: delete
 mode: partial
-description: "Retire ledger rows for records the corpus no longer has (a tombstoned or withdrawn record), so the next pass does not keep treating them as scored. Reads the same __scored_src staging as the upsert."
+description: "Retire ledger rows for records the corpus no longer has (a tombstoned or withdrawn record), so the next pass does not keep treating them as scored. Reads __scored_live — the whole current corpus — which is deliberately a DIFFERENT staging table from the upsert's __scored_src: a partial pass scores only part of the corpus, so what it may claim to have scored and what still exists are two different sets."
 params: []
 returns: none

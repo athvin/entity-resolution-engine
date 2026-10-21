@@ -649,8 +649,48 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          control plane applies; DesignDoc specified both and neither existed.
          Still unbuilt: tombstone *event* attribution in `entity_events` (already a documented
          gap in `run_reconcile`'s own note), and retiring `entities` rows that lose every member.
-   - [ ] E5 ensembles/cascades (#31), E6b segment scoping (#54),
-         E9b import-time screening + update rules (#38/#39), E9c S3 auto-ingestion (#47).
+   - [x] **E6b segment scoping (#54) — splitting the work without splitting the data.**
+         The incumbent caps a run at 3 hours and tells you to split your dataset. Splitting the
+         *corpus* is the obvious reading and it is destructive: every cross-segment duplicate
+         becomes invisible, and the records outside the slice lose the entities they are already
+         in. E7's machinery allows the better answer — split the **work**: a `segments` config
+         block maps a name to a predicate, and a scoped pass scores `segment × whole corpus`
+         plus `segment × segment`, reusing the stored scores for pairs where neither endpoint is
+         in the slice. Frozen model + frozen TF make those stored numbers exactly what a
+         re-score would produce, so **a scoped run leaves `match_scores` where a full run would**
+         and running each segment in turn covers the corpus with no pair unexamined. Same
+         INV-EQ argument as E7, same proof obligation.
+         The scope is widened to include anything new or changed wherever it lives. Deliberate:
+         the alternative is to score a slice and then write a ledger claiming the records
+         outside it were scored, which the next pass would believe.
+         **A run names a segment; it never carries SQL.** The predicate lives in the published
+         config, where it is parsed and column-checked beside the blocking rules — publish is
+         the only gate it ever passes, because nothing downstream re-parses it. A request
+         carrying SQL would hand every steward an injection point into the engine's own
+         queries. Validated twice: `create_job` 422s an unknown name *at submit*, listing the
+         declared ones (a typo must not become a queued job that fails minutes later), and the
+         dispatcher re-resolves against the config it is about to run under, because a schedule
+         stores its params and the config can be republished without it.
+         `GET /v1/orgs/{org}/segments` makes the names discoverable, with each predicate — an
+         operator choosing how to split a long run needs to see what each slice covers, and it
+         is their own config. `er run-all --segment` for the CLI.
+         **Also fixed here, surfaced by segments:** E7's ledger sync recorded the *whole corpus*
+         as scored. Harmless for an ordinary incremental pass (the rest already had matching
+         rows) but a lie for a scoped one, and the next pass would act on it. The upsert now
+         covers only what the pass scored; retirement still compares against the whole corpus,
+         so the two now read deliberately different staging tables.
+         Tests: `resolving_each_segment_in_turn_lands_where_one_full_run_would` segments
+         base_10 on `source_system` — chosen because **17 of its 19 pairs are cross-source**, so
+         the naive corpus-filtering implementation loses every one of them (observed: sabotaging
+         it drops exactly those 17) while two same-source pairs keep the within-slice pass
+         covered. Run with no new data on purpose, so three passes over an unchanged corpus must
+         round-trip `match_scores` bit-identically. Plus `pg_segments.rs` (name-not-SQL in the
+         job params, 422 on unknown/empty/wrong-case names naming what exists, discovery,
+         viewer 403, and a bad predicate refused at publish with nothing going live) and
+         er-config tests that an unused `segments` block leaves `config_hash` untouched while a
+         declared one moves it.
+   - [ ] E5 ensembles/cascades (#31), E9b import-time screening + update rules (#38/#39),
+         E9c S3 auto-ingestion (#47).
 3. **Learning loop** — labels/train/evaluate (#19/#20 + the evaluation-tooling gap),
    related-record features (#26), household/link entities (#33).
 4. **Operating at scale**

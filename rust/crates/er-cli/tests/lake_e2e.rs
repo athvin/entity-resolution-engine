@@ -158,6 +158,7 @@ fn run_all_phase(
         &er_cli::PipelineInputs {
             mode,
             rebuild_reason: None,
+            segment: None,
             lexicon: &lexicon_pairs(),
             deliveries: &deliveries,
             model: &er_cli::MatchModel {
@@ -786,6 +787,141 @@ fn an_incremental_batch_lands_where_a_full_rerun_would() {
     let _ = std::fs::remove_dir_all(&tmp_b);
 }
 
+/// Resolving the corpus one segment at a time must land exactly where one full
+/// run would (#54).
+///
+/// This is the answer to "my corpus is too big for one run", and the whole
+/// question is whether splitting the WORK can avoid splitting the DATA. The
+/// fixture makes the difference impossible to fake: base_10's duplicates are all
+/// **cross-source** by construction, so segmenting on `source_system` means
+/// every single duplicate spans two segments. An implementation that filtered
+/// the corpus to the segment — the obvious reading of "scope a run" — would find
+/// no duplicates at all and this test would collapse.
+///
+/// Run with no new data on purpose. Each pass therefore has to invalidate its
+/// slice's scores and rebuild them from the whole corpus, so the test is an
+/// exact round-trip: three passes over a corpus that has not changed must leave
+/// `match_scores` bit-identical to what the full run wrote.
+#[test]
+fn resolving_each_segment_in_turn_lands_where_one_full_run_would() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let (session, mut config, tmp) = open_seeded_lake("seg_cover");
+    // Declared in code rather than in the committed fixture so `config_hash`
+    // and the config golden stay untouched; the YAML parse path has its own
+    // test in er-config.
+    for source in ["crm", "billing", "webforms"] {
+        config
+            .segments
+            .insert(source.to_string(), format!("source_system = '{source}'"));
+    }
+
+    run_all_phase(
+        &session,
+        &config,
+        "incremental_batch",
+        "base",
+        "01SEGCOVER0000000000BASE000",
+        "2026-01-01 00:00:00",
+        "full",
+    );
+    let full_scores = active_scores(&session);
+    let full_partition = partition(&membership_rows(&session));
+
+    // The premise, in both directions. Most base_10 duplicates span two sources
+    // — so an implementation that filtered the corpus down to the segment would
+    // lose them, and this test would collapse rather than pass. A couple are
+    // within one source, so the within-slice pass is exercised too. Asserting
+    // both keeps the test honest if the fixture ever changes shape.
+    let same_source: Vec<_> = full_scores
+        .keys()
+        .filter(|(a, b)| a.split(':').next() == b.split(':').next())
+        .collect();
+    let cross_source = full_scores.len() - same_source.len();
+    assert!(
+        cross_source >= 15,
+        "premise: most pairs must cross a segment boundary (found {cross_source} \
+         of {})",
+        full_scores.len()
+    );
+    assert!(
+        !same_source.is_empty(),
+        "premise: at least one pair must sit inside one segment, so the \
+         within-slice pass is covered too"
+    );
+
+    let model_json = std::fs::read_to_string(repo_fixture("model_test_v1.json")).unwrap();
+    let tf_csv = repo_fixture("model_test_v1.tf.csv");
+    for (i, source) in ["crm", "billing", "webforms"].iter().enumerate() {
+        let delta = er_cli::run_match_segment(
+            &session,
+            &config,
+            &er_cli::MatchModel {
+                settings_json: &model_json,
+                tf_csv_path: std::path::Path::new(&tf_csv),
+                model_version: "v0001",
+                tf_snapshot_id: "01JWMDTFSNAP00000000000001",
+            },
+            config.thresholds.review_low,
+            &format!("01SEGCOVER00000000000SEG{i:03}"),
+            "2026-03-01 00:00:00",
+            &config.segments[*source],
+        )
+        .unwrap();
+        assert_eq!(delta.mode, "incremental", "{:?}", delta.full_reason);
+        assert_eq!(
+            delta.scope_predicate.as_deref(),
+            Some(config.segments[*source].as_str()),
+            "the pass should report the scope it ran under"
+        );
+        // The slice really was the unit of work: fewer records than the corpus,
+        // and more than none.
+        assert!(
+            delta.delta_records > 0 && delta.delta_records < delta.corpus_records,
+            "segment {source} scored {}/{} records",
+            delta.delta_records,
+            delta.corpus_records
+        );
+        assert!(
+            delta.invalidated_scores > 0,
+            "segment {source} should have superseded its own slice's scores"
+        );
+    }
+
+    er_cli::run_reconcile(
+        &session,
+        &config,
+        "01SEGCOVER0000000000RECON00",
+        "2026-03-01 00:00:00",
+    )
+    .unwrap();
+
+    let segmented = active_scores(&session);
+    let keys_full: BTreeSet<_> = full_scores.keys().collect();
+    let keys_seg: BTreeSet<_> = segmented.keys().collect();
+    assert_eq!(
+        keys_seg,
+        keys_full,
+        "covering the corpus by segment lost or invented pairs; \
+         only-segmented={:?} only-full={:?}",
+        keys_seg.difference(&keys_full).collect::<Vec<_>>(),
+        keys_full.difference(&keys_seg).collect::<Vec<_>>(),
+    );
+    assert_eq!(
+        segmented, full_scores,
+        "the same pairs, but scored differently"
+    );
+    assert_eq!(
+        partition(&membership_rows(&session)),
+        full_partition,
+        "segment-by-segment resolution produced different entities"
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
 /// The incremental pass must be CHEAPER, and both of its passes must be live.
 ///
 /// Equivalence alone is satisfiable by a pass that quietly re-scores everything,
@@ -1122,6 +1258,7 @@ fn run_all_base(tag: &str) -> (Session, Config, PathBuf) {
         &er_cli::PipelineInputs {
             mode: "full",
             rebuild_reason: None,
+            segment: None,
             lexicon: &lexicon,
             deliveries: &deliveries,
             model: &er_cli::MatchModel {
@@ -1529,6 +1666,7 @@ fn a_declared_veto_keeps_a_pair_out_of_scoring_but_not_out_of_a_transitive_clust
             &er_cli::PipelineInputs {
                 mode: "full",
                 rebuild_reason: None,
+                segment: None,
                 lexicon: &lexicon,
                 deliveries: &deliveries,
                 model: &er_cli::MatchModel {
@@ -1725,6 +1863,7 @@ fn a_model_compiled_from_the_config_resolves_base_10_like_the_trained_one() {
             &er_cli::PipelineInputs {
                 mode: "full",
                 rebuild_reason: None,
+                segment: None,
                 lexicon: &lexicon,
                 deliveries: &deliveries,
                 model: &er_cli::MatchModel {

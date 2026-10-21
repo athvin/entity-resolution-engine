@@ -102,6 +102,11 @@ enum Command {
         /// since the last successful run, instead of refusing it.
         #[arg(long)]
         allow_escalate: bool,
+        /// Restrict the match pass to a `segments` entry from the config: score
+        /// that slice against the whole corpus and reuse the rest. Bounds how
+        /// much one run does without losing cross-segment duplicates.
+        #[arg(long)]
+        segment: Option<String>,
     },
     /// S4.3.2 — train a match model on int_std_records; writes the trained
     /// settings JSON + the frozen TF snapshot CSV.
@@ -243,6 +248,7 @@ fn main() -> Result<()> {
             run_id,
             mode,
             allow_escalate,
+            segment,
         } => {
             let lexicon = load_lexicon(&lexicon)?;
             let mut deliveries: Vec<(String, String)> = Vec::new();
@@ -273,6 +279,27 @@ fn main() -> Result<()> {
             if decision.escalated() {
                 eprintln!("{}", decision.message);
             }
+            // A segment is named, never spelled out: the predicate comes from
+            // the config so it has been parsed and column-checked, and an
+            // unknown name fails here with the available names rather than
+            // deeper down as a SQL error.
+            let segment = match &segment {
+                Some(name) => {
+                    let predicate = config.segments.get(name).ok_or_else(|| {
+                        let known: Vec<&str> = config.segments.keys().map(String::as_str).collect();
+                        anyhow::anyhow!(
+                            "segment {name:?} is not in the config (known: {})",
+                            if known.is_empty() {
+                                "none declared".to_string()
+                            } else {
+                                known.join(", ")
+                            }
+                        )
+                    })?;
+                    Some((name.as_str(), predicate.as_str()))
+                }
+                None => None,
+            };
             er_cli::run_all(
                 &session,
                 &config,
@@ -283,6 +310,7 @@ fn main() -> Result<()> {
                     } else {
                         None
                     },
+                    segment,
                     lexicon: &lexicon,
                     deliveries: &deliveries,
                     model: &er_cli::MatchModel {
