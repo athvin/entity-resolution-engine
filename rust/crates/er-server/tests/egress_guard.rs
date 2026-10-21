@@ -60,11 +60,7 @@ fn no_product_code_bypasses_the_outbound_url_guard() {
         src.display()
     );
 
-    const BYPASSES: [&str; 3] = [
-        "Egress::Unguarded",
-        "emit_with_egress",
-        "emit_job_event_with_egress",
-    ];
+    const BYPASSES: [&str; 2] = ["Egress::Unguarded", "drain_once_with_egress"];
     let mut offenders: Vec<String> = Vec::new();
     for file in &files {
         // The guard module and the webhook module DEFINE the seam; they are the
@@ -87,7 +83,7 @@ fn no_product_code_bypasses_the_outbound_url_guard() {
     assert!(
         offenders.is_empty(),
         "product code must not reach the unguarded outbound path — call \
-         webhook::emit / webhook::emit_job_event, which always apply the \
+         webhook::drain / webhook::drain_once, which always apply the \
          guard:\n{}",
         offenders.join("\n")
     );
@@ -144,7 +140,7 @@ fn the_guarded_entry_points_call_the_guard() {
         .expect("webhook.rs is readable");
     assert!(
         webhook.contains("urlguard::check(&url, egress)"),
-        "the delivery loop must re-check every URL before POSTing to it"
+        "the drainer must re-check the URL before POSTing to it"
     );
     assert!(
         webhook.contains("Egress::Guarded"),

@@ -36,7 +36,7 @@ use std::net::IpAddr;
 /// There is no environment variable and no config switch for this, deliberately:
 /// a guard that can be turned off by configuration is a guard that will be found
 /// off in production. The only unguarded path is
-/// [`crate::webhook::emit_with_egress`], which exists so the delivery
+/// [`crate::webhook::drain_once_with_egress`], which exists so the delivery
 /// integration test can POST to a local listener, and which
 /// `tests/egress_guard.rs` forbids product code from naming.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

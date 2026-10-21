@@ -29,6 +29,14 @@ const IDLE_MAX: Duration = Duration::from_secs(5);
 /// minute — it is not the firing precision.
 const SCHEDULE_TICK_EVERY: Duration = Duration::from_secs(20);
 
+/// How many webhook deliveries one loop pass may attempt.
+///
+/// Bounded so a backlog cannot starve job dispatch — whatever is left is still
+/// due next pass. Small because each attempt is a network round trip with a
+/// 10s ceiling; a bigger budget would let one unreachable subscriber stall the
+/// loop for minutes.
+const DELIVERY_BUDGET: usize = 8;
+
 /// Poll + run jobs until `term` is set or a Postgres failure occurs. Returns
 /// `Ok(())` on a clean (term-requested) exit; `Err` on a control-plane failure
 /// (the caller decides whether that's fatal — the standalone binary exits
@@ -59,8 +67,23 @@ pub async fn run_loop(
                 Err(e) => eprintln!("scheduler tick failed: {e}"),
             }
         }
-        if dispatch_once(client, http).await? {
-            idle = IDLE_MIN; // ran a job; poll again immediately
+        // Deliver what the emit sites recorded. The outbox is drained here
+        // rather than at emit time so a subscriber that is briefly unreachable
+        // gets the event late instead of never — before this, every emit site
+        // POSTed inline and dropped the outcome with `let _ =`.
+        let drained = match webhook::drain(client, http, DELIVERY_BUDGET).await {
+            Ok(n) => n,
+            // A delivery failure is recorded, not propagated; a Postgres
+            // failure here must not take the job loop down either, for the
+            // same reason the scheduler tick does not.
+            Err(e) => {
+                eprintln!("webhook drain failed: {e}");
+                0
+            }
+        };
+
+        if dispatch_once(client).await? || drained > 0 {
+            idle = IDLE_MIN; // did work; poll again immediately
         } else {
             tokio::time::sleep(idle).await; // empty queue; back off (SIGTERM
             idle = (idle * 2).min(IDLE_MAX); // is seen at the next loop top)
@@ -145,10 +168,10 @@ struct ActiveModel {
 
 /// Claim + run one job. `Ok(true)` ran a job (outcome persisted), `Ok(false)`
 /// the queue was empty, `Err` a Postgres failure (fatal to the caller).
-async fn dispatch_once(
-    client: &tokio_postgres::Client,
-    http: &reqwest::Client,
-) -> Result<bool, tokio_postgres::Error> {
+///
+/// Takes no HTTP client: the job's `job.<state>` event is only RECORDED here,
+/// and `run_loop`'s drain does the sending.
+async fn dispatch_once(client: &tokio_postgres::Client) -> Result<bool, tokio_postgres::Error> {
     let Some(job) = pg::claim(client).await? else {
         return Ok(false);
     };
@@ -237,7 +260,7 @@ async fn dispatch_once(
     // incident is how an integration learns to ignore them. A requeued job is
     // not an outcome yet.
     if completed.state != "queued" {
-        let _ = webhook::emit_job_event(client, http, &completed).await;
+        let _ = webhook::emit_job_event(client, &completed).await;
     }
     Ok(true)
 }

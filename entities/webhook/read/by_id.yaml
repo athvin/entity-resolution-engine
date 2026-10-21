@@ -1,0 +1,6 @@
+kind: statement
+operation: read
+description: "One active subscription by id, for the outbox drainer to resolve its url and secret at delivery time rather than freezing them into the queued row — so rotating a secret or correcting a URL takes effect on the next attempt. Filters on `active`, which is also how deactivating a webhook stops queued deliveries."
+params:
+  - { name: webhook_id, type: varchar }
+returns: entity

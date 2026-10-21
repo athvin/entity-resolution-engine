@@ -1,0 +1,82 @@
+kind: entity
+version: 1
+name: webhook_delivery
+relation: webhook_deliveries
+description: "One attempt-tracked delivery of one event to one subscriber. The event is recorded here BEFORE any network call, so a subscriber that is briefly unreachable gets the event late instead of never."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+  # `wire: [json]` is what makes the typescript binding actually emit — without
+  # it the `typescript` language is silently ignored (V16).
+  wire: [json]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "UUIDv7, minted by the application."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant whose subscriber this is for; every read is scoped by it."
+  - name: webhook_id
+    type: varchar
+    nullable: false
+    references: { relation: webhooks, column: id }
+    description: "The subscription being delivered to."
+  - name: event_type
+    type: varchar
+    nullable: false
+    description: "The catalogued event (webhook::EVENT_CATALOG), e.g. job.succeeded."
+  - name: payload
+    type: json
+    nullable: false
+    description: "The exact body to POST. Stored rather than rebuilt so a retry delivers the same bytes the signature was computed over, and so the log shows what was actually sent."
+  - name: state
+    type: varchar
+    nullable: false
+    default: "'pending'"
+    accepted_values: [pending, delivered, failed]
+    description: "pending until a drain settles it; delivered on a 2xx; failed when retries are exhausted or the destination is refused outright."
+  - name: attempt
+    type: bigint
+    nullable: false
+    default: "0"
+    description: "Attempts handed out. Counted when claimed, not when reported, so a drainer that dies still consumes one."
+  - name: max_attempts
+    type: bigint
+    nullable: false
+    default: "6"
+    description: "Attempts before giving up. Six with the backoff below spans about ten minutes."
+  - name: next_attempt_at
+    type: timestamp
+    description: "When this becomes claimable. NULL means immediately; set to a backoff in the future after a retryable failure."
+  - name: response_code
+    type: bigint
+    description: "The subscriber's HTTP status, when the POST completed at all."
+  - name: error
+    type: varchar
+    description: "Why the last attempt did not deliver: a transport error, or the outbound-URL guard's refusal."
+  - name: delivered_at
+    type: timestamp
+    description: "When a 2xx was received; NULL unless state is delivered."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    volatile: true
+    default: now()
+    description: "When the event was recorded, which is before any delivery was attempted."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    volatile: true
+    default: now()
+    description: "Last write."
+indexes:
+  # The per-tenant delivery log, newest first.
+  - name: webhook_deliveries_org_recent
+    columns: [org_id, created_at]
+  # The drainer's claim scan: pending rows whose backoff has elapsed.
+  - name: webhook_deliveries_claimable
+    columns: [state, next_attempt_at]

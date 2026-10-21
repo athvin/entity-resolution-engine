@@ -144,6 +144,22 @@ erDiagram
         timestamp created_at
         timestamp updated_at
     }
+    webhook_deliveries {
+        varchar id PK
+        varchar org_id FK
+        varchar webhook_id FK
+        varchar event_type
+        json payload
+        varchar state "in {delivered, failed, pending}"
+        bigint attempt
+        bigint max_attempts
+        timestamp next_attempt_at
+        bigint response_code
+        varchar error
+        timestamp delivered_at
+        timestamp created_at
+        timestamp updated_at
+    }
     api_keys }o--|| orgs : "org_id → id"
     config_versions }o--|| orgs : "org_id → id"
     jobs }o--|| orgs : "org_id → id"
@@ -151,6 +167,8 @@ erDiagram
     schedules }o--|| orgs : "org_id → id"
     staged_steward_actions }o--|| orgs : "org_id → id"
     webhooks }o--|| orgs : "org_id → id"
+    webhook_deliveries }o--|| orgs : "org_id → id"
+    webhook_deliveries }o--|| webhooks : "webhook_id → id"
 ```
 
 | relation | description |
@@ -165,6 +183,7 @@ erDiagram
 | `schedules` | A recurring job schedule for a tenant: its kind, cron and source. |
 | `staged_steward_actions` | A steward action staged for review/apply: its payload, state and outcome. |
 | `webhooks` | A tenant webhook endpoint: its URL, subscribed events and signing secret. |
+| `webhook_deliveries` | One attempt-tracked delivery of one event to one subscriber. The event is recorded here BEFORE any network call, so a subscriber that is briefly unreachable gets the event late instead of never. |
 
 ## Frontend BFF — Postgres `erweb`
 

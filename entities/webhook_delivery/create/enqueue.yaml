@@ -1,0 +1,12 @@
+kind: statement
+operation: create
+mode: partial
+description: "Record an event for one subscriber, before anything is sent. This is the whole point of the outbox: the emit sites used to POST inline and discard the result with `let _ =`, so a subscriber that was down for a moment missed the event permanently and nobody — tenant or operator — could tell."
+params:
+  - { name: id, type: varchar }
+  - { name: org_id, type: varchar }
+  - { name: webhook_id, type: varchar }
+  - { name: event_type, type: varchar }
+  - { name: payload, type: json }
+  - { name: max_attempts, type: bigint }
+returns: entity

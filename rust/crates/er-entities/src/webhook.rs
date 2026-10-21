@@ -86,6 +86,31 @@ pub mod delete {
 
 pub mod read {
     //! @generated query functions for this entity + operation.
+    /// One active subscription by id, for the outbox drainer to resolve its url and secret at delivery time rather than freezing them into the queued row — so rotating a secret or correcting a URL takes effect on the next attempt. Filters on `active`, which is also how deactivating a webhook stops queued deliveries.
+    pub async fn by_id(
+        client: &::tokio_postgres::Client,
+        webhook_id: &str,
+    ) -> ::std::result::Result<Vec<super::Webhook>, ::tokio_postgres::Error> {
+        const SQL: &str = "SELECT id, org_id, url, events, secret, active, created_at, updated_at
+FROM public.webhooks
+WHERE id = $1 AND active
+";
+        let rows = client.query(SQL, &[&webhook_id]).await?;
+        Ok(rows
+            .iter()
+            .map(|row| super::Webhook {
+                id: row.get("id"),
+                org_id: row.get("org_id"),
+                url: row.get("url"),
+                events: row.get("events"),
+                secret: row.get("secret"),
+                active: row.get("active"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+            })
+            .collect())
+    }
+
     /// The delivery targets for one event: every active webhook subscribed to the type (or subscribed-to-all); includes the secret the delivery signs with.
     pub async fn for_delivery(
         client: &::tokio_postgres::Client,

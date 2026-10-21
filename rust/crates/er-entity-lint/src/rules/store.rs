@@ -42,6 +42,17 @@ const V12_BAD: &str = r"generate:
   wire: [json]
 ";
 
+const V16_GOOD: &str = r"generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+  wire: [json]
+";
+
+const V16_BAD: &str = r"generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+";
+
 const V13_GOOD: &str = r"generate:
   stores: [postgres]
   languages: [rust]
@@ -141,6 +152,40 @@ impl EntityRule for WireRequiresRust {
         vec![Violation::new(
             &entity.name,
             "a wire (arrow/json) requires generate.languages to include rust",
+        )]
+    }
+}
+
+/// V16 — a `typescript` language needs a wire to emit from.
+pub struct TypescriptRequiresWire;
+
+impl EntityRule for TypescriptRequiresWire {
+    fn info(&self) -> RuleInfo {
+        RuleInfo {
+            code: Code("V16"),
+            title: "an entity generating for `typescript` declares an arrow or json `wire`",
+            explain: "The TypeScript binding emitter is gated on a wire: with none declared, \
+                      `languages: [typescript]` emits nothing at all and no gate notices, so \
+                      the YAML claims a frontend type that does not exist and the frontend \
+                      hand-writes one instead — which is the drift the generated bindings were \
+                      introduced to stop. This was found the honest way: a new entity declared \
+                      `typescript`, no binding appeared, and `verify` was perfectly happy. V12 \
+                      covers the other direction (a wire needs a Rust end); together they make \
+                      the stores/languages/wire triple consistent.",
+            conforming: V16_GOOD,
+            violating: V16_BAD,
+            severity: Severity::Error,
+        }
+    }
+
+    fn check(&self, entity: &Entity) -> Vec<Violation> {
+        if !entity.has_language(Language::Typescript) || !entity.generate.wire.is_empty() {
+            return Vec::new();
+        }
+        vec![Violation::new(
+            &entity.name,
+            "generate.languages includes typescript but no wire is declared, so no binding is \
+             emitted — add `wire: [json]` (or drop typescript)",
         )]
     }
 }

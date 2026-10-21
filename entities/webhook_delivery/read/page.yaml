@@ -1,0 +1,9 @@
+kind: statement
+operation: read
+description: "The tenant's delivery log, newest first, optionally narrowed to one subscription or one state. Answers the question the old inline-and-discard path could not: did my endpoint actually receive it, and if not, why."
+params:
+  - { name: org_id, type: varchar }
+  - { name: webhook_id, type: varchar, nullable: true }
+  - { name: state, type: varchar, nullable: true }
+  - { name: limit, type: bigint }
+returns: entity

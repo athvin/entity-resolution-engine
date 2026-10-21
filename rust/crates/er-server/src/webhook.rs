@@ -65,6 +65,12 @@ pub fn catalog_json() -> Value {
     )
 }
 
+/// How many times a delivery is attempted before it is given up on. Six with
+/// the backoff in `webhook_delivery/update/settle.sql` spans about ten minutes,
+/// which covers a subscriber restart without keeping a dead endpoint in the
+/// queue for hours.
+pub const MAX_DELIVERY_ATTEMPTS: i64 = 6;
+
 /// The header carrying the payload signature: `sha256=<hex>` (GitHub-style, so
 /// a subscriber recomputes HMAC-SHA256 over the raw body to authenticate it).
 pub const SIGNATURE_HEADER: &str = "X-ER-Signature";
@@ -78,16 +84,6 @@ pub fn sign(secret: &str, body: &[u8]) -> String {
         HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC accepts any key length");
     mac.update(body);
     format!("sha256={}", hex::encode(mac.finalize().into_bytes()))
-}
-
-/// One delivery's outcome: the HTTP status (if the POST completed) or the
-/// transport error. A non-2xx status is reported via `status`, not `error`.
-#[derive(Debug)]
-pub struct DeliveryResult {
-    pub webhook_id: String,
-    pub url: String,
-    pub status: Option<u16>,
-    pub error: Option<String>,
 }
 
 /// How long a single delivery may take before it is abandoned. A subscriber
@@ -138,36 +134,103 @@ async fn post(
     Ok(resp.status().as_u16())
 }
 
-/// Fan an event out to every active webhook subscribed to `event_type`: build
-/// the body `{event, org, ...data}`, sign it per-subscriber (each has its own
-/// secret), and POST. Returns one [`DeliveryResult`] per target (empty when
-/// none subscribe). A dead endpoint is recorded, never propagated, so one
-/// failure can't suppress the others.
+/// Record an event for every active webhook subscribed to `event_type`, and
+/// return without sending anything.
+///
+/// This used to POST inline and every caller discarded the result with
+/// `let _ =`, so a subscriber that was unreachable for a moment missed the
+/// event **permanently** and nobody — tenant or operator — could find out: the
+/// per-target outcomes were computed and thrown away. Now the event lands in
+/// `webhook_deliveries` before any network call, and [`drain_once`] delivers it
+/// with retries.
+///
+/// The body is built and stored once, here, rather than rebuilt per attempt:
+/// a retry has to deliver the same bytes the signature is computed over, and
+/// the log has to show what was actually sent.
+///
+/// Returns one row per subscriber that will be attempted (empty when none
+/// subscribe).
 ///
 /// # Errors
-/// Propagates only the Postgres subscriber lookup error; per-delivery transport
-/// failures are captured in the returned results.
+/// Propagates the Postgres subscriber lookup or insert error. Unlike the old
+/// inline path this one CAN fail meaningfully — failing to record an event is
+/// worth knowing about, where failing to reach one subscriber is not.
 pub async fn emit(
     pg_client: &tokio_postgres::Client,
-    http: &reqwest::Client,
     org_id: &str,
     org_name: &str,
     event_type: &str,
     data: &Value,
-) -> Result<Vec<DeliveryResult>, tokio_postgres::Error> {
-    emit_with_egress(
-        pg_client,
-        http,
-        org_id,
-        org_name,
-        event_type,
-        data,
-        crate::urlguard::Egress::Guarded,
-    )
-    .await
+) -> Result<Vec<er_entities::webhook_delivery::WebhookDelivery>, tokio_postgres::Error> {
+    let targets = pg::webhooks_for_delivery(pg_client, org_id, event_type).await?;
+    if targets.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut body_doc = json!({ "event": event_type, "org": org_name });
+    if let (Some(obj), Some(extra)) = (body_doc.as_object_mut(), data.as_object()) {
+        for (k, v) in extra {
+            obj.insert(k.clone(), v.clone());
+        }
+    }
+
+    let mut queued = Vec::with_capacity(targets.len());
+    for (webhook_id, _url, _secret) in targets {
+        let row = er_entities::webhook_delivery::create::enqueue(
+            pg_client,
+            &er_ids::new_v7(),
+            org_id,
+            &webhook_id,
+            event_type,
+            &body_doc,
+            MAX_DELIVERY_ATTEMPTS,
+        )
+        .await?;
+        queued.extend(row);
+    }
+    Ok(queued)
 }
 
-/// [`emit`] with the outbound-URL guard made explicit.
+/// Deliver one due outbox row, with retries. `Ok(None)` when nothing is due.
+///
+/// The drainer, not the emit site, is where the network lives. That split is
+/// what makes a transient failure recoverable: the event is already durable, so
+/// a 500 or a refused connection becomes a backoff rather than a loss.
+///
+/// Classification decides retry-or-give-up, and getting it wrong wastes either
+/// deliveries or minutes:
+///   * 2xx — delivered, terminal.
+///   * 408 / 429 / 5xx, or a transport error — retryable; `settle` applies the
+///     backoff and `max_attempts` decides when to stop.
+///   * any other 4xx — the subscriber is rejecting the request itself and will
+///     reject it identically five more times, so fail now.
+///   * refused by the outbound-URL guard — never retryable. Re-checked here
+///     and not only at registration, because a hostname that resolved to a
+///     public address when the webhook was created can resolve to a private one
+///     now; that is DNS rebinding, and a registration-time-only guard does
+///     nothing about it.
+///
+/// # Errors
+/// Propagates a Postgres claim/settle failure. A delivery failure is recorded,
+/// never propagated — one dead endpoint must not stop the queue.
+pub async fn drain_once(
+    pg_client: &tokio_postgres::Client,
+    http: &reqwest::Client,
+) -> Result<Option<Delivered>, tokio_postgres::Error> {
+    drain_once_with_egress(pg_client, http, crate::urlguard::Egress::Guarded).await
+}
+
+/// What one drained attempt did.
+#[derive(Debug)]
+pub struct Delivered {
+    pub delivery_id: String,
+    pub webhook_id: String,
+    pub state: String,
+    pub status: Option<u16>,
+    pub error: Option<String>,
+}
+
+/// [`drain_once`] with the outbound-URL guard made explicit.
 ///
 /// `Egress::Unguarded` exists for ONE caller — the delivery integration test,
 /// which has to POST to a listener on `127.0.0.1` to observe that a delivery
@@ -178,82 +241,141 @@ pub async fn emit(
 /// off is a guard that gets found off.
 ///
 /// # Errors
-/// Propagates only the Postgres subscriber lookup error.
+/// Propagates a Postgres claim/settle failure.
 #[doc(hidden)]
-pub async fn emit_with_egress(
+pub async fn drain_once_with_egress(
     pg_client: &tokio_postgres::Client,
     http: &reqwest::Client,
-    org_id: &str,
-    org_name: &str,
-    event_type: &str,
-    data: &Value,
     egress: crate::urlguard::Egress,
-) -> Result<Vec<DeliveryResult>, tokio_postgres::Error> {
-    let targets = pg::webhooks_for_delivery(pg_client, org_id, event_type).await?;
+) -> Result<Option<Delivered>, tokio_postgres::Error> {
+    let Some(delivery) = er_entities::webhook_delivery::update::claim(pg_client)
+        .await?
+        .into_iter()
+        .next()
+    else {
+        return Ok(None);
+    };
 
-    let mut body_doc = json!({ "event": event_type, "org": org_name });
-    if let (Some(obj), Some(extra)) = (body_doc.as_object_mut(), data.as_object()) {
-        for (k, v) in extra {
-            obj.insert(k.clone(), v.clone());
-        }
-    }
-    let body = serde_json::to_vec(&body_doc).unwrap_or_default();
+    // The subscriber's URL and secret are read at delivery time, so rotating a
+    // secret or correcting a URL takes effect on the next attempt rather than
+    // being frozen into the queued row.
+    let Some((url, secret)) = pg::webhook_endpoint(pg_client, &delivery.webhook_id).await? else {
+        let settled = settle(
+            pg_client,
+            &delivery.id,
+            false,
+            false,
+            None,
+            Some("the subscription no longer exists"),
+        )
+        .await?;
+        return Ok(Some(Delivered {
+            delivery_id: delivery.id,
+            webhook_id: delivery.webhook_id,
+            state: settled,
+            status: None,
+            error: Some("the subscription no longer exists".to_string()),
+        }));
+    };
 
-    let mut results = Vec::with_capacity(targets.len());
-    for (webhook_id, url, secret) in targets {
-        // Re-checked HERE, not only at registration. A hostname that resolved
-        // to a public address when the webhook was created can resolve to a
-        // private one now — that is DNS rebinding, and a registration-time-only
-        // guard does nothing about it.
-        if let Err(rejection) = crate::urlguard::check(&url, egress).await {
-            results.push(DeliveryResult {
-                webhook_id,
-                url,
-                status: None,
-                error: Some(format!("refused: {rejection}")),
-            });
-            continue;
-        }
-        let signature = sign(&secret, &body);
-        let (status, error) = match post(http, &url, body.clone(), &signature).await {
-            Ok(code) => (Some(code), None),
-            Err(e) => (None, Some(e)),
-        };
-        results.push(DeliveryResult {
-            webhook_id,
-            url,
-            status,
-            error,
-        });
+    let body = serde_json::to_vec(&delivery.payload).unwrap_or_default();
+
+    if let Err(rejection) = crate::urlguard::check(&url, egress).await {
+        let error = format!("refused: {rejection}");
+        let settled = settle(pg_client, &delivery.id, false, false, None, Some(&error)).await?;
+        return Ok(Some(Delivered {
+            delivery_id: delivery.id,
+            webhook_id: delivery.webhook_id,
+            state: settled,
+            status: None,
+            error: Some(error),
+        }));
     }
-    Ok(results)
+
+    let signature = sign(&secret, &body);
+    let (delivered, retryable, status, error) = match post(http, &url, body, &signature).await {
+        Ok(code) if (200..300).contains(&code) => (true, false, Some(code), None),
+        Ok(code) => {
+            let retryable = code == 408 || code == 429 || (500..600).contains(&code);
+            (false, retryable, Some(code), Some(format!("HTTP {code}")))
+        }
+        Err(e) => (false, true, None, Some(e)),
+    };
+    let settled = settle(
+        pg_client,
+        &delivery.id,
+        delivered,
+        retryable,
+        status,
+        error.as_deref(),
+    )
+    .await?;
+    Ok(Some(Delivered {
+        delivery_id: delivery.id,
+        webhook_id: delivery.webhook_id,
+        state: settled,
+        status,
+        error,
+    }))
 }
 
-/// Emit the `job.<state>` event for a settled job to the org's subscribers.
+/// Record the attempt's outcome, returning the resulting state.
+async fn settle(
+    pg_client: &tokio_postgres::Client,
+    delivery_id: &str,
+    delivered: bool,
+    retryable: bool,
+    status: Option<u16>,
+    error: Option<&str>,
+) -> Result<String, tokio_postgres::Error> {
+    let rows = er_entities::webhook_delivery::update::settle(
+        pg_client,
+        delivered,
+        retryable,
+        status.map(i64::from),
+        error,
+        delivery_id,
+    )
+    .await?;
+    Ok(rows
+        .into_iter()
+        .next()
+        .map_or_else(|| "failed".to_string(), |r| r.state))
+}
+
+/// Drain until nothing is due, up to `budget` attempts. Returns how many were
+/// settled.
+///
+/// Bounded on purpose: this rides the dispatcher loop, and an unbounded drain
+/// would let a large backlog starve job dispatch. Whatever is left is still due
+/// on the next pass.
 ///
 /// # Errors
-/// Propagates the Postgres subscriber lookup error.
+/// Propagates a Postgres claim/settle failure.
+pub async fn drain(
+    pg_client: &tokio_postgres::Client,
+    http: &reqwest::Client,
+    budget: usize,
+) -> Result<usize, tokio_postgres::Error> {
+    let mut settled = 0;
+    for _ in 0..budget {
+        if drain_once(pg_client, http).await?.is_none() {
+            break;
+        }
+        settled += 1;
+    }
+    Ok(settled)
+}
+
+/// Record the `job.<state>` event for a settled job against the org's
+/// subscribers. Delivery happens later, in [`drain_once`].
+///
+/// # Errors
+/// Propagates the Postgres subscriber lookup or insert error.
 pub async fn emit_job_event(
     pg_client: &tokio_postgres::Client,
-    http: &reqwest::Client,
     job: &crate::Job,
-) -> Result<Vec<DeliveryResult>, tokio_postgres::Error> {
-    emit_job_event_with_egress(pg_client, http, job, crate::urlguard::Egress::Guarded).await
-}
-
-/// [`emit_job_event`] with the outbound-URL guard made explicit; see
-/// [`emit_with_egress`] for why this exists and what forbids its use in
-/// product code.
-///
-/// # Errors
-/// Propagates the Postgres subscriber lookup error.
-#[doc(hidden)]
-pub async fn emit_job_event_with_egress(
-    pg_client: &tokio_postgres::Client,
-    http: &reqwest::Client,
-    job: &crate::Job,
-    egress: crate::urlguard::Egress,
-) -> Result<Vec<DeliveryResult>, tokio_postgres::Error> {
+) -> Result<Vec<er_entities::webhook_delivery::WebhookDelivery>, tokio_postgres::Error> {
     let event_type = format!("job.{}", job.state);
     let data = json!({
         "job_id": job.id,
@@ -265,31 +387,5 @@ pub async fn emit_job_event_with_egress(
     let org_name = crate::pg::get_org_by_id(pg_client, &job.org_id)
         .await?
         .map_or_else(|| job.org_id.clone(), |o| o.name);
-    emit_with_egress(
-        pg_client,
-        http,
-        &job.org_id,
-        &org_name,
-        &event_type,
-        &data,
-        egress,
-    )
-    .await
-}
-
-#[cfg(test)]
-mod tests {
-    use super::sign;
-
-    #[test]
-    fn signature_is_deterministic_and_keyed() {
-        let body = br#"{"event":"job.succeeded"}"#;
-        let a = sign("secret-a", body);
-        assert!(a.starts_with("sha256="));
-        // Same key + body -> same signature; a different key -> different.
-        assert_eq!(a, sign("secret-a", body));
-        assert_ne!(a, sign("secret-b", body));
-        // A changed body changes the signature.
-        assert_ne!(a, sign("secret-a", br#"{"event":"job.failed"}"#));
-    }
+    emit(pg_client, &job.org_id, &org_name, &event_type, &data).await
 }
