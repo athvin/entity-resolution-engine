@@ -748,8 +748,42 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
    - [ ] E5b ensembles + cascades (#31 — N models per run, `then_run` cascade vs `and_run`
          union, per-model threshold; E5a's live-set seam is the entry point),
          E9b import-time screening + update rules (#38/#39), E9c S3 auto-ingestion (#47).
-3. **Learning loop** — labels/train/evaluate (#19/#20 + the evaluation-tooling gap),
-   related-record features (#26), household/link entities (#33).
+3. **Learning loop**
+   - [x] **E10a the `train` job, which the dispatcher had no arm for.** `train` has been in
+         `SCHEDULABLE_KINDS` since the queue shipped — so the schedule API accepted it, and every
+         tier-C config publish (one whose `comparisons` changed) enqueued one — while
+         `dispatcher.rs` had **no `"train"` arm**. It fell through to `other => Err("dispatcher
+         does not handle job kind …")` and failed every single time.
+         The failed job was the smaller half. A tier-C publish enqueues `train` AND a
+         `run_all_full` rebuild, so the rebuild went ahead and re-resolved the whole corpus
+         **against the model the publish was meant to replace** — a config change that looked
+         applied and was not.
+         `train_and_register` sits in the dispatcher's async half for the same reason
+         `apply_corrections` does: its OUTPUT is a registry row, which needs the Postgres client
+         the blocking half cannot hold. The sync training itself goes to `spawn_blocking`.
+         Two deliberate properties. **The new version is a DRAFT, never activated** — activation
+         is the explicit, audited act the registry exists for (#214), and training is not consent
+         to re-cluster a tenant's data. **The TF snapshot is APPENDED, not overwritten** —
+         `build_frozen_tf_tables` filters the CSV by `(model_version, tf_snapshot_id)`, so
+         snapshots coexist and each model reads only its own; replacing the file would retune the
+         *active* model's frozen term frequencies underneath it, which is precisely the guarantee
+         that makes an incremental or scoped run equal to a full one (E7/E6b).
+         The template is the **active** version's settings, so training refines what is live
+         rather than whatever is on disk; `ER_MODEL_PATH` remains the fallback for an org created
+         before the registry.
+         Tests: `pg_train.rs` runs real training over a standardized base_10 lake and asserts the
+         draft is registered and traceable to its job, the active version is untouched byte for
+         byte, the learned m/u probabilities are present and in range (a trained model identical
+         to its template means training did nothing), and the TF file is appended — existing rows
+         unchanged and first, new snapshot id present, exactly one header.
+         Plus **`dispatch_coverage.rs`**, the gate for the general bug: every kind in
+         `SCHEDULABLE_KINDS` (and `apply_corrections`) must be routed, checked textually because
+         the arms are string literals and the compiler has no opinion about a missing one. It
+         self-checks that its own scan can see a `match`-arm kind, a pre-branch kind, and not an
+         invented one — then observed failing with `["train"]` when the arm is removed.
+   - [ ] E10b pair labels + uncertainty-sampled labelling queue + label-driven training
+         (#19/#20), E10c per-version evaluation (precision/recall/ROC — `accuracy.rs` is built
+         and has no API), related-record features (#26), household/link entities (#33).
 4. **Operating at scale**
    - [x] **O2a job retry + failure classification (#58's retry half).** `attempt` and
          `max_attempts` shipped and **nothing ever retried** — a failed job stayed failed until

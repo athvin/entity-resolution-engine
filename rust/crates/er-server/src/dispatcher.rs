@@ -168,6 +168,11 @@ async fn dispatch_once(
     let env = org.env.clone();
     let outcome = if job.kind == "apply_corrections" {
         drain_and_correct(client, &job.org_id, &env, &job.id).await
+    } else if job.kind == "train" {
+        // Also async-half, and for the same reason as `apply_corrections`:
+        // training's OUTPUT is a registry row, which needs the Postgres client
+        // that `run_job`'s blocking half cannot hold.
+        train_and_register(client, &job.org_id, &env, &job.id).await
     } else {
         // The active model comes from the registry, read here because `run_job`
         // is the blocking half and cannot touch the async Postgres client. An
@@ -466,6 +471,180 @@ fn run_job(
 /// simply re-corrects.
 ///
 /// # Errors
+/// Train a model on the org's corpus and register the result as a DRAFT
+/// version (`train` jobs).
+///
+/// `train` has been in `SCHEDULABLE_KINDS` and enqueued by every tier-C config
+/// publish since the registry landed, and the dispatcher had **no arm for it** —
+/// so it fell through to "dispatcher does not handle job kind 'train'" and
+/// failed every single time. The visible damage was worse than a failed job:
+/// publishing a config whose `comparisons` changed enqueues `train` AND a
+/// `run_all_full` rebuild, so the rebuild went ahead and re-resolved the whole
+/// corpus against the model the publish was meant to replace.
+///
+/// Two deliberate properties:
+///
+/// **The new version is a draft, never activated.** Activation is the explicit,
+/// audited act the registry exists for, and training is not consent to
+/// re-cluster a tenant's data. `er_cli::run_train` is also not cheap, so the
+/// operator gets to look at what came out before it decides anything.
+///
+/// **The TF snapshot is appended, not overwritten.** `build_frozen_tf_tables`
+/// filters the CSV by `(model_version, tf_snapshot_id)`, so the new snapshot's
+/// rows sit alongside the active model's and each reads only its own. Writing
+/// over the file would retune the ACTIVE model's term frequencies underneath it,
+/// which is exactly the frozen-TF guarantee that makes incremental runs equal to
+/// full ones.
+///
+/// # Errors
+/// Returns a human string (like `run_job`) on a missing input, a training
+/// failure, or a registry write failure.
+pub async fn train_and_register(
+    client: &tokio_postgres::Client,
+    org_id: &str,
+    env: &Value,
+    run_id: &str,
+) -> Result<(), String> {
+    let catalog = env_str(env, "ER_LAKE_CATALOG")
+        .ok_or("org env missing ER_LAKE_CATALOG")?
+        .to_string();
+    let data_path = env_str(env, "ER_LAKE_DATA_PATH")
+        .ok_or("org env missing ER_LAKE_DATA_PATH")?
+        .to_string();
+    let config_path = env_str(env, "ER_CONFIG_PATH").ok_or("org env missing ER_CONFIG_PATH")?;
+    let tf_path = env_str(env, "ER_TF_PATH")
+        .ok_or("org env missing ER_TF_PATH")?
+        .to_string();
+    let config_text = std::fs::read_to_string(config_path)
+        .map_err(|e| format!("read config {config_path}: {e}"))?;
+    let config = er_config::load_config_str(&config_text)
+        .map_err(|e| format!("config: {}", crate::errfmt::chain(&e)))?;
+
+    // The TEMPLATE is the comparison + blocking structure to retrain, taken
+    // from the active version so training refines what is live rather than
+    // whatever happens to be on disk. Falling back to ER_MODEL_PATH keeps an
+    // org created before the registry working.
+    let template = match pg::active_model_version(client, org_id).await {
+        Ok(Some(m)) => m.model_json,
+        Ok(None) => {
+            let path = env_str(env, "ER_MODEL_PATH").ok_or(
+                "no active model version and no ER_MODEL_PATH, so there is no template to \
+                 retrain — publish a model version first",
+            )?;
+            std::fs::read_to_string(path).map_err(|e| format!("read model template: {e}"))?
+        }
+        Err(e) => return Err(format!("reading the model registry: {e}")),
+    };
+
+    // One label per training run, derived from the run id so two trains cannot
+    // collide and so a registry row can be traced back to the job that made it.
+    let label = format!("trained-{run_id}");
+    let tf_snapshot_id = format!("tf-{run_id}");
+
+    // The sync half: open the lake, train, write the two artifacts.
+    let (model_json, tf_rows) = {
+        let label = label.clone();
+        let snap = tf_snapshot_id.clone();
+        let training = config.training.clone();
+        tokio::task::spawn_blocking(move || -> Result<(String, String), String> {
+            let session =
+                er_cli::open_lake(&catalog, &data_path).map_err(|e| format!("open lake: {e:#}"))?;
+            let dir = std::env::temp_dir().join(format!("er_train_{label}"));
+            std::fs::create_dir_all(&dir).map_err(|e| format!("train scratch dir: {e}"))?;
+            let out_model = dir.join("model.json");
+            let out_tf = dir.join("tf.csv");
+            er_cli::run_train(
+                &session,
+                &er_cli::TrainInputs {
+                    template_settings_json: &template,
+                    deterministic_rules: &training.deterministic_rules,
+                    em_rules: &training.em_blocking_rules,
+                    recall: training.recall,
+                    #[expect(
+                        clippy::cast_precision_loss,
+                        reason = "a pair budget's magnitude is what matters, and f64 holds \
+                                  every value an i64 budget can usefully take"
+                    )]
+                    u_max_pairs: training.u_max_pairs as f64,
+                    model_version: &label,
+                    tf_snapshot_id: &snap,
+                },
+                &out_model,
+                &out_tf,
+            )
+            .map_err(|e| format!("training: {e:#}"))?;
+            let model_json = std::fs::read_to_string(&out_model)
+                .map_err(|e| format!("read trained model: {e}"))?;
+            let tf_rows =
+                std::fs::read_to_string(&out_tf).map_err(|e| format!("read trained tf: {e}"))?;
+            let _ = std::fs::remove_dir_all(&dir);
+            Ok((model_json, tf_rows))
+        })
+        .await
+        .map_err(|e| format!("training task panicked: {e}"))??
+    };
+
+    // Append this snapshot's rows to the shared frozen-TF CSV, header skipped —
+    // see the note above for why appending rather than replacing.
+    append_tf_snapshot(&tf_path, &tf_rows)?;
+
+    let provenance = serde_json::json!({
+        "source": "train",
+        "job_id": run_id,
+        "config_hash": er_config::config_hash(&config),
+        "trained_from": label,
+    });
+    pg::create_model_version(
+        client,
+        org_id,
+        pg::DEFAULT_MODEL_NAME,
+        if config.entity_type.is_person() {
+            "person"
+        } else {
+            "account"
+        },
+        &model_json,
+        &label,
+        Some(&tf_snapshot_id),
+        &provenance,
+        "trainer",
+    )
+    .await
+    .map_err(|e| format!("registering the trained model: {e}"))?;
+    eprintln!("train {run_id}: registered draft version {label} (not activated)");
+    Ok(())
+}
+
+/// Append a trained TF snapshot's rows to the shared frozen-TF CSV, writing the
+/// header only when the file is new.
+///
+/// The file is keyed by `(model_version, tf_snapshot_id, column_name)`, so
+/// snapshots coexist and each model reads only its own rows.
+fn append_tf_snapshot(tf_path: &str, tf_rows: &str) -> Result<(), String> {
+    use std::io::Write;
+    let existing = std::fs::metadata(tf_path).is_ok_and(|m| m.len() > 0);
+    let mut lines = tf_rows.lines();
+    let header = lines.next().unwrap_or_default();
+    let body: Vec<&str> = lines.filter(|l| !l.trim().is_empty()).collect();
+    if body.is_empty() && existing {
+        // A model with no TF columns trains fine and writes only a header;
+        // appending nothing is the correct no-op, not a failure.
+        return Ok(());
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(tf_path)
+        .map_err(|e| format!("open {tf_path} to append the TF snapshot: {e}"))?;
+    if !existing {
+        writeln!(file, "{header}").map_err(|e| format!("write TF header: {e}"))?;
+    }
+    for line in body {
+        writeln!(file, "{line}").map_err(|e| format!("append TF row: {e}"))?;
+    }
+    Ok(())
+}
+
 /// Propagates a Postgres read/mark failure, a lake open/apply failure, or a
 /// `run_correct` failure (as a human string, like `run_job` returns).
 pub async fn drain_and_correct(
