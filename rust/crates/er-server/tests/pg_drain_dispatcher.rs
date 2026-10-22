@@ -219,5 +219,51 @@ async fn drain_and_correct_applies_through_dispatcher() {
         .unwrap();
     assert_eq!(json_body(resp).await["status"], "resolved_match");
 
+    // ─── E10b-2: the resolution became a training label ─────────────────────
+    //
+    // `pair_label.origin` has declared `reviewer` as an accepted value since
+    // E10b and NOTHING ever wrote one — the labels API even counted the bucket,
+    // so the coverage endpoint reported a category that could not fill. A
+    // steward looking at a pair and deciding is the strongest signal a model
+    // can get, and it was being thrown away.
+    let labels =
+        er_entities::pair_label::read::page(&client, &oid(&client, "acme").await, None, None, 100)
+            .await
+            .unwrap();
+    let reviewer: Vec<_> = labels.iter().filter(|l| l.origin == "reviewer").collect();
+    assert_eq!(
+        reviewer.len(),
+        1,
+        "the match resolution leaves exactly one reviewer label, got {labels:?}"
+    );
+    let label = reviewer[0];
+    assert_eq!(label.verdict, "match");
+    // Canonical order, lower key first — the order E10b stores labels in. A
+    // label on the other ordering describes a pair nothing ever scored.
+    assert!(
+        label.rec_a_key <= label.rec_b_key,
+        "canonical pair order: {} vs {}",
+        label.rec_a_key,
+        label.rec_b_key
+    );
+    // WHO decided, carried from the staged action rather than defaulted to a
+    // role — the same reason D7 forwards an end-user identity at all. Asserted
+    // against the staging principal instead of a string format: this test stages
+    // with the operator token, so `operator` is the right answer here, and a
+    // steward resolving through the BFF would land `user:<email> via key:…`.
+    // Pinning the format would make this test about the token, not the carry.
+    assert_eq!(
+        label.labeled_by, "operator",
+        "the label must name the principal that staged the resolution"
+    );
+    // The `add_assertion` action is NOT a label: it is a steward asserting a
+    // relationship directly, not adjudicating a pair the model proposed, and
+    // there is no review verdict behind it.
+    assert_eq!(
+        labels.len(),
+        1,
+        "only the review resolution yields a label, got {labels:?}"
+    );
+
     let _ = std::fs::remove_dir_all(&tmp);
 }

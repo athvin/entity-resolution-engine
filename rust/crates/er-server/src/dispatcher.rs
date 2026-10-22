@@ -921,16 +921,75 @@ pub async fn drain_and_correct(
     let env = env.clone();
     let run_id_owned = run_id.to_string();
     let now = fmt_epoch(unix_now());
-    let (applied, correct): (Vec<String>, Result<(), String>) =
-        tokio::task::spawn_blocking(move || apply_and_correct(&env, &pending, &run_id_owned, &now))
-            .await
-            .unwrap_or_else(|e| (Vec::new(), Err(format!("drain task panicked: {e}"))));
+    let DrainOutcome {
+        applied,
+        labels,
+        correct,
+    } = tokio::task::spawn_blocking(move || apply_and_correct(&env, &pending, &run_id_owned, &now))
+        .await
+        .unwrap_or_else(|e| DrainOutcome::failed(format!("drain task panicked: {e}")));
     for id in &applied {
         pg::mark_action_applied(client, id)
             .await
             .map_err(|e| format!("mark action applied {id}: {e}"))?;
     }
+    // A steward's verdict is a training label (E10b-2). Written here because
+    // `pair_label` is a POSTGRES table and the apply half holds the lake
+    // session; this is the half with the client.
+    //
+    // Only for actions that APPLIED. A resolution staged but never drained is
+    // not a verdict the engine acted on, and labelling it would train on an
+    // intent the corpus never saw.
+    //
+    // Best-effort and after the marks: the resolution is already in the lake and
+    // the corpus is about to be corrected, so failing the drain because a label
+    // could not be upserted would undo real work to record an observation about
+    // it. `origin = 'reviewer'` has been an accepted value since E10b with
+    // nothing ever writing one — the labels API counted a bucket that could not
+    // fill.
+    for (label, labeled_by) in &labels {
+        if let Err(e) = pg::record_reviewer_label(
+            client,
+            org_id,
+            (&label.rec_a_key, &label.rec_b_key),
+            label.verdict,
+            labeled_by,
+        )
+        .await
+        {
+            eprintln!(
+                "run {run_id}: reviewer label for {}|{} not recorded: {e}",
+                label.rec_a_key, label.rec_b_key
+            );
+        }
+    }
     correct
+}
+
+/// What the blocking half of [`drain_and_correct`] produced.
+///
+/// A struct rather than a 3-tuple because the third element is itself a
+/// `Result` and the second a pair — positionally that reads as noise, and
+/// clippy says so.
+struct DrainOutcome {
+    /// Action ids that applied, for the async half to mark.
+    applied: Vec<String>,
+    /// Training labels a resolution implied, each with the principal that
+    /// staged it (E10b-2).
+    labels: Vec<(er_cli::DerivedLabel, String)>,
+    /// Whether the correction pass that followed succeeded.
+    correct: Result<(), String>,
+}
+
+impl DrainOutcome {
+    /// Nothing applied, nothing labelled, and why.
+    fn failed(why: String) -> Self {
+        Self {
+            applied: Vec::new(),
+            labels: Vec::new(),
+            correct: Err(why),
+        }
+    }
 }
 
 /// Blocking half of [`drain_and_correct`]: apply each pending action to the lake,
@@ -940,32 +999,38 @@ pub async fn drain_and_correct(
 /// returned so they are not re-applied.
 fn apply_and_correct(
     env: &Value,
-    pending: &[(String, Value)],
+    pending: &[pg::PendingAction],
     run_id: &str,
     now: &str,
-) -> (Vec<String>, Result<(), String>) {
+) -> DrainOutcome {
     let Some(catalog) = env_str(env, "ER_LAKE_CATALOG") else {
-        return (
-            Vec::new(),
-            Err("org env missing ER_LAKE_CATALOG".to_string()),
-        );
+        return DrainOutcome::failed("org env missing ER_LAKE_CATALOG".to_string());
     };
     let Some(data_path) = env_str(env, "ER_LAKE_DATA_PATH") else {
-        return (
-            Vec::new(),
-            Err("org env missing ER_LAKE_DATA_PATH".to_string()),
-        );
+        return DrainOutcome::failed("org env missing ER_LAKE_DATA_PATH".to_string());
     };
     let session = match er_cli::open_lake(catalog, data_path) {
         Ok(s) => s,
-        Err(e) => return (Vec::new(), Err(format!("open lake: {e}"))),
+        Err(e) => return DrainOutcome::failed(format!("open lake: {e}")),
     };
     let mut applied = Vec::new();
-    for (action_id, action) in pending {
-        if let Err(e) = er_cli::apply_staged_action(&session, action_id, action, now) {
-            return (applied, Err(format!("apply {action_id}: {e}")));
+    let mut labels = Vec::new();
+    for staged in pending {
+        match er_cli::apply_staged_action_labeled(&session, &staged.id, &staged.action, now) {
+            // The actor rides along: a label must name the person who decided,
+            // not the role (the D7 lesson).
+            Ok(derived) => {
+                labels.extend(derived.into_iter().map(|l| (l, staged.created_by.clone())));
+            }
+            Err(e) => {
+                return DrainOutcome {
+                    applied,
+                    labels,
+                    correct: Err(format!("apply {}: {e}", staged.id)),
+                };
+            }
         }
-        applied.push(action_id.clone());
+        applied.push(staged.id.clone());
     }
     let config = match env_str(env, "ER_CONFIG_PATH")
         .ok_or_else(|| "org env missing ER_CONFIG_PATH".to_string())
@@ -977,10 +1042,20 @@ fn apply_and_correct(
                 .map_err(|e| format!("config: {}", crate::errfmt::chain(&e)))
         }) {
         Ok(c) => c,
-        Err(e) => return (applied, Err(e)),
+        Err(e) => {
+            return DrainOutcome {
+                applied,
+                labels,
+                correct: Err(e),
+            };
+        }
     };
     let correct = er_cli::run_correct(&session, &config, run_id, now).map_err(|e| format!("{e:#}"));
-    (applied, correct)
+    DrainOutcome {
+        applied,
+        labels,
+        correct,
+    }
 }
 
 #[cfg(test)]

@@ -220,10 +220,15 @@ async fn unmerge_splits_and_respects_contradictions() {
     assert_eq!(pending.len(), 1, "one never-rule staged");
     {
         let session = er_cli::open_lake(&cat_a, &data_a).unwrap();
-        for (action_id, action) in &pending {
-            er_cli::apply_staged_action(&session, action_id, action, "2026-02-01 00:00:00")
-                .unwrap();
-            pg::mark_action_applied(&client, action_id).await.unwrap();
+        for staged in &pending {
+            er_cli::apply_staged_action(
+                &session,
+                &staged.id,
+                &staged.action,
+                "2026-02-01 00:00:00",
+            )
+            .unwrap();
+            pg::mark_action_applied(&client, &staged.id).await.unwrap();
         }
         er_cli::run_reconcile(
             &session,
@@ -264,10 +269,15 @@ async fn unmerge_splits_and_respects_contradictions() {
         .unwrap();
     {
         let session = er_cli::open_lake(&cat_b, &data_b).unwrap();
-        for (action_id, action) in &pending {
-            er_cli::apply_staged_action(&session, action_id, action, "2026-02-01 00:00:00")
-                .unwrap();
-            pg::mark_action_applied(&client, action_id).await.unwrap();
+        for staged in &pending {
+            er_cli::apply_staged_action(
+                &session,
+                &staged.id,
+                &staged.action,
+                "2026-02-01 00:00:00",
+            )
+            .unwrap();
+            pg::mark_action_applied(&client, &staged.id).await.unwrap();
         }
     }
 
@@ -304,13 +314,18 @@ async fn unmerge_splits_and_respects_contradictions() {
     assert_eq!(resp.status(), StatusCode::CREATED);
     {
         let session = er_cli::open_lake(&cat_b, &data_b).unwrap();
-        for (action_id, action) in &pg::pending_actions(&client, &oid(&client, "conflict").await)
+        for staged in &pg::pending_actions(&client, &oid(&client, "conflict").await)
             .await
             .unwrap()
         {
-            er_cli::apply_staged_action(&session, action_id, action, "2026-02-02 00:00:00")
-                .unwrap();
-            pg::mark_action_applied(&client, action_id).await.unwrap();
+            er_cli::apply_staged_action(
+                &session,
+                &staged.id,
+                &staged.action,
+                "2026-02-02 00:00:00",
+            )
+            .unwrap();
+            pg::mark_action_applied(&client, &staged.id).await.unwrap();
         }
     }
     // Read it via the BFF's `assertions:contradictions` spelling (exercises the
