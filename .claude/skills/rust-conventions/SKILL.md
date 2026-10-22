@@ -155,11 +155,12 @@ independently:
 - `arrow` must equal the major the `duckdb` crate pulls.
 - `datafusion` must equal the major `ff-analysis` resolves.
 
-A PR that bumps either alone can never go green, and the unblocker is upstream.
-Note that `.github/dependabot.yml` does **not** currently exclude them, so such
-PRs will still be opened — recognise and close them rather than trying to make
-them pass. (`@playwright/test` *is* excluded, for the image-tag reason the
-frontend-testing skill explains.)
+A PR that bumps either alone can never go green, and the unblocker is upstream —
+a `duckdb` release for `arrow`, a new `ff-analysis` tag for `datafusion`.
+`.github/dependabot.yml` excludes both from major updates for exactly this
+reason, each with the compiler error that proved it in a comment, so the bot no
+longer proposes them. (`@playwright/test` is excluded too, for the image-tag
+reason the frontend-testing skill explains.)
 `duckdb` itself is an **`=` pin** so that a DuckDB change is always a
 deliberate, reviewable event — it can move emitted SQL and floating-point
 output, which the goldens compare.

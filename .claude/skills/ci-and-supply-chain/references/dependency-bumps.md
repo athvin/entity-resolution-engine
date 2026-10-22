@@ -44,9 +44,13 @@ conflict — it produces a **type mismatch**, because the `LogicalPlan` and arro
 types have to be the same types across the boundary. See the sql-analysis
 skill.
 
-Dependabot does **not** currently exclude them, so expect occasional PRs that
-cannot pass. Recognise them and close them; the unblocker is upstream
-(`duckdb` or feather-flow releasing against the newer major).
+Both are excluded from major updates in `.github/dependabot.yml`, and each
+exclusion carries the error that proved it — arrow 60 gave
+`expected &[RecordBatch], found &Vec<RecordBatch>` (two `RecordBatch` types,
+one per arrow major), and DataFusion 55 said "there are multiple different
+versions of crate `arrow_schema` in the dependency graph". The unblocker is a
+`duckdb` release and a new `ff-analysis` tag respectively; when one lands, the
+pair moves together by hand.
 
 `duckdb` itself is an **`=` pin**, so it never moves by accident. A DuckDB
 change can alter emitted SQL and floating-point output, which the goldens

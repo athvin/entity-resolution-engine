@@ -30,7 +30,7 @@ statements is read or written only through the engine's own stage SQL, not
 through a typed query function.
 
 <!-- BEGIN GENERATED: entities-index -->
-**30 entities, 131 declared statements.**
+**32 entities, 137 declared statements.**
 
 | Entity | Relation | Store | Key | Natural key | History |
 |---|---|---|---|---|---|
@@ -52,10 +52,12 @@ through a typed query function.
 | `job` | `jobs` | postgres | `id` | — | — |
 | `match_score` | `match_scores` | duckdb | `id` | `rec_a_key, rec_b_key, model_version, tf_snapshot_id` | — |
 | `matching_model` | `matching_models` | postgres | `id` | `org_id, name, version` | yes |
+| `metric_snapshot` | `metric_snapshots` | duckdb | `id` | `run_id` | — |
 | `org` | `orgs` | postgres | `id` | `name` | yes |
 | `pair_label` | `pair_labels` | postgres | `id` | `org_id, rec_a_key, rec_b_key` | — |
 | `raw_record` | `raw_records` | duckdb | `id` | `source_system, source_record_id, content_hash` | — |
 | `record_overlay` | `record_overlays` | duckdb | `id` | `record_key, kind` | — |
+| `record_quality` | `record_qualities` | duckdb | `id` | `record_key` | — |
 | `resolved_entity` | `entities` | duckdb | `id` | — | — |
 | `review` | `review_queue` | duckdb | `id` | `rec_a_key, rec_b_key, reason` | — |
 | `run` | `runs` | duckdb | `id` | — | — |
@@ -87,10 +89,12 @@ Declared statements per entity and operation:
 | `job` | 2 | 3 | 4 | 0 |
 | `match_score` | 0 | 4 | 3 | 0 |
 | `matching_model` | 1 | 3 | 1 | 0 |
+| `metric_snapshot` | 1 | 1 | 0 | 0 |
 | `org` | 2 | 3 | 3 | 0 |
 | `pair_label` | 1 | 2 | 0 | 0 |
 | `raw_record` | 0 | 2 | 0 | 0 |
 | `record_overlay` | 1 | 2 | 1 | 1 |
+| `record_quality` | 1 | 2 | 0 | 1 |
 | `resolved_entity` | 0 | 1 | 1 | 0 |
 | `review` | 0 | 3 | 3 | 0 |
 | `run` | 1 | 3 | 1 | 0 |

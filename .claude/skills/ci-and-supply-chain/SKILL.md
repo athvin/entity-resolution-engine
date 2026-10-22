@@ -124,11 +124,12 @@ protection matches). Check the name first.
 **cargo-deny went red overnight.** A new advisory. Read the job log, then
 either upgrade or add an ignore **with a justification**, in its own PR.
 
-**A dependabot PR cannot go green.** Check whether it is `arrow` or
-`datafusion`: both are pinned to another crate's major (`duckdb`'s and
-`ff-analysis`'s respectively), so an independent bump is unmergeable and the
-unblocker is upstream. Dependabot does not currently exclude them, so close
-such PRs rather than trying to fix them.
+**A dependabot PR cannot go green.** Check first whether the dependency is
+pinned to another crate's major — `arrow` to `duckdb`'s, `datafusion` to
+`ff-analysis`'s. Those three are now excluded from major updates in
+`.github/dependabot.yml` (each with the compiler error that proved it), so the
+bot should not propose them at all; if one appears anyway, close it. The
+unblocker is upstream, never a fix in the PR.
 
 **Adding a gate.** Decide whether it should be required, and make it report on
 every PR if so (the `detect` + `if:` pattern). Then **observe it failing**
