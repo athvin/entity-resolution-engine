@@ -103,3 +103,35 @@ arrow = "58"
 chrono = { version = "0.4", features = ["serde"] }
 utoipa = { version = "6", features = ["chrono"] }
 
+# Dependencies build WITHOUT debug info, which is the whole ballgame on this
+# workspace. `libduckdb-sys` compiles bundled DuckDB C++ through cc-rs, which
+# emits `-g` whenever cargo tells it the profile wants debug info — and the
+# resulting rlib is ~1.5 GB, linked into every one of the 28 test binaries.
+# Measured here on a cold `cargo build -p libduckdb-sys`: the rlib goes
+# 1,544,853,576 -> 250,957,656 bytes (1473 -> 239 MiB, 6.15x) and `target`
+# 6.0 GB -> 1.1 GB. That matches the `cargo test -p er-server --no-run`
+# measurement this setting came from: rlib 1480 MB -> 240 MB, whole build
+# 12631 MB -> 7234 MB.
+#
+# Nobody debugs into bundled DuckDB, and the `package."*"` form leaves workspace
+# crates at the profile default, so stepping through this repo's own code still
+# works locally. Test harnesses keep line tables below, so backtraces name a
+# file and a line.
+#
+# Recorded because the obvious knob is the wrong one: `debug = "line-tables-only"`
+# here saves only ~7%, since any non-false setting still makes cargo pass
+# DEBUG=true to build scripts and cc keeps emitting full C++ symbols. It has to
+# be `false`.
+#
+# This lived as `CARGO_PROFILE_DEV_DEBUG` / `CARGO_PROFILE_TEST_DEBUG` job env on
+# the CI `test` job alone until 2026-10-22, so `lint`, `ducklake-e2e`,
+# `bench-compile`, `scale-tests` and every developer's laptop paid the full 1.9x.
+# A smaller `target` is also a smaller rust-cache entry, which is why this is
+# load-bearing for the Actions cache budget — see the `ci-and-supply-chain`
+# skill's build-cost reference.
+[profile.dev.package."*"]
+debug = false
+
+[profile.test]
+debug = "line-tables-only"
+

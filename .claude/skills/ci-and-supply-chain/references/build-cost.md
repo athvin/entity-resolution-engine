@@ -98,14 +98,23 @@ sccache              ~2,945 entries   4,571 MiB   # +239 entries, +161 MiB
 The repository does not get *further* over the ceiling, because eviction is what
 absorbs the growth. It is the rust-cache entry that pays.
 
-Three structural contributors, each fixed in the change this file documents:
+Two structural contributors, both fixed:
 
 1. **No rust-cache use set `save-if`.** All five compile jobs wrote the same
-   `shared-key: rust`, and PR branches minted their own entries.
-2. **`coverage` kept a 1,885 MiB entry** for a nightly job already allotted 60
-   minutes, whose instrumented artifacts its own comment says "don't cache
-   usefully".
-3. **sccache grew without bound**, since nothing pruned it.
+   `shared-key: rust`, and PR branches minted their own entries. `lint` is now
+   the single writer, and only from `main`.
+2. **sccache grew without bound**, since nothing pruned it. Capped nightly by
+   `cache-prune`.
+
+A third looked structural and is not. **`coverage`'s separate 1,885 MiB entry** —
+19% of the whole budget, for a nightly, non-required job whose own comment says
+instrumented builds "don't cache usefully" — was left alone deliberately.
+Dropping it makes that job permanently cold, and its `llvm-cov` step already
+measures **22m10 warm against a 60-minute timeout**: llvm-cov owns `RUSTFLAGS`,
+so every unit including dependencies rebuilds, and `shared-key: rust` cannot
+substitute. That trades 1.8 GiB for a timeout failure. It is also unnecessary —
+`[profile.test]` inherits the dep setting below, so the entry shrinks on its own,
+the bulk of it having been the duckdb rlib.
 
 A fourth contributor is not CI's: `rust/Cargo.toml` carried **no `[profile.*]`
 section at all**, so the debug-info saving measured at `rust.yml:179-194` —
@@ -119,7 +128,7 @@ rust-cache entry, so making the profile real buys cache headroom twice.
 |---|---|---|
 | Real `[profile.*]` in `rust/Cargo.toml` | yes | 1.9× less build output for every job and every laptop, not just `test` |
 | `save-if` so one job writes each key | yes | stops five jobs racing the same key and PR branches minting entries |
-| Drop `coverage`'s cache save | yes | frees 1.8 GiB for a nightly job that gains little |
+| Drop `coverage`'s cache save | **no** | frees 1.8 GiB but makes a 22m10-warm job permanently cold against a 60-min timeout; the profile change shrinks the entry instead |
 | Prune sccache to a budget, nightly | yes | caps the entry count that does the evicting |
 | `sccache --show-stats` in each job | yes | the hit rate was never observable; it is the input to every later decision here |
 | Split the serial `fmt + clippy + docs` | yes | four independent ~10m steps; the advisory one was pure critical-path tax |
