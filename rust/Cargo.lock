@@ -1958,7 +1958,7 @@ dependencies = [
  "aws-sdk-sesv2",
  "aws-smithy-http-client",
  "axum",
- "base64 0.22.1",
+ "base64 0.23.1",
  "chrono",
  "dedupe-core",
  "duckdb",
