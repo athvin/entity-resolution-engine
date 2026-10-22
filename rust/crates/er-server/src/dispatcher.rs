@@ -924,6 +924,7 @@ pub async fn drain_and_correct(
     let DrainOutcome {
         applied,
         labels,
+        resolutions,
         correct,
     } = tokio::task::spawn_blocking(move || apply_and_correct(&env, &pending, &run_id_owned, &now))
         .await
@@ -963,6 +964,38 @@ pub async fn drain_and_correct(
             );
         }
     }
+    // `review.resolved` (O3c), for the resolutions that APPLIED. Deliberately
+    // not emitted by the resolve endpoint: a resolution is staged and drained
+    // later, so an event fired at staging time would tell a subscriber about an
+    // intent the engine has not enforced — they would read a corpus that
+    // disagrees with the event they just received.
+    //
+    // Best-effort and after the marks, like the labels above and for the same
+    // reason: the decision is in the lake and the corpus has been corrected, so
+    // failing the drain to report on it would undo real work.
+    if !resolutions.is_empty() {
+        let org_name = pg::get_org_by_id(client, org_id)
+            .await
+            .map_err(|e| format!("look up org {org_id}: {e}"))?
+            .map_or_else(|| org_id.to_string(), |o| o.name);
+        for (review_id, resolution) in &resolutions {
+            if let Err(e) = webhook::emit(
+                client,
+                org_id,
+                &org_name,
+                "review.resolved",
+                &serde_json::json!({
+                    "review_id": review_id,
+                    "resolution": resolution,
+                    "run_id": run_id,
+                }),
+            )
+            .await
+            {
+                eprintln!("review.resolved for {review_id} not queued: {e}");
+            }
+        }
+    }
     correct
 }
 
@@ -977,6 +1010,11 @@ struct DrainOutcome {
     /// Training labels a resolution implied, each with the principal that
     /// staged it (E10b-2).
     labels: Vec<(er_cli::DerivedLabel, String)>,
+    /// `(review_id, resolution)` for each APPLIED `resolve_review` action, for
+    /// the `review.resolved` event (O3c). Includes dismissals: a dismissal is a
+    /// decision a subscriber may care about, even though it yields no training
+    /// label.
+    resolutions: Vec<(String, String)>,
     /// Whether the correction pass that followed succeeded.
     correct: Result<(), String>,
 }
@@ -987,6 +1025,7 @@ impl DrainOutcome {
         Self {
             applied: Vec::new(),
             labels: Vec::new(),
+            resolutions: Vec::new(),
             correct: Err(why),
         }
     }
@@ -1015,6 +1054,7 @@ fn apply_and_correct(
     };
     let mut applied = Vec::new();
     let mut labels = Vec::new();
+    let mut resolutions = Vec::new();
     for staged in pending {
         match er_cli::apply_staged_action_labeled(&session, &staged.id, &staged.action, now) {
             // The actor rides along: a label must name the person who decided,
@@ -1026,9 +1066,23 @@ fn apply_and_correct(
                 return DrainOutcome {
                     applied,
                     labels,
+                    resolutions,
                     correct: Err(format!("apply {}: {e}", staged.id)),
                 };
             }
+        }
+        // Recorded after the apply succeeded, so the event cannot claim a
+        // resolution the lake never took.
+        if staged.action.get("type").and_then(Value::as_str) == Some("resolve_review") {
+            let get = |k: &str| {
+                staged
+                    .action
+                    .get(k)
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string()
+            };
+            resolutions.push((get("review_id"), get("resolution")));
         }
         applied.push(staged.id.clone());
     }
@@ -1046,6 +1100,7 @@ fn apply_and_correct(
             return DrainOutcome {
                 applied,
                 labels,
+                resolutions,
                 correct: Err(e),
             };
         }
@@ -1054,6 +1109,7 @@ fn apply_and_correct(
     DrainOutcome {
         applied,
         labels,
+        resolutions,
         correct,
     }
 }

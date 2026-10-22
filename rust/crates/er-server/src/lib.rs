@@ -2307,6 +2307,30 @@ async fn publish_config_version(
         &json!({ "version": version, "tier": tier }),
     )
     .await;
+    // `config.published` (O3c). Queued through the outbox, like every other
+    // event: a POST inline here would make a tenant's unreachable endpoint
+    // slow down — or fail — their own publish.
+    //
+    // Best-effort: the version IS published and its rebuild jobs are queued, so
+    // failing the response because an event could not be enqueued would report
+    // failure for work that succeeded.
+    if let Err(e) = webhook::emit(
+        &client,
+        &org_row.id,
+        &org,
+        "config.published",
+        &json!({
+            "version": version,
+            "tier": tier,
+            "changed_blocks": changed,
+            "jobs_enqueued": jobs_enqueued,
+            "published_by": principal.actor,
+        }),
+    )
+    .await
+    {
+        eprintln!("config.published for {org} v{version} not queued: {e}");
+    }
     (
         StatusCode::OK,
         Json(json!({
@@ -4346,6 +4370,30 @@ async fn finish_delivery(
         }),
     )
     .await;
+    // `import.received` (O3c) — the delivery is committed to the drop root and
+    // its run is queued. Deliberately NOT "the import finished": that is a
+    // different question and `job.succeeded` already answers it, keyed by the
+    // `job_id` this payload carries so a subscriber can correlate the two.
+    //
+    // Both delivery paths reach here (the CSV upload and the JSON push), which
+    // is why the emit is in `finish_delivery` rather than in either endpoint —
+    // the same reason E9a put the preconditions here.
+    if let Err(e) = webhook::emit(
+        client,
+        org_id,
+        org,
+        "import.received",
+        &json!({
+            "source": source,
+            "delivery_id": delivery_id,
+            "bytes": bytes,
+            "job_id": job.id,
+        }),
+    )
+    .await
+    {
+        eprintln!("import.received for {org}/{source} not queued: {e}");
+    }
     (
         StatusCode::ACCEPTED,
         Json(json!({ "delivery_id": delivery_id, "job": job })),
