@@ -61,7 +61,7 @@ not exist; see the reference for the one long-lived key that does.
 | Permission set | Session | Reached by |
 |---|---|---|
 | `PlatformAdmin` | PT8H | the `er-platform` CLI profile |
-| `PlatformReadOnly` | PT8H | **not applied yet** — `er-readonly`, once it is |
+| `PlatformReadOnly` | PT8H | the `er-readonly` CLI profile |
 | `ProdDataReadOnly` | PT4H | no profile configured |
 | `ProdAdmin` | PT1H | the `er-prodadmin` CLI profile |
 
@@ -77,9 +77,9 @@ is the only thing limiting it.
 narrower than its name suggests: lake reads, `rds-db:connect` as `er_readonly`,
 `eks:Describe*` and log reads. It cannot list buckets or read Budgets, so it is
 not a general introspection identity. `PlatformReadOnly` is the one that is —
-account-wide `ReadOnlyAccess`, added for the MCP proxy — but it is **written
-and validated, not applied**, so until a human applies it the proxy runs as
-`PlatformAdmin`.
+account-wide `ReadOnlyAccess`, added for the MCP proxy, which runs as it via the
+`er-readonly` profile. An expired SSO token there is the usual reason the MCP
+server answers nothing: `aws sso login --profile er-readonly`.
 
 The generated reference carries an **Inline policy** column, and a `**none**`
 there is the fact worth noticing: a permission set with no inline policy has no
@@ -99,12 +99,11 @@ AWS's own service guidance on demand. Check `references/footprint.md` first
 regardless: it is generated from the Terraform, so it answers anything
 *declared* without touching the account.
 
-**Three guardrail layers, none sufficient alone**, and they are not all applied
-yet: the proxy flag is client-side and another client ignores it; the IAM
-condition keys reach only calls made *through* the MCP server and so miss the
-CLI entirely; the Bash guard catches the CLI but is pattern-based. Which are
-live, which await a human `terraform apply`, and the one profile none of them
-constrains:
+**Three guardrail layers, all live, none sufficient alone**: the proxy flag is
+client-side and another client ignores it; the IAM condition keys reach only
+calls made *through* the MCP server and so miss the CLI entirely; the Bash guard
+catches the CLI but is pattern-based. What each one misses, and the one profile
+none of them constrains:
 [references/mcp-and-guardrails.md](references/mcp-and-guardrails.md).
 
 The operative rule stands regardless of which layers are applied: **do not

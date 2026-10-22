@@ -8,7 +8,7 @@
         "https://aws-mcp.us-east-1.api.aws/mcp",
         "--read-only",
         "--profile",
-        "er-platform",
+        "er-readonly",
         "--metadata",
         "AWS_REGION=us-east-2"
       ]
