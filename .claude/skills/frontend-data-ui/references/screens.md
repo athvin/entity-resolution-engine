@@ -65,6 +65,7 @@ below `lg`.
 - `/[org]/runs`
 - `/[org]/settings/config`
 - `/[org]/settings/members`
+- `/[org]/settings/models`
 - `/[org]/sources`
 
 ### Routes NOT in the axe gate

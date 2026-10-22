@@ -158,7 +158,7 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
     assert_eq!(resp.status(), StatusCode::OK);
     let listed = json_body(resp).await;
     assert_eq!(listed["items"].as_array().unwrap().len(), 1);
-    assert_eq!(listed["active"]["version"], 1);
+    assert_eq!(listed["active"][0]["version"], 1);
     assert_eq!(listed["items"][0]["state"], "active");
     assert_eq!(
         listed["items"][0]["model_version_label"], "v0001",
@@ -356,7 +356,7 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         ))
         .await
         .unwrap();
-    assert_eq!(json_body(resp).await["active"]["version"], 1);
+    assert_eq!(json_body(resp).await["active"][0]["version"], 1);
 
     // A viewer cannot activate.
     let resp = app
@@ -396,7 +396,7 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         .await
         .unwrap();
     let listed = json_body(resp).await;
-    assert_eq!(listed["active"]["version"], 2);
+    assert_eq!(listed["active"][0]["version"], 2);
     let states: Vec<(i64, String)> = listed["items"]
         .as_array()
         .unwrap()
@@ -443,7 +443,7 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         .await
         .unwrap();
     assert_eq!(
-        json_body(resp).await["active"]["version"],
+        json_body(resp).await["active"][0]["version"],
         2,
         "re-activating the active version must leave it active"
     );
@@ -517,7 +517,7 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         .await
         .unwrap();
     assert_eq!(
-        json_body(resp).await["active"]["version"],
+        json_body(resp).await["active"][0]["version"],
         2,
         "a refused activation must not disturb the active model"
     );
@@ -645,7 +645,7 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         .await
         .unwrap();
     assert_eq!(
-        json_body(resp).await["active"]["version"],
+        json_body(resp).await["active"][0]["version"],
         compiled_version,
         "the compiled model is now what runs score against"
     );
@@ -743,6 +743,34 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         active,
         vec![("default", compiled_version), ("strict", 2)],
         "activation is scoped to its own name"
+    );
+
+    // `GET /models` reports EVERY active name, not one. It used to be
+    // `rows.iter().find(state == "active")` — well defined only while
+    // activation was unique per org, and after E5b-1 it returned whichever
+    // active row the list ordered first, so an ensemble's `active` field named
+    // an arbitrary member. Ordered by name for a stable render.
+    let resp = app
+        .clone()
+        .oneshot(req(
+            "GET",
+            "/v1/orgs/acme/models",
+            &viewer_key,
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    let listed = json_body(resp).await;
+    let active_names: Vec<&str> = listed["active"]
+        .as_array()
+        .expect("active is a list, one entry per name")
+        .iter()
+        .map(|a| a["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        active_names,
+        vec!["default", "strict"],
+        "every active name must be reported: {listed}"
     );
 
     // The invariant is structural, not just a property of the statement:

@@ -100,6 +100,15 @@ const SCREENS: {
       await expect(page.getByTestId("assistant-suggestions")).toBeVisible();
     },
   },
+  {
+    // A screen absent from this array is silently unchecked, which is why the
+    // models page is listed in the same change that adds it.
+    name: "models",
+    path: `/${ORG}/settings/models`,
+    ready: async (page) => {
+      await expect(page.getByTestId("models-table")).toBeVisible();
+    },
+  },
 ];
 
 test.describe("accessibility", () => {

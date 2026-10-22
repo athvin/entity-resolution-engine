@@ -14,6 +14,9 @@ export const queryKeys = {
   reviews: (org: string) => ["org", org, "reviews"] as const,
   goldenRecords: (org: string, q: string) => ["org", org, "golden-records", q] as const,
   entity: (org: string, entityId: string) => ["org", org, "entity", entityId] as const,
+  models: (org: string) => ["org", org, "models"] as const,
+  modelVersion: (org: string, name: string, version: number) =>
+    ["org", org, "models", name, version] as const,
   adminOrgs: () => ["admin", "orgs"] as const,
   adminOrg: (org: string) => ["admin", "orgs", org] as const,
   adminJobs: (params?: Record<string, string>) => ["admin", "jobs", params ?? {}] as const,

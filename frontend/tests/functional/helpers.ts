@@ -39,6 +39,20 @@ export function wizardOrg(projectName: string): string {
   return org;
 }
 
+/** The registry's own org per project: activating a version ARCHIVES the one it
+ * replaces, so a project that activates would otherwise flip the state another
+ * project is asserting about — all three projects share one mock server. */
+export function modelOrg(projectName: string): string {
+  const byProject: Record<string, string> = {
+    "desktop-chromium": "models-dev",
+    "mobile-safari": "models-ios",
+    "mobile-chrome": "models-android",
+  };
+  const org = byProject[projectName];
+  if (!org) throw new Error(`no models org for project ${projectName}`);
+  return org;
+}
+
 /** Sign in through the real BFF; page.request shares the page's cookie jar. */
 export async function login(page: Page, email: string): Promise<void> {
   const response = await page.request.post("/api/auth/login", {

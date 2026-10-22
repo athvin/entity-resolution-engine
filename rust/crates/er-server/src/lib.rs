@@ -1374,12 +1374,26 @@ async fn models_index(
     };
     match pg::list_model_versions(&client, &org_row.id).await {
         Ok(rows) => {
-            let active = rows.iter().find(|m| m.state == "active").map(
-                |m| json!({ "name": m.name, "version": m.version, "model_hash": m.model_hash }),
-            );
+            // `active` is a LIST, one entry per name. It used to be
+            // `rows.iter().find(state == "active")` — a single row — which was
+            // well defined only while activation was unique per org. Since it
+            // became unique per (org, NAME), `find` returns whichever active row
+            // the list happened to order first, so the field would name an
+            // arbitrary member of an ensemble. Ordered by name for a stable
+            // render; an ensemble's RUN order comes from the published config's
+            // `models:` list, never from here.
+            let mut active: Vec<&_> = rows.iter().filter(|m| m.state == "active").collect();
+            active.sort_by(|a, b| a.name.cmp(&b.name));
             Json(json!({
                 "items": rows.iter().map(model_summary).collect::<Vec<_>>(),
-                "active": active,
+                "active": active
+                    .iter()
+                    .map(|m| json!({
+                        "name": m.name,
+                        "version": m.version,
+                        "model_hash": m.model_hash,
+                    }))
+                    .collect::<Vec<_>>(),
             }))
             .into_response()
         }
