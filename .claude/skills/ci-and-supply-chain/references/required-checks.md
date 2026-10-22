@@ -65,7 +65,7 @@ exists instead of a workflow-level `paths:` filter.
 | Job | Status-check context | Timeout | Condition |
 |---|---|---|---|
 | `detect` | detect changes | 5 | `always` |
-| `skills` | agent skills (lint) | 5 | `always` |
+| `skills` | agent skills (lint + drift) | 5 | `always` |
 | `lint` | fmt + clippy + docs | 45 | `needs.detect.outputs.code == 'true'` |
 | `entities` | entities | 45 | `needs.detect.outputs.code == 'true'` |
 | `test` | test | 30 | `needs.detect.outputs.code == 'true'` |

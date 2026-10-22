@@ -183,9 +183,29 @@ placement follows that split:**
   lives as a step in the existing `lint` job.
 - `lint` output derives from the **skills themselves**, so it must run on a PR
   that touches nothing but `.claude/**`. That is precisely the PR that
-  `rust.yml`'s `detect` job skips every compile job for. So `lint` runs in its
-  own `skills` job that is **deliberately not gated on `detect`** — it needs no
+  `rust.yml`'s `detect` job skips every compile job for. So it runs in its own
+  `skills` job that is **deliberately not gated on `detect`** — it needs no
   toolchain, so running it unconditionally costs seconds.
+
+**That split had a hole, and it is worth understanding rather than just
+patching.** The reasoning above was sound while every generator derived from
+code *outside* `.claude/`: a code change always ran the full gate, so the drift
+check riding the cargo job was enough. `gen_skill_inventory` broke it. That
+generator derives from `SKILL.md` descriptions, so a one-line description edit
+makes the inventory tables stale — on a `.claude`-only PR, which is exactly the
+PR where the cargo job does not run. The PR goes green and the push-to-main run
+turns `main` red.
+
+So the `skills` job now runs `all` (regen + drift + lint), not just `lint`. It
+still needs no toolchain — every generator is grep/awk/sed over checked-in
+files, verified by running the whole thing in a bare container with no cargo,
+node, Docker, terraform or aws. The drift check is **deliberately left in the
+cargo job too**: `skills` is not a required status check, so on its own it
+cannot block a merge.
+
+**Do not read a `.claude`-only PR's green as proof the generated references are
+current** until `agent skills (lint + drift)` is promoted to a required check.
+Check the last push-to-main run instead.
 
 Getting that backwards would produce a gate that is green exactly when it
 matters.
