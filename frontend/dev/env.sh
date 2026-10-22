@@ -4,6 +4,15 @@
 
 STATE_DIR="${REPO_ROOT}/frontend/dev/.state"
 
+# The host port the control-plane Postgres binds. Overridable because 5433 is
+# also what the engine's lake-E2E instructions use, so a machine already
+# running one of those cannot boot this stack at all — `up.sh` dies on "port is
+# already allocated". Export the same value when invoking the tier
+# (`ER_DEV_PG_PORT=5470 make frontend-dev` / `frontend-seed` / `frontend-e2e`)
+# and everything downstream follows, including the Playwright config, which
+# reads ERWEB_DATABASE_URL from the environment before falling back.
+export ER_DEV_PG_PORT="${ER_DEV_PG_PORT:-5433}"
+
 # --- er-server (the Rust control plane) -------------------------------------
 #
 # These three are the WHOLE env contract: `state_from_env` reads
@@ -12,7 +21,7 @@ STATE_DIR="${REPO_ROOT}/frontend/dev/.state"
 # environment — config root, drop root, lake templates, tenant DSN template —
 # is now per-org data supplied in the `POST /v1/orgs` body instead, so it lives
 # in seed.mjs rather than here.
-export ER_PG_DSN="postgresql://postgres:er@localhost:5433/postgres"
+export ER_PG_DSN="postgresql://postgres:er@localhost:${ER_DEV_PG_PORT}/postgres"
 export ER_OPERATOR_TOKEN="dev-operator-token"
 # 127.0.0.1, not 0.0.0.0: a dev stack has no reason to be reachable off-box.
 # The port must stay 8000 because ERSERVER_BASE_URL and the e2e Playwright
@@ -60,7 +69,7 @@ export ER_PROVISION_ENV_JSON="{\"ER_DUCKDB_THREADS\":\"2\",\"ER_MODEL_PATH\":\"$
 # operator-only calls (tenant admin, /v1/email) with it.
 export ERSERVER_BASE_URL="http://localhost:8000"
 export ERSERVER_OPERATOR_TOKEN="${ER_OPERATOR_TOKEN}"
-export ERWEB_DATABASE_URL="postgresql://postgres:er@localhost:5433/postgres"
+export ERWEB_DATABASE_URL="postgresql://postgres:er@localhost:${ER_DEV_PG_PORT}/postgres"
 export ERWEB_SESSION_SECRET="dev-session-secret-dev-session-secret"
 export ERWEB_CREDENTIAL_KEY="3q2+7wEirykuXBXRO26AY9nbZAqAnDzws76jd2GxwkE="
 export ERWEB_INSECURE_COOKIES="1" # plain-HTTP localhost

@@ -428,6 +428,45 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
       forwards no identity), tenant self-onboarding 503s (auto-provisioning was never ported), one
       cold-start timing flake, and one case not yet diagnosed. Tuning the specs to hide those would
       defeat the purpose of reviving the tier.
+- [x] **W0.5c the tier's last red cases — a silent stall, a required field nothing sends.** The
+      wizard case that W0.5b left "not yet diagnosed" had two causes stacked, and the first hid
+      the second. The panel sat on "Create draft" until the 120 s `waitForURL` expired having
+      **sent no request and raised no error**: `activate()` opened with
+      `if (!activeConfig.data) return;` — a silent return inside an async pipeline whose UI state
+      was already `running` — and neither action button was gated on that read, so a click landing
+      before `GET /config` resolved was a no-op that looked identical to work in progress. The
+      mock answers in ~1 ms and always wins that race; BFF → er-server → a fresh per-request
+      Postgres connection does not. Both buttons now gate on the base config (Playwright's click
+      waits for enabled, so the race is unreachable rather than merely legible) and all three
+      silent returns set an error.
+      **What that unblocked is the sharper finding.** With the stall gone the spec reached the run
+      page and the page *threw*: `data.progress.stages` with no optional chaining, where
+      er-server sends no `progress` key at all. `JobRow` declared it **required**, three call
+      sites read it unguarded — run detail, the runs list's `lastStage`, the dashboard's
+      active-job line — and the Playwright mock fabricated it at 11 sites, so all three were green
+      in every tier and broken against every real backend. Per-stage progress has no producer in
+      the product: the `run` ledger is one row per run with start/end, and the stage-level
+      tracking this was shaped for went with the Python tree. Making the field optional let `tsc`
+      enumerate the readers; the mock's fabrication is stripped, and `runs.spec.ts`'s assertion on
+      the stage name `match` — which only the mock could ever satisfy — now asserts the waiting
+      state the real server produces. The stages card already had that empty state.
+      Two spec fixes, both honest rather than cosmetic: the unmerge case asserted exactly
+      `memberCount - 1` members after peeling one record, which encodes a property the engine does
+      not promise (re-clustering runs from the full edge set, so peeling the only hop holding
+      another member in takes that member too — a 5-member group legitimately lands at 3); it now
+      asserts strictly fewer, which is what the comment above it already claimed. And
+      `ER_DEV_PG_PORT` makes the stack's Postgres port overridable, because 5433 collides with the
+      engine's own lake-E2E instructions and `up.sh` died on "port is already allocated" before
+      anything else ran.
+      Verified: the wizard case passes against the real stack, and `make frontend` is green at 362
+      passed. **One red case is left and it is a real product bug, filed not hidden**:
+      `entities/ingest_batch/read/page.sql` is `ORDER BY id LIMIT $limit` — a forward keyset cursor
+      — and the "did my file do anything?" receipts panel forwards to it with `?limit=20`, so it
+      renders the **oldest** 20 deliveries. Once an org has 20 ingest batches a newly delivered
+      source can never appear. `read.rs`'s `runs_list` immediately below it is documented "the most
+      recent runs, newest first, capped at 20"; receipts just never adopted that idiom. The fix is
+      a newest-first declared read plus its own endpoint, keeping `/v1/orgs/{org}/imports` the
+      cursor it is.
 - [~] **W0.5 harness debt — superseded by W0.5b above.** The stale
       `make check-all` references are fixed (see W0.6). The full-stack tier stays dormant, but
       the reason is now understood rather than just noted.

@@ -89,10 +89,20 @@ test("unmerge splits a real merged entity through the reconcile pipeline", async
     .catch(() => false);
   if (!gone) {
     // Checkbox marks only render on multi-member entities, so count table rows.
-    await expect(page.getByTestId("entity-members").locator("tbody tr")).toHaveCount(
-      memberCount - 1,
-      { timeout: 15_000 },
-    );
+    //
+    // Strictly fewer, not exactly one fewer. `memberCount - 1` encoded a
+    // property the engine does not promise: peeling a record re-clusters from
+    // the full edge set, so if the marked record was the only hop holding
+    // another member in, that member leaves too. On a corpus grown by repeated
+    // tier runs (each wizard pass adds a source carrying its own duplicate
+    // pair) a 5-member group peeled by one legitimately lands at 3, and the
+    // spec failed on correct behaviour. The comment above already said
+    // "fewer" — this is the code agreeing with it.
+    await expect
+      .poll(() => page.getByTestId("entity-members").locator("tbody tr").count(), {
+        timeout: 15_000,
+      })
+      .toBeLessThan(memberCount);
   }
   await snap(page, "real-entity-after-unmerge");
 

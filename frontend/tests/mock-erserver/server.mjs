@@ -223,7 +223,6 @@ export function initialState() {
           error_class: null,
           error_detail: null,
           outcome: null,
-          progress: { stages: [{ stage: "standardize" }, { stage: "match" }] },
         },
         {
           id: "01jm000000000000000000000b",
@@ -240,7 +239,6 @@ export function initialState() {
           error_class: "transient_io",
           error_detail: "S3 connection reset during assemble",
           outcome: null,
-          progress: { stages: [{ stage: "standardize" }] },
         },
         {
           id: "01jm000000000000000000000a",
@@ -257,7 +255,6 @@ export function initialState() {
           error_class: null,
           error_detail: null,
           outcome: "model_activated",
-          progress: { stages: [{ stage: "train" }] },
         },
       ],
       // Only tests that mutate job state touch this org, so acme-dev's fixtures
@@ -278,7 +275,6 @@ export function initialState() {
           error_class: null,
           error_detail: null,
           outcome: null,
-          progress: { stages: [{ stage: "standardize" }] },
         },
         {
           id: "01jmmutable00000000000000m2",
@@ -295,7 +291,6 @@ export function initialState() {
           error_class: "transient_io",
           error_detail: "disk full",
           outcome: null,
-          progress: { stages: [{ stage: "standardize" }] },
         },
       ],
     },
@@ -682,7 +677,6 @@ export function initialState() {
       error_class: "precondition",
       error_detail: "no model_registry row has status='active'",
       outcome: null,
-      progress: { stages: [{ stage: "ingest" }, { stage: "standardize" }] },
     },
     {
       id: "01jmfresh000000000000000f2",
@@ -699,7 +693,6 @@ export function initialState() {
       error_class: "precondition",
       error_detail: "no model_registry row has status='active'",
       outcome: null,
-      progress: { stages: [{ stage: "ingest" }, { stage: "standardize" }] },
     },
   ];
 
@@ -1034,7 +1027,6 @@ const server = http.createServer((req, res) => {
             error_class: null,
             error_detail: null,
             outcome: null,
-            progress: { stages: [{ stage: "create_database" }] },
           },
         ];
       }
@@ -1119,7 +1111,6 @@ const server = http.createServer((req, res) => {
           if (provision) {
             provision.state = "succeeded";
             provision.exit_code = 0;
-            provision.progress.stages = [{ stage: "create_database" }, { stage: "init_lake" }];
           }
         }
       }
@@ -1279,7 +1270,6 @@ const server = http.createServer((req, res) => {
         error_class: null,
         error_detail: null,
         outcome: kind === "train" ? "model_activated" : null,
-        progress: { stages: kind === "train" ? [{ stage: "train" }] : [] },
       };
       (state.jobs[match[1]] ??= []).unshift(job);
       return send(res, 202, job);
@@ -1574,15 +1564,6 @@ const server = http.createServer((req, res) => {
         error_class: null,
         error_detail: null,
         outcome: "resolved",
-        progress: {
-          stages: [
-            { stage: "ingest" },
-            { stage: "standardize" },
-            { stage: "match" },
-            { stage: "reconcile" },
-            { stage: "assemble" },
-          ],
-        },
       };
       (state.jobs[org] ??= []).unshift(job);
       return send(res, 202, { delivery_id: `mockdelivery-${source}`, job });
@@ -1729,7 +1710,6 @@ const server = http.createServer((req, res) => {
           error_class: null,
           error_detail: null,
           outcome: kind === "train" ? "model_activated" : "resolved",
-          progress: { stages: [{ stage: kind === "train" ? "train" : "assemble" }] },
         }));
         for (const job of enqueued) (state.jobs[org] ??= []).unshift(job);
         return send(res, 200, {

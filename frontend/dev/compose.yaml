@@ -20,8 +20,10 @@
 # catalog will not be caught here. That was already true before this change,
 # because the stack could not boot at all.
 #
-# Port 5433 is shared with the engine's own lake-E2E instructions, so the two
-# setups remain mutually exclusive on one machine.
+# Port 5433 is shared with the engine's own lake-E2E instructions, so set
+# ER_DEV_PG_PORT when something already holds it — otherwise the two setups are
+# mutually exclusive on one machine and `up.sh` dies on "port is already
+# allocated" before anything else runs.
 
 name: er-frontend-dev
 
@@ -29,7 +31,7 @@ services:
   controlplane-db: # er-server's Postgres (jobs, orgs, keys, config, reviews) + the BFF's erweb schema
     image: postgres:16@sha256:11a9d238fbb48bab14599c57e41123254452b1a2d93c6c8595bce96f346bd082
     ports:
-      - "5433:5432"
+      - "${ER_DEV_PG_PORT:-5433}:5432"
     environment:
       POSTGRES_PASSWORD: er
     healthcheck:
