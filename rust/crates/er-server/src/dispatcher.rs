@@ -189,7 +189,12 @@ async fn dispatch_once(client: &tokio_postgres::Client) -> Result<bool, tokio_po
     // the existing scores), which needs the async Postgres client, so it does not
     // go through the blocking `run_job`.
     let env = org.env.clone();
-    let outcome = if job.kind == "apply_corrections" {
+    let outcome = if job.kind == "provision" {
+        // Async-half too, and for a different reason from the others: its final
+        // act is a STATE TRANSITION on the org row, which is what the UI's
+        // progress panel is waiting for.
+        provision_tenant(client, &org, &job.id).await
+    } else if job.kind == "apply_corrections" {
         drain_and_correct(client, &job.org_id, &env, &job.id).await
     } else if job.kind == "train" {
         // Also async-half, and for the same reason as `apply_corrections`:
@@ -670,6 +675,98 @@ fn append_tf_snapshot(tf_path: &str, tf_rows: &str) -> Result<(), String> {
 
 /// Propagates a Postgres read/mark failure, a lake open/apply failure, or a
 /// `run_correct` failure (as a human string, like `run_job` returns).
+/// The `provision` job (D8): create the tenant's lake, then promote the org from
+/// `provisioning` to `active`.
+///
+/// `create_org` already did everything that is fast — the org row, the starter
+/// config as a published version 1, the one-time admin key — so this is the slow
+/// half only. The promotion at the end is what the UI's progress panel polls
+/// for, and the e2e spec gives it 180 seconds.
+///
+/// Idempotent, because a retried job must converge rather than fail: the
+/// directory and catalog creation tolerate existing paths, `CREATE DATABASE` is
+/// guarded by an existence check, and the promotion is expected-state guarded so
+/// a second run on an already-active tenant is a no-op rather than an error.
+///
+/// # Errors
+/// Returns the failure text for the job row; the org is LEFT in `provisioning`
+/// so a retry can finish the work. A tenant stuck visibly mid-provision is
+/// better than one marked active over a lake that does not exist.
+async fn provision_tenant(
+    client: &tokio_postgres::Client,
+    org: &pg::OrgDetail,
+    job_id: &str,
+) -> Result<(), String> {
+    let profile = match crate::provision::Profile::from_env() {
+        Ok(Some(p)) => p,
+        // The job outlives the request that made it, so the profile can have
+        // been switched off in between. Say so rather than panicking.
+        Ok(None) => {
+            return Err(
+                "auto-provisioning is not configured on this dispatcher (ER_PROVISION_MODE)"
+                    .to_string(),
+            );
+        }
+        Err(e) => return Err(format!("auto-provisioning is misconfigured: {e}")),
+    };
+    let plan = profile.plan(&org.name);
+
+    crate::provision::create_workspace(&plan, &profile.config_template)?;
+
+    match profile.mode {
+        crate::provision::Mode::Local => crate::provision::create_local_lake(&plan)?,
+        crate::provision::Mode::Postgres => {
+            let database = plan
+                .tenant
+                .as_deref()
+                .ok_or("postgres mode produced no tenant database name")?;
+            let maint = profile
+                .maint_dsn
+                .as_deref()
+                .ok_or("postgres mode has no ER_PROVISION_MAINT_DSN")?;
+            create_tenant_database(maint, database).await?;
+        }
+    }
+
+    eprintln!(
+        "job {job_id}: provisioned {} ({:?})",
+        org.name, profile.mode
+    );
+    // Expected-state guarded: `false` means someone else already moved it (a
+    // concurrent retry, or an operator suspending mid-provision), which is not
+    // this job's problem to force.
+    pg::set_org_state(client, &org.name, "active", "provisioning")
+        .await
+        .map_err(|e| format!("promote {} to active: {e}", org.name))?;
+    Ok(())
+}
+
+/// `CREATE DATABASE <db>` on the maintenance connection, if absent.
+///
+/// The identifier is built by [`crate::provision::tenant_database`], which folds
+/// everything but `[a-z0-9]` to `_`, so it cannot carry a quote — but it is still
+/// double-quoted here, because `CREATE DATABASE` takes no parameters and a
+/// hand-built identifier is exactly the shape that becomes an injection the day
+/// someone relaxes the folding.
+async fn create_tenant_database(maint_dsn: &str, database: &str) -> Result<(), String> {
+    let client = pg::connect(maint_dsn)
+        .await
+        .map_err(|e| format!("connect to the provisioning maintenance DSN: {e}"))?;
+    let existing = client
+        .query("SELECT 1 FROM pg_database WHERE datname = $1", &[&database])
+        .await
+        .map_err(|e| format!("look up database {database}: {e}"))?;
+    if !existing.is_empty() {
+        return Ok(());
+    }
+    let quoted = database.replace('"', "\"\"");
+    client
+        .batch_execute(&format!("CREATE DATABASE \"{quoted}\""))
+        .await
+        .map_err(|e| format!("create database {database}: {e}"))?;
+    Ok(())
+}
+
 pub async fn drain_and_correct(
     client: &tokio_postgres::Client,
     org_id: &str,
