@@ -18,6 +18,10 @@ setup (how to run things, the dev substrate) stays in
    functional tier` and `pnpm audit + licenses` are **required status checks** on
    `main`. Before this, branch protection required only `rust.yml`'s four
    contexts, so the frontend CI ran and was then ignored at merge time.
+   (`rust.yml` now contributes five: `entities` was split out of
+   `fmt + clippy + docs` on 2026-10-22, when that job was four serial
+   ~10-minute steps and 42m27 on a cache miss. The new context was added to
+   protection only after it had reported green on `main`.)
 2. **No `paths:` filter on `frontend.yml`.** A workflow a path filter skips never
    reports, so a required check would sit pending forever on a backend-only PR.
    A `detect` job and an `if:` per job is the mechanism — mirroring what

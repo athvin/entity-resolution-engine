@@ -4,14 +4,20 @@
 #
 # The one exception: a PR that only touches `.claude/**` (agent/skill prose, no
 # code and nothing the generators read) runs none of the compile jobs. Because
-# the four jobs below are REQUIRED status checks, a workflow-level path filter
-# would leave them "pending" forever and block the PR; instead a `detect` job
-# computes whether any non-`.claude` file changed and the required jobs gate on
-# it with `if:`. A job skipped by `if:` reports a "skipped" conclusion, which
+# the required jobs below are REQUIRED status checks, a workflow-level path
+# filter would leave them "pending" forever and block the PR; instead a `detect`
+# job computes whether any non-`.claude` file changed and the required jobs gate
+# on it with `if:`. A job skipped by `if:` reports a "skipped" conclusion, which
 # branch protection accepts as satisfied — so the PR stays mergeable with zero
-# compute. The skip is deliberately `.claude`-only: `lint` runs `er-entity
-# verify` (docs/erd.md staleness) and the OpenAPI gate, so docs/ changes must
-# still run the gate.
+# compute. The skip is deliberately `.claude`-only: the `entities` job runs
+# `er-entity verify` (docs/erd.md staleness) and `lint` verifies the generated
+# skill references, so docs/ changes must still run the gate.
+#
+# A JOB'S `name:` IS ITS BRANCH-PROTECTION CONTEXT. Renaming one silently
+# un-protects it, and adding a required context for a job that does not yet
+# exist on `main` blocks every PR until it does. `entities` was split out of
+# `lint` and is required; it was added to protection only after it had reported
+# green on `main`, which is the only safe order.
 #
 # The toolchain is installed with `rustup` rather than an action: dtolnay's
 # rust-toolchain selects the channel through its ref (`@stable`), which cannot
@@ -159,6 +165,26 @@ jobs:
         with:
           workspaces: rust
           shared-key: rust
+          # Busts the stale entry, and makes the next profile edit bust it
+          # automatically. rust-cache keys on `Cargo.lock`, the rustc version and
+          # `.cargo/config.toml` — NOT on `Cargo.toml`, so the
+          # `[profile.dev.package."*"] debug = false` added in #251 was invisible
+          # to it. The symptom, from main run 39779467231: `Cache hit for:
+          # v0-rust-rust-Linux-x64-8556beb2-...` then `Cache up-to-date.` — an
+          # exact key hit, so rust-cache skipped the save and the pre-profile
+          # entry became immortal. Every run then restored ~1.3 GB of
+          # full-debug-info dependency artifacts whose fingerprints cargo
+          # immediately rejected, and rebuilt them anyway.
+          #
+          # `prefix-key` makes the v0 entries unreachable (restore-keys are
+          # prefixed too) so they age out instead of being downloaded for
+          # nothing. Hashing Cargo.toml into `key` is the durable half: a future
+          # profile or lint change lands on a new key and therefore SAVES, while
+          # restore-keys still prefix-match the previous entry for a partial
+          # restore. Bump `prefix-key` by hand only for a change neither file
+          # records.
+          prefix-key: "v1-rust"
+          key: ${{ hashFiles('rust/Cargo.toml') }}
           # THIS job is the single writer of `shared-key: rust`. The other four
           # compile jobs restore from it and set `save-if: false`, because the
           # 10 GB per-repository Actions cache is a shared, capped resource and
@@ -187,12 +213,6 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: entity framework verify (stale-output + analyser passes)
-        # Regenerate every artifact from entities/*.yaml and fail if any committed
-        # file (Rust struct, DuckLake/Postgres DDL, query fns) is stale; then plan
-        # every statement and run the E0xx passes. rustfmt is already installed
-        # above, which `er-entity gen` uses to canonicalise output.
-        run: cargo run -q -p er-entity-cli -- verify --root ..
       - name: rustdoc (deny warnings)
         run: cargo doc --workspace --no-deps --document-private-items
         env:
@@ -205,16 +225,6 @@ jobs:
         # rather than in the always-on `skills` job, which has no toolchain.
         working-directory: ${{ github.workspace }}
         run: bash scripts/skills-check.sh check
-      - name: API breaking-change gate (advisory)
-        # Diff the control-lane OpenAPI document against main's and report breaking
-        # component-schema changes (removed schema/field, retype, dropped required).
-        # Advisory — never fails the build — until the first external org key; the
-        # release pipeline then runs `er-openapi-check --strict`. A no-op on main
-        # (no base to diff) or if main is unfetchable.
-        run: |
-          git -C .. fetch --no-tags --depth=1 origin main || exit 0
-          git -C .. show origin/main:frontend/src/lib/api/openapi.json > /tmp/base-openapi.json 2>/dev/null || exit 0
-          cargo run -q -p er-server --bin er-openapi-check -- /tmp/base-openapi.json || true
       - name: Build cost (sccache stats, target size)
         # Never a gate: `always()` so a red job still reports, `|| true` so the
         # reporting itself cannot fail one.
@@ -228,6 +238,97 @@ jobs:
         #
         # Read it as a pair: a cold run shows what the misses cost, a warm run
         # shows what the hits save. One number alone says nothing.
+        if: always()
+        run: |
+          sccache --show-stats || true
+          du -sh target || true
+
+  # Split out of `lint` on 2026-10-22. That job ran four independent ~10-minute
+  # steps SERIALLY and took 42m27 on a cache miss — clippy 10m32, this 10m39,
+  # rustdoc 9m20 and the advisory OpenAPI gate 10m34 — while gating every merge.
+  #
+  # WHAT IS AND IS NOT WORTH SPLITTING, from run 39775982197 rather than from
+  # reasoning — because reasoning got it wrong here:
+  #
+  #   clippy       9m22    expensive: builds the dependency tree's metadata
+  #   this step    8m16    expensive: first `cargo run`, so it pays the codegen
+  #   rustdoc      0m39    nearly free once clippy has run
+  #   OpenAPI gate 0m42    nearly free once a `cargo run` has codegen'd
+  #
+  # So the cost is the DEPENDENCY TREE, paid once per kind of build, and the
+  # workspace's own 28 crates are cheap. Only the first two deserve their own
+  # jobs; rustdoc stays in `lint` and the OpenAPI gate stays here, because a
+  # separate job for either would re-pay a tree build to save forty seconds.
+  # The earlier guess — that these two `cargo run` steps share little because
+  # `er-entity-cli` pulls datafusion 52 / arrow 57 and `er-server` pulls
+  # duckdb / arrow 58 / aws — is contradicted by that 0m42.
+  #
+  # REQUIRED status check. It is the entity-framework gate: regenerate every
+  # artifact from entities/*.yaml and fail if any committed file (Rust struct,
+  # DuckLake/Postgres DDL, query fns) is stale, then plan every statement and run
+  # the E0xx passes.
+  entities:
+    name: entities
+    needs: detect
+    if: needs.detect.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    # 45 for the same reason as `lint`: on a cold cache this builds the bundled
+    # duckdb C++ tree plus a second full arrow before it can verify anything.
+    timeout-minutes: 45
+    env:
+      RUSTC_WRAPPER: sccache
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install stable toolchain
+        # rustfmt is not optional here: `er-entity gen` shells out to it to
+        # canonicalise generated output, and this gate compares bytes. It came
+        # for free in `lint` (clippy's job installs it); here it must be asked
+        # for, or every generated file reads as stale.
+        run: rustup update stable --no-self-update && rustup default stable && rustup component add rustfmt
+      - name: Install mold
+        run: sudo apt-get update && sudo apt-get install -y mold
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: rust
+          shared-key: rust
+          # Keyed to include a hash of Cargo.toml, which rust-cache does not
+          # hash by default — see the `lint` job for the stale-entry failure that
+          # cost. Keep these identical across jobs or they stop sharing.
+          prefix-key: "v1-rust"
+          key: ${{ hashFiles('rust/Cargo.toml') }}
+          # Restore-only. `lint` is the single writer of this key — see the long
+          # comment there for why five writers on a 10 GB capped cache is what
+          # kept producing cold runs.
+          save-if: false
+      - name: entity framework verify (stale-output + analyser passes)
+        run: cargo run -q -p er-entity-cli -- verify --root ..
+      - name: API breaking-change gate (advisory)
+        # Rides along here rather than getting its own job, which MEASUREMENT
+        # decided and intuition got wrong. In run 39775982197 this step cost
+        # 0m42 after `er-entity verify` had already codegen'd the shared
+        # dependency tree — against 10m34 in the 42m27 serial run, where nothing
+        # before it had produced rlibs. Standalone it would pay that codegen
+        # again for a step that is otherwise free, and gain nothing in wall clock
+        # because it already runs in parallel with `lint`.
+        #
+        # PR-only, which the step itself always implied: it diffs against
+        # `origin/main`, so on a push to main there is no base and it exits 0
+        # having examined nothing. Running it there was ~10 minutes to print
+        # nothing.
+        #
+        # It cannot fail this required job: every stage is `|| true` or
+        # `|| exit 0`. It is advisory until the first external org key, after
+        # which the release pipeline runs `er-openapi-check --strict`.
+        if: github.event_name == 'pull_request'
+        # Diff the control-lane OpenAPI document against main's and report breaking
+        # component-schema changes (removed schema/field, retype, dropped required).
+        run: |
+          git -C .. fetch --no-tags --depth=1 origin main || exit 0
+          git -C .. show origin/main:frontend/src/lib/api/openapi.json > /tmp/base-openapi.json 2>/dev/null || exit 0
+          cargo run -q -p er-server --bin er-openapi-check -- /tmp/base-openapi.json || true
+      - name: Build cost (sccache stats, target size)
+        # See the `lint` job's copy for why.
         if: always()
         run: |
           sccache --show-stats || true
@@ -280,6 +381,11 @@ jobs:
         with:
           workspaces: rust
           shared-key: rust
+          # Keyed to include a hash of Cargo.toml, which rust-cache does not
+          # hash by default — see the `lint` job for the stale-entry failure that
+          # cost. Keep these identical across jobs or they stop sharing.
+          prefix-key: "v1-rust"
+          key: ${{ hashFiles('rust/Cargo.toml') }}
           # Restore-only. `lint` is the single writer of this key — see the long
           # comment there for why five writers on a 10 GB capped cache is what
           # kept producing cold runs.
@@ -314,6 +420,20 @@ jobs:
           manifest-path: rust/Cargo.toml
           command: check advisories licenses bans sources
 
+  # NOT split, unlike `lint` — and that is a measurement, not an oversight. This
+  # job is now the critical path (23m10 in run 39775982197: 13m15 for the
+  # four-crate test, 8m17 for the rapidfuzz extension test), so splitting it is
+  # the obvious next move and it does not survive the numbers.
+  #
+  # The extension step's 8m17 came AFTER the first step had already built the
+  # dependency tree, so unlike `lint`'s rustdoc (0m39) and OpenAPI gate (0m42) it
+  # is not riding cheaply on a tree someone else paid for — those 8m17 are its own
+  # test-target compile, link and run. Standalone it would pay a tree build on top
+  # of that, plausibly ~18m against this job's remaining 13m15, which would make
+  # the wall clock WORSE than the 23m10 it was meant to improve.
+  #
+  # So: measure before splitting this. What would decide it is the tree cost for a
+  # `-p dedupe-core --test extensions` build alone, which no run has isolated yet.
   ducklake-e2e:
     name: DuckLake + extensions e2e
     needs: detect
@@ -353,6 +473,11 @@ jobs:
         with:
           workspaces: rust
           shared-key: rust
+          # Keyed to include a hash of Cargo.toml, which rust-cache does not
+          # hash by default — see the `lint` job for the stale-entry failure that
+          # cost. Keep these identical across jobs or they stop sharing.
+          prefix-key: "v1-rust"
+          key: ${{ hashFiles('rust/Cargo.toml') }}
           # Restore-only. `lint` is the single writer of this key — see the long
           # comment there for why five writers on a 10 GB capped cache is what
           # kept producing cold runs.
@@ -398,6 +523,11 @@ jobs:
         with:
           workspaces: rust
           shared-key: rust
+          # Keyed to include a hash of Cargo.toml, which rust-cache does not
+          # hash by default — see the `lint` job for the stale-entry failure that
+          # cost. Keep these identical across jobs or they stop sharing.
+          prefix-key: "v1-rust"
+          key: ${{ hashFiles('rust/Cargo.toml') }}
           # Restore-only. `lint` is the single writer of this key — see the long
           # comment there for why five writers on a 10 GB capped cache is what
           # kept producing cold runs.
@@ -430,6 +560,11 @@ jobs:
         with:
           workspaces: rust
           shared-key: rust
+          # Keyed to include a hash of Cargo.toml, which rust-cache does not
+          # hash by default — see the `lint` job for the stale-entry failure that
+          # cost. Keep these identical across jobs or they stop sharing.
+          prefix-key: "v1-rust"
+          key: ${{ hashFiles('rust/Cargo.toml') }}
           # Restore-only. `lint` is the single writer of this key — see the long
           # comment there for why five writers on a 10 GB capped cache is what
           # kept producing cold runs.
@@ -483,6 +618,11 @@ jobs:
         with:
           workspaces: rust
           shared-key: coverage
+          # Keyed to include a hash of Cargo.toml, which rust-cache does not
+          # hash by default — see the `lint` job for the stale-entry failure that
+          # cost. Keep these identical across jobs or they stop sharing.
+          prefix-key: "v1-rust"
+          key: ${{ hashFiles('rust/Cargo.toml') }}
           # This key KEEPS its writer, unlike the four restore-only jobs above,
           # and the reasoning is worth recording because the opposite looks
           # obviously right: the entry held 1,885 MiB, 19% of the repository's
@@ -536,19 +676,42 @@ jobs:
   cache-prune:
     name: prune sccache to budget
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 30, not 15: listing ~5,600 entries over 56 paginated requests and then
+    # deleting thousands of them is minutes of pure API round trips even eight at
+    # a time. The first version ran sequentially and did not finish in ten.
+    timeout-minutes: 30
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     permissions:
       # Deleting a cache entry needs write; nothing else here does.
       actions: write
     env:
       GH_TOKEN: ${{ github.token }}
-      # sccache's share of the 10 GB budget. Sized from the steady state of
-      # everything else — one `shared-key: rust` entry (~1.3 GB), the pnpm store,
-      # the Next build cache, the buildkit blobs from images.yml and the DuckDB
-      # extensions come to ~2.1 GiB — so this leaves several GiB of slack rather
-      # than running the budget to the edge between nightly runs.
-      SCCACHE_BUDGET_MIB: "2048"
+      # sccache's share of the 10 GB budget. Deliberately GENEROUS, and the first
+      # guess here (2048) was wrong in a way worth recording.
+      #
+      # sccache turns out to be the PRIMARY cache for this workspace, not a
+      # backstop for rust-cache. Run 39783867347 logged `No cache found.` for
+      # rust-cache in both compile jobs — a total miss — and still finished the
+      # whole workflow in 8m03, because sccache hit 96.65% and 97.54% (and 98%
+      # on C/C++, so it is caching the bundled DuckDB compile too). clippy came
+      # in at 2m02 with no rust-cache at all.
+      #
+      # So this budget is not "sccache's slice". It is "what is left after the
+      # caches that cannot share", and it should be as large as that allows:
+      # a fresh `v1-rust` entry, `coverage`'s entry, the buildkit blobs from
+      # images.yml (~1 GB, also uncapped), the pnpm store, the Next cache and the
+      # DuckDB extensions come to roughly 3.5 GB. Pruning below that line deletes
+      # entries that are each a future compile.
+      #
+      # The prune still exists, because unbounded growth is what evicted
+      # rust-cache in the first place. But the real fix is to take sccache out of
+      # this 10 GB budget entirely — see the build-cost reference's S3 section,
+      # which this measurement promotes from contingency to the obvious next step.
+      SCCACHE_BUDGET_MIB: "5120"
+      # Upper bound on deletions per run, so one night's work is bounded no
+      # matter how large the backlog. It converges over successive runs, and
+      # reports when it stops short rather than looking finished.
+      MAX_DELETES: "4000"
     steps:
       - name: Prune
         # No checkout, so step off the workflow's `rust` working-directory
@@ -581,17 +744,35 @@ jobs:
           printf 'sccache: %d entries, %d MiB (budget %d MiB)\n' \
             "$(wc -l <"$entries")" "$((total / 1048576))" "$SCCACHE_BUDGET_MIB"
 
-          deleted=0 freed=0
-          while IFS=$'\t' read -r id size; do
-            if [ "$total" -le "$budget" ]; then break; fi
-            # A concurrent run may have evicted it already; that is not a failure.
-            if gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/caches/$id" --silent 2>/dev/null; then
-              total=$((total - size))
-              freed=$((freed + size))
-              deleted=$((deleted + 1))
-            fi
-          done <"$entries"
+          # Choose the victims in one pass, then delete them CONCURRENTLY. A
+          # sequential loop is what the first version did and it does not fit in
+          # any sane timeout: one DELETE is a separate HTTPS round trip (~150 ms)
+          # and the backlog was 5,595 entries / 5,846 MiB, i.e. ~3,400 deletions.
+          # Measured: it ran past 10 minutes having cleared only part of it.
+          #
+          # MAX_DELETES bounds a single run so the job cannot become unbounded
+          # work if the backlog is ever huge; it simply converges over successive
+          # nights instead. Anything dropped is reported, never silent.
+          doomed=$(mktemp)
+          awk -F'\t' -v budget="$budget" -v total="$total" -v cap="$MAX_DELETES" '
+            total <= budget { exit }
+            NR > cap        { exit }
+            { print $1; total -= $2 }
+          ' "$entries" >"$doomed"
+          want=$(wc -l <"$doomed")
+          printf 'deleting %d oldest-accessed entries (cap %d)\n' "$want" "$MAX_DELETES"
 
-          printf 'deleted %d oldest-accessed sccache entries, freed %d MiB\n' \
-            "$deleted" "$((freed / 1048576))"
+          # `|| true` per delete: a concurrent run may have evicted it already,
+          # which is not a failure. xargs would otherwise exit 123 and, under
+          # `set -e`, fail a job whose whole point is hygiene.
+          export GITHUB_REPOSITORY
+          xargs -r -P 8 -I{} sh -c \
+            'gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/caches/{}" --silent 2>/dev/null || true' \
+            <"$doomed"
+
+          remaining=$((total - budget))
+          if [ "$want" -ge "$MAX_DELETES" ] && [ "$remaining" -gt 0 ]; then
+            printf 'hit the %d cap with ~%d MiB still over budget; the next run continues\n' \
+              "$MAX_DELETES" "$((remaining / 1048576))"
+          fi
           echo "total: $(report)"

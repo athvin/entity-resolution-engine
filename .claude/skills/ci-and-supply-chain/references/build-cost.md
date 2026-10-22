@@ -9,12 +9,14 @@ against it.
 ## Contents
 
 - The measured baseline (2026-10-22)
+- The first measurement after the change
+- Where it ended up
 - Why cold happens: the Actions cache budget
 - The levers, and which were taken
 - Rejected: headstart
-- Rejected: larger runners, for now
+- Blocked: more cores per job
 - Rejected: removing sccache
-- Escalation: sccache on S3
+- Next step: sccache on S3
 
 ## The measured baseline (2026-10-22)
 
@@ -56,6 +58,204 @@ Elsewhere: `test` spends 2m33 in the disk-reclaim step before compiling, and
 four-crate test and the rapidfuzz extension test. `coverage` is 22m10 of
 `llvm-cov` alone, nightly-only, and deliberately opts out of sccache and mold
 (`rust.yml:358-360`).
+
+## The first measurement after the change
+
+Run `39775982197`, the cache + profile change on a PR. **Read this run with its
+caveat first: the baseline's rust-cache restore step took 0m01 — a true miss —
+and this one took 0m28, an actual restore.** So it is not a clean A/B of the
+profile change; it is "profile change, and a cache entry existed". One data point
+cannot separate those, and nothing below should be read as attributing the
+improvement to one of them.
+
+| Job | baseline (miss) | run 39775982197 |
+|---|---|---|
+| fmt + clippy + docs | 42m27 | **19m57** |
+| DuckLake + extensions e2e | 27m55 | 23m10 |
+| test | 14m22 | 12m52 |
+| **workflow wall clock** | **42m38** | **23m18** |
+
+**The step breakdown is the useful part, because it overturned a design
+decision:**
+
+| Step | baseline | run 39775982197 |
+|---|---|---|
+| `cargo clippy` | 10m32 | 9m22 |
+| `er-entity verify` | 10m39 | 8m16 |
+| `cargo doc` | 9m20 | **0m39** |
+| OpenAPI gate (advisory) | 10m34 | **0m42** |
+
+**What that means: the cost is the dependency tree, paid once per kind of build,
+and the workspace's own 28 crates are cheap.** `cargo clippy` builds the tree's
+metadata; the first `cargo run` pays its codegen; everything after that in the
+same job is nearly free. The earlier reasoning here — that clippy's `.rmeta`
+cannot help a `cargo run`, and that `er-entity-cli` (datafusion 52 / arrow 57)
+and `er-server` (duckdb / arrow 58 / aws) share too little to matter — is
+**contradicted by that 0m42**, and was the justification for giving the OpenAPI
+gate its own job. It does not have one; it is a step on `entities`, where it
+costs 0m42 instead of re-paying a tree build.
+
+So only two of the four steps earned their own job, and `fmt + clippy + docs`
+became two, not three: it keeps fmt, clippy, rustdoc and the skills-reference
+check, and `entities` takes `er-entity verify` plus the advisory gate (PR-only —
+on a push to main it has no base to diff and exits having examined nothing).
+
+**`DuckLake + extensions e2e` was left whole for the same reason, inverted.** It
+is now the critical path, so splitting it is the obvious next move, and the
+numbers say no: its 8m17 extension step ran *after* the tree was already built,
+so unlike rustdoc's 0m39 those 8m17 are its own test-target compile, link and
+run. Standalone it would pay a tree build on top — plausibly ~18m against the
+remaining 13m15, making the wall clock worse than the 23m10 it was meant to fix.
+What would settle it is the tree cost of a `-p dedupe-core --test extensions`
+build alone, which no run has isolated.
+
+**sccache hit rates, visible for the first time** (this run, where the profile
+change invalidated every fingerprint, so these are a floor and not a steady
+state):
+
+| Job | requests | hits | misses | hit rate | `target` |
+|---|---|---|---|---|---|
+| fmt + clippy + docs | 1724 | 273 | 1172 | 16% | 13G |
+| test | 945 | 385 | 333 | 41% | 24G |
+| DuckLake + extensions e2e | 1158 | 314 | 691 | 27% | 20G |
+
+Note the C/C++ hits (104 / 171 / 223) — sccache is caching part of the bundled
+DuckDB compile, not just Rust. A steady-state reading on an unchanged lockfile is
+the number that decides the S3 question below; this is not it.
+
+### The profile change was invisible to rust-cache
+
+Found on main run `39779467231`, the merge of the profile change. The `lint` job
+logged:
+
+```
+Cache hit for: v0-rust-rust-Linux-x64-8556beb2-9ec4ef33
+...
+Cache up-to-date.
+```
+
+**An exact key hit, so rust-cache skipped the save.** `rust-cache` keys on
+`Cargo.lock`, the rustc version and `.cargo/config.toml` — **not** on
+`Cargo.toml`, where `[profile.*]` lives. So the pre-profile entry became
+immortal: every run restored ~1.3 GB of full-debug-info dependency artifacts
+whose fingerprints cargo then rejected and rebuilt, and the smaller
+post-profile `target` was never saved. Two useless entries held ~3 GB of a 10 GB
+budget that was already evicting.
+
+The fix is two inputs on every rust-cache use, which must stay identical across
+jobs or they stop sharing an entry:
+
+- `prefix-key: "v1-rust"` — makes the `v0-*` entries unreachable (restore-keys
+  are prefixed too) so they age out instead of being downloaded for nothing. One
+  fully cold run follows, by design.
+- `key: ${{ hashFiles('rust/Cargo.toml') }}` — the durable half. A future profile
+  or lint edit lands on a new key and therefore *saves*, while restore-keys still
+  prefix-match the previous entry for a partial restore.
+
+**The general lesson, worth more than the fix:** a cache whose key does not cover
+an input that changes build output does not go stale loudly — it goes stale
+*silently*, keeps reporting hits, and the cost shows up as compile time nobody
+attributes to it. `Cache up-to-date` next to an entry whose timestamp predates a
+build-affecting change is the signature.
+
+### The prune has to delete concurrently
+
+The first version of `cache-prune` deleted sequentially, and that does not fit in
+any sane timeout. One `DELETE` is a separate HTTPS round trip (~150 ms), and the
+backlog it was first run against was **5,595 entries / 5,846 MiB**, i.e. ~3,400
+deletions. Run against the live cache it was still going after **ten minutes**,
+against a 15-minute job timeout — so the nightly job would have died partway and
+reported failure while leaving the budget blown.
+
+Fixed by choosing the victims in one `awk` pass and deleting them through
+`xargs -P 8`: **1,586 deletions in 2m00** measured, so the 4,000-deletion cap
+lands around five minutes. The timeout went to 30 minutes, because listing ~5,600
+entries over 56 paginated requests is itself minutes before any deleting starts.
+
+Two details that are load-bearing rather than defensive:
+
+- **`|| true` on each delete.** A concurrent run may already have evicted that
+  entry. Without it `xargs` exits 123 and, under `set -e`, fails a job whose only
+  purpose is hygiene.
+- **`MAX_DELETES` bounds one run** so the job cannot become unbounded work, and
+  it *reports* when it stops short. A prune that silently gives up looks exactly
+  like a prune that finished.
+
+First measured result, after relieving the backlog by hand: **10,999,396,329 →
+7,029,161,413 bytes (6.54 GiB) across 4,485 entries** — under the ceiling with
+~3.4 GB of headroom, which is where the eviction stops.
+
+### Where it ended up
+
+Run `39783867347` — profile change, single cache writer, and the `entities`
+split, on a warm cache:
+
+| Job | baseline | now |
+|---|---|---|
+| fmt + clippy + docs | 42m27 | **3m33** |
+| entities | (inside the above) | 4m09 |
+| test | 14m22 | 7m54 |
+| DuckLake + extensions e2e | 27m55 | 7m04 |
+| cargo-deny | 30s | 0m25 |
+| **workflow wall clock** | **42m38** | **8m03** |
+
+The split did what it was supposed to: 3m33 and 4m09 **in parallel**, where the
+same two gates were ~7m42 serially. The critical path is now `test` at 7m54,
+which is a `cargo test --workspace` and a 2m03 disk-reclaim step — a different
+problem from the one this file opened with.
+
+### sccache is the primary cache, and that was backwards here
+
+**The same run logged `No cache found.` for rust-cache in both compile jobs.** A
+total miss, no restore at all — and it still finished in 8m03:
+
+| Job | requests | hits | misses | hit rate | C/C++ hit rate |
+|---|---|---|---|---|---|
+| fmt + clippy + docs | 1068 | 779 | 27 | **96.65%** | 98.32% |
+| entities | 1113 | 992 | 25 | **97.54%** | 95.66% |
+
+clippy ran in 2m02 with no rust-cache entry whatsoever. So for this workspace
+**sccache is the cache that matters**, and it covers the bundled DuckDB C++
+compile as well as the Rust units.
+
+That inverts the framing at the top of this file. The eviction problem was real —
+sccache's entry count was starving rust-cache — but the conclusion drawn from it
+was half wrong. Protecting the rust-cache entry with a single-writer rule was
+guarding the *cheaper* of the two caches, and the nightly prune's first budget
+(2048 MiB) capped the expensive one. Each pruned entry is a future compile.
+
+Two consequences, both applied:
+
+- `SCCACHE_BUDGET_MIB` is now **5120**, framed as "what is left after the caches
+  that cannot share" rather than as sccache's slice.
+- **The S3 move below stops being a contingency and becomes the obvious next
+  step.** Capping the primary cache to protect a 10 GB shared budget is the wrong
+  trade; taking it out of that budget removes the trade entirely.
+
+A second run settles it. Run `39786067377` carried the `prefix-key: v1-rust`
+bump, so rust-cache was guaranteed to miss — `No cache found.` in every job:
+
+| Job | requests | hits | misses | hit rate | job time |
+|---|---|---|---|---|---|
+| fmt + clippy + docs | 1068 | 801 | 5 | **99.38%** | 1m53 |
+| entities | 1113 | 1011 | 6 | **99.41%** | 4m19 |
+| test | 945 | 715 | 3 | **99.58%** | 8m36 |
+
+Wall clock **8m45** with no rust-cache entry in existence, against 8m03 with one
+that also missed. `fmt + clippy + docs` in 1m53 from nothing but sccache.
+
+**So the open question is now the other way round: what is rust-cache for?** It
+holds ~1.3 GB of a 10 GB budget, costs a restore and a save, and across two runs
+contributed nothing measurable because sccache answered 99% of compilations. The
+next experiment is a PR that removes it from the Rust jobs and compares; that
+would free the budget outright and make the S3 move unnecessary rather than
+merely attractive. Not done here — it is a deliberate change deserving its own
+measurement, and two runs that never restored an entry cannot prove what
+restoring one would have been worth.
+
+Read the 42m38 → 8m03 as the span between a cache miss on the old shape and a
+warm sccache on the new one, not as a single intervention. Three things changed
+at once, and the step-level numbers support each contributing.
 
 ## Why cold happens: the Actions cache budget
 
@@ -127,15 +327,18 @@ rust-cache entry, so making the profile real buys cache headroom twice.
 | Lever | Taken | Why |
 |---|---|---|
 | Real `[profile.*]` in `rust/Cargo.toml` | yes | 1.9× less build output for every job and every laptop, not just `test` |
-| `save-if` so one job writes each key | yes | stops five jobs racing the same key and PR branches minting entries |
+| `save-if` so one job writes each key | yes | stops five jobs racing the same key and PR branches minting entries — though see the sccache finding: this protects the cache that turned out not to matter |
 | Drop `coverage`'s cache save | **no** | frees 1.8 GiB but makes a 22m10-warm job permanently cold against a 60-min timeout; the profile change shrinks the entry instead |
-| Prune sccache to a budget, nightly | yes | caps the entry count that does the evicting |
+| Prune sccache to a budget, nightly | yes, but raised to 5120 MiB | caps the entry count that does the evicting. Must delete concurrently. The first budget (2048) throttled the cache doing 97% of the work — see the sccache finding |
 | `sccache --show-stats` in each job | yes | the hit rate was never observable; it is the input to every later decision here |
-| Split the serial `fmt + clippy + docs` | yes | four independent ~10m steps; the advisory one was pure critical-path tax |
+| Key rust-cache on `Cargo.toml` too | yes | it does not by default, so the `[profile.*]` change hit an exact key, logged `Cache up-to-date` and never saved — leaving an immortal pre-profile entry |
+| Split the serial `fmt + clippy + docs` | yes | 2026-10-22: `entities` split out and made required. Only the two tree-paying steps earned a job — see the measurement, which overturned splitting the other two |
+| Split `DuckLake + extensions e2e` | **no** | tried, then reverted on the numbers: its 8m17 step is its own work, not a tree it inherited, so a separate job would pay a tree build on top and come out slower. Now the critical path, so this is the open question |
 | cargo-nextest | no | build time dominates execution time here; revisit after the above |
 | `.cargo/config.toml` for local mold/sccache | no | helps laptops, not CI; worth doing, not yet scoped |
 | cargo-chef + cache mounts in `rust/Dockerfile` | no | `COPY . .` + one `cargo build --release` means any source change rebuilds DuckDB in release mode; real, separate |
-| Larger runners | no | see below |
+| More cores per job | **blocked** | not reachable by editing `runs-on:` on a user-owned repo — see below |
+| Drop rust-cache from the Rust jobs | **open — next experiment** | two runs completed in 8m03 and 8m45 with `No cache found.` and sccache at 99%; it holds ~1.3 GB and contributed nothing measurable |
 | headstart | no | see below |
 
 ## Rejected: headstart
@@ -190,22 +393,72 @@ faster on 4 cores.
 
 **Date.** 2026-10-22.
 
-## Rejected: larger runners, for now
+## Blocked: more cores per job
 
-**Decision.** Stay on `ubuntu-latest` until the cache and profile fixes above have
-been measured.
+**Decision.** More cores is wanted (operator: "having fast CI is really
+important") but is **not reachable by editing `runs-on:`**, so the parallelism
+above was taken first. Any core increase needs an account-level decision.
 
-**Context.** Larger GitHub-hosted runners are the one lever that multiplies every
-job at once, and they would also relieve the disk wall that forced the reclaim
-step and the debug-profile hunt. They cost roughly 2× per minute at 8 cores. The
-case for deferring is that a 42-minute job that should be 14 is not a compute
-problem, and buying cores to paper over a blown cache budget would hide the
-actual fault while still paying for it on every run.
+**Context — what this repo can actually run.** The repository is **public and
+owned by a user account**, not an organisation. That fixes two things:
 
-**Rejected alternative.** Moving `lint`, `test` and `ducklake-e2e` to
-`ubuntu-latest-8-core` now. Reconsider once the baseline above has been
-re-measured post-change — and note that it is also precondition 1 for a headstart
-revisit.
+- `ubuntu-latest` is 4 vCPU / 16 GB, and **its minutes are free**, because
+  standard GitHub-hosted runners are free for public repositories. The current
+  bill for all of this CI is zero.
+- **GitHub "larger runners" are not available.** They are a Team / Enterprise
+  Cloud feature, provisioned as a runner group in *organisation* settings, and
+  they are **metered even on public repositories** (~$0.012/min for 4-core
+  Linux, scaling with size). A user-owned repo has no org settings page to
+  create one in. `gh api repos/.../actions/runners` also confirms no self-hosted
+  runner is registered.
+
+So the failure mode to avoid is writing a label like `ubuntu-latest-8-core` that
+does not resolve: the job then queues forever, and on a **required** check that
+blocks every PR — the same class of mistake as a `paths:` filter on a required
+workflow.
+
+**The three real paths, none of them a one-line edit.**
+
+1. **A third-party runner provider** (Blacksmith, Depot, BuildJet, Namespace,
+   WarpBuild). Install a GitHub App, then change `runs-on:` per job. Several have
+   free or discounted open-source tiers, and — relevant here — several ship their
+   own cache backend with a far higher ceiling than 10 GB, which would retire the
+   eviction problem this file is mostly about rather than just outrunning it.
+   Lowest friction, and the only option that addresses both axes at once.
+2. **An organisation on the Team plan**, which unlocks GitHub larger runners.
+   Transfer the repo, create a runner group, then use its label. Keeps everything
+   first-party; costs the plan plus metered larger-runner minutes, and gives up
+   the free-for-public-repos standard-runner minutes for any job moved over.
+3. **Self-hosted runners** on the existing AWS/EKS footprint. **Weigh this
+   carefully on a public repo:** a pull request from a fork can execute arbitrary
+   code on a self-hosted runner, which is why GitHub advises against self-hosted
+   runners on public repositories. It is mitigable (fork PRs gated behind manual
+   approval) but it is a real attack surface on a repo that holds a `security`
+   skill and a pentest programme, and it carries infrastructure cost and
+   maintenance that the other two do not.
+
+**What was done instead, and why it was done first.** Parallelism, which is free:
+`fmt + clippy + docs` and `DuckLake + extensions e2e` were each running
+independent steps serially, so they cost the sum rather than the longest. That
+takes the cold critical path from 42m38 to roughly 20m without an account
+decision. A core increase multiplies whatever remains after that — and buying
+cores before fixing a blown cache budget and a serial job graph would have hidden
+both faults while paying for them on every run.
+
+**Deferred, deliberately** (operator, 2026-10-22): take the free parallelism
+first, re-measure, then revisit cores with numbers. The expected ~20m critical
+path may be enough on its own, and a core increase multiplies whatever is left
+rather than being wasted by it.
+
+**The scope is already decided, so a revisit need not re-litigate it:** the
+**longest required** jobs only — `DuckLake + extensions e2e`,
+`fmt + clippy + docs`, and `test`. Not the cheap jobs, not `entities` /
+`api-gate` / `extensions` (already ~10m and off the critical path), and not the
+nightly ones. Pay only where wall clock gates a merge; everything else keeps the
+free standard runner.
+
+**Still open.** Which of the three paths. Note that path 1 or 2 is also
+precondition 1 for a [headstart](#rejected-headstart) revisit.
 
 **Date.** 2026-10-22.
 
@@ -229,10 +482,12 @@ already the worst case — worse.
 
 **Date.** 2026-10-22.
 
-## Escalation: sccache on S3
+## Next step: sccache on S3
 
-If capping the entry count does not hold the budget, the next move is to take
-sccache out of the Actions cache entirely by pointing it at S3
+**Promoted from contingency to the recommended next move** by the 97% hit rate
+above: sccache is the primary cache, so capping it to protect a shared 10 GB
+budget is the wrong trade. Take it out of the Actions cache entirely by pointing
+it at S3
 (`SCCACHE_BUCKET` + `SCCACHE_REGION`). That removes ~4.3 GiB and ~2,700 entries
 from a 10 GB shared budget in one step, lifts the size cap, and keeps the
 dependency-bump resilience that is the reason to keep sccache at all.
