@@ -7,6 +7,16 @@ export default defineConfig({
     environment: "jsdom",
     include: ["tests/unit/**/*.test.{ts,tsx}", "tests/component/**/*.test.{ts,tsx}"],
     setupFiles: ["tests/setup.ts"],
+    // The DB-backed files open PGlite and run every drizzle migration in a
+    // `beforeAll`, which the 10s default is uncomfortably close to on a cold
+    // runner: `bff-members.test.ts`'s hook was measured at 10202 ms in CI
+    // against that default, while it is ~1.2 s warm here. A hook that trips the
+    // limit fails its whole FILE and reports its cases as `skipped` rather than
+    // failed — the run does exit non-zero, so the gate blocks rather than lying,
+    // but the message points at nothing and the redness is cache luck. 30 s is
+    // slack for the cold path only: a hook that is genuinely stuck still fails,
+    // just later.
+    hookTimeout: 30_000,
     coverage: {
       // Measured + enforced on EVERY PR: `pnpm check` runs with --coverage, so
       // the floor below is part of the same gate as lint and tsc. (The nightly

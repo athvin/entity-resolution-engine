@@ -475,6 +475,19 @@ test claims to protect and confirm the test fails. The authorization matrix in
 404 into a 403 fails 4 cases, and deleting the impersonation org confinement
 fails exactly the case written for it.
 
+### A DB-backed hook needs slack, and its failure reads as a skip
+
+`vitest.config.ts` sets `hookTimeout: 30_000`. The DB-backed unit files open
+PGlite and run every drizzle migration in a `beforeAll`, and the 10 s default is
+uncomfortably close: `bff-members.test.ts`'s hook was measured at **10202 ms**
+in CI against it, while warm locally it is ~1.2 s.
+
+Worth knowing what that failure looks like, because it is misleading rather than
+silent: vitest fails the whole **file** and reports its cases as `skipped`. The
+run still exits non-zero, so the gate blocks — but the summary reads like a
+smaller suite passed, and nothing points at the hook. Verified by forcing it
+(`--hookTimeout=1`): 20 skipped, exit 1.
+
 ### Visual baselines are invisible to a local gate
 
 `playwright.config.ts` sets `ignoreSnapshots: process.platform !== "linux"`, so
