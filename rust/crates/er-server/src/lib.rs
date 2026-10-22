@@ -211,6 +211,7 @@ fn detail_err(code: StatusCode, msg: impl Into<String>) -> axum::response::Respo
 /// existing three are left alone: each is load-bearing where it sits (publish
 /// needs its check atomic with the version repoint), and rewriting them would
 /// put behaviour changes in a bug-fix diff.
+///
 /// Boxed like `org_or_404`'s error, because an axum `Response` is large enough
 /// that clippy's `result_large_err` refuses it unboxed.
 fn refuse_unless_active(
@@ -228,6 +229,10 @@ fn refuse_unless_active(
         ),
     )))
 }
+
+/// The org-env key naming the config file the engine reads. It duplicates the
+/// `orgs.config_path` column, and `create_org` keeps the two in agreement.
+const ER_CONFIG_PATH_KEY: &str = "ER_CONFIG_PATH";
 
 /// The role lattice (`auth.py` `ROLE_RANK`): the derived `Ord` ranks
 /// `Viewer < Steward < Admin < Operator`, so a role check is `role >= minimum`.
@@ -476,11 +481,42 @@ async fn create_org(
         )
             .into_response();
     };
+    // `config_path` and `env.ER_CONFIG_PATH` name the same file and are stored
+    // independently, which was a silent-failure footgun: publish writes the
+    // YAML to the COLUMN (`write_config_file(&config_path, …)`) while every run
+    // reads the path out of ENV (`env_str(env, "ER_CONFIG_PATH")` in the
+    // dispatcher). Point them at different files and the tenant's publishes
+    // succeed, the config studio shows the new version live, and not one run
+    // ever reads it — the same shape as E10a's tier-C publish that rebuilt
+    // against the model it was meant to replace.
+    //
+    // One source of truth, enforced here rather than hoped for: inject the path
+    // when the caller omitted it, and refuse when they supplied a different one.
+    // Refusing beats silently overriding — a caller who passed two different
+    // paths believes something we would otherwise quietly discard.
+    let mut env_map = body.env;
+    match env_map.get(ER_CONFIG_PATH_KEY) {
+        None => {
+            env_map.insert(ER_CONFIG_PATH_KEY.to_string(), config_path.to_string());
+        }
+        Some(from_env) if from_env != config_path => {
+            return detail_err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!(
+                    "config_path '{config_path}' and env.{ER_CONFIG_PATH_KEY} '{from_env}' must \
+                     name the same file: publish writes to config_path and every run reads \
+                     env.{ER_CONFIG_PATH_KEY}, so a mismatch means published configs never take \
+                     effect"
+                ),
+            );
+        }
+        Some(_) => {}
+    }
     let client = match connect_pg(dsn).await {
         Ok(c) => c,
         Err(r) => return *r,
     };
-    let env = json!(body.env);
+    let env = json!(env_map);
     // History images record the acting principal (er.actor).
     let _ = pg::set_actor(&client, &principal.actor).await;
     match pg::upsert_org_byo(
