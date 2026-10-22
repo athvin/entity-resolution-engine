@@ -250,7 +250,7 @@ async fn webhook_delivery_fires_signed_and_the_guard_refuses_a_blocked_address()
     .await
     .unwrap();
 
-    pg::enqueue(&client, &org_id, "run_all_full", 0, None, None)
+    pg::enqueue(&client, &org_id, "run_all_full", 0, None, None, None)
         .await
         .unwrap();
     let done = dispatch_pg(&client, |_job| Ok(()), Some(&http))

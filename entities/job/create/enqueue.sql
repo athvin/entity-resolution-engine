@@ -1,5 +1,6 @@
-INSERT INTO public.jobs (id, org_id, kind, priority, idempotency_key, params)
-VALUES ($job_id, $org_id, $kind, $priority, $idempotency_key, coalesce($params, '{}'::jsonb))
+INSERT INTO public.jobs (id, org_id, kind, priority, idempotency_key, params, created_by)
+VALUES ($job_id, $org_id, $kind, $priority, $idempotency_key, coalesce($params, '{}'::jsonb),
+        $created_by)
 ON CONFLICT (org_id, idempotency_key) WHERE idempotency_key IS NOT NULL
   DO UPDATE SET kind = jobs.kind, updated_at = now()
 RETURNING

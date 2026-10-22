@@ -61,6 +61,7 @@ async fn dispatcher_runs_run_all_over_a_per_org_ducklake() {
         0,
         None,
         None,
+        None,
     )
     .await
     .unwrap();
@@ -156,6 +157,7 @@ async fn dispatcher_runs_run_all_over_a_per_org_ducklake() {
         &oid(&client, "acme").await,
         "run_all_full",
         0,
+        None,
         None,
         None,
     )

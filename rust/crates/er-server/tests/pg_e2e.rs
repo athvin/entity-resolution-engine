@@ -35,12 +35,28 @@ async fn queue_lifecycle_over_postgres() {
         .unwrap();
 
     // Enqueue two jobs; claim takes the higher priority first.
-    let high = pg::enqueue(&client, &oid(&client, "acme").await, "run", 5, None, None)
-        .await
-        .unwrap();
-    let _low = pg::enqueue(&client, &oid(&client, "acme").await, "run", 0, None, None)
-        .await
-        .unwrap();
+    let high = pg::enqueue(
+        &client,
+        &oid(&client, "acme").await,
+        "run",
+        5,
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    let _low = pg::enqueue(
+        &client,
+        &oid(&client, "acme").await,
+        "run",
+        0,
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
     assert_eq!(high.state, "queued");
 
     let claimed = pg::claim(&client).await.unwrap().expect("a job to claim");
@@ -70,6 +86,7 @@ async fn queue_lifecycle_over_postgres() {
         0,
         Some("k1"),
         None,
+        None,
     )
     .await
     .unwrap();
@@ -79,6 +96,7 @@ async fn queue_lifecycle_over_postgres() {
         "run",
         0,
         Some("k1"),
+        None,
         None,
     )
     .await
