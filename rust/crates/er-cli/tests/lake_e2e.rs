@@ -2607,7 +2607,32 @@ fn activating_a_new_model_retires_the_one_it_replaces() {
     // Drop the prior hard, which shifts every posterior down.
     settings["probability_two_random_records_match"] = serde_json::json!(1.0e-9);
     let strict_json = settings.to_string();
-    let tf_csv = repo_fixture("model_test_v1.tf.csv");
+    // The strict model needs its OWN term-frequency rows. The committed
+    // snapshot is keyed by `(model_version, tf_snapshot_id)` and holds only
+    // v0001's, so pointing the strict identity at it yields EMPTY frozen TF
+    // tables — and `build_frozen_tf_tables` says nothing about that, so this
+    // model used to score with every TF adjustment silently dropped. Its
+    // strictness then came partly from the missing adjustments rather than only
+    // from the lowered prior this test says it is testing. Re-key the same rows
+    // onto the new identity so the one declared variable is the only one that
+    // moved; `run_match_ensemble` now refuses the empty case outright.
+    let strict_tf = tmp.join("model_v0002_strict.tf.csv");
+    let base_tf = std::fs::read_to_string(repo_fixture("model_test_v1.tf.csv")).unwrap();
+    let mut rekeyed = String::with_capacity(base_tf.len());
+    for (i, line) in base_tf.lines().enumerate() {
+        if i == 0 || line.is_empty() {
+            rekeyed.push_str(line);
+        } else {
+            let mut cols = line.splitn(3, ',');
+            let (_mv, _snap) = (cols.next(), cols.next());
+            let rest = cols.next().unwrap_or_default();
+            rekeyed.push_str("v0002-strict,01JWMDTFSNAP00000000000002,");
+            rekeyed.push_str(rest);
+        }
+        rekeyed.push('\n');
+    }
+    std::fs::write(&strict_tf, &rekeyed).unwrap();
+    let tf_csv = strict_tf.to_string_lossy().into_owned();
 
     er_cli::run_match(
         &session,
@@ -3254,4 +3279,266 @@ fn cleanse_rules_change_the_corpus_and_their_absence_changes_nothing() {
     }
 
     let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// E5b: a ONE-member ensemble must be indistinguishable from the single-model
+/// path — same active scores, bit for bit, and the same partition.
+///
+/// This is the obligation E7 and E6b each discharged in their own terms, and it
+/// is why `run_all` delegates to `run_all_ensemble` with a one-member slice
+/// instead of keeping a second code path: the only way a "both paths agree"
+/// claim can rot is if there are two paths.
+#[test]
+fn a_one_member_ensemble_is_the_single_model_path() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let model_json = std::fs::read_to_string(repo_fixture("model_test_v1.json")).unwrap();
+    let tf_csv = repo_fixture("model_test_v1.tf.csv");
+    let member = || er_cli::EnsembleMember {
+        model: er_cli::MatchModel {
+            settings_json: &model_json,
+            tf_csv_path: std::path::Path::new(&tf_csv),
+            model_version: "v0001",
+            tf_snapshot_id: "01JWMDTFSNAP00000000000001",
+        },
+        name: "default",
+    };
+
+    // The single-model path, unchanged.
+    let (plain_session, config, plain_tmp) = open_seeded_lake("inveq_plain");
+    run_all_phase(
+        &plain_session,
+        &config,
+        "incremental_batch",
+        "base",
+        "01INVEQ000000000000PLAIN00",
+        "2026-01-01 00:00:00",
+        "full",
+    );
+    let plain_scores = active_scores(&plain_session);
+    let plain_partition = partition(&membership_rows(&plain_session));
+    let plain_identity = run_identity(&plain_session);
+    drop(plain_session);
+
+    // The same corpus, scored through the ensemble entry point with one member.
+    let (ens_session, _, ens_tmp) = open_seeded_lake("inveq_ensemble");
+    let deliveries: Vec<(String, String)> = ["crm", "billing", "webforms"]
+        .iter()
+        .filter_map(|s| {
+            std::fs::read_to_string(repo_fixture(&format!("incremental_batch/base/{s}.csv")))
+                .ok()
+                .map(|csv| ((*s).to_string(), csv))
+        })
+        .collect();
+    er_cli::run_all_ensemble(
+        &ens_session,
+        &config,
+        &er_cli::PipelineInputs {
+            mode: "full",
+            rebuild_reason: None,
+            segment: None,
+            lexicon: &lexicon_pairs(),
+            deliveries: &deliveries,
+            model: &member().model,
+            run_id: "01INVEQ000000000000PLAIN00",
+            ingested_at: "2026-01-01 00:00:00",
+            scored_at: "2026-01-01 00:00:00",
+            run_at: "2026-01-01 00:00:00",
+        },
+        &[member()],
+    )
+    .unwrap();
+
+    assert_eq!(
+        active_scores(&ens_session),
+        plain_scores,
+        "a one-member ensemble must score bit-identically"
+    );
+    assert_eq!(
+        partition(&membership_rows(&ens_session)),
+        plain_partition,
+        "...and cluster identically"
+    );
+    // And the run ledger must record the BARE model_version, not `default=v0001`
+    // — otherwise every existing tenant's next incremental run would see a
+    // fingerprint drift and be promoted to a full rebuild it does not need.
+    assert_eq!(
+        run_identity(&ens_session),
+        plain_identity,
+        "a one-member ensemble records the bare identity"
+    );
+    assert_eq!(
+        run_identity(&ens_session),
+        vec![(
+            "v0001".to_string(),
+            "01JWMDTFSNAP00000000000001".to_string()
+        )]
+    );
+    drop(ens_session);
+    let _ = std::fs::remove_dir_all(&plain_tmp);
+    let _ = std::fs::remove_dir_all(&ens_tmp);
+}
+
+/// E5b: two members both score the corpus, both identities stay ACTIVE, and the
+/// edge set is their union.
+///
+/// The load-bearing assertion is that BOTH identities are active. E5a's
+/// `retire_other_models` takes the live set as a list precisely so an ensemble
+/// can pass all of it at once; calling it per member — the obvious way to write
+/// the loop — would have each member retire the ones scored before it, which is
+/// E5a's original bug reappearing inside the ensemble. That failure mode is
+/// invisible in a score count and obvious here.
+#[test]
+fn an_ensemble_scores_every_member_and_retires_none_of_them() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let (session, config, tmp) = open_seeded_lake("ensemble_union");
+    let model_json = std::fs::read_to_string(repo_fixture("model_test_v1.json")).unwrap();
+    let tf_csv = repo_fixture("model_test_v1.tf.csv");
+
+    // A second member whose prior is lowered, so it clears fewer pairs: the
+    // union must then be the LOOSE member's edge set, and the strict member's
+    // rows must still be there to be read.
+    let mut strict: serde_json::Value = serde_json::from_str(&model_json).unwrap();
+    strict["probability_two_random_records_match"] = serde_json::json!(1.0e-9);
+    let strict_json = strict.to_string();
+    let strict_tf = tmp.join("strict.tf.csv");
+    rekey_tf(
+        &repo_fixture("model_test_v1.tf.csv"),
+        &strict_tf,
+        "v0002-strict",
+        "01JWMDTFSNAP00000000000002",
+    );
+
+    let deliveries: Vec<(String, String)> = ["crm", "billing", "webforms"]
+        .iter()
+        .filter_map(|s| {
+            std::fs::read_to_string(repo_fixture(&format!("incremental_batch/base/{s}.csv")))
+                .ok()
+                .map(|csv| ((*s).to_string(), csv))
+        })
+        .collect();
+    let members = [
+        er_cli::EnsembleMember {
+            model: er_cli::MatchModel {
+                settings_json: &model_json,
+                tf_csv_path: std::path::Path::new(&tf_csv),
+                model_version: "v0001",
+                tf_snapshot_id: "01JWMDTFSNAP00000000000001",
+            },
+            name: "loose",
+        },
+        er_cli::EnsembleMember {
+            model: er_cli::MatchModel {
+                settings_json: &strict_json,
+                tf_csv_path: &strict_tf,
+                model_version: "v0002-strict",
+                tf_snapshot_id: "01JWMDTFSNAP00000000000002",
+            },
+            name: "strict",
+        },
+    ];
+    er_cli::run_all_ensemble(
+        &session,
+        &config,
+        &er_cli::PipelineInputs {
+            mode: "full",
+            rebuild_reason: None,
+            segment: None,
+            lexicon: &lexicon_pairs(),
+            deliveries: &deliveries,
+            model: &members[0].model,
+            run_id: "01ENSEMBLE0000000000UNION0",
+            ingested_at: "2026-01-01 00:00:00",
+            scored_at: "2026-01-01 00:00:00",
+            run_at: "2026-01-01 00:00:00",
+        },
+        &members,
+    )
+    .unwrap();
+
+    // Both members are present and ACTIVE. This is the assertion that fails if
+    // the live set is passed per member rather than whole.
+    let by_model: Vec<(String, String)> = session
+        .query_strings(&format!(
+            "select model_version, cast(count(*) as varchar) from {} \
+             where is_active group by model_version order by model_version",
+            er_cli::MATCH_SCORES
+        ))
+        .unwrap()
+        .into_iter()
+        .map(|r| (r[0].clone(), r[1].clone()))
+        .collect();
+    let names: Vec<&str> = by_model.iter().map(|(m, _)| m.as_str()).collect();
+    assert_eq!(
+        names,
+        vec!["v0001", "v0002-strict"],
+        "both members must stay active; got {by_model:?}"
+    );
+    let strict_rows: i64 = by_model[1].1.parse().unwrap();
+    let loose_rows: i64 = by_model[0].1.parse().unwrap();
+    assert!(
+        strict_rows > 0 && loose_rows > 0,
+        "each member scored something: {by_model:?}"
+    );
+    assert!(
+        strict_rows < loose_rows,
+        "the lowered prior must clear fewer pairs ({strict_rows} vs {loose_rows}), or this \
+         test is not comparing two different models"
+    );
+
+    // The run ledger records the ENSEMBLE, so a change to either member moves
+    // the drift fingerprint.
+    assert_eq!(
+        run_identity(&session),
+        vec![(
+            "loose=v0001+strict=v0002-strict".to_string(),
+            "loose=01JWMDTFSNAP00000000000001+strict=01JWMDTFSNAP00000000000002".to_string()
+        )],
+        "the ledger must name every member"
+    );
+
+    drop(session);
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// `(model_version, tf_snapshot_id)` as the run ledger recorded it.
+fn run_identity(session: &Session) -> Vec<(String, String)> {
+    session
+        .query_strings(&format!(
+            "select coalesce(model_version, ''), coalesce(tf_snapshot_id, '') from {} \
+             order by started_at",
+            er_cli::RUNS
+        ))
+        .unwrap()
+        .into_iter()
+        .map(|r| (r[0].clone(), r[1].clone()))
+        .collect()
+}
+
+/// Copy a frozen-TF snapshot onto a different `(model_version, tf_snapshot_id)`.
+/// Needed because the snapshot is keyed by identity and a member with no rows
+/// scores with every TF adjustment silently dropped — which
+/// `run_match_ensemble` now refuses.
+fn rekey_tf(src: &str, dest: &std::path::Path, model_version: &str, tf_snapshot_id: &str) {
+    let base = std::fs::read_to_string(src).unwrap();
+    let mut out = String::with_capacity(base.len());
+    for (i, line) in base.lines().enumerate() {
+        if i == 0 || line.is_empty() {
+            out.push_str(line);
+        } else {
+            let rest = line.splitn(3, ',').nth(2).unwrap_or_default();
+            out.push_str(model_version);
+            out.push(',');
+            out.push_str(tf_snapshot_id);
+            out.push(',');
+            out.push_str(rest);
+        }
+        out.push('\n');
+    }
+    std::fs::write(dest, &out).unwrap();
 }
