@@ -77,6 +77,24 @@ fn metadata_excluded(spec: &SourceSpec) -> Vec<String> {
 
 /// One `stg_records` union arm for a source: projects `raw_records` through the
 /// S4.2 macros into the canonical staging shape.
+/// Wrap a raw-field expression in the config's cleanse rules for `attribute`.
+///
+/// Applied to the RAW value, before the normalizers — the normalizers decide
+/// what an email or a phone number IS, and feeding them `"  BOB@EXAMPLE.COM "`
+/// spends their judgement on noise a cleanse rule removes for free. A rule that
+/// ran afterwards would be editing the engine's conclusion rather than its
+/// input.
+///
+/// No rules for an attribute returns the expression untouched, so a config
+/// without a `transforms` block produces byte-identical staging SQL — which is
+/// what keeps every `std_hashes` golden valid.
+fn transformed(config: &Config, attribute: &str, expr: String) -> String {
+    match config.transforms.get(attribute) {
+        None => expr,
+        Some(rules) => rules.iter().fold(expr, |acc, rule| rule.apply_sql(&acc)),
+    }
+}
+
 fn stg_arm(
     source: &str,
     spec: &SourceSpec,
@@ -95,24 +113,30 @@ fn stg_arm(
         .collect();
     let excluded = metadata_excluded(spec);
     let excluded_refs: Vec<&str> = excluded.iter().map(String::as_str).collect();
+    // One place that both extracts a mapped column and applies its cleanse
+    // rules, so no attribute can silently skip the transforms.
+    let raw = |attribute: &str| transformed(config, attribute, field(&spec.columns[attribute]));
 
     format!(
         "select\n    source_system,\n    source_record_id,\n    content_hash,\n    '{std_version}' as std_version,\n    \
          {} as given_name,\n    {} as family_name,\n    {} as name_variants,\n    {},\n    {},\n    {},\n    \
          {} as birth_date,\n    {} as metadata,\n    try_cast({} as timestamp) as updated_at_source,\n    \
          ingest_batch_id,\n    ingested_at\nfrom {raw_table}\nwhere source_system = '{}'",
-        name_norm(&field(&spec.columns["given_name"])),
-        name_norm(&field(&spec.columns["family_name"])),
-        name_variants(&field(&spec.columns["given_name"]), lexicon),
-        email_norm(&field(&spec.columns["email"]), strip_plus, &placeholders),
-        phone_e164(&field(&spec.columns["phone"]), region),
+        name_norm(&raw("given_name")),
+        name_norm(&raw("family_name")),
+        // `name_variants` reads the given name too, so it sees the SAME cleansed
+        // value the normalizer does — otherwise a nickname expansion could come
+        // from the raw spelling and the two would disagree about one record.
+        name_variants(&raw("given_name"), lexicon),
+        email_norm(&raw("email"), strip_plus, &placeholders),
+        phone_e164(&raw("phone"), region),
         address_parse(
-            &field(&spec.columns["address_line"]),
-            &field(&spec.columns["addr_city"]),
-            &field(&spec.columns["addr_region"]),
-            &field(&spec.columns["addr_postal"]),
+            &raw("address_line"),
+            &raw("addr_city"),
+            &raw("addr_region"),
+            &raw("addr_postal"),
         ),
-        parse_date(&field(&spec.columns["birth_date"]), &spec.date_format),
+        parse_date(&raw("birth_date"), &spec.date_format),
         source_metadata("payload", &excluded_refs),
         field(&spec.updated_at_column),
         single_quote(source),

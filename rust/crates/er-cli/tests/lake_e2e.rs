@@ -2955,3 +2955,175 @@ fn with_data_quality(config: &Config) -> Config {
     };
     c
 }
+
+/// Cleanse rules must change the standardized corpus — and the absence of them
+/// must change nothing at all.
+///
+/// Both halves matter. The second is the determinism contract: every
+/// `std_hashes` golden in the repo was produced without a `transforms` block,
+/// so a config with none must produce byte-identical staging SQL. The first is
+/// the feature: a rule that compiles and has no effect is the failure mode a
+/// config DSL falls into (this repo has already had one — the `comparisons`
+/// levels nothing compiled, #216).
+#[test]
+fn cleanse_rules_change_the_corpus_and_their_absence_changes_nothing() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    use er_config::TransformRule;
+
+    let (session, config, tmp) = standardized_lake("transform_none");
+    let baseline: Vec<Vec<String>> = session
+        .query_strings(&format!(
+            "select record_key, coalesce(given_name,''), coalesce(email,'') \
+             from {} order by record_key",
+            er_cli::INT_STD_RECORDS
+        ))
+        .unwrap();
+    assert!(!baseline.is_empty(), "the base corpus standardized");
+
+    // Two rules, chosen to show the interaction with the normalizers rather
+    // than hide it.
+    //
+    // A CASE rule on `given_name` is invisible in the stored value, because
+    // cleanse runs BEFORE `name_norm` and `name_norm` lowercases. That is not a
+    // bug and it is worth asserting: an operator reaching for "upper-case the
+    // names" will get no visible change, and the reason is the ordering the
+    // feature is built on.
+    let mut cased = config.clone();
+    cased.transforms = [(
+        "given_name".to_string(),
+        vec![TransformRule::Upper, TransformRule::Trim],
+    )]
+    .into_iter()
+    .collect();
+    er_cli::run_standardize(&session, &cased, "2026-01-01 00:00:00").unwrap();
+    let after_case: Vec<Vec<String>> = session
+        .query_strings(&format!(
+            "select record_key, coalesce(given_name,''), coalesce(email,'') \
+             from {} order by record_key",
+            er_cli::INT_STD_RECORDS
+        ))
+        .unwrap();
+    assert_eq!(
+        after_case, baseline,
+        "a case rule on a field the normalizer lowercases has no visible effect \
+         — cleanse runs BEFORE standardization, and name_norm has the last word"
+    );
+
+    // A rule that changes the CHARACTERS does survive. base_10's
+    // `webforms:W001` is "Bob"; the lexicon already treats Bob and Robert as
+    // variants, so correcting it at source is a real cleanse operation.
+    let mut ruled = config.clone();
+    ruled.transforms = [(
+        "given_name".to_string(),
+        vec![TransformRule::Dictionary {
+            map: [("Bob".to_string(), "Robert".to_string())]
+                .into_iter()
+                .collect(),
+        }],
+    )]
+    .into_iter()
+    .collect();
+    er_cli::run_standardize(&session, &ruled, "2026-01-01 00:00:00").unwrap();
+    let after: Vec<Vec<String>> = session
+        .query_strings(&format!(
+            "select record_key, coalesce(given_name,''), coalesce(email,'') \
+             from {} order by record_key",
+            er_cli::INT_STD_RECORDS
+        ))
+        .unwrap();
+    assert_eq!(after.len(), baseline.len(), "same records");
+    assert_ne!(
+        after, baseline,
+        "a dictionary rule must change the corpus — a rule that compiles and \
+         does nothing is exactly the trap the uncompiled comparisons DSL fell \
+         into"
+    );
+
+    // Specifically the targeted record and column, and only those.
+    let changed: Vec<&Vec<String>> = after
+        .iter()
+        .zip(&baseline)
+        .filter(|(a, b)| a[1] != b[1])
+        .map(|(a, _)| a)
+        .collect();
+    assert_eq!(
+        changed.len(),
+        1,
+        "exactly the one record whose given name was Bob: {changed:?}"
+    );
+    assert_eq!(changed[0][0], "webforms:W001");
+    assert_eq!(
+        changed[0][1], "robert",
+        "the rule rewrote the raw value and the normalizer then lowercased it, \
+         which is the ordering this feature is built on"
+    );
+    let changed_emails = after
+        .iter()
+        .zip(&baseline)
+        .filter(|(a, b)| a[2] != b[2])
+        .count();
+    assert_eq!(
+        changed_emails, 0,
+        "a rule on given_name must not touch email"
+    );
+
+    // Re-standardizing with NO rules restores the baseline exactly — the
+    // determinism contract every std_hashes golden depends on.
+    er_cli::run_standardize(&session, &config, "2026-01-01 00:00:00").unwrap();
+    let restored: Vec<Vec<String>> = session
+        .query_strings(&format!(
+            "select record_key, coalesce(given_name,''), coalesce(email,'') \
+             from {} order by record_key",
+            er_cli::INT_STD_RECORDS
+        ))
+        .unwrap();
+    assert_eq!(
+        restored, baseline,
+        "a config with no transforms must standardize byte-identically"
+    );
+
+    // The preview shows only rows the rules CHANGE, against the RAW values —
+    // previewing against standardized values would answer the wrong question.
+    let preview =
+        er_cli::preview_transform(&session, &config, "given_name", &[TransformRule::Upper], 5)
+            .unwrap();
+    assert!(
+        !preview.is_empty(),
+        "upper-casing mixed-case names should preview some changes"
+    );
+    for (key, before, after_val) in &preview {
+        assert_ne!(
+            before, after_val,
+            "{key}: the preview must only list rows the rule changes"
+        );
+        assert_eq!(after_val, &before.to_uppercase());
+    }
+
+    // A dictionary passes unmatched values THROUGH rather than nulling them —
+    // it is a correction list, not an allowlist, and the other behaviour would
+    // silently delete most of a column.
+    let dict = er_cli::preview_transform(
+        &session,
+        &config,
+        "given_name",
+        &[TransformRule::Dictionary {
+            map: [("Bob".to_string(), "Robert".to_string())]
+                .into_iter()
+                .collect(),
+        }],
+        50,
+    )
+    .unwrap();
+    for (key, before, after_val) in &dict {
+        assert_eq!(
+            (before.as_str(), after_val.as_str()),
+            ("Bob", "Robert"),
+            "{key}: only the mapped value should change"
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}

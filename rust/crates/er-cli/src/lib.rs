@@ -1670,6 +1670,65 @@ pub fn write_record_quality(
     Ok(true)
 }
 
+/// What a set of cleanse rules would do to a sample of the corpus, before
+/// anyone publishes them.
+///
+/// Reads `raw_records` — the landed values, not the standardized ones — because
+/// that is what the rules actually operate on. Previewing against
+/// `int_std_records` would show the effect of a rule on a value the
+/// normalizers had already rewritten, which is the wrong question and would
+/// quietly mislead whoever is authoring the rule.
+///
+/// Writes nothing.
+///
+/// # Errors
+/// Propagates the lake query error, and refuses an attribute the config's
+/// sources do not map.
+pub fn preview_transform(
+    session: &Session,
+    config: &Config,
+    attribute: &str,
+    rules: &[er_config::TransformRule],
+    limit: usize,
+) -> Result<Vec<(String, String, String)>> {
+    let Some((source, spec)) = config
+        .sources
+        .iter()
+        .find(|(_, spec)| spec.columns.contains_key(attribute))
+    else {
+        anyhow::bail!("no source maps the attribute {attribute:?}");
+    };
+    let column = &spec.columns[attribute];
+    let before = format!(
+        "json_extract_string(payload, '$.{}')",
+        column.replace('\'', "''")
+    );
+    let after = rules
+        .iter()
+        .fold(before.clone(), |acc, rule| rule.apply_sql(&acc));
+    // Only rows the rules actually CHANGE: a preview padded with unaffected
+    // values makes a rule look inert, and the whole point is to see the effect.
+    let rows = session.query_scratch_strings(&format!(
+        "select record_key, coalesce({before}, ''), coalesce({after}, '')
+         from (
+             select source_system || ':' || source_record_id as record_key, payload
+             from {RAW_RECORDS}
+             where source_system = '{src}'
+         )
+         where coalesce({before}, '') <> coalesce({after}, '')
+         order by record_key
+         limit {limit}",
+        src = source.replace('\'', "''"),
+    ))?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|r| {
+            let mut it = r.into_iter();
+            Some((it.next()?, it.next()?, it.next()?))
+        })
+        .collect())
+}
+
 /// Apply one drained steward action to the lake (the control plane's
 /// `staged_steward_actions`, dispatched when the org's writer lock is free):
 ///   - `add_assertion` → insert an active assertion on the canonicalized pair
