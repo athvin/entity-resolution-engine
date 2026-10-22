@@ -48,6 +48,7 @@ the same fix.
 | `frontend-design-system` | the Tailwind v4 CSS-first tokens in `globals.css` and the two deliberate WCAG deviations from stock shadcn |
 | `frontend-testing` | which tier a change belongs in (unit, component, Playwright functional, the dormant full-stack tier) |
 | `infra-platform` | the Terraform env/module layout and shared S3 state with lockfile locking |
+| `landing-page` | the `(marketing)` route group that prerenders statically inside the same app that serves the BFF |
 | `pentest` | a Strix-style run that does recon over the attack surface, fans out a tester subagent per vulnerability category (user-invoked only) |
 | `rust-conventions` | that `make check` (not the bare cargo trio) is the finish line |
 | `security` | the attack surface (internet-facing Next.js BFF in front of the privileged Rust er-server control plane) |

@@ -173,6 +173,7 @@ The table below is **generated** from each skill's frontmatter by
 | building or restyling a component or page | `frontend-design-system` |
 | adding or fixing a frontend test, when a Playwright or vitest run fails | `frontend-testing` |
 | editing Terraform or a Helm chart, writing a NodePool | `infra-platform` |
+| editing or adding a marketing page or its copy | `landing-page` |
 | invoking /pentest, /pentest <category>, /pentest live (user-invoked only) | `pentest` |
 | authoring or reviewing any Rust in this repo | `rust-conventions` |
 | reviewing an endpoint or handler for SSRF/injection/tenant-isolation/auth/business-logic abuse | `security` |
