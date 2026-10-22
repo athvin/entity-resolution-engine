@@ -1609,18 +1609,17 @@ fn the_blocking_estimate_matches_what_a_run_actually_scores() {
 /// candidate and never scored**. That is what this asserts, by looking for the
 /// pair in `match_scores`.
 ///
-/// What it does NOT do, and the second half of this test proves it rather than
-/// leaving it to be discovered: candidate-level enforcement does not survive
-/// transitive closure. C001 and C009 are never compared to each other, but both
-/// are compared to W001 — whose email is a `test@test.com` placeholder that
-/// normalizes to NULL, so no veto applies to either pairing — and connected
-/// components then puts all three in one entity. Keeping vetoed records in
-/// different ENTITIES needs the never-rule path at reconcile (the `never_cut`
-/// fixpoint this repo already has for steward assertions), which is a separate
-/// piece of work. Until then this is a candidate constraint, and the test says
-/// so out loud.
+/// And since E3b it also holds over the PARTITION, which is the half this test
+/// used to pin as a known limit. C001 and C009 are never compared to each other,
+/// but both are compared to W001 — whose email is a `test@test.com` placeholder
+/// that normalizes to NULL, so no veto applies to either pairing — and connected
+/// components used to put all three in one entity. E3b feeds the declared veto
+/// into reconcile as a synthetic `never`, so the `never_cut` fixpoint separates
+/// them. Both halves are asserted here: the vetoed pair is absent from
+/// `match_scores` (candidate-level, E3) AND the two are in different entities
+/// (partition-level, E3b).
 #[test]
-fn a_declared_veto_keeps_a_pair_out_of_scoring_but_not_out_of_a_transitive_cluster() {
+fn a_declared_veto_keeps_a_pair_out_of_scoring_and_out_of_a_transitive_cluster() {
     if !enabled() {
         eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
         return;
@@ -1750,15 +1749,26 @@ fn a_declared_veto_keeps_a_pair_out_of_scoring_but_not_out_of_a_transitive_clust
         "the placeholder-email record must remain a candidate: a veto tolerates a missing value"
     );
 
-    // THE LIMIT, asserted rather than assumed: the two are still co-clustered,
-    // because each reaches the other through the NULL-email record.
+    // THE STRONGER GUARANTEE (E3b): the two are no longer co-clustered, even
+    // though each still reaches the other through the NULL-email record. This is
+    // the assertion the E3 version of this test asked its successor to make.
     assert!(
-        vetoed
+        !vetoed
             .iter()
             .any(|c| c.contains("crm:C001") && c.contains("crm:C009")),
-        "candidate-level vetoes do not survive transitive closure; if this now passes, \
-         entity-level enforcement has landed and this test should assert the stronger property"
+        "a declared veto must hold over the partition, not just the pair: C001 and C009 are \
+         still in one entity, so the synthetic `never` did not reach the never-cut fixpoint. \
+         Partition: {vetoed:?}"
     );
+    // And the separation is a CUT, not a disappearance: W001 keeps an entity, and
+    // each vetoed record is still in one. A veto that emptied the cluster would
+    // satisfy the assertion above for the wrong reason.
+    for key in ["crm:C001", "crm:C009", "webforms:W001"] {
+        assert!(
+            vetoed.iter().any(|c| c.contains(key)),
+            "{key} must still belong to an entity after the cut; partition: {vetoed:?}"
+        );
+    }
 
     // And a constraint changes how records group, never which records exist.
     let members = |p: &BTreeSet<BTreeSet<String>>| -> BTreeSet<String> {
@@ -2320,6 +2330,124 @@ fn protected_record_is_never_cut_and_escalates_through_ducklake() {
             .iter()
             .any(|r| r[0] == ca && r[1] == cb && r[2] == "open"),
         "expected an open never_unsatisfiable review for ({ca}, {cb}), got {reviews:?}"
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// E3b's hardest case: a config constraint that contradicts a steward.
+///
+/// A declared veto becomes a synthetic `never`, and a `never` the fixpoint
+/// cannot satisfy must NOT be resolved by guessing. Here C001 and C009 carry
+/// different non-blank emails, so an `email` veto forbids them — but a steward
+/// has explicitly linked each of them to W001, and `always` edges enter the
+/// fixpoint at probability 1.0 while `cut_protect_probability` is 1.0, so
+/// `choose_cut_edge` (which needs `value < cut_protect`) can sever neither.
+///
+/// The designed outcome, and the one asserted here: nothing is cut, the three
+/// stay co-clustered, and the unsatisfiable constraint surfaces as an open
+/// `never_unsatisfiable` review. A human's explicit merge is not silently
+/// reversed by a config rule, and the config rule is not silently dropped
+/// either — somebody is told. This is also what the widened escalation gate in
+/// `run_reconcile` is for: before E3b it only fired when a protect overlay
+/// existed, so a constraint-induced contradiction would have been computed and
+/// then thrown away.
+#[test]
+fn a_veto_a_steward_contradicts_escalates_instead_of_overriding_them() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let (session, base_config, tmp) = standardized_lake("veto_always");
+    // Matched under the committed model, which carries no constraint conjuncts —
+    // so the direct C001/C009 edge is really in `match_scores` and the synthetic
+    // never has something to drop. Reconcile is the only stage given the veto.
+    match_model(&session);
+
+    let (a, b, c) = ("crm:C001", "webforms:W001", "crm:C009");
+    for (i, (x, y)) in [(a, b), (b, c)].iter().enumerate() {
+        let always =
+            serde_json::json!({ "type": "add_assertion", "kind": "always", "a": x, "b": y });
+        er_cli::apply_staged_action(
+            &session,
+            &format!("act-veto-always-{i}"),
+            &always,
+            "2026-01-04 00:00:00",
+        )
+        .unwrap();
+    }
+
+    let vetoed_yaml = include_str!("fixtures/test.yaml").replace(
+        "comparisons:\n",
+        "constraints:\n  veto: [email]\n\ncomparisons:\n",
+    );
+    let vetoed_config = load_config_str(&vetoed_yaml).expect("the constrained config loads");
+    er_cli::run_reconcile(
+        &session,
+        &vetoed_config,
+        "01RUNVETOALWAYS00000000000",
+        "2026-01-06 00:00:00",
+    )
+    .unwrap();
+
+    let after = membership_rows(&session);
+    let entity_of = |rec: &str| -> Option<String> {
+        after.iter().find(|(_, r)| r == rec).map(|(e, _)| e.clone())
+    };
+    let ea = entity_of(a).expect("C001 is present after reconcile");
+    assert_eq!(
+        entity_of(b),
+        Some(ea.clone()),
+        "the steward's always edge to W001 must not be cut by a config veto"
+    );
+    assert_eq!(
+        entity_of(c),
+        Some(ea),
+        "C009 stays co-clustered: the veto escalated rather than severing a human's merge"
+    );
+
+    // Tolerate the table's absence rather than unwrapping: with no escalation at
+    // all, `review_queue` is never created, and a catalog error is a far less
+    // useful failure than "the escalation did not happen".
+    let escalations = |session: &Session| -> Vec<(String, String, String)> {
+        session
+            .query_strings(
+                "select rec_a_key, rec_b_key, status from lake.main.review_queue \
+                 where reason = 'never_unsatisfiable' order by rec_a_key, rec_b_key",
+            )
+            .map(|rows| {
+                rows.into_iter()
+                    .map(|r| (r[0].clone(), r[1].clone(), r[2].clone()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+
+    let (ca, cb) = if a <= c { (a, c) } else { (c, a) };
+    let reviews = escalations(&session);
+    assert!(
+        reviews
+            .iter()
+            .any(|(x, y, status)| x == ca && y == cb && status == "open"),
+        "an unsatisfiable CONFIG constraint must reach the review queue just as an \
+         unsatisfiable steward never does; expected an open ({ca}, {cb}), got {reviews:?}"
+    );
+
+    // And the base path is untouched: the same lake reconciled under the config
+    // WITHOUT constraints adds no further escalation, so the widened gate did not
+    // start surfacing reviews for every tenant.
+    let before = reviews.len();
+    er_cli::run_reconcile(
+        &session,
+        &base_config,
+        "01RUNVETOALWAYSBASE0000000",
+        "2026-01-07 00:00:00",
+    )
+    .unwrap();
+    assert_eq!(
+        escalations(&session).len(),
+        before,
+        "reconciling without constraints must not add another escalation"
     );
 
     let _ = std::fs::remove_dir_all(&tmp);

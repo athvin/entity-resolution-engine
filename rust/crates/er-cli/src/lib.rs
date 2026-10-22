@@ -2044,6 +2044,149 @@ fn load_protected_keys(session: &Session) -> Result<BTreeSet<String>> {
     load_overlay_keys(session, "protect")
 }
 
+/// The prefix on a synthetic assertion's id, so an escalation can say whether a
+/// `never` came from a steward or from the tenant's own `constraints:` block.
+/// Nothing persists these ids — `write_never_unsatisfiable_reviews` reads only
+/// the pair — so the prefix exists purely to be legible in a message.
+const CONSTRAINT_ASSERTION_PREFIX: &str = "constraint";
+
+/// E3b: the config's `constraints:` block, enforced at the ENTITY level.
+///
+/// E3 compiles each constraint into a conjunct on every blocking rule, so a
+/// violating pair is never generated as a candidate. That is the cheapest place
+/// to enforce it and it is where "before similarity counts" is literally true —
+/// but it does not survive transitive closure. On base_10, `crm:C001` and
+/// `crm:C009` hold different emails so an `email` veto keeps that pair out of
+/// scoring, while both are still compared to `webforms:W001`, whose placeholder
+/// email normalizes to NULL and so trips no veto; connected components then puts
+/// all three in one entity. The guarantee a tenant hears ("these two are never
+/// the same entity") was only true of the pair, not of the partition.
+///
+/// This returns the violations as synthetic `never` assertions so the existing
+/// [`never_cut_fixpoint`] separates them partition-level, with the escalation
+/// behaviour it already has when every path runs through a protected record.
+///
+/// **The rule is not re-implemented — it is re-scoped.** The predicate used here
+/// is the very string [`er_compile::constraint_conjuncts`] compiles into the
+/// blocking rules, evaluated with `coalesce(…, false)` exactly as a WHERE clause
+/// treats it. So the candidate-level rule and the entity-level rule cannot
+/// disagree about what violates a constraint: there is one SQL expression and
+/// two scopes for it — the pairs blocking generates, and the pairs that end up
+/// co-clustered. Re-deriving the comparison in Rust would mean two
+/// implementations of three-valued NULL logic, and the asymmetry bug this PR
+/// also fixes is evidence of how that goes.
+///
+/// Scope. Only pairs inside a multi-record component are examined, which keeps
+/// this bounded by cluster size rather than by the corpus: the fixpoint ignores
+/// a `never` whose endpoints are not co-clustered anyway, so a corpus-wide
+/// cartesian would compute the same answer and pay O(n²) for it.
+///
+/// Returns an empty vector when nothing is declared, so a config with no
+/// `constraints:` block leaves reconcile byte-identical.
+///
+/// # Errors
+/// Propagates the staging / scratch-read errors.
+fn constraint_nevers(
+    session: &Session,
+    config: &Config,
+    edges: &[PathEdge],
+    nodes: &[String],
+) -> Result<Vec<Assertion>> {
+    if config.constraints.is_empty() {
+        return Ok(Vec::new());
+    }
+    let conjuncts = er_compile::constraint_conjuncts(&config.constraints);
+    if conjuncts.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // What WOULD co-cluster, computed before never-cut removes anything — the
+    // question is which pairs this run is about to put in one entity.
+    let plain: Vec<(String, String)> = edges
+        .iter()
+        .map(|(a, b, _)| (a.clone(), b.clone()))
+        .collect();
+    let component = er_reconcile::cluster::label_propagate(nodes, &plain);
+    let mut sizes: BTreeMap<&str, usize> = BTreeMap::new();
+    for label in component.values() {
+        *sizes.entry(label.as_str()).or_default() += 1;
+    }
+    let scope: Vec<(&String, &String)> = component
+        .iter()
+        .filter(|(_, label)| sizes.get(label.as_str()).copied().unwrap_or(0) > 1)
+        .collect();
+    if scope.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let relation = if config.entity_type.is_person() {
+        INT_STD_RECORDS
+    } else {
+        ACCT_INT_STD_RECORDS
+    };
+    // Re-runnable: a base pass followed by an incremental one is two reconciles
+    // in one session, which is what `seed_lexicon` learned the hard way (E7).
+    session.execute_batch("drop table if exists __constraint_scope")?;
+    session.execute_batch(
+        "create temp table __constraint_scope(record_key varchar, cluster_id varchar)",
+    )?;
+    // Inserted in batches rather than as one `VALUES (…), (…), …`. The literal
+    // idiom `retire_other_models` uses is fine for a handful of models, but the
+    // scope here is every record in a multi-record cluster — on a large corpus
+    // that is millions of rows, and a single statement would be a SQL string
+    // tens of megabytes wide.
+    const SCOPE_BATCH: usize = 1_000;
+    for chunk in scope.chunks(SCOPE_BATCH) {
+        let rows: Vec<String> = chunk
+            .iter()
+            .map(|(key, label)| format!("('{}', '{}')", esc(key), esc(label)))
+            .collect();
+        session.execute_batch(&format!(
+            "insert into __constraint_scope values {}",
+            rows.join(", ")
+        ))?;
+    }
+
+    // `not coalesce(<conjuncts>, false)` is the violation test, and the coalesce
+    // is the whole of it: a conjunct that evaluates to NULL is not a pair that
+    // is "maybe eligible", it is a pair blocking never emits. Mirroring that
+    // exactly is what makes this agree with candidate generation.
+    //
+    // The join is driven from the SCOPE and not from the corpus on purpose: pair
+    // up within a cluster first (an equality on cluster_id plus `>` for
+    // canonical order, so each pair appears once), and only then look up the two
+    // records' values. Starting from `{relation}` instead would ask the planner
+    // to range-join the whole standardized corpus against itself and filter
+    // afterwards.
+    let eligible = conjuncts.join(" AND ");
+    let found = session.query_scratch_strings(&format!(
+        "select sl.record_key, sr.record_key \
+         from __constraint_scope sl \
+         join __constraint_scope sr \
+           on sr.cluster_id = sl.cluster_id and sr.record_key > sl.record_key \
+         join {relation} l on l.record_key = sl.record_key \
+         join {relation} r on r.record_key = sr.record_key \
+         where not coalesce({eligible}, false) \
+         order by sl.record_key, sr.record_key"
+    ))?;
+    session.execute_batch("drop table __constraint_scope")?;
+
+    Ok(found
+        .into_iter()
+        .filter_map(|row| {
+            let (a, b) = (row.first()?.clone(), row.get(1)?.clone());
+            let (a, b) = canon(&a, &b);
+            Some(Assertion {
+                assertion_id: format!("{CONSTRAINT_ASSERTION_PREFIX}:{a}|{b}"),
+                rec_a_key: a,
+                rec_b_key: b,
+                kind: AssertionKind::Never,
+                active: true,
+            })
+        })
+        .collect())
+}
+
 /// S4.5 reconcile: cluster the active auto-merge pairs in `lake.main.match_scores`
 /// into connected components, reconcile them against the prior
 /// `lake.main.entity_membership` (INV-PERM), and write the resulting
@@ -2115,11 +2258,18 @@ pub fn run_reconcile(session: &Session, config: &Config, run_id: &str, run_at: &
         // `always`: a protected edge (prob 1.0 >= cut_protect) never-cut can't sever.
         edges.push((a.rec_a_key.clone(), a.rec_b_key.clone(), 1.0));
     }
-    let nevers: Vec<Assertion> = assertions
+    let mut nevers: Vec<Assertion> = assertions
         .iter()
         .filter(|a| a.kind == AssertionKind::Never)
         .cloned()
         .collect();
+    // E3b: the tenant's own `constraints:` become `never`s too, so a veto holds
+    // over the PARTITION and not just over the pair. Derived from the edge set as
+    // it stands here — after suppression has removed records and after `always`
+    // has added its edges — because the question is which pairs this run is
+    // about to co-cluster. Empty unless `constraints:` is declared.
+    let synthetic = constraint_nevers(session, config, &edges, &nodes)?;
+    nevers.extend(synthetic.iter().cloned());
     // `never`: drop the direct edge (a bridge splits outright, no partition cut).
     let never_pairs: BTreeSet<(String, String)> = nevers
         .iter()
@@ -2157,7 +2307,15 @@ pub fn run_reconcile(session: &Session, config: &Config, run_id: &str, run_at: &
         // Gated on a protect overlay existing so the review_queue — and the
         // determinism contract — is untouched on the base path. (High-confidence
         // escalations, possible pre-1.3c, stay silent until we rebaseline.)
-        if !protected.is_empty() && !result.escalations.is_empty() {
+        //
+        // E3b widens the gate to a declared `constraints:` block, for the same
+        // reason and with the same care: a constraint the fixpoint could not
+        // satisfy is a question for a human, and the commonest way to produce one
+        // is a steward `always` that contradicts the tenant's own veto — those
+        // edges carry probability 1.0, so they are uncuttable and the pair
+        // escalates rather than either rule silently winning. A config with
+        // neither constraints nor protections still never touches `review_queue`.
+        if (!protected.is_empty() || !synthetic.is_empty()) && !result.escalations.is_empty() {
             write_never_unsatisfiable_reviews(session, run_id, run_at, &result.escalations)?;
         }
     }

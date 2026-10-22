@@ -274,8 +274,19 @@ pub fn constraint_conjuncts(constraints: &MatchConstraints) -> Vec<String> {
     for column in &constraints.exclude_when_equal {
         // Related, not duplicate. A NULL key excludes nothing — records with no
         // household are not all in the same household.
+        //
+        // Both IS NOT NULL guards are load-bearing, and the second one is the
+        // whole reason this reads the way it does. With only `l.{column} IS NOT
+        // NULL`, a right-hand NULL makes `l.{column} = r.{column}` evaluate to
+        // NULL, so the conjunct is `NOT (NULL AND TRUE)` = NULL — and a NULL
+        // conjunct in a WHERE clause drops the pair. The rule was therefore
+        // asymmetric in l and r: a record WITH a household could never be
+        // compared against one WITHOUT, which is the opposite of what the
+        // paragraph above promises. Blocking emits the pair in canonical key
+        // order, so this deterministically lost one direction rather than
+        // half-working by luck.
         out.push(format!(
-            "NOT (l.{column} = r.{column} AND l.{column} IS NOT NULL)"
+            "NOT (l.{column} = r.{column} AND l.{column} IS NOT NULL AND r.{column} IS NOT NULL)"
         ));
     }
     out
@@ -846,7 +857,9 @@ mod tests {
         assert_eq!(
             constraint_conjuncts(&exclude),
             vec![
-                "NOT (l.household_id = r.household_id AND l.household_id IS NOT NULL)".to_string()
+                "NOT (l.household_id = r.household_id AND l.household_id IS NOT NULL AND \
+                 r.household_id IS NOT NULL)"
+                    .to_string()
             ]
         );
 
