@@ -74,7 +74,7 @@ exists instead of a workflow-level `paths:` filter.
 | `bench-compile` | benchmarks (compile) | 30 | `github.event_name != 'pull_request'` |
 | `scale-tests` | scale golden (50k) | 30 | `github.event_name != 'pull_request'` |
 | `coverage` | coverage (llvm-cov) | 60 | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` |
-| `cache-prune` | prune sccache to budget | 30 | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` |
+| `cache-prune` | prune the Actions cache to budget | 30 | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` |
 
 ### Advisory ignores in `rust/deny.toml`
 

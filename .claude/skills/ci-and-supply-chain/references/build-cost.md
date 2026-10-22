@@ -10,6 +10,7 @@ against it.
 
 - The measured baseline (2026-10-22)
 - The first measurement after the change
+- Capping one prefix made the prune a no-op
 - Where it ended up
 - Why cold happens: the Actions cache budget
 - The levers, and which were taken
@@ -206,6 +207,36 @@ First measured result, after relieving the backlog by hand: **10,999,396,329 →
 7,029,161,413 bytes (6.54 GiB) across 4,485 entries** — under the ceiling with
 ~3.4 GB of headroom, which is where the eviction stops.
 
+### Capping one prefix made the prune a no-op
+
+First real run of `cache-prune`, run `39838150331`, printed its accounting and
+then correctly deleted **nothing**:
+
+```
+total: 4752 entries, 10,696,640,978 bytes      <- at the ceiling
+  sccache        4682 entries  3341.1 MiB      <- UNDER its 5120 budget
+  buildkit-blob   ~70 entries  ~5000 MiB       <- four entries at 763.8 MiB each
+  v1-rust-rust       2 entries   364.1 MiB each
+```
+
+sccache had stopped being the problem — and `images.yml`'s `type=gha,mode=max`
+docker layer cache had become it, holding **half the budget** and evicting the
+entries all of this exists to protect. A prune that caps one producer while
+another grows without bound is hygiene theatre.
+
+So the budget is now a **list of prefixes**, each capped independently
+(`sccache 5120`, `buildkit-blob 2048`), oldest-accessed first, sharing one
+`MAX_DELETES`. Deliberately *not* capped: `v1-rust*`, `pnpm-store`,
+`next-build`, `duckdb-extensions` — small, load-bearing, none unbounded.
+
+**The structural fix for buildkit is the same shape as sccache's:** point
+`cache-to` at a registry instead of the Actions cache
+(`type=registry,ref=<ecr-repo>:buildcache`). ECR and the OIDC push role already
+exist in `images.yml`, so it is plumbing rather than new infrastructure — but it
+changes the image pipeline that feeds `make dev-up`, so it wants its own change
+rather than riding along with a cache-hygiene edit.
+
+
 ### Where it ended up
 
 Run `39783867347` — profile change, single cache writer, and the `entities`
@@ -351,7 +382,8 @@ rust-cache entry, so making the profile real buys cache headroom twice.
 | Real `[profile.*]` in `rust/Cargo.toml` | yes | 1.9× less build output for every job and every laptop, not just `test` |
 | `save-if` so one job writes each key | yes | stops five jobs racing the same key and PR branches minting entries — though see the sccache finding: this protects the cache that turned out not to matter |
 | Drop `coverage`'s cache save | **no** | frees 1.8 GiB but makes a 22m10-warm job permanently cold against a 60-min timeout; the profile change shrinks the entry instead |
-| Prune sccache to a budget, nightly | yes, but raised to 5120 MiB | caps the entry count that does the evicting. Must delete concurrently. The first budget (2048) throttled the cache doing 97% of the work — see the sccache finding |
+| Prune the Actions cache to budget, nightly | yes — per prefix | must delete concurrently, and must cap EVERY unbounded producer: capping only sccache made the first real run a no-op while buildkit held half the budget. `sccache 5120`, `buildkit-blob 2048` |
+| Move the docker layer cache to ECR | **open** | `type=gha,mode=max` is ~5 GB, the single largest consumer. `type=registry` removes it from the budget; ECR and the OIDC role already exist |
 | `sccache --show-stats` in each job | yes | the hit rate was never observable; it is the input to every later decision here |
 | Key rust-cache on `Cargo.toml` too | yes | it does not by default, so the `[profile.*]` change hit an exact key, logged `Cache up-to-date` and never saved — leaving an immortal pre-profile entry |
 | Split the serial `fmt + clippy + docs` | yes | 2026-10-22: `entities` split out and made required. Only the two tree-paying steps earned a job — see the measurement, which overturned splitting the other two |
