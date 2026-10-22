@@ -60,6 +60,21 @@ pub fn config_reference_problems(config: &Config) -> Vec<String> {
         }
     }
 
+    // Constraints: each names a standardized column, which is compiled straight
+    // into `l.<column> = r.<column>` conjuncts on every blocking rule. E3 added
+    // the block and never added it here, so until now a misspelled constraint
+    // column produced SQL referencing a column that does not exist and the run
+    // failed — loudly, but minutes later and inside the tenant's pipeline rather
+    // than at the publish that introduced it. `MatchConstraints::columns()` was
+    // written for exactly this check and had no caller.
+    for column in config.constraints.columns() {
+        if !valid.contains(column) {
+            problems.push(format!(
+                "constraint column `{column}` is not a standardized column"
+            ));
+        }
+    }
+
     // Transforms: keyed by CANONICAL attribute, not by standardized column —
     // they run on the raw value before standardization, so `given_name` is in
     // range and `name_variants` (which standardization computes) is not. A
@@ -228,5 +243,36 @@ mod tests {
                 .any(|p| p.contains("comparison column `not_a_column`")),
             "{problems:?}"
         );
+    }
+
+    /// All three constraint kinds, because each is a separate list on the block
+    /// and `columns()` chains them — a check that only walked one would pass a
+    /// typo in the other two.
+    #[test]
+    fn a_constraint_on_an_unknown_column_is_flagged() {
+        // A real column is accepted. `email` exists for both entity types.
+        let good = load(&format!(
+            "{GOOD}\nconstraints:\n  veto: [email]\n  required_match: [phone_e164]\n  \
+             exclude_when_equal: [addr_postal]\n"
+        ));
+        assert_eq!(config_reference_problems(&good), Vec::<String>::new());
+
+        for (block, column) in [
+            ("veto", "ssn"),
+            ("required_match", "tax_id"),
+            ("exclude_when_equal", "household_id"),
+        ] {
+            // These three read like plausible constraint columns and are exactly
+            // the ones the design prose uses as examples — but none of them is a
+            // standardized column, so each must be refused at publish.
+            let bad = load(&format!("{GOOD}\nconstraints:\n  {block}: [{column}]\n"));
+            let problems = config_reference_problems(&bad);
+            assert!(
+                problems
+                    .iter()
+                    .any(|p| p.contains(&format!("constraint column `{column}`"))),
+                "{block}: [{column}] must be refused, got {problems:?}"
+            );
+        }
     }
 }

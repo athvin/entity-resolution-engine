@@ -525,11 +525,71 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
       absent from `match_scores` (the real guarantee), *and* the three still co-cluster (the
       limit), with a message telling the next person that a passing stronger assertion means
       entity-level enforcement has landed.
-- [ ] **E3b entity-level constraint enforcement** — feed config-declared vetoes into reconcile
-      as synthetic `never` rules so the existing `never_cut` fixpoint separates them
-      partition-level, with its escalation-to-review behaviour when every path is protected.
-      The machinery is already built for steward assertions; this is wiring plus a
-      within-cluster conflict scan.
+- [x] **E3b entity-level constraint enforcement — the limit E3 recorded, closed.** A declared
+      constraint now holds over the PARTITION, not just over the pair, so the stronger assertion
+      E3's own test asked its successor to make is the one that ships.
+      **The rule is not re-implemented, it is re-scoped.** The predicate evaluated inside a
+      cluster is the very string `er_compile::constraint_conjuncts` already compiles into the
+      blocking rules, wrapped in the `coalesce(…, false)` a WHERE clause applies to it. So there
+      is one SQL expression and two scopes for it — the pairs blocking generates, and the pairs
+      that end up co-clustered — and the candidate-level rule cannot drift from the
+      entity-level one. Re-deriving the comparison in Rust would have meant two implementations
+      of three-valued NULL logic, and the bug below is what that costs. `er-compile` is
+      therefore a real dependency of `er-cli` now, not just a dev one; the dependency edge *is*
+      the single-implementation guarantee.
+      Violations enter the existing `never_cut` fixpoint as synthetic `never` assertions (never
+      persisted as `assertions` rows — a republish that drops a veto must stop cutting, and a
+      stored row would outlive the rule that justified it). Scope is pairs inside a
+      multi-record component, computed from the edge set as it stands *after* suppression and
+      *after* `always`: the fixpoint ignores a `never` whose endpoints are not co-clustered
+      anyway, so a corpus-wide cartesian would reach the same answer and pay O(n²) for it.
+      **What happens when a config rule contradicts a human is the interesting half.** An
+      `always` edge enters at probability 1.0 and `cut_protect_probability` is 1.0, while
+      `choose_cut_edge` needs `value < cut_protect` — so a steward's merge is uncuttable and the
+      pair *escalates* instead. A config rule cannot silently reverse an explicit human
+      decision, and it is not silently discarded either: it becomes an open
+      `never_unsatisfiable` review. That required widening the escalation gate, which until now
+      fired only when a protect overlay existed — so a constraint-induced contradiction would
+      have been computed and then thrown away. A config with neither constraints nor
+      protections still never touches `review_queue`. Note the `contradictions` endpoint is
+      deliberately unchanged: it reads *persisted* assertions and answers "which steward
+      statements are mutually unsatisfiable", so a config-versus-steward conflict surfaces as
+      the review item above rather than there. Two kinds of conflict, two surfaces.
+      **`required_match` needs no scan and the code says why.** Every scored edge in a
+      component agreed on the column and required it non-null on both sides, and equality is
+      transitive, so a component reached through scored edges cannot violate it. It is still
+      included in the conjunct set, because an `always` edge can join records that disagree —
+      and that is exactly the case that should escalate.
+      **Two bugs in the same block, both found while scoping this and both fixed here.**
+      `exclude_when_equal` compiled to `NOT (l.c = r.c AND l.c IS NOT NULL)`, which is
+      **asymmetric in l and r**: with a right-hand NULL, `l.c = r.c` is NULL, the conjunct is
+      `NOT (NULL AND TRUE)` = NULL, and a NULL conjunct in a WHERE clause *drops the pair*. A
+      record with a household could never be compared against one without — the exact opposite
+      of the rule's own stated intent that "a NULL key excludes nothing", and deterministic
+      rather than half-working by luck, because blocking emits pairs in canonical key order.
+      Why no test caught it: the existing constraint truth tables mirror the SQL in Rust, whose
+      `&&`/`!` are two-valued, and `exclude_when_equal` was the one constraint with **no** truth
+      table at all — its only test asserted the emitted *string*. The new test runs the real
+      conjunct in DuckDB over all five NULL/equal/differ combinations for all three constraint
+      kinds, which is the only way to see a three-valued fault; observed failing on exactly the
+      right-NULL case with every other case passing.
+      And **constraint columns were never validated at publish**: `config_reference_problems`
+      already checked `blocking`, `comparisons`, `transforms` and `segments`, E3 added the block
+      and never joined the list, and `MatchConstraints::columns()` — whose doc says it exists
+      "for validating them against the schema" — had no caller in the workspace. A misspelled
+      constraint column produced SQL naming a column that does not exist, so the tenant's run
+      failed minutes later instead of their publish being refused. Now a 422, tested against
+      all three lists with the three columns the design prose itself uses as examples
+      (`ssn`, `tax_id`, `household_id`) — none of which is a standardized column.
+      Tests: the flipped `lake_e2e` assertion (C001/C009 land in different entities while all
+      three records keep a membership, so a cut is distinguishable from a disappearance), the
+      steward-contradiction escalation above, the DuckDB conjunct truth tables, and the publish
+      refusals. Sabotaged by making the derivation return nothing: both lake cases fail, and the
+      first prints the original bug verbatim — C001, C009 and W001 in one entity.
+      Known limit, stated rather than discovered: the in-scope records are staged into a session
+      temp in 1 000-row batches, so a corpus whose clusters hold millions of records pays a
+      proportional staging cost before the scan. Bounded by cluster membership, not by corpus
+      size, and nil for a corpus with no declared constraints.
 - [x] **E4 type-aware comparators (#25).** Four new level tokens, no schema change — the
       standardizer already parses addresses into components and stores `birth_date` as a real
       `DATE`, so these had everything they needed:
