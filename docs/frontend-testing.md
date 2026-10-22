@@ -58,7 +58,7 @@ setup (how to run things, the dev substrate) stays in
 | **unit** — `tests/unit/` | `pnpm test` | yes, per-PR | Pure logic and anything with a decision matrix. Authorization, domain vocabularies, parsers, error envelopes. DB-backed cases run against PGlite. |
 | **component** — `tests/component/` | yes, per-PR | yes, per-PR | Branchy *render* logic: a component whose output derives from data (bar widths, chips, diffs). **Not** screens. |
 | **functional** — `tests/functional/` | `pnpm test:e2e` | yes, per-PR | Every screen and flow against the mock erserver, on three device projects, plus the visual baselines and the axe a11y sweep. This is the bulk of the coverage. |
-| **full-stack** — `tests/e2e/` | `make frontend-e2e` | **no — dormant** | The real journey against a seeded dev stack. See [Dormant: the full-stack tier](#dormant-the-full-stack-tier). |
+| **full-stack** — `tests/e2e/` | `make frontend-e2e` | **no — release gate** | The real journey against a seeded dev stack (Docker, ~10 min). See [The full-stack tier](#the-full-stack-tier). |
 
 **Which tier does a change need?** If it is logic with branches, a unit test. If
 it is a component whose markup depends on data, a component test. If it is a
@@ -206,21 +206,97 @@ component state. The functional tier still drives these components behaviorally.
 
 ---
 
-## Dormant: the full-stack tier
+## The full-stack tier
 
-`tests/e2e/` (5 specs, 16 cases) **cannot run today.** `make frontend-seed` was
-dropped from the Makefile by `9a55504` — whose message says the frontend targets
-were "retained" — and its implementation, `frontend/dev/seed.py`, was deleted by
-`7cc444f` with no replacement. `tests/e2e/global-setup.ts` still tells you to run
-it.
+`tests/e2e/` (5 specs, 16 cases) runs against a real stack: one Postgres, a local
+DuckLake, `er-server`, and the Next.js app built and served on `:3200`.
 
-The other four targets (`frontend-dev`, `frontend-e2e`, `frontend-baselines`,
-`frontend-dev-reset`, plus `run`) were restored in #187; their scripts were never
-deleted. Reviving the tier needs a seed that provisions a tenant, loads a corpus,
-trains a model and runs the full pipeline (~3–4 min), writing the ground truth
-`tests/e2e/` asserts against.
+```
+make frontend-dev     # container + erweb migrations + er-server on :8000, blocks
+make frontend-seed    # org, api keys, published config, base_10 resolved, logins
+cd frontend && corepack pnpm build
+make frontend-e2e     # the tier
+```
 
-Until then this tier is documented dormant rather than left to look like a gate.
+It is **not** on the PR path — it is slow (~10 min) and needs Docker. Treat it as
+a release gate and as the thing to reach for when a change spans
+BFF → er-server → engine.
+
+### What it was, and what revived it (W0.5b)
+
+It was dormant from the all-Rust cutover until W0.5b, and the reason recorded at
+the time — `frontend/dev/seed.py` deleted by `7cc444f`, `make frontend-seed`
+dropped by `9a55504` — was only the visible half. The substrate had gone with the
+Python tree too: `up.sh` booted `uvicorn erserver.api` and
+`python -m erserver.dispatcher`; `env.sh` exported eight `ERSERVER_*` variables
+that nothing in the Rust workspace reads; and `compose.yaml` built its MinIO and
+catalog-Postgres services from `docker/Dockerfile`, which no longer exists.
+
+The stack is now deliberately smaller: **one** Postgres (control plane + the
+`erweb` schema) and a local DuckLake catalog file plus data directory — exactly
+what every `lake_e2e` case uses. MinIO and the catalog Postgres are gone. The
+honest cost is that a bug which only appears against S3 or a Postgres-backed
+catalog will not be caught here; neither local gate caught those before either
+(`make check-e2e`'s lake tests are also local), and the real AWS environment
+covers them.
+
+`er-server` runs the dispatcher **in-process** (`ER_DISPATCH_IN_PROCESS=1`), so
+the half-up state the old `run.sh` had to detect — a live API with nothing
+draining the queue — is unreachable.
+
+### The seeding order is forced, not chosen
+
+`frontend/dev/seed.mjs` resolves the first corpus through the `er` **CLI**, before
+publishing a config. Both alternatives are closed:
+
+* A first publish is tier C, so it enqueues `train` + `run_all_full`. That rebuild
+  is publish-triggered, so W0.3 sets `skip_ingest` on it — it never reads the drop
+  directory, and on a new org both jobs fail for want of a corpus.
+* `POST /imports` is the route that *does* ingest, and `delivery_preconditions`
+  refuses it until a config is already published.
+
+So something has to put a corpus in the lake first, and only the CLI can.
+
+`.state/expected.json` is the ground truth the specs read, in the shape their
+`Expected` interface declares: `{ org, metrics: { records, entities,
+duplicate_groups } }`. It is derived from the committed `base_10` fixture, not
+from the run that just happened — an independent statement of the right answer —
+and `metrics` is read as a **floor**, because the dev tenant is long-lived and
+every pass appends to it.
+
+### What the first run found
+
+The tier earned its keep immediately. `GET /api/orgs/{org}/jobs` in the BFF did
+`forward<unknown[]>(...)` and passed the body through — a type *assertion* about
+an HTTP body TypeScript cannot check. er-server returns `{ "jobs": [...] }` (it
+wraps every list: `items` for most, named keys for some), while the UI hook types
+it `JobRow[]`, the **mock returned a bare array**, and the specs call `.some()` on
+it. Three consumers agreed on "array"; only the real backend disagreed.
+
+The damage was not a blank table. `dashboard-content.tsx` does
+`(jobs.data ?? []).find(...)`, and `?? []` does not apply to a non-null object, so
+`.find` was undefined and **the whole dashboard crashed on render**. One line took
+out the app's landing page against the real backend, and the mock's
+unfaithfulness hid it through every green functional run.
+
+Fixed on both sides — unwrap in the BFF *and* make the mock return `{jobs}`.
+Unwrapping alone would have broken the functional tier, which is the point: the
+mock has to be faithful or it manufactures green. **The W0.4a contract gate
+compares routes, not response shapes**; a shape-level mock-vs-OpenAPI check would
+have caught this and is still unbuilt.
+
+### Known failures, and what each one is
+
+This tier is **red by design right now**: it reports real defects rather than
+being tuned to pass. 8 of 15 cases pass. Do not "fix" these in the specs.
+
+| Case | Diagnosis |
+|---|---|
+| `see-your-data` → provisions a tenant through the UI (×2) | **Product gap.** `create_org` returns 503 "auto-provisioning not configured" without a `config_path` — the path the admin tenant-create UI uses. The Python server provisioned server-side from the dead `ERSERVER_*` variables; the Rust port never reimplemented it. Tenant self-onboarding is broken in the product, not the test. |
+| `run-the-business` → suspended tenant refuses work (×2) | **Real bug.** Submitting a job to a suspended org returns **202, not 409**: `create_job` has no suspension guard, while `publish_config_version` and `delivery_preconditions` both have one. The UI promises "a suspended tenant refuses jobs, imports and steward actions" — jobs is the one that does not. |
+| `fix-your-data` → assertion library shows the actor | **Product gap.** Expects `steward@acme.dev`; gets `key:<uuid>`. `Principal.actor` is derived solely from the API key and the BFF forwards no end-user identity, so every human action is attributed to a service credential. Fixing it means forwarding the authenticated user for *attribution only* — never for authorization, or it becomes an impersonation vector. |
+| `see-your-data` → jobs table lists `run_all` | **Cold-start flake.** The card's text is just its title, meaning `jobs.isPending` was still true and the Skeleton (no text) was rendering. A freshly started `next start` has to initialise the dynamic route inside the assertion's 5 s budget. Needs a longer first-assertion timeout, not a code change. |
+| `grow-your-data` → wizard activates a new source | Not yet diagnosed. |
 
 ---
 

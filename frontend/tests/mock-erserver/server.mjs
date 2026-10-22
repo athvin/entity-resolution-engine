@@ -1286,7 +1286,11 @@ const server = http.createServer((req, res) => {
     }
     if ((match = /^\/v1\/orgs\/([^/]+)\/jobs$/.exec(path)) && req.method === "GET") {
       const limit = Number(url.searchParams.get("limit") ?? 50);
-      return send(res, 200, (state.jobs[match[1]] ?? []).slice(0, limit));
+      // `{ jobs: [...] }`, matching er-server, which wraps every list response.
+      // This mock returned a bare array until the full-stack tier was revived
+      // and showed the BFF route passing the real object through to a UI that
+      // expected an array — the mock's unfaithfulness is what hid it.
+      return send(res, 200, { jobs: (state.jobs[match[1]] ?? []).slice(0, limit) });
     }
     if ((match = /^\/v1\/orgs\/([^/]+)\/jobs\/([^/:]+)$/.exec(path)) && req.method === "GET") {
       const job = (state.jobs[match[1]] ?? []).find((row) => row.id === match[2]);

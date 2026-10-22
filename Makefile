@@ -92,20 +92,28 @@ frontend-coverage:
 # Python ones, leaving frontend/README.md and frontend/dev/run.sh:97 calling
 # commands that no longer existed. Their scripts were never deleted.
 #
-# NOT restored: `frontend-seed`. Its implementation (frontend/dev/seed.py) was
-# deleted in 7cc444f with no replacement, which is why the full-stack e2e tier is
-# dormant — `make frontend-e2e` and tests/e2e/** cannot pass without a seeded
-# tenant. See docs/frontend-testing.md before reviving either.
+# `frontend-seed` is back (W0.5b), reimplemented as frontend/dev/seed.mjs after
+# the Python frontend/dev/seed.py was deleted in 7cc444f. That deletion is what
+# made the full-stack e2e tier dormant; it is no longer.
 
-# The whole dev stack in one command (containers + migrations + erserver).
+# The whole dev stack in one command (container + migrations + er-server + seed + web).
 run:
 	bash frontend/dev/run.sh
 
-# Containers (Postgres x2 + MinIO) + erweb migrations + erserver api/dispatcher; blocks.
+# The control-plane Postgres container + erweb migrations + er-server; blocks.
 frontend-dev:
 	bash frontend/dev/up.sh
 
-# The full-stack tier. DORMANT: needs a seeded tenant (see the note above).
+# Seed the demo tenant: org, api keys, published config, base_10 resolved, logins.
+# Needs `make frontend-dev` running in another terminal.
+frontend-seed:
+	@bash -c 'set -euo pipefail; \
+	  export REPO_ROOT="$$PWD"; \
+	  source frontend/dev/env.sh; \
+	  node frontend/dev/seed.mjs'
+
+# The full-stack tier: Playwright against the real stack. Needs `make frontend-dev`
+# and `make frontend-seed`. Not on the PR path — this is the release gate.
 frontend-e2e:
 	cd frontend && FRONTEND_E2E=1 corepack pnpm test:e2e:full
 
