@@ -18,12 +18,14 @@ use crate::pg;
 /// list contains the fired type, so a tenant could subscribe to
 /// `entity.merged`, or to `job.succeeded` with the typo, and wait forever for a
 /// delivery that was never going to arrive. Nothing told them, and nothing
-/// could — there was no list of what exists.
+/// could — there was no list of what exists. (`entity.merged` has a producer as
+/// of O3c-2; `entity.edge_cut` is the one that still does not, and is refused
+/// for exactly the same reason the typo is.)
 ///
 /// Adding an event means adding it here, which is also what makes it
 /// subscribable. A type absent from this list is refused at registration
 /// instead of accepted and silently never delivered.
-pub const EVENT_CATALOG: [(&str, &str); 6] = [
+pub const EVENT_CATALOG: [(&str, &str); 12] = [
     (
         "job.succeeded",
         "A queued job finished successfully. Fired once per OUTCOME, not per \
@@ -64,12 +66,58 @@ pub const EVENT_CATALOG: [(&str, &str); 6] = [
          enforced yet would read a corpus that disagrees with the event. \
          Carries the verdict, including a dismissal.",
     ),
+    (
+        "entity.created",
+        "A run created entities that did not exist before. AGGREGATED: one \
+         event per kind per run, carrying the count and `detail_path`, not one \
+         event per entity — a run over a large corpus writes millions of ledger \
+         rows and a POST each would be worse than none.",
+    ),
+    (
+        "entity.member_added",
+        "Records joined entities that already existed. Aggregated per run like \
+         every `entity.*` event. This is the kind that tells a downstream \
+         system a golden record it already holds has changed underneath it, \
+         without it having to diff the whole corpus.",
+    ),
+    (
+        "entity.member_removed",
+        "Records left entities that survived. Aggregated per run. Paired with \
+         `member_added` this is the honest description of a re-resolution: the \
+         partition moved, and these are the two directions it moved in.",
+    ),
+    (
+        "entity.merged",
+        "Entities were merged into one. Aggregated per run. The event a \
+         subscriber most often wants, and the one a tenant could previously \
+         subscribe to and wait forever for — it was the worked example in this \
+         catalog's own reason for existing.",
+    ),
+    (
+        "entity.split",
+        "An entity separated into several. Aggregated per run. Fires for a \
+         steward `never` assertion taking effect and for a re-resolution the \
+         corpus no longer supports, which are the same fact to a subscriber.",
+    ),
+    (
+        "entity.retired",
+        "Entities stopped existing — every member moved elsewhere. Aggregated \
+         per run. A subscriber holding a reference to one needs to know it is \
+         now a tombstone rather than absent.",
+    ),
 ];
 
 // Deliberately NOT listed: `job.running`. The dispatcher marks a job running
 // but never emits for it, and listing an event nothing fires is the exact bug
 // this catalog exists to prevent. Add it here when something emits it, not
 // before.
+//
+// Also deliberately NOT listed: `entity.edge_cut`. `edge_cut` is in the
+// ledger's own kind list (`er_schema::model::EVENT_TYPES`) but nothing writes
+// it — the `cut_edges` relation has no producer either — so it falls under the
+// same rule as `job.running`. `dispatcher::entity_event_name` returns `None`
+// for it and logs the count, so if it ever gains a writer that shows up as an
+// operator-visible line rather than as events quietly never arriving.
 
 /// Whether `event_type` is one this system can actually emit.
 #[must_use]

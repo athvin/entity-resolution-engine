@@ -1421,12 +1421,53 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          brings that evidence: its literal type string must appear at an emit site. Observed
          failing — cataloguing an `entity.merged` nothing emits fails with "the catalog lists
          \"entity.merged\" but no emit site names it".
-   - [ ] O3c-2 entity-level events off the `entity_events` ledger. Still wants the fan-out
-         decision O3a named: a run over a large corpus writes thousands of rows and one POST each
-         would be worse than none, so this needs per-run aggregates or a capped fan-out that LOGS
-         what it dropped. It also crosses stores (the ledger is in the lake, the outbox in
-         Postgres), which the dispatcher's async half can bridge — the same shape E9b's screening
-         and E10b-2's labels both used.
+   - [x] **O3c-2 entity-level events off the `entity_events` ledger, as per-kind per-run
+         aggregates.** This is the item O3a named when it refused to catalogue entity events:
+         "thousands of un-retried POSTs per run would be worse than none." O3b's outbox fixed the
+         *retry* half and left the volume exactly where it was — a 10M-row corpus still writes
+         millions of ledger rows — so the fan-out decision was still open, and it is the whole
+         design of this PR.
+         **The answer is at most one event per KIND per run**, carrying the count and a
+         `detail_path`, with the rows served by a new
+         `GET /v1/orgs/{org}/runs/{run_id}/entity-events`. That is the standard webhook shape of
+         notify rather than deliver, and it is only an acceptable trade because it is lossless:
+         the aggregate expands back through the detail endpoint, which is asserted rather than
+         claimed (the sum of the delivered counts equals the rows the endpoint serves).
+         Six kinds are catalogued — `created`, `member_added`, `member_removed`, `merged`,
+         `split`, `retired`. **`edge_cut` is deliberately absent**: it is in the ledger's own kind
+         list (`er_schema::model::EVENT_TYPES`) but nothing writes it, and E3b left the `cut_edges`
+         relation without a producer too, so it falls under exactly the rule O3a wrote for
+         `job.running`. `entity_event_name` returns `None` for it and **logs the count** rather
+         than dropping it silently, which is the "capped fan-out that LOGS what it dropped" half
+         of the original requirement — if it ever gains a writer that surfaces as an
+         operator-visible line instead of as events quietly never arriving.
+         Two consequences of that rule are worth recording. The event names are spelled as
+         **literals** in a `match`, not `format!("entity.{kind}")`, because O3c-1's honesty gate
+         reads the emit sites for the literal string: a computed name would correctly fail it, as
+         a name nothing *says* is a name nothing can be shown to emit. And `entity.merged` was
+         the gate's own worked example of "an event nothing emits"; it has a producer now, so the
+         refusal case moved to `entity.edge_cut` — the better example anyway, since it looks
+         exactly as plausible as the five beside it and only the catalog's rule tells them apart.
+         **The store crossing.** The ledger is in the lake and the outbox in Postgres, so
+         `run_job` (which holds the lake session) now returns the per-kind counts and
+         `dispatch_once` (which holds the Postgres client) emits them — the same bridge E9b's
+         screening and E10b-2's labels used. The counts ride *beside* the outcome rather than
+         inside it, because every other arm of that `if` yields `Result<(), _>`. Both halves are
+         best-effort after the run committed: failing a run because a COUNT could not be read
+         would destroy work in order to describe it.
+         A new declared live read (`counts_by_kind_live`) does the aggregation in SQL and a
+         snapshot-pinned sibling (`by_run`) serves the detail page, keyset-cursored on `seq`
+         rather than `id` — `id` is a content hash, so an `id` cursor would page in an order no
+         reader asked for.
+         **Three gates observed failing.** Deleting one literal from the emit site fails O3c-1's
+         catalog gate by name. Changing the emit to one POST per ledger row fails the per-kind
+         uniqueness assertion. And dropping the kind filter from the detail endpoint fails the
+         losslessness assertion — but only after the test was strengthened: a first full run over
+         base_10 writes nothing but `created`, so the original single-run test passed the
+         filter sabotage. The fix is a second run with two rows appended to the crm delivery, one
+         a near-duplicate that joins an existing entity and one a stranger that makes a new one,
+         so the partition moves in two directions at once and a filter that is ignored stops
+         being indistinguishable from one that works.
    - [x] **O7a resolution metrics over time (#45/#57's trend half).** Every dashboard number has
          always been computed LIVE from the lake, so the product could say what is true now and
          nothing about the direction of travel — and "is the duplicate rate going up" is the

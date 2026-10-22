@@ -1,0 +1,17 @@
+kind: statement
+operation: read
+description: "One keyset page of a run's entity events, oldest first — the detail behind the per-kind aggregate the webhook delivers (O3c-2). Keyed on `seq`, which is monotonic within a run, so the cursor is the last seq seen. `event_type` narrows the page to the kind the aggregate named, which is what a subscriber following `detail_path` asks for; null means every kind. Snapshot-pinned like every read-API page; the live sibling `counts_by_kind_live` is the one the pipeline itself calls."
+params:
+  - { name: snapshot, type: bigint }
+  - { name: run_id, type: varchar }
+  - { name: event_type, type: varchar, nullable: true }
+  - { name: after, type: bigint, nullable: true }
+  - { name: limit, type: bigint }
+returns:
+  - { name: id, type: varchar, nullable: false }
+  - { name: seq, type: bigint, nullable: false }
+  - { name: run_id, type: varchar, nullable: false }
+  - { name: entity_id, type: varchar, nullable: false }
+  - { name: event_type, type: varchar, nullable: false }
+  - { name: details, type: json }
+  - { name: occurred_at, type: timestamp, nullable: false }

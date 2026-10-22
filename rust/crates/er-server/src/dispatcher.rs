@@ -17,7 +17,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::{Job, pg, webhook};
 
@@ -233,6 +233,10 @@ pub async fn dispatch_once_with(
     // the existing scores), which needs the async Postgres client, so it does not
     // go through the blocking `run_job`.
     let env = org.env.clone();
+    // Per-kind entity-event counts, for the webhook aggregate (O3c-2). Only a
+    // reconciling run produces any; every other kind leaves this empty, which
+    // is the honest "nothing to announce".
+    let mut entity_counts: Vec<(String, i64)> = Vec::new();
     let outcome = if let Some(Err(message)) = schema {
         Err(message)
     } else if job.kind == crate::schema::LAKE_MIGRATE_KIND {
@@ -280,9 +284,19 @@ pub async fn dispatch_once_with(
         };
         let jb = job.clone();
         let drop_root = org.drop_root.clone();
-        tokio::task::spawn_blocking(move || run_job(&jb, &env, drop_root.as_deref(), &models))
+        // The counts come out beside the outcome rather than inside it: every
+        // other arm of this `if` yields `Result<(), _>`, and widening all of
+        // them to carry a value only this one can produce would be noise.
+        match tokio::task::spawn_blocking(move || run_job(&jb, &env, drop_root.as_deref(), &models))
             .await
             .unwrap_or_else(|e| Err(format!("dispatcher task panicked: {e}")))
+        {
+            Ok(counts) => {
+                entity_counts = counts;
+                Ok(())
+            }
+            Err(message) => Err(message),
+        }
     };
 
     let completed = match &outcome {
@@ -322,7 +336,96 @@ pub async fn dispatch_once_with(
     if completed.state != "queued" {
         let _ = webhook::emit_job_event(client, &completed).await;
     }
+    // The entity-event aggregate rides the same settle, after the outcome: a
+    // subscriber watching both should see the outcome first, because `entity.*`
+    // describes what a run that SUCCEEDED did to the corpus.
+    if completed.state == "succeeded" && !entity_counts.is_empty() {
+        emit_entity_aggregates(client, &completed, &entity_counts).await;
+    }
     Ok(true)
+}
+
+/// The `entity.*` webhook event name for one `entity_events.event_type`, or
+/// `None` for a ledger kind that is not subscribable.
+///
+/// Spelled out as literals rather than `format!("entity.{kind}")` for two
+/// reasons. The catalog gate reads the emit sites looking for the event string,
+/// so a computed name would — correctly — fail it: a name nothing *says* is a
+/// name nothing can be shown to emit. And it makes the exclusion explicit.
+/// `edge_cut` is in the ledger's kind list but has no writer (the `cut_edges`
+/// relation has no producer either), so it stays out of the catalog by the
+/// catalog's own rule, rather than being listed and never delivered.
+fn entity_event_name(kind: &str) -> Option<&'static str> {
+    match kind {
+        "created" => Some("entity.created"),
+        "member_added" => Some("entity.member_added"),
+        "member_removed" => Some("entity.member_removed"),
+        "merged" => Some("entity.merged"),
+        "split" => Some("entity.split"),
+        "retired" => Some("entity.retired"),
+        _ => None,
+    }
+}
+
+/// Record one `entity.<kind>` webhook event per kind the run produced.
+///
+/// Aggregated per kind on purpose. O3a left entity events out of the catalog
+/// precisely because "thousands of un-retried POSTs per run would be worse than
+/// none", and the outbox O3b built fixes the retry half without touching the
+/// volume: a 10M-row corpus still produces millions of ledger rows. So this is
+/// at most six events per run, each carrying its count and where to read the
+/// rows — the standard webhook shape of notify rather than deliver, and lossless
+/// because the detail stays retrievable.
+///
+/// Best-effort, like the job event: the run's work is already committed, and a
+/// subscriber lookup that fails must not retroactively fail the run. A kind with
+/// no catalog entry is LOGGED rather than dropped silently, so a ledger kind
+/// that gains a writer surfaces as an operator-visible line instead of as
+/// events that quietly never arrive.
+async fn emit_entity_aggregates(
+    client: &tokio_postgres::Client,
+    job: &Job,
+    counts: &[(String, i64)],
+) {
+    let org_name = match pg::get_org_by_id(client, &job.org_id).await {
+        Ok(Some(org)) => org.name,
+        // Subscribers key on the org's id, so an unresolvable public handle
+        // degrades the payload rather than skipping the delivery.
+        Ok(None) => job.org_id.clone(),
+        Err(e) => {
+            eprintln!(
+                "run {}: entity-event aggregate not recorded: resolving the org: {e}",
+                job.id
+            );
+            return;
+        }
+    };
+    for (kind, n) in counts {
+        let Some(event) = entity_event_name(kind) else {
+            eprintln!(
+                "run {}: {n} {kind:?} entity events have no catalog entry, so nothing \
+                 could have subscribed to them — not delivered",
+                job.id
+            );
+            continue;
+        };
+        let data = json!({
+            // The run id IS the job id (`run_job` takes `&job.id`), named both
+            // ways because a subscriber correlating with `job.*` wants the one
+            // and a subscriber fetching the detail wants the other.
+            "run_id": job.id,
+            "job_id": job.id,
+            "event_type": kind,
+            "count": n,
+            "detail_path": format!(
+                "/v1/orgs/{org_name}/runs/{}/entity-events?event_type={kind}",
+                job.id
+            ),
+        });
+        if let Err(e) = webhook::emit(client, &job.org_id, &org_name, event, &data).await {
+            eprintln!("run {}: {event} not recorded: {e}", job.id);
+        }
+    }
 }
 
 /// Seconds since the Unix epoch (the run-stamp wall clock).
@@ -375,7 +478,7 @@ fn run_job(
     env: &Value,
     drop_root: Option<&str>,
     active_models: &[ActiveModel],
-) -> Result<(), String> {
+) -> Result<Vec<(String, i64)>, String> {
     let catalog = env_str(env, "ER_LAKE_CATALOG").ok_or("org env missing ER_LAKE_CATALOG")?;
     let data_path = env_str(env, "ER_LAKE_DATA_PATH").ok_or("org env missing ER_LAKE_DATA_PATH")?;
     let session = er_cli::open_lake(catalog, data_path).map_err(|e| format!("open lake: {e:#}"))?;
@@ -608,7 +711,31 @@ fn run_job(
             .map_err(|e| format!("{e:#}"))
         }
         other => Err(format!("dispatcher does not handle job kind '{other}'")),
-    }
+    }?;
+
+    // How many entity events of each kind this run produced, for the webhook
+    // aggregate (O3c-2). Read HERE because this is the half that holds the lake
+    // session; the half that can emit holds the Postgres client. Thousands of
+    // rows become at most one notification per kind, and the detail stays
+    // retrievable through the run's entity-event page — notify, do not deliver.
+    //
+    // Best-effort: the run's results are already written, so failing it because
+    // a COUNT could not be read would destroy work to describe it. An empty
+    // vector means "nothing to announce", which is also the honest answer for a
+    // kind of job that reconciles nothing.
+    let counts =
+        match er_entities::entity_event::read::counts_by_kind_live(session.connection(), run_id) {
+            Ok(rows) => rows
+                .into_iter()
+                .map(|r| (r.event_type, r.n.unwrap_or(0)))
+                .filter(|(_, n)| *n > 0)
+                .collect(),
+            Err(e) => {
+                eprintln!("run {run_id}: entity-event counts unavailable: {e}");
+                Vec::new()
+            }
+        };
+    Ok(counts)
 }
 
 /// The steward apply path (`apply_corrections` jobs; enqueued by the assertion,

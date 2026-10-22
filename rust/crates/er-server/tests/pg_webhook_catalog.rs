@@ -3,10 +3,16 @@
 //!
 //! A subscription was an unvalidated free-form array. `webhooks_for_delivery`
 //! merely tests whether the subscriber's `events` list contains the fired type,
-//! so a tenant could subscribe to `entity.merged` — which nothing emits — or to
-//! `job.suceeded` with the typo, and wait forever for a delivery that was never
-//! going to arrive. Nothing told them, and nothing could: there was no list of
-//! what exists.
+//! so a tenant could subscribe to `entity.merged` — which nothing emitted — or
+//! to `job.suceeded` with the typo, and wait forever for a delivery that was
+//! never going to arrive. Nothing told them, and nothing could: there was no
+//! list of what exists.
+//!
+//! O3c-2 gave `entity.merged` a producer, so the refusal case here moved to
+//! `entity.edge_cut`: the one ledger kind that is still written by nothing. It
+//! is the better example anyway — a name that looks exactly as plausible as the
+//! five beside it in `er_schema::model::EVENT_TYPES`, and the catalog's rule is
+//! what tells the two apart.
 //!
 //! The catalog is only worth having if it is TRUE, so the first test here reads
 //! the emit sites rather than trusting the list. That is also why `job.running`
@@ -96,6 +102,12 @@ fn every_catalogued_event_has_a_state_that_reaches_the_emitter() {
             "config.published",
             "import.received",
             "review.resolved",
+            "entity.created",
+            "entity.member_added",
+            "entity.member_removed",
+            "entity.merged",
+            "entity.split",
+            "entity.retired",
         ]
     );
     for (_, description) in webhook::EVENT_CATALOG {
@@ -191,6 +203,12 @@ async fn registration_refuses_an_event_nothing_emits() {
             "config.published",
             "import.received",
             "review.resolved",
+            "entity.created",
+            "entity.member_added",
+            "entity.member_removed",
+            "entity.merged",
+            "entity.split",
+            "entity.retired",
         ],
         "discovery serves exactly the catalog, so the two cannot disagree"
     );
@@ -222,7 +240,7 @@ async fn registration_refuses_an_event_nothing_emits() {
     // An event nothing emits is refused, and the refusal names what does exist
     // — the information that was previously unobtainable.
     for bad in [
-        r#"{"url":"https://example.test/h","events":["entity.merged"]}"#,
+        r#"{"url":"https://example.test/h","events":["entity.edge_cut"]}"#,
         r#"{"url":"https://example.test/h","events":["job.suceeded"]}"#,
         r#"{"url":"https://example.test/h","events":["job.running"]}"#,
         r#"{"url":"https://example.test/h","events":["job.failed","nonsense"]}"#,
