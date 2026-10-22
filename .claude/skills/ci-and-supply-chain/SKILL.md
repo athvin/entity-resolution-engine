@@ -5,10 +5,17 @@ description: Explains this repo's CI topology and dependency gates — the `dete
 
 # CI and the supply chain
 
-Four workflows: `rust`, `frontend`, `infra`, `images`. Seven jobs across the
+Four workflows: `rust`, `frontend`, `infra`, `images`. Eight jobs across the
 first two are required status checks, so a change is not mergeable until they
 pass. The per-job contexts, timeouts and conditions are generated:
 [references/required-checks.md](references/required-checks.md).
+
+**A job's `name:` is its branch-protection context.** Two failure modes follow,
+and both brick `main` rather than merely annoy: renaming a required job silently
+un-protects it, and adding a required context for a job that does not yet exist
+on `main` leaves every PR pending forever. So a split like `entities` out of
+`fmt + clippy + docs` goes in one order only: land the job, let it report green
+on `main`, *then* add the context.
 
 ## The `detect` pattern, and the rule that must not be broken
 
@@ -37,7 +44,8 @@ it skips the gate rather than failing it.
 
 `rust.yml`'s detect skips the compile jobs only for PRs that touch nothing
 outside `.claude/**`. The skip is deliberately that narrow: `docs/` changes
-still run the gate, because the lint job verifies generated docs.
+still run the gate, because `entities` verifies `docs/erd.md` and `lint`
+verifies the generated skill references.
 
 ## Why a job fails when your diff is innocent
 

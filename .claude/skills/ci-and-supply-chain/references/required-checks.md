@@ -67,13 +67,14 @@ exists instead of a workflow-level `paths:` filter.
 | `detect` | detect changes | 5 | `always` |
 | `skills` | agent skills (lint) | 5 | `always` |
 | `lint` | fmt + clippy + docs | 45 | `needs.detect.outputs.code == 'true'` |
+| `entities` | entities | 45 | `needs.detect.outputs.code == 'true'` |
 | `test` | test | 30 | `needs.detect.outputs.code == 'true'` |
 | `security` | cargo-deny (advisories + licenses + bans) | 10 | `needs.detect.outputs.code == 'true'` |
 | `ducklake-e2e` | DuckLake + extensions e2e | 45 | `needs.detect.outputs.code == 'true'` |
 | `bench-compile` | benchmarks (compile) | 30 | `github.event_name != 'pull_request'` |
 | `scale-tests` | scale golden (50k) | 30 | `github.event_name != 'pull_request'` |
 | `coverage` | coverage (llvm-cov) | 60 | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` |
-| `cache-prune` | prune sccache to budget | 15 | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` |
+| `cache-prune` | prune sccache to budget | 30 | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` |
 
 ### Advisory ignores in `rust/deny.toml`
 
