@@ -86,7 +86,13 @@ strict lint, the generated crate from pedantic clippy.
 ## The generated crate's extras
 
 - `src/schema.rs` — `POSTGRES_BASELINE`: every control table's DDL in
-  FK-dependency order; er-server boots only this (never hand DDL).
+  FK-dependency order; er-server's boot replays this, then reconciles (never
+  hand DDL).
+- `src/catalog.rs` — `ENTITY_YAML` (every `entity.yaml` embedded with
+  `include_str!`) and `catalog()`, the compiled-in catalog the reconciler
+  compares live stores against at boot, at every lake job, at provisioning and
+  in the deploy's tenant sweep. The generated crate depends on
+  `er-entity-spec` and `serde_norway` for it.
 - `src/batch.rs` — typed Arrow extraction for the `returns: columns` row
   structs: `check_columns` (structural; list child-field names ignored),
   per-type `opt_*` getters, `req` (NULL in a declared non-null column is an

@@ -1,0 +1,6 @@
+kind: statement
+operation: read
+mode: full
+description: "The newest ledger row — the schema version the control database is at, as the reconciler and the deploy report read it."
+params: []
+returns: entity

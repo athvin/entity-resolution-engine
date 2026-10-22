@@ -92,6 +92,25 @@ dispatcher:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: 500m, memory: 1Gi }
 
+# The schema reconciliation the deploy drives (entity-framework-design.md,
+# "Upgrades"). The control plane migrates in the web-api pod's init container
+# (not a value: it is how the pod boots). The tenant half is this:
+tenantMigrate:
+  # The post-upgrade hook Job that reconciles every active tenant's lake and
+  # prints the per-tenant report; off only for a chart install with no tenants
+  # to sweep.
+  enabled: true
+  # How long `er-server migrate-tenants` waits for the dispatcher to run the
+  # sweep's jobs before reporting the stragglers as `timeout` (and failing the
+  # hook). A tenant mid-run holds its lake until that run finishes; its own job
+  # start reconciles the lake anyway.
+  timeoutSeconds: 1800
+  drift:
+    # The same sweep on a timer: catches a lake altered or restored behind the
+    # deploy's back, and a tenant that missed the sweep.
+    enabled: true
+    schedule: "17 4 * * *"
+
 web:
   replicas: 1
   resources:

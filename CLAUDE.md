@@ -61,7 +61,11 @@ Makefile targets all `cd rust` first.
 **Schema changes go through `entities/`.** Every table is an `entity.yaml` and
 every persistent SQL statement is a declared `.sql` + `.yaml` pair;
 `er-entity gen` emits the Rust structs, DDL, Arrow schemas, and TypeScript
-bindings. Never hand-edit a generated file. See the `entity-framework` skill and
+bindings. Never hand-edit a generated file. There are no migration files: the
+catalog is compiled into `er-server` and every live store is reconciled to it
+(additive changes applied and ledgered in `schema_migrations`, breaking ones
+refused) at boot, at the start of every lake job, at provisioning and by the
+deploy's per-tenant sweep. See the `entity-framework` skill and
 `docs/entity-framework-design.md`.
 
 **The entity conventions are a lint registry, not prose.** Every rule an

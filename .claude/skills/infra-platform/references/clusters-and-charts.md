@@ -37,6 +37,8 @@ both cost and egress policy.
 | `externalsecrets.yaml` | External Secrets projections of the Secrets Manager entries |
 | `efs.yaml` | the static PV for the shared filesystem |
 | `job-db-migrate.yaml` | drizzle migrations as a pre-install/pre-upgrade hook |
+| `job-tenant-migrate.yaml` | `er-server migrate-tenants` as a post-install/post-upgrade hook: every active tenant's lake reconciled, reported per tenant |
+| `cronjob-tenant-drift.yaml` | the same sweep daily, as drift detection |
 | `serviceaccounts.yaml` | a single ServiceAccount, with `automountServiceAccountToken: false` |
 | `instrumentation.yaml` | OpenTelemetry operator auto-instrumentation |
 

@@ -1,0 +1,43 @@
+kind: entity
+version: 1
+name: lake_schema_migration
+relation: schema_migrations
+description: "A tenant lake's schema ledger: one row per DDL statement the reconciler applied to lake.main.*, plus one `verified` row each time a new catalog version found the lake already current. The latest row's catalog_hash is the version this lake is at; the lake, not the control plane, is authoritative for its own position."
+key: [id]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "The ledger row's unique id (UUIDv7, minted by the reconciler)."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "When the statement was applied (or the verification recorded)."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Row update stamp; equals created_at (the ledger is append-only)."
+  - name: catalog_hash
+    type: varchar
+    nullable: false
+    description: "The sha256 of the entity catalog's lake DDL that the reconciler was reconciling toward — the schema version."
+  - name: kind
+    type: varchar
+    nullable: false
+    description: "`applied`: this row's statement ran; `verified`: nothing was pending under a catalog version the ledger had not seen."
+  - name: relation
+    type: varchar
+    description: "The store-qualified relation the statement touched (lake.main.raw_records); NULL for a verification."
+  - name: statement
+    type: varchar
+    description: "The DDL statement as applied; NULL for a verification."
+  - name: applied_by
+    type: varchar
+    nullable: false
+    description: "The reconciler that wrote the row: the binary name and its code version."
+  - name: snapshot_id
+    type: bigint
+    description: "The DuckLake snapshot the lake was at after this row's statement committed; a cursor pinned to an older snapshot cannot read columns this statement added."

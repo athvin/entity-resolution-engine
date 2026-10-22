@@ -229,5 +229,50 @@ async fn provisioning_a_tenant_end_to_end() {
         "the idempotency key should collapse a replayed provision, got {provisions}"
     );
 
+    // ---- phase 5: the provision job builds the lake at the catalog version --
+    //
+    // Needs the ducklake extension (the lake is opened to create its tables),
+    // which is why this phase is gated like the lake tiers are. The dispatcher's
+    // profile normally comes from the process environment, which a test cannot
+    // set, so the job arm is driven with the same profile the request used.
+    if std::env::var("DEDUPE_E2E_DUCKLAKE").as_deref() == Ok("1") {
+        let profile = Ok(Some(Profile {
+            mode: Mode::Local,
+            root: root.clone(),
+            config_template: template.clone(),
+            maint_dsn: None,
+            data_template: None,
+            env_extra: serde_json::from_str(r#"{"ER_DUCKDB_THREADS":"2"}"#).unwrap(),
+        }));
+        let ran = er_server::dispatcher::dispatch_once_with(&client, &profile)
+            .await
+            .unwrap();
+        assert!(ran, "the provision job should have been claimed");
+        let org = pg::get_org(&client, "acme").await.unwrap().unwrap();
+        assert_eq!(org.state, "active", "provisioning promotes the org");
+        // The lake exists with every DDL-owned relation and a ledger that says
+        // which catalog version created them.
+        let catalog = org.env["ER_LAKE_CATALOG"].as_str().unwrap();
+        let data = org.env["ER_LAKE_DATA_PATH"].as_str().unwrap();
+        let session = er_cli::open_lake(catalog, data).unwrap();
+        assert!(session.lake_table_exists("raw_records").unwrap());
+        assert!(session.lake_table_exists("schema_migrations").unwrap());
+        let ledger =
+            er_entities::lake_schema_migration::read::latest(session.connection()).unwrap();
+        assert_eq!(
+            ledger.first().map(|r| r.catalog_hash.as_str()),
+            Some(er_server::schema::lake_catalog_hash().as_str())
+        );
+        // ...and the control plane cached the position.
+        let states = er_entities::tenant_schema_state::read::list(&client)
+            .await
+            .unwrap();
+        let state = states.iter().find(|s| s.org_id == org.id).unwrap();
+        assert_eq!(state.status, "migrated");
+        assert_eq!(state.catalog_hash, er_server::schema::lake_catalog_hash());
+    } else {
+        eprintln!("skipping the provision-job phase (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+    }
+
     let _ = std::fs::remove_dir_all(&root);
 }

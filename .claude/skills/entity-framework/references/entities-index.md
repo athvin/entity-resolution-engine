@@ -30,7 +30,7 @@ statements is read or written only through the engine's own stage SQL, not
 through a typed query function.
 
 <!-- BEGIN GENERATED: entities-index -->
-**32 entities, 137 declared statements.**
+**35 entities, 143 declared statements.**
 
 | Entity | Relation | Store | Key | Natural key | History |
 |---|---|---|---|---|---|
@@ -50,6 +50,7 @@ through a typed query function.
 | `ingest_batch` | `ingest_batches` | duckdb | `id` | — | — |
 | `int_std_record` | `int_std_records` | duckdb | `id` | `record_key` | — |
 | `job` | `jobs` | postgres | `id` | — | — |
+| `lake_schema_migration` | `schema_migrations` | duckdb | `id` | — | — |
 | `match_score` | `match_scores` | duckdb | `id` | `rec_a_key, rec_b_key, model_version, tf_snapshot_id` | — |
 | `matching_model` | `matching_models` | postgres | `id` | `org_id, name, version` | yes |
 | `metric_snapshot` | `metric_snapshots` | duckdb | `id` | `run_id` | — |
@@ -62,8 +63,10 @@ through a typed query function.
 | `review` | `review_queue` | duckdb | `id` | `rec_a_key, rec_b_key, reason` | — |
 | `run` | `runs` | duckdb | `id` | — | — |
 | `schedule` | `schedules` | postgres | `id` | — | yes |
+| `schema_migration` | `schema_migrations` | postgres | `id` | — | — |
 | `scored_record` | `scored_records` | duckdb | `id` | `record_key` | — |
 | `staged_steward_action` | `staged_steward_actions` | postgres | `id` | — | — |
+| `tenant_schema_state` | `tenant_schema_states` | postgres | `id` | `org_id` | — |
 | `webhook` | `webhooks` | postgres | `id` | — | yes |
 | `webhook_delivery` | `webhook_deliveries` | postgres | `id` | — | — |
 
@@ -87,6 +90,7 @@ Declared statements per entity and operation:
 | `ingest_batch` | 1 | 1 | 0 | 0 |
 | `int_std_record` | 0 | 4 | 0 | 0 |
 | `job` | 2 | 3 | 4 | 0 |
+| `lake_schema_migration` | 1 | 1 | 0 | 0 |
 | `match_score` | 0 | 4 | 3 | 0 |
 | `matching_model` | 1 | 3 | 1 | 0 |
 | `metric_snapshot` | 1 | 1 | 0 | 0 |
@@ -99,8 +103,10 @@ Declared statements per entity and operation:
 | `review` | 0 | 3 | 3 | 0 |
 | `run` | 1 | 3 | 1 | 0 |
 | `schedule` | 2 | 2 | 3 | 1 |
+| `schema_migration` | 1 | 1 | 0 | 0 |
 | `scored_record` | 0 | 1 | 1 | 1 |
 | `staged_steward_action` | 1 | 1 | 1 | 0 |
+| `tenant_schema_state` | 1 | 1 | 0 | 0 |
 | `webhook` | 1 | 3 | 0 | 1 |
 | `webhook_delivery` | 1 | 1 | 2 | 0 |
 <!-- END GENERATED: entities-index -->

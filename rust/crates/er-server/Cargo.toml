@@ -104,6 +104,8 @@ thiserror.workspace = true
 er-versions = { version = "0.1.0", path = "../er-versions" }
 er-compile = { version = "0.1.0", path = "../er-compile" }
 regex-lite = "0.1.9"
+er-entity-diff = { version = "0.1.0", path = "../er-entity-diff" }
+er-entity-spec = { version = "0.1.0", path = "../er-entity-spec" }
 
 [lints]
 workspace = true

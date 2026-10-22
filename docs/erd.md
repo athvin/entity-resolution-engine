@@ -137,6 +137,16 @@ erDiagram
         timestamp created_at
         timestamp updated_at
     }
+    schema_migrations {
+        varchar id PK
+        timestamp created_at
+        timestamp updated_at
+        varchar catalog_hash
+        varchar kind "in {applied, verified}"
+        varchar relation
+        varchar statement
+        varchar applied_by
+    }
     staged_steward_actions {
         varchar id PK
         varchar org_id FK
@@ -146,6 +156,16 @@ erDiagram
         varchar created_by
         timestamp created_at
         timestamp applied_at
+        timestamp updated_at
+    }
+    tenant_schema_states {
+        varchar id PK
+        varchar org_id FK
+        varchar catalog_hash
+        varchar status "in {breaking, current, error, migrated}"
+        varchar detail
+        timestamp checked_at
+        timestamp created_at
         timestamp updated_at
     }
     webhooks {
@@ -181,6 +201,7 @@ erDiagram
     pair_labels }o--|| orgs : "org_id → id"
     schedules }o--|| orgs : "org_id → id"
     staged_steward_actions }o--|| orgs : "org_id → id"
+    tenant_schema_states }o--|| orgs : "org_id → id"
     webhooks }o--|| orgs : "org_id → id"
     webhook_deliveries }o--|| orgs : "org_id → id"
     webhook_deliveries }o--|| webhooks : "webhook_id → id"
@@ -197,7 +218,9 @@ erDiagram
 | `orgs` | A tenant: its config pointer, lake env, lifecycle state and active config version. |
 | `pair_labels` | A human (or model) verdict on one candidate pair — the training signal the engine has always been able to learn from and never had. One row per (org, pair): a re-label corrects the previous verdict rather than stacking another. |
 | `schedules` | A recurring job schedule for a tenant: its kind, cron and source. |
+| `schema_migrations` | The control-plane schema ledger: one row per DDL statement the reconciler applied to public.*, plus one `verified` row each time a new catalog version found the live schema already current. The latest row's catalog_hash is the version the database is at. |
 | `staged_steward_actions` | A steward action staged for review/apply: its payload, state and outcome. |
+| `tenant_schema_states` | The control plane's cache of each tenant lake's schema position: the catalog version the lake was last reconciled or checked against and how that went. The lake's own schema_migrations ledger is authoritative; this row is what the deploy report and the drift check read without opening every lake. |
 | `webhooks` | A tenant webhook endpoint: its URL, subscribed events and signing secret. |
 | `webhook_deliveries` | One attempt-tracked delivery of one event to one subscriber. The event is recorded here BEFORE any network call, so a subscriber that is briefly unreachable gets the event late instead of never. |
 
@@ -531,6 +554,17 @@ erDiagram
         timestamp retracted_at
         timestamp updated_at
     }
+    schema_migrations {
+        varchar id PK
+        timestamp created_at
+        timestamp updated_at
+        varchar catalog_hash
+        varchar kind
+        varchar relation
+        varchar statement
+        varchar applied_by
+        bigint snapshot_id
+    }
     int_std_records {
         varchar id PK
         varchar record_key
@@ -698,6 +732,7 @@ erDiagram
 | `ingest_batches` | ddl | One delivery receipt (S4.1): per-source landing counts for a batch, including tombstones and resurrections. |
 | `golden_overrides` | ddl | One steward golden-field override (latest-wins per entity and attribute); a NULL value means the steward cleared the field. |
 | `record_overlays` | ddl | One steward record overlay (protect/suppress): a flag on a record key, retractable, applied at assembly. |
+| `schema_migrations` | ddl | A tenant lake's schema ledger: one row per DDL statement the reconciler applied to lake.main.*, plus one `verified` row each time a new catalog version found the lake already current. The latest row's catalog_hash is the version this lake is at; the lake, not the control plane, is authoritative for its own position. |
 | `int_std_records` | stage | One current standardized person record per record key: the standardization stage's output (supersession applied, tombstones excluded) and the matching stage's input. |
 | `golden_records` | stage | One resolved person: the surviving value per attribute, at a snapshot. |
 | `golden_lineage` | stage | Per-attribute survivorship provenance: which record each surviving golden value came from. |

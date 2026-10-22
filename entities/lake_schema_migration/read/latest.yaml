@@ -1,0 +1,10 @@
+kind: statement
+operation: read
+description: "The newest ledger row's catalog version — the schema version this lake is at, read by the reconciler before it decides whether anything is pending."
+pin: live
+pin_reason: "The reconciler reads this inside the writer's own job, before any snapshot for this run exists, and must see the row the previous reconciliation just wrote."
+params: []
+returns:
+  - { name: catalog_hash, type: varchar, nullable: false }
+  - { name: kind, type: varchar, nullable: false }
+  - { name: created_at, type: timestamp, nullable: false }

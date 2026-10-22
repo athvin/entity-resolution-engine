@@ -1,0 +1,6 @@
+kind: statement
+operation: read
+mode: full
+description: "Every tenant's recorded schema position, for the deploy report and the drift check (`er-server migrate-tenants`); the caller joins org names from the org list."
+params: []
+returns: entity
