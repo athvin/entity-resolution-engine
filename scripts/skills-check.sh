@@ -25,6 +25,21 @@
 
 set -euo pipefail
 
+# Pin collation. Every generated block is built by piping `find` through `sort`,
+# and some of those sorts compare PATHS — `entities/webhook/entity.yaml` against
+# `entities/webhook_delivery/entity.yaml` differ at `/` (0x2F) versus `_` (0x5F).
+# Under LC_ALL=C the `/` sorts first, which is what is committed and what CI
+# (a C locale) regenerates. Under a UTF-8 locale punctuation drops to a lower
+# collation level, so the comparison falls through to `d` versus `e` and
+# `webhook_delivery` sorts first instead.
+#
+# Without this the gate's verdict depends on the developer's locale: `make check`
+# reported a two-line `entities-index.md` diff on a macOS en_US.UTF-8 shell while
+# CI was clean. That is a false-POSITIVE generator — the mirror of this repo's
+# false-green rule, and worse in one way, because the obvious response is to
+# commit the reordered file, which makes CI stale instead. One tree, one answer.
+export LC_ALL=C
+
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_root"
 
