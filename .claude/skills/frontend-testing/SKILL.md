@@ -1,0 +1,140 @@
+---
+name: frontend-testing
+description: Explains this repo's frontend test tiers and quality gates — which tier a change belongs in (unit, component, Playwright functional, the dormant full-stack tier), the per-PR coverage floor and why it sits where it does, the axe accessibility gate, PGlite as the test database, the Playwright fixture orgs and the container-tag-must-match-dependency rule for visual baselines, plus the known false-green traps. Use when adding or fixing a frontend test, when a Playwright or vitest run fails, when choosing where new coverage belongs, when visual baselines change, or when a frontend CI job is red. For the BFF boundary and its authz gate see frontend-bff; for CI job wiring and required checks see ci-and-supply-chain.
+---
+
+# Frontend testing
+
+`docs/frontend-testing.md` is the living standard; this skill is the working
+summary. The frontend gate **blocks merges** — three of its jobs are required
+checks — so a frontend change is not done until its tier passes.
+
+## The four tiers, and how to choose
+
+| Tier | Directory | Command | In CI |
+|---|---|---|---|
+| unit | `tests/unit/` | `pnpm test` | yes, per-PR |
+| component | `tests/component/` | `pnpm test` | yes, per-PR |
+| functional | `tests/functional/` | `pnpm test:e2e` | yes, per-PR |
+| full-stack | `tests/e2e/` | `make frontend-e2e` | **no — dormant** |
+
+Choosing:
+
+- **Pure logic** — a formatter, a guard, a reducer, a BFF helper's branches →
+  unit.
+- **A component's rendered behaviour** in isolation → component.
+- **A flow through real route handlers**, a session, authorization, or anything
+  that needs the app actually running → functional. This is where most
+  meaningful frontend coverage lives.
+- **The whole stack against a real backend** → the dormant tier. Do not add
+  there expecting it to run.
+
+The full-stack tier is dormant because its seed script was deleted with no
+replacement, so it needs a seeded tenant that nothing currently provides.
+Treat it as unavailable rather than broken.
+
+## The coverage floor
+
+Enforced **per-PR** by `pnpm check` (`vitest run --coverage`), scoped to
+`src/lib/**`. The exact thresholds and the Playwright pin are generated:
+[references/tiers-and-thresholds.md](references/tiers-and-thresholds.md).
+
+The number sits near 49% and that is the honest ceiling, not a compromise:
+`src/lib/query/**` is deliberately outside the unit tier's remit because those
+hooks are exercised by Playwright. Raising the floor means writing unit tests
+for `src/lib`, **not** re-scoping the measurement to flatter it.
+
+The nightly `coverage` job only publishes the HTML artifact; the gate is the
+per-PR one.
+
+## The accessibility gate
+
+`tests/functional/a11y.spec.ts` runs `@axe-core/playwright` with
+`.withTags(["wcag2a", "wcag2aa"])` across the product's screens and asserts
+**zero `serious` or `critical` violations**. Lesser impacts are not gated.
+
+It skips mobile projects deliberately — one axe pass per screen, because the
+desktop DOM is a superset of the mobile one. Adding a screen means adding it to
+this spec's list; a new screen is otherwise silently unchecked.
+
+## PGlite is the test database
+
+`src/lib/db/index.ts` branches on the URL: a `pglite:` URL dynamically imports
+PGlite plus the drizzle PGlite adapter and migrator, instead of connecting to
+Postgres.
+
+So the functional tier runs with `ERWEB_DATABASE_URL=pglite://memory` and needs
+no database process, and unit tests that touch the database set the same at
+module top. This is why the frontend gate needs no service container.
+
+The important property: it is the **real drizzle schema and real migrations**,
+not a mock. A query that works against PGlite works against Postgres, and a
+migration error surfaces in tests.
+
+## Playwright fixtures
+
+Fixture users, orgs and the login helper live in `tests/functional/helpers.ts`:
+
+- Users spanning the role lattice, with one shared password constant.
+- `ORG` is the **read-only, pixel-compared** org — do not mutate it from a
+  test, or you will break the visual baselines for every other spec.
+- `triageOrg(projectName)` and `wizardOrg(projectName)` return a **per-project**
+  mutable org, so the three device projects cannot interfere with each other.
+  Use them for anything that writes.
+- `login()` POSTs the **real** BFF login route via `page.request`, sharing the
+  cookie jar — no auth stubbing, so the session path is covered by every test
+  that logs in.
+
+The backend is a mock er-server (`tests/mock-erserver/server.mjs`), which also
+serves a scripted model endpoint for the assistant surface.
+
+Three device projects run: one desktop and two mobile. Visual baselines are
+**Linux-only** (`ignoreSnapshots` when the platform is not Linux), so snapshot
+assertions simply do not run on a Mac.
+
+## The rule that causes mystery pixel diffs
+
+**The Playwright container tag must equal the `@playwright/test` dependency
+version.** The committed baselines were rendered inside that image.
+
+A dependency bump without an image bump (or vice versa) produces pixel diffs
+that look exactly like UI regressions and are not. Both values are shown in the
+generated reference so a divergence is visible as a diff there.
+
+Regenerate baselines with the repo's script rather than by hand, so they are
+rendered in the same image CI uses.
+
+## Known false-green traps
+
+These have all bitten this repo. They are the reason the standard insists a
+gate must be observed **failing** before it is trusted.
+
+- **A piped exit code.** `playwright test | tail` reports the pipe's status, not
+  Playwright's, so a failing suite looks green. Never pipe a gate's output in
+  CI without `pipefail`.
+- **Semgrep's zero findings on a parse error.** A ruleset that fails to parse
+  reports no findings, which is indistinguishable from "clean".
+- **A mock that diverges from the real router.** A mock backend answering a
+  shape the real service does not is a green test over a broken integration.
+- **A required check that never reports.** A workflow-level `paths:` filter
+  leaves a required check pending forever and blocks every PR — which is why
+  `frontend.yml` has no `paths:` filter and uses a `detect` job instead. See the
+  ci-and-supply-chain skill.
+
+## Common workflows
+
+**Adding a flow test.** Functional tier. Use `triageOrg()` for a mutable org,
+`login()` for the session, and assert against the real route handlers.
+
+**A test needs new backend data.** Extend the mock er-server, and check its
+shape against the real OpenAPI document — a mock that drifts is a false green.
+
+**Coverage dropped below the floor.** Write unit tests for `src/lib`. Do not
+lower the threshold or widen the exclusions.
+
+**A visual baseline changed.** Decide first whether the change is intended. If
+it is, regenerate with the repo's script (in the pinned image). If you are on a
+Mac, note snapshots did not run locally at all.
+
+**A gate you just added passes.** Break it on purpose and confirm it fails with
+a useful message before trusting it.

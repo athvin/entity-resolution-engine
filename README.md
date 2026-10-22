@@ -133,7 +133,7 @@ count is the main scaling lever. The retired Python stack's tuning record —
 its 1M/10M medians, evidence-linked backlog and rejected experiments — is
 preserved as history in the [performance record](docs/performance.md) and the
 [profiling guide](docs/profiling.md), with the DuckLake analysis methodology in
-the [analysis skill](.agents/skills/ducklake-performance/SKILL.md).
+the [analysis skill](.claude/skills/ducklake-performance/SKILL.md).
 
 ## Documentation
 

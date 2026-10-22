@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := check
-.PHONY: build fmt lint test check check-e2e entities-check frontend frontend-audit frontend-coverage run frontend-dev frontend-e2e frontend-baselines frontend-dev-reset image-api dev-up dev-suspend dev-resume dev-down obs-up clean symposium
+.PHONY: build fmt lint test check check-e2e entities-check skills-check frontend frontend-audit frontend-coverage run frontend-dev frontend-e2e frontend-baselines frontend-dev-reset image-api dev-up dev-suspend dev-resume dev-down obs-up clean symposium
 
 # --- Rust backend: the application (engine, CLI, control plane) lives in rust/ ---
 #
@@ -24,8 +24,19 @@ test:
 entities-check:
 	cd rust && cargo run -q -p er-entity-cli -- verify --root ..
 
-# The fast PR-equivalent backend gate (mirrors rust.yml's lint + test tiers).
-check: fmt lint entities-check test
+# The agent-skill gate (.claude/skills/**). Two modes, split by what their
+# output derives from: `lint` validates the skills against the Agent Skills
+# authoring rules and needs no toolchain, while `regen` rebuilds the GENERATED
+# blocks inside skill references from entities/, the crate tree, analyze.rs, the
+# workflows and the frontend config, then fails on drift. See
+# docs/agent-skills.md.
+skills-check:
+	bash scripts/skills-check.sh all
+
+# The fast PR-equivalent backend gate (mirrors rust.yml's lint + test tiers),
+# plus the skill gate — a stale generated reference is the same class of defect
+# as a stale generated entity artifact.
+check: fmt lint entities-check skills-check test
 
 # The gated e2e tiers: the DuckLake + extension pipeline and the Postgres
 # control-plane queue/dispatch. Needs the DuckDB extensions and a local

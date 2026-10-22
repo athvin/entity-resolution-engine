@@ -15,7 +15,7 @@ remaining injection surface is narrow, specific, and easy to miss.
 
 ## Why ordinary SQLi is (mostly) not the risk
 
-104 declared statements, all parameter-bound (`duckdb::params![...]` / `client.query(SQL, &[...])`).
+Every declared statement is parameter-bound (`duckdb::params![...]` / `client.query(SQL, &[...])`).
 The only textual substitution in the generated crate is the DuckLake snapshot pin
 (`.replace("{snapshot}", ...)`), and that value is always a Rust `i64` — not injectable. Two posterity
 gates keep it that way: `freeform_sql.rs` (no `query_strings` caller outside the engine core, no

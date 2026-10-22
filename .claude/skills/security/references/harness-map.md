@@ -27,7 +27,7 @@ reference — if a finding has no row here, add the row before writing the test.
 |---|---|---|---|---|
 | 1 | Lake-catalog uniqueness (tenant isolation) | `er-server/src/read.rs` `open_org_lake` | **NEW** `er-server/tests/pg_tenant_isolation.rs` (clone `pg_orgs.rs`) | env-gated pg |
 | 2 | Cross-org read → 404 | `er-server/src/lib.rs` `guard` | extend `er-server/tests/pg_auth.rs` | env-gated pg |
-| 3 | Webhook SSRF → IMDS | `er-server/src/webhook.rs` `post`/`emit`; reg in `lib.rs` `create_webhook` | **(a)** unit in `webhook.rs` for a new URL guard; **(b)** extend `tests/pg_webhooks.rs` (register blocked → 422) + `tests/pg_webhook_deliver.rs` (deliver blocked → refused) | unit + env-gated pg |
+| 3 | Webhook SSRF → IMDS (**guard built**) | `er-server/src/webhook.rs` `client`/`post`/`emit`; reg in `lib.rs` `create_webhook` | units in `webhook.rs`; `tests/pg_webhooks.rs` (register blocked) + `tests/pg_webhook_deliver.rs` (deliver refused); **`tests/egress_guard.rs`** is the posterity gate — it fails if `er-server/src` names the unguarded entry points, `Egress::Unguarded`, or `reqwest::Client::new()` | unit + env-gated pg + static gate |
 | 4 | Config-as-code raw SQL | `er-config/src/lib.rs` `BlockingRule.expr`, `Training.deterministic_rules`, `em_blocking_rules`; `er-server/src/config_check.rs` | extend `config_check.rs` `#[cfg(test)] mod tests` (parse the two `training` lists it ignores today) | unit |
 | 5 | CSV formula injection | `er-server/src/read.rs` `merge_plans_csv`/`csv_cell` | co-located unit in `read.rs` | unit |
 | 6 | MAX_KEYS `\u{1f}` bypass | `er-server/src/read.rs` `keys_from_query` | co-located unit in `read.rs` | unit |
@@ -52,7 +52,12 @@ empty with a message that *names each offender and the remedy*. Always include a
 (`assert!(files_scanned > N, "scan found too few files — the walk is broken")`) so a broken walk can't
 pass vacuously. The message is the UX — copy the "here is what to do" tone of `freeform_sql.rs`.
 
-**Env-gated pg integration** (clone `pg_auth.rs` / `pg_orgs.rs`). `#[tokio::test]`; first line:
+**Env-gated pg integration** (clone `pg_auth.rs` / `pg_orgs.rs`). **Exactly one `#[tokio::test]`
+per file**, with sequential phases inside it — enforced by `er-server/tests/pg_serial.rs`, because
+the tests in a binary run concurrently and every Postgres test in the crate shares one schema it
+drops and recreates on entry. A second test function in the file races the first. That failure mode
+is especially nasty here: it passes locally and in the CI `test` job (both skip without a DSN) and
+only fails in the DuckLake e2e job. First line:
 `let Ok(dsn) = std::env::var("ER_TEST_PG_DSN") else { eprintln!("skipping: ER_TEST_PG_DSN unset"); return; };`
 Build `app(AppState::with_pg(&dsn).await?)`, drive requests with `oneshot(req(...))`, assert
 status + body. Seed orgs/keys via the same helpers the neighbouring tests use. These run under

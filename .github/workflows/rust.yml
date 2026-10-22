@@ -92,6 +92,28 @@ jobs:
             echo "code=false" >> "$GITHUB_OUTPUT"
           fi
 
+  # Deliberately NOT gated on `detect`. The jobs below skip for a PR that only
+  # touches `.claude/**` — which is exactly the PR that changes a skill, so a
+  # skill gate placed in any of them would never run when it matters. This one
+  # needs no toolchain (pure shell, no cargo, no node, no network), so running
+  # it unconditionally costs seconds.
+  skills:
+    name: agent skills (lint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: agent-skill authoring rules
+        # Frontmatter limits, body size, one-level references, resolving links,
+        # a table of contents on long references, and an evals.md per skill.
+        #
+        # working-directory is mandatory: this workflow defaults every `run` to
+        # `rust/` (for the cargo jobs), and the script lives at the repo root.
+        # Without the override this step dies with exit 127 before it checks
+        # anything — which is how the first push of this job failed.
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/skills-check.sh lint
+
   lint:
     name: fmt + clippy + docs
     needs: detect
@@ -127,6 +149,14 @@ jobs:
         run: cargo doc --workspace --no-deps --document-private-items
         env:
           RUSTDOCFLAGS: "-D warnings"
+      - name: agent-skill generated references are not stale
+        # The GENERATED blocks in .claude/skills/**/references/ are derived from
+        # entities/, the crate tree, er-sql-check's analyze.rs, the workflows and
+        # the frontend config. They can only go stale when CODE changes — and a
+        # code change always reaches this job — so the regen half belongs here
+        # rather than in the always-on `skills` job, which has no toolchain.
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/skills-check.sh check
       - name: API breaking-change gate (advisory)
         # Diff the control-lane OpenAPI document against main's and report breaking
         # component-schema changes (removed schema/field, retype, dropped required).

@@ -29,8 +29,8 @@ Role lattice: `Viewer < Steward < Admin < Operator` (`lib.rs`, derived `Ord`). A
 auth is structurally hard to skip. Authorization is the `guard(principal, org, minimum)` call;
 wrong-org resolves to **404** (no org enumeration), under-privileged to 403.
 
-**The crown jewel is the SQL governance** (see the `entity-framework` skill). 104 declared
-statements, all parameter-bound; the only textual substitution in the whole generated crate is the
+**The crown jewel is the SQL governance** (see the `entity-framework` skill). Every persistent
+statement is declared and parameter-bound; the only textual substitution in the whole generated crate is the
 DuckLake snapshot pin (an `i64`, not injectable). This shrinks injection to a handful of
 *declared-raw* config fields. Respect it: the fastest way to introduce a vuln here is to route
 user input into SQL outside a declared statement.
@@ -85,9 +85,16 @@ Step 5 is non-negotiable. A security test that passes before the fix is proving 
   `training.em_blocking_rules`. Publish-time analysis (`config_check.rs`) checks column *references*
   in `blocking[].expr` only — the two `training` lists get none. Treat config publish as an
   authenticated code-execution surface gated by role, not as safe input.
-- **Outbound URLs from config/requests are SSRF** unless host-filtered. Webhooks and the dispatcher
-  make real `reqwest` calls; k8s egress is unrestricted by design. The app-layer URL guard is the
-  only thing we can test locally.
+- **Outbound URLs from config/requests are SSRF** unless host-filtered — and the guard now exists.
+  `webhook::client()` refuses redirects outright (`Policy::none()`) because a first-hop-only check is
+  bypassed by a 302 to `169.254.169.254`, and carries a delivery timeout so a stalling listener cannot
+  hold a dispatcher thread. There is **no env var and no config field to disable it**, deliberately: a
+  guard configuration can switch off is a guard that gets found switched off. The cost is a
+  bypass-shaped seam (`emit_with_egress` / `Egress`) for the delivery test, and
+  `tests/egress_guard.rs` is the posterity gate that pays it — it fails if anything under
+  `er-server/src` names the unguarded entry points, `Egress::Unguarded`, or
+  `reqwest::Client::new()`. Kubernetes egress is still unrestricted by design, so the app-layer
+  guard remains the only layer we can test locally.
 - **`er-server/src` must contain no `lake.main.<x>` literal and no `query_strings` caller.** These are
   posterity gates (`freeform_sql.rs`). If a security fix needs lake SQL, it must be a declared
   statement — never assembled inline.
@@ -104,7 +111,7 @@ A condensed index; the full table with exact files and line hints is
 | Category | Prove it by | Test home |
 |---|---|---|
 | Cross-tenant lake read | two orgs made to share a catalog → one reads the other | NEW `er-server/tests/pg_tenant_isolation.rs` |
-| Webhook SSRF → IMDS | register `http://169.254.169.254/...`; delivery attempts it | unit in `webhook.rs` + `tests/pg_webhooks.rs` |
+| Webhook SSRF → IMDS (**guarded**) | register `http://169.254.169.254/...`; delivery refuses it | units in `webhook.rs`, `tests/pg_webhooks.rs`, + the `tests/egress_guard.rs` posterity gate |
 | Config-as-code SQL | publish a config whose rule calls a subquery/function | `config_check.rs` unit tests |
 | CSV formula injection | a record name `=cmd()` exported uninjected | unit in `read.rs` (`merge_plans_csv`) |
 | Assertion forced-merge | `POST /assertions` with nonexistent keys succeeds | `er-server/tests/pg_steward.rs` |
