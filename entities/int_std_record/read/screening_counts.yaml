@@ -1,0 +1,15 @@
+kind: statement
+operation: read
+description: "Import-time screening (E9b) for one delivery of the person corpus: how many of the records it landed joined an existing entity, how many fell in the gray band, and how many are genuinely new. Derived from scores the run ALREADY produced rather than a second scoring pass — an incremental run has just compared these very records against the corpus, so screening is a read, not work. Filtered on `ingest_batch_id`, which `int_std_records` stamps with the batch that landed the CURRENT content version: an unchanged re-delivery keeps its old batch id and is therefore excluded, which is right — it was screened when it first landed. Reads `match_scores` as well as `int_std_records`, declared through `reads:` so the impact surface is explicit (E009). The join is the point — the question is about the intersection — and the alternative, staging the delivery's keys through Rust as a VALUES list, would scale with the size of the delivery. The two endpoint columns are unioned rather than OR-joined so the plan is two hash joins instead of a nested loop."
+pin: live
+pin_reason: "Composed inside the writer's own transaction, immediately after the match stage and before the run commits, so there is no committed snapshot to pin."
+reads: [match_score]
+params:
+  - { name: source, type: varchar }
+  - { name: batch, type: varchar }
+  - { name: auto_merge, type: double }
+  - { name: review_low, type: double }
+returns:
+  - { name: matched_count, type: bigint }
+  - { name: review_count, type: bigint }
+  - { name: unmatched_count, type: bigint }

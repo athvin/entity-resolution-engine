@@ -6,7 +6,13 @@ description: "One delivery receipt (S4.1): per-source landing counts for a batch
 key: [id]
 generate:
   stores: [duckdb]
-  languages: [rust]
+  languages: [rust, typescript]
+  # The receipt has been on the JSON wire since the read API shipped — the
+  # "did my file do anything?" panel renders it — but it never declared so, so
+  # no TypeScript binding existed and the frontend's hand-written `ReceiptRow`
+  # had nothing to be checked against. Declaring it is what lets the
+  # wire-contract gate (W0.4b) cover that interface.
+  wire: [json]
 columns:
   - name: id
     type: varchar
@@ -48,6 +54,18 @@ columns:
     type: boolean
     nullable: false
     description: "Whether the delivery tombstoned omitted keys."
+  - name: matched_count
+    type: bigint
+    description: "Screening (E9b): delivered records that joined an existing entity — their best active score reached `thresholds.auto_merge`. NULL means the delivery was never screened, which is the honest answer for a run that scored nothing (a correction pass, or a rebuild with `skip_ingest`); 0 means it was screened and nothing matched."
+  - name: review_count
+    type: bigint
+    description: "Screening (E9b): delivered records whose best active score landed in the gray band — at or above `review_low` but below `auto_merge`. These are the ones a steward has to decide."
+  - name: unmatched_count
+    type: bigint
+    description: "Screening (E9b): delivered records with no active score reaching `review_low` — genuinely new as far as the model can tell."
+  - name: screened_at
+    type: timestamp
+    description: "When the delivery was screened, NULL if it was not. Separate from the counts so that `screened with everything unmatched` (counts 0/0/N) is distinguishable from `never screened` (all NULL) without reading three columns."
   - name: created_at
     type: timestamp
     nullable: false
@@ -55,4 +73,4 @@ columns:
   - name: updated_at
     type: timestamp
     nullable: false
-    description: "Run-logical last-write time (equals created_at; receipts are written once)."
+    description: "Run-logical last-write time. Receipts were written once until E9b; the screening pass now updates the row after the match stage, because the verdicts do not exist until the run has scored."

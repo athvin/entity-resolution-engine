@@ -1098,7 +1098,58 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          STEWARD, which is the tighter boundary anyway; and the screen joins `a11y.spec.ts`'s
          SCREENS in the same change that creates it, because one absent from that array is
          silently unchecked.
-   - [ ] E9b import-time screening + update rules (#38/#39), E9c S3 auto-ingestion (#47).
+   - [x] **E9b-1 import-time screening: the receipt says what the delivery MET.** "Did my file do
+         anything?" had an answer about landing (new / changed / unchanged / removed) and none
+         about meaning. A delivery now reports how its records landed against the corpus: how many
+         the engine already knew, how many it wants a decision on, and how many are genuinely new.
+         **The design decision, and it is the whole slice.** The plan put screening on the staged
+         rows at the API; `finish_delivery` is the single landing path for both the CSV upload and
+         the JSON push, which makes it the obvious hook. It is the wrong one — that function runs
+         in the API request path, so screening a large CSV there would block the request and
+         compete with the dispatcher for the per-tenant writer. Screening instead happens between
+         MATCH and RECONCILE, where it is not new work at all: an incremental pass has just
+         compared these very records against the corpus, so the verdicts are a **read** over
+         `match_scores`, and they are the same verdicts the run itself acted on. It is also the
+         first moment they exist — the receipt is written during ingest, where they cannot.
+         Filtered on `ingest_batch_id`, which the standardized corpus stamps with the batch that
+         landed the CURRENT content version, so an unchanged re-delivery is excluded by
+         construction. That is right: it was screened when it first landed.
+         The counts are **nullable**, and the panel renders an em dash rather than a zero where
+         they are unset. "Screened and nothing matched" (0/0/N) and "never screened" (all NULL,
+         which is what a correction pass or a `skip_ingest` rebuild leaves) are different facts,
+         and a zero would assert the first while meaning the second. `screened_at` exists so the
+         distinction is one column rather than three.
+         Three things the framework taught rather than the plan. **E009 exists**: a declared read
+         that spans two relations is supported through `reads:`, which makes the impact surface
+         explicit — I had inferred from the absence of any such read that it was forbidden, and
+         the analyser corrected me. A lake **timestamp parameter** must be declared `varchar` with
+         an explicit `::timestamp` cast, because a `timestamp` param generates `DateTime<Utc>` and
+         duckdb's `ToSql` does not implement it. And a broken generated artifact **blocks the
+         generator that would fix it** (`cargo run -p er-entity-cli` has to build the workspace),
+         so the escape is `git checkout` the generated crate, then regen.
+         **The schema has two sources and they can drift.** `create_ddl_table` builds from
+         `er_schema::model`, a HAND-MAINTAINED S5 registry validated against a golden dump — not
+         from the entity-generated DDL. Adding columns to `entities/` was not enough and
+         `er-entity-diff` did not notice; the lake test failing on "Referenced column
+         matched_count not found" is what caught it. Both now agree byte-for-byte, verified by
+         diffing `create_table_sql` against the generated DDL. The golden rebaseline is 21 lines
+         because it was patched at `indent=1` — its native formatting, confirmed by a round-trip
+         check first; `json.dumps` at the default indent reformatted all 4,200 lines.
+         Tests: the counts reconcile with the receipt's own landing breakdown
+         (`matched + review + unmatched == new + changed + resurrected`) for every delivery across
+         two phases, and a corpus that resolves 23 records to 10 entities must find matches rather
+         than calling everything new. Observed failing: disabling the screening call fails on
+         "a delivery that landed records must be screened". The functional tier pins the em dash
+         for an unscreened delivery, with that fixture left NULL on purpose.
+         Also brings the receipt under the wire-contract gate (W0.4b): `ingest_batch` had
+         `languages: [rust]` and no `wire:`, so no TypeScript binding existed and the panel's
+         hand-written `ReceiptRow` had nothing to be checked against — even though the receipt has
+         been on the JSON wire since the read API shipped. Declaring the wire it was already on is
+         what brought it under the gate, and `ReceiptRow` turned out to be a clean subset.
+   - [ ] E9b-2 update rules (#39): what to DO with a matched row — update-empty-only / update-all /
+         nothing / a custom survivorship chain, bounded by a confidence range. Needs the screening
+         above to exist, and by the E5b-2 precedent must not ship a field nothing reads.
+   - [ ] E9c S3 auto-ingestion (#47).
 3. **Learning loop**
    - [x] **E10a the `train` job, which the dispatcher had no arm for.** `train` has been in
          `SCHEDULABLE_KINDS` since the queue shipped — so the schedule API accepted it, and every

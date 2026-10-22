@@ -1,0 +1,14 @@
+kind: statement
+operation: update
+mode: partial
+description: "Record a delivery's screening verdicts on its receipt (E9b). A second write to a row that used to be written once: the verdicts cannot exist at receipt time, because they are what the MATCH stage decides, and the receipt is written during ingest. `screened_at` doubles as the `updated_at` stamp so a screened receipt carries one consistent time rather than two that invite a question about which is authoritative."
+params:
+  - { name: matched_count, type: bigint }
+  - { name: review_count, type: bigint }
+  - { name: unmatched_count, type: bigint }
+  # varchar + an explicit `::timestamp` cast, as every lake time param is:
+  # a `timestamp` param would generate `DateTime<Utc>`, which duckdb's `ToSql`
+  # does not implement.
+  - { name: screened_at, type: varchar }
+  - { name: ingest_batch_id, type: varchar }
+returns: none

@@ -3542,3 +3542,120 @@ fn rekey_tf(src: &str, dest: &std::path::Path, model_version: &str, tf_snapshot_
     }
     std::fs::write(dest, &out).unwrap();
 }
+
+/// E9b: a delivery's receipt says how its records landed against the corpus —
+/// matched, gray-band, or genuinely new.
+///
+/// The counts are derived from scores the run ALREADY produced, so the property
+/// worth pinning is that they reconcile with the receipt's own landing
+/// breakdown: every record the delivery newly landed gets exactly one verdict,
+/// so `matched + review + unmatched == new + changed + resurrected`. An
+/// unchanged re-delivery is excluded by construction (`int_std_records` stamps
+/// `ingest_batch_id` with the batch that landed the CURRENT content version),
+/// which is right: it was screened when it first landed.
+#[test]
+fn a_delivery_is_screened_against_the_corpus() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let (session, config, tmp) = open_seeded_lake("screening");
+    run_all_phase(
+        &session,
+        &config,
+        "incremental_batch",
+        "base",
+        "01SCREEN0000000000000BASE0",
+        "2026-01-01 00:00:00",
+        "full",
+    );
+
+    let receipts = screening_receipts(&session);
+    assert!(
+        !receipts.is_empty(),
+        "the base delivery wrote receipts to screen"
+    );
+    for (source, landed, matched, review, unmatched, screened) in &receipts {
+        assert!(
+            screened,
+            "{source}: a delivery that landed records must be screened"
+        );
+        assert_eq!(
+            matched + review + unmatched,
+            *landed,
+            "{source}: every newly landed record gets exactly one verdict \
+             ({matched} matched + {review} review + {unmatched} new vs {landed} landed)"
+        );
+    }
+
+    // base_10 resolves 23 records into 10 entities, so the corpus is mostly
+    // duplicates — the screening must SEE that rather than calling everything
+    // new, which is the failure mode of a screen that never joined the scores.
+    let total_matched: i64 = receipts.iter().map(|r| r.2).sum();
+    assert!(
+        total_matched > 0,
+        "a corpus that resolves 23 records to 10 entities has matches to find: {receipts:?}"
+    );
+
+    // The second phase re-delivers the same sources with some rows changed.
+    // Records whose content did not move keep their old batch id, so they are
+    // not re-screened — the receipt covers what THIS delivery landed, not the
+    // corpus.
+    run_all_phase(
+        &session,
+        &config,
+        "incremental_batch",
+        "batch",
+        "01SCREEN000000000000BATCH0",
+        "2026-02-01 00:00:00",
+        "incremental",
+    );
+    let after = screening_receipts(&session);
+    assert!(
+        after.len() > receipts.len(),
+        "the second delivery wrote its own receipts"
+    );
+    for (source, landed, matched, review, unmatched, screened) in &after {
+        assert!(screened, "{source}: every delivery is screened");
+        assert_eq!(
+            matched + review + unmatched,
+            *landed,
+            "{source}: the verdicts still account for exactly the landed records"
+        );
+    }
+
+    drop(session);
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// Per receipt: `(source, newly landed, matched, review, unmatched, screened)`.
+/// "Newly landed" is new + changed + resurrected — the records that carry this
+/// batch id in the standardized corpus, which is exactly what gets screened.
+fn screening_receipts(session: &Session) -> Vec<(String, i64, i64, i64, i64, bool)> {
+    session
+        .query_strings(&format!(
+            "select source_system,
+                    cast(new_count + changed_count + resurrected_count as varchar),
+                    cast(coalesce(matched_count, -1) as varchar),
+                    cast(coalesce(review_count, -1) as varchar),
+                    cast(coalesce(unmatched_count, -1) as varchar),
+                    cast(screened_at is not null as varchar)
+               from {}
+              where new_count + changed_count + resurrected_count > 0
+              order by id",
+            er_cli::INGEST_BATCHES
+        ))
+        .unwrap()
+        .into_iter()
+        .map(|r| {
+            (
+                r[0].clone(),
+                r[1].parse().unwrap(),
+                r[2].parse().unwrap(),
+                r[3].parse().unwrap(),
+                r[4].parse().unwrap(),
+                r[5] == "true",
+            )
+        })
+        .collect()
+}

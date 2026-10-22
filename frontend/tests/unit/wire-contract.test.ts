@@ -47,12 +47,14 @@ import { describe, expect, it } from "vitest";
 
 import type { ConfigVersion } from "@/lib/entities/bindings/ConfigVersion";
 import type { GoldenLineage } from "@/lib/entities/bindings/GoldenLineage";
+import type { IngestBatch } from "@/lib/entities/bindings/IngestBatch";
 import type { Job } from "@/lib/entities/bindings/Job";
 import type { MatchingModel } from "@/lib/entities/bindings/MatchingModel";
 import type { Org } from "@/lib/entities/bindings/Org";
 import type { Schedule } from "@/lib/entities/bindings/Schedule";
 import type { AdminOrgRow } from "@/lib/query/admin";
 import type { ConfigVersionRow } from "@/lib/query/config";
+import type { ReceiptRow } from "@/components/sources/sources-content";
 import type { JobRow, LineageRow } from "@/lib/query/hooks";
 import type { ModelVersionDetail, ModelVersionRow } from "@/lib/query/models";
 import type { ScheduleRow } from "@/lib/query/steward";
@@ -117,6 +119,15 @@ const PAIRS = {
     "weights"
   >,
 
+  /**
+   * The delivery receipt. `ingest_batch` had `languages: [rust]` and no `wire:`
+   * until E9b, so no binding existed and this interface had nothing to be
+   * checked against — even though the panel has rendered the receipt since the
+   * read API shipped. Declaring the wire it was already on is what brought it
+   * under the gate.
+   */
+  receipt: true satisfies NoUndeclaredFields<ReceiptRow, IngestBatch>,
+
   configVersion: true satisfies NoUndeclaredFields<ConfigVersionRow, ConfigVersion>,
   lineage: true satisfies NoUndeclaredFields<LineageRow, GoldenLineage>,
   schedule: true satisfies NoUndeclaredFields<ScheduleRow, Schedule>,
@@ -136,6 +147,7 @@ describe("wire contract: UI response shapes vs the generated entity bindings", (
       "lineage",
       "modelVersion",
       "modelVersionDetail",
+      "receipt",
       "schedule",
     ]);
   });

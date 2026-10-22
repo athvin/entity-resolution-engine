@@ -144,4 +144,89 @@ ORDER BY record_key
         let batches = stmt.query_arrow(::duckdb::params![])?.collect::<Vec<_>>();
         AllKeysLiveRow::from_batches(&batches)
     }
+
+    /// One row of `screening_counts`: Import-time screening (E9b) for one delivery of the Account corpus: how many of the records it landed joined an existing entity, how many fell in the gray band, and how many are genuinely new. Derived from scores the run ALREADY produced rather than a second scoring pass — an incremental run has just compared these very records against the corpus, so screening is a read, not work. Filtered on `ingest_batch_id`, which `acct_int_std_records` stamps with the batch that landed the CURRENT content version: an unchanged re-delivery keeps its old batch id and is therefore excluded, which is right — it was screened when it first landed. Reads `match_scores` as well as `acct_int_std_records`, declared through `reads:` so the impact surface is explicit (E009). The join is the point — the question is about the intersection — and the alternative, staging the delivery's keys through Rust as a VALUES list, would scale with the size of the delivery. The two endpoint columns are unioned rather than OR-joined so the plan is two hash joins instead of a nested loop.
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct ScreeningCountsRow {
+        pub matched_count: Option<i64>,
+        pub review_count: Option<i64>,
+        pub unmatched_count: Option<i64>,
+    }
+
+    impl ScreeningCountsRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("matched_count", ::arrow::datatypes::DataType::Int64),
+                ("review_count", ::arrow::datatypes::DataType::Int64),
+                ("unmatched_count", ::arrow::datatypes::DataType::Int64),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::Int64Array = crate::batch::col(batch, 0, "matched_count")?;
+                let c1: &::arrow::array::Int64Array = crate::batch::col(batch, 1, "review_count")?;
+                let c2: &::arrow::array::Int64Array =
+                    crate::batch::col(batch, 2, "unmatched_count")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        matched_count: crate::batch::opt_i64(c0, i),
+                        review_count: crate::batch::opt_i64(c1, i),
+                        unmatched_count: crate::batch::opt_i64(c2, i),
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// Import-time screening (E9b) for one delivery of the Account corpus: how many of the records it landed joined an existing entity, how many fell in the gray band, and how many are genuinely new. Derived from scores the run ALREADY produced rather than a second scoring pass — an incremental run has just compared these very records against the corpus, so screening is a read, not work. Filtered on `ingest_batch_id`, which `acct_int_std_records` stamps with the batch that landed the CURRENT content version: an unchanged re-delivery keeps its old batch id and is therefore excluded, which is right — it was screened when it first landed. Reads `match_scores` as well as `acct_int_std_records`, declared through `reads:` so the impact surface is explicit (E009). The join is the point — the question is about the intersection — and the alternative, staging the delivery's keys through Rust as a VALUES list, would scale with the size of the delivery. The two endpoint columns are unioned rather than OR-joined so the plan is two hash joins instead of a nested loop.
+    pub fn screening_counts(
+        conn: &::duckdb::Connection,
+        source: &str,
+        batch: &str,
+        auto_merge: f64,
+        review_low: f64,
+    ) -> ::duckdb::Result<Vec<ScreeningCountsRow>> {
+        const SQL: &str = "WITH delivered AS (
+  SELECT record_key
+  FROM lake.main.acct_int_std_records
+  WHERE source_system = $1 AND ingest_batch_id = $2
+),
+endpoints AS (
+  SELECT rec_a_key AS record_key, match_probability
+  FROM lake.main.match_scores
+  WHERE is_active
+  UNION ALL
+  SELECT rec_b_key AS record_key, match_probability
+  FROM lake.main.match_scores
+  WHERE is_active
+),
+verdict AS (
+  SELECT d.record_key, max(e.match_probability) AS best
+  FROM delivered d
+  LEFT JOIN endpoints e ON e.record_key = d.record_key
+  GROUP BY d.record_key
+)
+SELECT
+  count(*) FILTER (WHERE best >= $3) AS matched_count,
+  count(*) FILTER (WHERE best >= $4 AND best < $3) AS review_count,
+  count(*) FILTER (WHERE best IS NULL OR best < $4) AS unmatched_count
+FROM verdict
+";
+        let mut stmt = conn.prepare(SQL)?;
+        let batches = stmt
+            .query_arrow(::duckdb::params![source, batch, auto_merge, review_low])?
+            .collect::<Vec<_>>();
+        ScreeningCountsRow::from_batches(&batches)
+    }
 }

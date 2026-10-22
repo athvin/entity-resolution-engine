@@ -35,6 +35,16 @@ test.describe("sources & imports", () => {
     // mirrors each endpoint's real ordering, so `crm` (the older receipt)
     // leading this table means the panel is reading the wrong end again.
     await expect(receipts.locator("tbody tr").first()).toContainText("webforms");
+
+    // Screening (E9b): of the records a delivery landed, how many the engine
+    // already knew, how many want a decision, and how many are new.
+    const screened = receipts.locator("tbody tr").first();
+    await expect(screened).toContainText("9"); // already known
+    await expect(screened).toContainText("2"); // to review
+    // And a delivery the run never scored shows an EM DASH, not a 0 — "screened
+    // and nothing matched" is a different fact from "not screened", and a zero
+    // would assert the first while meaning the second.
+    await expect(receipts.locator("tbody tr").nth(1)).toContainText("—");
   });
 
   test("a steward uploads a file and the import queues", async ({ page }) => {

@@ -638,6 +638,15 @@ fn ddl_specs() -> Vec<TableSpec> {
                 nn("tombstone_count", BIGINT),
                 nn("resurrected_count", BIGINT),
                 nn("full_refresh_keys", BOOLEAN),
+                // Screening (E9b): how the delivery's records landed against
+                // the corpus. NULLABLE on purpose — the verdicts are what the
+                // MATCH stage decides, and the receipt is written during
+                // ingest, so a run that scores nothing leaves them unset.
+                // NULL means "not screened"; 0 means "screened, none matched".
+                col("matched_count", BIGINT),
+                col("review_count", BIGINT),
+                col("unmatched_count", BIGINT),
+                col("screened_at", TIMESTAMP),
                 nn("created_at", TIMESTAMP),
                 nn("updated_at", TIMESTAMP),
             ],
