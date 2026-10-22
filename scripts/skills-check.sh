@@ -644,9 +644,31 @@ gen_aws_footprint() {
 	echo "Distinct \`resource \"aws_*\"\` blocks across \`infra/terraform/\`, by count:"
 	echo
 	echo '```'
+	# The `awk` reformat is load-bearing: **`uniq -c` pads its count to a
+	# different width on BSD and GNU** (macOS `   9`, GNU `      9`). Leaving
+	# that padding in the output made every line of this block differ by leading
+	# whitespace between a developer's Mac and CI — the gate failed with exactly
+	# 63 insertions and 63 deletions while the same commit regenerated
+	# byte-identically on the machine that produced it. Nothing about the data
+	# had changed.
+	#
+	# This is the same class as the LC_ALL collation bug this script already
+	# guards against at the top: a generated artifact whose bytes depend on the
+	# developer's platform is a gate that cannot be green for everyone at once.
+	# Any generator that shells out to a coreutil should pin its own formatting
+	# rather than inherit the tool's.
+	#
+	# The sort also uses PER-KEY modifiers (`-k1,1nr -k2,2`) rather than a global
+	# `-rn`: a global `-n` makes key 2 numeric too, so all the names parse as 0
+	# and equal-count rows are ordered only by sort's last-resort rule. Per-key
+	# modifiers keep the count numeric-descending and make the name a plain
+	# ascending string sort, which is a total order because the names are unique
+	# after `uniq`.
 	grep -rhoE 'resource "aws_[a-z0-9_]+"' infra/terraform \
 		| sed -e 's/^resource "//' -e 's/"$//' \
-		| sort | uniq -c | sort -rn -k1,1 -k2,2 || true
+		| sort | uniq -c \
+		| awk '{ printf "%4d  %s\n", $1, $2 }' \
+		| sort -k1,1nr -k2,2 || true
 	echo '```'
 	echo
 	echo "### Identity Center permission sets"
@@ -963,6 +985,13 @@ run_drift_check() {
 	if ! git diff --quiet HEAD -- "${generated_files[@]}"; then
 		red "FAIL generated skill references are stale. Run 'make skills-check' and commit the diff."
 		git --no-pager diff --stat HEAD -- "${generated_files[@]}"
+		# The CONTENT, not just the stat. A stat line says a file changed and
+		# gives no way to tell "someone forgot to commit the regen" from "this
+		# generator emits different bytes on your machine than on CI" — the
+		# second being invisible locally, because locally it always agrees with
+		# itself. Telling those apart from a `126 ++---` line alone cost an hour.
+		# Capped so a genuinely large regeneration does not bury the message.
+		git --no-pager diff --no-color HEAD -- "${generated_files[@]}" | head -60
 		fail=1
 	else
 		note "generated references are current"
