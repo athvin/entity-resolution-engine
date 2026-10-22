@@ -923,6 +923,31 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          Still to come in O3b: the outbox + delivery log + backoff (today a delivery failure is
          collected and discarded), and entity-level events off the `entity_events` ledger, which
          wants the outbox first — thousands of un-retried POSTs per run would be worse than none.
+   - [x] **O7a resolution metrics over time (#45/#57's trend half).** Every dashboard number has
+         always been computed LIVE from the lake, so the product could say what is true now and
+         nothing about the direction of travel — and "is the duplicate rate going up" is the
+         question an operator actually has. Nothing was retained to answer it.
+         New `metric_snapshot` lake entity, written at the end of every `run_all`, plus
+         `GET /v1/orgs/{org}/insights` returning the series newest-first with the derived rates.
+         Four judgements worth recording. It counts **duplicate RECORDS as well as groups**:
+         counting only groups calls a five-record cluster and a two-record cluster the same
+         amount of duplication, which is how a worsening corpus looks flat. It keeps
+         **`largest_group`**, because a sudden jump there is the signature of an over-merge and an
+         average cluster size hides it completely. It is assembled in **one query per family**,
+         since a snapshot built from several independent reads of a live lake can describe a
+         corpus that never existed at any instant. And `duplicate_rate` is **null, not 0.0**, when
+         there are no records — reporting zero would draw a reassuring flat line for an empty
+         corpus.
+         Keyed on `run_id` and upserted, so a correction pass or a retry reusing a run id
+         corrects the snapshot instead of double-counting. Written **best-effort and last**: the
+         run's results are already in the lake, so a failure to describe them must not fail the
+         run that produced them. Rates are derived on read rather than stored, so changing a
+         definition does not need a backfill.
+         Test: `a_run_records_metrics_that_agree_with_the_corpus` checks every count against the
+         lake it describes rather than against constants — so it asserts "the snapshot is true",
+         not "the snapshot is what it was when I wrote this" — asserts `duplicate_records >
+         duplicate_groups` on base_10 so the two definitions are distinguishable, and asserts a
+         re-run of the same id corrects rather than appends.
    - [ ] O2b emailed run reports (#58's reporting half), O3b webhook outbox + entity events,
          O4 write-back handler (#44), O5 tags/approval (#51), O6 bulk depth (#9/#62/#52),
          O7 insights + time series (#45/#57/#85), O8 workflows + triggers (#55/#56).

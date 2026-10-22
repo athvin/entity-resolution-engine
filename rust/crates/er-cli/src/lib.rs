@@ -61,6 +61,8 @@ pub const GOLDEN_OVERRIDES: &str = "lake.main.golden_overrides";
 /// Steward record overlays (protect/suppress), keyed `(record_key, kind)`.
 pub const RECORD_OVERLAYS: &str = "lake.main.record_overlays";
 pub const RUNS: &str = "lake.main.runs";
+/// Per-run resolution metrics, so the dashboard can show a trend.
+pub const METRIC_SNAPSHOTS: &str = "lake.main.metric_snapshots";
 pub const REVIEW_QUEUE: &str = "lake.main.review_queue";
 pub const ASSERTIONS: &str = "lake.main.assertions";
 pub const INGEST_BATCHES: &str = "lake.main.ingest_batches";
@@ -1461,6 +1463,73 @@ pub fn write_run_end(session: &Session, run_id: &str, ended_at: &str) -> Result<
     Ok(())
 }
 
+/// Capture this run's resolution metrics, so the dashboard can show a TREND.
+///
+/// Every dashboard number has always been computed live from the lake, which
+/// means it can say what is true now and nothing about whether that is better
+/// or worse than last week — and "is the duplicate rate going up" is the
+/// question an operator actually has. Nothing was ever retained to answer it.
+///
+/// Counted in ONE query per family rather than many, because a snapshot assembled
+/// from several independent reads of a live lake can describe a corpus that never
+/// existed at any instant.
+///
+/// Deliberately counts duplicate RECORDS as well as groups: counting only groups
+/// calls a five-record cluster and a two-record cluster the same amount of
+/// duplication, which is how a worsening corpus can look flat.
+///
+/// Best-effort by design — a metrics failure must not fail a run whose results
+/// are already written. It returns the error so a caller can log it, and
+/// `run_all` does exactly that.
+///
+/// # Errors
+/// Propagates the lake read/write errors.
+pub fn write_metric_snapshot(
+    session: &Session,
+    config: &Config,
+    run_id: &str,
+    captured_at: &str,
+) -> Result<()> {
+    create_ddl_table(session, "metric_snapshots")?;
+    let std_qual = if config.entity_type.is_person() {
+        INT_STD_RECORDS
+    } else {
+        ACCT_INT_STD_RECORDS
+    };
+    let auto_merge = config.thresholds.auto_merge;
+    let review_low = config.thresholds.review_low;
+    let run = run_id.replace('\'', "''");
+    let at = captured_at.replace('\'', "''");
+
+    session.execute_batch("drop table if exists __metric_src")?;
+    session.execute_batch(&format!(
+        "create temp table __metric_src as
+         with groups as (
+             select entity_id, count(*) as members
+             from {ENTITY_MEMBERSHIP}
+             group by entity_id
+         )
+         select
+             '{run}' as run_id,
+             cast('{at}' as timestamp) as captured_at,
+             (select count(*) from {std_qual}) as records,
+             (select count(*) from groups) as entities,
+             -- Records IN a multi-member group, not the group count.
+             coalesce((select sum(members) from groups where members > 1), 0) as duplicate_records,
+             (select count(*) from groups where members > 1) as duplicate_groups,
+             coalesce((select max(members) from groups), 0) as largest_group,
+             (select count(*) from {REVIEW_QUEUE} where status = 'open') as review_backlog,
+             (select count(*) from {MATCH_SCORES}
+               where is_active and match_probability >= {auto_merge}) as auto_merge_pairs,
+             (select count(*) from {MATCH_SCORES}
+               where is_active and match_probability >= {review_low}
+                 and match_probability < {auto_merge}) as review_band_pairs"
+    ))?;
+    er_entities::metric_snapshot::create::upsert(session.connection())?;
+    session.execute_batch("drop table __metric_src")?;
+    Ok(())
+}
+
 /// Apply one drained steward action to the lake (the control plane's
 /// `staged_steward_actions`, dispatched when the org's writer lock is free):
 ///   - `add_assertion` → insert an active assertion on the canonicalized pair
@@ -2355,6 +2424,11 @@ pub fn run_all(session: &Session, config: &Config, inputs: &PipelineInputs) -> R
     run_reconcile(session, config, inputs.run_id, inputs.run_at)?;
     run_golden(session, config, inputs.run_at)?;
     write_reviews(session, config, inputs.run_id, inputs.run_at)?;
+    // Metrics last, and best-effort: the run's results are already written, so
+    // a failure to describe them must not fail the run that produced them.
+    if let Err(e) = write_metric_snapshot(session, config, inputs.run_id, inputs.run_at) {
+        eprintln!("run {}: metric snapshot failed: {e:#}", inputs.run_id);
+    }
     write_run_end(session, inputs.run_id, inputs.run_at)?;
     Ok(())
 }

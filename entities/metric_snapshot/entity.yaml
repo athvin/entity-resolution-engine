@@ -1,0 +1,63 @@
+kind: entity
+version: 1
+name: metric_snapshot
+relation: metric_snapshots
+description: "One run's resolution metrics, kept so the dashboard can show a TREND rather than only a current value. The dashboard has always computed its numbers live from the lake, which means it can say what is true now and nothing about whether that is better or worse than last week — which is the question an operator actually has."
+key: [id]
+natural_key: [run_id]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "Content-derived row id: sha256('metric_snapshots:' || run_id)."
+  - name: run_id
+    type: varchar
+    nullable: false
+    description: "The run these metrics describe. One snapshot per run, so a re-run of the same id overwrites rather than double-counting."
+  - name: captured_at
+    type: timestamp
+    nullable: false
+    description: "The run's logical clock, not wall time — so a replayed fixture produces the same snapshot."
+  - name: records
+    type: bigint
+    nullable: false
+    description: "Records in the standardized corpus."
+  - name: entities
+    type: bigint
+    nullable: false
+    description: "Entities the run resolved them into."
+  - name: duplicate_records
+    type: bigint
+    nullable: false
+    description: "Records sitting in an entity with more than one member — the numerator of the duplicate rate. Counting GROUPS instead would call a 5-record cluster and a 2-record cluster the same amount of duplication."
+  - name: duplicate_groups
+    type: bigint
+    nullable: false
+    description: "Entities with more than one member."
+  - name: largest_group
+    type: bigint
+    nullable: false
+    description: "Members in the biggest entity. A sudden jump here is the signature of an over-merge, which an average cluster size hides completely."
+  - name: review_backlog
+    type: bigint
+    nullable: false
+    description: "Open review items after the run — the work the thresholds are handing to humans."
+  - name: auto_merge_pairs
+    type: bigint
+    nullable: false
+    description: "Active scores at or above the auto-merge threshold."
+  - name: review_band_pairs
+    type: bigint
+    nullable: false
+    description: "Active scores in the gray band: scored, not merged. The two together say where the thresholds are actually sitting."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical creation time."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time."

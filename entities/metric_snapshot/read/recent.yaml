@@ -1,0 +1,20 @@
+kind: statement
+operation: read
+description: "The most recent snapshots, newest first — the series the dashboard draws a trend from. Ordered by the run's logical clock rather than insertion, so a backfilled or replayed run sits where it belongs in time."
+params:
+  - { name: snapshot, type: bigint }
+  - { name: limit, type: bigint }
+returns:
+  - { name: id, type: varchar, nullable: false }
+  - { name: run_id, type: varchar, nullable: false }
+  - { name: captured_at, type: timestamp, nullable: false }
+  - { name: records, type: bigint, nullable: false }
+  - { name: entities, type: bigint, nullable: false }
+  - { name: duplicate_records, type: bigint, nullable: false }
+  - { name: duplicate_groups, type: bigint, nullable: false }
+  - { name: largest_group, type: bigint, nullable: false }
+  - { name: review_backlog, type: bigint, nullable: false }
+  - { name: auto_merge_pairs, type: bigint, nullable: false }
+  - { name: review_band_pairs, type: bigint, nullable: false }
+  - { name: created_at, type: timestamp, nullable: false }
+  - { name: updated_at, type: timestamp, nullable: false }

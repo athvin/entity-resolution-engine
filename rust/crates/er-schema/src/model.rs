@@ -410,6 +410,26 @@ fn ddl_specs() -> Vec<TableSpec> {
             BTreeMap::new(),
         ),
         tspec(
+            "metric_snapshots",
+            vec![
+                nn("id", VARCHAR),
+                nn("run_id", VARCHAR),
+                nn("captured_at", TIMESTAMP),
+                nn("records", BIGINT),
+                nn("entities", BIGINT),
+                nn("duplicate_records", BIGINT),
+                nn("duplicate_groups", BIGINT),
+                nn("largest_group", BIGINT),
+                nn("review_backlog", BIGINT),
+                nn("auto_merge_pairs", BIGINT),
+                nn("review_band_pairs", BIGINT),
+                nn("created_at", TIMESTAMP),
+                nn("updated_at", TIMESTAMP),
+            ],
+            vec![key(&["id"]), key(&["run_id"])],
+            BTreeMap::new(),
+        ),
+        tspec(
             "entity_membership",
             vec![
                 nn("id", VARCHAR),
