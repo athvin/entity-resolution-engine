@@ -1,0 +1,10 @@
+kind: statement
+operation: read
+description: "How many entity events of each kind one run produced — the aggregate the webhook outbox delivers (O3c-2). Counts rather than rows on purpose: a run over a large corpus writes thousands of these, and one POST each would be worse than none (O3a said so when it deliberately left entity events out of the catalog). A subscriber gets one notification per KIND per run and fetches the detail through `GET /v1/orgs/{org}/runs/{run_id}/entity-events`, which is the standard webhook shape — notify, do not deliver the payload — and is lossless because the detail stays retrievable."
+pin: live
+pin_reason: "Read at the end of the run that wrote these rows, inside the pipeline's own session, so there is no committed snapshot containing them yet."
+params:
+  - { name: run_id, type: varchar }
+returns:
+  - { name: event_type, type: varchar, nullable: false }
+  - { name: n, type: bigint }

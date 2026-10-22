@@ -4793,6 +4793,62 @@ async fn runs_list(
     }
 }
 
+/// Viewer+: one run's entity events
+/// (`GET /v1/orgs/{org}/runs/{run_id}/entity-events`). Keyset page; query
+/// `event_type`, `cursor`, `limit`.
+///
+/// The detail behind the `entity.*` webhook aggregate. Those events carry a
+/// count per kind rather than a row per entity — a run over a large corpus
+/// writes millions of ledger rows, and O3a left entity events out of the
+/// catalog precisely because a POST each would be worse than none. That trade
+/// is only lossless if the rows stay retrievable, which is this endpoint: the
+/// aggregate's `detail_path` points here, already narrowed to its kind.
+async fn run_entity_events(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, run_id)): Path<(String, String)>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let session = match org_lake(&state, &org).await {
+        Ok(s) => s,
+        Err(r) => return *r,
+    };
+    let (snapshot, after) =
+        match read::page_start(&session, params.get("cursor").map(String::as_str)) {
+            Ok(x) => x,
+            Err(read::PageStartError::BadCursor) => {
+                return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "invalid cursor");
+            }
+            Err(read::PageStartError::Lake(e)) => {
+                return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
+            }
+        };
+    let limit = read::parse_limit(params.get("limit").map(String::as_str));
+    match read::entity_events_by_run(
+        &session,
+        snapshot,
+        &run_id,
+        params
+            .get("event_type")
+            .map(String::as_str)
+            .filter(|v| !v.is_empty()),
+        after.as_deref(),
+        limit,
+    ) {
+        Ok((items, next_cursor)) => Json(json!({
+            "items": items,
+            "run_id": run_id,
+            "snapshot": snapshot,
+            "next_cursor": next_cursor,
+        }))
+        .into_response(),
+        Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
+    }
+}
+
 /// Load an org's `source_system -> priority_rank` map from its active published
 /// config (needed only by the `source_priority` master-election policy).
 async fn org_source_ranks(
@@ -6502,6 +6558,10 @@ fn build_routes(state: AppState) -> Router {
         )
         .route("/v1/orgs/{org}/imports/recent", get(imports_recent))
         .route("/v1/orgs/{org}/runs", get(runs_list))
+        .route(
+            "/v1/orgs/{org}/runs/{run_id}/entity-events",
+            get(run_entity_events),
+        )
         .route("/v1/orgs/{org}/merge-plans", get(merge_plans))
         .route(
             "/v1/orgs/{org}/schedules",

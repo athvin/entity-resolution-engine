@@ -1363,3 +1363,64 @@ pub fn data_quality(session: &Session, snapshot: i64, stale_days: i64) -> Result
         "snapshot": snapshot,
     }))
 }
+
+/// One keyset page of a run's entity events, oldest first — the detail behind
+/// the `entity.*` webhook aggregate (O3c-2).
+///
+/// The aggregate names a count and a `detail_path`; this is what that path
+/// serves. Cursoring on `seq` rather than `id` because `seq` is what the ledger
+/// orders by: `id` is a content hash, so an `id` cursor would page in an order
+/// no reader asked for.
+///
+/// `after` arrives through the standard cursor, whose key is a string, so it is
+/// parsed back to the `seq` it encodes. A cursor whose key is not a number
+/// yields no page rather than an error — it can only come from a cursor this
+/// function did not mint.
+///
+/// # Errors
+/// Propagates a non-missing-table lake query error.
+pub fn entity_events_by_run(
+    session: &Session,
+    snapshot: i64,
+    run_id: &str,
+    event_type: Option<&str>,
+    after: Option<&str>,
+    limit: i64,
+) -> Result<(Vec<Value>, Option<String>), String> {
+    let limit = limit.clamp(1, MAX_LIMIT);
+    let after_seq = match after {
+        Some(raw) => match raw.parse::<i64>() {
+            Ok(n) => Some(n),
+            Err(_) => return Ok((Vec::new(), None)),
+        },
+        None => None,
+    };
+    match er_entities::entity_event::read::by_run(
+        session.connection(),
+        snapshot,
+        run_id,
+        event_type,
+        after_seq,
+        limit + 1,
+    ) {
+        Ok(rows) => {
+            let has_more = rows.len() as i64 > limit;
+            let page = &rows[..rows.len().min(usize::try_from(limit).unwrap_or(0))];
+            let next = has_more
+                .then(|| {
+                    page.last()
+                        .map(|r| encode_cursor(snapshot, &r.seq.to_string()))
+                })
+                .flatten();
+            Ok((rows_to_values(page), next))
+        }
+        Err(e) => {
+            let s = e.to_string();
+            if is_missing_table(&s) {
+                Ok((Vec::new(), None))
+            } else {
+                Err(s)
+            }
+        }
+    }
+}

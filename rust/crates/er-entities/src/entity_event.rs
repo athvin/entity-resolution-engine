@@ -187,4 +187,165 @@ ORDER BY occurred_at, seq
             .collect::<Vec<_>>();
         ByEntityRow::from_batches(&batches)
     }
+
+    /// One row of `by_run`: One keyset page of a run's entity events, oldest first — the detail behind the per-kind aggregate the webhook delivers (O3c-2). Keyed on `seq`, which is monotonic within a run, so the cursor is the last seq seen. `event_type` narrows the page to the kind the aggregate named, which is what a subscriber following `detail_path` asks for; null means every kind. Snapshot-pinned like every read-API page; the live sibling `counts_by_kind_live` is the one the pipeline itself calls.
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct ByRunRow {
+        pub id: String,
+        pub seq: i64,
+        pub run_id: String,
+        pub entity_id: String,
+        pub event_type: String,
+        pub details: Option<::serde_json::Value>,
+        #[serde(serialize_with = "crate::batch::ser_duckdb_timestamp")]
+        pub occurred_at: ::chrono::DateTime<::chrono::Utc>,
+    }
+
+    impl ByRunRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("id", ::arrow::datatypes::DataType::Utf8),
+                ("seq", ::arrow::datatypes::DataType::Int64),
+                ("run_id", ::arrow::datatypes::DataType::Utf8),
+                ("entity_id", ::arrow::datatypes::DataType::Utf8),
+                ("event_type", ::arrow::datatypes::DataType::Utf8),
+                ("details", ::arrow::datatypes::DataType::Utf8),
+                (
+                    "occurred_at",
+                    ::arrow::datatypes::DataType::Timestamp(
+                        ::arrow::datatypes::TimeUnit::Microsecond,
+                        None,
+                    ),
+                ),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "id")?;
+                let c1: &::arrow::array::Int64Array = crate::batch::col(batch, 1, "seq")?;
+                let c2: &::arrow::array::StringArray = crate::batch::col(batch, 2, "run_id")?;
+                let c3: &::arrow::array::StringArray = crate::batch::col(batch, 3, "entity_id")?;
+                let c4: &::arrow::array::StringArray = crate::batch::col(batch, 4, "event_type")?;
+                let c5: &::arrow::array::StringArray = crate::batch::col(batch, 5, "details")?;
+                let c6: &::arrow::array::TimestampMicrosecondArray =
+                    crate::batch::col(batch, 6, "occurred_at")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        id: crate::batch::req(crate::batch::opt_str(c0, i), "id", i)?,
+                        seq: crate::batch::req(crate::batch::opt_i64(c1, i), "seq", i)?,
+                        run_id: crate::batch::req(crate::batch::opt_str(c2, i), "run_id", i)?,
+                        entity_id: crate::batch::req(crate::batch::opt_str(c3, i), "entity_id", i)?,
+                        event_type: crate::batch::req(
+                            crate::batch::opt_str(c4, i),
+                            "event_type",
+                            i,
+                        )?,
+                        details: crate::batch::opt_json(c5, i, "details")?,
+                        occurred_at: crate::batch::req(
+                            crate::batch::opt_ts(c6, i),
+                            "occurred_at",
+                            i,
+                        )?,
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// One keyset page of a run's entity events, oldest first — the detail behind the per-kind aggregate the webhook delivers (O3c-2). Keyed on `seq`, which is monotonic within a run, so the cursor is the last seq seen. `event_type` narrows the page to the kind the aggregate named, which is what a subscriber following `detail_path` asks for; null means every kind. Snapshot-pinned like every read-API page; the live sibling `counts_by_kind_live` is the one the pipeline itself calls.
+    pub fn by_run(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+        run_id: &str,
+        event_type: Option<&str>,
+        after: Option<i64>,
+        limit: i64,
+    ) -> ::duckdb::Result<Vec<ByRunRow>> {
+        const SQL: &str = "SELECT id, seq, run_id, entity_id, event_type, details, occurred_at
+FROM lake.main.entity_events AT (VERSION => {snapshot})
+WHERE run_id = $1
+  AND ($2 IS NULL OR event_type = $2)
+  AND ($3 IS NULL OR seq > $3)
+ORDER BY seq
+LIMIT $4
+";
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = conn.prepare(&sql)?;
+        let batches = stmt
+            .query_arrow(::duckdb::params![run_id, event_type, after, limit])?
+            .collect::<Vec<_>>();
+        ByRunRow::from_batches(&batches)
+    }
+
+    /// One row of `counts_by_kind_live`: How many entity events of each kind one run produced — the aggregate the webhook outbox delivers (O3c-2). Counts rather than rows on purpose: a run over a large corpus writes thousands of these, and one POST each would be worse than none (O3a said so when it deliberately left entity events out of the catalog). A subscriber gets one notification per KIND per run and fetches the detail through `GET /v1/orgs/{org}/runs/{run_id}/entity-events`, which is the standard webhook shape — notify, do not deliver the payload — and is lossless because the detail stays retrievable.
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct CountsByKindLiveRow {
+        pub event_type: String,
+        pub n: Option<i64>,
+    }
+
+    impl CountsByKindLiveRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("event_type", ::arrow::datatypes::DataType::Utf8),
+                ("n", ::arrow::datatypes::DataType::Int64),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "event_type")?;
+                let c1: &::arrow::array::Int64Array = crate::batch::col(batch, 1, "n")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        event_type: crate::batch::req(
+                            crate::batch::opt_str(c0, i),
+                            "event_type",
+                            i,
+                        )?,
+                        n: crate::batch::opt_i64(c1, i),
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// How many entity events of each kind one run produced — the aggregate the webhook outbox delivers (O3c-2). Counts rather than rows on purpose: a run over a large corpus writes thousands of these, and one POST each would be worse than none (O3a said so when it deliberately left entity events out of the catalog). A subscriber gets one notification per KIND per run and fetches the detail through `GET /v1/orgs/{org}/runs/{run_id}/entity-events`, which is the standard webhook shape — notify, do not deliver the payload — and is lossless because the detail stays retrievable.
+    pub fn counts_by_kind_live(
+        conn: &::duckdb::Connection,
+        run_id: &str,
+    ) -> ::duckdb::Result<Vec<CountsByKindLiveRow>> {
+        const SQL: &str = "SELECT event_type, count(*) AS n
+FROM lake.main.entity_events
+WHERE run_id = $1
+GROUP BY event_type
+ORDER BY event_type
+";
+        let mut stmt = conn.prepare(SQL)?;
+        let batches = stmt
+            .query_arrow(::duckdb::params![run_id])?
+            .collect::<Vec<_>>();
+        CountsByKindLiveRow::from_batches(&batches)
+    }
 }
