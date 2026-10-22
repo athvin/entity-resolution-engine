@@ -91,7 +91,7 @@ impl Job {
 
 pub mod create {
     //! @generated query functions for this entity + operation.
-    /// Queue a job, idempotent on the org idempotency key (a repeat key returns the original row via a no-op upsert).
+    /// Queue a job, idempotent on the org idempotency key (a repeat key returns the original row via a no-op upsert). `created_by` is the acting principal, so a job can say who asked for it; the column existed and only `enqueue_scheduled` ever wrote it.
     pub async fn enqueue(
         client: &::tokio_postgres::Client,
         job_id: &str,
@@ -100,10 +100,11 @@ pub mod create {
         priority: i64,
         idempotency_key: Option<&str>,
         params: Option<&::serde_json::Value>,
+        created_by: Option<&str>,
     ) -> ::std::result::Result<Vec<super::Job>, ::tokio_postgres::Error> {
-        const SQL: &str =
-            "INSERT INTO public.jobs (id, org_id, kind, priority, idempotency_key, params)
-VALUES ($1, $2, $3, $4, $5, coalesce($6, '{}'::jsonb))
+        const SQL: &str = "INSERT INTO public.jobs (id, org_id, kind, priority, idempotency_key, params, created_by)
+VALUES ($1, $2, $3, $4, $5, coalesce($6, '{}'::jsonb),
+        $7)
 ON CONFLICT (org_id, idempotency_key) WHERE idempotency_key IS NOT NULL
   DO UPDATE SET kind = jobs.kind, updated_at = now()
 RETURNING
@@ -139,6 +140,7 @@ RETURNING
                     &priority,
                     &idempotency_key,
                     &params,
+                    &created_by,
                 ],
             )
             .await?;

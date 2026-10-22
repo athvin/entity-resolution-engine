@@ -640,7 +640,17 @@ async fn provision_org(
     };
 
     let idem = format!("provision:{name}");
-    let job = match pg::enqueue(&client, &org_row.id, "provision", 0, Some(&idem), None).await {
+    let job = match pg::enqueue(
+        &client,
+        &org_row.id,
+        "provision",
+        0,
+        Some(&idem),
+        None,
+        Some(&principal.actor),
+    )
+    .await
+    {
         Ok(job) => job,
         Err(e) => return pg_err(e),
     };
@@ -1956,6 +1966,7 @@ async fn put_lexicon(
         0,
         Some(&idem),
         Some(&params),
+        Some(&principal.actor),
     )
     .await
     {
@@ -2184,7 +2195,17 @@ async fn publish_config_version(
     match tier {
         Some("C") => {
             let train_key = format!("publish:{version}:train");
-            match pg::enqueue(&client, &org_row.id, "train", 0, Some(&train_key), None).await {
+            match pg::enqueue(
+                &client,
+                &org_row.id,
+                "train",
+                0,
+                Some(&train_key),
+                None,
+                Some(&principal.actor),
+            )
+            .await
+            {
                 Ok(j) => jobs_enqueued.push(j.id),
                 Err(e) => return pg_err(e),
             }
@@ -2195,6 +2216,7 @@ async fn publish_config_version(
                 0,
                 Some(&rebuild_key),
                 Some(&rebuild_params),
+                Some(&principal.actor),
             )
             .await
             {
@@ -2209,6 +2231,7 @@ async fn publish_config_version(
             0,
             Some(&rebuild_key),
             Some(&rebuild_params),
+            Some(&principal.actor),
         )
         .await
         {
@@ -2314,6 +2337,7 @@ async fn create_job(
             body.priority,
             None,
             params.as_ref(),
+            Some(&principal.actor),
         )
         .await
         {
@@ -4234,6 +4258,7 @@ async fn finish_delivery(
         0,
         None,
         Some(&json!({ "source": source, "delivery_id": delivery_id })),
+        Some(actor),
     )
     .await
     {
@@ -5327,6 +5352,7 @@ async fn add_assertion(
         0,
         Some(&idem),
         Some(&params),
+        Some(&principal.actor),
     )
     .await
     {
@@ -5418,6 +5444,7 @@ async fn record_overlay_action(
         0,
         Some(&idem),
         Some(&params),
+        Some(&principal.actor),
     )
     .await
     {
@@ -5750,6 +5777,7 @@ async fn unmerge_entity(
         0,
         Some(&idem),
         Some(&params),
+        Some(&principal.actor),
     )
     .await
     {
@@ -5935,6 +5963,7 @@ async fn bulk_resolve_reviews(
             0,
             Some(&idem),
             Some(&params),
+            Some(&principal.actor),
         )
         .await
         {
@@ -6069,6 +6098,7 @@ async fn mass_update(
             0,
             Some(&idem),
             Some(&params),
+            Some(&principal.actor),
         )
         .await
         {

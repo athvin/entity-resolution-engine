@@ -86,6 +86,17 @@ async fn job_lifecycle_over_postgres_http() {
     assert!(job["org_id"].as_str().is_some_and(|v| !v.is_empty()));
     assert_eq!(job["priority"], 5);
 
+    // A job records WHO asked for it. `pg::enqueue` never set `created_by` —
+    // only `enqueue_scheduled` did, hardcoding `'scheduler'` — so every job
+    // submitted through the API had it NULL, and `job-detail.tsx`'s
+    // `job-attribution` span (which renders exactly this field, stripping
+    // `user:` and ` via key:…` off it) could never show anything. The column
+    // existed the whole time.
+    assert_eq!(
+        job["created_by"], "operator",
+        "a job must record its creator, got {job}"
+    );
+
     // list sees exactly the one job
     let resp = app
         .clone()

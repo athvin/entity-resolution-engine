@@ -144,6 +144,7 @@ pub async fn enqueue(
     priority: i64,
     idempotency_key: Option<&str>,
     params: Option<&serde_json::Value>,
+    created_by: Option<&str>,
 ) -> Result<Job, PgError> {
     let job_id = er_ids::new_v7();
     // The statement is an idempotent upsert: a repeat idempotency key returns the
@@ -156,6 +157,7 @@ pub async fn enqueue(
         priority,
         idempotency_key,
         params,
+        created_by,
     )
     .await?;
     Ok(jobs

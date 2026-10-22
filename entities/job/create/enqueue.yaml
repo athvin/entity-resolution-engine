@@ -1,7 +1,7 @@
 kind: statement
 operation: create
 mode: partial
-description: "Queue a job, idempotent on the org idempotency key (a repeat key returns the original row via a no-op upsert)."
+description: "Queue a job, idempotent on the org idempotency key (a repeat key returns the original row via a no-op upsert). `created_by` is the acting principal, so a job can say who asked for it; the column existed and only `enqueue_scheduled` ever wrote it."
 params:
   - { name: job_id, type: varchar }
   - { name: org_id, type: varchar }
@@ -9,4 +9,5 @@ params:
   - { name: priority, type: bigint }
   - { name: idempotency_key, type: varchar, nullable: true }
   - { name: params, type: json, nullable: true }
+  - { name: created_by, type: varchar, nullable: true }
 returns: entity
