@@ -1146,9 +1146,45 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          hand-written `ReceiptRow` had nothing to be checked against — even though the receipt has
          been on the JSON wire since the read API shipped. Declaring the wire it was already on is
          what brought it under the gate, and `ReceiptRow` turned out to be a clean subset.
-   - [ ] E9b-2 update rules (#39): what to DO with a matched row — update-empty-only / update-all /
-         nothing / a custom survivorship chain, bounded by a confidence range. Needs the screening
-         above to exist, and by the E5b-2 precedent must not ship a field nothing reads.
+   - [~] **E9b-2 update rules (#39) — ANALYSED, and mostly already built. A decision is needed
+         before any code.** The capability is "what to DO with a matched row": update-empty-only /
+         update-all / nothing, bounded by a confidence range. Scoping it against this engine
+         (2026-10-22) found that three of those four parts already have mechanisms, because this
+         architecture **derives** golden records from members rather than mutating stored records —
+         the incumbent's model is "the import edits rows in your CRM", which is not what happens
+         here.
+         * **update-all** is the default. `run_golden` reassembles each entity's golden from ALL
+           members every run, and `recency` in an attribute's chain makes the newest value win.
+         * **bounded by a confidence range** is structural, not a knob. A record only becomes a
+           member if its edge cleared `auto_merge`; a gray-band match goes to review instead. So
+           membership already *is* the confidence bound, and a second one would either duplicate
+           it or contradict it.
+         * **update-empty-only** splits by intent. For "prefer better data" the existing chain
+           already covers it — `completeness`, `validated`, `longest`, `numeric_max` and
+           `prioritized:` are all expressions of it. For "don't let an import overwrite what I
+           curated", the mechanism is `golden_override`: a steward's latest-wins per
+           (entity, attribute) value applied AFTER assembly, which survives every later run by
+           construction.
+         * **nothing** has no coherent equivalent, and that is a statement about the design rather
+           than a gap. A member's values are what the golden is assembled from, so "join the
+           entity but contribute nothing" describes a member that is not a member.
+         **The one real gap, with its cost stated.** There is no survivorship rule expressing
+         INCUMBENCY — "prefer the value that won last run, take a new one only where there was
+         none". Every rule is a function of the current member set; none looks at history, and the
+         chain terminates in `record_key ASC`, which is deterministic but arbitrary with respect
+         to arrival order. Adding it means feeding the PRIOR golden into survivorship, which (a)
+         breaks the stage's "identical SQL over identical inputs → identical rows" contract unless
+         the prior golden becomes a declared, versioned input, and (b) reintroduces exactly the
+         mutable-record model this architecture rejected — a value would persist because it was
+         once chosen, not because the data says so.
+         **So the decision is whether parity here means the behaviour or the knob.** The
+         behaviours are reachable today through survivorship + `golden_override`; the knob is not,
+         and buying it costs the determinism contract. Recorded rather than built, because
+         building an update-rules subsystem beside survivorship would be a second mechanism for
+         one question — the shape this program has twice removed (`ModelSpec.threshold`,
+         `CombineMode`). A doc that maps the incumbent's three modes onto the existing config is
+         probably the whole deliverable.
+   - [ ] E9c S3 auto-ingestion (#47).
    - [ ] E9c S3 auto-ingestion (#47).
 3. **Learning loop**
    - [x] **E10a the `train` job, which the dispatcher had no arm for.** `train` has been in
