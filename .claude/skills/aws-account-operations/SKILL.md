@@ -61,10 +61,11 @@ not exist; see the reference for the one long-lived key that does.
 | Permission set | Session | Reached by |
 |---|---|---|
 | `PlatformAdmin` | PT8H | the `er-platform` CLI profile |
+| `PlatformReadOnly` | PT8H | **not applied yet** — `er-readonly`, once it is |
 | `ProdDataReadOnly` | PT4H | no profile configured |
 | `ProdAdmin` | PT1H | the `er-prodadmin` CLI profile |
 
-Two things to know before picking one. `PlatformAdmin` carries
+Three things to know before picking one. `PlatformAdmin` carries
 `AdministratorAccess` *plus* an inline guard whose Deny statements block prod
 S3, RDS, EKS, Secrets and KMS mutation (conditioned on
 `aws:ResourceTag/Environment = prod`), prod role minting, and
@@ -75,33 +76,39 @@ is the only thing limiting it.
 `ProdDataReadOnly` looks like the obvious read-only identity but is much
 narrower than its name suggests: lake reads, `rds-db:connect` as `er_readonly`,
 `eks:Describe*` and log reads. It cannot list buckets or read Budgets, so it is
-not a general introspection identity.
+not a general introspection identity. `PlatformReadOnly` is the one that is —
+account-wide `ReadOnlyAccess`, added for the MCP proxy — but it is **written
+and validated, not applied**, so until a human applies it the proxy runs as
+`PlatformAdmin`.
+
+The generated reference carries an **Inline policy** column, and a `**none**`
+there is the fact worth noticing: a permission set with no inline policy has no
+deny statements at all, whatever its managed policy allows.
 
 ## Introspecting the account
 
-**Today:** read-only `aws` CLI calls under a profile from the table above.
-There is no MCP server configured in this repo yet, so a question about live
-state is answered by `describe`/`list`/`get` from a shell, or by reading the
-Terraform — and `references/footprint.md` is the fastest answer for anything
-*declared*, which is most questions.
-
-**In flight:** the AWS MCP Server behind `mcp-proxy-for-aws-cli` with
-`--read-only`, which is better than the CLI on two counts — write-capable tools
+A read-only question about the live account should go through the **AWS MCP
+Server**, declared in `.mcp.json` behind `mcp-proxy-for-aws-cli` with
+`--read-only`. It beats a shell `aws` call on two counts: write-capable tools
 are never offered to the agent at all, and every request is recorded in
 CloudWatch and CloudTrail as agent-initiated, which a Bash invocation is not.
-Its tools are fully qualified: `aws___search_documentation` for current AWS
-behaviour (prefer it over recalling API details) and `aws___retrieve_skill` for
-AWS's own service guidance on demand.
 
-The designed posture is **three guardrail layers, none sufficient alone** — the
-proxy flag is client-side and another client ignores it; the IAM condition keys
-reach only calls made *through* the MCP server and so miss the CLI entirely; a
-Bash guard catches the CLI but is pattern-based. The design, and the one profile
-none of the layers constrains:
+Its tools are fully qualified — `aws___search_documentation` for current AWS
+behaviour (prefer it over recalling API details) and `aws___retrieve_skill` for
+AWS's own service guidance on demand. Check `references/footprint.md` first
+regardless: it is generated from the Terraform, so it answers anything
+*declared* without touching the account.
+
+**Three guardrail layers, none sufficient alone**, and they are not all applied
+yet: the proxy flag is client-side and another client ignores it; the IAM
+condition keys reach only calls made *through* the MCP server and so miss the
+CLI entirely; the Bash guard catches the CLI but is pattern-based. Which are
+live, which await a human `terraform apply`, and the one profile none of them
+constrains:
 [references/mcp-and-guardrails.md](references/mcp-and-guardrails.md).
 
-Until that lands, the operative rule is the plain one: **do not mutate AWS from
-an agent session.** Write Terraform and let a human apply it.
+The operative rule stands regardless of which layers are applied: **do not
+mutate AWS from an agent session.** Write Terraform and let a human apply it.
 
 ## Pod Identity, never IRSA — and one role per triple
 
@@ -166,10 +173,9 @@ Bedrock's two halves, the SDK feature pins that must not be relaxed, and why
 ## Common workflows
 
 **"What is deployed / what version / what is this resource?"** Check
-`references/footprint.md` first — it is generated from the Terraform, so it is
-current for anything declared, which answers most questions without touching
-the account. For live state, a read-only `describe`/`list` under the
-`er-platform` profile.
+`references/footprint.md` first — generated from the Terraform, so it answers
+anything declared without touching the account. For live state, ask the MCP
+server.
 
 **A pod cannot reach AWS.** Check for an `aws_eks_pod_identity_association`
 covering its exact (cluster, namespace, service account) triple before looking
@@ -187,7 +193,6 @@ exist.
 -check -recursive` and a credential-free `init -backend=false && validate`,
 which is what CI runs. Do not apply from an agent session.
 
-**Reaching for the `aws` CLI to change something.** Do not. Write Terraform and
-let a human apply it. There is no guardrail in place to catch a mutating CLI
-call from an agent session yet, which is exactly why the rule is a rule rather
-than a preference.
+**Reaching for the `aws` CLI to change something.** Prefer Terraform. If a
+one-off genuinely is right, expect the Bash guard to deny it outright or ask
+first — that is the guard working, not a bug.

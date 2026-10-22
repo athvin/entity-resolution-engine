@@ -284,6 +284,13 @@ infrastructure runs read-only, and **exactly one server per provider** — a
 plugin that brings its own duplicate produces competing tools that degrade
 agent performance with no error.
 
+A rule learned writing the AWS entry: **do not declare a server whose package
+name you have not verified.** `.mcp.json` carries only `aws`, whose invocation
+comes verbatim from AWS's own setup documentation. Terraform's server arrives
+through its plugin instead, which ships a config its vendor maintains — a
+guessed `uvx` package name is a silent failure at session start, and the
+failure looks like the server simply not appearing.
+
 ### The decision record
 
 | Candidate | Decision | Why |

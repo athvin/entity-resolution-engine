@@ -298,13 +298,16 @@ One wrinkle worth knowing: a Pod Identity association binds one (cluster, namesp
 
 ### 8.1 Identity Center permission sets
 
-All three permission sets are assigned in the single account; the "scope" is the resource-name prefix each grants against, not an account.
+Every permission set is assigned in the single account; the "scope" is the resource-name prefix each grants against, not an account.
 
 | Permission set | Scope | Assigned to | Grants | Session |
 |---|---|---|---|---|
 | `PlatformAdmin` | account-wide minus the §8.2 prod denies | you + developers | Full access; mutating `er-dev-*` is unrestricted by design | 8h |
+| `PlatformReadOnly` | account-wide read | developers | AWS-managed `ReadOnlyAccess`, for the agent introspection path (§8.2). **Written, not yet applied** | 8h |
 | `ProdDataReadOnly` | `er-prod-*` read | you + developers | `s3:GetObject`/`ListBucket` on the prod lake, `kms:Decrypt` scoped `kms:ViaService = s3`, `rds-db:connect` as `er_readonly`, `eks:DescribeCluster` plus a `view`-only Kubernetes group | 4h |
 | `ProdAdmin` | `er-prod-*` full | **you only** | Full prod (the only set without the §8.2 denies) | 1h |
+
+`PlatformReadOnly` exists because `ProdDataReadOnly` cannot serve as a general read identity: its grants are the prod lake, one database role, `eks:DescribeCluster` and logs, so it cannot list buckets or read Budgets. Until it is applied, the MCP proxy runs as `PlatformAdmin` with only its own `--read-only` flag constraining it.
 
 Access is granted by **group membership**, not per-person assignment, so onboarding is one entry and offboarding is one removal.
 
@@ -319,6 +322,12 @@ With a single account there is no OU and SCPs evaluate against nothing (§3), so
 **Statement 1 — data mutation.** Denies `s3:Put*`/`Delete*` on `er-prod-*` buckets, `rds:Delete*`/`Modify*`, `eks:Delete*`/`Update*`, `secretsmanager:Put*`/`Delete*` and `kms:ScheduleKeyDeletion` on `er-prod-*` / `er/prod/*`-named resources.
 
 **Statement 2 — privilege escalation.** Denies `iam:CreateRole`, `PutRolePolicy`, `AttachRolePolicy`, `UpdateAssumeRolePolicy` and `CreateAccessKey` against `er-prod-*` roles. Statement 1 leaves the application's own `er-prod-*` roles writable paths to the lake, so statement 2 is what keeps a developer from minting `er-prod-app-anything` and walking out of the guardrail — the exemption is only trustworthy because minting the thing it exempts is itself denied.
+
+**Statement 3 — agent-initiated mutation** (`DenyMutationViaMCP`, written but **not yet applied**). Denies the destructive action set outright when `aws:ViaAWSMCPService` is true — the condition key AWS sets on requests arriving through an AWS-managed MCP server. It reads differently from statements 1 and 2 on purpose: it is **not** scoped to the prod prefix, because it protects the whole account from an agent rather than prod from a developer, and it denies `iam:*` rather than the narrow prod-role set, because an agent able to edit IAM can remove the statement.
+
+Its limitation is the thing to hold onto: the condition key exists **only** on MCP-routed requests. An `aws` CLI call, an SDK call or a `terraform apply` from the same session carries no such key and is entirely unaffected. Statement 3 does not make the account read-only for an agent; it makes *MCP-routed* access read-only, which is why the repo also carries a client-side `--read-only` proxy flag and a `PreToolUse` Bash guard. The three layers and what each one misses are catalogued in `.claude/skills/aws-account-operations/references/mcp-and-guardrails.md`.
+
+The same change adds a fourth permission set, **`PlatformReadOnly`** (account-wide `ReadOnlyAccess`, PT8H, assigned to `developers`), so the MCP proxy can run as a read-only identity rather than as `PlatformAdmin`. `ProdDataReadOnly` cannot serve that purpose — its five Allow statements cover the lake, `rds-db:connect`, `eks:Describe*` and logs, so it cannot list buckets or read Budgets.
 
 **The enforcement is weaker than the SCP version, materially** (full argument: D-ACCT): an inline deny *is* the identity-policy layer, so whoever can edit permission sets can remove the guard — one policy edit, not a structural boundary. The mitigations the claim depends on: the permission sets live in Terraform behind `main`'s branch protection (§8.6), so removing a deny is a reviewed, logged diff; `ProdAdmin` assumption is alerted on (§8.6); and the §17 probes assert the deny itself, not the mechanism. The Terraform apply role walks through the guardrail legitimately, so its **trust policy** is part of this claim — §14.2 pins it to the CI apply role on `main` and `ProdAdmin` as break-glass.
 

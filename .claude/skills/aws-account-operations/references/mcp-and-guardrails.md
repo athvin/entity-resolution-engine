@@ -1,14 +1,11 @@
 # The three guardrail layers, and what each one misses
 
-> **In flight.** This file describes the designed posture, not the current
-> state. No MCP server is configured in this repo yet, the IAM deny is not
-> written, and there is no Bash guard. Until all three land the operative rule
-> is the plain one from the skill body: **do not mutate AWS from an agent
-> session** — write Terraform and let a human apply it.
->
-> It is written down ahead of the implementation because the *reasoning* about
-> what each layer misses is the part worth reviewing, and because a reader
-> asking "is the agent safe against AWS?" needs the honest answer now.
+> **Partially applied.** The MCP proxy and the Bash guard are live. The IAM
+> statement and the `PlatformReadOnly` permission set are **written and
+> `terraform validate`d but NOT applied** — applying them is a human action, and
+> until it happens Layer 2 does not exist and Layer 1 runs as an admin profile
+> constrained only by the proxy flag. Treat the account as having two of three
+> layers.
 
 ## Contents
 

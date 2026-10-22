@@ -53,6 +53,8 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
    5 aws_s3_bucket_public_access_block
    5 aws_s3_bucket_policy
    5 aws_s3_bucket
+   4 aws_ssoadmin_permission_set
+   4 aws_ssoadmin_account_assignment
    4 aws_secretsmanager_secret_version
    4 aws_secretsmanager_secret
    4 aws_kms_key
@@ -60,14 +62,12 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
    4 aws_iam_role_policy_attachment
    4 aws_eks_pod_identity_association
    4 aws_eks_addon
-   3 aws_ssoadmin_permission_set
-   3 aws_ssoadmin_account_assignment
+   3 aws_ssoadmin_managed_policy_attachment
    3 aws_security_group
    3 aws_s3_bucket_versioning
    3 aws_s3_bucket_server_side_encryption_configuration
    2 aws_subnet
    2 aws_ssoadmin_permission_set_inline_policy
-   2 aws_ssoadmin_managed_policy_attachment
    2 aws_route_table_association
    2 aws_route_table
    2 aws_route
@@ -118,6 +118,7 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
 | Permission set | Session | Inline policy |
 |---|---|---|
 | `PlatformAdmin` | PT8H | yes |
+| `PlatformReadOnly` | PT8H | **none** |
 | `ProdDataReadOnly` | PT4H | yes |
 | `ProdAdmin` | PT1H | **none** |
 
