@@ -4,14 +4,20 @@
 #
 # The one exception: a PR that only touches `.claude/**` (agent/skill prose, no
 # code and nothing the generators read) runs none of the compile jobs. Because
-# the four jobs below are REQUIRED status checks, a workflow-level path filter
-# would leave them "pending" forever and block the PR; instead a `detect` job
-# computes whether any non-`.claude` file changed and the required jobs gate on
-# it with `if:`. A job skipped by `if:` reports a "skipped" conclusion, which
+# the required jobs below are REQUIRED status checks, a workflow-level path
+# filter would leave them "pending" forever and block the PR; instead a `detect`
+# job computes whether any non-`.claude` file changed and the required jobs gate
+# on it with `if:`. A job skipped by `if:` reports a "skipped" conclusion, which
 # branch protection accepts as satisfied — so the PR stays mergeable with zero
-# compute. The skip is deliberately `.claude`-only: `lint` runs `er-entity
-# verify` (docs/erd.md staleness) and the OpenAPI gate, so docs/ changes must
-# still run the gate.
+# compute. The skip is deliberately `.claude`-only: the `entities` job runs
+# `er-entity verify` (docs/erd.md staleness) and `lint` verifies the generated
+# skill references, so docs/ changes must still run the gate.
+#
+# A JOB'S `name:` IS ITS BRANCH-PROTECTION CONTEXT. Renaming one silently
+# un-protects it, and adding a required context for a job that does not yet
+# exist on `main` blocks every PR until it does. `entities` was split out of
+# `lint` and is required; it was added to protection only after it had reported
+# green on `main`, which is the only safe order.
 #
 # The toolchain is installed with `rustup` rather than an action: dtolnay's
 # rust-toolchain selects the channel through its ref (`@stable`), which cannot
@@ -187,12 +193,6 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: entity framework verify (stale-output + analyser passes)
-        # Regenerate every artifact from entities/*.yaml and fail if any committed
-        # file (Rust struct, DuckLake/Postgres DDL, query fns) is stale; then plan
-        # every statement and run the E0xx passes. rustfmt is already installed
-        # above, which `er-entity gen` uses to canonicalise output.
-        run: cargo run -q -p er-entity-cli -- verify --root ..
       - name: rustdoc (deny warnings)
         run: cargo doc --workspace --no-deps --document-private-items
         env:
@@ -205,16 +205,6 @@ jobs:
         # rather than in the always-on `skills` job, which has no toolchain.
         working-directory: ${{ github.workspace }}
         run: bash scripts/skills-check.sh check
-      - name: API breaking-change gate (advisory)
-        # Diff the control-lane OpenAPI document against main's and report breaking
-        # component-schema changes (removed schema/field, retype, dropped required).
-        # Advisory — never fails the build — until the first external org key; the
-        # release pipeline then runs `er-openapi-check --strict`. A no-op on main
-        # (no base to diff) or if main is unfetchable.
-        run: |
-          git -C .. fetch --no-tags --depth=1 origin main || exit 0
-          git -C .. show origin/main:frontend/src/lib/api/openapi.json > /tmp/base-openapi.json 2>/dev/null || exit 0
-          cargo run -q -p er-server --bin er-openapi-check -- /tmp/base-openapi.json || true
       - name: Build cost (sccache stats, target size)
         # Never a gate: `always()` so a red job still reports, `|| true` so the
         # reporting itself cannot fail one.
@@ -228,6 +218,112 @@ jobs:
         #
         # Read it as a pair: a cold run shows what the misses cost, a warm run
         # shows what the hits save. One number alone says nothing.
+        if: always()
+        run: |
+          sccache --show-stats || true
+          du -sh target || true
+
+  # Split out of `lint` on 2026-10-22. That job ran four independent ~10-minute
+  # steps SERIALLY and took 42m27 on a cold cache — clippy 10m32, this 10m39,
+  # rustdoc 9m20 and the advisory OpenAPI gate 10m34 — while gating every merge.
+  # Run in parallel instead, and the critical path is the longest step, not the
+  # sum. Warm the same steps are 6m37 / 2m30 / 1m55 / 2m15, so the serial shape
+  # only really hurt on a cold cache, which is exactly when it hurt most.
+  #
+  # These do not share a build with `lint`: clippy emits `.rmeta` check artifacts,
+  # and `cargo run` needs linkable rlibs, so the old job paid for a check build
+  # AND a debug build and the second was not cheaper for the first having run.
+  # Nor do the two `cargo run` steps share much with each other — `er-entity-cli`
+  # pulls er-sql-check's datafusion 52 / arrow 57 universe, `er-server` pulls
+  # duckdb / arrow 58 / aws, and the two never unify. Separate jobs duplicate
+  # less than it looks.
+  #
+  # REQUIRED status check. It is the entity-framework gate: regenerate every
+  # artifact from entities/*.yaml and fail if any committed file (Rust struct,
+  # DuckLake/Postgres DDL, query fns) is stale, then plan every statement and run
+  # the E0xx passes.
+  entities:
+    name: entities
+    needs: detect
+    if: needs.detect.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    # 45 for the same reason as `lint`: on a cold cache this builds the bundled
+    # duckdb C++ tree plus a second full arrow before it can verify anything.
+    timeout-minutes: 45
+    env:
+      RUSTC_WRAPPER: sccache
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install stable toolchain
+        # rustfmt is not optional here: `er-entity gen` shells out to it to
+        # canonicalise generated output, and this gate compares bytes. It came
+        # for free in `lint` (clippy's job installs it); here it must be asked
+        # for, or every generated file reads as stale.
+        run: rustup update stable --no-self-update && rustup default stable && rustup component add rustfmt
+      - name: Install mold
+        run: sudo apt-get update && sudo apt-get install -y mold
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: rust
+          shared-key: rust
+          # Restore-only. `lint` is the single writer of this key — see the long
+          # comment there for why five writers on a 10 GB capped cache is what
+          # kept producing cold runs.
+          save-if: false
+      - name: entity framework verify (stale-output + analyser passes)
+        run: cargo run -q -p er-entity-cli -- verify --root ..
+      - name: Build cost (sccache stats, target size)
+        # See the `lint` job's copy for why.
+        if: always()
+        run: |
+          sccache --show-stats || true
+          du -sh target || true
+
+  # Also split out of `lint`, and PR-only — which the step itself always implied:
+  # it diffs against `origin/main`, so on a push to main there is no base and it
+  # exits 0 having examined nothing. Running it there spent ~10 minutes of cold
+  # compile to print nothing.
+  #
+  # NOT a required check, deliberately. It is advisory until the first external
+  # org key (the release pipeline runs `er-openapi-check --strict`), and a check
+  # that cannot fail should not be able to hold a merge — which is exactly what
+  # it did from inside `lint`, for 10m34 of every cold run.
+  api-gate:
+    name: API breaking-change gate (advisory)
+    needs: detect
+    if: github.event_name == 'pull_request' && needs.detect.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      RUSTC_WRAPPER: sccache
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install stable toolchain
+        run: rustup update stable --no-self-update && rustup default stable
+      - name: Install mold
+        run: sudo apt-get update && sudo apt-get install -y mold
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: rust
+          shared-key: rust
+          # Restore-only. `lint` is the single writer of this key — see the long
+          # comment there for why five writers on a 10 GB capped cache is what
+          # kept producing cold runs.
+          save-if: false
+      - name: API breaking-change gate (advisory)
+        # Diff the control-lane OpenAPI document against main's and report breaking
+        # component-schema changes (removed schema/field, retype, dropped required).
+        # Advisory — never fails the build — until the first external org key; the
+        # release pipeline then runs `er-openapi-check --strict`. A no-op if main
+        # is unfetchable.
+        run: |
+          git -C .. fetch --no-tags --depth=1 origin main || exit 0
+          git -C .. show origin/main:frontend/src/lib/api/openapi.json > /tmp/base-openapi.json 2>/dev/null || exit 0
+          cargo run -q -p er-server --bin er-openapi-check -- /tmp/base-openapi.json || true
+      - name: Build cost (sccache stats, target size)
+        # See the `lint` job's copy for why.
         if: always()
         run: |
           sccache --show-stats || true
@@ -314,13 +410,20 @@ jobs:
           manifest-path: rust/Cargo.toml
           command: check advisories licenses bans sources
 
+  # Note the name is now wider than the job: the rapidfuzz extension half moved to
+  # `extensions` below. The name is NOT changed, because a job's `name:` is its
+  # branch-protection context and renaming a required one silently un-protects it.
+  # Renaming this is a deliberate two-step (add the new context, merge, drop the
+  # old) that is not worth spending on prose.
   ducklake-e2e:
     name: DuckLake + extensions e2e
     needs: detect
     if: needs.detect.outputs.code == 'true'
     runs-on: ubuntu-latest
     # 45 for the same reason as `lint`: this measured 29 min on a cold cache,
-    # one minute inside the old limit. It passed by luck, not by margin.
+    # one minute inside the old limit. It passed by luck, not by margin. The
+    # 9m47 extension step has since moved out, so the margin is real now — but
+    # the cold DuckDB build is still the floor, so the timeout stays.
     timeout-minutes: 45
     env:
       RUSTC_WRAPPER: sccache
@@ -369,6 +472,60 @@ jobs:
           restore-keys: |
             duckdb-extensions-
       - run: cargo test -p dedupe-cli -p er-cli -p er-server -p er-entity-diff
+      - name: Build cost (sccache stats, target size)
+        # See the `lint` job's copy for why.
+        if: always()
+        run: |
+          sccache --show-stats || true
+          du -sh target || true
+
+  # Split out of `ducklake-e2e` on 2026-10-22, same reasoning as the `lint` split:
+  # the two were independent steps run serially, 16m36 and 9m47 on a cold cache,
+  # so the job cost their sum while gating every merge. In parallel it costs the
+  # larger one. This also drops the Postgres service here — it existed for the
+  # er-server control-plane queue gate in the other half, and this test never
+  # touched it.
+  #
+  # Wants to be a REQUIRED check: it was inside one, so leaving it advisory would
+  # quietly retire a gate. Added to protection after it first reports green on
+  # `main`, never before — see the header.
+  extensions:
+    name: extensions (rapidfuzz)
+    needs: detect
+    if: needs.detect.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    # Generous for a 9m47 step, for the same reason as its parent: a duckdb bump
+    # makes this build the bundled C++ tree before it can load anything.
+    timeout-minutes: 45
+    env:
+      RUSTC_WRAPPER: sccache
+      DEDUPE_E2E_EXTENSIONS: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install stable toolchain
+        run: rustup update stable --no-self-update && rustup default stable
+      - name: Install mold
+        run: sudo apt-get update && sudo apt-get install -y mold
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: rust
+          shared-key: rust
+          # Restore-only. `lint` is the single writer of this key — see the long
+          # comment there for why five writers on a 10 GB capped cache is what
+          # kept producing cold runs.
+          save-if: false
+      - name: Cache DuckDB extensions
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.duckdb/extensions
+          # Key on the lockfile (the DuckDB version lives there), and fall back to
+          # any prior extensions cache so a dependency change restores the already
+          # downloaded extensions instead of re-fetching them cold under the job
+          # timeout.
+          key: duckdb-extensions-${{ hashFiles('rust/Cargo.lock') }}
+          restore-keys: |
+            duckdb-extensions-
       - name: Extension loading (rapidfuzz)
         run: cargo test -p dedupe-core --test extensions
       - name: Build cost (sccache stats, target size)

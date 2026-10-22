@@ -12,7 +12,7 @@ against it.
 - Why cold happens: the Actions cache budget
 - The levers, and which were taken
 - Rejected: headstart
-- Rejected: larger runners, for now
+- Blocked: more cores per job
 - Rejected: removing sccache
 - Escalation: sccache on S3
 
@@ -51,11 +51,39 @@ costing 10m34 of critical path. And cold-vs-warm is a 3× swing on the one job
 that gates every merge, so **reducing how often cold happens is worth more than
 any per-step optimisation.**
 
+That job is now three (2026-10-22): `fmt + clippy + docs` keeps fmt, clippy,
+rustdoc and the skills-reference check; `entities` takes `er-entity verify`; and
+`api-gate` takes the advisory OpenAPI diff, PR-only, since on a push to main it
+has no base to diff and exits having examined nothing. Cold critical path becomes
+the longest of them rather than the sum.
+
+**Why they could not simply share one build.** clippy emits `.rmeta` check
+artifacts and `cargo run` needs linkable rlibs, so the original job paid for a
+check build *and* a debug build, and the second was no cheaper for the first
+having run — which is why four steps each cost ~10 minutes rather than one
+costing 10 and three costing little. The two `cargo run` steps do not share much
+with each other either: `er-entity-cli` pulls er-sql-check's datafusion 52 /
+arrow 57 universe and `er-server` pulls duckdb / arrow 58 / aws, and
+`er-sql-check`'s manifest records that the two arrow majors never unify. So
+separate jobs duplicate less than the crate count suggests.
+
+`DuckLake + extensions e2e` had the same shape and got the same treatment: its
+16m36 four-crate test and 9m47 rapidfuzz extension test were serial, so the job
+cost their sum. `extensions (rapidfuzz)` is now its own job, which also drops the
+Postgres service it never used — that existed for the er-server control-plane
+queue gate in the other half.
+
 Elsewhere: `test` spends 2m33 in the disk-reclaim step before compiling, and
-10m47 in `cargo test --workspace`. `ducklake-e2e` splits 16m36 / 9m47 between its
-four-crate test and the rapidfuzz extension test. `coverage` is 22m10 of
-`llvm-cov` alone, nightly-only, and deliberately opts out of sccache and mold
-(`rust.yml:358-360`).
+10m47 in `cargo test --workspace`. `coverage` is 22m10 of `llvm-cov` alone,
+nightly-only, and deliberately opts out of sccache and mold (`rust.yml:358-360`).
+
+**Expected critical path after both splits**, holding the cold step costs
+constant: `max(clippy 10m32 + rustdoc 9m20, entities 10m39, api-gate 10m34,
+ducklake 16m36, extensions 9m47, test 14m22)` ≈ **20m**, against 42m38 measured.
+Re-measure rather than trusting that arithmetic — it assumes six jobs restoring
+one cache entry in parallel costs each of them what it cost one job serially,
+which is exactly the kind of assumption the `sccache --show-stats` output exists
+to check.
 
 ## Why cold happens: the Actions cache budget
 
@@ -131,11 +159,11 @@ rust-cache entry, so making the profile real buys cache headroom twice.
 | Drop `coverage`'s cache save | **no** | frees 1.8 GiB but makes a 22m10-warm job permanently cold against a 60-min timeout; the profile change shrinks the entry instead |
 | Prune sccache to a budget, nightly | yes | caps the entry count that does the evicting |
 | `sccache --show-stats` in each job | yes | the hit rate was never observable; it is the input to every later decision here |
-| Split the serial `fmt + clippy + docs` | yes | four independent ~10m steps; the advisory one was pure critical-path tax |
+| Split the serial `fmt + clippy + docs` | yes | four independent ~10m steps; the advisory one was pure critical-path tax. Done 2026-10-22: `entities` + `api-gate` split out, `entities` required |
 | cargo-nextest | no | build time dominates execution time here; revisit after the above |
 | `.cargo/config.toml` for local mold/sccache | no | helps laptops, not CI; worth doing, not yet scoped |
 | cargo-chef + cache mounts in `rust/Dockerfile` | no | `COPY . .` + one `cargo build --release` means any source change rebuilds DuckDB in release mode; real, separate |
-| Larger runners | no | see below |
+| More cores per job | **blocked** | not reachable by editing `runs-on:` on a user-owned repo — see below |
 | headstart | no | see below |
 
 ## Rejected: headstart
@@ -190,22 +218,72 @@ faster on 4 cores.
 
 **Date.** 2026-10-22.
 
-## Rejected: larger runners, for now
+## Blocked: more cores per job
 
-**Decision.** Stay on `ubuntu-latest` until the cache and profile fixes above have
-been measured.
+**Decision.** More cores is wanted (operator: "having fast CI is really
+important") but is **not reachable by editing `runs-on:`**, so the parallelism
+above was taken first. Any core increase needs an account-level decision.
 
-**Context.** Larger GitHub-hosted runners are the one lever that multiplies every
-job at once, and they would also relieve the disk wall that forced the reclaim
-step and the debug-profile hunt. They cost roughly 2× per minute at 8 cores. The
-case for deferring is that a 42-minute job that should be 14 is not a compute
-problem, and buying cores to paper over a blown cache budget would hide the
-actual fault while still paying for it on every run.
+**Context — what this repo can actually run.** The repository is **public and
+owned by a user account**, not an organisation. That fixes two things:
 
-**Rejected alternative.** Moving `lint`, `test` and `ducklake-e2e` to
-`ubuntu-latest-8-core` now. Reconsider once the baseline above has been
-re-measured post-change — and note that it is also precondition 1 for a headstart
-revisit.
+- `ubuntu-latest` is 4 vCPU / 16 GB, and **its minutes are free**, because
+  standard GitHub-hosted runners are free for public repositories. The current
+  bill for all of this CI is zero.
+- **GitHub "larger runners" are not available.** They are a Team / Enterprise
+  Cloud feature, provisioned as a runner group in *organisation* settings, and
+  they are **metered even on public repositories** (~$0.012/min for 4-core
+  Linux, scaling with size). A user-owned repo has no org settings page to
+  create one in. `gh api repos/.../actions/runners` also confirms no self-hosted
+  runner is registered.
+
+So the failure mode to avoid is writing a label like `ubuntu-latest-8-core` that
+does not resolve: the job then queues forever, and on a **required** check that
+blocks every PR — the same class of mistake as a `paths:` filter on a required
+workflow.
+
+**The three real paths, none of them a one-line edit.**
+
+1. **A third-party runner provider** (Blacksmith, Depot, BuildJet, Namespace,
+   WarpBuild). Install a GitHub App, then change `runs-on:` per job. Several have
+   free or discounted open-source tiers, and — relevant here — several ship their
+   own cache backend with a far higher ceiling than 10 GB, which would retire the
+   eviction problem this file is mostly about rather than just outrunning it.
+   Lowest friction, and the only option that addresses both axes at once.
+2. **An organisation on the Team plan**, which unlocks GitHub larger runners.
+   Transfer the repo, create a runner group, then use its label. Keeps everything
+   first-party; costs the plan plus metered larger-runner minutes, and gives up
+   the free-for-public-repos standard-runner minutes for any job moved over.
+3. **Self-hosted runners** on the existing AWS/EKS footprint. **Weigh this
+   carefully on a public repo:** a pull request from a fork can execute arbitrary
+   code on a self-hosted runner, which is why GitHub advises against self-hosted
+   runners on public repositories. It is mitigable (fork PRs gated behind manual
+   approval) but it is a real attack surface on a repo that holds a `security`
+   skill and a pentest programme, and it carries infrastructure cost and
+   maintenance that the other two do not.
+
+**What was done instead, and why it was done first.** Parallelism, which is free:
+`fmt + clippy + docs` and `DuckLake + extensions e2e` were each running
+independent steps serially, so they cost the sum rather than the longest. That
+takes the cold critical path from 42m38 to roughly 20m without an account
+decision. A core increase multiplies whatever remains after that — and buying
+cores before fixing a blown cache budget and a serial job graph would have hidden
+both faults while paying for them on every run.
+
+**Deferred, deliberately** (operator, 2026-10-22): take the free parallelism
+first, re-measure, then revisit cores with numbers. The expected ~20m critical
+path may be enough on its own, and a core increase multiplies whatever is left
+rather than being wasted by it.
+
+**The scope is already decided, so a revisit need not re-litigate it:** the
+**longest required** jobs only — `DuckLake + extensions e2e`,
+`fmt + clippy + docs`, and `test`. Not the cheap jobs, not `entities` /
+`api-gate` / `extensions` (already ~10m and off the critical path), and not the
+nightly ones. Pay only where wall clock gates a merge; everything else keeps the
+free standard runner.
+
+**Still open.** Which of the three paths. Note that path 1 or 2 is also
+precondition 1 for a [headstart](#rejected-headstart) revisit.
 
 **Date.** 2026-10-22.
 
