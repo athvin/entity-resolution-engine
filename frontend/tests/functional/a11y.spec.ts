@@ -9,7 +9,27 @@ import { login, ORG, USERS } from "./helpers";
  * the weight; this catches what slips around them.
  */
 
-const SCREENS: { name: string; path: string; ready: (page: Page) => Promise<void> }[] = [
+const SCREENS: {
+  name: string;
+  path: string;
+  ready: (page: Page) => Promise<void>;
+  /**
+   * Skip the fixture login for a screen that is reachable without a session.
+   * `exactOptionalPropertyTypes` is on, so this is explicitly `| undefined`
+   * rather than a bare optional.
+   */
+  anonymous?: boolean | undefined;
+}[] = [
+  {
+    // The public landing page. Listed first because it is the only screen a
+    // visitor sees before deciding whether to use the product at all.
+    name: "landing",
+    path: "/",
+    anonymous: true,
+    ready: async (page) => {
+      await expect(page.getByTestId("marketing-hero")).toBeVisible();
+    },
+  },
   {
     name: "dashboard",
     path: `/${ORG}/dashboard`,
@@ -86,7 +106,9 @@ test.describe("accessibility", () => {
   for (const screen of SCREENS) {
     test(`${screen.name} has no serious axe violations`, async ({ page, isMobile }) => {
       test.skip(isMobile, "one axe pass per screen; the desktop DOM is a superset");
-      await login(page, USERS.steward);
+      // The sweep logs in before every screen, so an unauthenticated route
+      // cannot be added without making this step conditional.
+      if (!screen.anonymous) await login(page, USERS.steward);
       await page.goto(screen.path);
       await screen.ready(page);
       const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze();

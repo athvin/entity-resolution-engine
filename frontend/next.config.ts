@@ -4,8 +4,8 @@ import type { NextConfig } from "next";
  * Response security headers for every path.
  *
  * Set here rather than in src/proxy.ts because `headers()` applies to static
- * responses too: `/login` and `/reset` are prerendered (see the build output),
- * and the proxy's matcher deliberately excludes static assets.
+ * responses too: `/`, `/login` and `/reset` are prerendered (see the build
+ * output), and the proxy's matcher deliberately excludes static assets.
  *
  * The CSP is REPORT-ONLY for now, and the policy below is the realistic one
  * rather than the strict one, on purpose. A strict script-src needs a per-request
@@ -16,6 +16,13 @@ import type { NextConfig } from "next";
  * (an injected script, an unplanned external connect) instead of drowning in
  * our own inline tags. Tightening script-src via nonces is the follow-up; see
  * docs/frontend-testing.md.
+ *
+ * The scope of that follow-up GREW when the marketing surface landed. The set
+ * of pages a nonce policy would force dynamic is no longer two auth forms — it
+ * is the whole public funnel, which is precisely the set you least want
+ * rendered per request. (The landing page's one inline tag is JSON-LD, which
+ * CSP3 classes as a data block rather than a script resource, so it is not
+ * subject to script-src either way.)
  */
 const CSP_REPORT_ONLY = [
   "default-src 'self'",

@@ -259,6 +259,42 @@ possible contrast with Cloudingo's most-cited complaint ("a lot going on", deep 
   queued vs running vs retrying). The UI renders those truthfully with human labels instead
   of flattening them into fake booleans.
 
+### 3.4 The marketing surface
+
+The public landing page is a `(marketing)` route group inside the same Next app,
+statically prerendered (`export const dynamic = "force-static"`). It is **not** a separate
+project and **not** `output: 'export'` — the app serves the BFF and needs a server, and a
+second project would mean a second copy of the token system, a second gate, a second
+audit/licence allowlist and a hosting target that does not exist.
+
+**It inherits §3.3 in full.** The ESLint palette rule is repo-wide under `frontend/`, and
+exempting marketing would mean either a second config block (which also exempts those paths
+from the other rules in that array) or hue-bearing variables in the token file every app
+component reads. Both cost more than they buy. The positive case is stronger anyway: in a
+category of indigo-gradient dashboards the grayscale *is* the differentiator, and a landing
+page that opens on a gradient before handing the visitor a black-and-white app has said the
+product is less confident than its marketing.
+
+So hero interest comes from a 6–8× type-scale ratio, weight contrast inside a single line,
+`bg-foreground text-background` inversion spent **once per viewport** on the primary CTA, the
+three surface planes, and one honest product image — two near-duplicate records resolving
+into a golden record with the evidence that produced it, built from the same hand-rolled
+DOM/CSS vocabulary as the real evidence waterfall.
+
+Two structural notes worth knowing before editing it. `/` is the landing page, so the
+signed-in dispatcher moved to `/app`; because `/app` is deliberately absent from the proxy's
+`PUBLIC_PATHS`, one CTA is correct for both signed-in and signed-out visitors with no session
+read and therefore no client JavaScript. And the canonical origin is a hardcoded constant
+rather than an environment variable — a canonical URL is one value for the whole internet by
+definition, `next build` runs with no runtime environment, and one image serves every
+per-developer hostname.
+
+**Not yet reachable from the internet.** The ALB is `scheme: internal` and the Cloudflare
+records are DNS-only, so the surface is complete and fully tested but unpublished until the
+production edge topology is decided (§4.1 and `docs/infrastructure.md`). Whether marketing
+lives at the apex with the portal at `app.` — which would need host-based routing in
+`src/proxy.ts` — or both share one hostname is the open question.
+
 ---
 
 ## 4. The two-plane data rule

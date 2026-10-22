@@ -55,6 +55,7 @@ below `lg`.
 <!-- BEGIN GENERATED: screens-coverage -->
 ### Screens swept by the axe gate
 
+- `/`
 - `/[org]/assistant`
 - `/[org]/campaigns`
 - `/[org]/dashboard`
@@ -71,7 +72,6 @@ below `lg`.
 Each of these renders without any accessibility check. See the prose above
 for the three categories that legitimately sit outside the sweep.
 
-- `/`
 - `/[org]/records/[entityId]`
 - `/[org]/runs/[jobId]`
 - `/[org]/runs/schedules`
@@ -85,6 +85,7 @@ for the three categories that legitimately sit outside the sweep.
 - `/admin/tenants`
 - `/admin/tenants/[org]`
 - `/admin/tenants/new`
+- `/app`
 - `/invite/[token]`
 - `/login`
 - `/reset`

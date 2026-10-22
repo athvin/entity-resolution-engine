@@ -99,6 +99,27 @@ attribute — deliberately, so a palette class hidden inside `cn()`, a `cva`
 variant or a helper does not evade it. Its message names the remedy, so read the
 failure rather than working around it.
 
+### Three ways colour gets in that the rule cannot see
+
+The gate matches Tailwind palette *utilities*. Colour that arrives by any other
+route is invisible to it, so these need checking by eye:
+
+- **Browser-default form controls.** A bare `<input type="checkbox">` or
+  `type="range"` renders in the user agent's accent colour — blue in every
+  mainstream browser — with no class for the rule to match. Every such control
+  needs `accent-foreground` (or `appearance-none` plus explicit styling). There
+  is at least one such checkbox in the config studio's comparison editor today;
+  the sliders beside it get this right.
+- **Anything with its own palette**: an embedded SVG with hardcoded `fill`, an
+  inline `style`, a canvas, a third-party widget, a favicon.
+- **A chroma-bearing token.** A value added to `globals.css` with a non-zero
+  middle number is a palette the rule will happily let through, because every
+  consumer uses a legitimate semantic class name. The generated token reference
+  shows both themes' raw values for exactly this reason.
+
+The visual baselines are the backstop, and they are only a backstop if they are
+current — a stale baseline keeps asserting the design it was captured from.
+
 ## Primitives are added through the CLI, never hand-rolled
 
 `src/components/ui/` holds a deliberately thin set — far fewer than stock

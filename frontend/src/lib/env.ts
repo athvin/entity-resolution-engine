@@ -38,3 +38,20 @@ export function env(): Env {
   cached ??= envSchema.parse(process.env);
   return cached;
 }
+
+/**
+ * The deployment's own origin, read WITHOUT validating the rest of the schema.
+ *
+ * `env()` is lazy precisely so `next build` succeeds on a machine with no
+ * runtime environment — but `src/app/robots.ts` is **prerendered**, so it runs
+ * during the build, and calling `env()` there would demand
+ * ERSERVER_OPERATOR_TOKEN, ERWEB_DATABASE_URL and the two secrets at build
+ * time. The Docker build sets none of them, so the whole export step fails.
+ *
+ * This is the one escape hatch, and it is narrow on purpose: a single optional
+ * variable with nothing to validate. Anything that needs a *required* value
+ * must go through `env()` and must not be prerendered.
+ */
+export function publicBaseUrl(): string | undefined {
+  return process.env.ERWEB_PUBLIC_BASE_URL;
+}

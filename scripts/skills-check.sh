@@ -600,11 +600,14 @@ gen_screens_coverage() {
 			| sed -e 's#^$#/#' \
 			| sort -u
 	)
-	# The gate addresses screens by `path:`, which interpolates the fixture org.
-	# Normalise those to the same [org] shape the route list uses.
+	# The gate addresses screens by `path:`. Tenant entries are template literals
+	# interpolating the fixture org; public ones are plain quoted strings. BOTH
+	# spellings must be read — matching only backticks reported the landing page
+	# as unchecked while it was in fact swept, and a gate that cries wolf about a
+	# covered screen is worse than one that stays quiet.
 	gated=$(
-		grep -oE 'path: `[^`]*`' "$spec" \
-			| sed -e 's/^path: `//' -e 's/`$//' -e 's#\${ORG}#[org]#g' \
+		grep -oE 'path: (`[^`]*`|"[^"]*"|'"'"'[^'"'"']*'"'"')' "$spec" \
+			| sed -e 's/^path: //' -e 's/^[`"'"'"']//' -e 's/[`"'"'"']$//' -e 's#\${ORG}#[org]#g' \
 			| sort -u
 	)
 	echo "### Screens swept by the axe gate"
