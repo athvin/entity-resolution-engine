@@ -52,22 +52,36 @@ all.
 
 ## 3. A pod stuck Pending
 
-**Query:** "A 10M-row run has been Pending for twenty minutes. The job shows
-active and there's nothing in the pod events. Cluster out of memory?"
+**Query:** "I pointed a batch workload at a NodePool with `4xlarge` instances.
+NodeClaims keep appearing and disappearing, the pod stays Pending, and there's
+nothing in its events. Cluster out of memory?"
 
 Must:
 
 - Name the account vCPU quotas as the first thing to check —
   *All Standard Spot Instance Requests* (`L-34B43A08`) and *Running On-Demand
   Standard instances* (`L-1216C47A`), defaulting to **8 vCPU each**, measured in
-  vCPUs rather than instances, so a 16-vCPU runner node can never place.
+  vCPUs rather than instances, so a 16-vCPU node can never place.
 - Describe the signature: the fleet request fails
   `VcpuLimitExceeded` / `MaxSpotInstanceCountExceeded`, the NodeClaim is torn
-  down and retried, and the dispatcher keeps the job active throughout — which
-  is why there is nothing obvious in the events.
+  down and retried, and the pod stays Pending throughout — which is why there is
+  nothing obvious in the pod's own events.
 
 Credit for knowing both were raised to 64 in `us-east-2`, and for connecting it
 to the single-account model: dev and prod share service quotas.
+
+> **Maintainer's note on the wording.** This asks about a *NodePool scale-up*,
+> deliberately, not about a stuck pipeline run. The earlier wording — "a 10M-row
+> run has been Pending for twenty minutes, the job shows active" — was not
+> answerable as posed: there is no per-run runner pod. The k8s Job launcher was
+> never built, the Rust dispatcher runs the matching `er-cli` op in-process and
+> awaits it inline (`rust/crates/er-server/src/dispatcher.rs`), and the workspace
+> carries no `kube` or `k8s-openapi` dependency. A correct answer to that wording
+> had to open by rejecting the premise, which made "name the quotas first"
+> impossible to satisfy and scored a right answer as a miss. The quota knowledge
+> is unchanged and still correct — it was really observed on 2026-10-11
+> (`docs/infrastructure.md:98`) — so the scenario moved, not the must-list. If
+> the Job launcher is ever built, the original wording becomes valid again.
 
 ## 4. Why the bill moved
 

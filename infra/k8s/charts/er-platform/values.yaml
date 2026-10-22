@@ -28,9 +28,12 @@ images:
     repository: er-web
     tag: ""
     digest: ""
-  # The image every runner Job runs (§6.2/§11: er-pipeline — the engine CLI
-  # and the baked DuckDB extensions). Resolved to ERSERVER_RUNNER_IMAGE on the
-  # dispatcher; the same tag-pinning rule as above applies.
+  # The image the planned runner Job will run (§6.2/§11: er-pipeline — the
+  # engine CLI and the baked DuckDB extensions), to be resolved to
+  # ERSERVER_RUNNER_IMAGE on the dispatcher; the same tag-pinning rule as above
+  # will apply. NOT IMPLEMENTED today — there are no runner Jobs and
+  # ERSERVER_RUNNER_IMAGE is read nowhere; see the `dispatcher:` block below.
+  # The image itself is real and is built by CI; it is what `er` runs locally.
   runner:
     repository: er-pipeline
     tag: ""
@@ -81,13 +84,28 @@ api:
 dispatcher:
   # replicas and strategy are NOT values: §2's reaper assumes it is alone, so
   # the template hard-codes replicas 1 / Recreate.
-  concurrency: 2 # ERSERVER_CONCURRENCY — cross-tenant throughput only
+  #
+  # NOT IMPLEMENTED — `concurrency` and `launcher` below describe the k8s Job
+  # launcher, which does not exist. The Rust dispatcher runs the matching
+  # `er-cli` op IN-PROCESS and awaits it inline, one job at a time: see the
+  # module header and `dispatch_once` in
+  # `rust/crates/er-server/src/dispatcher.rs`. The workspace has no `kube` or
+  # `k8s-openapi` dependency at all, so it cannot create a Job.
+  #
+  # Neither ERSERVER_CONCURRENCY nor ERSERVER_LAUNCHER is read by any Rust
+  # source or chart template — they appear only in these comments. They are kept
+  # as the shape the planned launcher will take (infrastructure.md §6, listed as
+  # Phase 2 work), NOT as live configuration. infrastructure.md still describes
+  # the seam in terms of `server/src/erserver/dispatcher.py`, which went with the
+  # Python tree, so treat that citation as stale too.
+  #
+  # Consequence worth knowing when debugging: there is no per-run runner pod, so
+  # a stuck run shows nothing in pod events — read the `er-server` container log
+  # in the merged `web-api` pod instead, and look for a stale
+  # `dispatching`/`running` row holding the org's partial unique index.
+  concurrency: 2 # ERSERVER_CONCURRENCY — not read; see above
   pollSeconds: "" # ERSERVER_POLL_SECONDS; empty keeps the erserver default (2s)
-  # ERSERVER_LAUNCHER: how runs execute (infrastructure.md §6). "kubernetes"
-  # is the in-cluster default — one batch/v1 Job per run on the tainted runner
-  # NodePools; "subprocess" forks the runner inside the dispatcher pod —
-  # it exists for debugging, not operation.
-  launcher: kubernetes
+  launcher: kubernetes # ERSERVER_LAUNCHER — not read; see above
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: 500m, memory: 1Gi }
