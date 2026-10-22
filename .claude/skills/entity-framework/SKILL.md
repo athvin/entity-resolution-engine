@@ -34,7 +34,7 @@ Everything else is gated — see [references/gates.md](references/gates.md).
 
 | What | Where |
 |---|---|
-| Entity definition | `entities/<name>/entity.yaml` (25 entities) |
+| Entity definition | `entities/<name>/entity.yaml` (the inventory is generated — [references/entities-index.md](references/entities-index.md)) |
 | Declared statements | `entities/<name>/{create,read,update,delete}/<stmt>.{sql,yaml}` |
 | Generated Rust (structs + query fns + `batch.rs` + `schema.rs`) | `rust/crates/er-entities/src/` |
 | Generated DDL | `rust/crates/er-entities/ddl/{lake,postgres}/` |
@@ -61,9 +61,16 @@ The order is always definition → regenerate → use. Copy this checklist:
 - [ ] 5. Commit the definition AND the regenerated artifacts together
 ```
 
-`verify` = the byte-exact staleness check + orphan scan + the analyser's E0xx
-passes. It is CI's gate (the `lint` job) and part of `make check`. A change
-that skips step 2 fails CI with "N generated file(s) are stale or missing".
+`verify` = the entity lint pass (V-rules) + the byte-exact staleness check +
+orphan scan + the analyser's E0xx passes, in that order. The lint pass
+**short-circuits on an error-severity finding**, because every later pass
+assumes a conforming catalog. It is CI's gate (the `lint` job) and part of
+`make check`. A change that skips step 2 fails CI with "N generated file(s) are
+stale or missing".
+
+`er-entity check` and `er-entity verify` are the **same code path** — both
+match arms call one function. Treat them as aliases; `check` is not a narrower
+staleness-only command, whatever its own help text suggests.
 
 **Live databases:** `er-entity diff --store postgres --dsn <dsn>` compares a
 running control database against the catalog; `er-entity migrate --apply`
@@ -147,11 +154,16 @@ its golden fixtures — do not add analyser coverage there.
   param; `LIMIT $limit` binds fine.
 
 The full rule table with remedies: [references/statements.md](references/statements.md).
+Note that **`E007`, `E008` and `E013` are documented but never implemented** —
+do not rely on them firing. The analyser's own internals, the rewrite step and
+the generated list of which codes are really live belong to the sql-analysis
+skill.
 
 Those are the **statement** rules (`E0xx`, in `er-sql-check`). The **entity**
 rules (`V0xx`, in `er-entity-lint`) are a separate family and documented
 differently: every rule carries its own reasoning, so rather than summarising
-them here, ask the tool.
+them here, ask the tool. Codes are append-only — a retired rule keeps its code,
+so the next free code is always one past the highest, never a gap.
 
 ```
 er-entity lint --explain V4    # why the rule exists, plus worked examples
@@ -167,8 +179,8 @@ drift. Adding a rule: [references/gates.md](references/gates.md).
 | Failure | Meaning | Fix |
 |---|---|---|
 | `er-entity lint: [V0xx] …` | an `entity.yaml` breaks a convention | `er-entity lint --explain <code>` |
-| `er-entity check: … stale or missing` | definition changed without regen | run gen, commit the diff |
-| `er-entity check: … orphaned file(s)` | a deleted entity/statement left output behind | delete the named files |
+| `… stale or missing` | definition changed without regen | run gen, commit the diff |
+| `… orphaned file(s)` | a deleted entity/statement left output behind | delete the named files |
 | `er-entity analyse: [E0xx] …` | a statement breaks a rule | see the rule's remedy in references/statements.md |
 | oracle (`oracle_lake_reads_match_their_declared_shape`) | DuckDB's real result type ≠ declaration | fix the declared type, or CAST in SQL |
 | `declared_names` / `the_lake_contains_only_declared_relations` | an undeclared `lake.main.<x>` | declare it (entity or registry) first |

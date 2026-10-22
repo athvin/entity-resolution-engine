@@ -78,7 +78,7 @@ For a small harness check, use `benchmarks/full_pipeline.py --scale smoke --loca
 --with-incremental --incremental-records 100 --incremental-scenario mixed-v1 --profile
 --with-profile-control` with `uv run python`. See the
 [performance record](performance.md) and the repository
-[analysis skill](../.agents/skills/ducklake-performance/SKILL.md), which retain both
+[analysis skill](../.claude/skills/ducklake-performance/SKILL.md), which retain both
 workloads' measured results and the evidence-linked backlog. Ordered writes and
 partitioning are future measured experiments; this campaign changes no production
 layout, clustering or scoring algorithm.
