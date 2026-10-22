@@ -1,6 +1,6 @@
 ---
 name: frontend-testing
-description: Explains this repo's frontend test tiers and quality gates — which tier a change belongs in (unit, component, Playwright functional, the dormant full-stack tier), the per-PR coverage floor and why it sits where it does, the axe accessibility gate, PGlite as the test database, the Playwright fixture orgs and the container-tag-must-match-dependency rule for visual baselines, plus the known false-green traps. Use when adding or fixing a frontend test, when a Playwright or vitest run fails, when choosing where new coverage belongs, when visual baselines change, or when a frontend CI job is red. For the BFF boundary and its authz gate see frontend-bff; for tokens, styling and interface copy see frontend-design-system; for what to render on a dense data surface and which screens the axe gate is missing see frontend-data-ui; for the public marketing surface see landing-page; for CI job wiring and required checks see ci-and-supply-chain.
+description: Explains this repo's frontend test tiers and quality gates — which tier a change belongs in (unit, component, Playwright functional, the Docker-backed full-stack tier that is a release gate rather than a PR gate), the per-PR coverage floor and why it sits where it does, the axe accessibility gate, PGlite as the test database, the Playwright fixture orgs and the container-tag-must-match-dependency rule for visual baselines, plus the known false-green traps. Use when adding or fixing a frontend test, when a Playwright or vitest run fails, when choosing where new coverage belongs, when visual baselines change, or when a frontend CI job is red. For the BFF boundary and its authz gate see frontend-bff; for tokens, styling and interface copy see frontend-design-system; for what to render on a dense data surface and which screens the axe gate is missing see frontend-data-ui; for the public marketing surface see landing-page; for CI job wiring and required checks see ci-and-supply-chain.
 ---
 
 # Frontend testing
@@ -16,7 +16,7 @@ checks — so a frontend change is not done until its tier passes.
 | unit | `tests/unit/` | `pnpm test` | yes, per-PR |
 | component | `tests/component/` | `pnpm test` | yes, per-PR |
 | functional | `tests/functional/` | `pnpm test:e2e` | yes, per-PR |
-| full-stack | `tests/e2e/` | `make frontend-e2e` | **no — dormant** |
+| full-stack | `tests/e2e/` | `make frontend-e2e` | **no — release gate** |
 
 Choosing:
 
@@ -26,12 +26,15 @@ Choosing:
 - **A flow through real route handlers**, a session, authorization, or anything
   that needs the app actually running → functional. This is where most
   meaningful frontend coverage lives.
-- **The whole stack against a real backend** → the dormant tier. Do not add
-  there expecting it to run.
+- **The whole stack against a real backend** → the full-stack tier. It is real
+  and runnable, but it is **not on the PR path** — it needs Docker and takes
+  about ten minutes.
 
-The full-stack tier is dormant because its seed script was deleted with no
-replacement, so it needs a seeded tenant that nothing currently provides.
-Treat it as unavailable rather than broken.
+The full-stack tier runs against one Postgres, a local DuckLake, `er-server`
+and the built Next app. It was dormant from the all-Rust cutover until W0.5b
+revived it, so treat any older note calling it unavailable as stale. Reach for
+it when a change spans BFF → er-server → engine; its sequence is
+`make frontend-dev`, `make frontend-seed`, `pnpm build`, `make frontend-e2e`.
 
 ## The coverage floor
 

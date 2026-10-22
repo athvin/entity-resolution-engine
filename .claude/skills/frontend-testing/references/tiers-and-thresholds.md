@@ -46,5 +46,5 @@ so a divergence shows up as a diff in this file:
 | unit | `frontend/tests/unit/` | `pnpm test` |
 | component | `frontend/tests/component/` | `pnpm test` |
 | functional | `frontend/tests/functional/` | `pnpm test:e2e` |
-| e2e | `frontend/tests/e2e/` | `make frontend-e2e` — dormant, its seed script was deleted |
+| e2e | `frontend/tests/e2e/` | `make frontend-e2e` — release gate, needs Docker (~10 min) |
 <!-- END GENERATED: tiers-and-thresholds -->

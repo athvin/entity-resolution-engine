@@ -508,7 +508,7 @@ gen_tiers_and_thresholds() {
 		case $t in
 		unit | component) cmd='`pnpm test`' ;;
 		functional) cmd='`pnpm test:e2e`' ;;
-		e2e) cmd='`make frontend-e2e` — dormant, its seed script was deleted' ;;
+		e2e) cmd='`make frontend-e2e` — release gate, needs Docker (~10 min)' ;;
 		*) cmd='—' ;;
 		esac
 		printf '| %s | `frontend/tests/%s/` | %s |\n' "$t" "$t" "$cmd"

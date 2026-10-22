@@ -46,7 +46,7 @@ the same fix.
 | `frontend-bff` | that the browser never reaches the Rust control plane, the split between the server-only upstream client and the browser's same-origin client |
 | `frontend-data-ui` | the charting policy that every chart is hand-rolled DOM/CSS rather than a library or canvas and why |
 | `frontend-design-system` | the Tailwind v4 CSS-first tokens in `globals.css` and the two deliberate WCAG deviations from stock shadcn |
-| `frontend-testing` | which tier a change belongs in (unit, component, Playwright functional, the dormant full-stack tier) |
+| `frontend-testing` | which tier a change belongs in (unit, component, Playwright functional, the Docker-backed full-stack tier that is a release gate rather than a PR gate) |
 | `infra-platform` | the Terraform env/module layout and shared S3 state with lockfile locking |
 | `landing-page` | the `(marketing)` route group that prerenders statically inside the same app that serves the BFF |
 | `pentest` | a Strix-style run that does recon over the attack surface, fans out a tester subagent per vulnerability category (user-invoked only) |
