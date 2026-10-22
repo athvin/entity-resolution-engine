@@ -1,7 +1,7 @@
 kind: statement
 operation: update
 mode: partial
-description: "Activate one version and archive whichever version was active, in a single statement. One statement rather than two so there is no window in which the tenant has no active model, and no transaction needed around the generated query functions."
+description: "Activate one version and archive whichever version of THE SAME NAME was active, in a single statement. One statement rather than two so there is no window in which the tenant has no active model, and no transaction needed around the generated query functions. Scoped by name, not by org: this used to archive every active row for the org, so a tenant that activated a second named model silently retired the first — and an ensemble is exactly a list of named models active at once (E5b). The name comes from a subquery on `$model_id` rather than a parameter so the caller cannot pass one that disagrees with the row, and so the whole thing stays one atomic statement. `matching_models_one_active_per_name` makes the resulting invariant structural."
 params:
   - { name: model_id, type: varchar }
   - { name: org_id, type: varchar }

@@ -949,9 +949,47 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          the partition **splitting** into more entities than the loose model produced.
          Sabotaging the retirement reproduces the original bug exactly (`v0001` 19 active beside
          `v0002-strict` 17).
-   - [ ] E5b ensembles + cascades (#31 — N models per run, `then_run` cascade vs `and_run`
-         union, per-model threshold; E5a's live-set seam is the entry point),
-         E9b import-time screening + update rules (#38/#39), E9c S3 auto-ingestion (#47).
+   - [x] **E5b-1 the registry made per-name, which is what an ensemble needs to exist.**
+         `matching_model/entity.yaml` has always said "one tenant can keep several models", and
+         the registry made that impossible: `read/active` was `WHERE org_id AND state='active'
+         ORDER BY version DESC LIMIT 1` and `update/activate` archived **every** other active row
+         for the org, so activating a second *named* model silently retired the first. An
+         ensemble is a list of named models active at once, so it could not be represented at
+         all — this is the schema change E5b was always going to need first, and it is worth its
+         own slice because it is the only part that touches DDL.
+         Activation is now scoped to the name, taken from a subquery on `$model_id` rather than a
+         parameter — the caller cannot pass a name that disagrees with the row, and the statement
+         stays a single atomic UPDATE (the property E1 chose it for: no window with no active
+         model, no transaction around the generated query functions). The invariant is also
+         **structural**: `matching_models_one_active_per_name` is a partial unique index on
+         `(org_id, name) WHERE state = 'active'`, so a second active row for one name is refused
+         by Postgres even if some future writer forgets the archive half.
+         `read/active_all` + `pg::active_models` serve the set; `read/active` stays for the
+         single-model path, where it still answers the same row. `ORDER BY name` there is read
+         determinism only — a cascade's step order comes from the published config's ordered
+         `models:` list, never from the registry, so renaming a model cannot silently reorder a
+         cascade.
+         Tests, in `pg_model_registry.rs`'s existing single test as new phases: two names active
+         simultaneously; activating a new version of one name archives only that name and leaves
+         the other untouched; and a direct `INSERT` of a second active row for one name is
+         refused *by that index* (asserted on `DbError::constraint`, not a flattened message —
+         `err.to_string()` is only "db error"). Observed failing both ways: reverting the
+         activate scoping leaves only the newly activated name active, which is the original bug.
+         E1's "exactly one version is ever active" assertion did not weaken — it lists one name's
+         versions, so it was always per-name in effect; only its wording was wrong.
+   - [ ] E5b-2 the ensemble itself (#31 — a config `models:` list, the dispatcher resolving N
+         active versions, `ScorePass` per model with the full live set handed to
+         `retire_other_models`, `and_run` union vs `then_run` cascade, per-model thresholds).
+         The design decision already taken: per-model thresholds mean the model-blind edge reads
+         (`auto_merge_edges_live`, which reconcile clusters from, and `active_page`) must learn
+         about `model_version`, and the way to do that without pulling every scored pair into
+         Rust is to stage `(model_version, threshold)` into a temp table and join — the same
+         pattern `retire_other_models` already uses for `__live_models`. The INV-EQ obligation
+         stands: a single-model ensemble must leave `match_scores` bit-identical.
+   - [ ] E5b-3 the models page (catch-up UI for E1 — versions with state, the m/u + log2(m/u)
+         weights view the API already exposes, upload, compile, activate; the first surface for
+         the registry at all).
+   - [ ] E9b import-time screening + update rules (#38/#39), E9c S3 auto-ingestion (#47).
 3. **Learning loop**
    - [x] **E10a the `train` job, which the dispatcher had no arm for.** `train` has been in
          `SCHEDULABLE_KINDS` since the queue shipped — so the schedule API accepted it, and every

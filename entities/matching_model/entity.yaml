@@ -85,3 +85,14 @@ indexes:
     unique: true
   - name: matching_models_org_state
     columns: [org_id, state]
+  # One active version per (org, NAME) — not per org. This entity's description
+  # already said "one tenant can keep several models", but `read/active` was
+  # `WHERE org_id AND state='active' LIMIT 1` and `update/activate` archived
+  # every other active row org-wide, so activating a second model silently
+  # retired the first. An ensemble is a list of named models all active at once
+  # (E5b), which makes the real invariant per name. Partial, so archived and
+  # draft versions stay unconstrained.
+  - name: matching_models_one_active_per_name
+    columns: [org_id, name]
+    unique: true
+    where: "state = 'active'"

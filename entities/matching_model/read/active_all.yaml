@@ -1,0 +1,7 @@
+kind: statement
+operation: read
+mode: partial
+description: "EVERY active model version for the tenant, one per name — the ensemble a run scores with (E5b). Sibling of `active`, which serves the single-model path with `LIMIT 1`; that one answers \"the\" active model and becomes ambiguous the moment two names are active, which is why an ensemble reads through here instead. `ORDER BY name` is for read determinism only — a cascade's step order comes from the ordered `models:` list in the published config, never from this ordering, so renaming a model cannot silently reorder a cascade. `matching_models_one_active_per_name` guarantees at most one row per name."
+params:
+  - { name: org_id, type: varchar }
+returns: entity
