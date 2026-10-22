@@ -1004,7 +1004,20 @@ run_drift_check() {
 	# stays green when it matters.
 	#
 	# Still HEAD-relative, so a `git add` of a stale file cannot launder it.
-	local f stale=() tmp_head tmp_work
+	#
+	# Two liveness guards, because the per-file comparison below skips anything
+	# it cannot read out of HEAD — and a loop that skips everything reports a
+	# clean tree. Outside a git repository this check passed, silently, having
+	# compared nothing. Same shape as `lint`'s zero-skills exit and
+	# check-bff-authz.mjs's zero-routes exit: a gate that cannot tell success
+	# from never-ran is worse than no gate.
+	if ! git rev-parse --verify HEAD >/dev/null 2>&1; then
+		red "FAIL drift check cannot resolve HEAD — not a git repository, or a repository with no commits."
+		fail=1
+		return
+	fi
+
+	local f stale=() compared=0 tmp_head tmp_work
 	tmp_head=$(mktemp)
 	tmp_work=$(mktemp)
 	for f in "${generated_files[@]}"; do
@@ -1012,12 +1025,20 @@ run_drift_check() {
 		# reported it either, so keep that behaviour rather than inventing a
 		# new failure for a file this run just created.
 		git cat-file -e "HEAD:$f" 2>/dev/null || continue
+		compared=$((compared + 1))
 		git show "HEAD:$f" | generated_blocks >"$tmp_head"
 		generated_blocks <"$f" >"$tmp_work"
 		if ! cmp -s "$tmp_head" "$tmp_work"; then
 			stale+=("$f")
 		fi
 	done
+
+	if ((compared == 0)); then
+		red "FAIL drift check compared 0 files — every generated_files path is untracked or wrong."
+		rm -f "$tmp_head" "$tmp_work"
+		fail=1
+		return
+	fi
 
 	if ((${#stale[@]})); then
 		red "FAIL generated skill references are stale. Run 'make skills-check' and commit the diff."

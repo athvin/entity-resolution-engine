@@ -126,21 +126,45 @@ jobs:
   # needs no toolchain (pure shell, no cargo, no node, no network), so running
   # it unconditionally costs seconds.
   skills:
-    name: agent skills (lint)
+    name: agent skills (lint + drift)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: agent-skill authoring rules
-        # Frontmatter limits, body size, one-level references, resolving links,
-        # a table of contents on long references, and an evals.md per skill.
+      - name: agent-skill authoring rules and generated-reference drift
+        # `all` = regen + drift + lint. Authoring rules are frontmatter limits,
+        # body size, one-level references, resolving links, a table of contents
+        # on long references, and an evals.md per skill.
+        #
+        # The DRIFT half also runs here, not only in the cargo `lint` job, and
+        # that is the point of this job rather than an accident:
+        #
+        #   `lint` is gated on `detect`, which skips every compile job for a PR
+        #   touching nothing but .claude/** — so the drift check does not run on
+        #   exactly the PRs that change skills. That was sound while every
+        #   generator derived from code outside .claude/, because a code change
+        #   always ran the full gate. It stopped being sound when
+        #   `gen_skill_inventory` landed: it derives from SKILL.md descriptions,
+        #   so a one-line description edit makes the inventory tables in
+        #   docs/agent-skills.md and CLAUDE.md stale — a .claude-only PR that
+        #   goes green and turns main red on the push-to-main run.
+        #
+        # Running it needs no toolchain: every generator is grep/awk/sed over
+        # checked-in files, which is why this job can stay at 5 minutes with a
+        # bare checkout and no cargo, node or Docker.
+        #
+        # It is deliberately ALSO left in the cargo `lint` job. This job is not
+        # a required status check, so on its own it cannot block a merge; the
+        # required one covers code PRs while this one covers .claude-only PRs.
+        # Promoting this to required would make the pair redundant — worth doing
+        # now that both halves have been observed failing.
         #
         # working-directory is mandatory: this workflow defaults every `run` to
         # `rust/` (for the cargo jobs), and the script lives at the repo root.
         # Without the override this step dies with exit 127 before it checks
         # anything — which is how the first push of this job failed.
         working-directory: ${{ github.workspace }}
-        run: bash scripts/skills-check.sh lint
+        run: bash scripts/skills-check.sh all
 
   lint:
     name: fmt + clippy + docs
