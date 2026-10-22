@@ -59,3 +59,29 @@ updates:
       rust-minor-patch:
         patterns: ["*"]
         update-types: ["minor", "patch"]
+    ignore:
+      # Three crates whose major is not ours to choose: each must equal the major
+      # an EXTERNAL dependency already resolved, or the same type arrives under
+      # two crate versions and stops being the same type.
+      #
+      # `arrow` must match whatever `duckdb` pulls, because Arrow values cross
+      # that boundary. duckdb 1.10506.1 — the newest release — still requires
+      # `arrow ^58`, so arrow 60 produced `expected &[RecordBatch], found
+      # &Vec<RecordBatch>`: two RecordBatch types, one per arrow major. The
+      # unblocker is a duckdb release, not a bot PR, and when it lands the two
+      # move together by hand (closed PR #195).
+      - dependency-name: "arrow"
+        update-types: ["version-update:semver-major"]
+      # `datafusion-common` / `datafusion-expr` must match the major that
+      # `ff-analysis` resolves — a git dependency pinned to a tag, whose
+      # LogicalPlan er-sql-check inspects. On 55 the compiler said it plainly:
+      # "there are multiple different versions of crate `arrow_schema` in the
+      # dependency graph". The unblocker is a new ff-analysis tag built on the
+      # newer DataFusion (closed PRs #194, #196).
+      #
+      # er-sql-check/Cargo.toml carries the long-form reasoning, including why
+      # the resulting arrow 57/58 split is deliberate and contained.
+      - dependency-name: "datafusion-common"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "datafusion-expr"
+        update-types: ["version-update:semver-major"]
