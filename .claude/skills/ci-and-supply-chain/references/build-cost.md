@@ -152,6 +152,16 @@ jobs or they stop sharing an entry:
   or lint edit lands on a new key and therefore *saves*, while restore-keys still
   prefix-match the previous entry for a partial restore.
 
+**Verified on main run `39793219777`**, which logged `No cache found.` then
+`... Saving cache ...` — it saves now, where before it logged `Cache up-to-date`
+and skipped. And the new entry is what the profile change was always supposed to
+buy:
+
+```
+v0-rust-rust-Linux-x64-8556beb2-...   1301 MiB   stale, restored for nothing
+v1-rust-rust-Linux-x64-8556beb2-...    364 MiB   3.6x smaller
+```
+
 **The general lesson, worth more than the fix:** a cache whose key does not cover
 an input that changes build output does not go stale loudly — it goes stale
 *silently*, keeps reporting hits, and the cost shows up as compile time nobody
@@ -314,7 +324,8 @@ measures **22m10 warm against a 60-minute timeout**: llvm-cov owns `RUSTFLAGS`,
 so every unit including dependencies rebuilds, and `shared-key: rust` cannot
 substitute. That trades 1.8 GiB for a timeout failure. It is also unnecessary —
 `[profile.test]` inherits the dep setting below, so the entry shrinks on its own,
-the bulk of it having been the duckdb rlib.
+the bulk of it having been the duckdb rlib — measured at **1301 MiB -> 364 MiB**
+for the `rust` key once the key fix let a fresh entry be written at all.
 
 A fourth contributor is not CI's: `rust/Cargo.toml` carried **no `[profile.*]`
 section at all**, so the debug-info saving measured at `rust.yml:179-194` —
