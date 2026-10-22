@@ -259,18 +259,29 @@ that the axe gate or ESLint produces on its own.
 ### Tier 2 — installed plugins
 
 Vendor-maintained only, declared in `.claude/settings.json` via
-`enabledPlugins`, with **every bundled skill that contradicts this repo hidden
-through `skillOverrides`**.
+`enabledPlugins`. A bundled skill that contradicts this repo can be hidden
+through `skillOverrides` — but hiding is a weaker instrument than it looks, and
+the `aws-core` row in the decision record is the case that establishes why it is
+not sufficient on its own.
 
-Hiding is not optional tidying. A plugin's always-on cost is its skill
-descriptions, and a skill that is wrong here is worse than absent because it
-answers confidently. The AWS toolkit ships CDK, CloudFormation and Amplify
-skills against a Terraform-only repo, and SDK skills for languages this repo
-does not contain — those are hidden, and `aws-account-operations` states the
-Terraform-only rule explicitly so the remainder is safe.
+A plugin's always-on cost is its skill descriptions, and a skill that is wrong
+here is worse than absent because it answers confidently. That argues for
+hiding. Two traps argue against relying on it:
+
+- `skillOverrides` takes a bare enum string — `"on"`, `"name-only"`,
+  `"user-invocable-only"`, `"off"`. The object form `{ "hidden": true }` is
+  rejected per entry and fails **silently**, so an override can sit in the file
+  hiding nothing at all.
+- An override only covers the skills you knew to name. A plugin that adds a
+  skill, renames one, or ships more than its description implies re-exposes the
+  conflict with no diff here. Verify the names against the installed plugin
+  (`claude plugin details <name>@<marketplace>` lists them with their token
+  cost) rather than against its catalogue blurb.
 
 Note that `enabledPlugins` waits for workspace trust, so a fresh clone does not
-silently acquire them.
+silently acquire them — but trust alone does not install a plugin either. An
+`enabledPlugins` entry can therefore sit unfulfilled indefinitely, which also
+means it is untested: whatever it would load has never been observed.
 
 ### Tier 3 — MCP servers
 
@@ -284,6 +295,16 @@ infrastructure runs read-only, and **exactly one server per provider** — a
 plugin that brings its own duplicate produces competing tools that degrade
 agent performance with no error.
 
+`aws-core` is the worked example of both rules failing at once, and the reason
+it is out. It bundles an `aws-mcp` server pointed at the same AWS endpoint as
+ours, under a different name — so nothing collides, nothing warns, and both
+simply register. Ours passes `--read-only` and `--profile er-readonly`; theirs
+passes neither, so the duplicate reintroduces exactly the write-capable tooling
+our invocation strips, under whatever identity the default credential chain
+happens to resolve. A guardrail expressed as client-side flags is only as good
+as the inventory of clients, which is why the read-only *identity* is the
+control that actually holds.
+
 A rule learned writing the AWS entry: **do not declare a server whose package
 name you have not verified.** `.mcp.json` carries only `aws`, whose invocation
 comes verbatim from AWS's own setup documentation. Terraform's server arrives
@@ -296,14 +317,14 @@ failure looks like the server simply not appearing.
 | Candidate | Decision | Why |
 |---|---|---|
 | `web-interface-guidelines` rules | **vendored** | good rules, fetched at runtime upstream |
-| `aws-core` plugin | **installed**, 8 of 13 skills hidden | live AWS documentation and the billing/observability/IAM skills; its IaC skills are the wrong tool here |
-| `terraform` plugin | **installed** | MCP server only, no always-on skill cost |
-| AWS MCP Server | **installed**, read-only | live account introspection, and `retrieve_skill` delivers AWS's own guidance on demand |
+| `aws-core` plugin | **out** | bundles an `aws-mcp` server with neither `--read-only` nor a profile, and installs a `PreToolUse` hook; its CDK and CloudFormation authoring skills are the wrong tool here, and `skillOverrides` could not be relied on to contain them |
+| `terraform` plugin | **installed** | MCP server only, no always-on skill cost; defaults to the read-only `registry` toolset, with mutation behind `ENABLE_TF_OPERATIONS` |
+| AWS MCP Server | **installed**, read-only | `retrieve_skill` delivers AWS's own guidance on demand. Note `--read-only` strips `run_script`, so this reaches **no account state** — it is documentation and guidance only |
 | `aws-data-analytics` | out | S3 Tables / Glue / Athena would push toward the wrong architecture; the lake is DuckLake on plain S3 with a Postgres catalog |
 | `aws-agents` | out | Bedrock is reached through the Anthropic SDK seam, not AgentCore |
 | `aws-dev-toolkit` | out | 34 skills and three MCP servers, overlapping `infra-platform` and `aws-account-operations` |
 | `vercel` plugin | out | a large always-on cost for one rule set we vendor instead |
-| `impeccable` | out | executes Node scripts and installs hooks; high churn |
+| `impeccable` | out | executes Node scripts and installs hooks; high churn. The hook objection is not vendor-specific — it is why `aws-core` is out too |
 | `ui-ux-pro-max` | out | a style catalogue that produces generic recommendations, against a repo whose design is a fixed constraint |
 | `marketingskills`, `claude-seo` | deferred | reasonable once a marketing surface exists and copy/SEO work begins |
 
@@ -327,8 +348,10 @@ quality floor and writing guidance apply unchanged, and `dataviz`'s form
 heuristic is sound. Only the specific conflicting claim is superseded.
 
 If an override ever misfires, the escalation is `skillOverrides` in
-`.claude/settings.json` — the same mechanism Tier 2 uses to hide a plugin's
-skills.
+`.claude/settings.json`, keyed by skill name with one of the four enum strings
+Tier 2 lists. Nothing uses it today — the file carries no `skillOverrides` block
+at all — so the first entry added should be confirmed to take effect in a fresh
+session rather than assumed, given it fails silently on a malformed value.
 
 ## Adding a skill
 
