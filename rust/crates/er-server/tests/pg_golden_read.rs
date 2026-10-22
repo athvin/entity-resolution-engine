@@ -412,20 +412,72 @@ async fn golden_records_read_over_ducklake() {
     assert!(pairs[0].get("match_probability").is_some());
     assert!(pairs[0].get("evidence").is_some());
 
-    // Probability band: min=0.95 keeps only the high-confidence pairs.
+    // Probability band: band_low=0.95 keeps only the high-confidence pairs.
+    //
+    // The query names here must be the ones the BFF actually forwards —
+    // `band_low`/`band_high`, see
+    // `frontend/src/app/api/orgs/[org]/match-scores/route.ts` — and NOT whatever
+    // this handler happens to prefer. This assertion read `min`/`max` while the
+    // BFF sent `band_low`/`band_high`, so the band was dropped on every real
+    // request while both this test and the Playwright mock stayed green.
     let resp = app
         .clone()
-        .oneshot(op_get("/v1/orgs/acme/match-scores?min=0.95"))
+        .oneshot(op_get("/v1/orgs/acme/match-scores?band_low=0.95"))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let banded = json_body(resp).await;
     let hi = banded["items"].as_array().unwrap();
-    assert!(hi.len() <= pairs.len(), "band narrows the set");
+    assert!(hi.len() <= pairs.len(), "band never widens the set");
     assert!(
         hi.iter()
             .all(|p| p["match_probability"].as_f64().unwrap() >= 0.95),
-        "every banded pair is >= 0.95"
+        "every banded pair is >= 0.95 (the bound is inclusive)"
+    );
+
+    // Proof the band is applied at all, independent of how this fixture's
+    // probabilities happen to be distributed: ask for a band strictly above
+    // every observed score and require an empty page. A dropped filter returns
+    // the full unfiltered set, which a `<=`-style comparison cannot distinguish
+    // from a band that legitimately narrowed — which is precisely how the
+    // `min`/`max` mismatch stayed invisible here.
+    let ceiling = pairs
+        .iter()
+        .map(|p| p["match_probability"].as_f64().unwrap())
+        .fold(f64::NEG_INFINITY, f64::max);
+    let resp = app
+        .clone()
+        .oneshot(op_get(&format!(
+            "/v1/orgs/acme/match-scores?band_low={}",
+            ceiling + 0.001
+        )))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let above = json_body(resp).await;
+    assert!(
+        above["items"].as_array().unwrap().is_empty(),
+        "a band above every observed score ({ceiling}) must return nothing, not the unfiltered page"
+    );
+
+    // The upper bound shares that contract and had no coverage at all.
+    let resp = app
+        .clone()
+        .oneshot(op_get(&format!(
+            "/v1/orgs/acme/match-scores?band_high={}",
+            ceiling - 0.001
+        )))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let below = json_body(resp).await;
+    assert!(
+        below["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|p| p["match_probability"].as_f64().unwrap() <= ceiling - 0.001),
+        "band_high is an inclusive upper bound"
     );
 
     // Records-by-key: look up a real standardized record by its record_key.
