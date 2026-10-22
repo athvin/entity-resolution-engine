@@ -91,7 +91,23 @@ async fn config_publish_tiers_and_authz() {
             "/v1/orgs",
             "op-secret",
             Body::from(
-                serde_json::json!({ "name": "acme", "config_path": config_path }).to_string(),
+                // `ER_MODEL_PATH` so creating the org SEEDS and activates its
+                // starter model, as a real tenant's does — the ensemble phases
+                // below need a registry name that actually resolves, and a
+                // tenant with no model at all could never publish a `models:`
+                // list anyway.
+                serde_json::json!({
+                    "name": "acme",
+                    "config_path": config_path,
+                    "env": {
+                        "ER_MODEL_PATH": std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                            .join("../../../fixtures/static/model_test_v1.json")
+                            .to_string_lossy(),
+                        "ER_MODEL_VERSION": "v0001",
+                        "ER_TF_SNAPSHOT_ID": "01JWMDTFSNAP00000000000001",
+                    },
+                })
+                .to_string(),
             ),
         ))
         .await
@@ -258,6 +274,54 @@ async fn config_publish_tiers_and_authz() {
     assert_eq!(
         owned[0]["cron"], "30 4 * * 1",
         "the schedule must follow the newly published cadence"
+    );
+
+    // ─── E5b: publishing an ensemble ────────────────────────────────────────
+    //
+    // A `models:` member must resolve to an ACTIVE registry version. Refused at
+    // PUBLISH, as a 422 naming the member, rather than at run time: a publish
+    // has a human waiting on the response, while the same mistake found in the
+    // dispatcher is a failed job with the tenant's rebuild queued behind it.
+    let bad_yaml = format!("{v4_yaml}\nmodels:\n  - name: nonesuch\n");
+    let bad = create_version(&app, "op-secret", &bad_yaml).await;
+    let resp = publish(&app, "op-secret", bad).await;
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "a member with no active version must not publish"
+    );
+    let body = json_body(resp).await;
+    let detail = body["detail"].as_str().unwrap_or_default();
+    assert!(
+        detail.contains("nonesuch") && detail.contains("no ACTIVE version"),
+        "the 422 must name the member: {body}"
+    );
+
+    // `default` IS active — creating the org seeded and activated it — so an
+    // ensemble naming it publishes, and lands as tier **B**: changing which
+    // models score needs a re-score, not a retrain, so one rebuild job and no
+    // train job.
+    let ens_yaml = format!("{v4_yaml}\nmodels:\n  - name: default\n");
+    let ens = create_version(&app, "op-secret", &ens_yaml).await;
+    let resp = publish(&app, "op-secret", ens).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let pub_ens = json_body(resp).await;
+    assert_eq!(
+        pub_ens["tier"], "B",
+        "a models: change is a re-score, not a retrain: {pub_ens}"
+    );
+    assert!(
+        pub_ens["changed_blocks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|b| b == "models"),
+        "the changed set must name the block: {pub_ens}"
+    );
+    assert_eq!(
+        pub_ens["jobs_enqueued"].as_array().unwrap().len(),
+        1,
+        "tier B enqueues the rebuild only, no train"
     );
 
     let _ = std::fs::remove_file(&config_path);

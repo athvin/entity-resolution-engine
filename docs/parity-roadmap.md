@@ -977,15 +977,67 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          activate scoping leaves only the newly activated name active, which is the original bug.
          E1's "exactly one version is ever active" assertion did not weaken — it lists one name's
          versions, so it was always per-name in effect; only its wording was wrong.
-   - [ ] E5b-2 the ensemble itself (#31 — a config `models:` list, the dispatcher resolving N
-         active versions, `ScorePass` per model with the full live set handed to
-         `retire_other_models`, `and_run` union vs `then_run` cascade, per-model thresholds).
-         The design decision already taken: per-model thresholds mean the model-blind edge reads
-         (`auto_merge_edges_live`, which reconcile clusters from, and `active_page`) must learn
-         about `model_version`, and the way to do that without pulling every scored pair into
-         Rust is to stage `(model_version, threshold)` into a temp table and join — the same
-         pattern `retire_other_models` already uses for `__live_models`. The INV-EQ obligation
-         stands: a single-model ensemble must leave `match_scores` bit-identical.
+   - [x] **E5b-2 ensembles that score, in full mode.** A config `models:` list of registry
+         names; the dispatcher reads EVERY active version (per-name since E5b-1) and the
+         published config selects which of them score, in config order — so retraining a member
+         is an activate, not a publish. Each member scores the whole corpus under its own
+         `(model_version, tf_snapshot_id)` key, so a pair carries one row per member and the
+         existing model-blind edge read unions them: two models vote and neither erases the
+         other. Publishing a `models:` change is tier **B** — a re-score, not a retrain, the
+         reasoning `constraints` already carries — and a member naming no ACTIVE registry version
+         is a **422 at publish** rather than a failed job with the tenant's rebuild queued behind
+         it.
+         `run_all` now delegates to `run_all_ensemble` with a one-member slice instead of keeping
+         a parallel path, which is what makes the equivalence claim unfalsifiable rather than
+         argued — there is only one path. `ensemble_identity` is single-sourced for the same
+         reason: a one-member run records its **bare** `model_version`, byte-identical to a
+         pre-ensemble run, so no existing tenant's next incremental run sees a fingerprint drift.
+         Several members record `name=version+…`, composite rather than hashed because that
+         string is a user-facing diagnostic — the guard's refusal reads `model_version last=… now=…`
+         and an operator needs to see WHICH member moved.
+         **Found while building it, and the reason the fingerprint had to change at all:**
+         `RunFingerprint.model_version` is a single `Option<String>`. Recording one member's
+         version there would leave a change to any OTHER member invisible to the drift guard — so
+         an incremental run would never be promoted and the changed member would never score the
+         existing corpus, silently. Same family as E10a's tier-C publish that rebuilt against the
+         model it was meant to replace.
+         **A second find, in this repo's own test fixture.** `build_frozen_tf_tables` is the
+         snapshot CSV filtered to `(model_version, tf_snapshot_id)`, and an identity with no rows
+         yields EMPTY tables — so a pass scores on with every TF adjustment dropped, exactly the
+         silent-score-change `matching_model/entity.yaml` warns about for the same join. Latent
+         for one model, likely for an ensemble member whose rows were never appended.
+         `run_match_ensemble` now refuses it, naming the member — and the guard immediately caught
+         **E5a's own retirement test**, whose `v0002-strict` model has never had TF rows in the
+         committed snapshot. Its strictness came partly from the missing adjustments rather than
+         only from the lowered prior it says it is testing; the test now re-keys the rows onto its
+         own identity (test-local, no committed-fixture rebaseline) so the one declared variable
+         is the only one that moved. Its conclusion held either way, which is why nothing noticed.
+         Scope held deliberately to full mode, and said out loud in the run log rather than
+         tripped over: `run_match_partial` is single-model by construction — it requires the
+         scored-records ledger to hold exactly ONE identity before it reuses anything, and its
+         delta is "records with no ledger row for this `(record_key, content_hash)`" with **no
+         model filter**, so a record scored by member A but not B counts as scored and B would
+         never see it. Per-member deltas are E5b-2b. A full pass is meanwhile always correct, just
+         more expensive.
+         Two fields were written and then REMOVED rather than shipped inert, each to arrive with
+         the code that reads it: a per-member `threshold` (it needs the resolved
+         `model_version -> threshold` mapping wherever clustering happens, and that mapping lives
+         in the registry while `run_correct` re-clusters from the lake alone — persisting the
+         resolved ensemble on the run row is the fix, and it is DDL) and `mode`
+         (`and_run`/`then_run`). A declared field nothing honours is the dead-config shape this
+         program has already found once.
+         Tests: a one-member ensemble scores **bit-identically** to the single-model path, clusters
+         identically, and records the bare identity; two members both score, both identities stay
+         ACTIVE, and the lowered-prior member clears strictly fewer pairs. Sabotage: handing
+         `retire_other_models` one member's identity at a time — the obvious way to write the loop
+         — reproduces E5a's bug exactly, leaving only `v0002-strict` active with the loose member
+         silently retired. Plus the structural config rules (distinct, non-empty, exact names) and
+         the publish 422 / tier-B classification over real Postgres.
+   - [ ] E5b-2b incremental ensembles (per-member deltas in `run_match_partial`: the ledger must
+         match the ensemble's identity SET rather than hold exactly one, and the delta must be
+         computed per member or a record scored by one member is never scored by another) and the
+         `then_run` cascade + per-member thresholds, which want the resolved ensemble persisted on
+         the run row.
    - [ ] E5b-3 the models page (catch-up UI for E1 — versions with state, the m/u + log2(m/u)
          weights view the API already exposes, upload, compile, activate; the first surface for
          the registry at all).

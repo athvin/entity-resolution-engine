@@ -29,12 +29,14 @@ pub const TERMINAL_SURVIVORSHIP_RULE: &str = "record_key ASC";
 /// sources and rejected in a user document (S6.1 V11).
 pub const RESERVED_SOURCE_PREFIX: &str = "_";
 
-/// The fourteen top-level blocks of S6, in document order. [`Config`]'s S6 block
-/// fields MUST equal this set; the `entity_type` discriminator (added for the
+/// The top-level blocks of S6, in document order — the count is the array's own
+/// length, deliberately not restated in prose (it has read "fourteen" since it
+/// held sixteen). [`Config`]'s S6 block fields MUST equal this set; the `entity_type` discriminator (added for the
 /// Account entity type) is a meta-field, not an S6 block, and is excluded.
-pub const CONFIG_BLOCKS: [&str; 18] = [
+pub const CONFIG_BLOCKS: [&str; 19] = [
     "tenant",
     "thresholds",
+    "models",
     "standardization",
     "transforms",
     "sources",
@@ -170,8 +172,8 @@ pub const CANONICAL_ATTRIBUTES: [&str; 9] = [
 /// The entity type a tenant's config resolves. `Person` is the default and the
 /// only type the existing pipeline standardizes/matches today; `Account` selects
 /// the parallel Account attribute set + schema (the standardize/match/frontend
-/// paths land in later sub-PRs). A meta-discriminator, NOT one of the fourteen
-/// S6 [`CONFIG_BLOCKS`].
+/// paths land in later sub-PRs). A meta-discriminator, NOT one of the S6
+/// [`CONFIG_BLOCKS`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EntityType {
@@ -221,6 +223,39 @@ pub fn canonical_attributes(entity_type: EntityType) -> &'static [&'static str] 
 pub struct Thresholds {
     pub auto_merge: f64,
     pub review_low: f64,
+}
+
+/// One member of the matching ensemble (E5b): a registry model name, the
+/// threshold its own edges auto-merge at, and how it combines with the members
+/// before it.
+///
+/// The name refers to a `matching_models` row's `name`, whose ACTIVE version is
+/// what a run scores with — so retraining a member is an activate in the
+/// registry, not a config publish. That is also why activation had to become
+/// unique per `(org, name)` rather than per org (E5b-1): several members are
+/// active at once by definition.
+///
+/// Members UNION at the corpus threshold: each scores the whole candidate set,
+/// and a pair merges if any member put it at or above `thresholds.auto_merge`.
+/// That is what the existing model-blind edge read already computes, which is
+/// why this slice needs no new SQL and no change to reconcile.
+///
+/// Deliberately absent, each landing with the code that reads it rather than
+/// before it — a declared field nothing honours is the dead-config shape this
+/// program has already found once:
+///
+/// * a per-member `threshold`. It needs the resolved `model_version ->
+///   threshold` mapping available wherever clustering happens, and that mapping
+///   lives in the registry (Postgres) while `run_correct` re-clusters from the
+///   lake alone. Persisting the resolved ensemble on the run row is the fix, and
+///   it is DDL.
+/// * a `mode` (`and_run` / `then_run`). The cascade is a predicate on which
+///   pairs a later member scores at all.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelSpec {
+    /// The registry name whose active version this member scores with.
+    pub name: String,
 }
 
 /// S6 `standardization`, consumed by `email_norm` / `phone_e164`.
@@ -560,6 +595,14 @@ pub struct Config {
     pub entity_type: EntityType,
     pub tenant: String,
     pub thresholds: Thresholds,
+    /// The matching ensemble: an ordered list of registry model names, each
+    /// with its own threshold and combine mode (E5b). Empty means the
+    /// single-model path — the org's one active model, scored at
+    /// `thresholds.auto_merge` — which is what every config written before
+    /// ensembles existed means, and why this is omitted from the canonical
+    /// document when empty: `config_hash` stays byte-identical for them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<ModelSpec>,
     pub standardization: Standardization,
     /// Cleanse rules per canonical attribute, applied before standardization.
     /// Omitted from the canonical document when empty, so a config written
@@ -662,9 +705,13 @@ mod tests {
 
     #[test]
     fn blocks_and_constants() {
-        assert_eq!(CONFIG_BLOCKS.len(), 18);
+        assert_eq!(CONFIG_BLOCKS.len(), 19);
         assert_eq!(CONFIG_BLOCKS[0], "tenant");
-        assert_eq!(CONFIG_BLOCKS[17], "correction_pass");
+        assert_eq!(CONFIG_BLOCKS[18], "correction_pass");
+        // `models` sits beside `thresholds` because it refines the same
+        // decision — what probability merges — one threshold per member
+        // instead of one for the corpus.
+        assert!(CONFIG_BLOCKS.contains(&"models"));
         // `constraints` sits beside `blocking` because it changes the same
         // thing — which pairs are candidates — and so carries the same publish
         // tier.
@@ -690,6 +737,40 @@ mod tests {
         );
         assert!(EntityType::default().is_person());
         assert!(!EntityType::Account.is_person());
+    }
+
+    #[test]
+    fn an_empty_models_block_serialises_away() {
+        // The obligation `skip_serializing_if` exists for: every config written
+        // before ensembles must hash byte-identically, so publishing one is not
+        // silently promoted to a tier-B re-score and no `std_hashes` golden
+        // moves. Asserted on the canonical document (what `config_hash` is taken
+        // over), not just on the field.
+        let config = load_config_str(DEFAULT_YAML).unwrap();
+        assert!(config.models.is_empty(), "the fixture declares no ensemble");
+        let doc = canonical_document(&config);
+        assert!(
+            !doc.contains("\"models\""),
+            "an empty models block must not appear in the canonical document"
+        );
+        // And a declared ensemble DOES move the hash — otherwise the block
+        // would be unhashed config, which is worse than no block at all.
+        let mut with_models = config.clone();
+        with_models.models.push(ModelSpec {
+            name: "strict".to_string(),
+        });
+        assert_ne!(
+            config_hash(&config),
+            config_hash(&with_models),
+            "declaring an ensemble must change config_hash"
+        );
+        // A member that takes every default serialises to just its name, so the
+        // document stays as small as what it actually says.
+        let doc = canonical_document(&with_models);
+        assert!(
+            doc.contains(r#""models":[{"name":"strict"}]"#),
+            "defaults must not be written out, got {doc}"
+        );
     }
 
     #[test]

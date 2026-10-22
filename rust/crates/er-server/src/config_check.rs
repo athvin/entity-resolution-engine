@@ -31,6 +31,29 @@ pub fn config_reference_problems(config: &Config) -> Vec<String> {
 
     let mut problems = Vec::new();
 
+    // The ensemble (E5b). Structural only: whether a name resolves to an ACTIVE
+    // registry version is a Postgres question, checked by the publish handler so
+    // the refusal is a 422 at publish rather than a failed job later.
+    let mut seen: BTreeSet<&str> = BTreeSet::new();
+    for (i, spec) in config.models.iter().enumerate() {
+        let name = spec.name.trim();
+        if name.is_empty() {
+            problems.push(format!("models[{i}] has an empty name"));
+        } else if !seen.insert(name) {
+            // A duplicate would score the same model twice and, worse, read as
+            // though it were weighted — an ensemble is a SET of distinct models.
+            problems.push(format!(
+                "models[{i}] repeats `{name}`; each member must name a distinct model"
+            ));
+        }
+        if name != spec.name {
+            problems.push(format!(
+                "models[{i}] name `{}` has leading or trailing whitespace; it must match a                  registry name exactly",
+                spec.name
+            ));
+        }
+    }
+
     // Blocking: each key expression must parse and reference only real columns.
     for rule in &config.blocking {
         match dedupe_core::sql::columns::columns_used(&rule.expr, "blocking") {
@@ -176,6 +199,53 @@ mod tests {
     #[test]
     fn a_valid_config_has_no_reference_problems() {
         assert_eq!(config_reference_problems(&load(GOOD)), Vec::<String>::new());
+    }
+
+    /// E5b: the ensemble's structural rules. Whether a name resolves to an
+    /// ACTIVE registry version is a Postgres question and lives in the publish
+    /// handler; these are the ones a pure check can answer.
+    #[test]
+    fn an_ensemble_must_name_distinct_non_empty_models() {
+        // A well-formed ensemble is silent.
+        let good = load(&format!(
+            "{GOOD}\nmodels:\n  - name: loose\n  - name: strict\n"
+        ));
+        assert_eq!(config_reference_problems(&good), Vec::<String>::new());
+
+        // A repeat would score the same model twice and read as if it were
+        // weighted; an ensemble is a set of distinct models.
+        let dup = load(&format!(
+            "{GOOD}\nmodels:\n  - name: loose\n  - name: strict\n  - name: loose\n"
+        ));
+        let problems = config_reference_problems(&dup);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("models[2]") && p.contains("repeats `loose`")),
+            "{problems:?}"
+        );
+
+        // An empty name matches no registry row, so it can only ever fail later.
+        let empty = load(&format!("{GOOD}\nmodels:\n  - name: \"\"\n"));
+        let problems = config_reference_problems(&empty);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("models[0] has an empty name")),
+            "{problems:?}"
+        );
+
+        // Whitespace is refused rather than trimmed: the name has to match a
+        // registry name exactly, and silently trimming it would make the config
+        // and the registry disagree about what the member is called.
+        let padded = load(&format!("{GOOD}\nmodels:\n  - name: \" loose \"\n"));
+        let problems = config_reference_problems(&padded);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("models[0]") && p.contains("whitespace")),
+            "{problems:?}"
+        );
     }
 
     /// A segment predicate gets exactly one chance to be caught, and this is it:

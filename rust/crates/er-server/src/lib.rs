@@ -1995,7 +1995,12 @@ async fn put_lexicon(
 const TIER_C_BLOCKS: [&str; 3] = ["comparisons", "standardization", "sources"];
 // `constraints` sits with `blocking` because it changes the same thing: which
 // pairs are candidates. Editing it needs a re-score, not a retrain.
-const TIER_B_BLOCKS: [&str; 2] = ["blocking", "constraints"];
+//
+// `models` joins them for the same reason, one level up: changing WHICH models
+// score changes every pair's verdict set, and the members are already trained —
+// so a re-score, not a retrain. (A member added to the list has never scored
+// this corpus at all, which is exactly what tier B's full re-score fixes.)
+const TIER_B_BLOCKS: [&str; 3] = ["blocking", "constraints", "models"];
 const TIER_A_BLOCKS: [&str; 2] = ["thresholds", "survivorship"];
 /// Blocks only an operator may change (`configsvc.py`): everything structural.
 const OPERATOR_ONLY_BLOCKS: [&str; 7] = [
@@ -2108,6 +2113,44 @@ async fn publish_config_version(
             ),
         )
         .into_response();
+    }
+
+    // The ensemble's members must exist as ACTIVE registry versions. Refused
+    // here, as a 422 naming the member, rather than at run time: a publish is a
+    // deliberate act with a human waiting on the response, while the same
+    // mistake discovered in the dispatcher is a failed job with the tenant's
+    // next rebuild already queued behind it.
+    if !new_config.models.is_empty() {
+        match pg::active_models(&client, &org_row.id).await {
+            Ok(active) => {
+                let have: std::collections::BTreeSet<&str> =
+                    active.iter().map(|m| m.name.as_str()).collect();
+                let missing: Vec<&str> = new_config
+                    .models
+                    .iter()
+                    .map(|s| s.name.as_str())
+                    .filter(|n| !have.contains(n))
+                    .collect();
+                if !missing.is_empty() {
+                    let mut known: Vec<&str> = have.into_iter().collect();
+                    known.sort_unstable();
+                    return detail_err(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        format!(
+                            "`models:` names {} with no ACTIVE version in the registry \
+                             (active: {})",
+                            missing.join(", "),
+                            if known.is_empty() {
+                                "none".to_string()
+                            } else {
+                                known.join(", ")
+                            }
+                        ),
+                    );
+                }
+            }
+            Err(e) => return pg_err(e),
+        }
     }
 
     // Org publish context (config_path / state / current active version).

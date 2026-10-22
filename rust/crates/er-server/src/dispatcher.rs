@@ -256,14 +256,22 @@ pub async fn dispatch_once_with(
         // org with no registry version resolves `None` and `run_job` falls back
         // to the env file, which is what every org did before the registry
         // existed.
-        let model = match pg::active_model_version(client, &job.org_id).await {
-            Ok(m) => m.map(|m| ActiveModel {
-                model_json: m.model_json,
-                model_version_label: m.model_version_label,
-                tf_snapshot_id: m.tf_snapshot_id,
-                name: m.name,
-                version: m.version,
-            }),
+        // EVERY active version, not one: activation is unique per (org, name)
+        // since E5b-1, so an org can have several active models and the
+        // published config's `models:` list says which of them score. The
+        // selection happens in `run_job`, which is the half that holds the
+        // config; this half just does the Postgres read it exists to do.
+        let models: Vec<ActiveModel> = match pg::active_models(client, &job.org_id).await {
+            Ok(rows) => rows
+                .into_iter()
+                .map(|m| ActiveModel {
+                    model_json: m.model_json,
+                    model_version_label: m.model_version_label,
+                    tf_snapshot_id: m.tf_snapshot_id,
+                    name: m.name,
+                    version: m.version,
+                })
+                .collect(),
             Err(e) => {
                 pg::mark(client, &job.id, "failed").await?;
                 eprintln!("job {} failed: reading the model registry: {e}", job.id);
@@ -272,11 +280,9 @@ pub async fn dispatch_once_with(
         };
         let jb = job.clone();
         let drop_root = org.drop_root.clone();
-        tokio::task::spawn_blocking(move || {
-            run_job(&jb, &env, drop_root.as_deref(), model.as_ref())
-        })
-        .await
-        .unwrap_or_else(|e| Err(format!("dispatcher task panicked: {e}")))
+        tokio::task::spawn_blocking(move || run_job(&jb, &env, drop_root.as_deref(), &models))
+            .await
+            .unwrap_or_else(|e| Err(format!("dispatcher task panicked: {e}")))
     };
 
     let completed = match &outcome {
@@ -368,7 +374,7 @@ fn run_job(
     job: &Job,
     env: &Value,
     drop_root: Option<&str>,
-    active_model: Option<&ActiveModel>,
+    active_models: &[ActiveModel],
 ) -> Result<(), String> {
     let catalog = env_str(env, "ER_LAKE_CATALOG").ok_or("org env missing ER_LAKE_CATALOG")?;
     let data_path = env_str(env, "ER_LAKE_DATA_PATH").ok_or("org env missing ER_LAKE_DATA_PATH")?;
@@ -436,6 +442,27 @@ fn run_job(
                 .unwrap_or_default();
             // Registry first, env file second. The fallback is what keeps an org
             // created before the registry existed scoring exactly as it did.
+            // With no `models:` block the org scores against its ONE active
+            // version, which is what every config written before ensembles
+            // means. Several active names and no block is not a default we may
+            // pick for the tenant — activation became per-name in E5b-1, so this
+            // state is reachable, and silently choosing one model is the class of
+            // bug this program keeps closing.
+            let active_model = if config.models.is_empty() {
+                if active_models.len() > 1 {
+                    let names: Vec<&str> = active_models.iter().map(|m| m.name.as_str()).collect();
+                    return Err(format!(
+                        "the registry has {} active models ({}) but the published config \
+                         declares no `models:` list, so which one scores is undefined; \
+                         declare the ensemble or archive the versions you do not want",
+                        active_models.len(),
+                        names.join(", ")
+                    ));
+                }
+                active_models.first()
+            } else {
+                None
+            };
             let from_env;
             let settings_json: &str = if let Some(m) = active_model {
                 eprintln!(
@@ -462,6 +489,49 @@ fn run_job(
                     .or_else(|| env_str(env, "ER_TF_SNAPSHOT_ID"))
                     .unwrap_or("tf"),
             };
+            // The ensemble: the published config's `models:` list resolved
+            // against the registry's active set, in CONFIG order — the config is
+            // the selector, the registry supplies the versions. So retraining a
+            // member is an activate, not a publish.
+            let members: Vec<er_cli::EnsembleMember<'_>> = config
+                .models
+                .iter()
+                .map(|spec| {
+                    let found = active_models
+                        .iter()
+                        .find(|m| m.name == spec.name)
+                        .ok_or_else(|| {
+                            let active: Vec<&str> =
+                                active_models.iter().map(|m| m.name.as_str()).collect();
+                            format!(
+                                "the config declares model '{}' but the registry has no ACTIVE \
+                                 version of that name (active: {})",
+                                spec.name,
+                                if active.is_empty() {
+                                    "none".to_string()
+                                } else {
+                                    active.join(", ")
+                                }
+                            )
+                        })?;
+                    Ok(er_cli::EnsembleMember {
+                        model: er_cli::MatchModel {
+                            settings_json: &found.model_json,
+                            tf_csv_path: Path::new(tf_path),
+                            model_version: &found.model_version_label,
+                            tf_snapshot_id: found.tf_snapshot_id.as_deref().unwrap_or("tf"),
+                        },
+                        name: &found.name,
+                    })
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            if !members.is_empty() {
+                let listed: Vec<String> = members
+                    .iter()
+                    .map(|m| format!("{}={}", m.name, m.model.model_version))
+                    .collect();
+                eprintln!("run {run_id}: ensemble {}", listed.join(" + "));
+            }
 
             // The mode the job asked for, then the drift guard's verdict on it.
             // An incremental run may only extend a corpus scored under the same
@@ -514,22 +584,27 @@ fn run_job(
                 None => None,
             };
 
-            er_cli::run_all(
-                &session,
-                &config,
-                &er_cli::PipelineInputs {
-                    lexicon: &lexicon,
-                    deliveries: &deliveries,
-                    model: &model,
-                    run_id,
-                    ingested_at: &now,
-                    scored_at: &now,
-                    run_at: &now,
-                    mode: &decision.mode,
-                    rebuild_reason,
-                    segment,
-                },
-            )
+            let inputs = er_cli::PipelineInputs {
+                lexicon: &lexicon,
+                deliveries: &deliveries,
+                model: &model,
+                run_id,
+                ingested_at: &now,
+                scored_at: &now,
+                run_at: &now,
+                mode: &decision.mode,
+                rebuild_reason,
+                segment,
+            };
+            // A declared ensemble routes through `run_all_ensemble`; an empty
+            // list goes through `run_all`, which builds the one-member slice
+            // itself — so the single-model path stays one call deep and cannot
+            // drift from what it did before ensembles existed.
+            if members.is_empty() {
+                er_cli::run_all(&session, &config, &inputs)
+            } else {
+                er_cli::run_all_ensemble(&session, &config, &inputs, &members)
+            }
             .map_err(|e| format!("{e:#}"))
         }
         other => Err(format!("dispatcher does not handle job kind '{other}'")),

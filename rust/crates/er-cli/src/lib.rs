@@ -192,6 +192,54 @@ pub struct MatchModel<'a> {
     pub tf_snapshot_id: &'a str,
 }
 
+/// One member of a run's matching ensemble (E5b): a model and the registry name
+/// the config selected it by.
+///
+/// Members union at the corpus threshold, so a member carries no threshold of
+/// its own yet — see [`er_config::ModelSpec`] for why that field waits for the
+/// code that would read it.
+pub struct EnsembleMember<'a> {
+    pub model: MatchModel<'a>,
+    /// The `matching_models.name` this member came from. Load-bearing in the run
+    /// ledger's composite identity (so a drift message names which member
+    /// moved) and in diagnostics; scoring itself keys on
+    /// `(model_version, tf_snapshot_id)`.
+    pub name: &'a str,
+}
+
+/// The identity the RUN LEDGER records for an ensemble, and therefore what the
+/// drift guard compares across runs.
+///
+/// A single member renders as its bare `model_version`, byte-identical to what
+/// a pre-ensemble run wrote — otherwise every existing tenant's next
+/// incremental run would see a fingerprint drift and be promoted to a full
+/// rebuild it does not need.
+///
+/// Several members render as `name=version` joined by `+`, in the published
+/// config's order. Composite rather than a hash because this string is a
+/// user-facing diagnostic: the guard's refusal reads
+/// `model_version last=… now=…`, and an operator needs to see WHICH member
+/// changed. It is also why the whole ensemble has to appear here at all —
+/// recording one member's version would leave a change to any other member
+/// invisible to the guard, so an incremental run would never be promoted and
+/// the changed member would never score the existing corpus. Silently.
+#[must_use]
+pub fn ensemble_identity(members: &[EnsembleMember]) -> (String, String) {
+    if let [only] = members {
+        return (
+            only.model.model_version.to_string(),
+            only.model.tf_snapshot_id.to_string(),
+        );
+    }
+    let mut versions: Vec<String> = Vec::with_capacity(members.len());
+    let mut snapshots: Vec<String> = Vec::with_capacity(members.len());
+    for m in members {
+        versions.push(format!("{}={}", m.name, m.model.model_version));
+        snapshots.push(format!("{}={}", m.name, m.model.tf_snapshot_id));
+    }
+    (versions.join("+"), snapshots.join("+"))
+}
+
 /// The `evidence` JSON expression (S4.3.5): `gamma_<col>` + `mw_<col>` for every
 /// comparison, `mw_tf_adj_<col>` where the model carries the TF adjustment, and
 /// the whole-pair `match_weight`. Valid wherever the retained prediction columns
@@ -572,9 +620,45 @@ pub fn run_match(
     run_id: &str,
     scored_at: &str,
 ) -> Result<()> {
-    let mut settings = load_model(model.settings_json)?;
-    settings.retain_intermediate = true;
+    run_match_ensemble(
+        session,
+        config,
+        &[EnsembleMember {
+            model: MatchModel { ..*model },
+            name: SOLE_MEMBER_NAME,
+        }],
+        review_low,
+        run_id,
+        scored_at,
+    )
+}
 
+/// The registry name a single-model run reports for its one member. Never
+/// rendered into the run ledger (a one-member ensemble records its bare
+/// `model_version`; see [`ensemble_identity`]), so this is diagnostics only.
+const SOLE_MEMBER_NAME: &str = "default";
+
+/// S4.3 match (full mode) for an ENSEMBLE: every member scores the whole
+/// corpus, and each member's pairs at or above `review_low` are merged into
+/// `lake.main.match_scores` under that member's own
+/// `(model_version, tf_snapshot_id)` key. A pair therefore carries one row per
+/// member that scored it, and the edge read unions them — which is what makes
+/// two models "vote" without either erasing the other.
+///
+/// # Errors
+/// Propagates model-load / predict / lake DDL+MERGE errors.
+pub fn run_match_ensemble(
+    session: &Session,
+    config: &Config,
+    members: &[EnsembleMember],
+    review_low: f64,
+    run_id: &str,
+    scored_at: &str,
+) -> Result<()> {
+    assert!(
+        !members.is_empty(),
+        "a run always scores with at least one member"
+    );
     // The matched corpus is the person or Account standardized table, by
     // entity_type. MATCH_SCORES (the merge target below) is shared + entity-agnostic.
     let (std_unqual, std_qual) = if config.entity_type.is_person() {
@@ -582,47 +666,80 @@ pub fn run_match(
     } else {
         ("acct_int_std_records", ACCT_INT_STD_RECORDS)
     };
-    let input = session.register_lake_table(std_unqual, std_unqual)?;
-    let tf_tables = build_frozen_tf_tables(
-        session,
-        &settings,
-        model.tf_csv_path,
-        model.model_version,
-        model.tf_snapshot_id,
-    )?;
-    let predictions = run_predict_with_tf(session, &settings, &input, &tf_tables, None)?;
 
-    // A full pass recomputes every pair, so everything this model previously
-    // scored is about to be superseded: deactivate it all, then let the MERGE
-    // bring back whatever still clears the threshold. Without this, a score can
-    // only ever be created — so a pair that drops below `review_low`, or whose
-    // record was deleted from the corpus, keeps an active row forever, and
-    // reconcile rebuilds its node universe from edge endpoints (see
-    // `run_reconcile`), which resurrects deleted records into their old entity.
-    invalidate_superseded_scores(session, model, run_id, scored_at, StaleScope::EveryActive)?;
-    // And retire any OTHER model's scores, so activating a new version takes
-    // effect instead of being unioned with the one it replaced.
-    retire_other_models(
-        session,
-        &[(model.model_version, model.tf_snapshot_id)],
-        run_id,
-        scored_at,
-    )?;
-    stage_and_upsert_scores(
-        session,
-        &ScorePass {
-            settings: &settings,
-            model,
-            review_low,
-            run_id,
-            scored_at,
-            std_qual,
-            predictions: std::slice::from_ref(&predictions.physical),
-        },
-    )?;
-    // A full pass scored the whole corpus, so the whole corpus is what it may
-    // claim.
-    sync_scored_ledger(session, model, run_id, scored_at, std_qual, std_qual)?;
+    // Retire the non-members ONCE, with the whole live set. Doing it per member
+    // would retire the members scored earlier in this very loop — which is
+    // precisely the bug E5a fixed for the single-model case, reappearing inside
+    // the ensemble. Disjoint from the per-member invalidation below (that one
+    // only ever touches its own model identity's rows), so the order between
+    // the two does not matter.
+    let live: Vec<(&str, &str)> = members
+        .iter()
+        .map(|m| (m.model.model_version, m.model.tf_snapshot_id))
+        .collect();
+    retire_other_models(session, &live, run_id, scored_at)?;
+
+    for member in members {
+        let model = &member.model;
+        let mut settings = load_model(model.settings_json)?;
+        settings.retain_intermediate = true;
+        let input = session.register_lake_table(std_unqual, std_unqual)?;
+        let tf_tables = build_frozen_tf_tables(
+            session,
+            &settings,
+            model.tf_csv_path,
+            model.model_version,
+            model.tf_snapshot_id,
+        )?;
+        // A term-frequency miss is SILENT by construction: the frozen TF tables
+        // are the snapshot CSV filtered to `(model_version, tf_snapshot_id)`, so
+        // an identity with no rows in that file yields empty tables and the pass
+        // scores on without any TF adjustment — "changing a pair's score rather
+        // than failing", as `matching_model/entity.yaml` warns about the same
+        // join. Latent for one model, whose identity comes from the same place
+        // as the file; likely for an ensemble member whose rows were never
+        // appended. Refuse instead, naming the member.
+        if !settings.tf_columns().is_empty()
+            && tf_tables.iter().try_fold(true, |all_empty, handle| {
+                Ok::<bool, anyhow::Error>(all_empty && count_rows(session, &handle.physical)? == 0)
+            })?
+        {
+            anyhow::bail!(
+                "member '{}' ({}/{}) declares term-frequency adjustments but the frozen \
+                 snapshot at {} has no rows for that identity; scoring would silently drop \
+                 every TF adjustment",
+                member.name,
+                model.model_version,
+                model.tf_snapshot_id,
+                model.tf_csv_path.display(),
+            );
+        }
+        let predictions = run_predict_with_tf(session, &settings, &input, &tf_tables, None)?;
+
+        // A full pass recomputes every pair, so everything this model previously
+        // scored is about to be superseded: deactivate it all, then let the MERGE
+        // bring back whatever still clears the threshold. Without this, a score can
+        // only ever be created — so a pair that drops below `review_low`, or whose
+        // record was deleted from the corpus, keeps an active row forever, and
+        // reconcile rebuilds its node universe from edge endpoints (see
+        // `run_reconcile`), which resurrects deleted records into their old entity.
+        invalidate_superseded_scores(session, model, run_id, scored_at, StaleScope::EveryActive)?;
+        stage_and_upsert_scores(
+            session,
+            &ScorePass {
+                settings: &settings,
+                model,
+                review_low,
+                run_id,
+                scored_at,
+                std_qual,
+                predictions: std::slice::from_ref(&predictions.physical),
+            },
+        )?;
+        // A full pass scored the whole corpus, so the whole corpus is what it may
+        // claim.
+        sync_scored_ledger(session, model, run_id, scored_at, std_qual, std_qual)?;
+    }
     Ok(())
 }
 
@@ -1324,14 +1441,21 @@ fn create_ddl_table(session: &Session, name: &str) -> Result<()> {
 /// # Errors
 /// Propagates lake DDL / insert errors.
 pub fn write_run_start(session: &Session, config: &Config, inputs: &PipelineInputs) -> Result<()> {
+    // Routed through `ensemble_identity` rather than reading the fields
+    // directly, so the rule for what the ledger records lives in one place and
+    // the one-member case cannot drift from the N-member case.
+    let (model_version, tf_snapshot_id) = ensemble_identity(&[EnsembleMember {
+        model: MatchModel { ..*inputs.model },
+        name: SOLE_MEMBER_NAME,
+    }]);
     write_run_row(
         session,
         config,
         inputs.run_id,
         inputs.run_at,
         inputs.mode,
-        inputs.model.model_version,
-        inputs.model.tf_snapshot_id,
+        &model_version,
+        &tf_snapshot_id,
         Some(&lexicon_fingerprint(inputs.lexicon)),
         inputs.rebuild_reason,
     )
@@ -2713,7 +2837,49 @@ impl<'a> PipelineInputs<'a> {
 /// # Errors
 /// Propagates any stage error.
 pub fn run_all(session: &Session, config: &Config, inputs: &PipelineInputs) -> Result<()> {
-    write_run_start(session, config, inputs)?;
+    run_all_ensemble(
+        session,
+        config,
+        inputs,
+        &[EnsembleMember {
+            model: MatchModel { ..*inputs.model },
+            name: SOLE_MEMBER_NAME,
+        }],
+    )
+}
+
+/// [`run_all`] for an ENSEMBLE: `members` is the published config's `models:`
+/// list resolved against the registry, in config order. A one-member slice is
+/// exactly [`run_all`], which is how the single-model path keeps its behaviour
+/// without a second code path to keep in step.
+///
+/// # Errors
+/// Propagates every stage's error, as [`run_all`] does.
+pub fn run_all_ensemble(
+    session: &Session,
+    config: &Config,
+    inputs: &PipelineInputs,
+    members: &[EnsembleMember],
+) -> Result<()> {
+    assert!(
+        !members.is_empty(),
+        "a run always scores with at least one member"
+    );
+    // The run ledger records the ENSEMBLE's identity, not one member's, because
+    // that string is what the drift guard compares across runs — see
+    // `ensemble_identity`.
+    let (model_version, tf_snapshot_id) = ensemble_identity(members);
+    write_run_row(
+        session,
+        config,
+        inputs.run_id,
+        inputs.run_at,
+        inputs.mode,
+        &model_version,
+        &tf_snapshot_id,
+        Some(&lexicon_fingerprint(inputs.lexicon)),
+        inputs.rebuild_reason,
+    )?;
     seed_lexicon(session, inputs.lexicon)?;
     for (source, csv) in inputs.deliveries {
         run_ingest(
@@ -2735,7 +2901,19 @@ pub fn run_all(session: &Session, config: &Config, inputs: &PipelineInputs) -> R
         )?;
     }
     run_standardize(session, config, inputs.run_at)?;
-    if inputs.mode == er_versions::MODE_INCREMENTAL || inputs.segment.is_some() {
+    // An ensemble scores in FULL mode only, and declines the incremental path
+    // out loud rather than tripping over it. Two things in `run_match_partial`
+    // are single-model by construction: it requires the scored-records ledger to
+    // hold exactly ONE identity before it will reuse anything, and its delta is
+    // "records with no ledger row for this (record_key, content_hash)" with no
+    // model filter — so a record scored by member A but not member B counts as
+    // scored, and B would never see it. Per-member deltas are the fix and they
+    // are their own change; a full pass is meanwhile always CORRECT, just more
+    // expensive, so the honest move is to say so in the ledger.
+    let ensemble_forces_full = members.len() > 1;
+    if !ensemble_forces_full
+        && (inputs.mode == er_versions::MODE_INCREMENTAL || inputs.segment.is_some())
+    {
         let delta = run_match_partial(
             session,
             config,
@@ -2762,10 +2940,18 @@ pub fn run_all(session: &Session, config: &Config, inputs: &PipelineInputs) -> R
                 .unwrap_or_default(),
         );
     } else {
-        run_match(
+        if ensemble_forces_full && inputs.mode == er_versions::MODE_INCREMENTAL {
+            eprintln!(
+                "run {}: full match over the whole corpus — an ensemble of {} models \
+                 has no incremental pass yet (per-member deltas)",
+                inputs.run_id,
+                members.len()
+            );
+        }
+        run_match_ensemble(
             session,
             config,
-            inputs.model,
+            members,
             config.thresholds.review_low,
             inputs.run_id,
             inputs.scored_at,
