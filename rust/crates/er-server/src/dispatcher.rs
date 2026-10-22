@@ -170,8 +170,26 @@ struct ActiveModel {
 /// the queue was empty, `Err` a Postgres failure (fatal to the caller).
 ///
 /// Takes no HTTP client: the job's `job.<state>` event is only RECORDED here,
-/// and `run_loop`'s drain does the sending.
-async fn dispatch_once(client: &tokio_postgres::Client) -> Result<bool, tokio_postgres::Error> {
+/// and `run_loop`'s drain does the sending. Public so the Postgres-tier tests
+/// can drive one real claim-run-mark cycle without the loop.
+///
+/// # Errors
+/// Propagates a Postgres claim/mark/lookup failure.
+pub async fn dispatch_once(client: &tokio_postgres::Client) -> Result<bool, tokio_postgres::Error> {
+    dispatch_once_with(client, &crate::provision::Profile::from_env()).await
+}
+
+/// [`dispatch_once`] with the provisioning profile handed in rather than read
+/// from the process environment — the Postgres-tier tests cannot set env
+/// (`std::env::set_var` is `unsafe` in edition 2024 and the workspace denies
+/// `unsafe_code`), and the `provision` arm needs one.
+///
+/// # Errors
+/// Propagates a Postgres claim/mark/lookup failure.
+pub async fn dispatch_once_with(
+    client: &tokio_postgres::Client,
+    profile: &Result<Option<crate::provision::Profile>, crate::provision::ProfileError>,
+) -> Result<bool, tokio_postgres::Error> {
     let Some(job) = pg::claim(client).await? else {
         return Ok(false);
     };
@@ -183,17 +201,48 @@ async fn dispatch_once(client: &tokio_postgres::Client) -> Result<bool, tokio_po
         return Ok(true);
     };
 
+    // Every lake job reconciles its lake first, under the one-active-job-per-org
+    // rule it already holds: the catalog compiled into this binary against the
+    // tenant's live tables, safe statements applied and ledgered, a breaking
+    // difference failing the job before any stage runs against a table it does
+    // not fit. The outcome is recorded per tenant whatever it was, so the deploy
+    // report and the drift check read it without opening the lake. Provisioning
+    // is the one kind that runs before the lake exists; it reconciles the lake
+    // it creates.
+    let schema = if job.kind == "provision" {
+        None
+    } else {
+        let env = org.env.clone();
+        let outcome = tokio::task::spawn_blocking(move || crate::schema::reconcile_lake_env(&env))
+            .await
+            .unwrap_or_else(|e| Err(format!("dispatcher task panicked: {e}")));
+        let (status, hash, detail) = crate::schema::tenant_state(&outcome);
+        crate::schema::record_tenant_state(client, &job.org_id, status, &hash, Some(&detail))
+            .await?;
+        if let Ok(r) = &outcome
+            && !r.applied.is_empty()
+        {
+            eprintln!("job {}: lake schema migrated ({})", job.id, r.detail());
+        }
+        Some(outcome)
+    };
+
     // The pipeline is synchronous and holds a !Send DuckDB Session, so run it on
     // a blocking thread with owned inputs. The steward apply path is special: it
     // drains the org's pending staged actions into the lake and corrects (reusing
     // the existing scores), which needs the async Postgres client, so it does not
     // go through the blocking `run_job`.
     let env = org.env.clone();
-    let outcome = if job.kind == "provision" {
+    let outcome = if let Some(Err(message)) = schema {
+        Err(message)
+    } else if job.kind == crate::schema::LAKE_MIGRATE_KIND {
+        // The sweep's job: reconciling was the work.
+        Ok(())
+    } else if job.kind == "provision" {
         // Async-half too, and for a different reason from the others: its final
         // act is a STATE TRANSITION on the org row, which is what the UI's
         // progress panel is waiting for.
-        provision_tenant(client, &org, &job.id).await
+        provision_tenant(client, &org, &job.id, profile).await
     } else if job.kind == "apply_corrections" {
         drain_and_correct(client, &job.org_id, &env, &job.id).await
     } else if job.kind == "train" {
@@ -336,6 +385,8 @@ fn run_job(
     };
 
     match job.kind.as_str() {
+        // Reconciled before this function ran; nothing else to do.
+        crate::schema::LAKE_MIGRATE_KIND => Ok(()),
         "lake_maintain" => {
             let expire = env_str(env, "ER_EXPIRE_OLDER_THAN").unwrap_or("7 days");
             er_cli::run_maintain(&session, expire)
@@ -696,8 +747,9 @@ async fn provision_tenant(
     client: &tokio_postgres::Client,
     org: &pg::OrgDetail,
     job_id: &str,
+    profile: &Result<Option<crate::provision::Profile>, crate::provision::ProfileError>,
 ) -> Result<(), String> {
-    let profile = match crate::provision::Profile::from_env() {
+    let profile = match profile {
         Ok(Some(p)) => p,
         // The job outlives the request that made it, so the profile can have
         // been switched off in between. Say so rather than panicking.
@@ -727,6 +779,21 @@ async fn provision_tenant(
             create_tenant_database(maint, database).await?;
         }
     }
+
+    // The lake's tables, at this binary's catalog version, with the ledger
+    // saying so — before the org is promoted, so a tenant never goes active
+    // over a lake whose tables its first job would have had to create. Opened
+    // from the org ROW's env, which is what every later job opens, rather than
+    // from the plan re-derived here.
+    let env = org.env.clone();
+    let schema = tokio::task::spawn_blocking(move || crate::schema::reconcile_lake_env(&env))
+        .await
+        .unwrap_or_else(|e| Err(format!("dispatcher task panicked: {e}")));
+    let (status, hash, detail) = crate::schema::tenant_state(&schema);
+    crate::schema::record_tenant_state(client, &org.id, status, &hash, Some(&detail))
+        .await
+        .map_err(|e| format!("record {}'s schema state: {e}", org.name))?;
+    schema.map_err(|e| format!("provision {}'s lake schema: {e}", org.name))?;
 
     eprintln!(
         "job {job_id}: provisioned {} ({:?})",

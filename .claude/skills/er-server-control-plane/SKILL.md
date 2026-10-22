@@ -94,15 +94,26 @@ and row mapping are generated from `entities/job/`, not hand-written.
 ## Schema bootstrap
 
 `ensure_schema` takes `pg_advisory_xact_lock(hashtext('erserver.ensure_schema'),
-0)`, sets `er.ddl_log_skip` for the transaction, then replays the generated
+0)`, sets `er.ddl_log_skip` for the transaction, replays the generated
 `POSTGRES_BASELINE` — every `public.*` table's DDL in FK-dependency order, built
-from the entity catalog.
+from the entity catalog — and then runs `er_entity_diff::reconcile_postgres`
+against the compiled-in catalog: the `ADD COLUMN` the baseline's `IF NOT
+EXISTS` cannot do, each statement ledgered in `public.schema_migrations`. A
+breaking difference is `SchemaError::Reconcile` (`ERR_SCHEMA_BREAKING`, every
+difference listed) and the boot stops; `main.rs` prints the chain and exits.
 
 - **No schema is hand-written here.** A new control-plane table comes from an
   `entity.yaml`; see the entity-framework skill.
 - The advisory lock makes concurrent boots safe.
 - `er.ddl_log_skip` stops an idempotent boot replay from filling the DDL ledger
-  with no-op events.
+  with no-op events; the reconciler's statements are real migrations and are
+  NOT skipped, so they appear in `ddl_log` as well as the ledger.
+- `er-server migrate` is the same thing as a subcommand: the web-api pod's init
+  container, and the one-off master-DSN run the event triggers need.
+- `er-server migrate-tenants [--timeout-secs N]` is the lake half
+  (`schema.rs`): one `lake_migrate` job per active org, a wait, a per-tenant
+  report, non-zero exit on `breaking`/`error`/`timeout`. The chart runs it as
+  a post-upgrade hook and a daily CronJob.
 
 `ensure_event_triggers` is **best-effort by design**: `CREATE EVENT TRIGGER`
 needs superuser/rds_superuser, which CI and dev have but the application role
@@ -112,9 +123,16 @@ job with the master DSN. Do not "fix" this into a hard failure.
 
 ## The dispatcher
 
-`dispatcher::run_loop` polls; `dispatch_once` does claim → mark running → open
-the org's lake → run the matching `er-cli` operation **in-process** → mark the
-outcome → emit the `job.<state>` webhook. There are no per-run Kubernetes jobs.
+`dispatcher::run_loop` polls; `dispatch_once` does claim → mark running →
+**reconcile the org's lake** (`schema::reconcile_lake_env`, recorded in
+`public.tenant_schema_states` whatever the outcome; a breaking lake fails the
+job with `ERR_SCHEMA_BREAKING` before any stage runs) → open the org's lake →
+run the matching `er-cli` operation **in-process** → mark the outcome → emit
+the `job.<state>` webhook. `provision` is the one kind that skips the
+pre-step and reconciles the lake it creates instead; `lake_migrate` is the
+kind whose whole work is the pre-step. There are no per-run Kubernetes jobs.
+`dispatch_once_with` takes the provisioning profile explicitly for the
+Postgres-tier tests.
 
 - Idle backoff doubles from 500ms to a 5s ceiling.
 - A Postgres failure returns `Err` and is fatal to the caller: the standalone

@@ -1,0 +1,52 @@
+# Drift detection, as a schedule rather than a product: the same tenant sweep
+# the deploy runs, on a timer. A lake that an operator altered, restored from a
+# backup, or that missed the deploy's sweep (a job held its lock past the
+# deadline) is reconciled here if the difference is additive, and reported as
+# `breaking` — a failed Job, visible in `kubectl get jobs` — if it is not. The
+# per-tenant positions it records are in public.tenant_schema_states.
+{{- if and .Values.tenantMigrate.enabled .Values.tenantMigrate.drift.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: er-tenant-drift
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: er-tenant-drift
+    app.kubernetes.io/component: migrations
+    {{- include "er-platform.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.tenantMigrate.drift.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: {{ add .Values.tenantMigrate.timeoutSeconds 120 }}
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: er-tenant-drift
+            {{- include "er-platform.labels" . | nindent 12 }}
+        spec:
+          restartPolicy: Never
+          serviceAccountName: er-api
+          securityContext:
+            {{- include "er-platform.podSecurityContext" . | nindent 12 }}
+          containers:
+            - name: tenant-drift
+              image: {{ include "er-platform.image" (dict "root" . "image" .Values.images.api) }}
+              command: ["er-server", "migrate-tenants", "--timeout-secs", {{ .Values.tenantMigrate.timeoutSeconds | quote }}]
+              securityContext:
+                {{- include "er-platform.containerSecurityContext" . | nindent 16 }}
+                runAsUser: 1001
+                runAsGroup: 1001
+              env:
+                {{- include "er-platform.erserverEnv" . | nindent 16 }}
+              envFrom:
+                - secretRef:
+                    name: er-erserver-env
+              resources:
+                requests: { cpu: 100m, memory: 128Mi }
+                limits: { cpu: 500m, memory: 512Mi }
+{{- end }}

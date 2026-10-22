@@ -39,6 +39,7 @@ pub mod openapi;
 pub mod pg;
 pub mod provision;
 pub mod read;
+pub mod schema;
 pub mod urlguard;
 pub mod webhook;
 

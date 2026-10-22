@@ -21,6 +21,10 @@ utoipa = { workspace = true }
 # entity struct (with-chrono for timestamptz columns, with-serde_json for jsonb).
 duckdb = { workspace = true }
 tokio-postgres = { workspace = true, features = ["with-chrono-0_4"] }
+# The compiled-in catalog (`src/catalog.rs`): the entity YAML is embedded with
+# include_str! and parsed on demand by the schema reconciler.
+er-entity-spec = { path = "../er-entity-spec" }
+serde_norway = { workspace = true }
 
 # No `[lints]` block: the generated crate root carries its own clippy suppressions,
 # since generated code is not written to the workspace's pedantic style.

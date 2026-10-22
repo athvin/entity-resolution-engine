@@ -76,12 +76,21 @@ enum Command {
         /// The repository root (holds `entities/`). Defaults to the current dir.
         #[arg(long, default_value = ".")]
         root: PathBuf,
-        /// The store to diff (only `postgres` is wired today).
+        /// The store to diff: `postgres` (the control database) or `duckdb` (one
+        /// tenant's DuckLake, whose stage-materialised relations are skipped).
         #[arg(long, default_value = "postgres")]
         store: String,
         /// The Postgres DSN (defaults to the `ER_PG_DSN` env var).
         #[arg(long)]
         dsn: Option<String>,
+        /// `--store duckdb`: the DuckLake metadata (everything after `ducklake:`,
+        /// e.g. a catalog file path or `postgres:dbname=...`); defaults to
+        /// `ER_LAKE_CATALOG`.
+        #[arg(long)]
+        lake_catalog: Option<String>,
+        /// `--store duckdb`: the lake's data path; defaults to `ER_LAKE_DATA_PATH`.
+        #[arg(long)]
+        lake_data_path: Option<String>,
     },
     /// Print the entity-relationship diagram (`docs/erd.md`) to stdout. `gen`
     /// writes the same document into the tree; `verify` fails when it is stale.
@@ -111,17 +120,26 @@ enum Command {
         docs: bool,
     },
     /// Plan (or `--apply`) the safe migration that reconciles a live store to the
-    /// catalog; a breaking difference is refused for a hand-written migration.
+    /// catalog; a breaking difference is refused for a hand-written migration (the
+    /// control database) or a rebuild (a lake). `--apply` is the same reconciler
+    /// er-server runs at boot and at every lake job, ledger included.
     Migrate {
         /// The repository root (holds `entities/`). Defaults to the current dir.
         #[arg(long, default_value = ".")]
         root: PathBuf,
-        /// The store (only `postgres` is wired today).
+        /// The store: `postgres` (the control database) or `duckdb` (one tenant's
+        /// DuckLake).
         #[arg(long, default_value = "postgres")]
         store: String,
         /// The Postgres DSN (defaults to the `ER_PG_DSN` env var).
         #[arg(long)]
         dsn: Option<String>,
+        /// `--store duckdb`: the DuckLake metadata; defaults to `ER_LAKE_CATALOG`.
+        #[arg(long)]
+        lake_catalog: Option<String>,
+        /// `--store duckdb`: the lake's data path; defaults to `ER_LAKE_DATA_PATH`.
+        #[arg(long)]
+        lake_data_path: Option<String>,
         /// Apply the safe statements instead of only printing them.
         #[arg(long)]
         apply: bool,
@@ -444,122 +462,253 @@ fn run_verify(root: &Path) -> Result<bool> {
     Ok(fresh && analysed)
 }
 
-/// Diff a live store against the catalog; returns true when they match.
-fn run_diff(root: &Path, store: &str, dsn: Option<&str>) -> Result<bool> {
-    use er_entity_spec::Store;
-    if store != "postgres" {
-        anyhow::bail!("only --store postgres is wired today (got {store:?})");
+/// How a lake is reached from the command line: explicit flags, else the env the
+/// org row carries (`ER_LAKE_CATALOG` / `ER_LAKE_DATA_PATH`).
+struct LakeTarget {
+    catalog: String,
+    data_path: Option<String>,
+}
+
+impl LakeTarget {
+    fn resolve(catalog: Option<&str>, data_path: Option<&str>) -> Result<Self> {
+        let catalog = catalog
+            .map(ToString::to_string)
+            .or_else(|| std::env::var("ER_LAKE_CATALOG").ok())
+            .context("a lake is required (--lake-catalog or ER_LAKE_CATALOG)")?;
+        let data_path = data_path
+            .map(ToString::to_string)
+            .or_else(|| std::env::var("ER_LAKE_DATA_PATH").ok());
+        Ok(Self { catalog, data_path })
     }
-    let entities_dir = root.join("entities");
-    let catalog = load_catalog(&entities_dir)?;
-    let dsn = dsn
-        .map(ToString::to_string)
-        .or_else(|| std::env::var("ER_PG_DSN").ok())
-        .context("a Postgres DSN is required (--dsn or ER_PG_DSN)")?;
-    let relations: Vec<String> = er_entity_diff::postgres_relations(&catalog);
 
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .context("building the tokio runtime")?;
-    let diffs = runtime.block_on(async {
-        let (client, connection) = tokio_postgres::connect(&dsn, er_pg_tls::make_tls())
-            .await
-            .context("connecting to Postgres")?;
-        let handle = tokio::spawn(connection);
-        let live = er_entity_diff::read_postgres_columns(&client, &relations)
-            .await
-            .context("reading the live schema")?;
-        handle.abort();
-        anyhow::Ok(er_entity_diff::diff_store(&catalog, Store::Postgres, &live))
-    })?;
-
-    if diffs.is_empty() {
-        println!("er-entity diff: the Postgres schema matches the catalog");
-        Ok(true)
-    } else {
-        eprintln!("er-entity diff: {} difference(s):", diffs.len());
-        for d in &diffs {
-            eprintln!("  [{:?}] {}: {}", d.severity, d.relation, d.message);
-        }
-        Ok(false)
+    fn open(&self, read_only: bool) -> Result<duckdb::Connection> {
+        let conn = duckdb::Connection::open_in_memory().context("opening DuckDB")?;
+        er_entity_diff::attach_lake(&conn, &self.catalog, self.data_path.as_deref(), read_only)
+            .with_context(|| format!("attaching the lake {}", self.catalog))?;
+        Ok(conn)
     }
 }
 
-/// Plan — or, with `apply`, apply — the safe migration reconciling Postgres to the
-/// catalog. A breaking difference is refused (ERR_SCHEMA_BREAKING).
-fn run_migrate(root: &Path, store: &str, dsn: Option<&str>, apply: bool) -> Result<bool> {
+fn parse_store(store: &str) -> Result<er_entity_spec::Store> {
     use er_entity_spec::Store;
-    if store != "postgres" {
-        anyhow::bail!("only --store postgres is wired today (got {store:?})");
+    match store {
+        "postgres" => Ok(Store::Postgres),
+        "duckdb" => Ok(Store::Duckdb),
+        other => anyhow::bail!("--store must be `postgres` or `duckdb` (got {other:?})"),
     }
+}
+
+fn print_diffs(diffs: &[er_entity_diff::DiffItem], store: er_entity_spec::Store) -> bool {
+    use er_entity_diff::Severity;
+    let label = match store {
+        er_entity_spec::Store::Postgres => "Postgres",
+        er_entity_spec::Store::Duckdb => "lake",
+    };
+    let pending = diffs
+        .iter()
+        .filter(|d| d.severity != Severity::Ahead)
+        .count();
+    if pending == 0 {
+        println!("er-entity diff: the {label} schema matches the catalog");
+    } else {
+        eprintln!("er-entity diff: {pending} difference(s):");
+    }
+    for d in diffs {
+        match d.severity {
+            Severity::Ahead => eprintln!("  [Ahead] {}: {}", d.relation, d.message),
+            severity => eprintln!("  [{severity:?}] {}: {}", d.relation, d.message),
+        }
+    }
+    pending == 0
+}
+
+/// Diff a live store against the catalog; returns true when they match (an
+/// ahead store — extra live columns — still matches; it is printed).
+fn run_diff(
+    root: &Path,
+    store: &str,
+    dsn: Option<&str>,
+    lake_catalog: Option<&str>,
+    lake_data_path: Option<&str>,
+) -> Result<bool> {
+    use er_entity_spec::Store;
+    let store = parse_store(store)?;
     let entities_dir = root.join("entities");
     let catalog = load_catalog(&entities_dir)?;
-    let dsn = dsn
-        .map(ToString::to_string)
-        .or_else(|| std::env::var("ER_PG_DSN").ok())
-        .context("a Postgres DSN is required (--dsn or ER_PG_DSN)")?;
-    let relations: Vec<String> = er_entity_diff::postgres_relations(&catalog);
 
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .context("building the tokio runtime")?;
-    runtime.block_on(async {
-        let (mut client, connection) = tokio_postgres::connect(&dsn, er_pg_tls::make_tls())
-            .await
-            .context("connecting to Postgres")?;
-        let handle = tokio::spawn(connection);
-        let live = er_entity_diff::read_postgres_columns(&client, &relations)
-            .await
-            .context("reading the live schema")?;
-        let plan = er_entity_diff::plan_migration(&catalog, Store::Postgres, &live);
+    let diffs = match store {
+        Store::Duckdb => {
+            let target = LakeTarget::resolve(lake_catalog, lake_data_path)?;
+            let conn = target.open(true)?;
+            let stage: std::collections::BTreeSet<String> =
+                er_schema::model::stage_owned().into_iter().collect();
+            let owned = er_entity_diff::catalog_without(&catalog, Store::Duckdb, &stage)?;
+            let relations = er_entity_diff::lake_relations(&catalog);
+            let live = er_entity_diff::read_lake_columns(&conn, &relations)
+                .context("reading the live lake schema")?;
+            er_entity_diff::diff_store(&owned, Store::Duckdb, &live)
+        }
+        Store::Postgres => {
+            let dsn = dsn
+                .map(ToString::to_string)
+                .or_else(|| std::env::var("ER_PG_DSN").ok())
+                .context("a Postgres DSN is required (--dsn or ER_PG_DSN)")?;
+            let relations: Vec<String> = er_entity_diff::postgres_relations(&catalog);
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .context("building the tokio runtime")?;
+            runtime.block_on(async {
+                let (client, connection) = tokio_postgres::connect(&dsn, er_pg_tls::make_tls())
+                    .await
+                    .context("connecting to Postgres")?;
+                let handle = tokio::spawn(connection);
+                let live = er_entity_diff::read_postgres_columns(&client, &relations)
+                    .await
+                    .context("reading the live schema")?;
+                handle.abort();
+                anyhow::Ok(er_entity_diff::diff_store(&catalog, Store::Postgres, &live))
+            })?
+        }
+    };
+    Ok(print_diffs(&diffs, store))
+}
 
-        if !plan.breaking.is_empty() {
-            eprintln!(
-                "ERR_SCHEMA_BREAKING: {} change(s) need a hand-written migration:",
-                plan.breaking.len()
-            );
-            for d in &plan.breaking {
-                eprintln!("  {}: {}", d.relation, d.message);
-            }
-            handle.abort();
-            return anyhow::Ok(false);
+fn print_plan(plan: &er_entity_diff::MigrationPlan, label: &str) -> bool {
+    if !plan.breaking.is_empty() {
+        eprintln!(
+            "ERR_SCHEMA_BREAKING: {} change(s) the reconciler refuses to auto-apply:",
+            plan.breaking.len()
+        );
+        for d in &plan.breaking {
+            eprintln!("  {}: {}", d.relation, d.message);
         }
-        if plan.statements.is_empty() {
-            println!("er-entity migrate: the Postgres schema is already current");
-            handle.abort();
-            return anyhow::Ok(true);
+        return false;
+    }
+    for d in &plan.ahead {
+        eprintln!("  [Ahead] {}: {}", d.relation, d.message);
+    }
+    if plan.statements.is_empty() {
+        println!("er-entity migrate: the {label} schema is already current");
+    } else {
+        println!(
+            "-- er-entity migrate plan ({} statement(s)):",
+            plan.statements.len()
+        );
+        for stmt in &plan.statements {
+            println!("{stmt}");
         }
-        if apply {
-            // Apply the safe statements under the schema advisory lock, in one txn.
-            let tx = client.transaction().await.context("begin")?;
-            tx.execute(
-                "SELECT pg_advisory_xact_lock(hashtext('erserver.ensure_schema'), 0)",
-                &[],
-            )
-            .await
-            .context("advisory lock")?;
-            for stmt in &plan.statements {
-                tx.batch_execute(stmt).await.with_context(|| stmt.clone())?;
-            }
-            tx.commit().await.context("commit")?;
-            println!(
-                "er-entity migrate: applied {} statement(s)",
-                plan.statements.len()
-            );
-        } else {
-            println!(
-                "-- er-entity migrate plan ({} statement(s)):",
-                plan.statements.len()
-            );
-            for stmt in &plan.statements {
-                println!("{stmt}");
+    }
+    true
+}
+
+fn report_reconciled(reconciled: &er_entity_diff::Reconciled, label: &str) {
+    for d in &reconciled.ahead {
+        eprintln!("  [Ahead] {}: {}", d.relation, d.message);
+    }
+    if reconciled.applied.is_empty() {
+        println!(
+            "er-entity migrate: the {label} schema is already current (catalog {})",
+            &reconciled.catalog_hash[..12]
+        );
+    } else {
+        println!(
+            "er-entity migrate: applied {} statement(s) to the {label} (catalog {})",
+            reconciled.applied.len(),
+            &reconciled.catalog_hash[..12]
+        );
+        for stmt in &reconciled.applied {
+            println!("{stmt}");
+        }
+    }
+}
+
+/// Plan — or, with `apply`, apply — the safe migration reconciling a store to the
+/// catalog. A breaking difference is refused (ERR_SCHEMA_BREAKING). `apply` runs
+/// the same reconciler er-server does, so the store's `schema_migrations` ledger
+/// records what this command did.
+fn run_migrate(
+    root: &Path,
+    store: &str,
+    dsn: Option<&str>,
+    lake_catalog: Option<&str>,
+    lake_data_path: Option<&str>,
+    apply: bool,
+) -> Result<bool> {
+    use er_entity_spec::Store;
+    let store = parse_store(store)?;
+    let entities_dir = root.join("entities");
+    let catalog = load_catalog(&entities_dir)?;
+    let applied_by = format!("er-entity {}", env!("CARGO_PKG_VERSION"));
+
+    match store {
+        Store::Duckdb => {
+            let target = LakeTarget::resolve(lake_catalog, lake_data_path)?;
+            let conn = target.open(!apply)?;
+            if apply {
+                match er_entity_diff::reconcile_lake(&conn, &catalog, &applied_by) {
+                    Ok(reconciled) => {
+                        report_reconciled(&reconciled, "lake");
+                        Ok(true)
+                    }
+                    Err(e @ er_entity_diff::ReconcileError::Breaking(_)) => {
+                        eprintln!("{e}");
+                        Ok(false)
+                    }
+                    Err(e) => Err(e).context("reconciling the lake"),
+                }
+            } else {
+                let stage: std::collections::BTreeSet<String> =
+                    er_schema::model::stage_owned().into_iter().collect();
+                let owned = er_entity_diff::catalog_without(&catalog, Store::Duckdb, &stage)?;
+                let relations = er_entity_diff::lake_relations(&catalog);
+                let live = er_entity_diff::read_lake_columns(&conn, &relations)
+                    .context("reading the live lake schema")?;
+                let plan = er_entity_diff::plan_migration(&owned, Store::Duckdb, &live);
+                Ok(print_plan(&plan, "lake"))
             }
         }
-        handle.abort();
-        anyhow::Ok(true)
-    })
+        Store::Postgres => {
+            let dsn = dsn
+                .map(ToString::to_string)
+                .or_else(|| std::env::var("ER_PG_DSN").ok())
+                .context("a Postgres DSN is required (--dsn or ER_PG_DSN)")?;
+            let relations: Vec<String> = er_entity_diff::postgres_relations(&catalog);
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .context("building the tokio runtime")?;
+            runtime.block_on(async {
+                let (mut client, connection) = tokio_postgres::connect(&dsn, er_pg_tls::make_tls())
+                    .await
+                    .context("connecting to Postgres")?;
+                let handle = tokio::spawn(connection);
+                let outcome = if apply {
+                    match er_entity_diff::reconcile_postgres(&mut client, &catalog, &applied_by)
+                        .await
+                    {
+                        Ok(reconciled) => {
+                            report_reconciled(&reconciled, "Postgres");
+                            Ok(true)
+                        }
+                        Err(e @ er_entity_diff::ReconcileError::Breaking(_)) => {
+                            eprintln!("{e}");
+                            Ok(false)
+                        }
+                        Err(e) => Err(e).context("reconciling the control database"),
+                    }
+                } else {
+                    let live = er_entity_diff::read_postgres_columns(&client, &relations)
+                        .await
+                        .context("reading the live schema")?;
+                    let plan = er_entity_diff::plan_migration(&catalog, Store::Postgres, &live);
+                    Ok(print_plan(&plan, "Postgres"))
+                };
+                handle.abort();
+                outcome
+            })
+        }
+    }
 }
 
 fn main() -> ExitCode {
@@ -586,13 +735,34 @@ fn main() -> ExitCode {
                 run_lint(root)
             }
         }
-        Command::Diff { root, store, dsn } => run_diff(root, store, dsn.as_deref()),
+        Command::Diff {
+            root,
+            store,
+            dsn,
+            lake_catalog,
+            lake_data_path,
+        } => run_diff(
+            root,
+            store,
+            dsn.as_deref(),
+            lake_catalog.as_deref(),
+            lake_data_path.as_deref(),
+        ),
         Command::Migrate {
             root,
             store,
             dsn,
+            lake_catalog,
+            lake_data_path,
             apply,
-        } => run_migrate(root, store, dsn.as_deref(), *apply),
+        } => run_migrate(
+            root,
+            store,
+            dsn.as_deref(),
+            lake_catalog.as_deref(),
+            lake_data_path.as_deref(),
+            *apply,
+        ),
     };
     match result {
         Ok(true) => ExitCode::SUCCESS,

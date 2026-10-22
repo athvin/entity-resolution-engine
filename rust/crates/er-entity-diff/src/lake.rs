@@ -7,6 +7,40 @@ use std::collections::BTreeMap;
 
 use crate::LiveColumn;
 
+/// Attach a DuckLake catalog as `lake` on a bare DuckDB connection, the way the
+/// engine's `Session::attach_ducklake` does (format pinned: no automatic
+/// catalog migration behind our back; no catalog-inlined small writes). For the
+/// CLI's `--store duckdb`, which has no engine session; the server and the
+/// dispatcher reconcile through the session they already hold.
+///
+/// # Errors
+/// Propagates the extension load or the ATTACH error.
+pub fn attach_lake(
+    conn: &duckdb::Connection,
+    metadata: &str,
+    data_path: Option<&str>,
+    read_only: bool,
+) -> duckdb::Result<()> {
+    conn.execute_batch("INSTALL ducklake; LOAD ducklake;")?;
+    let mut options = Vec::new();
+    if let Some(dp) = data_path {
+        options.push(format!("DATA_PATH '{}'", dp.replace('\'', "''")));
+    }
+    if read_only {
+        options.push("READ_ONLY".to_string());
+    }
+    options.push("AUTOMATIC_MIGRATION false".to_string());
+    conn.execute_batch(&format!(
+        "ATTACH 'ducklake:{}' AS lake ({});",
+        metadata.replace('\'', "''"),
+        options.join(", ")
+    ))?;
+    if !read_only {
+        conn.execute_batch("CALL lake.set_option('data_inlining_row_limit', 0);")?;
+    }
+    Ok(())
+}
+
 /// Read the `lake.main.*` columns, in ordinal order, keyed by bare relation name,
 /// restricted to `relations`.
 ///

@@ -516,7 +516,7 @@ make dev-up DEV=alice
        scoped to s3://er-dev-lake/dev/alice/*, ExternalSecret,
        three Deployments, Ingress at alice.dev.<domain>
   2. wait for postgres-0, then CREATE DATABASE erctl (via er_provisioner)
-  3. drizzle migrate + ensure_schema
+  3. drizzle migrate (hook) + er-server migrate (init container) + migrate-tenants (post-upgrade hook)
   4. seed
 ```
 
@@ -524,7 +524,7 @@ Secrets come from `er/dev/alice/{erserver,erweb}`, created by the same target if
 
 Three details carry over from the local stack. The dispatcher gets `replicas: 1`, `strategy: Recreate`, and an init container gating on the API's `/healthz`, because its leader connection otherwise blocks `ensure_schema` indefinitely. The Postgres pod runs with `-c max_locks_per_transaction=1024`, matching both compose files. And `ResourceQuota` is what stops one developer's 10M-row run from starving the cluster — `requests.memory: 80Gi`, `limits.cpu: 24`, `count/jobs.batch: 4`, and **`requests.ephemeral-storage`**, without which §5.3's spill sizing is unenforced.
 
-Two details are cloud-only. The per-developer Ingresses share **one internal ALB** via the controller's `group.name` (§4.1) — the controller's documented warning that anyone with Ingress RBAC in the group can override its rules describes, in dev, people who already hold `PlatformAdmin`, which is why prod never joins a dev group. external-dns publishes `alice.dev.<domain>` against the wildcard certificate, scoped with `--domain-filter=dev.<domain>` and a per-cluster `--txt-owner-id`. Step 3's drizzle migrations run as a Helm pre-upgrade hook Job (`node scripts/db-migrate.mjs`, reading `ERWEB_DATABASE_URL`), while `ensure_schema` rides the API's boot as it does locally.
+Two details are cloud-only. The per-developer Ingresses share **one internal ALB** via the controller's `group.name` (§4.1) — the controller's documented warning that anyone with Ingress RBAC in the group can override its rules describes, in dev, people who already hold `PlatformAdmin`, which is why prod never joins a dev group. external-dns publishes `alice.dev.<domain>` against the wildcard certificate, scoped with `--domain-filter=dev.<domain>` and a per-cluster `--txt-owner-id`. Step 3's drizzle migrations run as a Helm pre-upgrade hook Job (`node scripts/db-migrate.mjs`, reading `ERWEB_DATABASE_URL`); the Rust control-plane schema reconciles in the web-api pod's init container (`er-server migrate`: the baseline plus the catalog reconciler, ledgered in `public.schema_migrations`) and again, idempotently, at the API's boot; and every active tenant's lake is reconciled by the post-upgrade hook (`er-server migrate-tenants`, one line per tenant) with a daily CronJob repeating it as drift detection. See [entity-framework-design.md](entity-framework-design.md), "Upgrades and API versions".
 
 Lifecycle:
 

@@ -54,6 +54,11 @@ is the worst place to have one.
    DDL ledger with no-op events.
 3. Replay `er_entities::schema::POSTGRES_BASELINE`: every `public.*` table's
    DDL in FK-dependency order, generated from the entity catalog.
+4. Commit, then `er_entity_diff::reconcile_postgres` in its own transaction
+   under the same lock: read `information_schema.columns`, plan, refuse a
+   breaking plan (`SchemaError::Reconcile`), apply the safe `ADD COLUMN`s /
+   `CREATE TABLE`s, and write `public.schema_migrations` (one `applied` row
+   per statement, or one `verified` row per new catalog hash).
 
 `ensure_event_triggers` installs the DDL-audit triggers **best-effort**,
 returning `Ok(false)` when the role lacks privilege. See the SKILL body for why
@@ -70,6 +75,7 @@ that is correct rather than a bug.
 | `resume_job` | back to `queued`, `not_before = now()`, `finished_at` cleared, with a `resume_run_id` |
 | `get_job`, `list_jobs`, `list_jobs_all` | scoped and cross-org reads |
 | `merge_org_env` | `UPDATE orgs SET env = env || $2` — a shallow merge, not a replace |
+| `schema::record_tenant_state`, `schema::enqueue_tenant_migrations`, `schema::wait_for_tenant_migrations` | the lake reconciliation bookkeeping: the per-tenant position cache, and the deploy sweep |
 | `ensure_org`, `upsert_org_byo`, `org_exists`, `list_orgs`, `get_org` | org lifecycle |
 | `issue_key`, `lookup_key`, `revoke_key` | API keys |
 

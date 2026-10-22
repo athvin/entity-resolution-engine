@@ -103,6 +103,13 @@ unlike the frontend workflow.
 - **Drizzle migrations run as a pre-install/pre-upgrade hook** from the web
   image. So a schema change ships with the deploy that needs it, and a failed
   migration fails the release rather than leaving a half-migrated app serving.
+- **The Rust schema reconciles in three places the chart owns.** An init
+  container on the web-api pod runs `er-server migrate` (the control plane,
+  before the new server serves — safe because the strategy is `Recreate`); a
+  post-upgrade hook Job runs `er-server migrate-tenants` (every active
+  tenant's lake, one line per tenant, non-zero on any tenant that is not
+  current or migrated); and a daily CronJob runs the same sweep as drift
+  detection. The last two are `tenantMigrate.*` values.
 - The chart has **no `appVersion`**: images are pinned per install by tag, and
   prod promotes by digest.
 
@@ -164,6 +171,13 @@ is no node-credential fallback to mask a mistake, which is a feature.
 
 **Changing the database schema the BFF owns.** It ships through the chart's
 migrate hook, so the chart and the image version must agree.
+
+**A release's tenant sweep failed.** `kubectl logs job/er-tenant-migrate`
+is the per-tenant report. `breaking` means that tenant's lake needs a rebuild
+(the detail names the relation and column); `timeout` means a job held the
+lake past `tenantMigrate.timeoutSeconds` and that job's own start already
+reconciled it; `error` is the lake not opening. `public.tenant_schema_states`
+holds the same lines.
 
 **Adding capacity.** There are no node groups. Describe the workload's
 requirements and let Auto Mode place it.

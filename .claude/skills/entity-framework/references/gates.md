@@ -107,6 +107,18 @@ cannot see.
 (needs `ER_TEST_PG_DSN`) — after boot provisioning, `public.*` holds only the
 tables the generated `POSTGRES_BASELINE` declares.
 
+**The reconciler's contract** — `er-entity-diff/tests/pg_reconcile.rs` (needs
+`ER_TEST_PG_DSN`), `er-entity-diff/tests/lake_reconcile.rs` (needs
+`DEDUPE_E2E_DUCKLAKE=1`) and `er-server/tests/pg_migrate_tenants.rs` (needs
+both): an empty store converges to the catalog and the ledger says so, a
+second pass writes nothing, a dropped nullable column comes back as an
+`applied` row, an extra live column is reported as ahead and left alone, a
+retyped column is refused with nothing written, a stage-materialised lake
+relation is never touched, and the deploy sweep reports `migrated`, `current`
+and `breaking` per tenant with a breaking lake failing every job for that
+tenant before a stage runs. A reconciler change that breaks any of these is a
+production schema bug, not a test to update.
+
 **The DuckLake e2e tiers** (`DEDUPE_E2E_DUCKLAKE=1 DEDUPE_E2E_EXTENSIONS=1`,
 `make check-e2e`) — the base_10 committed goldens must stay byte-identical;
 this is the determinism proof every framework change rides on.

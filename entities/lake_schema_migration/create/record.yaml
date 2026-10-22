@@ -1,0 +1,14 @@
+kind: statement
+operation: create
+mode: partial
+description: "Append one ledger row to the tenant lake: an applied statement, or a verification that the lake was already current under a new catalog version."
+params:
+  - { name: id, type: varchar }
+  - { name: created_at, type: varchar }
+  - { name: catalog_hash, type: varchar }
+  - { name: kind, type: varchar }
+  - { name: relation, type: varchar, nullable: true }
+  - { name: statement, type: varchar, nullable: true }
+  - { name: applied_by, type: varchar }
+  - { name: snapshot_id, type: bigint, nullable: true }
+returns: none

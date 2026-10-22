@@ -1,0 +1,11 @@
+kind: statement
+operation: create
+mode: partial
+description: "Record a tenant lake's schema position after a reconciliation or check: insert the row, or on a repeat for the same tenant replace its catalog version, status, detail and check time."
+params:
+  - { name: id, type: varchar }
+  - { name: org_id, type: varchar }
+  - { name: catalog_hash, type: varchar }
+  - { name: status, type: varchar }
+  - { name: detail, type: varchar, nullable: true }
+returns: none

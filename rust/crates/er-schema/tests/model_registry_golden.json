@@ -15,7 +15,8 @@
   "run_stages",
   "ingest_batches",
   "golden_overrides",
-  "record_overlays"
+  "record_overlays",
+  "schema_migrations"
  ],
  "relations": {
   "acct_golden_lineage": {
@@ -1951,6 +1952,66 @@
      "succeeded"
     ]
    },
+   "keys": [
+    {
+     "columns": [
+      "id"
+     ],
+     "where": null
+    }
+   ],
+   "owner": "ddl"
+  },
+  "schema_migrations": {
+   "columns": [
+    {
+     "name": "id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "created_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "updated_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "catalog_hash",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "kind",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "relation",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "statement",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "applied_by",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "snapshot_id",
+     "nullable": true,
+     "type": "BIGINT"
+    }
+   ],
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.schema_migrations (\n  id VARCHAR NOT NULL,\n  created_at TIMESTAMP NOT NULL,\n  updated_at TIMESTAMP NOT NULL,\n  catalog_hash VARCHAR NOT NULL,\n  kind VARCHAR NOT NULL,\n  relation VARCHAR,\n  statement VARCHAR,\n  applied_by VARCHAR NOT NULL,\n  snapshot_id BIGINT\n);",
+   "enums": {},
    "keys": [
     {
      "columns": [

@@ -1,0 +1,48 @@
+kind: entity
+version: 1
+name: schema_migration
+relation: schema_migrations
+description: "The control-plane schema ledger: one row per DDL statement the reconciler applied to public.*, plus one `verified` row each time a new catalog version found the live schema already current. The latest row's catalog_hash is the version the database is at."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "The ledger row's unique id (UUIDv7, minted by the reconciler)."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the statement was applied (or the verification recorded)."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Row update stamp; equals created_at (the ledger is append-only)."
+  - name: catalog_hash
+    type: varchar
+    nullable: false
+    description: "The sha256 of the entity catalog's Postgres DDL that the reconciler was reconciling toward — the schema version."
+  - name: kind
+    type: varchar
+    nullable: false
+    accepted_values: [applied, verified]
+    description: "`applied`: this row's statement ran; `verified`: nothing was pending under a catalog version the ledger had not seen."
+  - name: relation
+    type: varchar
+    description: "The store-qualified relation the statement touched (public.jobs); NULL for a verification."
+  - name: statement
+    type: varchar
+    description: "The DDL statement as applied; NULL for a verification."
+  - name: applied_by
+    type: varchar
+    nullable: false
+    description: "The reconciler that wrote the row: the binary name and its code version."
+indexes:
+  - name: schema_migrations_created_at
+    columns: [created_at]

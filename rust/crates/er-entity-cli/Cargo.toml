@@ -26,6 +26,8 @@ tokio = { workspace = true }
 tokio-postgres = { workspace = true }
 er-pg-tls = { path = "../er-pg-tls" }
 er-entity-lint = { version = "0.1.0", path = "../er-entity-lint" }
+duckdb.workspace = true
+er-schema = { version = "0.1.0", path = "../er-schema" }
 
 [lints]
 workspace = true

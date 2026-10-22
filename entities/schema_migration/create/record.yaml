@@ -1,0 +1,12 @@
+kind: statement
+operation: create
+mode: partial
+description: "Append one ledger row: an applied statement, or a verification that the live schema was already current under a new catalog version."
+params:
+  - { name: id, type: varchar }
+  - { name: catalog_hash, type: varchar }
+  - { name: kind, type: varchar }
+  - { name: relation, type: varchar, nullable: true }
+  - { name: statement, type: varchar, nullable: true }
+  - { name: applied_by, type: varchar }
+returns: none

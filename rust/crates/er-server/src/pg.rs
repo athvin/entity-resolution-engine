@@ -45,13 +45,34 @@ pub async fn connect(dsn: &str) -> Result<Client, PgError> {
     Ok(client)
 }
 
-/// Apply the schema under the advisory-lock bootstrap (db.py `ensure_schema`):
-/// the API and dispatcher both ensure the schema at boot, and the
-/// drop-then-recreate index idiom deadlocks without serialization.
+/// Why the control-plane schema could not be ensured at boot.
+#[derive(Debug, thiserror::Error)]
+pub enum SchemaError {
+    /// The baseline replay or the reconciler's own queries failed.
+    #[error("ensuring the control-plane schema")]
+    Postgres(#[from] PgError),
+    /// The live schema differs from the catalog in a way the reconciler refuses
+    /// to auto-apply (`ERR_SCHEMA_BREAKING`): the boot stops, and an operator
+    /// writes the migration by hand; the next boot verifies the result.
+    #[error("the control-plane schema needs a hand-written migration")]
+    Reconcile(#[from] er_entity_diff::ReconcileError),
+}
+
+/// Ensure the control-plane schema under the advisory-lock bootstrap (db.py
+/// `ensure_schema`): the API and dispatcher both ensure the schema at boot, and
+/// the drop-then-recreate index idiom deadlocks without serialization.
+///
+/// Two passes. The **baseline** replays every table's `CREATE TABLE IF NOT
+/// EXISTS` (+ indexes, the history prelude) so an empty database is provisioned
+/// whole. The **reconciler** then compares the live columns with the catalog
+/// compiled into this binary and applies what the baseline cannot — a column
+/// added to an existing table — recording each statement in
+/// `public.schema_migrations`; a breaking difference stops the boot with the
+/// list, never a half-migrated schema.
 ///
 /// # Errors
-/// Propagates any DDL / transaction error.
-pub async fn ensure_schema(client: &mut Client) -> Result<(), PgError> {
+/// A DDL / transaction error, or a breaking difference the reconciler refuses.
+pub async fn ensure_schema(client: &mut Client) -> Result<(), SchemaError> {
     let tx = client.transaction().await?;
     tx.execute(
         "SELECT pg_advisory_xact_lock(hashtext('erserver.ensure_schema'), 0)",
@@ -66,6 +87,26 @@ pub async fn ensure_schema(client: &mut Client) -> Result<(), PgError> {
         tx.batch_execute(stmt).await?;
     }
     tx.commit().await?;
+    // The reconciler's ADD COLUMNs are real migrations: ledgered, and visible
+    // to the DDL event triggers.
+    let reconciled = er_entity_diff::reconcile_postgres(
+        client,
+        &er_entities::catalog::catalog(),
+        &crate::schema::applied_by(),
+    )
+    .await?;
+    if !reconciled.applied.is_empty() {
+        eprintln!(
+            "er-server: control-plane schema migrated ({})",
+            reconciled.detail()
+        );
+    }
+    for ahead in &reconciled.ahead {
+        eprintln!(
+            "er-server: control-plane schema is ahead of this build: {}: {}",
+            ahead.relation, ahead.message
+        );
+    }
     Ok(())
 }
 

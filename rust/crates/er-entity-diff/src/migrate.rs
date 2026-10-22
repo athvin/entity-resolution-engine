@@ -10,17 +10,37 @@ use er_entity_spec::{Catalog, Column, Entity, Store};
 
 use crate::{DiffItem, LiveColumn, Severity, diff_store};
 
+/// One statement a plan applies, with the relation it touches (what the
+/// `schema_migrations` ledger records beside the SQL).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Planned {
+    /// The store-qualified relation (`public.jobs`, `lake.main.raw_records`).
+    pub relation: String,
+    /// The DDL statement, as applied.
+    pub sql: String,
+}
+
+impl std::fmt::Display for Planned {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.sql)
+    }
+}
+
 /// A migration plan for one store.
 #[derive(Debug, Clone, Default)]
 pub struct MigrationPlan {
     /// Statements that reconcile the live store to the catalog, in order.
-    pub statements: Vec<String>,
+    pub statements: Vec<Planned>,
     /// Differences that cannot be auto-applied; each needs a hand-written migration.
     pub breaking: Vec<DiffItem>,
+    /// Columns the live store carries beyond the catalog: tolerated, reported,
+    /// never dropped (see [`Severity::Ahead`]).
+    pub ahead: Vec<DiffItem>,
 }
 
 impl MigrationPlan {
-    /// Whether the plan has nothing to do and nothing it refuses.
+    /// Whether the plan has nothing to do and nothing it refuses (an ahead store
+    /// is still "nothing to do").
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.statements.is_empty() && self.breaking.is_empty()
@@ -104,20 +124,22 @@ pub fn plan_migration(
     store: Store,
     live: &BTreeMap<String, Vec<LiveColumn>>,
 ) -> MigrationPlan {
-    // Breaking differences come straight from the differ.
-    let breaking = diff_store(catalog, store, live)
+    // Breaking and ahead differences come straight from the differ.
+    let (breaking, ahead): (Vec<DiffItem>, Vec<DiffItem>) = diff_store(catalog, store, live)
         .into_iter()
-        .filter(|d| d.severity == Severity::Breaking)
-        .collect();
+        .filter(|d| d.severity != Severity::Safe)
+        .partition(|d| d.severity == Severity::Breaking);
     let mut plan = MigrationPlan {
         statements: Vec::new(),
         breaking,
+        ahead,
     };
 
     // Safe operations are re-derived from the catalog so each statement is real
     // DDL (not a diff message): a missing relation -> CREATE TABLE; a missing
     // nullable column -> ADD COLUMN. CREATEs are ordered so a referenced table is
     // created before the table that references it (the FK is valid on apply).
+    let qualify = |relation: &str| format!("{}.{relation}", store.qualifier());
     let mut needs_history_prelude = false;
     for entity in topo_order(&catalog.for_store(store)) {
         match live.get(&entity.relation) {
@@ -126,15 +148,20 @@ pub fn plan_migration(
                 // and trigger, which call public.er_history() — the prelude
                 // must precede it.
                 needs_history_prelude |= store == Store::Postgres && entity.generate.history;
-                plan.statements.push(create_table_sql(store, entity));
+                plan.statements.push(Planned {
+                    relation: qualify(&entity.relation),
+                    sql: create_table_sql(store, entity),
+                });
             }
             Some(cols) => {
                 let present: std::collections::BTreeSet<&str> =
                     cols.iter().map(|c| c.name.as_str()).collect();
                 for column in &entity.columns {
                     if !present.contains(column.name.as_str()) && column.nullable {
-                        plan.statements
-                            .push(add_column_sql(store, &entity.relation, column));
+                        plan.statements.push(Planned {
+                            relation: qualify(&entity.relation),
+                            sql: add_column_sql(store, &entity.relation, column),
+                        });
                     }
                 }
                 // The entity exists but its history companion does not: create
@@ -145,7 +172,10 @@ pub fn plan_migration(
                     && let Some(companion) = er_entity_gen::emit_history_companion_ddl(entity)
                 {
                     needs_history_prelude = true;
-                    plan.statements.push(companion);
+                    plan.statements.push(Planned {
+                        relation: qualify(&format!("{}_history", entity.relation)),
+                        sql: companion,
+                    });
                 }
             }
         }
@@ -153,8 +183,13 @@ pub fn plan_migration(
     // The er_history() function every companion trigger calls, once, first
     // (CREATE OR REPLACE — idempotent against an already-provisioned database).
     if needs_history_prelude {
-        plan.statements
-            .insert(0, er_entity_gen::history_prelude().to_string());
+        plan.statements.insert(
+            0,
+            Planned {
+                relation: "public.er_history()".to_string(),
+                sql: er_entity_gen::history_prelude().to_string(),
+            },
+        );
     }
     plan
 }
@@ -176,7 +211,11 @@ mod tests {
     fn an_absent_relation_plans_a_create_table() {
         let plan = plan_migration(&catalog(), Store::Postgres, &BTreeMap::new());
         assert_eq!(plan.statements.len(), 1);
-        assert!(plan.statements[0].contains("CREATE TABLE IF NOT EXISTS public.jobs"));
+        assert!(
+            plan.statements[0]
+                .sql
+                .contains("CREATE TABLE IF NOT EXISTS public.jobs")
+        );
         assert_eq!(plan.breaking, Vec::new());
     }
 
@@ -218,7 +257,7 @@ mod tests {
         assert!(
             plan.statements
                 .iter()
-                .any(|s| s.contains("ADD COLUMN run_id text")),
+                .any(|s| s.sql.contains("ADD COLUMN run_id text")),
             "{:?}",
             plan.statements
         );
@@ -259,11 +298,17 @@ mod tests {
         let plan = plan_migration(&webhook_catalog(), Store::Postgres, &BTreeMap::new());
         assert_eq!(plan.statements.len(), 2, "{:?}", plan.statements);
         assert!(
-            plan.statements[0].contains("FUNCTION public.er_history()"),
+            plan.statements[0]
+                .sql
+                .contains("FUNCTION public.er_history()"),
             "the er_history prelude must precede the trigger that calls it"
         );
-        assert!(plan.statements[1].contains("CREATE TABLE IF NOT EXISTS public.webhooks ("));
-        assert!(plan.statements[1].contains("public.webhooks_history ("));
+        assert!(
+            plan.statements[1]
+                .sql
+                .contains("CREATE TABLE IF NOT EXISTS public.webhooks (")
+        );
+        assert!(plan.statements[1].sql.contains("public.webhooks_history ("));
         assert_eq!(plan.breaking, Vec::new());
     }
 
@@ -275,11 +320,19 @@ mod tests {
 
         let plan = plan_migration(&catalog, Store::Postgres, &live);
         assert_eq!(plan.statements.len(), 2, "{:?}", plan.statements);
-        assert!(plan.statements[0].contains("FUNCTION public.er_history()"));
-        assert!(plan.statements[1].contains("public.webhooks_history ("));
-        assert!(plan.statements[1].contains("TRIGGER er_history_webhooks"));
         assert!(
-            !plan.statements[1].contains("public.webhooks ("),
+            plan.statements[0]
+                .sql
+                .contains("FUNCTION public.er_history()")
+        );
+        assert!(plan.statements[1].sql.contains("public.webhooks_history ("));
+        assert!(
+            plan.statements[1]
+                .sql
+                .contains("TRIGGER er_history_webhooks")
+        );
+        assert!(
+            !plan.statements[1].sql.contains("public.webhooks ("),
             "the entity table already exists; only the companion is created"
         );
         assert_eq!(plan.breaking, Vec::new());

@@ -36,7 +36,7 @@ Everything else is gated — see [references/gates.md](references/gates.md).
 |---|---|
 | Entity definition | `entities/<name>/entity.yaml` (the inventory is generated — [references/entities-index.md](references/entities-index.md)) |
 | Declared statements | `entities/<name>/{create,read,update,delete}/<stmt>.{sql,yaml}` |
-| Generated Rust (structs + query fns + `batch.rs` + `schema.rs`) | `rust/crates/er-entities/src/` |
+| Generated Rust (structs + query fns + `batch.rs` + `schema.rs` + `catalog.rs`) | `rust/crates/er-entities/src/` |
 | Generated DDL | `rust/crates/er-entities/ddl/{lake,postgres}/` |
 | Generated TypeScript | `frontend/src/lib/entities/{bindings,readers}/` |
 | Generated ERD (never hand-edit) | `docs/erd.md` |
@@ -44,6 +44,7 @@ Everything else is gated — see [references/gates.md](references/gates.md).
 | The analyser + emitter + E0xx rules | `rust/crates/er-sql-check/` |
 | The generator + emitters | `rust/crates/er-entity-gen/` |
 | The CLI (`er-entity gen/check/verify/diff/migrate/erd`) | `rust/crates/er-entity-cli/` |
+| The reconciler (differ + planner + ledger, both stores) | `rust/crates/er-entity-diff/` |
 | Full design rationale | `docs/entity-framework-design.md` |
 
 Everything under the generated directories is owned by `er-entity gen` —
@@ -72,13 +73,27 @@ stale or missing".
 match arms call one function. Treat them as aliases; `check` is not a narrower
 staleness-only command, whatever its own help text suggests.
 
-**Live databases:** `er-entity diff --store postgres --dsn <dsn>` compares a
-running control database against the catalog; `er-entity migrate --apply`
-applies the safe (additive) changes in one transaction and refuses breaking
-ones (`ERR_SCHEMA_BREAKING` — those need a hand-written migration). The lake is
-rebuilt by the pipeline itself (registry DDL + CTAS), which is why lake changes
-must be additive. Bump an entity's `version` only on a breaking change (type
-change, rename, drop); an added nullable column is not one.
+**Live databases are reconciled, not migrated by file.** There are no
+migration files. The catalog is compiled into `er-server`
+(`er_entities::catalog::catalog()`), and `er-entity-diff`'s reconciler compares
+it with a live store's `information_schema`, applies only what is safe (create
+an absent relation, add an absent nullable column), refuses everything else
+with `ERR_SCHEMA_BREAKING`, and writes one `applied` row per statement to that
+store's own `schema_migrations` ledger keyed by the catalog hash (a `verified`
+row marks a new catalog version that found the store current). Where it runs:
+`ensure_schema` at boot and the web-api init container (`public.*`); the start
+of every lake job, provisioning, and the deploy's `er-server migrate-tenants`
+sweep (every tenant's `lake.main.*`, with the outcome cached in
+`public.tenant_schema_states`). Stage-materialised lake relations are skipped —
+each run rebuilds them whole. A column the store carries that the catalog does
+not declare is **ahead**: reported, never dropped, never refused (E011 makes
+an old binary safe against it). From the command line, `er-entity diff` and
+`er-entity migrate [--apply]` take `--store postgres --dsn <dsn>` or `--store
+duckdb --lake-catalog <metadata> --lake-data-path <path>`; `--apply` is the
+same reconciler, ledger included. A breaking lake difference means a rebuild
+of that tenant; a breaking control difference means a hand-written migration,
+verified by the next boot. Bump an entity's `version` only on a breaking
+change (type change, rename, drop); an added nullable column is not one.
 
 ## Common workflows
 
@@ -92,9 +107,13 @@ same columns, same order). Lake note: additive only; the lake has no defaults.
 `kind/version/name/relation/description/key/generate/columns` (see
 [references/entities-and-generation.md](references/entities-and-generation.md)
 for every field), regenerate, commit. Control-plane tables boot from the
-generated `POSTGRES_BASELINE`; never hand-write DDL. A lake relation that is
-engine-internal (not an entity) goes in the `er-schema` registry instead —
-those are the only two doors ("there is no third place", CONTRIBUTING.md).
+generated `POSTGRES_BASELINE`; lake tables are created in every tenant lake by
+the reconciler at the next job start, provisioning or deploy sweep; never
+hand-write DDL. A lake relation that is engine-internal (not an entity) goes in
+the `er-schema` registry instead — those are the only two doors ("there is no
+third place", CONTRIBUTING.md). A lake *entity* must also appear in that
+registry (`er_schema::model::ddl_specs`, with the golden JSON updated), because
+the declared-names gates read the registry.
 
 **Add a lake read** — a `.sql` + `.yaml` under `entities/<entity>/read/`.
 Two shapes:

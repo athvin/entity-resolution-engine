@@ -692,6 +692,26 @@ fn ddl_specs() -> Vec<TableSpec> {
             vec![key(&["id"]), key(&["record_key", "kind"])],
             BTreeMap::new(),
         ),
+        // The lake's schema ledger: one row per DDL statement the reconciler
+        // applied, plus a `verified` row per catalog version it found current.
+        // Mirrors `entities/lake_schema_migration`; the reconciler (er-entity-diff)
+        // writes it through the generated statement, never by hand.
+        tspec(
+            "schema_migrations",
+            vec![
+                nn("id", VARCHAR),
+                nn("created_at", TIMESTAMP),
+                nn("updated_at", TIMESTAMP),
+                nn("catalog_hash", VARCHAR),
+                nn("kind", VARCHAR),
+                col("relation", VARCHAR),
+                col("statement", VARCHAR),
+                nn("applied_by", VARCHAR),
+                col("snapshot_id", BIGINT),
+            ],
+            vec![key(&["id"])],
+            BTreeMap::new(),
+        ),
     ]
 }
 
