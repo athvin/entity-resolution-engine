@@ -1260,11 +1260,43 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          ordering against real base_10 scores, asserts it **differs from score order** so the
          test can tell the two apart, and asserts determinism across identical requests.
          Replacing the ordering with `match_probability DESC` is observed failing.
-   - [ ] E10b-2 implicit feedback from review resolutions (#20) — belongs in the DRAIN, not the
-         staging endpoint: `resolve_review` only stages an action and the pair lives in the lake,
-         while `drain_and_correct` holds both the Postgres client and the lake session, and a
-         resolution staged but never applied should not become training signal.
-         E10c per-version evaluation (precision/recall/ROC over the labels), label-driven
+   - [x] **E10b-2 a steward's verdict becomes a training label.** `pair_label.origin` has
+         declared `reviewer` as an accepted value since E10b and **nothing ever wrote one** — and
+         the labels API *counted* that bucket, so the coverage endpoint reported a category which
+         could not fill. A person looking at a pair and deciding is the strongest signal a model
+         can get, and it was being thrown away.
+         Written in the DRAIN, as the entry above predicted and for the reason it gave: the
+         staging endpoint has neither the pair (the action carries only `review_id` and the
+         verdict) nor the lake, while `drain_and_correct` holds the Postgres client and, through
+         `apply_and_correct`, the lake session. Only APPLIED actions produce labels — a resolution
+         staged and never drained is not a verdict the engine acted on, and labelling it would
+         train on an intent the corpus never saw.
+         Three decisions worth keeping. A **dismissal yields no label**: "not worth my time" is
+         not a verdict about whether the pair is the same person, and training on it would teach
+         the model that uncertain pairs are negatives. The pair is **canonicalised lower-key
+         first**, matching how E10b stores labels — a label on the other ordering describes a pair
+         nothing ever scored. And the upsert is on `(org_id, rec_a_key, rec_b_key)` with
+         `created_at` left out of the SET, so re-resolving a pair **corrects** its label instead
+         of stacking a second one while still saying when the pair was first judged.
+         The label names **who** decided. `pg::pending_actions` now carries the staged action's
+         `created_by` instead of dropping it, which is the same reason D7 forwards an end-user
+         identity at all — without it every reviewer label would read as the role.
+         Two framework facts fell out. `assertion/create/from_review` **cannot** return the pair
+         it resolved: the framework refuses `RETURNING` on a lake write ("a lake write must
+         declare `returns: none`"), which is why there is a new `review/read/pair_live` rather
+         than a widened write. And it is `pin: live` because the steward-apply transaction may
+         have written the row itself, so no committed snapshot contains it — `by_id` is pinned for
+         the read API and is the wrong statement here.
+         Best-effort and after the marks: the resolution is already in the lake and the corpus is
+         about to be corrected, so failing the drain because a label could not be upserted would
+         undo real work to record an observation about it.
+         Test in `pg_drain_dispatcher.rs`, which already resolves a review through the real drain:
+         exactly one `reviewer` label, `match` verdict, canonical order, `labeled_by` equal to the
+         staging principal, and the sibling `add_assertion` action yields **no** label (a steward
+         asserting a relationship directly is not adjudicating a pair the model proposed).
+         Observed failing: suppressing the derivation fails on "the match resolution leaves exactly
+         one reviewer label, got []".
+   - [ ] E10c per-version evaluation (precision/recall/ROC over the labels), label-driven
          training (`m_from_labels` into `train_and_register`), related-record features (#26),
          household/link entities (#33).
 4. **Operating at scale**

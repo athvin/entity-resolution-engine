@@ -1874,6 +1874,44 @@ pub fn apply_staged_action(
     action: &serde_json::Value,
     applied_at: &str,
 ) -> Result<()> {
+    apply_staged_action_labeled(session, action_id, action, applied_at).map(|_| ())
+}
+
+/// A training label a steward's decision implies (E10b-2).
+///
+/// A resolution is the strongest signal a model can get — a person looked at the
+/// pair and said. `pair_label.origin` has declared `reviewer` as an accepted
+/// value since E10b and nothing ever wrote one, so the labels API counted a
+/// bucket that could not fill.
+pub struct DerivedLabel {
+    /// Canonical pair order (lower key first), matching how E10b stores labels:
+    /// a label on the other ordering describes a pair nothing ever scored.
+    pub rec_a_key: String,
+    pub rec_b_key: String,
+    /// `match` or `no_match`. A DISMISSAL yields no label at all — "not worth
+    /// my time" is not a verdict about whether the pair is the same person, and
+    /// training on it would teach the model that uncertain pairs are negatives.
+    pub verdict: &'static str,
+}
+
+/// [`apply_staged_action`], additionally returning the training labels the
+/// action implies — empty for every action type except a `resolve_review` that
+/// carried a verdict.
+///
+/// Separate entry point rather than a changed signature because the labels go
+/// to POSTGRES, which this function cannot reach: it holds the lake session and
+/// runs on the blocking half. The dispatcher's async half owns the upsert, and
+/// every other caller (the pg test tiers) wants the plain `Result<()>`.
+///
+/// # Errors
+/// Propagates lake DDL / write errors.
+pub fn apply_staged_action_labeled(
+    session: &Session,
+    action_id: &str,
+    action: &serde_json::Value,
+    applied_at: &str,
+) -> Result<Vec<DerivedLabel>> {
+    let mut labels = Vec::new();
     let field = |k: &str| {
         action
             .get(k)
@@ -1933,6 +1971,25 @@ pub fn apply_staged_action(
                     applied_at,
                     review_id,
                 )?;
+                // The same verdict, as a training label. Read live from the
+                // review the assertion was derived from, so the label and the
+                // assertion cannot disagree about which pair was judged.
+                // (`from_review` cannot return it: the framework refuses
+                // RETURNING on a lake write.)
+                for row in er_entities::review::read::pair_live(session.connection(), review_id)? {
+                    if let (Some(a), Some(b)) = (row.rec_a_key, row.rec_b_key) {
+                        let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+                        labels.push(DerivedLabel {
+                            rec_a_key: lo,
+                            rec_b_key: hi,
+                            verdict: if kind == "always" {
+                                "match"
+                            } else {
+                                "no_match"
+                            },
+                        });
+                    }
+                }
             }
         }
         // Mass-update: set (override_field) or clear (clear_field) one golden
@@ -2021,7 +2078,7 @@ pub fn apply_staged_action(
         }
         _ => {}
     }
-    Ok(())
+    Ok(labels)
 }
 
 /// Populate `review_queue` with the gray-band pairs — active `match_scores`

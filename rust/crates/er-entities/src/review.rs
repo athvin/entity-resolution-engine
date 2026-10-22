@@ -377,6 +377,61 @@ LIMIT $2
             .collect::<Vec<_>>();
         PageRow::from_batches(&batches)
     }
+
+    /// One row of `pair_live`: One review's pair, read live — the endpoints that stage a resolution carry only `review_id` and the verdict, so the pair has to come from the lake at APPLY time. Used to derive the training label a resolution implies (E10b-2). Distinct from `by_id`, which is snapshot-pinned for the read API: this one runs inside the steward-apply transaction, where the row may have been written by that same transaction and no committed snapshot contains it. A pair-only projection rather than reusing `by_id` because the label needs exactly two columns and a wider read would invite using the rest.
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct PairLiveRow {
+        pub rec_a_key: Option<String>,
+        pub rec_b_key: Option<String>,
+    }
+
+    impl PairLiveRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("rec_a_key", ::arrow::datatypes::DataType::Utf8),
+                ("rec_b_key", ::arrow::datatypes::DataType::Utf8),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "rec_a_key")?;
+                let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "rec_b_key")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        rec_a_key: crate::batch::opt_str(c0, i),
+                        rec_b_key: crate::batch::opt_str(c1, i),
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// One review's pair, read live — the endpoints that stage a resolution carry only `review_id` and the verdict, so the pair has to come from the lake at APPLY time. Used to derive the training label a resolution implies (E10b-2). Distinct from `by_id`, which is snapshot-pinned for the read API: this one runs inside the steward-apply transaction, where the row may have been written by that same transaction and no committed snapshot contains it. A pair-only projection rather than reusing `by_id` because the label needs exactly two columns and a wider read would invite using the rest.
+    pub fn pair_live(
+        conn: &::duckdb::Connection,
+        review_id: &str,
+    ) -> ::duckdb::Result<Vec<PairLiveRow>> {
+        const SQL: &str = "SELECT rec_a_key, rec_b_key
+FROM lake.main.review_queue
+WHERE id = $1
+";
+        let mut stmt = conn.prepare(SQL)?;
+        let batches = stmt
+            .query_arrow(::duckdb::params![review_id])?
+            .collect::<Vec<_>>();
+        PairLiveRow::from_batches(&batches)
+    }
 }
 
 pub mod update {

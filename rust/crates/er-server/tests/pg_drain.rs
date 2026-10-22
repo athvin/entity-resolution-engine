@@ -173,10 +173,15 @@ async fn steward_drain_applies_to_lake() {
     assert_eq!(pending.len(), 2, "two actions staged");
     {
         let session = er_cli::open_lake(&catalog, &data_path).unwrap();
-        for (action_id, action) in &pending {
-            er_cli::apply_staged_action(&session, action_id, action, "2026-01-04 00:00:00")
-                .unwrap();
-            pg::mark_action_applied(&client, action_id).await.unwrap();
+        for staged in &pending {
+            er_cli::apply_staged_action(
+                &session,
+                &staged.id,
+                &staged.action,
+                "2026-01-04 00:00:00",
+            )
+            .unwrap();
+            pg::mark_action_applied(&client, &staged.id).await.unwrap();
         }
         // session dropped: release the catalog before the read API attaches it.
     }

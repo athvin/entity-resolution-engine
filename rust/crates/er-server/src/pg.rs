@@ -755,17 +755,63 @@ pub async fn stage_action(
 ///
 /// # Errors
 /// Propagates the query error.
-pub async fn pending_actions(
-    client: &Client,
-    org_id: &str,
-) -> Result<Vec<(String, serde_json::Value)>, PgError> {
+pub async fn pending_actions(client: &Client, org_id: &str) -> Result<Vec<PendingAction>, PgError> {
     Ok(
         er_entities::staged_steward_action::read::pending(client, org_id)
             .await?
             .into_iter()
-            .map(|a| (a.id, a.action))
+            .map(|a| PendingAction {
+                id: a.id,
+                action: a.action,
+                created_by: a.created_by,
+            })
             .collect(),
     )
+}
+
+/// One drained steward action, with the principal that staged it.
+///
+/// `created_by` is carried rather than dropped because a resolution becomes a
+/// training label (E10b-2) and a label has to say WHO decided — the same reason
+/// D7 forwards the end-user identity at all. Without it every reviewer label
+/// would read as the role rather than the person.
+pub struct PendingAction {
+    pub id: String,
+    pub action: serde_json::Value,
+    pub created_by: String,
+}
+
+/// Record the training label a steward's review resolution implies, as
+/// `origin = 'reviewer'` (E10b-2).
+///
+/// Upserts on `(org_id, rec_a_key, rec_b_key)`: re-resolving a pair CORRECTS
+/// its label instead of stacking a second one, and `created_at` is left out of
+/// the update so the row keeps saying when the pair was first judged.
+///
+/// # Errors
+/// Propagates the upsert error.
+pub async fn record_reviewer_label(
+    client: &Client,
+    org_id: &str,
+    pair: (&str, &str),
+    verdict: &str,
+    labeled_by: &str,
+) -> Result<(), PgError> {
+    er_entities::pair_label::create::record(
+        client,
+        &er_ids::new_v7(),
+        org_id,
+        pair.0,
+        pair.1,
+        verdict,
+        "reviewer",
+        labeled_by,
+        None,
+        None,
+        None,
+    )
+    .await?;
+    Ok(())
 }
 
 /// Mark a staged action applied (`steward.py` `drain_org`).

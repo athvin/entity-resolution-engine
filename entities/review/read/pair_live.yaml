@@ -1,0 +1,10 @@
+kind: statement
+operation: read
+description: "One review's pair, read live — the endpoints that stage a resolution carry only `review_id` and the verdict, so the pair has to come from the lake at APPLY time. Used to derive the training label a resolution implies (E10b-2). Distinct from `by_id`, which is snapshot-pinned for the read API: this one runs inside the steward-apply transaction, where the row may have been written by that same transaction and no committed snapshot contains it. A pair-only projection rather than reusing `by_id` because the label needs exactly two columns and a wider read would invite using the rest."
+pin: live
+pin_reason: "Composed inside the steward-apply writer's own transaction, against rows that transaction may itself have written; there is no committed snapshot to pin."
+params:
+  - { name: review_id, type: varchar }
+returns:
+  - { name: rec_a_key, type: varchar }
+  - { name: rec_b_key, type: varchar }
