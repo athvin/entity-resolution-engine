@@ -72,7 +72,7 @@ fn a_tenant_lake_converges_and_its_ledger_records_it() {
 
     // ---- phase 2: a second pass is a no-op ---------------------------------
     let second = reconcile_lake(&conn, &catalog, "lake_reconcile-test").unwrap();
-    assert!(second.applied.is_empty());
+    assert_eq!(second.applied, Vec::new());
     assert!(second.ledger_was_current);
     assert_eq!(
         count(&conn, "SELECT count(*) FROM lake.main.schema_migrations"),
@@ -85,8 +85,8 @@ fn a_tenant_lake_converges_and_its_ledger_records_it() {
     )
     .unwrap();
     let third = reconcile_lake(&conn, &catalog, "lake_reconcile-test").unwrap();
-    assert!(third.applied.is_empty(), "{:?}", third.applied);
-    assert!(third.ahead.is_empty(), "{:?}", third.ahead);
+    assert_eq!(third.applied, Vec::new());
+    assert_eq!(third.ahead, Vec::new());
 
     // ---- phase 4: a dropped nullable column comes back ----------------------
     conn.execute_batch("ALTER TABLE lake.main.runs DROP COLUMN rebuild_reason;")

@@ -69,7 +69,7 @@ async fn the_control_database_converges_and_the_ledger_records_it() {
     let second = reconcile_postgres(&mut client, &catalog, "pg_reconcile-test")
         .await
         .unwrap();
-    assert!(second.applied.is_empty());
+    assert_eq!(second.applied, Vec::new());
     assert!(second.ledger_was_current);
     let count: i64 = client
         .query_one("SELECT count(*) FROM public.schema_migrations", &[])
@@ -126,7 +126,7 @@ async fn the_control_database_converges_and_the_ledger_records_it() {
     let fourth = reconcile_postgres(&mut client, &catalog, "pg_reconcile-test")
         .await
         .unwrap();
-    assert!(fourth.applied.is_empty());
+    assert_eq!(fourth.applied, Vec::new());
     assert_eq!(fourth.ahead.len(), 1, "{:?}", fourth.ahead);
     assert_eq!(fourth.ahead[0].relation, "public.orgs");
     assert!(fourth.ahead[0].message.contains("legacy_note"));
