@@ -48,11 +48,13 @@ import { describe, expect, it } from "vitest";
 import type { ConfigVersion } from "@/lib/entities/bindings/ConfigVersion";
 import type { GoldenLineage } from "@/lib/entities/bindings/GoldenLineage";
 import type { Job } from "@/lib/entities/bindings/Job";
+import type { MatchingModel } from "@/lib/entities/bindings/MatchingModel";
 import type { Org } from "@/lib/entities/bindings/Org";
 import type { Schedule } from "@/lib/entities/bindings/Schedule";
 import type { AdminOrgRow } from "@/lib/query/admin";
 import type { ConfigVersionRow } from "@/lib/query/config";
 import type { JobRow, LineageRow } from "@/lib/query/hooks";
+import type { ModelVersionDetail, ModelVersionRow } from "@/lib/query/models";
 import type { ScheduleRow } from "@/lib/query/steward";
 
 /**
@@ -101,6 +103,20 @@ const PAIRS = {
     "display_name" | "registered" | "has_credentials"
   >,
 
+  modelVersion: true satisfies NoUndeclaredFields<ModelVersionRow, MatchingModel>,
+
+  /**
+   * `weights` is DERIVED, not stored: `model_weights` parses the settings
+   * document and reports each comparison level's m/u and the `log2(m/u)` it
+   * implies. The entity has no such column and should not — it is a view over
+   * `model_json`, which the entity does have.
+   */
+  modelVersionDetail: true satisfies NoUndeclaredFields<
+    ModelVersionDetail,
+    MatchingModel,
+    "weights"
+  >,
+
   configVersion: true satisfies NoUndeclaredFields<ConfigVersionRow, ConfigVersion>,
   lineage: true satisfies NoUndeclaredFields<LineageRow, GoldenLineage>,
   schedule: true satisfies NoUndeclaredFields<ScheduleRow, Schedule>,
@@ -118,6 +134,8 @@ describe("wire contract: UI response shapes vs the generated entity bindings", (
       "configVersion",
       "job",
       "lineage",
+      "modelVersion",
+      "modelVersionDetail",
       "schedule",
     ]);
   });

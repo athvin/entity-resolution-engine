@@ -403,6 +403,55 @@ export function initialState() {
       })),
       "mutable-dev": [],
     },
+    // The model registry. Two names ACTIVE at once, because activation is
+    // unique per (org, name) — the shape an ensemble has, and the shape the
+    // page's `active` list has to render.
+    models: {
+      "acme-dev": [
+        {
+          id: "01jmmodel00000000000000001",
+          name: "default",
+          version: 1,
+          entity_type: "person",
+          model_hash: "f9051b00384be3eff7790b690c842b9c19b40081f91203b2c11c9b364ab12c8d",
+          model_version_label: "v0001",
+          tf_snapshot_id: "01JWMDTFSNAP00000000000001",
+          state: "active",
+          provenance: { origin: "seeded" },
+          created_by: "key:01jmkey0000000000000000001",
+          activated_at: "2026-09-20T10:00:00Z",
+          created_at: "2026-09-20T10:00:00Z",
+        },
+        {
+          id: "01jmmodel00000000000000002",
+          name: "default",
+          version: 2,
+          entity_type: "person",
+          model_hash: "aa11bb22cc33dd44ee55ff6677889900aabbccddeeff00112233445566778899",
+          model_version_label: "v0002",
+          tf_snapshot_id: "01JWMDTFSNAP00000000000002",
+          state: "draft",
+          provenance: { origin: "uploaded", by: "admin@acme.dev" },
+          created_by: "user:admin@acme.dev",
+          activated_at: null,
+          created_at: "2026-09-24T09:30:00Z",
+        },
+        {
+          id: "01jmmodel00000000000000003",
+          name: "strict",
+          version: 1,
+          entity_type: "person",
+          model_hash: "bb22cc33dd44ee55ff6677889900aabbccddeeff001122334455667788990011",
+          model_version_label: "v0001-strict",
+          tf_snapshot_id: "01JWMDTFSNAP00000000000003",
+          state: "active",
+          provenance: { origin: "compiled" },
+          created_by: "user:admin@acme.dev",
+          activated_at: "2026-09-25T11:00:00Z",
+          created_at: "2026-09-25T11:00:00Z",
+        },
+      ],
+    },
     receipts: {
       "acme-dev": [
         {
@@ -535,6 +584,12 @@ export function initialState() {
     "wizard-ios",
     "wizard-android",
     "selectall-dev",
+    // Activating a version ARCHIVES the one it replaces, so the registry gets
+    // one org per device project: all three share this server, and a project
+    // that activates would otherwise flip the state another is asserting.
+    "models-dev",
+    "models-ios",
+    "models-android",
     // Starting a run takes the org's one writer slot; sharing an org with the
     // Runs page's Run-now test would disable whichever button ran second.
     "palette-dev",
@@ -577,6 +632,13 @@ export function initialState() {
     state.assertions[org] = [];
     state.contradictions[org] = [];
     state.matchScores[org] = [];
+    // A registry of its own, structurally identical to acme-dev's: two names
+    // active plus a draft, so each project can activate without racing.
+    state.models[org] = state.models["acme-dev"].map((m) => ({
+      ...m,
+      id: `${m.id.slice(0, 18)}${org.slice(-3)}${m.version}`,
+      provenance: { ...m.provenance },
+    }));
     state.receipts[org] = [];
     state.schedules[org] = [];
     state.configs[org] = {
@@ -1529,6 +1591,127 @@ const server = http.createServer((req, res) => {
     }
     // Newest first, a bare array — `read::imports_recent`. The fixtures below
     // are stored in this order (id …0003 before …0002).
+    // ── model registry ──────────────────────────────────────────────────────
+    //
+    // `active` is a LIST, one entry per name, ordered by name — mirroring
+    // `models_index`. It was a single row until activation became unique per
+    // (org, name), at which point `find(state == "active")` named an arbitrary
+    // ensemble member.
+    if ((match = /^\/v1\/orgs\/([^/]+)\/models$/.exec(path)) && req.method === "GET") {
+      const rows = state.models[match[1]] ?? [];
+      const active = rows
+        .filter((m) => m.state === "active")
+        .sort((a, b) => (a.name > b.name ? 1 : -1))
+        .map((m) => ({ name: m.name, version: m.version, model_hash: m.model_hash }));
+      return send(res, 200, { items: rows, active });
+    }
+    if ((match = /^\/v1\/orgs\/([^/]+)\/models\/compile$/.exec(path)) && req.method === "POST") {
+      const rows = (state.models[match[1]] ??= []);
+      const version =
+        Math.max(0, ...rows.filter((m) => m.name === "default").map((m) => m.version)) + 1;
+      const minted = {
+        id: `01jmmodel0000000000000${String(version).padStart(4, "0")}`,
+        name: "default",
+        version,
+        entity_type: "person",
+        model_hash: "cc33dd44ee55ff6677889900aabbccddeeff001122334455667788990011aabb",
+        model_version_label: `v${String(version).padStart(4, "0")}`,
+        tf_snapshot_id: null,
+        state: "draft",
+        provenance: { origin: "compiled" },
+        created_by: "user:admin@acme.dev",
+        activated_at: null,
+        created_at: "2026-09-26T12:00:00Z",
+      };
+      rows.push(minted);
+      return send(res, 201, minted);
+    }
+    if ((match = /^\/v1\/orgs\/([^/]+)\/models\/versions$/.exec(path)) && req.method === "POST") {
+      const body = await readBody(req);
+      const rows = (state.models[match[1]] ??= []);
+      const name = body.name ?? "default";
+      const version = Math.max(0, ...rows.filter((m) => m.name === name).map((m) => m.version)) + 1;
+      const minted = {
+        id: `01jmmodel0000000000000${String(rows.length + 90).padStart(4, "0")}`,
+        name,
+        version,
+        entity_type: "person",
+        model_hash: "dd44ee55ff6677889900aabbccddeeff001122334455667788990011aabbccdd",
+        model_version_label: body.model_version_label,
+        tf_snapshot_id: body.tf_snapshot_id ?? null,
+        // A draft: authoring a model must not re-cluster a tenant's corpus.
+        state: "draft",
+        provenance: { origin: "uploaded", by: "admin@acme.dev" },
+        created_by: "user:admin@acme.dev",
+        activated_at: null,
+        created_at: "2026-09-26T12:30:00Z",
+      };
+      rows.push(minted);
+      return send(res, 201, minted);
+    }
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/models\/([^/]+)\/versions\/(\d+)$/.exec(path)) &&
+      req.method === "GET"
+    ) {
+      const row = (state.models[match[1]] ?? []).find(
+        (m) => m.name === match[2] && m.version === Number(match[3]),
+      );
+      if (!row) return send(res, 404, { detail: "not found" });
+      return send(res, 200, {
+        ...row,
+        model_json: "{}",
+        // The derived weights view: field names are `model_weights`'s, not the
+        // page's wishes — the weight is `log2_bayes_factor`.
+        weights: {
+          link_type: "dedupe_only",
+          probability_two_random_records_match: 0.0001851008630274792,
+          blocking_rules: [],
+          comparisons: [
+            {
+              output_column_name: "email",
+              comparison_description: "CustomComparison",
+              levels: [
+                {
+                  label: "email is NULL",
+                  sql_condition: '"email_l" IS NULL OR "email_r" IS NULL',
+                  is_null_level: true,
+                  m_probability: null,
+                  u_probability: null,
+                  log2_bayes_factor: null,
+                  tf_adjustment_column: null,
+                },
+                {
+                  label: "Exact match on email",
+                  sql_condition: '"email_l" = "email_r"',
+                  is_null_level: false,
+                  m_probability: 0.7770572781827891,
+                  u_probability: 0.00011916543339900672,
+                  log2_bayes_factor: 12.670309,
+                  tf_adjustment_column: "email",
+                },
+              ],
+            },
+          ],
+        },
+      });
+    }
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/models\/([^/]+)\/versions\/(\d+)\/activate$/.exec(path)) &&
+      req.method === "POST"
+    ) {
+      const rows = state.models[match[1]] ?? [];
+      const target = rows.find((m) => m.name === match[2] && m.version === Number(match[3]));
+      if (!target) return send(res, 404, { detail: "not found" });
+      // Archive only the SAME NAME's active version: other names stay active,
+      // which is what makes an ensemble possible.
+      for (const m of rows) {
+        if (m.name === target.name && m.state === "active") m.state = "archived";
+      }
+      target.state = "active";
+      target.activated_at = "2026-09-26T13:00:00Z";
+      return send(res, 200, target);
+    }
+
     if ((match = /^\/v1\/orgs\/([^/]+)\/imports\/recent$/.exec(path)) && req.method === "GET") {
       const source = url.searchParams.get("source");
       const limit = Number(url.searchParams.get("limit") ?? 20);

@@ -44,6 +44,12 @@ export const TRIAGE_ORGS = [
   // it cannot share one with the Runs page's own Run-now test: whichever ran
   // second would find the button correctly disabled and fail.
   "palette-dev",
+  // The model registry: activating a version ARCHIVES the one it replaces, so
+  // a project that activates would flip the state another project is asserting
+  // — all three share one mock server.
+  "models-dev",
+  "models-ios",
+  "models-android",
   // The account/org-entity tenant: its config declares `entity_type: account`,
   // so the UI reads the company/domain vocabulary. The account spec is
   // read-only (duplicates view + wizard up to the Map step, no publish), so a

@@ -1038,9 +1038,35 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          computed per member or a record scored by one member is never scored by another) and the
          `then_run` cascade + per-member thresholds, which want the resolved ensemble persisted on
          the run row.
-   - [ ] E5b-3 the models page (catch-up UI for E1 — versions with state, the m/u + log2(m/u)
-         weights view the API already exposes, upload, compile, activate; the first surface for
-         the registry at all).
+   - [x] **E5b-3 the models page — and `active` stops naming one model.** The registry had no
+         surface at all since E1 built it: a tenant could not see which model its data was scored
+         against, what it used to be, or the m/u probabilities the engine always carried
+         (`grep m_probability` over the frontend returned nothing).
+         The API half was wrong the moment E5b-1 landed. `models_index`'s `active` was
+         `rows.iter().find(state == "active")` — a single row, well defined only while activation
+         was unique per ORG. Per-NAME, `find` returns whichever active row the list ordered first,
+         so the field named an arbitrary ensemble member. Now a list, one per name, ordered by
+         name for a stable render; the RUN order still comes from the config's `models:` list.
+         The page: what is scoring now (one line per active name), every version with state /
+         provenance / stamp, the derived per-level m, u and `log2(m/u)`, and the two ways to mint
+         a draft — compile from the published config (no body: the rules already written become a
+         model) or upload a settings document. Both land as drafts; activate is admin-only and
+         per-version, and the spec pins that activating one name leaves the others active, which
+         is the whole reason an ensemble can exist. Grayscale throughout — state is font weight
+         and a check glyph, never hue.
+         **The recurring defect, caught on new code.** I wrote the weights interface from memory
+         and it was wrong three ways: `match_weight` for the server's `log2_bayes_factor`, an
+         invented `prior`, a missing `id`. Reading `model_weights` fixed it before any UI existed,
+         and W0.4b's wire-contract gate now carries both model pairs so `ModelVersionRow` cannot
+         drift from the generated `MatchingModel`. `weights` is declared *composed*: parsed out of
+         `model_json`, so the entity rightly has no such column.
+         Fixtures, each learned the hard way: one org per device project
+         (`models-dev`/`-ios`/`-android`) because activating archives what it replaces and all
+         three projects share one mock server — the first run failed with `default v1` reading
+         `archived`; `TRIAGE_ORGS` grants admin and steward only, so the read-only cases use the
+         STEWARD, which is the tighter boundary anyway; and the screen joins `a11y.spec.ts`'s
+         SCREENS in the same change that creates it, because one absent from that array is
+         silently unchecked.
    - [ ] E9b import-time screening + update rules (#38/#39), E9c S3 auto-ingestion (#47).
 3. **Learning loop**
    - [x] **E10a the `train` job, which the dispatcher had no arm for.** `train` has been in
