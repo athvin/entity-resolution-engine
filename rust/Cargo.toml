@@ -93,7 +93,7 @@ uuid = { version = "1", features = ["v7"] }
 # API-key secret generation (SHA-256-hashed at rest; the plaintext is random).
 rand = "0.10"
 # Opaque keyset read cursors (base64url of the snapshot + last key).
-base64 = "0.22"
+base64 = "0.23"
 # Parse repeated query params (e.g. ?key=a&key=b) the typed Query extractor can't.
 serde_urlencoded = "0.7"
 # Entity framework generated crate (`er-entities`): Arrow schemas, chrono date/time
