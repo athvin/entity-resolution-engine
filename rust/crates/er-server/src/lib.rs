@@ -3289,7 +3289,10 @@ async fn quality(
 }
 
 /// Viewer+: active pairwise match scores (`GET /v1/orgs/{org}/match-scores`).
-/// Keyset page; query `cursor`, `limit`, `min`/`max` (probability band).
+/// Keyset page; query `cursor`, `limit`, `band_low`/`band_high` (probability
+/// band). The band names must match what the BFF forwards
+/// (`src/app/api/orgs/[org]/match-scores/route.ts`): a rename on one side only
+/// drops the filter silently, which is what `min`/`max` here used to do.
 async fn match_scores_list(
     principal: Principal,
     State(state): State<AppState>,
@@ -3314,9 +3317,16 @@ async fn match_scores_list(
             }
         };
     let limit = read::parse_limit(params.get("limit").map(String::as_str));
-    let min = read::parse_f64(params.get("min").map(String::as_str));
-    let max = read::parse_f64(params.get("max").map(String::as_str));
-    match read::match_scores_list(&session, snapshot, after.as_deref(), min, max, limit) {
+    let band_low = read::parse_f64(params.get("band_low").map(String::as_str));
+    let band_high = read::parse_f64(params.get("band_high").map(String::as_str));
+    match read::match_scores_list(
+        &session,
+        snapshot,
+        after.as_deref(),
+        band_low,
+        band_high,
+        limit,
+    ) {
         Ok((items, next_cursor)) => Json(json!({
             "items": items,
             "snapshot": snapshot,
