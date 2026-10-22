@@ -166,8 +166,20 @@ test("a segment exports real golden records as snapshot-consistent CSV", async (
   const chunks: Buffer[] = [];
   for await (const chunk of stream) chunks.push(chunk as Buffer);
   const lines = Buffer.concat(chunks).toString("utf8").trim().split("\n");
-  expect(lines[0]).toContain("entity_id,given_name");
-  expect(lines.length).toBeGreaterThan(100); // the whole corpus, paged server-side
+  // `entity_id` has not been a column since the identity program renamed every
+  // primary key to `id` — the generated `GoldenRecord` binding has `id` and no
+  // `entity_id`. And `> 100` was written for the deleted seed's *generated*
+  // corpus; the revived seed uses the committed base_10 fixtures (W0.5b, 23
+  // records / 10 entities) and each wizard pass adds a couple more. Both
+  // assertions sat stale for as long as this file aborted before reaching here.
+  // The stable claim is the one worth making: the unfiltered segment exports
+  // every entity in the corpus, exactly once — so read the count.
+  expect(lines[0]).toContain("id,given_name");
+  const metrics = (await (await page.request.get(`/api/orgs/${ORG}/metrics`)).json()) as {
+    entities: number;
+  };
+  expect(metrics.entities).toBeGreaterThan(0);
+  expect(lines.length).toBe(metrics.entities + 1); // + the header row
   await snap(page, "real-segment-export");
 });
 

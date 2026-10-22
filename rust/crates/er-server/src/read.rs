@@ -887,6 +887,40 @@ pub fn assertions_list(
     }
 }
 
+/// The most recent ingest-batch receipts, newest first, capped like
+/// [`runs_list`]: a bare array, not a keyset page. Optional `source` filter.
+/// Empty if the `ingest_batches` table is absent.
+///
+/// Why this exists next to [`imports_list`]. That one is a FORWARD keyset
+/// cursor — `id > $after`, `ORDER BY id` — so it answers the *oldest* page
+/// first, which is correct for walking a history and wrong for a latest-activity
+/// panel. The "did my file do anything?" receipts card read it with `?limit=20`,
+/// so once a tenant had 20 ingest batches a newly delivered source could never
+/// appear on the page that exists to answer whether the delivery did anything.
+///
+/// # Errors
+/// Propagates a non-missing-table lake query error.
+pub fn imports_recent(
+    session: &Session,
+    snapshot: i64,
+    source: Option<&str>,
+    limit: i64,
+) -> Result<Vec<Value>, String> {
+    let limit = limit.clamp(1, MAX_LIMIT);
+    let source = source.filter(|s| !s.is_empty());
+    match er_entities::ingest_batch::read::recent(session.connection(), snapshot, source, limit) {
+        Ok(rows) => Ok(rows_to_values(&rows)),
+        Err(e) => {
+            let s = e.to_string();
+            if is_missing_table(&s) {
+                Ok(Vec::new())
+            } else {
+                Err(s)
+            }
+        }
+    }
+}
+
 /// The ingest-batch receipts, keyed by `id`
 /// (`readapi.ingest_batches_list`). Optional `source` filter.
 ///
