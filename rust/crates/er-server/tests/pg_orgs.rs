@@ -75,6 +75,68 @@ async fn orgs_crud_and_state_machine() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
 
+    // `config_path` is mirrored into env as ER_CONFIG_PATH when the caller omits
+    // it. The two name the same file and are stored independently: publish writes
+    // the YAML to the COLUMN while every run reads the path out of ENV, so a
+    // caller who sets only one gets a tenant whose published configs never take
+    // effect — successfully, and silently.
+    //
+    // Read through pg rather than the HTTP surface because `GET /v1/orgs/{org}`
+    // deliberately exposes only a `resources` projection of env, not env itself.
+    let stored = pg::get_org(&client, "acme").await.unwrap().unwrap();
+    assert_eq!(
+        stored.env.get("ER_CONFIG_PATH").and_then(|v| v.as_str()),
+        Some("/configs/acme.yaml"),
+        "config_path must be mirrored into env so every run reads the file publish writes"
+    );
+
+    // A caller who supplies BOTH, disagreeing, is refused rather than silently
+    // overridden: passing two different paths means they believe something, and
+    // quietly discarding one of them is how this stays invisible. Creates
+    // nothing, so the org count below is unaffected.
+    let resp = app
+        .clone()
+        .oneshot(req(
+            "POST",
+            "/v1/orgs",
+            "op-secret",
+            Body::from(
+                r#"{"name":"mismatch","config_path":"/configs/a.yaml","env":{"ER_CONFIG_PATH":"/configs/b.yaml"}}"#,
+            ),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "a config_path that disagrees with env.ER_CONFIG_PATH must be refused"
+    );
+    let detail = json_body(resp).await["detail"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        detail.contains("/configs/a.yaml") && detail.contains("/configs/b.yaml"),
+        "the refusal should name both paths, got {detail:?}"
+    );
+
+    // Agreeing explicitly is accepted — the guard refuses a CONFLICT, not the act
+    // of stating the path twice. Re-upserts `acme` rather than creating a third
+    // org, so this stays count-neutral too.
+    let resp = app
+        .clone()
+        .oneshot(req(
+            "POST",
+            "/v1/orgs",
+            "op-secret",
+            Body::from(
+                r#"{"name":"acme","config_path":"/configs/acme.yaml","env":{"ER_CONFIG_PATH":"/configs/acme.yaml","ER_DUCKDB_THREADS":"4"}}"#,
+            ),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+
     // create with an invalid name: 422.
     let resp = app
         .clone()

@@ -202,9 +202,16 @@ async fn golden_records_read_over_ducklake() {
     pg::ensure_schema(&mut client).await.unwrap();
     let app = app(AppState::with_pg("op-secret".to_string(), dsn.clone()));
 
+    // `config_path` and `env.ER_CONFIG_PATH` must name the SAME file. This
+    // fixture used to send a hardcoded `/configs/acme.yaml` for the column while
+    // pointing env at the real temp config it had just written — the exact
+    // misconfiguration `create_org` now refuses, and one that only went unnoticed
+    // here because this test never publishes: had it published, the YAML would
+    // have been written to `/configs/acme.yaml` and every run would have gone on
+    // reading the temp file.
     let create = serde_json::json!({
         "name": "acme",
-        "config_path": "/configs/acme.yaml",
+        "config_path": config_path,
         "env": { "ER_LAKE_CATALOG": catalog, "ER_LAKE_DATA_PATH": data_path, "ER_CONFIG_PATH": config_path },
     });
     let resp = app
