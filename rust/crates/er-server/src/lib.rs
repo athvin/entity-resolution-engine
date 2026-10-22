@@ -191,6 +191,44 @@ fn detail_err(code: StatusCode, msg: impl Into<String>) -> axum::response::Respo
     (code, Json(json!({ "detail": msg.into() }))).into_response()
 }
 
+/// Refuse an operation on a tenant that is not `active`, as a 409 naming the
+/// state it is in. `what` is the plural noun for the thing being refused
+/// ("jobs", "assertions") so the message reads like the imports one.
+///
+/// Every handler that ENQUEUES work has to call this. The guarantee is stated in
+/// the tenant-admin UI — "a suspended tenant refuses jobs, imports and steward
+/// actions until resumed" — and it was only partly true. Four enqueue paths
+/// already refused, each in its own idiom: `delivery_preconditions` compares
+/// `org_row.state`, `publish_config_version` compares a separately-fetched
+/// `org_state`, and `put_lexicon` uses a match guard
+/// (`Ok(Some(o)) if o.state == "active"`). Three did not refuse at all —
+/// `create_job`, `add_assertion` and `record_overlay_action` went role-check →
+/// org-exists → `pg::enqueue` — so a suspended tenant could be made to spend
+/// compute and mutate its own lake through any of those three doors.
+///
+/// A shared helper rather than a fourth hand-written spelling, because four
+/// idioms for one rule is precisely how the next handler gets forgotten. The
+/// existing three are left alone: each is load-bearing where it sits (publish
+/// needs its check atomic with the version repoint), and rewriting them would
+/// put behaviour changes in a bug-fix diff.
+/// Boxed like `org_or_404`'s error, because an axum `Response` is large enough
+/// that clippy's `result_large_err` refuses it unboxed.
+fn refuse_unless_active(
+    org: &pg::OrgDetail,
+    what: &str,
+) -> Result<(), Box<axum::response::Response>> {
+    if org.state == "active" {
+        return Ok(());
+    }
+    Err(Box::new(detail_err(
+        StatusCode::CONFLICT,
+        format!(
+            "org '{}' is {}; {what} are accepted only when active",
+            org.name, org.state
+        ),
+    )))
+}
+
 /// The role lattice (`auth.py` `ROLE_RANK`): the derived `Ord` ranks
 /// `Viewer < Steward < Admin < Operator`, so a role check is `role >= minimum`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -1949,6 +1987,9 @@ async fn create_job(
             Ok(r) => r,
             Err(r) => return *r,
         };
+        if let Err(e) = refuse_unless_active(&org_row, "jobs") {
+            return *e;
+        }
         // Resolve the segment NAME against the published config here, so an
         // unknown name is a 422 at submit time naming the segments that do
         // exist — rather than a job that sits in the queue and then fails.
@@ -4960,6 +5001,9 @@ async fn add_assertion(
         Ok(r) => r,
         Err(r) => return *r,
     };
+    if let Err(e) = refuse_unless_active(&org_row, "assertions") {
+        return *e;
+    }
     match pg::enqueue(
         &client,
         &org_row.id,
@@ -5048,6 +5092,9 @@ async fn record_overlay_action(
         Ok(r) => r,
         Err(r) => return *r,
     };
+    if let Err(e) = refuse_unless_active(&org_row, "steward actions") {
+        return *e;
+    }
     match pg::enqueue(
         &client,
         &org_row.id,

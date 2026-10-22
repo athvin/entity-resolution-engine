@@ -151,6 +151,51 @@ async fn orgs_crud_and_state_machine() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::CONFLICT);
 
+    // A suspended org accepts no WORK, which is the half the state machine was
+    // missing. Three handlers went role-check → org-exists → `pg::enqueue`, so
+    // each answered 202 and the dispatcher ran the job — spending the tenant's
+    // compute and mutating their lake while suspended. Imports and publish
+    // already refused; these did not. The tenant-admin UI states the guarantee
+    // outright ("a suspended tenant refuses jobs, imports and steward actions
+    // until resumed"), so this is that sentence as an assertion.
+    //
+    // All three doors, not just the obvious one: `create_job` is what the UI
+    // calls "jobs", but `add_assertion` and `record_overlay_action` enqueue an
+    // `apply_corrections` job just as surely. Guarding only the first would have
+    // left the same defect reachable behind two other handlers.
+    for (uri, body, what) in [
+        ("/v1/orgs/acme/jobs", r#"{"kind":"run_all_full"}"#, "a job"),
+        (
+            "/v1/orgs/acme/assertions",
+            r#"{"a":"crm:C001","b":"crm:C002","kind":"never"}"#,
+            "an assertion",
+        ),
+        (
+            "/v1/orgs/acme/records/suppress",
+            r#"{"record_key":"crm:C001"}"#,
+            "a suppression",
+        ),
+    ] {
+        let resp = app
+            .clone()
+            .oneshot(req("POST", uri, "op-secret", Body::from(body)))
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::CONFLICT,
+            "a suspended org must refuse {what} ({uri})"
+        );
+        let detail = json_body(resp).await["detail"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(
+            detail.contains("suspended"),
+            "the refusal should name the state, got {detail:?}"
+        );
+    }
+
     // resume (suspended -> active).
     let resp = app
         .clone()
@@ -164,6 +209,25 @@ async fn orgs_crud_and_state_machine() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     assert_eq!(json_body(resp).await["state"], "active");
+
+    // ...and once active again it accepts work. Asserted because the guard above
+    // is satisfiable by refusing EVERY submission, which would be a worse bug
+    // than the one it fixes.
+    let resp = app
+        .clone()
+        .oneshot(req(
+            "POST",
+            "/v1/orgs/acme/jobs",
+            "op-secret",
+            Body::from(r#"{"kind":"run_all_full"}"#),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::ACCEPTED,
+        "a resumed org must accept job submission again"
+    );
 
     // resume again: 409 (not suspended).
     let resp = app
