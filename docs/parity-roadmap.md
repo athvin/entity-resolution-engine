@@ -386,7 +386,49 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
       Tests: a `lake_e2e` case asserting the ledger stores the fingerprint the guard computes,
       that an unchanged fingerprint proceeds as incremental, that a moved lexicon promotes to
       full and names the drifted field, and that the same drift refuses without escalation.
-- [~] **W0.5 harness debt — partly done, the seed deliberately deferred.** The stale
+- [x] **W0.5b the full-stack tier, revived — and what it found in its first hour.**
+      W0.5 recorded one blocker ("the dispatcher has no `train` arm"), which E10a cleared. That
+      was the visible half. The whole substrate had gone with the Python tree: `up.sh` booted
+      `uvicorn erserver.api` + `python -m erserver.dispatcher`; `env.sh` exported **eight**
+      `ERSERVER_*` variables nothing in the Rust workspace reads (the control plane takes exactly
+      three — `ER_PG_DSN`, `ER_OPERATOR_TOKEN`, `ER_SERVER_ADDR`); and `compose.yaml` built its
+      MinIO and catalog-Postgres services from `docker/Dockerfile`, which no longer exists. `run.sh`
+      called a `make frontend-seed` target that had been deleted. None of it could start.
+      **The stack is now one Postgres and a local DuckLake** (catalog file + data dir, exactly what
+      every `lake_e2e` case uses), with `ER_DISPATCH_IN_PROCESS=1` so one process serves the API and
+      drains the queue — which makes the "half-up stack" state `run.sh` used to detect unreachable.
+      MinIO and the catalog Postgres are gone; neither local gate exercised S3 or a Postgres catalog
+      before either (`make check-e2e`'s lake tests are local too), so no existing coverage is lost,
+      and the real AWS environment still covers both. Stated rather than hidden.
+      **The seeding order is forced, not chosen**, and this is the part worth remembering. A first
+      publish is tier C, so it enqueues `train` + `run_all_full` — and that rebuild is
+      publish-triggered, so W0.3 sets `skip_ingest` on it: it never reads the drop directory, and on
+      a new org both jobs fail for want of a corpus. The other direction is just as closed:
+      `POST /imports` is the route that ingests, and `delivery_preconditions` refuses it until a
+      config is already published. So something has to seed the lake before the first publish, and
+      only the `er` CLI can. `frontend/dev/seed.mjs` does that, then publishes, and both
+      publish-triggered jobs succeed.
+      **The bug the tier found, which is the argument for having it.** `GET /api/orgs/{org}/jobs`
+      did `forward<unknown[]>(...)` and passed the body through — a type ASSERTION about an HTTP
+      body TypeScript cannot check. er-server returns `{"jobs": [...]}`; the UI hook types it
+      `JobRow[]`, the Playwright mock returned a bare array, and the specs call `.some()` on it.
+      Three consumers agreed on "array" and only the real backend disagreed. The damage was not a
+      blank table: `dashboard-content.tsx` does `(jobs.data ?? []).find(...)`, and `?? []` does not
+      apply to a non-null object, so **the whole dashboard crashed on render**. Fixed on both sides,
+      because unwrapping alone would have broken the functional tier — the mock has to be faithful
+      or it manufactures green. The W0.4a gate compares routes, **not response shapes**; a
+      shape-level check would have caught this and is still unbuilt.
+      Verified: 10 entities / 23 records live, matching base_10's committed truth;
+      `duplicate_groups: 9` derived from the fixture independently equals the engine's count; the
+      seed is idempotent. **8 of 15 cases pass, and the tier is left red on purpose** — the
+      remaining failures are real findings, each documented in `docs/frontend-testing.md` with its
+      diagnosis: a suspended org still accepts jobs (**202, not 409** — `create_job` has no
+      suspension guard while publish and imports both do), every human action is attributed to
+      `key:<uuid>` rather than the person (`Principal.actor` comes only from the API key and the BFF
+      forwards no identity), tenant self-onboarding 503s (auto-provisioning was never ported), one
+      cold-start timing flake, and one case not yet diagnosed. Tuning the specs to hide those would
+      defeat the purpose of reviving the tier.
+- [~] **W0.5 harness debt — superseded by W0.5b above.** The stale
       `make check-all` references are fixed (see W0.6). The full-stack tier stays dormant, but
       the reason is now understood rather than just noted.
       Recovering the deleted `frontend/dev/seed.py` was itself informative: step 4 of its
