@@ -204,6 +204,54 @@ LIMIT 1
             .collect())
     }
 
+    /// EVERY active model version for the tenant, one per name — the ensemble a run scores with (E5b). Sibling of `active`, which serves the single-model path with `LIMIT 1`; that one answers "the" active model and becomes ambiguous the moment two names are active, which is why an ensemble reads through here instead. `ORDER BY name` is for read determinism only — a cascade's step order comes from the ordered `models:` list in the published config, never from this ordering, so renaming a model cannot silently reorder a cascade. `matching_models_one_active_per_name` guarantees at most one row per name.
+    pub async fn active_all(
+        client: &::tokio_postgres::Client,
+        org_id: &str,
+    ) -> ::std::result::Result<Vec<super::MatchingModel>, ::tokio_postgres::Error> {
+        const SQL: &str = "SELECT
+  id,
+  org_id,
+  name,
+  version,
+  entity_type,
+  model_json,
+  model_hash,
+  model_version_label,
+  tf_snapshot_id,
+  state,
+  provenance,
+  created_by,
+  activated_at,
+  created_at,
+  updated_at
+FROM public.matching_models
+WHERE org_id = $1 AND state = 'active'
+ORDER BY name
+";
+        let rows = client.query(SQL, &[&org_id]).await?;
+        Ok(rows
+            .iter()
+            .map(|row| super::MatchingModel {
+                id: row.get("id"),
+                org_id: row.get("org_id"),
+                name: row.get("name"),
+                version: row.get("version"),
+                entity_type: row.get("entity_type"),
+                model_json: row.get("model_json"),
+                model_hash: row.get("model_hash"),
+                model_version_label: row.get("model_version_label"),
+                tf_snapshot_id: row.get("tf_snapshot_id"),
+                state: row.get("state"),
+                provenance: row.get("provenance"),
+                created_by: row.get("created_by"),
+                activated_at: row.get("activated_at"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+            })
+            .collect())
+    }
+
     /// One model version by its natural key.
     pub async fn by_version(
         client: &::tokio_postgres::Client,
@@ -304,7 +352,7 @@ ORDER BY name, version DESC
 
 pub mod update {
     //! @generated query functions for this entity + operation.
-    /// Activate one version and archive whichever version was active, in a single statement. One statement rather than two so there is no window in which the tenant has no active model, and no transaction needed around the generated query functions.
+    /// Activate one version and archive whichever version of THE SAME NAME was active, in a single statement. One statement rather than two so there is no window in which the tenant has no active model, and no transaction needed around the generated query functions. Scoped by name, not by org: this used to archive every active row for the org, so a tenant that activated a second named model silently retired the first — and an ensemble is exactly a list of named models active at once (E5b). The name comes from a subquery on `$model_id` rather than a parameter so the caller cannot pass one that disagrees with the row, and so the whole thing stays one atomic statement. `matching_models_one_active_per_name` makes the resulting invariant structural.
     pub async fn activate(
         client: &::tokio_postgres::Client,
         model_id: &str,
@@ -315,7 +363,16 @@ SET state = CASE WHEN id = $1 THEN 'active' ELSE 'archived' END,
     activated_at = CASE WHEN id = $1 THEN now() ELSE activated_at END,
     updated_at = now()
 WHERE org_id = $2
-  AND (id = $1 OR state = 'active')
+  AND (
+    id = $1
+    OR (
+      state = 'active'
+      AND name = (
+        SELECT name FROM public.matching_models
+        WHERE id = $1 AND org_id = $2
+      )
+    )
+  )
 ";
         client.execute(SQL, &[&model_id, &org_id]).await
     }

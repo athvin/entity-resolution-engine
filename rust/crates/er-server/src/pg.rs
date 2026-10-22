@@ -952,6 +952,23 @@ pub async fn active_model_version(
         .next())
 }
 
+/// Every active model version for the tenant, one per name — the ensemble a run
+/// scores with (E5b). Empty when the tenant has none.
+///
+/// Distinct from [`active_model_version`], which answers "the" active model and
+/// is only well defined while a single name is active. Activation is now unique
+/// per `(org, name)` rather than per org, so both can be true at once: a
+/// single-model tenant sees the same row through either.
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn active_models(
+    client: &Client,
+    org_id: &str,
+) -> Result<Vec<er_entities::matching_model::MatchingModel>, PgError> {
+    er_entities::matching_model::read::active_all(client, org_id).await
+}
+
 /// One model version by its natural key.
 ///
 /// # Errors

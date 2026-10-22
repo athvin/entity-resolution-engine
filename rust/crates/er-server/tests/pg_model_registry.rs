@@ -14,7 +14,9 @@
 //!     is an idempotent upsert and versions auto-increment);
 //!   * versions are immutable and monotonic, uploads land as drafts, and
 //!     activation is a separate explicit step;
-//!   * activation is atomic: exactly one version is ever active;
+//!   * activation is atomic, and unique per (org, NAME) rather than per org:
+//!     exactly one version of a name is ever active, while several names can be
+//!     active at once — which is what an ensemble is (E5b);
 //!   * the weights view exposes each level's m/u and the log-odds they imply;
 //!   * a model for the other entity type cannot be activated;
 //!   * role boundaries: a viewer reads, only an admin writes.
@@ -37,6 +39,18 @@ fn starter_model_path() -> String {
         .join("../../../fixtures/static/model_test_v1.json")
         .to_string_lossy()
         .into_owned()
+}
+
+/// Active models as `(name, version)`, sorted — `MatchingModel`'s Debug carries
+/// the entire settings document, which buries the one fact these assertions are
+/// about.
+fn summarise(models: &[er_entities::matching_model::MatchingModel]) -> Vec<(&str, i64)> {
+    let mut out: Vec<(&str, i64)> = models
+        .iter()
+        .map(|m| (m.name.as_str(), m.version))
+        .collect();
+    out.sort_unstable();
+    out
 }
 
 fn req(method: &str, uri: &str, bearer: &str, body: Body) -> Request<Body> {
@@ -634,6 +648,133 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         json_body(resp).await["active"]["version"],
         compiled_version,
         "the compiled model is now what runs score against"
+    );
+
+    // ─── E5b: activation is unique per (org, NAME), not per org ─────────────
+    //
+    // The entity's own description always said "one tenant can keep several
+    // models", but `read/active` was `WHERE org_id AND state='active' LIMIT 1`
+    // and `update/activate` archived every other active row for the org — so
+    // activating a second named model silently retired the first, and an
+    // ensemble (a list of named models all active at once) was unrepresentable.
+    let second = serde_json::json!({
+        "model_json": starter_json,
+        "model_version_label": "v0001",
+        "name": "strict",
+    });
+    let resp = app
+        .clone()
+        .oneshot(req(
+            "POST",
+            "/v1/orgs/acme/models/versions",
+            &admin_key,
+            Body::from(second.to_string()),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let strict_v1 = json_body(resp).await;
+    assert_eq!(
+        strict_v1["version"], 1,
+        "versions are per name, so a new name starts at 1"
+    );
+    assert_eq!(strict_v1["name"], "strict");
+
+    let resp = app
+        .clone()
+        .oneshot(req(
+            "POST",
+            "/v1/orgs/acme/models/strict/versions/1/activate",
+            &admin_key,
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // Both names are active at once — the capability an ensemble needs, and the
+    // assertion that fails against the org-wide archive this replaced.
+    // Summarised as (name, version): `MatchingModel`'s Debug carries the whole
+    // settings document, which buries the one fact the assertion is about.
+    let models = pg::active_models(&client, &org_id).await.unwrap();
+    let active = summarise(&models);
+    assert_eq!(
+        active.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
+        vec!["default", "strict"],
+        "activating `strict` must not retire `default`, got {active:?}"
+    );
+
+    // And activating a NEW version within one name archives only that name's
+    // previous version. Upload strict v2, activate it, and `default` must be
+    // untouched while strict v1 goes to archived.
+    let resp = app
+        .clone()
+        .oneshot(req(
+            "POST",
+            "/v1/orgs/acme/models/versions",
+            &admin_key,
+            Body::from(
+                serde_json::json!({
+                    "model_json": starter_json,
+                    "model_version_label": "v0002",
+                    "name": "strict",
+                })
+                .to_string(),
+            ),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    assert_eq!(json_body(resp).await["version"], 2);
+    let resp = app
+        .clone()
+        .oneshot(req(
+            "POST",
+            "/v1/orgs/acme/models/strict/versions/2/activate",
+            &admin_key,
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let models = pg::active_models(&client, &org_id).await.unwrap();
+    let active = summarise(&models);
+    assert_eq!(
+        active,
+        vec![("default", compiled_version), ("strict", 2)],
+        "activation is scoped to its own name"
+    );
+
+    // The invariant is structural, not just a property of the statement:
+    // `matching_models_one_active_per_name` is a partial unique index, so a
+    // second active row for one name is rejected by Postgres even if some
+    // future writer forgets the archive half. Attempted directly in SQL,
+    // because the API path (one atomic UPDATE) cannot produce it.
+    let err = client
+        .execute(
+            "INSERT INTO public.matching_models \
+               (id, org_id, name, version, entity_type, model_json, model_hash, \
+                model_version_label, state, provenance, created_by) \
+             SELECT 'dup-active-row', org_id, name, 999, entity_type, model_json, \
+                    model_hash, model_version_label, 'active', provenance, created_by \
+             FROM public.matching_models \
+             WHERE org_id = $1 AND name = 'strict' AND version = 2",
+            &[&org_id],
+        )
+        .await
+        .expect_err("a second active row for one name must be rejected");
+    // `err.to_string()` is only the outermost message ("db error") — the
+    // constraint name lives on the `DbError`, so read it there rather than
+    // string-matching a flattened chain.
+    let db = err
+        .as_db_error()
+        .expect("a database error, not a transport one");
+    assert_eq!(
+        db.constraint(),
+        Some("matching_models_one_active_per_name"),
+        "the partial unique index must be what refuses it, got {:?} / {}",
+        db.constraint(),
+        db.message()
     );
 
     let _ = std::fs::remove_file(&config_path);
