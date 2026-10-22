@@ -355,6 +355,7 @@ and each locked by a test observed failing first:
 | `grow-your-data` → wizard activates a new source | `?limit=3` returned every job the org had ever had: the handler had no `Query` extractor and `pg::list_jobs` passed `i64::MAX`, while the BFF forwarded `limit` and `state` and the UI asked for `?limit=20`. The spec's three-kind assertion could never hold. | a `Query` extractor routing to the existing `pg::list_jobs_all` |
 | `grow-your-data` → wizard activates a new source (2nd cause) | The activation panel sat on "Create draft" until the 120 s `waitForURL` expired, having **sent no request and shown no error**. `activate()` opened with `if (!activeConfig.data) return;` — a silent return inside an async pipeline whose UI had already been set to `running` — and the button was never gated on that read, so a click landing before `GET /config` resolved was a no-op. The mock answers in ~1 ms and always won the race; a real BFF → er-server → fresh-connection Postgres round trip does not. | gate both actions on the base config, and turn all three silent returns into errors |
 | `grow-your-data` → the run page after activation | **The whole run-detail page threw** against the real backend: `data.progress.stages` with no optional chaining, where er-server sends no `progress` key at all. Per-stage progress has no producer — the `run` ledger is one row per run and the stage-level tracking went with the Python tree — while `JobRow` declared `progress` **required** and the mock fabricated it at 11 sites. Same field, same shape, two more crash sites: the runs list (`lastStage`) and the dashboard's active-job line. | make the field optional so `tsc` finds every reader, strip the fabrication from the mock, and retarget the spec that asserted a mock-only stage name |
+| `grow-your-data` → the delivery receipt for the new source | **Real bug.** `ingest_batch/read/page.sql` is a forward keyset cursor (`ORDER BY id`, `id > $after`), and the "did my file do anything?" panel forwarded to it with `?limit=20` — so it rendered the **oldest** 20 receipts and a tenant past 20 ingest batches could never see a new source land. Two more consumers read the same endpoint as newest-first: the assistant's `get_import_receipts`, whose declaration says "newest first", and the mock, which served the fixtures descending regardless — which is why every tier was green. | `ingest_batch/read/recent` + `GET /imports/recent`, mirroring `runs_list`; the mock now copies each endpoint's real ordering |
 | `fix-your-data` → unmerge splits a merged entity | Asserted exactly `memberCount - 1` members after peeling one record. Re-clustering runs from the full edge set, so if the peeled record was the only hop holding another member in, that member leaves too — a 5-member group legitimately lands at 3. The spec failed on correct behaviour once repeated tier runs grew the corpus. | assert strictly fewer, which is what the comment above it already claimed |
 | `see-your-data` → jobs table lists `run_all` | A **cold-route** flake, not slow data: `next start` initialises the dynamic route on first hit and the default 5 s expired while `jobs.isPending` was true, with the Skeleton rendering no text — so the card's whole content was its own title and the failure read as "element not found". | a 60 s budget on that first assertion |
 
@@ -429,6 +430,20 @@ test claims to protect and confirm the test fails. The authorization matrix in
 `tests/unit/bff-access.test.ts` was verified this way — turning the non-member
 404 into a 403 fails 4 cases, and deleting the impersonation org confinement
 fails exactly the case written for it.
+
+### Visual baselines are invisible to a local gate
+
+`playwright.config.ts` sets `ignoreSnapshots: process.platform !== "linux"`, so
+every `@visual` assertion is **ignored** off Linux. A green `make frontend` on
+macOS is not evidence about a baseline, and the failure mode is the usual one —
+it looks like proof, and it is not. Only `make frontend-baselines` (the pinned
+Linux image) or CI can tell you.
+
+Observed: removing a fabricated field from the mock emptied one table column.
+Local reported 362 passed; CI reported `runs.spec.ts:92` failing on
+mobile-safari. Any change to rendered content needs `make frontend-baselines`
+and a *review of the diff* — it rewrites every `@visual` baseline, so one
+unexpected file in that diff is itself a finding.
 
 ---
 

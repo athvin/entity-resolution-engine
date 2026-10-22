@@ -459,14 +459,43 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
       engine's own lake-E2E instructions and `up.sh` died on "port is already allocated" before
       anything else ran.
       Verified: the wizard case passes against the real stack, and `make frontend` is green at 362
-      passed. **One red case is left and it is a real product bug, filed not hidden**:
-      `entities/ingest_batch/read/page.sql` is `ORDER BY id LIMIT $limit` — a forward keyset cursor
-      — and the "did my file do anything?" receipts panel forwards to it with `?limit=20`, so it
-      renders the **oldest** 20 deliveries. Once an org has 20 ingest batches a newly delivered
-      source can never appear. `read.rs`'s `runs_list` immediately below it is documented "the most
-      recent runs, newest first, capped at 20"; receipts just never adopted that idiom. The fix is
-      a newest-first declared read plus its own endpoint, keeping `/v1/orgs/{org}/imports` the
-      cursor it is.
+      passed. The one red case left over was a real product bug rather than spec drift, and it is
+      W0.5d below.
+      **A trap worth naming, found by this PR failing CI after `make frontend` passed.**
+      `playwright.config.ts` sets `ignoreSnapshots: process.platform !== "linux"`, so every
+      `@visual` assertion is *ignored* off Linux. A green local frontend gate is therefore **never**
+      evidence about a baseline — only `make frontend-baselines` (the pinned Linux image) or CI is.
+      Removing the mock's fabricated `progress` emptied the runs list's last-stage column and
+      invalidated exactly one baseline; local said 362 passed, CI said 1 failed. Added to
+      `docs/frontend-testing.md` alongside the semgrep-parse-error and `| tail` traps.
+- [x] **W0.5d the receipts panel answered with the oldest deliveries.** `ingest_batch/read/page.sql`
+      is a FORWARD keyset cursor — `ORDER BY id`, `id > $after` — which is right for walking a
+      history and wrong for a latest-activity panel. **Three** consumers read it as though it were
+      newest-first: the "did my file do anything?" receipts card via `?limit=20`; the assistant's
+      `get_import_receipts` tool, whose own declaration promises "newest first" and which therefore
+      handed the model the oldest 20 receipts; and the Playwright mock, which served the fixtures in
+      their stored descending order regardless — so the panel looked correct in every tier while the
+      real endpoint handed it the other end. Past 20 ingest batches a newly delivered source could
+      never appear on the page that exists to say whether the delivery did anything. Found by
+      `grow-your-data.spec.ts:147` once repeated tier runs pushed acme-dev to exactly 20 batches.
+      Adds `ingest_batch/read/recent` and `GET /v1/orgs/{org}/imports/recent`, mirroring
+      `read::runs_list` — "the most recent runs, newest first, capped at 20", the idiom this read
+      should have had from the start. A separate endpoint rather than a flag, because a descending
+      page under `after` semantics has no coherent meaning; `/v1/orgs/{org}/imports` stays the
+      cursor it is and a test pins that it still starts at the oldest. The BFF route keeps its own
+      `{items}` contract and **constructs** the envelope instead of asserting one about the upstream
+      body — the W0.5b lesson. The mock now mirrors each endpoint's real ordering, which is the
+      second half of the shape-gate argument: a mock must copy **ordering**, not just field names.
+      Verified by sabotage: flipping the new statement to `ORDER BY id` fails the lake test on the
+      newest-first assertion before it passes.
+      **What this says about D9's arbiter.** `frontend/src/lib/api/openapi.json` documents **zero
+      paths** — deliberately, per `er-server/src/openapi.rs`'s own header — so the plan's assumption
+      that it could arbitrate response shapes is wrong as it stands. But its 12 `components.schemas`
+      *are* the generated entity structs, and they are usable today: `components.schemas.Job` lists
+      exactly the 21 fields er-server sends, with `progress`, `outcome` and `exit_code` **absent**
+      and `created_by` present. So D9 splits — field-level checks are buildable now against those
+      schemas, while envelope-level checks (W0.5b's `{jobs: […]}`, this entry's ordering) need
+      `#[utoipa::path]` on the handlers first.
 - [~] **W0.5 harness debt — superseded by W0.5b above.** The stale
       `make check-all` references are fixed (see W0.6). The full-stack tier stays dormant, but
       the reason is now understood rather than just noted.

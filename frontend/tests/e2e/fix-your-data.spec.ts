@@ -149,7 +149,14 @@ test("schedules: create, disable, delete against the real control plane", async 
   await page.goto(`/${ORG}/runs/schedules`);
 
   await page.getByTestId("schedule-kind").selectOption("run_all_incremental");
-  await page.getByTestId("schedule-cron").fill("15 7 * * *");
+  // `schedule-cron` — a single free-text input — has not existed since the cron
+  // builder landed; the raw expression is now behind the custom preset. This
+  // spec never noticed because its file always aborted on an earlier case, so
+  // it sat stale for as long as the tier was red. `steward-surfaces.spec.ts`
+  // drives the same widget in the mock tier and is the shape copied here.
+  await page.getByTestId("cron-preset-custom").click();
+  await page.getByTestId("cron-custom").fill("15 7 * * *");
+  await expect(page.getByTestId("cron-preview")).toContainText("runs next:");
   await page.getByTestId("schedule-create").click();
   const row = page.getByTestId("schedule-run_all_incremental");
   await expect(row).toContainText("15 7 * * *");
