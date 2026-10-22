@@ -3,8 +3,12 @@
 Hand-run scenarios. Pose each in a **fresh** session and check the expected
 behaviours. Record a pass only if every "must" holds.
 
-Scenario 1 is the one that justifies installing a third-party AWS plugin at all:
-that plugin ships CDK and CloudFormation skills, and this skill has to win.
+Scenario 1 was written to prove this skill could beat the `aws-core` plugin's own
+CDK and CloudFormation skills. That plugin is **no longer installed** — see the
+decision record in [`docs/agent-skills.md`](../../../docs/agent-skills.md) — so
+the scenario no longer tests a contest between skills. It still earns its place:
+the request names CDK itself, so the skill has to refuse the language the asker
+offered, with or without a rival skill present.
 
 ## 1. A new AWS resource, asked for in the wrong language
 
