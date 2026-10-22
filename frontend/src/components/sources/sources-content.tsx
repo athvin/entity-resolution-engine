@@ -6,7 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Database, Loader2, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { bffFetch, BffRequestError } from "@/lib/api/client";
 import { effectiveRole, useSession } from "@/lib/query/hooks";
@@ -14,7 +14,7 @@ import { queryKeys } from "@/lib/query/keys";
 import { useImportFile, useSources } from "@/lib/query/steward";
 import { cn } from "@/lib/utils";
 
-interface ReceiptRow {
+export interface ReceiptRow {
   id: string;
   run_id: string;
   source_system: string;
@@ -23,6 +23,17 @@ interface ReceiptRow {
   unchanged_count: number;
   tombstone_count: number;
   resurrected_count: number;
+  /**
+   * Screening (E9b): how the delivery's records landed against the corpus.
+   * NULL for a delivery that was never screened — a run that scored nothing —
+   * which is why these are nullable rather than defaulted to 0. "Screened and
+   * nothing matched" is a different fact from "not screened", and the panel
+   * says so rather than drawing a zero either way.
+   */
+  matched_count: number | null;
+  review_count: number | null;
+  unmatched_count: number | null;
+  screened_at: string | null;
   created_at: string;
 }
 
@@ -38,6 +49,12 @@ function ReceiptsPanel({ org }: { org: string }) {
         <CardTitle className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
           Delivery receipts — did my file do anything?
         </CardTitle>
+        <CardDescription>
+          The last three columns are the screening: of the records a delivery landed, how many the
+          engine already knew, how many it wants a decision on, and how many are new. An em dash
+          means the delivery was never screened — a run that scored nothing, which is not the same
+          as nothing matching.
+        </CardDescription>
       </CardHeader>
       <CardContent className="overflow-x-auto p-4 pt-2 lg:p-6 lg:pt-2">
         {receipts.isPending ? (
@@ -53,6 +70,9 @@ function ReceiptsPanel({ org }: { org: string }) {
                 <th className="py-1.5 pr-4 font-medium">Changed</th>
                 <th className="py-1.5 pr-4 font-medium">Unchanged</th>
                 <th className="py-1.5 pr-4 font-medium">Removed</th>
+                <th className="py-1.5 pr-4 font-medium">Already known</th>
+                <th className="py-1.5 pr-4 font-medium">To review</th>
+                <th className="py-1.5 pr-4 font-medium">New to you</th>
                 <th className="py-1.5 font-medium">Delivered</th>
               </tr>
             </thead>
@@ -72,6 +92,19 @@ function ReceiptsPanel({ org }: { org: string }) {
                       {noop && " — identical delivery, not a failure"}
                     </td>
                     <td className="py-2 pr-4 tabular-nums">{receipt.tombstone_count}</td>
+                    {/*
+                      An em dash where the delivery was never screened, rather
+                      than a 0: "screened and nothing matched" and "not
+                      screened" are different facts, and a zero would assert
+                      the first while meaning the second.
+                    */}
+                    <td className="text-muted-foreground py-2 pr-4 tabular-nums">
+                      {receipt.matched_count ?? "—"}
+                    </td>
+                    <td className="py-2 pr-4 font-medium tabular-nums">
+                      {receipt.review_count ?? "—"}
+                    </td>
+                    <td className="py-2 pr-4 tabular-nums">{receipt.unmatched_count ?? "—"}</td>
                     <td className="text-muted-foreground py-2 text-xs">{receipt.created_at}</td>
                   </tr>
                 );

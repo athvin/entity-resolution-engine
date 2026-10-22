@@ -16,4 +16,10 @@ returns:
   - { name: tombstone_count, type: bigint, nullable: false }
   - { name: resurrected_count, type: bigint, nullable: false }
   - { name: full_refresh_keys, type: boolean, nullable: false }
+  # Screening (E9b), nullable: NULL means the delivery was never screened
+  # (a run that scored nothing), which is distinct from screened-and-nothing-matched.
+  - { name: matched_count, type: bigint }
+  - { name: review_count, type: bigint }
+  - { name: unmatched_count, type: bigint }
+  - { name: screened_at, type: timestamp }
   - { name: created_at, type: timestamp, nullable: false }

@@ -2311,6 +2311,91 @@ fn constraint_nevers(
         .collect())
 }
 
+/// Record, on each delivery's receipt, how its records landed against the
+/// corpus: matched, gray-band, or genuinely new (E9b).
+///
+/// Derived from scores the run has ALREADY produced. An incremental pass has
+/// just compared these very records against everything else, so screening is a
+/// read over `match_scores` rather than a second scoring pass — the cheapest
+/// possible place to answer it, and the only one where the answer is the same
+/// verdict the run itself acted on.
+///
+/// Called after match and before reconcile, which is the first moment the
+/// verdicts exist: the receipt is written during ingest, where they cannot.
+///
+/// Best-effort, deliberately. The delivery has landed and the corpus is
+/// resolved; failing the run because a COUNT could not be written would
+/// destroy work to report on it. A failure leaves the counts NULL, which the
+/// schema defines as "not screened" rather than "nothing matched".
+fn screen_deliveries(session: &Session, config: &Config, inputs: &PipelineInputs) {
+    let (auto_merge, review_low) = (config.thresholds.auto_merge, config.thresholds.review_low);
+    for (source, _) in inputs.deliveries {
+        let counts = if config.entity_type.is_person() {
+            er_entities::int_std_record::read::screening_counts(
+                session.connection(),
+                source,
+                inputs.run_id,
+                auto_merge,
+                review_low,
+            )
+            .map(|rows| {
+                rows.into_iter().next().map(|r| {
+                    (
+                        r.matched_count.unwrap_or(0),
+                        r.review_count.unwrap_or(0),
+                        r.unmatched_count.unwrap_or(0),
+                    )
+                })
+            })
+        } else {
+            er_entities::acct_int_std_record::read::screening_counts(
+                session.connection(),
+                source,
+                inputs.run_id,
+                auto_merge,
+                review_low,
+            )
+            .map(|rows| {
+                rows.into_iter().next().map(|r| {
+                    (
+                        r.matched_count.unwrap_or(0),
+                        r.review_count.unwrap_or(0),
+                        r.unmatched_count.unwrap_or(0),
+                    )
+                })
+            })
+        };
+        match counts {
+            Ok(Some((matched, review, unmatched))) => {
+                if let Err(e) = er_entities::ingest_batch::update::screening(
+                    session.connection(),
+                    matched,
+                    review,
+                    unmatched,
+                    inputs.scored_at,
+                    &format!("{}:{source}", inputs.run_id),
+                ) {
+                    eprintln!(
+                        "run {}: screening {source} could not be recorded: {e}",
+                        inputs.run_id
+                    );
+                } else {
+                    eprintln!(
+                        "run {}: {source} screened — {matched} matched, {review} to review, \
+                         {unmatched} new",
+                        inputs.run_id
+                    );
+                }
+            }
+            // No row means the delivery landed nothing this run (every record
+            // unchanged, so none carries this batch id). Not screened, because
+            // there was nothing to screen.
+            Ok(None) => {}
+            Err(e) => eprintln!("run {}: screening {source} failed: {e}", inputs.run_id),
+        }
+    }
+}
+
 /// S4.5 reconcile: cluster the active auto-merge pairs in `lake.main.match_scores`
 /// into connected components, reconcile them against the prior
 /// `lake.main.entity_membership` (INV-PERM), and write the resulting
@@ -2956,6 +3041,12 @@ pub fn run_all_ensemble(
             inputs.run_id,
             inputs.scored_at,
         )?;
+    }
+    // Screening, between match and reconcile: the first moment the verdicts
+    // exist (the receipt is written during ingest, where they cannot) and
+    // before reconcile changes the entity shape they describe.
+    if !inputs.deliveries.is_empty() {
+        screen_deliveries(session, config, inputs);
     }
     // Reconcile and golden stay whole-corpus in both modes. That is a choice,
     // not an omission: clustering is a function of the edge set, and connected

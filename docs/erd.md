@@ -530,6 +530,10 @@ erDiagram
         bigint tombstone_count
         bigint resurrected_count
         boolean full_refresh_keys
+        bigint matched_count
+        bigint review_count
+        bigint unmatched_count
+        timestamp screened_at
         timestamp created_at
         timestamp updated_at
     }

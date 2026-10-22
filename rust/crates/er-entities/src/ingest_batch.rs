@@ -26,9 +26,17 @@ pub struct IngestBatch {
     pub resurrected_count: i64,
     /// Whether the delivery tombstoned omitted keys.
     pub full_refresh_keys: bool,
+    /// Screening (E9b): delivered records that joined an existing entity — their best active score reached `thresholds.auto_merge`. NULL means the delivery was never screened, which is the honest answer for a run that scored nothing (a correction pass, or a rebuild with `skip_ingest`); 0 means it was screened and nothing matched.
+    pub matched_count: Option<i64>,
+    /// Screening (E9b): delivered records whose best active score landed in the gray band — at or above `review_low` but below `auto_merge`. These are the ones a steward has to decide.
+    pub review_count: Option<i64>,
+    /// Screening (E9b): delivered records with no active score reaching `review_low` — genuinely new as far as the model can tell.
+    pub unmatched_count: Option<i64>,
+    /// When the delivery was screened, NULL if it was not. Separate from the counts so that `screened with everything unmatched` (counts 0/0/N) is distinguishable from `never screened` (all NULL) without reading three columns.
+    pub screened_at: Option<::chrono::DateTime<::chrono::Utc>>,
     /// Creation stamp (the run's logical timestamp).
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
-    /// Run-logical last-write time (equals created_at; receipts are written once).
+    /// Run-logical last-write time. Receipts were written once until E9b; the screening pass now updates the row after the match stage, because the verdicts do not exist until the run has scored.
     pub updated_at: ::chrono::DateTime<::chrono::Utc>,
 }
 
@@ -56,6 +64,10 @@ impl IngestBatch {
             "tombstone_count",
             "resurrected_count",
             "full_refresh_keys",
+            "matched_count",
+            "review_count",
+            "unmatched_count",
+            "screened_at",
             "created_at",
             "updated_at",
         ]
@@ -121,6 +133,11 @@ pub mod read {
         pub tombstone_count: i64,
         pub resurrected_count: i64,
         pub full_refresh_keys: bool,
+        pub matched_count: Option<i64>,
+        pub review_count: Option<i64>,
+        pub unmatched_count: Option<i64>,
+        #[serde(serialize_with = "crate::batch::ser_duckdb_timestamp_opt")]
+        pub screened_at: Option<::chrono::DateTime<::chrono::Utc>>,
         #[serde(serialize_with = "crate::batch::ser_duckdb_timestamp")]
         pub created_at: ::chrono::DateTime<::chrono::Utc>,
     }
@@ -140,6 +157,16 @@ pub mod read {
                 ("tombstone_count", ::arrow::datatypes::DataType::Int64),
                 ("resurrected_count", ::arrow::datatypes::DataType::Int64),
                 ("full_refresh_keys", ::arrow::datatypes::DataType::Boolean),
+                ("matched_count", ::arrow::datatypes::DataType::Int64),
+                ("review_count", ::arrow::datatypes::DataType::Int64),
+                ("unmatched_count", ::arrow::datatypes::DataType::Int64),
+                (
+                    "screened_at",
+                    ::arrow::datatypes::DataType::Timestamp(
+                        ::arrow::datatypes::TimeUnit::Microsecond,
+                        None,
+                    ),
+                ),
                 (
                     "created_at",
                     ::arrow::datatypes::DataType::Timestamp(
@@ -174,8 +201,16 @@ pub mod read {
                     crate::batch::col(batch, 8, "resurrected_count")?;
                 let c9: &::arrow::array::BooleanArray =
                     crate::batch::col(batch, 9, "full_refresh_keys")?;
-                let c10: &::arrow::array::TimestampMicrosecondArray =
-                    crate::batch::col(batch, 10, "created_at")?;
+                let c10: &::arrow::array::Int64Array =
+                    crate::batch::col(batch, 10, "matched_count")?;
+                let c11: &::arrow::array::Int64Array =
+                    crate::batch::col(batch, 11, "review_count")?;
+                let c12: &::arrow::array::Int64Array =
+                    crate::batch::col(batch, 12, "unmatched_count")?;
+                let c13: &::arrow::array::TimestampMicrosecondArray =
+                    crate::batch::col(batch, 13, "screened_at")?;
+                let c14: &::arrow::array::TimestampMicrosecondArray =
+                    crate::batch::col(batch, 14, "created_at")?;
                 for i in 0..batch.num_rows() {
                     out.push(Self {
                         id: crate::batch::req(crate::batch::opt_str(c0, i), "id", i)?,
@@ -212,8 +247,12 @@ pub mod read {
                             "full_refresh_keys",
                             i,
                         )?,
+                        matched_count: crate::batch::opt_i64(c10, i),
+                        review_count: crate::batch::opt_i64(c11, i),
+                        unmatched_count: crate::batch::opt_i64(c12, i),
+                        screened_at: crate::batch::opt_ts(c13, i),
                         created_at: crate::batch::req(
-                            crate::batch::opt_ts(c10, i),
+                            crate::batch::opt_ts(c14, i),
                             "created_at",
                             i,
                         )?,
@@ -234,6 +273,7 @@ pub mod read {
     ) -> ::duckdb::Result<Vec<PageRow>> {
         const SQL: &str = "SELECT id, run_id, source_system, path, new_count, changed_count,
        unchanged_count, tombstone_count, resurrected_count, full_refresh_keys,
+       matched_count, review_count, unmatched_count, screened_at,
        created_at
 FROM lake.main.ingest_batches AT (VERSION => {snapshot})
 WHERE ($1 IS NULL OR source_system = $1)
@@ -262,6 +302,11 @@ LIMIT $3
         pub tombstone_count: i64,
         pub resurrected_count: i64,
         pub full_refresh_keys: bool,
+        pub matched_count: Option<i64>,
+        pub review_count: Option<i64>,
+        pub unmatched_count: Option<i64>,
+        #[serde(serialize_with = "crate::batch::ser_duckdb_timestamp_opt")]
+        pub screened_at: Option<::chrono::DateTime<::chrono::Utc>>,
         #[serde(serialize_with = "crate::batch::ser_duckdb_timestamp")]
         pub created_at: ::chrono::DateTime<::chrono::Utc>,
     }
@@ -281,6 +326,16 @@ LIMIT $3
                 ("tombstone_count", ::arrow::datatypes::DataType::Int64),
                 ("resurrected_count", ::arrow::datatypes::DataType::Int64),
                 ("full_refresh_keys", ::arrow::datatypes::DataType::Boolean),
+                ("matched_count", ::arrow::datatypes::DataType::Int64),
+                ("review_count", ::arrow::datatypes::DataType::Int64),
+                ("unmatched_count", ::arrow::datatypes::DataType::Int64),
+                (
+                    "screened_at",
+                    ::arrow::datatypes::DataType::Timestamp(
+                        ::arrow::datatypes::TimeUnit::Microsecond,
+                        None,
+                    ),
+                ),
                 (
                     "created_at",
                     ::arrow::datatypes::DataType::Timestamp(
@@ -315,8 +370,16 @@ LIMIT $3
                     crate::batch::col(batch, 8, "resurrected_count")?;
                 let c9: &::arrow::array::BooleanArray =
                     crate::batch::col(batch, 9, "full_refresh_keys")?;
-                let c10: &::arrow::array::TimestampMicrosecondArray =
-                    crate::batch::col(batch, 10, "created_at")?;
+                let c10: &::arrow::array::Int64Array =
+                    crate::batch::col(batch, 10, "matched_count")?;
+                let c11: &::arrow::array::Int64Array =
+                    crate::batch::col(batch, 11, "review_count")?;
+                let c12: &::arrow::array::Int64Array =
+                    crate::batch::col(batch, 12, "unmatched_count")?;
+                let c13: &::arrow::array::TimestampMicrosecondArray =
+                    crate::batch::col(batch, 13, "screened_at")?;
+                let c14: &::arrow::array::TimestampMicrosecondArray =
+                    crate::batch::col(batch, 14, "created_at")?;
                 for i in 0..batch.num_rows() {
                     out.push(Self {
                         id: crate::batch::req(crate::batch::opt_str(c0, i), "id", i)?,
@@ -353,8 +416,12 @@ LIMIT $3
                             "full_refresh_keys",
                             i,
                         )?,
+                        matched_count: crate::batch::opt_i64(c10, i),
+                        review_count: crate::batch::opt_i64(c11, i),
+                        unmatched_count: crate::batch::opt_i64(c12, i),
+                        screened_at: crate::batch::opt_ts(c13, i),
                         created_at: crate::batch::req(
-                            crate::batch::opt_ts(c10, i),
+                            crate::batch::opt_ts(c14, i),
                             "created_at",
                             i,
                         )?,
@@ -374,6 +441,7 @@ LIMIT $3
     ) -> ::duckdb::Result<Vec<RecentRow>> {
         const SQL: &str = "SELECT id, run_id, source_system, path, new_count, changed_count,
        unchanged_count, tombstone_count, resurrected_count, full_refresh_keys,
+       matched_count, review_count, unmatched_count, screened_at,
        created_at
 FROM lake.main.ingest_batches AT (VERSION => {snapshot})
 WHERE ($1 IS NULL OR source_system = $1)
@@ -386,5 +454,37 @@ LIMIT $2
             .query_arrow(::duckdb::params![source, limit])?
             .collect::<Vec<_>>();
         RecentRow::from_batches(&batches)
+    }
+}
+
+pub mod update {
+    //! @generated query functions for this entity + operation.
+    /// Record a delivery's screening verdicts on its receipt (E9b). A second write to a row that used to be written once: the verdicts cannot exist at receipt time, because they are what the MATCH stage decides, and the receipt is written during ingest. `screened_at` doubles as the `updated_at` stamp so a screened receipt carries one consistent time rather than two that invite a question about which is authoritative.
+    pub fn screening(
+        conn: &::duckdb::Connection,
+        matched_count: i64,
+        review_count: i64,
+        unmatched_count: i64,
+        screened_at: &str,
+        ingest_batch_id: &str,
+    ) -> ::duckdb::Result<usize> {
+        const SQL: &str = "UPDATE lake.main.ingest_batches
+   SET matched_count = $1,
+       review_count = $2,
+       unmatched_count = $3,
+       screened_at = $4::timestamp,
+       updated_at = $4::timestamp
+ WHERE id = $5
+";
+        conn.execute(
+            SQL,
+            ::duckdb::params![
+                matched_count,
+                review_count,
+                unmatched_count,
+                screened_at,
+                ingest_batch_id
+            ],
+        )
     }
 }

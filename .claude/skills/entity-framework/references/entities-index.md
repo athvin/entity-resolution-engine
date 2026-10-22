@@ -30,7 +30,7 @@ statements is read or written only through the engine's own stage SQL, not
 through a typed query function.
 
 <!-- BEGIN GENERATED: entities-index -->
-**35 entities, 145 declared statements.**
+**35 entities, 148 declared statements.**
 
 | Entity | Relation | Store | Key | Natural key | History |
 |---|---|---|---|---|---|
@@ -76,7 +76,7 @@ Declared statements per entity and operation:
 |---|---|---|---|---|
 | `acct_golden_lineage` | 0 | 1 | 0 | 0 |
 | `acct_golden_record` | 0 | 3 | 0 | 0 |
-| `acct_int_std_record` | 0 | 1 | 0 | 0 |
+| `acct_int_std_record` | 0 | 2 | 0 | 0 |
 | `api_key` | 1 | 1 | 1 | 0 |
 | `assertion` | 2 | 3 | 1 | 0 |
 | `audit_log` | 1 | 1 | 0 | 0 |
@@ -87,8 +87,8 @@ Declared statements per entity and operation:
 | `golden_lineage` | 0 | 1 | 0 | 0 |
 | `golden_override` | 1 | 0 | 0 | 1 |
 | `golden_record` | 0 | 5 | 11 | 0 |
-| `ingest_batch` | 1 | 2 | 0 | 0 |
-| `int_std_record` | 0 | 4 | 0 | 0 |
+| `ingest_batch` | 1 | 2 | 1 | 0 |
+| `int_std_record` | 0 | 5 | 0 | 0 |
 | `job` | 2 | 3 | 4 | 0 |
 | `lake_schema_migration` | 1 | 1 | 0 | 0 |
 | `match_score` | 0 | 4 | 3 | 0 |

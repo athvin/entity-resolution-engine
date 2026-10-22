@@ -9,6 +9,10 @@ CREATE TABLE IF NOT EXISTS lake.main.ingest_batches (
   tombstone_count BIGINT NOT NULL,
   resurrected_count BIGINT NOT NULL,
   full_refresh_keys BOOLEAN NOT NULL,
+  matched_count BIGINT,
+  review_count BIGINT,
+  unmatched_count BIGINT,
+  screened_at TIMESTAMP,
   created_at TIMESTAMP NOT NULL,
   updated_at TIMESTAMP NOT NULL
 );

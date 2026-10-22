@@ -465,6 +465,10 @@ export function initialState() {
           tombstone_count: 1,
           resurrected_count: 0,
           full_refresh_keys: false,
+          matched_count: 9,
+          review_count: 2,
+          unmatched_count: 4,
+          screened_at: "2026-09-24T06:00:30Z",
           created_at: "2026-09-24T06:00:10Z",
         },
         {
@@ -478,6 +482,13 @@ export function initialState() {
           tombstone_count: 0,
           resurrected_count: 0,
           full_refresh_keys: false,
+          // Deliberately UNSCREENED: the run that landed this delivery scored
+          // nothing, so the panel must show an em dash rather than a 0. Left
+          // null so that path is exercised instead of assumed.
+          matched_count: null,
+          review_count: null,
+          unmatched_count: null,
+          screened_at: null,
           created_at: "2026-09-23T06:00:08Z",
         },
       ],

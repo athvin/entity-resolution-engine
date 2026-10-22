@@ -981,6 +981,26 @@
      "type": "BOOLEAN"
     },
     {
+     "name": "matched_count",
+     "nullable": true,
+     "type": "BIGINT"
+    },
+    {
+     "name": "review_count",
+     "nullable": true,
+     "type": "BIGINT"
+    },
+    {
+     "name": "unmatched_count",
+     "nullable": true,
+     "type": "BIGINT"
+    },
+    {
+     "name": "screened_at",
+     "nullable": true,
+     "type": "TIMESTAMP"
+    },
+    {
      "name": "created_at",
      "nullable": false,
      "type": "TIMESTAMP"
@@ -991,7 +1011,7 @@
      "type": "TIMESTAMP"
     }
    ],
-   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.ingest_batches (\n  id VARCHAR NOT NULL,\n  run_id VARCHAR NOT NULL,\n  source_system VARCHAR NOT NULL,\n  path VARCHAR NOT NULL,\n  new_count BIGINT NOT NULL,\n  changed_count BIGINT NOT NULL,\n  unchanged_count BIGINT NOT NULL,\n  tombstone_count BIGINT NOT NULL,\n  resurrected_count BIGINT NOT NULL,\n  full_refresh_keys BOOLEAN NOT NULL,\n  created_at TIMESTAMP NOT NULL,\n  updated_at TIMESTAMP NOT NULL\n);",
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.ingest_batches (\n  id VARCHAR NOT NULL,\n  run_id VARCHAR NOT NULL,\n  source_system VARCHAR NOT NULL,\n  path VARCHAR NOT NULL,\n  new_count BIGINT NOT NULL,\n  changed_count BIGINT NOT NULL,\n  unchanged_count BIGINT NOT NULL,\n  tombstone_count BIGINT NOT NULL,\n  resurrected_count BIGINT NOT NULL,\n  full_refresh_keys BOOLEAN NOT NULL,\n  matched_count BIGINT,\n  review_count BIGINT,\n  unmatched_count BIGINT,\n  screened_at TIMESTAMP,\n  created_at TIMESTAMP NOT NULL,\n  updated_at TIMESTAMP NOT NULL\n);",
    "enums": {},
    "keys": [
     {
