@@ -174,6 +174,32 @@ test.describe("new-source wizard", () => {
     await expect(page.getByTestId("wizard-done")).toContainText("Settings → Config");
   });
 
+  test("neither action is offered before the base config lands", async ({
+    page,
+    isMobile,
+  }, testInfo) => {
+    test.skip(isMobile, "identical gating; keep the matrix lean");
+    const org = wizardOrg(testInfo.project.name);
+    await login(page, USERS.admin);
+    // The new source block is *appended* to the active config, so until that
+    // read lands there is nothing to build a draft from. Both buttons used to
+    // be live anyway and `activate()` returned silently, leaving the panel
+    // spinning on "Create draft" with no error and no request ever sent —
+    // which `grow-your-data.spec.ts` only ever saw as a 120s `waitForURL`
+    // timeout, two phases away from the real stall.
+    await page.route(`**/api/orgs/${org}/config`, (route) =>
+      route.fulfill({ status: 500, json: { code: "internal", message: "config read failed" } }),
+    );
+    await walkToReview(page, org, `erp_gate_${testInfo.project.name.replaceAll("-", "_")}`);
+
+    await expect(page.getByTestId("wizard-activate-run")).toBeDisabled();
+    await expect(page.getByTestId("wizard-commit")).toBeDisabled();
+    // Disabled silently is the same sin one step earlier, so it says why.
+    await expect(page.getByTestId("wizard-blocked-reason")).toContainText(
+      "could not be read, so there is no base to add this source to",
+    );
+  });
+
   test("a failed sample upload names both recovery paths", async ({ page, isMobile }, testInfo) => {
     test.skip(isMobile, "identical error surface; keep the matrix lean");
     const org = wizardOrg(testInfo.project.name);

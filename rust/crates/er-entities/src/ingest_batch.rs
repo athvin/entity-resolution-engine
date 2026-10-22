@@ -248,4 +248,143 @@ LIMIT $3
             .collect::<Vec<_>>();
         PageRow::from_batches(&batches)
     }
+
+    /// One row of `recent`: The most recent ingest-batch receipts at a pinned snapshot, newest first, optionally filtered by source system — the 'did my file do anything?' panel. Sibling of `page`, which is a FORWARD keyset cursor (`id > $after` ascending) and therefore answers the oldest page first; the panel wants the latest activity, and reading it through `page` meant a tenant past 20 ingest batches could never see a newly delivered source. Ordered by `created_at` like `run/read/recent`'s `started_at`, NOT by `id`: the id is `<run_id>:<source_system>`, and a run id is only chronological when it is a ULID/UUIDv7 — the dev seed's literal `seed-base` sorts above every real one, which would put the oldest receipts back on top. `id` breaks ties so the order stays deterministic for equal timestamps.
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct RecentRow {
+        pub id: String,
+        pub run_id: String,
+        pub source_system: String,
+        pub path: String,
+        pub new_count: i64,
+        pub changed_count: i64,
+        pub unchanged_count: i64,
+        pub tombstone_count: i64,
+        pub resurrected_count: i64,
+        pub full_refresh_keys: bool,
+        #[serde(serialize_with = "crate::batch::ser_duckdb_timestamp")]
+        pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    }
+
+    impl RecentRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("id", ::arrow::datatypes::DataType::Utf8),
+                ("run_id", ::arrow::datatypes::DataType::Utf8),
+                ("source_system", ::arrow::datatypes::DataType::Utf8),
+                ("path", ::arrow::datatypes::DataType::Utf8),
+                ("new_count", ::arrow::datatypes::DataType::Int64),
+                ("changed_count", ::arrow::datatypes::DataType::Int64),
+                ("unchanged_count", ::arrow::datatypes::DataType::Int64),
+                ("tombstone_count", ::arrow::datatypes::DataType::Int64),
+                ("resurrected_count", ::arrow::datatypes::DataType::Int64),
+                ("full_refresh_keys", ::arrow::datatypes::DataType::Boolean),
+                (
+                    "created_at",
+                    ::arrow::datatypes::DataType::Timestamp(
+                        ::arrow::datatypes::TimeUnit::Microsecond,
+                        None,
+                    ),
+                ),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "id")?;
+                let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "run_id")?;
+                let c2: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 2, "source_system")?;
+                let c3: &::arrow::array::StringArray = crate::batch::col(batch, 3, "path")?;
+                let c4: &::arrow::array::Int64Array = crate::batch::col(batch, 4, "new_count")?;
+                let c5: &::arrow::array::Int64Array = crate::batch::col(batch, 5, "changed_count")?;
+                let c6: &::arrow::array::Int64Array =
+                    crate::batch::col(batch, 6, "unchanged_count")?;
+                let c7: &::arrow::array::Int64Array =
+                    crate::batch::col(batch, 7, "tombstone_count")?;
+                let c8: &::arrow::array::Int64Array =
+                    crate::batch::col(batch, 8, "resurrected_count")?;
+                let c9: &::arrow::array::BooleanArray =
+                    crate::batch::col(batch, 9, "full_refresh_keys")?;
+                let c10: &::arrow::array::TimestampMicrosecondArray =
+                    crate::batch::col(batch, 10, "created_at")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        id: crate::batch::req(crate::batch::opt_str(c0, i), "id", i)?,
+                        run_id: crate::batch::req(crate::batch::opt_str(c1, i), "run_id", i)?,
+                        source_system: crate::batch::req(
+                            crate::batch::opt_str(c2, i),
+                            "source_system",
+                            i,
+                        )?,
+                        path: crate::batch::req(crate::batch::opt_str(c3, i), "path", i)?,
+                        new_count: crate::batch::req(crate::batch::opt_i64(c4, i), "new_count", i)?,
+                        changed_count: crate::batch::req(
+                            crate::batch::opt_i64(c5, i),
+                            "changed_count",
+                            i,
+                        )?,
+                        unchanged_count: crate::batch::req(
+                            crate::batch::opt_i64(c6, i),
+                            "unchanged_count",
+                            i,
+                        )?,
+                        tombstone_count: crate::batch::req(
+                            crate::batch::opt_i64(c7, i),
+                            "tombstone_count",
+                            i,
+                        )?,
+                        resurrected_count: crate::batch::req(
+                            crate::batch::opt_i64(c8, i),
+                            "resurrected_count",
+                            i,
+                        )?,
+                        full_refresh_keys: crate::batch::req(
+                            crate::batch::opt_bool(c9, i),
+                            "full_refresh_keys",
+                            i,
+                        )?,
+                        created_at: crate::batch::req(
+                            crate::batch::opt_ts(c10, i),
+                            "created_at",
+                            i,
+                        )?,
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// The most recent ingest-batch receipts at a pinned snapshot, newest first, optionally filtered by source system — the 'did my file do anything?' panel. Sibling of `page`, which is a FORWARD keyset cursor (`id > $after` ascending) and therefore answers the oldest page first; the panel wants the latest activity, and reading it through `page` meant a tenant past 20 ingest batches could never see a newly delivered source. Ordered by `created_at` like `run/read/recent`'s `started_at`, NOT by `id`: the id is `<run_id>:<source_system>`, and a run id is only chronological when it is a ULID/UUIDv7 — the dev seed's literal `seed-base` sorts above every real one, which would put the oldest receipts back on top. `id` breaks ties so the order stays deterministic for equal timestamps.
+    pub fn recent(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+        source: Option<&str>,
+        limit: i64,
+    ) -> ::duckdb::Result<Vec<RecentRow>> {
+        const SQL: &str = "SELECT id, run_id, source_system, path, new_count, changed_count,
+       unchanged_count, tombstone_count, resurrected_count, full_refresh_keys,
+       created_at
+FROM lake.main.ingest_batches AT (VERSION => {snapshot})
+WHERE ($1 IS NULL OR source_system = $1)
+ORDER BY created_at DESC, id DESC
+LIMIT $2
+";
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = conn.prepare(&sql)?;
+        let batches = stmt
+            .query_arrow(::duckdb::params![source, limit])?
+            .collect::<Vec<_>>();
+        RecentRow::from_batches(&batches)
+    }
 }

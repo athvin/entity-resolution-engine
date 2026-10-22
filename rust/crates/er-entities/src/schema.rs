@@ -195,6 +195,7 @@ CREATE INDEX IF NOT EXISTS jobs_claimable ON public.jobs (state, not_before, pri
 );
 CREATE UNIQUE INDEX IF NOT EXISTS matching_models_org_name_version ON public.matching_models (org_id, name, version);
 CREATE INDEX IF NOT EXISTS matching_models_org_state ON public.matching_models (org_id, state);
+CREATE UNIQUE INDEX IF NOT EXISTS matching_models_one_active_per_name ON public.matching_models (org_id, name) WHERE state = 'active';
 CREATE TABLE IF NOT EXISTS public.matching_models_history (
   history_id bigserial NOT NULL,
   row_id text NOT NULL,

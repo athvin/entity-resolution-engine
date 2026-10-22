@@ -53,6 +53,17 @@ costing 10m34 of critical path. And cold-vs-warm is a 3× swing on the one job
 that gates every merge, so **reducing how often cold happens is worth more than
 any per-step optimisation.**
 
+Every compile job also spends ~1m in `apt-get update && apt-get install -y mold`
+— an unpinned network dependency repeated six times, which on 2026-10-22 was
+observed **hanging for over 20 minutes on two consecutive attempts**. On a
+required job a hang is not a failure: it is the 45-minute job timeout, which
+reads as a non-green check even though every gate passed.
+
+That is now bounded — `timeout 120` per attempt, three attempts, a 13-minute step
+cap — so a stuck mirror is retried rather than waited on. Bounding it is not
+removing it: a pinned binary or a cached `.deb` would drop both the network
+dependency and the ~1m, and is still open.
+
 Elsewhere: `test` spends 2m33 in the disk-reclaim step before compiling, and
 10m47 in `cargo test --workspace`. `ducklake-e2e` splits 16m36 / 9m47 between its
 four-crate test and the rapidfuzz extension test. `coverage` is 22m10 of
@@ -345,6 +356,8 @@ rust-cache entry, so making the profile real buys cache headroom twice.
 | Key rust-cache on `Cargo.toml` too | yes | it does not by default, so the `[profile.*]` change hit an exact key, logged `Cache up-to-date` and never saved — leaving an immortal pre-profile entry |
 | Split the serial `fmt + clippy + docs` | yes | 2026-10-22: `entities` split out and made required. Only the two tree-paying steps earned a job — see the measurement, which overturned splitting the other two |
 | Split `DuckLake + extensions e2e` | **no** | tried, then reverted on the numbers: its 8m17 step is its own work, not a tree it inherited, so a separate job would pay a tree build on top and come out slower. Now the critical path, so this is the open question |
+| Guard `apt-get install mold` against hanging | yes | it hung 20+ min on two consecutive attempts; `timeout 120` per attempt, 3 attempts, 13-min step cap, so a stuck mirror is a retry rather than a 45-minute job timeout |
+| Stop installing mold per job at all | **open** | still ~1m on six jobs' critical path. A pinned binary or cached `.deb` removes the dependency instead of bounding it |
 | cargo-nextest | no | build time dominates execution time here; revisit after the above |
 | `.cargo/config.toml` for local mold/sccache | no | helps laptops, not CI; worth doing, not yet scoped |
 | cargo-chef + cache mounts in `rust/Dockerfile` | no | `COPY . .` + one `cargo build --release` means any source change rebuilds DuckDB in release mode; real, separate |

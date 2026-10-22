@@ -27,6 +27,14 @@ test.describe("sources & imports", () => {
     await expect(receipts).toContainText("webforms");
     await expect(receipts).toContainText("12"); // new
     await expect(receipts).toContainText("identical delivery, not a failure");
+    // Newest delivery first. This route used to forward to
+    // `/v1/orgs/{org}/imports`, a FORWARD keyset cursor, so `?limit=20` served
+    // the OLDEST 20 receipts — past 20 ingest batches a tenant could never see
+    // a new source on the panel that exists to answer whether it landed. The
+    // mock hid it by serving the fixtures newest-first regardless; it now
+    // mirrors each endpoint's real ordering, so `crm` (the older receipt)
+    // leading this table means the panel is reading the wrong end again.
+    await expect(receipts.locator("tbody tr").first()).toContainText("webforms");
   });
 
   test("a steward uploads a file and the import queues", async ({ page }) => {

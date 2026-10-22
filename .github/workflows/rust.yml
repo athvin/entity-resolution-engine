@@ -159,7 +159,23 @@ jobs:
       - name: Install stable toolchain
         run: rustup update stable --no-self-update && rustup default stable && rustup component add rustfmt clippy
       - name: Install mold
-        run: sudo apt-get update && sudo apt-get install -y mold
+        # Retried and time-boxed, because this is an unpinned network dependency
+        # on the critical path of six jobs. Observed hanging for 20+ minutes on
+        # two consecutive attempts on 2026-10-22 — and on a required job a hang
+        # is not a failure, it is the 45-minute job timeout, which reads as a
+        # non-green check even though every gate passed. `timeout` bounds each
+        # attempt so a stuck mirror is retried rather than waited on; the step
+        # cap is sized to let all three attempts run (3 x 2 x 120s = 12 min).
+        timeout-minutes: 13
+        run: |
+          for i in 1 2 3; do
+            if timeout 120 sudo apt-get update && timeout 120 sudo apt-get install -y mold; then
+              exit 0
+            fi
+            echo "mold install attempt $i failed or timed out; retrying"
+            sleep 5
+          done
+          exit 1
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
@@ -286,7 +302,23 @@ jobs:
         # for, or every generated file reads as stale.
         run: rustup update stable --no-self-update && rustup default stable && rustup component add rustfmt
       - name: Install mold
-        run: sudo apt-get update && sudo apt-get install -y mold
+        # Retried and time-boxed, because this is an unpinned network dependency
+        # on the critical path of six jobs. Observed hanging for 20+ minutes on
+        # two consecutive attempts on 2026-10-22 — and on a required job a hang
+        # is not a failure, it is the 45-minute job timeout, which reads as a
+        # non-green check even though every gate passed. `timeout` bounds each
+        # attempt so a stuck mirror is retried rather than waited on; the step
+        # cap is sized to let all three attempts run (3 x 2 x 120s = 12 min).
+        timeout-minutes: 13
+        run: |
+          for i in 1 2 3; do
+            if timeout 120 sudo apt-get update && timeout 120 sudo apt-get install -y mold; then
+              exit 0
+            fi
+            echo "mold install attempt $i failed or timed out; retrying"
+            sleep 5
+          done
+          exit 1
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
@@ -375,7 +407,23 @@ jobs:
       - name: Install stable toolchain
         run: rustup update stable --no-self-update && rustup default stable
       - name: Install mold
-        run: sudo apt-get update && sudo apt-get install -y mold
+        # Retried and time-boxed, because this is an unpinned network dependency
+        # on the critical path of six jobs. Observed hanging for 20+ minutes on
+        # two consecutive attempts on 2026-10-22 — and on a required job a hang
+        # is not a failure, it is the 45-minute job timeout, which reads as a
+        # non-green check even though every gate passed. `timeout` bounds each
+        # attempt so a stuck mirror is retried rather than waited on; the step
+        # cap is sized to let all three attempts run (3 x 2 x 120s = 12 min).
+        timeout-minutes: 13
+        run: |
+          for i in 1 2 3; do
+            if timeout 120 sudo apt-get update && timeout 120 sudo apt-get install -y mold; then
+              exit 0
+            fi
+            echo "mold install attempt $i failed or timed out; retrying"
+            sleep 5
+          done
+          exit 1
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
@@ -467,7 +515,23 @@ jobs:
       - name: Install stable toolchain
         run: rustup update stable --no-self-update && rustup default stable
       - name: Install mold
-        run: sudo apt-get update && sudo apt-get install -y mold
+        # Retried and time-boxed, because this is an unpinned network dependency
+        # on the critical path of six jobs. Observed hanging for 20+ minutes on
+        # two consecutive attempts on 2026-10-22 — and on a required job a hang
+        # is not a failure, it is the 45-minute job timeout, which reads as a
+        # non-green check even though every gate passed. `timeout` bounds each
+        # attempt so a stuck mirror is retried rather than waited on; the step
+        # cap is sized to let all three attempts run (3 x 2 x 120s = 12 min).
+        timeout-minutes: 13
+        run: |
+          for i in 1 2 3; do
+            if timeout 120 sudo apt-get update && timeout 120 sudo apt-get install -y mold; then
+              exit 0
+            fi
+            echo "mold install attempt $i failed or timed out; retrying"
+            sleep 5
+          done
+          exit 1
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
@@ -517,7 +581,23 @@ jobs:
       - name: Install stable toolchain
         run: rustup update stable --no-self-update && rustup default stable
       - name: Install mold
-        run: sudo apt-get update && sudo apt-get install -y mold
+        # Retried and time-boxed, because this is an unpinned network dependency
+        # on the critical path of six jobs. Observed hanging for 20+ minutes on
+        # two consecutive attempts on 2026-10-22 — and on a required job a hang
+        # is not a failure, it is the 45-minute job timeout, which reads as a
+        # non-green check even though every gate passed. `timeout` bounds each
+        # attempt so a stuck mirror is retried rather than waited on; the step
+        # cap is sized to let all three attempts run (3 x 2 x 120s = 12 min).
+        timeout-minutes: 13
+        run: |
+          for i in 1 2 3; do
+            if timeout 120 sudo apt-get update && timeout 120 sudo apt-get install -y mold; then
+              exit 0
+            fi
+            echo "mold install attempt $i failed or timed out; retrying"
+            sleep 5
+          done
+          exit 1
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
@@ -554,7 +634,23 @@ jobs:
       - name: Install stable toolchain
         run: rustup update stable --no-self-update && rustup default stable
       - name: Install mold
-        run: sudo apt-get update && sudo apt-get install -y mold
+        # Retried and time-boxed, because this is an unpinned network dependency
+        # on the critical path of six jobs. Observed hanging for 20+ minutes on
+        # two consecutive attempts on 2026-10-22 — and on a required job a hang
+        # is not a failure, it is the 45-minute job timeout, which reads as a
+        # non-green check even though every gate passed. `timeout` bounds each
+        # attempt so a stuck mirror is retried rather than waited on; the step
+        # cap is sized to let all three attempts run (3 x 2 x 120s = 12 min).
+        timeout-minutes: 13
+        run: |
+          for i in 1 2 3; do
+            if timeout 120 sudo apt-get update && timeout 120 sudo apt-get install -y mold; then
+              exit 0
+            fi
+            echo "mold install attempt $i failed or timed out; retrying"
+            sleep 5
+          done
+          exit 1
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:

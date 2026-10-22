@@ -176,9 +176,26 @@ export function NewSourceWizard({ org }: { org: string }) {
     };
   }
 
+  /**
+   * Why the active config is missing, in the operator's words. The new source
+   * block is *appended* to the active config, so there is nothing to build a
+   * draft from until that read lands — and both entry points used to `return`
+   * silently here, which left the activation panel spinning on "Create draft"
+   * with no error shown and no request ever sent. That is the stuck state
+   * `grow-your-data.spec.ts` saw as a 120s `waitForURL` timeout.
+   */
+  function missingBaseConfig(): string {
+    return activeConfig.isError
+      ? describeError(activeConfig.error, "the org's active config could not be read")
+      : "the org's active config has not finished loading — retry in a moment";
+  }
+
   async function saveDraft() {
     setError(null);
-    if (!activeConfig.data) return;
+    if (!activeConfig.data) {
+      setError(missingBaseConfig());
+      return;
+    }
     try {
       const yaml = addSourceBlock(activeConfig.data.yaml, state.name, sourceBlock());
       const draft = await createDraft.mutateAsync(yaml);
@@ -194,7 +211,10 @@ export function NewSourceWizard({ org }: { org: string }) {
     let version = draftVersion;
     if (from === "draft") {
       setActivation({ phase: "draft", running: true, error: null });
-      if (!activeConfig.data) return;
+      if (!activeConfig.data) {
+        setActivation({ phase: "draft", running: false, error: missingBaseConfig() });
+        return;
+      }
       try {
         const yaml = addSourceBlock(activeConfig.data.yaml, state.name, sourceBlock());
         version = (await createDraft.mutateAsync(yaml)).version;
@@ -210,7 +230,14 @@ export function NewSourceWizard({ org }: { org: string }) {
     }
     if (from === "draft" || from === "publish") {
       setActivation({ phase: "publish", running: true, error: null });
-      if (version === null) return;
+      if (version === null) {
+        setActivation({
+          phase: "publish",
+          running: false,
+          error: "no draft version to publish — create the draft again",
+        });
+        return;
+      }
       try {
         await publish.mutateAsync(version);
       } catch (cause) {
@@ -223,7 +250,14 @@ export function NewSourceWizard({ org }: { org: string }) {
       }
     }
     setActivation({ phase: "upload", running: true, error: null });
-    if (!state.file) return;
+    if (!state.file) {
+      setActivation({
+        phase: "upload",
+        running: false,
+        error: "the sample file is no longer held in the browser — import it from the Sources page",
+      });
+      return;
+    }
     try {
       const result = await importFile.mutateAsync({ source: state.name, file: state.file });
       router.push(`/${org}/runs/${result.job.id}`);
@@ -658,15 +692,24 @@ export function NewSourceWizard({ org }: { org: string }) {
             <div className="flex gap-2">
               <Button
                 variant="outline"
-                disabled={createDraft.isPending}
+                disabled={createDraft.isPending || !activeConfig.data}
                 data-testid="wizard-commit"
                 onClick={() => void saveDraft()}
               >
                 {createDraft.isPending ? "Saving…" : "Save draft only"}
               </Button>
+              {/*
+                Both actions append to the active config, so neither can start
+                before that read lands — gating here makes the stuck state
+                above unreachable rather than merely legible, and a click
+                arriving mid-flight waits for the button instead of no-opping.
+              */}
               <Button
                 disabled={
-                  createDraft.isPending || state.file === null || state.file.size > MAX_IMPORT_BYTES
+                  createDraft.isPending ||
+                  !activeConfig.data ||
+                  state.file === null ||
+                  state.file.size > MAX_IMPORT_BYTES
                 }
                 data-testid="wizard-activate-run"
                 onClick={() => void activate()}
@@ -674,6 +717,13 @@ export function NewSourceWizard({ org }: { org: string }) {
                 Activate & run
               </Button>
             </div>
+            {!activeConfig.data && (
+              <p className="text-muted-foreground text-xs" data-testid="wizard-blocked-reason">
+                {activeConfig.isError
+                  ? "The org's active config could not be read, so there is no base to add this source to."
+                  : "Reading the org's active config — this source is added to it."}
+              </p>
+            )}
             {state.file !== null && state.file.size > MAX_IMPORT_BYTES && (
               <p className="text-muted-foreground text-xs">
                 {state.fileName} is over the 256 MiB import cap — save the draft and sync the file

@@ -97,7 +97,16 @@ export interface JobRow {
   state: string;
   error_class: string | null;
   attempt: number;
-  progress: { stages?: { stage: string }[] };
+  /**
+   * Optional because **er-server does not send it**. Per-stage progress has no
+   * producer at all: the `run` ledger is one row per run with start/end, and
+   * the stage-level tracking this was shaped for went with the Python tree. The
+   * field was declared required here and fabricated by the Playwright mock, so
+   * `job.progress.stages` threw `undefined is not an object` on the run detail
+   * page, the runs list and the dashboard's active-job line against every real
+   * backend — while all three were green in the mock tier.
+   */
+  progress?: { stages?: { stage: string }[] };
 }
 
 const ACTIVE_JOB_STATES = new Set(["queued", "dispatching", "running", "retrying", "canceling"]);

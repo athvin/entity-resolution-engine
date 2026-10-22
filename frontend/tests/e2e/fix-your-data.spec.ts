@@ -89,10 +89,20 @@ test("unmerge splits a real merged entity through the reconcile pipeline", async
     .catch(() => false);
   if (!gone) {
     // Checkbox marks only render on multi-member entities, so count table rows.
-    await expect(page.getByTestId("entity-members").locator("tbody tr")).toHaveCount(
-      memberCount - 1,
-      { timeout: 15_000 },
-    );
+    //
+    // Strictly fewer, not exactly one fewer. `memberCount - 1` encoded a
+    // property the engine does not promise: peeling a record re-clusters from
+    // the full edge set, so if the marked record was the only hop holding
+    // another member in, that member leaves too. On a corpus grown by repeated
+    // tier runs (each wizard pass adds a source carrying its own duplicate
+    // pair) a 5-member group peeled by one legitimately lands at 3, and the
+    // spec failed on correct behaviour. The comment above already said
+    // "fewer" — this is the code agreeing with it.
+    await expect
+      .poll(() => page.getByTestId("entity-members").locator("tbody tr").count(), {
+        timeout: 15_000,
+      })
+      .toBeLessThan(memberCount);
   }
   await snap(page, "real-entity-after-unmerge");
 
@@ -139,7 +149,14 @@ test("schedules: create, disable, delete against the real control plane", async 
   await page.goto(`/${ORG}/runs/schedules`);
 
   await page.getByTestId("schedule-kind").selectOption("run_all_incremental");
-  await page.getByTestId("schedule-cron").fill("15 7 * * *");
+  // `schedule-cron` — a single free-text input — has not existed since the cron
+  // builder landed; the raw expression is now behind the custom preset. This
+  // spec never noticed because its file always aborted on an earlier case, so
+  // it sat stale for as long as the tier was red. `steward-surfaces.spec.ts`
+  // drives the same widget in the mock tier and is the shape copied here.
+  await page.getByTestId("cron-preset-custom").click();
+  await page.getByTestId("cron-custom").fill("15 7 * * *");
+  await expect(page.getByTestId("cron-preview")).toContainText("runs next:");
   await page.getByTestId("schedule-create").click();
   const row = page.getByTestId("schedule-run_all_incremental");
   await expect(row).toContainText("15 7 * * *");

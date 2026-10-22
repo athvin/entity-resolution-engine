@@ -1,0 +1,19 @@
+kind: statement
+operation: read
+description: "The most recent ingest-batch receipts at a pinned snapshot, newest first, optionally filtered by source system — the 'did my file do anything?' panel. Sibling of `page`, which is a FORWARD keyset cursor (`id > $after` ascending) and therefore answers the oldest page first; the panel wants the latest activity, and reading it through `page` meant a tenant past 20 ingest batches could never see a newly delivered source. Ordered by `created_at` like `run/read/recent`'s `started_at`, NOT by `id`: the id is `<run_id>:<source_system>`, and a run id is only chronological when it is a ULID/UUIDv7 — the dev seed's literal `seed-base` sorts above every real one, which would put the oldest receipts back on top. `id` breaks ties so the order stays deterministic for equal timestamps."
+params:
+  - { name: snapshot, type: bigint }
+  - { name: source, type: varchar, nullable: true }
+  - { name: limit, type: bigint }
+returns:
+  - { name: id, type: varchar, nullable: false }
+  - { name: run_id, type: varchar, nullable: false }
+  - { name: source_system, type: varchar, nullable: false }
+  - { name: path, type: varchar, nullable: false }
+  - { name: new_count, type: bigint, nullable: false }
+  - { name: changed_count, type: bigint, nullable: false }
+  - { name: unchanged_count, type: bigint, nullable: false }
+  - { name: tombstone_count, type: bigint, nullable: false }
+  - { name: resurrected_count, type: bigint, nullable: false }
+  - { name: full_refresh_keys, type: boolean, nullable: false }
+  - { name: created_at, type: timestamp, nullable: false }
