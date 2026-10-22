@@ -106,6 +106,12 @@ jobs:
       - name: agent-skill authoring rules
         # Frontmatter limits, body size, one-level references, resolving links,
         # a table of contents on long references, and an evals.md per skill.
+        #
+        # working-directory is mandatory: this workflow defaults every `run` to
+        # `rust/` (for the cargo jobs), and the script lives at the repo root.
+        # Without the override this step dies with exit 127 before it checks
+        # anything — which is how the first push of this job failed.
+        working-directory: ${{ github.workspace }}
         run: bash scripts/skills-check.sh lint
 
   lint:
