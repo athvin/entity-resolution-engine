@@ -2773,3 +2773,185 @@ fn a_run_records_metrics_that_agree_with_the_corpus() {
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+/// Per-record quality scoring, and the judgement that makes it mean something.
+///
+/// The easy version of this feature scores a missing email as both incomplete
+/// AND invalid, which penalises one absence twice and makes "fill in the
+/// blanks" look like it improves validity. So the assertions below are mostly
+/// about the dimensions being INDEPENDENT: a record missing a field must lose
+/// completeness without losing validity, and a record whose source publishes no
+/// timestamp must not be dragged to the bottom of the work queue for it.
+#[test]
+fn record_quality_scores_each_dimension_only_where_it_applies() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let (session, base_config, tmp) = run_all_base("quality");
+
+    // Unconfigured writes nothing at all — the table's absence is the no-op.
+    assert!(
+        !er_cli::write_record_quality(
+            &session,
+            &base_config,
+            "01QUALITY0000000000000000000",
+            "2026-01-03 00:00:00"
+        )
+        .unwrap(),
+        "an unset data_quality block must score nothing"
+    );
+
+    let config = with_data_quality(&base_config);
+    assert!(
+        er_cli::write_record_quality(
+            &session,
+            &config,
+            "01QUALITY0000000000000000000",
+            "2026-01-03 00:00:00"
+        )
+        .unwrap(),
+        "a configured block must score"
+    );
+
+    let rows = er_entities::record_quality::read::worst(
+        session.connection(),
+        session.latest_snapshot_version().unwrap(),
+        100.0,
+        500,
+    )
+    .unwrap();
+    let records: i64 = session
+        .query_strings(&format!("select count(*) from {}", er_cli::INT_STD_RECORDS))
+        .unwrap()[0][0]
+        .parse()
+        .unwrap();
+    assert_eq!(
+        i64::try_from(rows.len()).unwrap(),
+        records,
+        "every record in the corpus should be scored"
+    );
+
+    for r in &rows {
+        assert!(
+            r.score.is_finite() && (0.0..=100.0).contains(&r.score),
+            "{} scored {}",
+            r.record_key,
+            r.score
+        );
+        assert!((0.0..=1.0).contains(&r.completeness));
+        if let Some(v) = r.validity {
+            assert!((0.0..=1.0).contains(&v), "validity {v}");
+        }
+        if let Some(f) = r.freshness {
+            assert!((0.0..=1.0).contains(&f), "freshness {f}");
+        }
+    }
+
+    // The scores must DISCRIMINATE. base_10 deliberately contains records with
+    // missing emails and missing phones, so a scorer that works will spread
+    // them out; one that returns a constant would pass every assertion above.
+    let min = rows.iter().map(|r| r.score).fold(f64::INFINITY, f64::min);
+    let max = rows
+        .iter()
+        .map(|r| r.score)
+        .fold(f64::NEG_INFINITY, f64::max);
+    assert!(
+        max - min > 1.0,
+        "the scores must distinguish records (min {min}, max {max}) — a constant \
+         score would satisfy every range check above"
+    );
+
+    // The judgement: a record MISSING its email loses completeness and is NOT
+    // marked invalid for it. base_10's crm:C008 has no email address.
+    let incomplete = rows
+        .iter()
+        .find(|r| r.record_key == "crm:C008")
+        .expect("crm:C008 is in base_10");
+    let complete = rows
+        .iter()
+        .find(|r| r.record_key == "crm:C001")
+        .expect("crm:C001 is in base_10");
+    assert!(
+        incomplete.completeness < complete.completeness,
+        "a record with no email must be less complete ({} vs {})",
+        incomplete.completeness,
+        complete.completeness
+    );
+    assert_eq!(
+        incomplete.validity.map(|v| v >= 1.0),
+        Some(true),
+        "a missing email must not count as an INVALID email — that penalises \
+         one absence twice; crm:C008's remaining validatable fields are fine, \
+         so its validity is 1.0, got {:?}",
+        incomplete.validity
+    );
+
+    // Re-scoring corrects rather than duplicating.
+    er_cli::write_record_quality(&session, &config, "01QUALITY2", "2026-06-01 00:00:00").unwrap();
+    let again = er_entities::record_quality::read::worst(
+        session.connection(),
+        session.latest_snapshot_version().unwrap(),
+        100.0,
+        500,
+    )
+    .unwrap();
+    assert_eq!(
+        again.len(),
+        rows.len(),
+        "re-scoring must not duplicate rows"
+    );
+    // Five months later, the same records are staler, so scores must have moved
+    // DOWN — freshness is actually being computed rather than stubbed.
+    let before: f64 = rows.iter().map(|r| r.score).sum();
+    let after: f64 = again.iter().map(|r| r.score).sum();
+    assert!(
+        after < before,
+        "scoring the same corpus five months later must lower freshness \
+         (total {after} vs {before})"
+    );
+
+    // The distribution read reports buckets, not just a mean — a mean of 70 can
+    // be every record at 70 or half at 95 and half at 45.
+    let dist = er_entities::record_quality::read::distribution(
+        session.connection(),
+        session.latest_snapshot_version().unwrap(),
+    )
+    .unwrap();
+    let d = &dist[0];
+    assert_eq!(d.scored, Some(i64::try_from(rows.len()).unwrap()));
+    let bucketed =
+        d.below_50.unwrap_or(0) + d.between_50_80.unwrap_or(0) + d.at_least_80.unwrap_or(0);
+    assert_eq!(
+        bucketed,
+        i64::try_from(again.len()).unwrap(),
+        "every scored record must land in exactly one bucket"
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// A `data_quality` config, added in code so the committed fixture's
+/// `config_hash` and the config golden stay untouched.
+fn with_data_quality(config: &Config) -> Config {
+    let mut c = config.clone();
+    c.data_quality = er_config::DataQuality {
+        completeness: [
+            ("given_name".to_string(), 1.0),
+            ("family_name".to_string(), 1.0),
+            ("email".to_string(), 2.0),
+            ("phone_e164".to_string(), 1.0),
+            ("birth_date".to_string(), 1.0),
+        ]
+        .into_iter()
+        .collect(),
+        weights: er_config::DataQualityWeights {
+            completeness: 1.0,
+            validity: 1.0,
+            freshness: 1.0,
+        },
+        fresh_days: 90,
+        stale_days: 1095,
+    };
+    c
+}

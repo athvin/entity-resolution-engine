@@ -1,0 +1,16 @@
+kind: statement
+operation: read
+description: "The corpus's quality distribution: buckets rather than only a mean, because a mean of 70 can be every record at 70 or half at 95 and half at 45, and those need different work. The per-dimension means say which dimension is dragging."
+params:
+  - { name: snapshot, type: bigint }
+returns:
+  - { name: scored, type: bigint }
+  - { name: mean_score, type: double }
+  - { name: min_score, type: double }
+  - { name: max_score, type: double }
+  - { name: below_50, type: bigint }
+  - { name: between_50_80, type: bigint }
+  - { name: at_least_80, type: bigint }
+  - { name: mean_completeness, type: double }
+  - { name: mean_validity, type: double }
+  - { name: mean_freshness, type: double }

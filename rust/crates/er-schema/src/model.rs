@@ -430,6 +430,23 @@ fn ddl_specs() -> Vec<TableSpec> {
             BTreeMap::new(),
         ),
         tspec(
+            "record_qualities",
+            vec![
+                nn("id", VARCHAR),
+                nn("record_key", VARCHAR),
+                nn("score", DOUBLE),
+                nn("completeness", DOUBLE),
+                col("validity", DOUBLE),
+                col("freshness", DOUBLE),
+                nn("run_id", VARCHAR),
+                nn("scored_at", TIMESTAMP),
+                nn("created_at", TIMESTAMP),
+                nn("updated_at", TIMESTAMP),
+            ],
+            vec![key(&["id"]), key(&["record_key"])],
+            BTreeMap::new(),
+        ),
+        tspec(
             "entity_membership",
             vec![
                 nn("id", VARCHAR),

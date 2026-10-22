@@ -63,6 +63,8 @@ pub const RECORD_OVERLAYS: &str = "lake.main.record_overlays";
 pub const RUNS: &str = "lake.main.runs";
 /// Per-run resolution metrics, so the dashboard can show a trend.
 pub const METRIC_SNAPSHOTS: &str = "lake.main.metric_snapshots";
+/// Per-record data-quality scores. Absent until `data_quality` is configured.
+pub const RECORD_QUALITIES: &str = "lake.main.record_qualities";
 pub const REVIEW_QUEUE: &str = "lake.main.review_queue";
 pub const ASSERTIONS: &str = "lake.main.assertions";
 pub const INGEST_BATCHES: &str = "lake.main.ingest_batches";
@@ -1530,6 +1532,144 @@ pub fn write_metric_snapshot(
     Ok(())
 }
 
+/// Score every record for data quality, when the config asks for it.
+///
+/// Three dimensions, kept separately because they fail independently and a
+/// single number tells an operator nothing about what to fix: a record can be
+/// COMPLETE and wrong, VALID and nearly empty, or both and five years stale.
+///
+/// The judgement that makes the score mean something is what happens when a
+/// dimension does not APPLY:
+///
+/// * **Validity** is measured over the validatable fields that are PRESENT. A
+///   record with no email is already penalised for that by completeness;
+///   scoring its validity zero as well penalises the same absence twice and
+///   makes "fill in the blanks" look like it improves validity. A record with
+///   none of them scores NULL and is averaged over the other dimensions rather
+///   than handed a zero it did not earn.
+/// * **Freshness** is NULL when the source carries no timestamp, because
+///   unknown age is not the same as old. A source that simply does not publish
+///   `updated_at` would otherwise drag every one of its records to the bottom
+///   of the work queue.
+///
+/// `email_valid` / `phone_valid` are not recomputed here — standardize already
+/// decided, and a second opinion that could disagree would be a bug with two
+/// plausible answers.
+///
+/// A config with no `data_quality` block writes nothing, so the table's absence
+/// is a byte-exact no-op. Returns whether it scored anything.
+///
+/// # Errors
+/// Propagates the lake read/write errors, and refuses weights that sum to zero
+/// (which would define no score at all rather than a default one).
+pub fn write_record_quality(
+    session: &Session,
+    config: &Config,
+    run_id: &str,
+    scored_at: &str,
+) -> Result<bool> {
+    let dq = &config.data_quality;
+    if dq.is_unset() {
+        return Ok(false);
+    }
+    let std_qual = if config.entity_type.is_person() {
+        INT_STD_RECORDS
+    } else {
+        ACCT_INT_STD_RECORDS
+    };
+    create_ddl_table(session, "record_qualities")?;
+
+    let total_weight: f64 = dq.completeness.values().sum();
+    anyhow::ensure!(
+        total_weight > 0.0,
+        "data_quality.completeness weights sum to {total_weight}, which defines no score"
+    );
+    // A whitespace-only value is absent: standardize trims, so anything left
+    // that is empty really is empty.
+    let present: Vec<String> = dq
+        .completeness
+        .iter()
+        .map(|(column, weight)| {
+            format!(
+                "case when \"{column}\" is not null and length(trim(cast(\"{column}\" as varchar))) > 0 then {weight} else 0.0 end"
+            )
+        })
+        .collect();
+
+    let validatable = [("email", "email_valid"), ("phone_e164", "phone_valid")];
+    let judged: Vec<String> = validatable
+        .iter()
+        .map(|(value, flag)| {
+            format!(
+                "case when \"{value}\" is not null and \"{flag}\" is not null then 1.0 else 0.0 end"
+            )
+        })
+        .collect();
+    let passed: Vec<String> = validatable
+        .iter()
+        .map(|(value, flag)| {
+            format!("case when \"{value}\" is not null and \"{flag}\" then 1.0 else 0.0 end")
+        })
+        .collect();
+
+    let (wc, wv, wf) = (
+        dq.weights.completeness,
+        dq.weights.validity,
+        dq.weights.freshness,
+    );
+    let fresh = dq.fresh_days.max(0);
+    let stale = dq.stale_days.max(fresh + 1);
+    let run = run_id.replace('\'', "''");
+    let at = scored_at.replace('\'', "''");
+
+    session.execute_batch("drop table if exists __quality_src")?;
+    session.execute_batch(&format!(
+        "create temp table __quality_src as
+         with dims as (
+             select
+                 record_key,
+                 ({present}) / {total_weight} as completeness,
+                 case when ({judged_sum}) > 0 then ({passed_sum}) / ({judged_sum}) end as validity,
+                 case
+                   when updated_at_source is null then null
+                   else greatest(0.0, least(1.0,
+                     (cast({stale} as double)
+                        - date_diff('day', updated_at_source, cast('{at}' as timestamp)))
+                     / cast({span} as double)))
+                 end as freshness
+             from {std_qual}
+         )
+         select
+             record_key,
+             completeness,
+             validity,
+             freshness,
+             -- Weighted mean over the dimensions that APPLY: a NULL dimension
+             -- leaves both the numerator term and its weight out, rather than
+             -- being scored zero.
+             100.0 * (
+                 {wc} * completeness
+                 + coalesce({wv} * validity, 0.0)
+                 + coalesce({wf} * freshness, 0.0)
+             ) / (
+                 {wc}
+                 + case when validity is null then 0.0 else {wv} end
+                 + case when freshness is null then 0.0 else {wf} end
+             ) as score,
+             '{run}' as run_id,
+             cast('{at}' as timestamp) as scored_at
+         from dims",
+        present = present.join(" + "),
+        judged_sum = judged.join(" + "),
+        passed_sum = passed.join(" + "),
+        span = (stale - fresh).max(1),
+    ))?;
+    er_entities::record_quality::create::upsert(session.connection())?;
+    er_entities::record_quality::delete::absent_from_std(session.connection())?;
+    session.execute_batch("drop table __quality_src")?;
+    Ok(true)
+}
+
 /// Apply one drained steward action to the lake (the control plane's
 /// `staged_steward_actions`, dispatched when the org's writer lock is free):
 ///   - `add_assertion` → insert an active assertion on the canonicalized pair
@@ -2428,6 +2568,12 @@ pub fn run_all(session: &Session, config: &Config, inputs: &PipelineInputs) -> R
     // a failure to describe them must not fail the run that produced them.
     if let Err(e) = write_metric_snapshot(session, config, inputs.run_id, inputs.run_at) {
         eprintln!("run {}: metric snapshot failed: {e:#}", inputs.run_id);
+    }
+    // Quality scoring, when configured. Best-effort: the run's results are
+    // already in the lake, so failing to DESCRIBE them must not fail the run
+    // that produced them.
+    if let Err(e) = write_record_quality(session, config, inputs.run_id, inputs.run_at) {
+        eprintln!("run {}: quality scoring failed: {e:#}", inputs.run_id);
     }
     write_run_end(session, inputs.run_id, inputs.run_at)?;
     Ok(())

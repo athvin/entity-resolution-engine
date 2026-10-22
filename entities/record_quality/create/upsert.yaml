@@ -1,0 +1,6 @@
+kind: statement
+operation: create
+mode: partial
+description: "Score the corpus from the session's __quality_src staging, keyed on record_key so a re-scored record is rewritten rather than duplicated."
+params: []
+returns: none

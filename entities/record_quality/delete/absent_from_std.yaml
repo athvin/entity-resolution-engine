@@ -1,0 +1,6 @@
+kind: statement
+operation: delete
+mode: partial
+description: "Drop scores for records the corpus no longer has, from the same __quality_src staging the upsert reads. Without it a tombstoned record keeps a quality score for good — the same upsert-only trap that left deleted records clustered until E7."
+params: []
+returns: none

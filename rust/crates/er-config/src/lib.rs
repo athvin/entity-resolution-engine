@@ -32,7 +32,7 @@ pub const RESERVED_SOURCE_PREFIX: &str = "_";
 /// The fourteen top-level blocks of S6, in document order. [`Config`]'s S6 block
 /// fields MUST equal this set; the `entity_type` discriminator (added for the
 /// Account entity type) is a meta-field, not an S6 block, and is excluded.
-pub const CONFIG_BLOCKS: [&str; 16] = [
+pub const CONFIG_BLOCKS: [&str; 17] = [
     "tenant",
     "thresholds",
     "standardization",
@@ -41,6 +41,7 @@ pub const CONFIG_BLOCKS: [&str; 16] = [
     "constraints",
     "comparisons",
     "segments",
+    "data_quality",
     "survivorship",
     "training",
     "storage",
@@ -366,6 +367,87 @@ pub struct CorrectionPass {
 /// predicate is parsed and column-checked at publish, like a blocking rule.
 pub type Segments = BTreeMap<String, String>;
 
+/// S6 `data_quality`: how a per-record quality score is computed.
+///
+/// Three dimensions, because they fail independently and a single number that
+/// mixes them tells an operator nothing about what to fix: a record can be
+/// COMPLETE and wrong (a malformed email in every field), VALID and empty (one
+/// good email and nothing else), or both and five years out of date.
+///
+/// Each dimension is scored only where it APPLIES. A record with no email is
+/// already penalised for that by completeness; scoring its validity as zero as
+/// well would penalise the same absence twice and make "fill in the blanks"
+/// look like it fixes validity. So validity is measured over the validatable
+/// fields that are PRESENT, and a record with none of them is scored on the
+/// other dimensions alone rather than being given a zero it did not earn.
+///
+/// Absent from the canonical document when unset, so `config_hash` is unchanged
+/// for every config written before quality scoring existed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DataQuality {
+    /// Attributes that count toward completeness, with their weights. A field
+    /// nobody uses should not drag a record's score down, so this is declared
+    /// rather than "every column".
+    pub completeness: BTreeMap<String, f64>,
+    /// Relative weight of each dimension in the final score.
+    #[serde(default = "default_dq_weights")]
+    pub weights: DataQualityWeights,
+    /// A record whose source timestamp is this recent scores full marks for
+    /// freshness.
+    #[serde(default = "default_fresh_days")]
+    pub fresh_days: i64,
+    /// A record this old scores zero for freshness; in between it decays
+    /// linearly. Must exceed `fresh_days`.
+    #[serde(default = "default_stale_days")]
+    pub stale_days: i64,
+}
+
+/// How much each dimension contributes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DataQualityWeights {
+    pub completeness: f64,
+    pub validity: f64,
+    pub freshness: f64,
+}
+
+fn default_dq_weights() -> DataQualityWeights {
+    DataQualityWeights {
+        completeness: 1.0,
+        validity: 1.0,
+        freshness: 1.0,
+    }
+}
+
+const fn default_fresh_days() -> i64 {
+    90
+}
+
+const fn default_stale_days() -> i64 {
+    1095
+}
+
+impl DataQuality {
+    /// Whether scoring is configured at all. Used by `skip_serializing_if` so an
+    /// unset block leaves `config_hash` untouched.
+    #[must_use]
+    pub fn is_unset(&self) -> bool {
+        self.completeness.is_empty()
+    }
+}
+
+impl Default for DataQuality {
+    fn default() -> Self {
+        Self {
+            completeness: BTreeMap::new(),
+            weights: default_dq_weights(),
+            fresh_days: default_fresh_days(),
+            stale_days: default_stale_days(),
+        }
+    }
+}
+
 /// The whole S6 document, validated. `config_hash` is NOT a field of it (S6).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -390,6 +472,11 @@ pub struct Config {
     /// existed hashes identically.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub segments: BTreeMap<String, String>,
+    /// How a per-record quality score is computed. Omitted from the canonical
+    /// document when unset, so a config written before quality scoring existed
+    /// hashes identically.
+    #[serde(default, skip_serializing_if = "DataQuality::is_unset")]
+    pub data_quality: DataQuality,
     pub survivorship: BTreeMap<String, Vec<String>>,
     pub training: Training,
     pub storage: Storage,
@@ -469,9 +556,9 @@ mod tests {
 
     #[test]
     fn blocks_and_constants() {
-        assert_eq!(CONFIG_BLOCKS.len(), 16);
+        assert_eq!(CONFIG_BLOCKS.len(), 17);
         assert_eq!(CONFIG_BLOCKS[0], "tenant");
-        assert_eq!(CONFIG_BLOCKS[15], "correction_pass");
+        assert_eq!(CONFIG_BLOCKS[16], "correction_pass");
         // `constraints` sits beside `blocking` because it changes the same
         // thing — which pairs are candidates — and so carries the same publish
         // tier.

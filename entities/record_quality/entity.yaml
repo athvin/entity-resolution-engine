@@ -1,0 +1,49 @@
+kind: entity
+version: 1
+name: record_quality
+relation: record_qualities
+description: "A per-record data-quality score, 0-100, with the three dimensions kept separately. The dimensions are kept because a single number says a record is bad and not what to do about it: complete-but-invalid, valid-but-empty and simply old are three different jobs."
+key: [id]
+natural_key: [record_key]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "Content-derived row id: sha256('record_qualities:' || record_key)."
+  - name: record_key
+    type: varchar
+    nullable: false
+    description: "The standardized record scored."
+  - name: score
+    type: double
+    nullable: false
+    description: "0-100, the weighted mean of the dimensions that APPLY to this record. A dimension that cannot be judged is left out of the mean rather than counted as zero."
+  - name: completeness
+    type: double
+    nullable: false
+    description: "Weighted fraction of the configured attributes that are populated."
+  - name: validity
+    type: double
+    description: "Fraction of the PRESENT validatable fields that passed standardization. NULL when the record has none of them — a record with no email is already penalised by completeness, and scoring its validity zero would penalise the same absence twice."
+  - name: freshness
+    type: double
+    description: "1.0 within `fresh_days` of the run, decaying to 0.0 at `stale_days`. NULL when the source carries no timestamp, because unknown age is not the same as old."
+  - name: run_id
+    type: varchar
+    nullable: false
+    description: "The run that scored it."
+  - name: scored_at
+    type: timestamp
+    nullable: false
+    description: "That run's logical clock."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical creation time."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time."
