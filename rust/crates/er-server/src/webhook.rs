@@ -23,7 +23,7 @@ use crate::pg;
 /// Adding an event means adding it here, which is also what makes it
 /// subscribable. A type absent from this list is refused at registration
 /// instead of accepted and silently never delivered.
-pub const EVENT_CATALOG: [(&str, &str); 3] = [
+pub const EVENT_CATALOG: [(&str, &str); 6] = [
     (
         "job.succeeded",
         "A queued job finished successfully. Fired once per OUTCOME, not per \
@@ -40,6 +40,29 @@ pub const EVENT_CATALOG: [(&str, &str); 3] = [
         "job.canceled",
         "An operator canceled the job. Until this release cancel delivered \
          nothing at all, so a system waiting on an outcome waited forever.",
+    ),
+    (
+        "config.published",
+        "A config version became the active one. Carries the version, the change \
+         TIER and the blocks that moved, so a subscriber can tell a threshold \
+         tweak (tier A, which re-reads existing scores) from a comparison \
+         change (tier C, which retrains and re-resolves the corpus) without \
+         diffing YAML.",
+    ),
+    (
+        "import.received",
+        "A delivery landed and its run was queued. Fired when the file is \
+         committed to the drop root, not when the run finishes — those are \
+         different questions, and `job.succeeded` already answers the second, \
+         keyed by the `job_id` this payload carries.",
+    ),
+    (
+        "review.resolved",
+        "A steward resolved a review and the decision was APPLIED to the lake. \
+         Not fired at the moment of resolution: a resolution is staged and \
+         drained later, and a subscriber acting on an intent the engine has not \
+         enforced yet would read a corpus that disagrees with the event. \
+         Carries the verdict, including a dismissal.",
     ),
 ];
 

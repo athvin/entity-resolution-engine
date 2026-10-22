@@ -53,7 +53,15 @@ fn every_catalogued_event_has_a_state_that_reaches_the_emitter() {
     let emitting_sources = format!("{SERVER_SRC}{DISPATCHER_SRC}");
     for (event, _) in webhook::EVENT_CATALOG {
         let Some(state) = event.strip_prefix("job.") else {
-            // A non-job event will need its own evidence when one is added.
+            // A non-job event brings its OWN evidence: its literal type string
+            // must appear at an emit site. `job.*` can be checked by state
+            // because `emit_job_event` builds the type from one; everything
+            // else names the event where it fires, so that is what to look for.
+            assert!(
+                emitting_sources.contains(&format!("\"{event}\"")),
+                "the catalog lists {event:?} but no emit site names it — either \
+                 something must emit it or it must not be listed"
+            );
             continue;
         };
         assert!(
@@ -75,9 +83,21 @@ fn every_catalogued_event_has_a_state_that_reaches_the_emitter() {
         "job.running must not be subscribable until something emits it"
     );
 
-    // The catalog's three entries are the three terminal outcomes.
+    // The catalog: the three terminal job outcomes, plus the control-plane
+    // events O3c added. Listed exhaustively rather than counted, so adding one
+    // is a deliberate edit here and not a number that drifts.
     let events: Vec<&str> = webhook::EVENT_CATALOG.iter().map(|(e, _)| *e).collect();
-    assert_eq!(events, vec!["job.succeeded", "job.failed", "job.canceled"]);
+    assert_eq!(
+        events,
+        vec![
+            "job.succeeded",
+            "job.failed",
+            "job.canceled",
+            "config.published",
+            "import.received",
+            "review.resolved",
+        ]
+    );
     for (_, description) in webhook::EVENT_CATALOG {
         assert!(
             description.len() > 30,
@@ -162,7 +182,18 @@ async fn registration_refuses_an_event_nothing_emits() {
         .iter()
         .map(|e| e["event"].as_str().unwrap())
         .collect();
-    assert_eq!(names, vec!["job.succeeded", "job.failed", "job.canceled"]);
+    assert_eq!(
+        names,
+        vec![
+            "job.succeeded",
+            "job.failed",
+            "job.canceled",
+            "config.published",
+            "import.received",
+            "review.resolved",
+        ],
+        "discovery serves exactly the catalog, so the two cannot disagree"
+    );
     assert!(
         listed["events"][0]["description"].is_string(),
         "the catalog must explain each event, not just name it"

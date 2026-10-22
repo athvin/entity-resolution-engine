@@ -1393,6 +1393,40 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          Still to come in O3b: the outbox + delivery log + backoff (today a delivery failure is
          collected and discarded), and entity-level events off the `entity_events` ledger, which
          wants the outbox first — thousands of un-retried POSTs per run would be worse than none.
+   - [x] **O3c-1 the control-plane events: `config.published`, `import.received`,
+         `review.resolved`.** O3a's catalog was deliberately only the three terminal job outcomes,
+         so a subscriber could learn that a job finished and nothing about WHY it started. These
+         three are the causes, and each fires from a place that already holds the Postgres client,
+         so none of them needs the cross-store bridge the entity events do.
+         The interesting decision is `review.resolved`, and it is the same one E10b-2 just made
+         for labels: it fires from the **drain**, not from the resolve endpoint. A resolution is
+         staged and applied later, so an event at staging time would tell a subscriber about an
+         intent the engine has not enforced — they would fetch the corpus and find it disagreeing
+         with the event they just received. It fires for dismissals too: a dismissal is a decision
+         worth delivering even though it yields no training label.
+         `import.received` fires from `finish_delivery`, which is where E9a put the shared
+         preconditions, so both delivery paths (the CSV upload and the JSON push) get it from one
+         site. It is deliberately NOT "the import finished" — that is `job.succeeded`, keyed by
+         the `job_id` this payload carries so the two can be correlated.
+         `config.published` carries the change TIER and the blocks that moved, which is the point:
+         a subscriber can tell a threshold tweak (tier A, re-reads existing scores) from a
+         comparison change (tier C, retrains and re-resolves the corpus) without diffing YAML.
+         All three are queued through O3b's outbox, never POSTed inline — a tenant's unreachable
+         endpoint must not be able to slow down or fail their own publish — and all three are
+         best-effort after the work committed, for the reason that recurs: failing an operation to
+         report on it destroys work to describe it.
+         **O3a's honesty gate was extended rather than bypassed.** It checked `job.*` events by
+         finding the state string in the emit sources and explicitly `continue`d on anything else
+         ("a non-job event will need its own evidence when one is added"). A non-job event now
+         brings that evidence: its literal type string must appear at an emit site. Observed
+         failing — cataloguing an `entity.merged` nothing emits fails with "the catalog lists
+         \"entity.merged\" but no emit site names it".
+   - [ ] O3c-2 entity-level events off the `entity_events` ledger. Still wants the fan-out
+         decision O3a named: a run over a large corpus writes thousands of rows and one POST each
+         would be worse than none, so this needs per-run aggregates or a capped fan-out that LOGS
+         what it dropped. It also crosses stores (the ledger is in the lake, the outbox in
+         Postgres), which the dispatcher's async half can bridge — the same shape E9b's screening
+         and E10b-2's labels both used.
    - [x] **O7a resolution metrics over time (#45/#57's trend half).** Every dashboard number has
          always been computed LIVE from the lake, so the product could say what is true now and
          nothing about the direction of travel — and "is the duplicate rate going up" is the
