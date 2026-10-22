@@ -782,6 +782,37 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          exactly the actionable output this feature exists to produce, and it is invisible
          without the breakdown. The test pins it, so a corpus change that makes the rule useful
          gets noticed.
+   - [x] **E6c the estimate and the segment catalog reach the UI.** E6a and E6b both shipped
+         endpoints with **no caller at all**: an operator still could not see what a run would
+         cost before starting it, which is the entire point of E6a, nor restrict a run to a
+         declared slice, which is the point of E6b.
+         The cost panel rides the Runs page's run-trigger surface and is fetched **on demand** —
+         the estimate opens the org's lake and counts pairs, so a page that ran it automatically
+         would make a cheap page expensive to open. A spec asserts exactly that by failing the
+         request if anything fetches it before the button is pressed. It shows the pairs the rules
+         generate against the cartesian total, the share avoided (to four decimals above 99.9%,
+         because "99.9%" and "99.999%" are three orders of magnitude apart in real cost), each
+         rule's MARGINAL contribution — the number that says whether a rule is pulling its weight
+         — and the blocks large enough to dominate a run on their own. 409 is rendered as the
+         designed state it is: an org with no model has nothing to estimate.
+         The segment picker adds `segment: <name>` to the run's params. The job carries the NAME
+         only; the predicate is resolved server-side against the org's own published config, so
+         no SQL ever travels in a request — the property the dispatcher already enforced and the
+         UI must not undermine. Offered for scoring runs but **not** for a correction pass, which
+         re-clusters from the existing edge set and would be restricted by nothing.
+         **The naming collision the plan warned about is real and was avoided:**
+         `src/app/api/orgs/[org]/segments/` is the CAMPAIGNS saved-segment store, backed by the
+         erweb database and unrelated to the config `segments:` block. This uses
+         `/api/orgs/[org]/config/segments`, which is what it actually is. Two different things
+         called "segment" is a naming accident in the product; putting them on one route would
+         have made it a bug.
+         Two fixture lessons, both found by failing first: the segment-scoping test needs its OWN
+         org (`segment-dev`) because starting a run takes the org's single writer slot, so sharing
+         with the Runs page's Run-now test leaves whichever ran second looking at a correctly
+         disabled button — the same reason `palette-dev` exists. And `make frontend-baselines` was
+         run and produced an EMPTY diff, which is the point: both additions are steward-gated and
+         the runs baseline is a viewer's view, so the verification is what makes "no baseline
+         moved" a fact rather than an assumption.
    - [x] **E8 online resolve API (#37).** `POST /v1/orgs/{org}/resolve` — post an **unsaved**
          record, learn which entity it belongs to and how confident that is, before storing it.
          This is how the engine embeds in someone else's system instead of owning their data,

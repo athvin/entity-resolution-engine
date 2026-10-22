@@ -17,6 +17,8 @@ import {
   type RunRow,
 } from "@/lib/query/hooks";
 import { useSubmitJob } from "@/lib/query/steward";
+import { RunCost } from "./run-cost";
+import { useConfigSegments } from "@/lib/query/blocking";
 import { RUN_KINDS } from "@/lib/domain/run-kinds";
 import { cn } from "@/lib/utils";
 
@@ -61,6 +63,11 @@ export function RunsContent({ org }: { org: string }) {
   const router = useRouter();
   const [kindOpen, setKindOpen] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // The config's `segments:` block — named slices a run may be restricted to.
+  // The job carries the NAME; the predicate is looked up in the org's own
+  // published config server-side, so no SQL ever travels in a request.
+  const segments = useConfigSegments(org);
+  const [segment, setSegment] = useState("");
   const activeJob = (jobs.data ?? []).find((job) => ACTIVE.has(job.state));
   const role = effectiveRole(session.data, org);
   const isSteward = role !== null && ROLE_RANK[role] >= ROLE_RANK.steward;
@@ -68,8 +75,12 @@ export function RunsContent({ org }: { org: string }) {
   function startRun(kind: string, params: Record<string, unknown>) {
     setKindOpen(false);
     setSubmitError(null);
+    // A correction pass re-clusters from the existing edge set rather than
+    // scoring, so a segment would restrict nothing — offering it there would
+    // imply a scoping that does not happen.
+    const scoped = segment && kind !== "correct" ? { ...params, segment } : params;
     submit.mutate(
-      { kind, params },
+      { kind, params: scoped },
       {
         onSuccess: (result) => {
           router.push(`/${org}/runs/${result.id}`);
@@ -89,6 +100,26 @@ export function RunsContent({ org }: { org: string }) {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-xl font-semibold lg:text-2xl">Runs</h1>
         <span className="flex-1" />
+        {isSteward && (segments.data?.length ?? 0) > 0 && (
+          <label className="flex items-center gap-1.5 text-sm">
+            <span className="text-muted-foreground">Scope</span>
+            <select
+              className="border-input bg-background focus-visible:ring-ring h-8 rounded-md border px-2 text-sm focus-visible:ring-2 focus-visible:outline-none"
+              value={segment}
+              data-testid="run-segment"
+              onChange={(e) => {
+                setSegment(e.target.value);
+              }}
+            >
+              <option value="">Whole corpus</option>
+              {(segments.data ?? []).map((choice) => (
+                <option key={choice.name} value={choice.name} title={choice.predicate}>
+                  {choice.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         {isSteward && (
           <span className="relative inline-flex">
             {/* Split button: the common kind on the left, the rest behind the caret. */}
@@ -170,6 +201,8 @@ export function RunsContent({ org }: { org: string }) {
           </Card>
         </Link>
       )}
+
+      {isSteward && <RunCost org={org} />}
 
       <Card data-testid="jobs-table">
         <CardHeader className="p-4 pb-1 lg:p-6 lg:pb-2">
