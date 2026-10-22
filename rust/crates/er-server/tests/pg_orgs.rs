@@ -469,6 +469,48 @@ async fn orgs_crud_and_state_machine() {
     assert!(has_rows, "acme has audit rows");
     assert!(org_rows.iter().all(|r| r["org"] == "acme"));
 
+    // The audit trail names the PERSON, not just the credential. The BFF has
+    // always sent `x-acting-user` on every forwarded call and its own comment
+    // promised that erserver records "user:<email> via key:…"; nothing read the
+    // header, so every human action was filed under the service credential.
+    //
+    // Note the assertion above still holds: with no header the actor is exactly
+    // `operator`, so a direct API caller's rows are unchanged.
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/orgs")
+                .header(header::AUTHORIZATION, "Bearer op-secret")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header("x-acting-user", "ada@acme.dev")
+                .body(Body::from(
+                    r#"{"name":"acme","config_path":"/configs/acme.yaml"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+
+    let resp = app
+        .clone()
+        .oneshot(req("GET", "/v1/audit", "op-secret", Body::empty()))
+        .await
+        .unwrap();
+    let feed = json_body(resp).await;
+    let actors: Vec<&str> = feed
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|r| r["actor"].as_str())
+        .collect();
+    assert!(
+        actors.contains(&"user:ada@acme.dev via operator"),
+        "the audit trail should name the person AND the credential, got {actors:?}"
+    );
+
     // /v1/audit is operator-only: a viewer key is 403.
     let resp = app
         .clone()

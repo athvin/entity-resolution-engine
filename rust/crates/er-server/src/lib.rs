@@ -306,6 +306,69 @@ fn unauthorized(msg: &str) -> (StatusCode, Json<Value>) {
     (StatusCode::UNAUTHORIZED, Json(json!({ "detail": msg })))
 }
 
+/// The header the BFF uses to name the human behind a request. It has been sent
+/// on every forwarded call since the BFF was written — `proxy.ts` sets
+/// `"x-acting-user": access.identity.user.email` — and its own comment states
+/// the intended result: "erserver's audit_log records `user:<email> via key:…`".
+/// Nothing here read it, so every human action was attributed to the service
+/// credential instead. This is the receiving half.
+const ACTING_USER_HEADER: &str = "x-acting-user";
+
+/// The longest acting-user we will record. An email, not an essay; the value
+/// lands in `audit_log.actor` and `assertions.created_by`.
+const ACTING_USER_MAX: usize = 128;
+
+/// The human named by [`ACTING_USER_HEADER`], if the header is present and
+/// sane. `None` leaves the actor as the credential alone.
+///
+/// **This is attribution, never authorization.** `Principal.org` and
+/// `Principal.role` keep coming solely from the bearer credential, so this
+/// header cannot widen what a caller may do — only what the audit trail calls
+/// them. That split is the whole safety property: were `role` to read this, the
+/// header would be an impersonation vector.
+///
+/// The honest limit: anyone holding a valid key can set it, so attribution is
+/// exactly as trustworthy as the key. It is still a strict improvement on
+/// `key:<id>`, and because the credential is recorded ALONGSIDE the person
+/// (`user:… via key:…`) the trail keeps its provenance — a forged name cannot
+/// hide which credential carried the request. Making attribution unforgeable
+/// needs a credential the tenant does not hold, which is the service-identity
+/// work (#78), not this.
+///
+/// Rejected values are ignored rather than refused: a malformed header should
+/// not fail an otherwise valid request, and falling back to the credential form
+/// loses nothing relative to the previous behaviour.
+fn forwarded_actor(parts: &Parts) -> Option<String> {
+    let raw = parts.headers.get(ACTING_USER_HEADER)?.to_str().ok()?.trim();
+    acceptable_actor(raw).then(|| raw.to_string())
+}
+
+/// Whether a trimmed acting-user is fit to record: printable, non-space ASCII,
+/// bounded, and free of the two characters that would need escaping wherever the
+/// actor is embedded.
+///
+/// Separate from [`forwarded_actor`] so the rule is testable without a header,
+/// which matters because the `http` crate refuses to CONSTRUCT a header value
+/// containing `\n` or `\r` at all — CRLF injection is already impossible one
+/// layer below this, and the check here is defence in depth rather than the
+/// only thing standing in the way.
+fn acceptable_actor(raw: &str) -> bool {
+    !raw.is_empty()
+        && raw.len() <= ACTING_USER_MAX
+        && raw
+            .chars()
+            .all(|c| c.is_ascii_graphic() && c != '"' && c != '\\')
+}
+
+/// Compose the recorded actor from the credential and the forwarded human.
+/// `user:<email> via <credential>` is the format `proxy.ts` documents.
+fn compose_actor(credential: &str, user: Option<String>) -> String {
+    match user {
+        Some(user) => format!("user:{user} via {credential}"),
+        None => credential.to_string(),
+    }
+}
+
 impl FromRequestParts<AppState> for Principal {
     type Rejection = (StatusCode, Json<Value>);
 
@@ -328,7 +391,7 @@ impl FromRequestParts<AppState> for Principal {
             && ct_eq(credential.as_bytes(), state.operator_token.as_bytes())
         {
             return Ok(Principal {
-                actor: "operator".to_string(),
+                actor: compose_actor("operator", forwarded_actor(parts)),
                 org: None,
                 role: Role::Operator,
             });
@@ -369,7 +432,8 @@ impl FromRequestParts<AppState> for Principal {
                     }
                 };
                 Ok(Principal {
-                    actor: format!("key:{key_id}"),
+                    // Role and org come from the KEY, never from the header.
+                    actor: compose_actor(&format!("key:{key_id}"), forwarded_actor(parts)),
                     org: Some(org_name),
                     role: Role::parse(&role).unwrap_or(Role::Viewer),
                 })
@@ -6153,7 +6217,91 @@ pub async fn state_from_env() -> AppState {
 
 #[cfg(test)]
 mod tests {
-    use super::rewrite_action_path;
+    use super::{ACTING_USER_MAX, compose_actor, forwarded_actor, rewrite_action_path};
+
+    /// Build request parts carrying the given `x-acting-user` value.
+    fn parts_with(header: Option<&str>) -> axum::http::request::Parts {
+        let mut builder = axum::http::Request::builder().uri("/");
+        if let Some(value) = header {
+            builder = builder.header(super::ACTING_USER_HEADER, value);
+        }
+        builder.body(()).unwrap().into_parts().0
+    }
+
+    #[test]
+    fn the_recorded_actor_names_the_person_and_the_credential() {
+        // The format `proxy.ts` documents: "user:<email> via key:…". Both halves
+        // matter — the person is who to ask about a decision, the credential is
+        // how the request got in, and a forged name cannot hide the latter.
+        assert_eq!(
+            compose_actor("key:01ABC", Some("steward@acme.dev".to_string())),
+            "user:steward@acme.dev via key:01ABC"
+        );
+        assert_eq!(
+            compose_actor("operator", Some("root@er.dev".to_string())),
+            "user:root@er.dev via operator"
+        );
+        // No header: exactly the previous behaviour, so a direct API caller's
+        // audit rows are unchanged.
+        assert_eq!(compose_actor("key:01ABC", None), "key:01ABC");
+        assert_eq!(compose_actor("operator", None), "operator");
+    }
+
+    #[test]
+    fn an_unusable_acting_user_is_ignored_rather_than_trusted() {
+        assert_eq!(
+            forwarded_actor(&parts_with(Some("steward@acme.dev"))).as_deref(),
+            Some("steward@acme.dev")
+        );
+        // Surrounding whitespace is trimmed, not rejected.
+        assert_eq!(
+            forwarded_actor(&parts_with(Some("  steward@acme.dev  "))).as_deref(),
+            Some("steward@acme.dev")
+        );
+        // Absent, empty, or whitespace-only: fall back to the credential.
+        assert!(forwarded_actor(&parts_with(None)).is_none());
+        assert!(forwarded_actor(&parts_with(Some(""))).is_none());
+        assert!(forwarded_actor(&parts_with(Some("   "))).is_none());
+        // A space would let a caller pass off "x via key:other" as one actor,
+        // and a quote or backslash would need escaping wherever the actor is
+        // embedded. Refused rather than sanitised: a name that needed rewriting
+        // is not a name worth recording. Asserted through a real header, since
+        // these are all values a header may legally carry.
+        for bad in ["ada admin", "ada\tadmin", "\"ada\"", "ada\\admin"] {
+            assert!(
+                forwarded_actor(&parts_with(Some(bad))).is_none(),
+                "{bad:?} must not reach the audit trail"
+            );
+        }
+        // Bounded: an email, not an essay.
+        let long = "a".repeat(ACTING_USER_MAX + 1);
+        assert!(forwarded_actor(&parts_with(Some(&long))).is_none());
+        let at_limit = "a".repeat(ACTING_USER_MAX);
+        assert!(forwarded_actor(&parts_with(Some(&at_limit))).is_some());
+    }
+
+    /// CRLF is refused by the predicate, and the reason it is tested HERE rather
+    /// than through a header is itself the finding: `http::Request::builder()`
+    /// will not construct a header value containing `\n` or `\r` — it returns
+    /// `InvalidHeaderValue` — so log-forging through this header is already
+    /// impossible one layer below us. The predicate still rejects them, because
+    /// a rule that depends on a neighbour's behaviour for its safety should say
+    /// so and then not rely on it.
+    #[test]
+    fn control_characters_are_refused_though_a_header_cannot_carry_them() {
+        for bad in ["ada\nadmin@acme.dev", "ada\radmin", "ada\0admin"] {
+            assert!(!super::acceptable_actor(bad), "{bad:?} must be refused");
+            assert!(
+                axum::http::Request::builder()
+                    .uri("/")
+                    .header(super::ACTING_USER_HEADER, bad)
+                    .body(())
+                    .is_err()
+                    || !bad.contains(['\n', '\r']),
+                "the http layer should refuse to build {bad:?} as a header"
+            );
+        }
+    }
 
     #[test]
     fn rewrites_every_action_spelling_the_bff_uses() {
