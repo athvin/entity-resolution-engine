@@ -770,7 +770,7 @@ jobs:
   # Kept as its own job, never a step on a required one: cache hygiene must not
   # be able to fail a merge.
   cache-prune:
-    name: prune sccache to budget
+    name: prune the Actions cache to budget
     runs-on: ubuntu-latest
     # 30, not 15: listing ~5,600 entries over 56 paginated requests and then
     # deleting thousands of them is minutes of pure API round trips even eight at
@@ -803,7 +803,29 @@ jobs:
       # rust-cache in the first place. But the real fix is to take sccache out of
       # this 10 GB budget entirely — see the build-cost reference's S3 section,
       # which this measurement promotes from contingency to the obvious next step.
-      SCCACHE_BUDGET_MIB: "5120"
+      #
+      # MEASURED 2026-10-22, run 39838150331 — the first real run of this job.
+      # It printed the accounting below and then correctly deleted NOTHING,
+      # because sccache was 3,341 MiB against this 5,120 budget while the
+      # repository sat at 10,696,640,978 bytes:
+      #
+      #     sccache        4682 entries  3341.1 MiB
+      #     buildkit-blob   ~70 entries  ~5000 MiB   <- four entries at 763.8 MiB
+      #     v1-rust-rust       2 entries   364.1 MiB each
+      #
+      # So capping sccache alone made this job a no-op while `images.yml`'s
+      # `type=gha,mode=max` layer cache held half the budget and kept evicting
+      # the entries that make CI fast. BUDGETS below is therefore a list, not a
+      # single number: each prefix is capped independently, oldest-accessed
+      # first.
+      #
+      # What is deliberately NOT capped: `v1-rust*` (two ~364 MiB entries,
+      # the thing all of this protects), `pnpm-store`, `next-build` and
+      # `duckdb-extensions` — all small, all load-bearing, none growing without
+      # bound. Only the two unbounded producers are listed.
+      BUDGETS: |
+        sccache 5120
+        buildkit-blob 2048
       # Upper bound on deletions per run, so one night's work is bounded no
       # matter how large the backlog. It converges over successive runs, and
       # reports when it stops short rather than looking finished.
@@ -830,45 +852,65 @@ jobs:
             sort -k3 -rn
           echo "::endgroup::"
 
-          entries=$(mktemp)
-          gh api --paginate \
-            "repos/$GITHUB_REPOSITORY/actions/caches?per_page=100&key=sccache&sort=last_accessed_at&direction=asc" \
-            --jq '.actions_caches[] | "\(.id)\t\(.size_in_bytes)"' >"$entries"
+          # One pass per capped prefix. Each is independent: a prefix already
+          # under budget contributes no deletions, which is the correct no-op.
+          grand_deleted=0
+          while read -r prefix budget_mib; do
+            [ -n "$prefix" ] || continue
 
-          total=$(awk -F'\t' '{s+=$2} END {print s+0}' "$entries")
-          budget=$((SCCACHE_BUDGET_MIB * 1048576))
-          printf 'sccache: %d entries, %d MiB (budget %d MiB)\n' \
-            "$(wc -l <"$entries")" "$((total / 1048576))" "$SCCACHE_BUDGET_MIB"
+            entries=$(mktemp)
+            gh api --paginate \
+              "repos/$GITHUB_REPOSITORY/actions/caches?per_page=100&key=$prefix&sort=last_accessed_at&direction=asc" \
+              --jq '.actions_caches[] | "\(.id)\t\(.size_in_bytes)"' >"$entries"
 
-          # Choose the victims in one pass, then delete them CONCURRENTLY. A
-          # sequential loop is what the first version did and it does not fit in
-          # any sane timeout: one DELETE is a separate HTTPS round trip (~150 ms)
-          # and the backlog was 5,595 entries / 5,846 MiB, i.e. ~3,400 deletions.
-          # Measured: it ran past 10 minutes having cleared only part of it.
-          #
-          # MAX_DELETES bounds a single run so the job cannot become unbounded
-          # work if the backlog is ever huge; it simply converges over successive
-          # nights instead. Anything dropped is reported, never silent.
-          doomed=$(mktemp)
-          awk -F'\t' -v budget="$budget" -v total="$total" -v cap="$MAX_DELETES" '
-            total <= budget { exit }
-            NR > cap        { exit }
-            { print $1; total -= $2 }
-          ' "$entries" >"$doomed"
-          want=$(wc -l <"$doomed")
-          printf 'deleting %d oldest-accessed entries (cap %d)\n' "$want" "$MAX_DELETES"
+            total=$(awk -F'\t' '{s+=$2} END {print s+0}' "$entries")
+            budget=$((budget_mib * 1048576))
+            printf '%s: %d entries, %d MiB (budget %d MiB)\n' \
+              "$prefix" "$(wc -l <"$entries")" "$((total / 1048576))" "$budget_mib"
 
-          # `|| true` per delete: a concurrent run may have evicted it already,
-          # which is not a failure. xargs would otherwise exit 123 and, under
-          # `set -e`, fail a job whose whole point is hygiene.
-          export GITHUB_REPOSITORY
-          xargs -r -P 8 -I{} sh -c \
-            'gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/caches/{}" --silent 2>/dev/null || true' \
-            <"$doomed"
+            if [ "$total" -le "$budget" ]; then
+              echo "  under budget; nothing to do"
+              continue
+            fi
 
-          remaining=$((total - budget))
-          if [ "$want" -ge "$MAX_DELETES" ] && [ "$remaining" -gt 0 ]; then
-            printf 'hit the %d cap with ~%d MiB still over budget; the next run continues\n' \
-              "$MAX_DELETES" "$((remaining / 1048576))"
-          fi
+            # Choose the victims in one pass, then delete them CONCURRENTLY. A
+            # sequential loop is what the first version did and it does not fit
+            # in any sane timeout: one DELETE is a separate HTTPS round trip
+            # (~150 ms) and the backlog was 5,595 entries / 5,846 MiB, i.e.
+            # ~3,400 deletions. Measured: it ran past 10 minutes having cleared
+            # only part of it. `xargs -P 8` does 1,586 in 2m00.
+            #
+            # MAX_DELETES bounds a single run so the job cannot become unbounded
+            # work if a backlog is ever huge; it converges over successive runs
+            # instead. Anything dropped is reported, never silent.
+            remaining_cap=$((MAX_DELETES - grand_deleted))
+            if [ "$remaining_cap" -le 0 ]; then
+              printf '  deletion cap %d already spent; the next run continues here\n' "$MAX_DELETES"
+              continue
+            fi
+
+            doomed=$(mktemp)
+            awk -F'\t' -v budget="$budget" -v total="$total" -v cap="$remaining_cap" '
+              total <= budget { exit }
+              NR > cap        { exit }
+              { print $1; total -= $2 }
+            ' "$entries" >"$doomed"
+            want=$(wc -l <"$doomed")
+            printf '  deleting %d oldest-accessed entries (cap %d remaining)\n' "$want" "$remaining_cap"
+
+            # `|| true` per delete: a concurrent run may have evicted it
+            # already, which is not a failure. xargs would otherwise exit 123
+            # and, under `set -e`, fail a job whose whole point is hygiene.
+            export GITHUB_REPOSITORY
+            xargs -r -P 8 -I{} sh -c \
+              'gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/caches/{}" --silent 2>/dev/null || true' \
+              <"$doomed"
+
+            grand_deleted=$((grand_deleted + want))
+            if [ "$want" -ge "$remaining_cap" ]; then
+              printf '  hit the deletion cap with %s still over budget; the next run continues\n' "$prefix"
+            fi
+          done <<<"$BUDGETS"
+
+          printf 'deleted %d entries in total\n' "$grand_deleted"
           echo "total: $(report)"
