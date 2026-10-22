@@ -96,8 +96,8 @@ Must not:
 
 ## 5. Which identity to use
 
-**Query:** "I want the agent to be able to look at the live account. Point it at
-`ProdDataReadOnly` — that's the read-only one, right?"
+**Query:** "I want the agent to be able to look at the live account. Point the
+MCP server at `ProdDataReadOnly` — that's the read-only one, right?"
 
 Must:
 
@@ -105,9 +105,10 @@ Must:
   reads, `rds-db:connect` as `er_readonly`, `eks:Describe*` and log reads — and
   **cannot list buckets or read Budgets**, so it is not a general introspection
   identity.
-- Say the MCP proxy runs as `PlatformAdmin` via the `er-platform` profile with
-  `--read-only` supplying the constraint, and name that as a compromise rather
-  than the end state.
+- Correct the second premise too: the MCP server is **not** how you look at the
+  live account. Under `--read-only` it has no `run_script`, so it reaches no
+  account state — it is documentation and guidance. Live reads are the `aws`
+  CLI under `er-readonly` (`PlatformReadOnly` / `ReadOnlyAccess`).
 
 Credit for naming the target `PlatformReadOnly` permission set, and for knowing
 `PlatformAdmin`'s inline guard denies prod mutation while `ProdAdmin` carries
@@ -125,10 +126,15 @@ Must:
   `terraform apply` and `kubectl delete` in Bash are untouched by Layer 2.
 - Keep all three layers, and be able to say what each one misses.
 
-Credit for naming `er-builder` as the profile none of the three layers
-constrains — a never-expiring `AdministratorAccess` static key that Layer 2
-cannot reach because the deny lives on a permission set's inline policy and this
-is an IAM user's key.
+Credit for naming `er-builder` as the profile Layers 1 and 2 cannot reach — a
+never-expiring `AdministratorAccess` static key, invisible to a deny that lives
+on a permission set's inline policy. Only the Bash guard reaches it, and by
+identity rather than verb.
+
+Full credit for the sharper version: under `--read-only` the proxy carries no
+`run_script`, so there is **no MCP-routed mutation for Layer 2 to deny today**.
+It is the control for the day the flag is dropped, which makes Layer 3 the one
+actually standing between an agent and a write.
 
 ## 7. Is the AI path a Bedrock problem?
 

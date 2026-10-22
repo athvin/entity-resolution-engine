@@ -87,27 +87,48 @@ deny statements at all, whatever its managed policy allows.
 
 ## Introspecting the account
 
-A read-only question about the live account should go through the **AWS MCP
-Server**, declared in `.mcp.json` behind `mcp-proxy-for-aws-cli` with
-`--read-only`. It beats a shell `aws` call on two counts: write-capable tools
-are never offered to the agent at all, and every request is recorded in
-CloudWatch and CloudTrail as agent-initiated, which a Bash invocation is not.
+Three sources, and picking the wrong one wastes time:
 
-Its tools are fully qualified — `aws___search_documentation` for current AWS
-behaviour (prefer it over recalling API details) and `aws___retrieve_skill` for
-AWS's own service guidance on demand. Check `references/footprint.md` first
-regardless: it is generated from the Terraform, so it answers anything
-*declared* without touching the account.
+| Question | Answer with |
+|---|---|
+| anything **declared** — what resources exist, which permission sets, the SDK surface | [references/footprint.md](references/footprint.md), generated from the Terraform |
+| **live account state** — a cluster's version, a bucket's contents, a budget's spend | the `aws` CLI under the `er-readonly` profile |
+| **how AWS itself behaves** — an API's shape, a service's current guidance | the AWS MCP Server |
 
-**Three guardrail layers, all live, none sufficient alone**: the proxy flag is
+**The MCP server does not reach account state, and that is by configuration.**
+`.mcp.json` runs the proxy with `--read-only`, which strips `aws___run_script`
+and `aws___get_presigned_url` — `run_script` being the only tool that executes
+anything against the account. What remains is
+`aws___search_documentation`, `aws___read_documentation`,
+`aws___retrieve_skill`, `aws___list_regions`, `aws___get_regional_availability`
+and `aws___get_tasks`. Prefer those over recalling API details from memory; do
+not expect them to tell you what is running.
+
+So a live question is a CLI question:
+
+```sh
+aws sso login --profile er-readonly        # PlatformReadOnly, 8h
+AWS_PROFILE=er-readonly aws eks describe-cluster --name er-dev --query cluster.version
+```
+
+That profile cannot write — `ReadOnlyAccess`, verified by
+`iam simulate-principal-policy` returning `implicitDeny` for `s3:PutObject`,
+`eks:DeleteCluster`, `iam:CreateUser` and the rest. An expired token is the
+usual reason a command fails; the fix is another `aws sso login`, not a config
+change.
+
+**Three guardrail layers, none sufficient alone**: the proxy flag is
 client-side and another client ignores it; the IAM condition keys reach only
-calls made *through* the MCP server and so miss the CLI entirely; the Bash guard
-catches the CLI but is pattern-based. What each one misses, and the one profile
-none of them constrains:
+calls made *through* the MCP server, so they miss the CLI entirely; the Bash
+guard catches the CLI but is pattern-based. One consequence worth stating
+plainly — because `--read-only` already removes `run_script`, the IAM layer
+currently defends a path the config does not expose. It is there for the day
+someone drops that flag, not as today's active control. What each layer misses,
+and the one profile none of them constrains:
 [references/mcp-and-guardrails.md](references/mcp-and-guardrails.md).
 
-The operative rule stands regardless of which layers are applied: **do not
-mutate AWS from an agent session.** Write Terraform and let a human apply it.
+The operative rule is unchanged: **do not mutate AWS from an agent session.**
+Write Terraform and let a human apply it.
 
 ## Pod Identity, never IRSA — and one role per triple
 
@@ -173,8 +194,9 @@ Bedrock's two halves, the SDK feature pins that must not be relaxed, and why
 
 **"What is deployed / what version / what is this resource?"** Check
 `references/footprint.md` first — generated from the Terraform, so it answers
-anything declared without touching the account. For live state, ask the MCP
-server.
+anything declared without touching the account. For live state, a read-only
+`describe`/`list` under `AWS_PROFILE=er-readonly`. Not the MCP server: under
+`--read-only` it carries no tool that reaches the account.
 
 **A pod cannot reach AWS.** Check for an `aws_eks_pod_identity_association`
 covering its exact (cluster, namespace, service account) triple before looking

@@ -21,6 +21,26 @@ finished:
 | IAM condition keys | MCP-routed mutation, at the API | **every CLI and SDK call** — the keys only exist on MCP-routed requests |
 | Bash guard | `aws` / `terraform` / `kubectl` mutation from a session | non-shell paths, and anything its patterns do not match |
 
+**Layer 1 is doing more of the work than the layering implies.** `--read-only`
+does not merely hide write tools, it removes the only tool that reaches the
+account at all: `aws___run_script`. Probed against the live endpoint, the
+server offers six tools with the flag and eight without, the two extra being
+`run_script` and `get_presigned_url`.
+
+Two consequences follow, and both are easy to state wrongly:
+
+- **Layer 2 currently guards a path the configuration does not expose.** With
+  `run_script` absent there is no MCP-routed mutation for
+  `aws:ViaAWSMCPService` to deny. That is not an argument against having it —
+  it is exactly the control you want the day someone drops the flag, or points
+  a second client at the same endpoint — but it is defence in depth, not
+  today's active control, and the honest ordering is Layer 1 first.
+- **The CloudTrail benefit is smaller than it sounds.** "Every MCP request is
+  recorded as agent-initiated" is true of requests that reach AWS APIs, and
+  under `--read-only` the documentation tools do not. Do not reach for the MCP
+  server expecting an audit trail of account reads; those come from the CLI
+  under `er-readonly`, recorded the ordinary way.
+
 Layer 2 is the only one that is genuinely server-side, and it is also the one
 with the largest blind spot. That asymmetry is the whole reason for three.
 
