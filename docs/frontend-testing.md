@@ -256,6 +256,28 @@ It is **not** on the PR path — it is slow (~10 min) and needs Docker. Treat it
 a release gate and as the thing to reach for when a change spans
 BFF → er-server → engine.
 
+The control-plane Postgres binds **5433**, which is also the port the engine's
+own lake-E2E instructions use, so a machine already running one of those gets
+`Bind for 0.0.0.0:5433 failed: port is already allocated` and nothing else.
+Export `ER_DEV_PG_PORT` on all four commands to move it — `env.sh` threads it
+into both DSNs and `playwright.e2e.config.ts` reads `ERWEB_DATABASE_URL` from
+the environment before falling back, so the override reaches every consumer:
+
+```
+ER_DEV_PG_PORT=5470 make frontend-dev
+ER_DEV_PG_PORT=5470 make frontend-seed
+ER_DEV_PG_PORT=5470 ERWEB_DATABASE_URL=postgresql://postgres:er@localhost:5470/postgres \
+  make frontend-e2e
+```
+
+Two things to know before trusting a result. `next start` serves whatever is in
+`.next`, so **rebuild after every source change** or the tier silently tests the
+previous build. And the tier is stateful: each wizard pass adds a source
+carrying its own duplicate pair, so a corpus grown by repeated runs is a
+different corpus — which is how the `ingest_batches` window bug and the unmerge
+spec's over-strict count were both found, but also means an exact-count
+assertion over the corpus is a latent flake.
+
 ### What it was, and what revived it (W0.5b)
 
 It was dormant from the all-Rust cutover until W0.5b, and the reason recorded at
@@ -330,21 +352,26 @@ and each locked by a test observed failing first:
 | `run-the-business` → suspended tenant refuses work (×2) | Submitting a job to a suspended org returned **202, not 409**. `create_job`, `add_assertion` and `record_overlay_action` all went role-check → org-exists → `pg::enqueue`, so a suspended tenant could be made to spend compute and mutate its own lake — while the admin UI promised otherwise. `publish_config_version`, `delivery_preconditions` and `put_lexicon` each already refused, in three different idioms. | D6 — a shared `refuse_unless_active` on the three that had none |
 | `see-your-data` → provisions a tenant through the UI (×2) | `create_org` returned 503 without a `config_path` — the path the tenant-create UI uses, so self-onboarding was broken in the product. The `orgs.state` enum, the mock, the registry's `provision_job_id` and the UI's progress poller all already assumed the flow; only the server was missing. Six of the dead `ERSERVER_*` variables were its configuration. | D8 — a declared provisioning profile (local / Postgres) plus a `provision` job |
 | `fix-your-data` → assertion library shows the actor | Expected `steward@acme.dev`, got `key:<uuid>`. The BFF had **always** sent `x-acting-user` and its own comment promised `user:<email> via key:…`; er-server had zero references to the header. | D7 — honour it for attribution only, never for authorization |
-| `grow-your-data` → wizard activates a new source | `?limit=3` returned every job the org had ever had: the handler had no `Query` extractor and `pg::list_jobs` passed `i64::MAX`, while the BFF forwarded `limit` and `state` and the UI asked for `?limit=20`. The spec's three-kind assertion could never hold. | this PR — a `Query` extractor routing to the existing `pg::list_jobs_all` |
+| `grow-your-data` → wizard activates a new source | `?limit=3` returned every job the org had ever had: the handler had no `Query` extractor and `pg::list_jobs` passed `i64::MAX`, while the BFF forwarded `limit` and `state` and the UI asked for `?limit=20`. The spec's three-kind assertion could never hold. | a `Query` extractor routing to the existing `pg::list_jobs_all` |
+| `grow-your-data` → wizard activates a new source (2nd cause) | The activation panel sat on "Create draft" until the 120 s `waitForURL` expired, having **sent no request and shown no error**. `activate()` opened with `if (!activeConfig.data) return;` — a silent return inside an async pipeline whose UI had already been set to `running` — and the button was never gated on that read, so a click landing before `GET /config` resolved was a no-op. The mock answers in ~1 ms and always won the race; a real BFF → er-server → fresh-connection Postgres round trip does not. | gate both actions on the base config, and turn all three silent returns into errors |
+| `grow-your-data` → the run page after activation | **The whole run-detail page threw** against the real backend: `data.progress.stages` with no optional chaining, where er-server sends no `progress` key at all. Per-stage progress has no producer — the `run` ledger is one row per run and the stage-level tracking went with the Python tree — while `JobRow` declared `progress` **required** and the mock fabricated it at 11 sites. Same field, same shape, two more crash sites: the runs list (`lastStage`) and the dashboard's active-job line. | make the field optional so `tsc` finds every reader, strip the fabrication from the mock, and retarget the spec that asserted a mock-only stage name |
+| `fix-your-data` → unmerge splits a merged entity | Asserted exactly `memberCount - 1` members after peeling one record. Re-clustering runs from the full edge set, so if the peeled record was the only hop holding another member in, that member leaves too — a 5-member group legitimately lands at 3. The spec failed on correct behaviour once repeated tier runs grew the corpus. | assert strictly fewer, which is what the comment above it already claimed |
 | `see-your-data` → jobs table lists `run_all` | A **cold-route** flake, not slow data: `next start` initialises the dynamic route on first hit and the default 5 s expired while `jobs.isPending` was true, with the Skeleton rendering no text — so the card's whole content was its own title and the failure read as "element not found". | a 60 s budget on that first assertion |
 
-Four of the five were the same shape — **the frontend states a contract the
-backend never fulfilled** — which is the class `mock_contract.rs` was built for
-and can only partly see; it compares route and method, not response shapes,
-headers or query parameters. That gap is the strongest remaining argument for a
-shape-level gate.
+Most of them were the same shape — **the frontend states a contract the backend
+never fulfilled** — which is the class `mock_contract.rs` was built for and can
+only partly see; it compares route and method, not response shapes, headers or
+query parameters. Every one of those was *also* green in the mock tier, because
+the mock asserted the frontend's belief rather than the server's behaviour: a
+bare `[…]` for `{jobs: […]}`, a fabricated `progress` object, a stage name no
+producer emits. That gap is the strongest remaining argument for a shape-level
+gate, and `progress` is the sharpest case for it — the field was declared
+**required** in `JobRow`, read unguarded at three call sites, and sent by nothing.
 
----|---|
-| `see-your-data` → provisions a tenant through the UI (×2) | **Product gap.** `create_org` returns 503 "auto-provisioning not configured" without a `config_path` — the path the admin tenant-create UI uses. The Python server provisioned server-side from the dead `ERSERVER_*` variables; the Rust port never reimplemented it. Tenant self-onboarding is broken in the product, not the test. |
-| `run-the-business` → suspended tenant refuses work (×2) | **Real bug.** Submitting a job to a suspended org returns **202, not 409**: `create_job` has no suspension guard, while `publish_config_version` and `delivery_preconditions` both have one. The UI promises "a suspended tenant refuses jobs, imports and steward actions" — jobs is the one that does not. |
-| `fix-your-data` → assertion library shows the actor | **Product gap.** Expects `steward@acme.dev`; gets `key:<uuid>`. `Principal.actor` is derived solely from the API key and the BFF forwards no end-user identity, so every human action is attributed to a service credential. Fixing it means forwarding the authenticated user for *attribution only* — never for authorization, or it becomes an impersonation vector. |
-| `see-your-data` → jobs table lists `run_all` | **Cold-start flake.** The card's text is just its title, meaning `jobs.isPending` was still true and the Skeleton (no text) was rendering. A freshly started `next start` has to initialise the dynamic route inside the assertion's 5 s budget. Needs a longer first-assertion timeout, not a code change. |
-| `grow-your-data` → wizard activates a new source | Not yet diagnosed. |
+Two fabrications survive in the mock on purpose, as a marker for that gate:
+`outcome` and `exit_code` are served on jobs, exist nowhere in er-server, and
+are read by no component — harmless today, and exactly what a shape diff should
+flag before someone starts reading them.
 
 ---
 

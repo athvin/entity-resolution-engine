@@ -48,7 +48,7 @@ function duration(run: RunRow): string {
 }
 
 function lastStage(job: JobRow): string {
-  const stages = job.progress.stages;
+  const stages = job.progress?.stages;
   return stages?.length ? (stages[stages.length - 1]?.stage ?? "") : "";
 }
 

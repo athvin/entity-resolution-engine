@@ -30,7 +30,7 @@ export function JobDetail({ org, jobId }: { org: string; jobId: string }) {
     );
   }
   const data = job.data;
-  const stages = data.progress.stages ?? [];
+  const stages = data.progress?.stages ?? [];
   const role = effectiveRole(session.data, org);
   const isSteward = role !== null && ROLE_RANK[role] >= ROLE_RANK.steward;
 

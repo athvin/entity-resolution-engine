@@ -20,14 +20,20 @@ test.describe("runs monitor", () => {
     await expect(page.getByTestId("runs-table")).toContainText("148");
   });
 
-  test("job detail shows live stages and the failure disposition", async ({ page }) => {
+  test("job detail shows the stage state and the failure disposition", async ({ page }) => {
     await login(page, USERS.steward);
     await page.goto(`/${ORG}/runs/${FAILED_JOB}`);
     await expect(page.getByTestId("job-error")).toContainText("transient_io");
     await expect(page.getByTestId("job-error")).toContainText("Attempt 3 of 3");
     await expect(page.getByTestId("job-resume")).toBeVisible();
     await page.goto(`/${ORG}/runs/${RUNNING_JOB}`);
-    await expect(page.getByTestId("job-stages")).toContainText("match");
+    // This asserted the stage name "match" and could only ever pass against
+    // the mock: `progress` has no producer in er-server, so the real response
+    // omits it entirely and the card shows its waiting state. The mock used to
+    // fabricate the field, which is also what hid the crash — three call sites
+    // read `job.progress.stages` unguarded, so this page, the runs list and
+    // the dashboard's active-job line all threw against a real backend.
+    await expect(page.getByTestId("job-stages")).toContainText("Waiting for the first stage");
     await expect(page.getByTestId("job-cancel")).toBeVisible();
   });
 

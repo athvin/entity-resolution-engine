@@ -316,7 +316,7 @@ export function DashboardContent({ org }: { org: string }) {
             <span className="font-medium">{activeJob.kind}</span>
             <span className="text-muted-foreground">
               {activeJob.state}
-              {activeJob.progress.stages?.length
+              {activeJob.progress?.stages?.length
                 ? ` — ${activeJob.progress.stages[activeJob.progress.stages.length - 1]?.stage ?? ""}`
                 : ""}
             </span>
