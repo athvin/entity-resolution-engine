@@ -979,23 +979,64 @@ run_regen() {
 	note "regenerated ${#generated_files[@]} generated files"
 }
 
+# Everything between `<!-- BEGIN GENERATED: … -->` and its END marker, for
+# every block in the file, with the markers included so a block that disappears
+# is also a difference. Reads stdin.
+generated_blocks() {
+	awk '
+		/<!-- BEGIN GENERATED: /  { inblock = 1 }
+		inblock                   { print }
+		/<!-- END GENERATED: /    { inblock = 0 }
+	'
+}
+
 run_drift_check() {
-	# HEAD-relative, so it catches staleness in both the worktree and the index
-	# — a `git add` of a stale file must not be able to launder it past the gate.
-	if ! git diff --quiet HEAD -- "${generated_files[@]}"; then
+	# Compare only the GENERATED BLOCKS, not the whole files.
+	#
+	# This used to be `git diff --quiet HEAD -- "${generated_files[@]}"`, which
+	# was right while every target was a generated-only reference. It stopped
+	# being right when `CLAUDE.md` and `docs/agent-skills.md` joined the array:
+	# they are mostly hand-written prose, so ANY in-progress edit to either —
+	# a sentence in the authoring rules, a line in the gate table — failed the
+	# check with "generated skill references are stale" while every generated
+	# block was byte-identical to HEAD. A gate that fires on prose it does not
+	# own teaches people to ignore it, which is the same failure as a gate that
+	# stays green when it matters.
+	#
+	# Still HEAD-relative, so a `git add` of a stale file cannot launder it.
+	local f stale=() tmp_head tmp_work
+	tmp_head=$(mktemp)
+	tmp_work=$(mktemp)
+	for f in "${generated_files[@]}"; do
+		# Absent from HEAD means newly added: `git diff HEAD` would not have
+		# reported it either, so keep that behaviour rather than inventing a
+		# new failure for a file this run just created.
+		git cat-file -e "HEAD:$f" 2>/dev/null || continue
+		git show "HEAD:$f" | generated_blocks >"$tmp_head"
+		generated_blocks <"$f" >"$tmp_work"
+		if ! cmp -s "$tmp_head" "$tmp_work"; then
+			stale+=("$f")
+		fi
+	done
+
+	if ((${#stale[@]})); then
 		red "FAIL generated skill references are stale. Run 'make skills-check' and commit the diff."
-		git --no-pager diff --stat HEAD -- "${generated_files[@]}"
-		# The CONTENT, not just the stat. A stat line says a file changed and
-		# gives no way to tell "someone forgot to commit the regen" from "this
-		# generator emits different bytes on your machine than on CI" — the
-		# second being invisible locally, because locally it always agrees with
-		# itself. Telling those apart from a `126 ++---` line alone cost an hour.
-		# Capped so a genuinely large regeneration does not bury the message.
-		git --no-pager diff --no-color HEAD -- "${generated_files[@]}" | head -60
+		for f in "${stale[@]}"; do
+			printf '  %s\n' "$f"
+			# The CONTENT, not just a filename. A bare path gives no way to tell
+			# "someone forgot to commit the regen" from "this generator emits
+			# different bytes on your machine than on CI" — the second being
+			# invisible locally, because locally it always agrees with itself.
+			# Telling those apart from a `126 ++---` line alone once cost an hour.
+			git show "HEAD:$f" | generated_blocks >"$tmp_head"
+			generated_blocks <"$f" >"$tmp_work"
+			diff -u --label "HEAD/$f" --label "regenerated/$f" "$tmp_head" "$tmp_work" | head -40
+		done
 		fail=1
 	else
 		note "generated references are current"
 	fi
+	rm -f "$tmp_head" "$tmp_work"
 }
 
 # ---------------------------------------------------------------------------
