@@ -190,10 +190,26 @@ placement follows that split:**
 Getting that backwards would produce a gate that is green exactly when it
 matters.
 
-The drift check diffs **only the generated files**, relative to `HEAD`. Diffing
-the whole skills tree would report an author's in-progress prose as generated
-staleness; being HEAD-relative means a `git add` cannot launder a stale file
-past the gate.
+The drift check diffs **only the GENERATED BLOCKS**, relative to `HEAD`.
+
+Two narrowings, each from a failure. Diffing the whole skills tree would report
+an author's in-progress prose as generated staleness. And diffing whole *files*
+has the same flaw once a target is mostly prose — `CLAUDE.md` and this document
+are both generator targets now, so any mid-edit sentence in either used to fail
+the gate with "generated skill references are stale" while every block was
+byte-identical to `HEAD`. A gate that fires on prose it does not own teaches
+people to ignore it, which is the same defect as one that stays green when it
+matters.
+
+Being `HEAD`-relative is the third narrowing, and it is what stops a `git add`
+laundering a stale file past the gate.
+
+**`check` regenerates before it diffs**, so a hand-edit *inside* a block is
+simply overwritten and is not what this detects. What it detects is a **source**
+change that makes the committed output wrong — a new `resource "aws_*"`, a
+screen added to or removed from the axe gate, a token added to `globals.css`.
+Testing it with a hand-edited block will show you a passing gate and prove
+nothing.
 
 The `skills` job is not yet a required status check. Per
 `docs/frontend-testing.md`'s rule, promote it only after it has been observed
