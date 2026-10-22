@@ -37,6 +37,7 @@ pub mod errfmt;
 pub mod mail;
 pub mod openapi;
 pub mod pg;
+pub mod provision;
 pub mod read;
 pub mod urlguard;
 pub mod webhook;
@@ -96,6 +97,20 @@ pub struct AppState {
     /// [`DEFAULT_MAX_IMPORT_BYTES`]; configurable so an operator can tighten it
     /// and so the oversize path is testable without a 256 MiB request.
     max_import_bytes: usize,
+    /// The tenant auto-provisioning target (D8), or `None` when provisioning is
+    /// off — in which case `POST /v1/orgs` without a `config_path` keeps
+    /// answering 503, exactly as it did before provisioning existed.
+    ///
+    /// Held on the state rather than read from the environment inside the
+    /// handler, for the same reason `mail` is: a test needs to construct one
+    /// directly. Setting process env from a test is not an option here —
+    /// `std::env::set_var` is `unsafe` in edition 2024 and the workspace denies
+    /// `unsafe_code`.
+    provision: Option<provision::Profile>,
+    /// Set when provisioning IS configured but configured wrongly. Kept apart
+    /// from `None` on purpose: an operator who opted in and made a typo should
+    /// see which variable is wrong, not a 503 that says provisioning is off.
+    provision_error: Option<String>,
 }
 
 impl AppState {
@@ -108,6 +123,8 @@ impl AppState {
             dsn: None,
             mail: Arc::new(mail::Mailer::off()),
             max_import_bytes: DEFAULT_MAX_IMPORT_BYTES,
+            provision: None,
+            provision_error: None,
         }
     }
 
@@ -122,6 +139,8 @@ impl AppState {
             dsn: Some(dsn),
             mail: Arc::new(mail::Mailer::off()),
             max_import_bytes: DEFAULT_MAX_IMPORT_BYTES,
+            provision: None,
+            provision_error: None,
         }
     }
 
@@ -130,6 +149,20 @@ impl AppState {
     #[must_use]
     pub fn with_mail(mut self, mailer: mail::Mailer) -> Self {
         self.mail = Arc::new(mailer);
+        self
+    }
+
+    /// Set the tenant auto-provisioning target. `Ok(None)` leaves provisioning
+    /// off; `Err` records the misconfiguration so the handler can name it.
+    #[must_use]
+    pub fn with_provision(
+        mut self,
+        profile: Result<Option<provision::Profile>, provision::ProfileError>,
+    ) -> Self {
+        match profile {
+            Ok(p) => self.provision = p,
+            Err(e) => self.provision_error = Some(e.to_string()),
+        }
         self
     }
 
@@ -487,6 +520,154 @@ async fn healthz() -> Json<Value> {
     Json(json!({ "status": "ok" }))
 }
 
+/// Auto-provision a tenant from the declared profile (D8).
+///
+/// Synchronous half: derive the tenant's paths, record the org as
+/// `provisioning`, land the starter config as version 1 and publish it, mint the
+/// customer's one-time admin key, and enqueue the `provision` job that does the
+/// slow work. Returns the shape the BFF and the Playwright mock already agree
+/// on — `{name, tenant, config_version, state, job_id, admin_key, admin_key_id}`.
+///
+/// Why the split. The lake is created by the JOB, not here: creating a DuckLake
+/// (or a Postgres catalog database) takes long enough that holding the request
+/// open for it is the wrong shape, and the UI was built to poll — a progress
+/// panel that waits for `provisioning` to become `active`, with a 180s budget in
+/// the e2e spec. The state enum, the mock, the registry's `provision_job_id` and
+/// that poller were all already here; only the server end was missing.
+///
+/// The admin key is returned ONCE and never stored in plaintext — `issue_key`
+/// stores a hash, and this response is the only time the secret exists outside
+/// the caller's hands.
+async fn provision_org(
+    principal: &Principal,
+    dsn: &str,
+    profile: &provision::Profile,
+    name: &str,
+) -> axum::response::Response {
+    let plan = profile.plan(name);
+    // Read the starter config BEFORE touching the database: a missing or
+    // unreadable template is an operator error, and discovering it after the org
+    // row exists would leave a half-provisioned tenant behind.
+    let yaml = match provision::starter_config(&profile.config_template) {
+        Ok(yaml) => yaml,
+        Err(e) => return detail_err(StatusCode::INTERNAL_SERVER_ERROR, e),
+    };
+    // And validate it, for the same reason `create_config_version` does: a
+    // starter config that cannot load would strand every tenant provisioned
+    // from this profile.
+    let config = match load_config_str(&yaml) {
+        Ok(c) => c,
+        Err(e) => {
+            return detail_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!(
+                    "the starter config {} does not load: {}",
+                    profile.config_template.display(),
+                    errfmt::chain(&e)
+                ),
+            );
+        }
+    };
+    let problems = config_check::config_reference_problems(&config);
+    if !problems.is_empty() {
+        return detail_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!(
+                "the starter config {} references unknown columns: {}",
+                profile.config_template.display(),
+                problems.join("; ")
+            ),
+        );
+    }
+
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let _ = pg::set_actor(&client, &principal.actor).await;
+
+    let env = plan.env_json();
+    if let Err(e) = pg::upsert_org_byo(
+        &client,
+        name,
+        &plan.config_path.to_string_lossy(),
+        &env,
+        Some(&plan.drop_root.to_string_lossy()),
+    )
+    .await
+    {
+        return pg_err(e);
+    }
+    // `upsert_byo` inserts `active`; a provisioned tenant is not usable until
+    // its lake exists, so step it back to `provisioning` and let the job
+    // promote it. Expected-state guarded, so a replay of this call on an
+    // already-active tenant leaves it alone.
+    let _ = pg::set_org_state(&client, name, "provisioning", "active").await;
+
+    let org_row = match pg::get_org(&client, name).await {
+        Ok(Some(row)) => row,
+        Ok(None) => {
+            return detail_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "org vanished after upsert",
+            );
+        }
+        Err(e) => return pg_err(e),
+    };
+
+    // The starter config as version 1, published so the tenant has an active
+    // config from the start — the wizard and the upload path both require one.
+    let hash = config_hash(&config);
+    let version =
+        match pg::create_config_version(&client, &org_row.id, &yaml, &hash, &principal.actor).await
+        {
+            Ok(v) => v,
+            Err(e) => return pg_err(e),
+        };
+    if let Err(e) = provision::create_workspace(&plan, &profile.config_template) {
+        return detail_err(StatusCode::INTERNAL_SERVER_ERROR, e);
+    }
+    // (org_id, org_name) — the two are adjacent `&str`s, so a swap compiles and
+    // silently publishes nothing. Caught by asserting `active_config_version`.
+    if let Err(e) = pg::publish_config_version(&client, &org_row.id, name, version, Some("C")).await
+    {
+        return pg_err(e);
+    }
+
+    let (admin_key_id, admin_key) = match pg::issue_key(&client, &org_row.id, "admin").await {
+        Ok(pair) => pair,
+        Err(e) => return pg_err(e),
+    };
+
+    let idem = format!("provision:{name}");
+    let job = match pg::enqueue(&client, &org_row.id, "provision", 0, Some(&idem), None).await {
+        Ok(job) => job,
+        Err(e) => return pg_err(e),
+    };
+    let _ = pg::audit(
+        &client,
+        &principal.actor,
+        Some(name),
+        "org.provision",
+        &json!({ "job_id": job.id, "mode": format!("{:?}", profile.mode).to_lowercase() }),
+    )
+    .await;
+
+    (
+        StatusCode::CREATED,
+        Json(json!({
+            "name": name,
+            "tenant": plan.tenant,
+            "config_version": version,
+            "state": "provisioning",
+            "job_id": job.id,
+            "admin_key_id": admin_key_id,
+            "admin_key": admin_key,
+        })),
+    )
+        .into_response()
+}
+
 /// Org-name rule from `OrgIn` (`api.py`): 1..=128 chars, first `[a-z0-9]`, rest
 /// `[a-z0-9_-]`.
 fn valid_org_name(s: &str) -> bool {
@@ -538,12 +719,22 @@ async fn create_org(
             .into_response();
     };
     let Some(config_path) = body.config_path.as_deref() else {
-        // Auto mode: no seed template configured here → the real 503 branch.
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({ "detail": "auto-provisioning not configured" })),
-        )
-            .into_response();
+        // Auto mode: provision from the declared profile. Unconfigured is still
+        // the 503 — that branch was the only behaviour until D8, and keeping it
+        // means an operator who has not opted in sees no change.
+        return match (&state.provision, &state.provision_error) {
+            (Some(profile), _) => provision_org(&principal, dsn, profile, &body.name).await,
+            // Switched on and misconfigured: say which variable, rather than
+            // pretending provisioning is simply off.
+            (None, Some(e)) => detail_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("auto-provisioning is misconfigured: {e}"),
+            ),
+            (None, None) => detail_err(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "auto-provisioning not configured (set ER_PROVISION_MODE)",
+            ),
+        };
     };
     // `config_path` and `env.ER_CONFIG_PATH` name the same file and are stored
     // independently, which was a silent-failure footgun: publish writes the
@@ -6212,7 +6403,9 @@ pub async fn state_from_env() -> AppState {
     };
     // Async because a SES backend resolves credentials at construction; `off`
     // and `log` do not await anything.
-    state.with_mail(mail::Mailer::from_env().await)
+    state
+        .with_mail(mail::Mailer::from_env().await)
+        .with_provision(provision::Profile::from_env())
 }
 
 #[cfg(test)]
