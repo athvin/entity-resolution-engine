@@ -107,6 +107,26 @@ cannot see.
 (needs `ER_TEST_PG_DSN`) — after boot provisioning, `public.*` holds only the
 tables the generated `POSTGRES_BASELINE` declares.
 
+**`er-entity-gen/tests/registry_matches_entities.rs`** — the entity catalog and
+the HAND-MAINTAINED S5 registry (`er_schema::model::all_specs()`) must render
+the same `create_table_sql` for every DDL-owned lake relation they both
+describe.
+
+There are **two schema sources**, and the one that runs at runtime is the
+registry: `er_cli::create_ddl_table` builds every lake table from `all_specs()`,
+not from the entity-generated DDL. So **a lake column change belongs in both** —
+`entities/<e>/entity.yaml` *and* `crates/er-schema/src/model.rs`, plus that
+crate's golden dump. An entity-only change regenerates cleanly, passes
+`er-entity verify` and `er-entity-diff`, and then fails inside a run with
+`Binder Error: Referenced column "…" not found`, because the table was created
+from a registry that never heard of the column. That is exactly how E9b found
+it.
+
+`er-entity-diff` cannot catch this by construction: it compares the catalog
+against a **live** store, so with no live column there is nothing to diff. The
+golden in `er-schema` is hand-maintained at `indent=1` — check round-trip
+fidelity before editing it, or a four-column change reformats 4,200 lines.
+
 **The reconciler's contract** — `er-entity-diff/tests/pg_reconcile.rs` (needs
 `ER_TEST_PG_DSN`), `er-entity-diff/tests/lake_reconcile.rs` (needs
 `DEDUPE_E2E_DUCKLAKE=1`) and `er-server/tests/pg_migrate_tenants.rs` (needs
