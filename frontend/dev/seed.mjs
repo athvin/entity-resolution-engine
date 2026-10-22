@@ -80,6 +80,22 @@ for (const source of SOURCES) {
     join(DROP_DIR, `${source}.csv`),
   );
 }
+
+// A second delivery, staged for the SPECS rather than for the seed run.
+// `fix-your-data.spec.ts` uploads these through the UI to exercise a real
+// incremental delivery with receipts, and reads them from
+// `.state/seed/corpus/batch/` — a path the deleted `seed.py` produced with its
+// corpus generator. The committed `incremental_batch` fixture is the same
+// delivery E7 used, and its header is byte-identical to base_10's, so the
+// declared source mapping accepts it unchanged.
+const batchDir = join(STATE, "seed", "corpus", "batch");
+mkdirSync(batchDir, { recursive: true });
+for (const source of SOURCES) {
+  copyFileSync(
+    join(REPO, `fixtures/static/incremental_batch/batch/${source}.csv`),
+    join(batchDir, `${source}.csv`),
+  );
+}
 log(`workspace ready under ${STATE}`);
 
 // ---------------------------------------------------------------------- org

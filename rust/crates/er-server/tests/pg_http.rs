@@ -106,6 +106,82 @@ async fn job_lifecycle_over_postgres_http() {
         .unwrap();
     assert_eq!(json_body(resp).await["jobs"].as_array().unwrap().len(), 0);
 
+    // `limit` and `state` are HONOURED, not merely accepted. They used to be
+    // neither: this handler had no `Query` extractor and `pg::list_jobs` passed
+    // `i64::MAX`, while the BFF forwarded both, `useJobs` asked for `?limit=20`
+    // and `grow-your-data.spec.ts` asked for `?limit=3` and then asserted
+    // exactly three kinds — an assertion that cannot hold against an unbounded
+    // list.
+    for kind in ["second", "third"] {
+        let resp = app
+            .clone()
+            .oneshot(op_request(
+                "POST",
+                "/v1/orgs/acme/jobs",
+                Body::from(format!(r#"{{"kind":"{kind}"}}"#)),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::ACCEPTED);
+    }
+    let resp = app
+        .clone()
+        .oneshot(op_request("GET", "/v1/orgs/acme/jobs", Body::empty()))
+        .await
+        .unwrap();
+    assert_eq!(
+        json_body(resp).await["jobs"].as_array().unwrap().len(),
+        3,
+        "all three jobs exist, so a limited list below is a real restriction"
+    );
+
+    let resp = app
+        .clone()
+        .oneshot(op_request(
+            "GET",
+            "/v1/orgs/acme/jobs?limit=2",
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    let limited = json_body(resp).await;
+    assert_eq!(
+        limited["jobs"].as_array().unwrap().len(),
+        2,
+        "?limit=2 must return two jobs, got {limited}"
+    );
+
+    // `state` likewise: everything is queued, so a filter on a state nothing is
+    // in must return nothing rather than the whole list.
+    let resp = app
+        .clone()
+        .oneshot(op_request(
+            "GET",
+            "/v1/orgs/acme/jobs?state=succeeded",
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    let filtered = json_body(resp).await;
+    assert_eq!(
+        filtered["jobs"].as_array().unwrap().len(),
+        0,
+        "?state=succeeded must filter, got {filtered}"
+    );
+
+    // ...and an unknown state is refused rather than silently ignored, matching
+    // `GET /v1/jobs`.
+    let resp = app
+        .clone()
+        .oneshot(op_request(
+            "GET",
+            "/v1/orgs/acme/jobs?state=nonsense",
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
     // get the job by id
     let resp = app
         .clone()

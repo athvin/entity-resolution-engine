@@ -50,7 +50,16 @@ test("a steward browses real golden records with provenance and history", async 
   // Assert on the job kind every journey keeps producing, not the seed's
   // one-time train — the tenant is long-lived and each e2e pass appends jobs,
   // so train eventually scrolls out of the table's window.
-  await expect(page.getByTestId("jobs-table")).toContainText("run_all");
+  //
+  // The longer budget is for a COLD route, not for slow data. `next start` has
+  // to initialise this dynamic route on first hit, and the default 5s expired
+  // while `jobs.isPending` was still true — with the Skeleton rendering, whose
+  // markup carries no text, so the card's whole content was its own title and
+  // the failure read as "element not found". The data itself is already in
+  // Postgres by the time the seed finishes.
+  await expect(page.getByTestId("jobs-table")).toContainText("run_all", {
+    timeout: 60_000,
+  });
   await expect(page.getByTestId("runs-table")).toContainText("succeeded");
   await snap(page, "runs-real");
 });

@@ -38,6 +38,22 @@ export LAKE_DIR="${STATE_DIR}/lake"
 export CONFIG_DIR="${STATE_DIR}/configs"
 export DROP_DIR="${STATE_DIR}/drop"
 
+# --- tenant auto-provisioning (D8) -----------------------------------------
+#
+# What `POST /v1/orgs` with only a name does — the call the admin
+# tenant-create UI makes. Unset, the server answers 503 and
+# `see-your-data.spec.ts`'s provisioning journey cannot pass, so the dev stack
+# declares a profile.
+#
+# `local` because this stack's lake is a catalog file plus a data directory;
+# the `postgres` mode (a per-tenant `er_t_<org>` catalog database plus an S3
+# prefix) is what an AWS environment sets. The starter config is the committed
+# test fixture, which is the config the seeded tenant already runs.
+export ER_PROVISION_MODE="local"
+export ER_PROVISION_ROOT="${STATE_DIR}/tenants"
+export ER_PROVISION_CONFIG_TEMPLATE="${REPO_ROOT}/rust/crates/er-cli/tests/fixtures/test.yaml"
+export ER_PROVISION_ENV_JSON="{\"ER_DUCKDB_THREADS\":\"2\",\"ER_MODEL_PATH\":\"${STATE_DIR}/engine/model_test_v1.json\",\"ER_TF_PATH\":\"${STATE_DIR}/engine/model_test_v1.tf.csv\",\"ER_LEXICON_PATH\":\"${STATE_DIR}/engine/nickname_variants.csv\",\"ER_MODEL_VERSION\":\"v0001\",\"ER_TF_SNAPSHOT_ID\":\"01JWMDTFSNAP00000000000001\"}"
+
 # --- BFF (Next.js server side) ---------------------------------------------
 #
 # ERSERVER_OPERATOR_TOKEN must equal ER_OPERATOR_TOKEN above: the BFF relays
