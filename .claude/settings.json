@@ -53,17 +53,6 @@
   },
   "enabledMcpjsonServers": ["aws"],
   "enabledPlugins": {
-    "aws-core@claude-plugins-official": true,
     "terraform@claude-plugins-official": true
-  },
-  "skillOverrides": {
-    "aws-cdk": { "hidden": true },
-    "aws-cloudformation": { "hidden": true },
-    "aws-amplify": { "hidden": true },
-    "aws-serverless": { "hidden": true },
-    "aws-messaging-and-streaming": { "hidden": true },
-    "aws-sdk-python-usage": { "hidden": true },
-    "aws-sdk-js-v3-usage": { "hidden": true },
-    "aws-sdk-swift-usage": { "hidden": true }
   }
 }

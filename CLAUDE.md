@@ -125,12 +125,16 @@ there is no `cdk.json`, no `template.yaml`, no `samconfig`, and that is a
 decision rather than a gap. A CDK app is not a smaller first step — it is a
 second, unmanaged source of truth for the same AWS account.
 
-This is worth stating at the top level because the installed AWS toolkit plugin
-ships CDK and CloudFormation skills (hidden via `skillOverrides`, but its
-documentation search still returns their idioms). Reading CloudFormation is
-fine — an EKS addon may surface as a stack AWS manages for you. Adding to it is
-not. The `aws-account-operations` skill carries the operating rules; the
-`infra-platform` skill carries the authoring ones.
+This is worth stating at the top level because the obvious tool for AWS work —
+the `aws-core` plugin — is deliberately **not** installed. It ships CDK and
+CloudFormation authoring skills against this repo's Terraform-only rule, and it
+bundles its own `aws-mcp` server carrying neither `--read-only` nor a profile,
+alongside the read-only one `.mcp.json` already declares. The AWS MCP server
+that *is* installed still answers CDK and CloudFormation questions through its
+documentation topics, so those idioms remain one search away. Reading
+CloudFormation is fine — an EKS addon may surface as a stack AWS manages for
+you. Adding to it is not. The `aws-account-operations` skill carries the
+operating rules; the `infra-platform` skill carries the authoring ones.
 
 **Use `cargo add`** to add dependencies or features rather than editing
 `Cargo.toml` by hand.
