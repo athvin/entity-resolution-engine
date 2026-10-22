@@ -64,6 +64,14 @@ cache and link with mold, but a `duckdb` bump invalidates the cache and forces a
 full rebuild — which is why the lint and DuckLake e2e jobs carry longer
 timeouts than their steady-state runtime needs.
 
+A bump is not the only way to land cold, though. **The two caches are a shared,
+capped resource**: GitHub allows 10 GB of Actions cache per repository and evicts
+LRU past it, and sccache's GHA backend writes one entry per compilation object —
+so its entry *count* is what evicts the rust-cache entries that make a run warm.
+That budget is the difference between a 14-minute and a 42-minute gate. Where the
+time actually goes, what the caches cost, and the decision log for changes
+against them: [references/build-cost.md](references/build-cost.md).
+
 ## Pinned actions
 
 Every `uses:` is pinned to a **commit SHA** with a `# vTAG` comment. A tag is
