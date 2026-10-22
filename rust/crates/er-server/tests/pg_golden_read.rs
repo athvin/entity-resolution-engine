@@ -501,6 +501,101 @@ async fn golden_records_read_over_ducklake() {
     assert_eq!(rows.len(), 3, "one receipt per delivered source");
     let total_new: i64 = rows.iter().map(|r| r["new_count"].as_i64().unwrap()).sum();
     assert_eq!(total_new, 23, "base_10 lands 23 new records");
+    // `/imports` is a FORWARD keyset cursor, so it answers the oldest page
+    // first. That is correct for walking a history and wrong for the "did my
+    // file do anything?" panel, which read this endpoint with `?limit=20` and
+    // therefore showed the oldest 20 deliveries — past 20 ingest batches a
+    // newly delivered source could never appear on it. Pin the direction so the
+    // distinction below is a real one.
+    let ascending: Vec<&str> = rows.iter().map(|r| r["id"].as_str().unwrap()).collect();
+    let mut sorted = ascending.clone();
+    sorted.sort_unstable();
+    assert_eq!(ascending, sorted, "/imports pages ascending by id");
+
+    // `/imports/recent` answers the other end: newest first, a bare array, the
+    // shape `/runs` already uses for a latest-activity read.
+    //
+    // Coverage limit, stated rather than left implicit: `run_all` stamps one
+    // `ingested_at` across the whole delivery, so all three receipts here share
+    // a `created_at` and the ordering below only exercises the `id` tiebreak.
+    // It does NOT prove ordering by time beats ordering by id — which matters,
+    // because the id is `<run_id>:<source_system>` and a run id is only
+    // chronological when it is a ULID/UUIDv7. The dev seed's literal
+    // `seed-base` sorts above every real one, so an `ORDER BY id DESC` put the
+    // OLDEST receipts back on top; that was caught against the seeded dev
+    // tenant (31 batches, mixed id shapes), not here. A fixture with two runs
+    // at different timestamps and non-monotonic run ids would close the gap.
+    let resp = app
+        .clone()
+        .oneshot(op_get("/v1/orgs/acme/imports/recent"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let recent = json_body(resp).await;
+    let recent_rows = recent.as_array().expect("a bare array, like /runs");
+    let descending: Vec<&str> = recent_rows
+        .iter()
+        .map(|r| r["id"].as_str().unwrap())
+        .collect();
+    let mut expected = ascending.clone();
+    expected.reverse();
+    assert_eq!(
+        descending, expected,
+        "/imports/recent is newest first, got {recent}"
+    );
+
+    // The bug in one assertion: a capped read must return the LATEST delivery,
+    // not the earliest. Both endpoints honour `limit`; they disagree about
+    // which end, and only one of them answers the panel's question.
+    let resp = app
+        .clone()
+        .oneshot(op_get("/v1/orgs/acme/imports/recent?limit=1"))
+        .await
+        .unwrap();
+    let newest = json_body(resp).await;
+    assert_eq!(
+        newest.as_array().unwrap().len(),
+        1,
+        "?limit=1 restricts, got {newest}"
+    );
+    assert_eq!(
+        newest[0]["id"].as_str().unwrap(),
+        *ascending.last().unwrap(),
+        "the one row must be the newest receipt"
+    );
+    let resp = app
+        .clone()
+        .oneshot(op_get("/v1/orgs/acme/imports?limit=1"))
+        .await
+        .unwrap();
+    let oldest = json_body(resp).await;
+    assert_eq!(
+        oldest["items"][0]["id"].as_str().unwrap(),
+        ascending[0],
+        "the cursor endpoint still starts at the oldest — unchanged by this fix"
+    );
+
+    // The `source` filter survives the new ordering.
+    let one_source = recent_rows[0]["source_system"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let resp = app
+        .clone()
+        .oneshot(op_get(&format!(
+            "/v1/orgs/acme/imports/recent?source={one_source}"
+        )))
+        .await
+        .unwrap();
+    let filtered = json_body(resp).await;
+    let filtered_rows = filtered.as_array().unwrap();
+    assert!(
+        !filtered_rows.is_empty()
+            && filtered_rows
+                .iter()
+                .all(|r| r["source_system"].as_str() == Some(one_source.as_str())),
+        "?source must filter, got {filtered}"
+    );
 
     // Runs: run_all wrote a `runs` ledger row (full mode, succeeded).
     let resp = app
@@ -605,10 +700,26 @@ async fn golden_records_read_over_ducklake() {
         .unwrap();
     let viewer_key = json_body(resp).await["key"].as_str().unwrap().to_string();
     let resp = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
                 .uri("/v1/orgs/acme/golden-records")
+                .header(header::AUTHORIZATION, format!("Bearer {viewer_key}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // The new receipts read is viewer+ too, on the same guard as every other
+    // read here — the panel it feeds is on a page viewers can open.
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/orgs/acme/imports/recent")
                 .header(header::AUTHORIZATION, format!("Bearer {viewer_key}"))
                 .body(Body::empty())
                 .unwrap(),

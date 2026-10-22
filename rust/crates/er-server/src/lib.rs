@@ -4615,6 +4615,45 @@ async fn imports_list(
     ))
 }
 
+/// Viewer+: the most recent ingest-batch receipts
+/// (`GET /v1/orgs/{org}/imports/recent`), newest first, a bare array — the
+/// shape `runs_list` already uses for the same kind of latest-activity read.
+///
+/// Separate from `imports_list` rather than a flag on it, because that endpoint
+/// is a forward keyset cursor (`id > $after` ascending) and a descending page
+/// under `after` semantics has no coherent meaning. The receipts panel read the
+/// cursor endpoint with `?limit=20` and therefore rendered the *oldest* 20
+/// deliveries; past 20 ingest batches a tenant could never see a new source
+/// land on the page that exists to tell them whether it did.
+async fn imports_recent(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let session = match org_lake(&state, &org).await {
+        Ok(s) => s,
+        Err(r) => return *r,
+    };
+    let snapshot = match read::latest_snapshot(&session) {
+        Ok(s) => s,
+        Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
+    };
+    let limit = read::parse_limit(params.get("limit").map(String::as_str));
+    match read::imports_recent(
+        &session,
+        snapshot,
+        params.get("source").map(String::as_str),
+        limit,
+    ) {
+        Ok(items) => Json(json!(items)).into_response(),
+        Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
+    }
+}
+
 /// Viewer+: the 20 most recent runs (`GET /v1/orgs/{org}/runs`), a bare array.
 async fn runs_list(
     principal: Principal,
@@ -6345,6 +6384,7 @@ fn build_routes(state: AppState) -> Router {
                 .post(upload_import)
                 .layer(axum::extract::DefaultBodyLimit::max(max_import_bytes)),
         )
+        .route("/v1/orgs/{org}/imports/recent", get(imports_recent))
         .route("/v1/orgs/{org}/runs", get(runs_list))
         .route("/v1/orgs/{org}/merge-plans", get(merge_plans))
         .route(

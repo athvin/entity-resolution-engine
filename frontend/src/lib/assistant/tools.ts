@@ -117,7 +117,14 @@ export async function executeTool(
       if (typeof input.source === "string" && input.source) {
         searchParams.set("source", input.source);
       }
-      return forward(access, `/v1/orgs/${org}/imports`, { searchParams });
+      // `/imports/recent`, not `/imports`: the declaration above promises
+      // "newest first" and the latter is a forward keyset cursor, so this tool
+      // handed the model the OLDEST 20 receipts and called them the newest.
+      // Kept in the `{items}` envelope the tool result already had.
+      const items = await forward<unknown[]>(access, `/v1/orgs/${org}/imports/recent`, {
+        searchParams,
+      });
+      return { items };
     }
     case "list_config_versions":
       return forward(access, `/v1/orgs/${org}/config/versions`);

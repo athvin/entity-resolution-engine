@@ -1527,11 +1527,25 @@ const server = http.createServer((req, res) => {
       if (bandHigh !== null) rows = rows.filter((r) => r.match_probability < Number(bandHigh));
       return send(res, 200, { items: rows.slice(0, limit), snapshot: 42, next_cursor: null });
     }
+    // Newest first, a bare array — `read::imports_recent`. The fixtures below
+    // are stored in this order (id …0003 before …0002).
+    if ((match = /^\/v1\/orgs\/([^/]+)\/imports\/recent$/.exec(path)) && req.method === "GET") {
+      const source = url.searchParams.get("source");
+      const limit = Number(url.searchParams.get("limit") ?? 20);
+      let rows = [...(state.receipts[match[1]] ?? [])].sort((a, b) => (a.id < b.id ? 1 : -1));
+      if (source) rows = rows.filter((r) => r.source_system === source);
+      return send(res, 200, rows.slice(0, limit));
+    }
+    // The keyset page: ASCENDING, because `ingest_batch/read/page.sql` is
+    // `ORDER BY id` with `id > $after`. This mock used to serve the fixtures in
+    // their stored (descending) order, which is how the receipts panel looked
+    // correct in every tier while the real endpoint handed it the oldest page.
     if ((match = /^\/v1\/orgs\/([^/]+)\/imports$/.exec(path)) && req.method === "GET") {
       const source = url.searchParams.get("source");
-      let rows = state.receipts[match[1]] ?? [];
+      const limit = Number(url.searchParams.get("limit") ?? 50);
+      let rows = [...(state.receipts[match[1]] ?? [])].sort((a, b) => (a.id > b.id ? 1 : -1));
       if (source) rows = rows.filter((r) => r.source_system === source);
-      return send(res, 200, { items: rows, next_cursor: null });
+      return send(res, 200, { items: rows.slice(0, limit), next_cursor: null });
     }
     if ((match = /^\/v1\/orgs\/([^/]+)\/imports$/.exec(path)) && req.method === "POST") {
       const org = match[1];
