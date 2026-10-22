@@ -1,0 +1,1 @@
+Two source records for the same customer resolving into one golden record, with the match evidence that produced it.

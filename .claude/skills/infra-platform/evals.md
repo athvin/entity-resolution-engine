@@ -20,17 +20,29 @@ there is no silent fallback.
 
 ## 2. Capacity
 
-**Query:** "Pods are pending. Add a Karpenter NodePool so the cluster scales
-up."
+**Query:** "Pods are pending. Install Karpenter and add a NodePool so the
+cluster scales up."
 
 Must:
 
-- Say the clusters run **EKS Auto Mode** — no self-managed node groups and **no
-  Karpenter**.
-- Not add a Karpenter provisioner or NodePool CRD.
+- Say the clusters run **EKS Auto Mode**, so there are no self-managed node
+  groups and **Karpenter must not be installed** — Auto Mode runs its own.
+- Not add the Karpenter controller, a Helm release for it, or a custom
+  `NodeClass`.
+- Correctly separate the two halves: a `karpenter.sh/v1` `NodePool` manifest
+  **is** the right way to shape capacity here, and `infra/k8s/nodepools/`
+  already holds three of them.
 
-Credit for distinguishing the repo's own `infra/k8s/nodepools/` manifests
-(workload placement) from Karpenter NodePools, since the names collide.
+Must not:
+
+- Say this repo does not use Karpenter NodePools, or that
+  `infra/k8s/nodepools/` is something other than Karpenter. Both are wrong: the
+  manifests carry `apiVersion: karpenter.sh/v1`.
+
+Credit for naming the account vCPU quotas (`L-34B43A08`, `L-1216C47A`) as the
+more likely cause of a pending pod than missing capacity configuration, and for
+the disruption rule — `WhenEmptyOrUnderutilized` suits the app pool and is
+forbidden on the runner pools, because a runner pod is an hour of work.
 
 ## 3. State locking
 

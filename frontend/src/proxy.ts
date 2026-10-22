@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { SESSION_COOKIE } from "@/lib/auth/constants";
+import { MARKETING_PUBLIC_PATHS } from "@/lib/site/routes";
 
 // Reachable without a session. The invite and reset flows are how someone
 // GETS one, and in both the token in the URL is the credential — a redirect to
@@ -15,6 +16,11 @@ const PUBLIC_PATHS = [
   // CSP violation reports: the browser posts these with no credentials, and the
   // ones from the login page — before any session exists — are the most useful.
   "/api/csp-report",
+  // The public marketing surface, plus /robots.txt and /sitemap.xml. Spread
+  // from one list so the pages, the sitemap and this gate cannot disagree about
+  // what is public; see src/lib/site/routes.ts for why the two metadata routes
+  // need explicit entries.
+  ...MARKETING_PUBLIC_PATHS,
 ];
 
 /**
@@ -37,7 +43,11 @@ export function proxy(request: NextRequest) {
     }
     const login = request.nextUrl.clone();
     login.pathname = "/login";
-    login.search = pathname === "/" ? "" : `?next=${encodeURIComponent(pathname)}`;
+    // Every path that reaches here is worth returning to after login. `/` used
+    // to be special-cased to an empty query because it was the signed-in
+    // dispatcher and `?next=/` would have bounced through it twice; `/` is now
+    // the public landing page and never reaches this branch at all.
+    login.search = `?next=${encodeURIComponent(pathname)}`;
     return NextResponse.redirect(login);
   }
   return NextResponse.next();

@@ -150,8 +150,80 @@ resource "aws_ssoadmin_permission_set_inline_policy" "platform_admin_guard" {
         Action   = ["iam:CreateAccessKey"]
         Resource = "arn:aws:iam::*:user/*"
       },
+      {
+        # Agent-initiated mutation, via the AWS MCP Server.
+        #
+        # `aws:ViaAWSMCPService` is true only on requests that arrive through an
+        # AWS-managed MCP server, so this is the server-side half of the agent
+        # guardrails — the client-side `--read-only` proxy flag is one config
+        # edit (or one different MCP client) from absent.
+        #
+        # Two things make this statement read differently from its neighbours
+        # above, both deliberate:
+        #
+        #   1. It is NOT conditioned on `aws:ResourceTag/Environment = prod`.
+        #      Every other deny here protects prod from a developer; this one
+        #      protects the whole account from an agent, and dev is in scope.
+        #   2. It denies `iam:*` outright rather than the narrow prod-role set,
+        #      because an agent that can edit IAM can remove this statement.
+        #
+        # It does NOT cover the `aws` CLI, an SDK call, or anything else outside
+        # the MCP path — the condition key simply is not present on those
+        # requests. That gap is why the repo also carries a PreToolUse Bash
+        # guard; see .claude/skills/aws-account-operations/references/
+        # mcp-and-guardrails.md for what each of the three layers misses.
+        Sid    = "DenyMutationViaMCP"
+        Effect = "Deny"
+        Action = [
+          "s3:Delete*",
+          "s3:Put*",
+          "rds:Delete*",
+          "rds:Modify*",
+          "eks:Delete*",
+          "eks:Update*",
+          "iam:*",
+          "kms:ScheduleKeyDeletion",
+          "secretsmanager:*Secret*Value",
+          "ec2:Terminate*",
+        ]
+        Resource = "*"
+        Condition = {
+          Bool = { "aws:ViaAWSMCPService" = "true" }
+        }
+      },
     ]
   })
+}
+
+# The read-only identity the MCP proxy is meant to run as.
+#
+# `ProdDataReadOnly` looks like the obvious candidate and is not: its five Allow
+# statements cover lake reads, `rds-db:connect` as `er_readonly`, `eks:Describe*`
+# and log reads, so it cannot list buckets or read Budgets — most of what
+# introspection actually asks. Until this set is applied, `.mcp.json` points at
+# the `er-platform` profile (PlatformAdmin) and leans on the proxy's
+# `--read-only` flag plus DenyMutationViaMCP above. Flipping it afterwards is a
+# one-line change to that file.
+resource "aws_ssoadmin_permission_set" "platform_read_only" {
+  name             = "PlatformReadOnly"
+  description      = "Account-wide read for agent introspection via the AWS MCP Server (8.2)"
+  instance_arn     = local.instance_arn
+  session_duration = "PT8H"
+}
+
+resource "aws_ssoadmin_managed_policy_attachment" "platform_read_only" {
+  instance_arn       = local.instance_arn
+  permission_set_arn = aws_ssoadmin_permission_set.platform_read_only.arn
+  managed_policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"
+}
+
+resource "aws_ssoadmin_account_assignment" "developers_platform_read_only" {
+  instance_arn       = local.instance_arn
+  permission_set_arn = aws_ssoadmin_permission_set.platform_read_only.arn
+  principal_id       = aws_identitystore_group.developers.group_id
+  principal_type     = "GROUP"
+  target_id          = var.account_id
+  target_type        = "AWS_ACCOUNT"
 }
 
 resource "aws_ssoadmin_permission_set" "prod_data_read_only" {

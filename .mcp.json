@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "aws": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "mcp-proxy-for-aws-cli@latest",
+        "https://aws-mcp.us-east-1.api.aws/mcp",
+        "--read-only",
+        "--profile",
+        "er-platform",
+        "--metadata",
+        "AWS_REGION=us-east-2"
+      ]
+    }
+  }
+}

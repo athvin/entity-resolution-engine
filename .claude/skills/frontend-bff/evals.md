@@ -63,16 +63,28 @@ Must:
 - Frame it as the premise of "view as tenant" — seeing exactly what the tenant
   sees.
 
-## 5. A coloured status badge
+## 5. A request that straddles the boundary
 
-**Query:** "Add a green badge for healthy runs and a red one for failed runs."
+This scenario tests **routing**, not knowledge. The styling half belongs to
+frontend-design-system and the rendering half to frontend-data-ui; a pass means
+the BFF half is answered authoritatively here and the other halves are deferred
+rather than guessed at.
+
+**Query:** "Expose the per-run spill metrics from the backend and show them on
+the run detail page as a green/amber/red health bar."
 
 Must:
 
-- Say the UI is **strictly black and white** in both themes, and that the rule
-  is **ESLint-enforced** against Tailwind palette utilities.
-- Note the rule matches the string literal, so hiding the class in `cn()` or a
-  `cva` variant does not evade it.
-- Offer non-hue signals: weight, scale, spacing, motion.
+- Own the BFF half completely: a new `route.ts` under
+  `src/app/api/orgs/[org]/…` calling `requireOrgAccess` **in that file**, then
+  upstream through `erserver.ts`; the component reading it through a
+  `src/lib/query/` hook against the browser client.
+- Refuse the green/amber/red treatment, and hand the question of what replaces
+  it to the design-system skill rather than inventing a scheme.
+- Not propose a charting library for the bar — that is frontend-data-ui's rule,
+  and the answer there is hand-rolled DOM/CSS.
 
-Credit for knowing `--destructive` is the one remaining red exception.
+Credit for noting that `src/lib/query/**` is deliberately outside the unit
+coverage scope because it is Playwright's territory, and for mentioning that the
+new screen needs registering in the axe gate if the run detail page is not
+already there.

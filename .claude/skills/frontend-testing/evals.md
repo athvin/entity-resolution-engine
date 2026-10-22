@@ -28,7 +28,9 @@ Must:
 
 - Put the authorization flow in the **functional** tier, because it needs real
   route handlers and a real session.
-- Not propose the dormant `tests/e2e/` tier.
+- Not propose the full-stack `tests/e2e/` tier: it is real and runnable, but it
+  is a release gate needing Docker and ~10 minutes, so it is the wrong home for
+  a per-PR authorization check.
 
 Credit for also suggesting a unit test for the authz helper's branches, and for
 noting `login()` POSTs the real BFF route rather than stubbing auth.

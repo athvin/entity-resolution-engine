@@ -137,7 +137,7 @@ retention.
 
 | Path | Purpose |
 |---|---|
-| `infra/k8s/nodepools/` | workload placement pools (not Karpenter) |
+| `infra/k8s/nodepools/` | `karpenter.sh/v1` `NodePool`s consumed by Auto Mode's own Karpenter — writing one is correct, installing Karpenter is not |
 | `infra/k8s/observability/` | the namespace and the three upstream chart value files |
 | `infra/k8s/secrets/` | the External Secrets ClusterSecretStore |
 | `infra/k8s/storage/` | the gp3 StorageClass |

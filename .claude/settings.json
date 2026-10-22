@@ -10,6 +10,60 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(aws *)",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/aws-write-guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(terraform *)",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/aws-write-guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(kubectl *)",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/aws-write-guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(helm *)",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/aws-write-guard.sh"
+          }
+        ]
+      }
     ]
+  },
+  "permissions": {
+    "deny": [
+      "Bash(aws organizations *)",
+      "Bash(aws iam delete-* *)",
+      "Bash(aws kms schedule-key-deletion *)",
+      "Bash(aws eks delete-cluster *)",
+      "Bash(aws rds delete-db-cluster *)",
+      "Bash(aws rds delete-db-instance *)",
+      "Bash(aws s3 rb *)",
+      "Bash(aws s3api delete-bucket *)"
+    ]
+  },
+  "enabledMcpjsonServers": ["aws"],
+  "enabledPlugins": {
+    "aws-core@claude-plugins-official": true,
+    "terraform@claude-plugins-official": true
+  },
+  "skillOverrides": {
+    "aws-cdk": { "hidden": true },
+    "aws-cloudformation": { "hidden": true },
+    "aws-amplify": { "hidden": true },
+    "aws-serverless": { "hidden": true },
+    "aws-messaging-and-streaming": { "hidden": true },
+    "aws-sdk-python-usage": { "hidden": true },
+    "aws-sdk-js-v3-usage": { "hidden": true },
+    "aws-sdk-swift-usage": { "hidden": true }
   }
 }

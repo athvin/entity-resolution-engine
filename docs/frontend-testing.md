@@ -69,6 +69,36 @@ Do not reach for a component test to cover something the functional tier already
 drives. Duplicating a screen in jsdom is slower to run, weaker evidence, and two
 places to update.
 
+**The one exception, and why it is one.** `tests/component/structured-data.test.tsx`
+asserts on what React's *server* renderer puts on the wire for a `<script>`
+text child — that quotes survive unescaped so JSON-LD parses, and that
+`</script` is encoded so the payload cannot close its own tag. Playwright
+cannot see either property (the browser has already parsed the markup by the
+time a test looks), and both are React implementation details a major upgrade
+could change, with a failure mode that is invisible in the rendered page and
+only breaks crawlers. That is the shape that earns a component test: a wire-format
+property, not a screen.
+
+### The axe sweep, and the two things that make a screen invisible to it
+
+`tests/functional/a11y.spec.ts` holds a hardcoded `SCREENS` array. **A screen
+not in that array is silently unchecked** — the gate passes having examined
+nothing about it. Which routes are currently missing is derived rather than
+remembered: `make skills-check` regenerates the list in the `frontend-data-ui`
+skill's `references/screens.md` from the route tree.
+
+Two shape rules when adding an entry:
+
+- The sweep **logs in as a fixture user before every screen**, so a public route
+  needs `anonymous: true` to skip that step. The landing page is the first entry
+  that uses it.
+- The sweep is **desktop-only**, on the stated grounds that the desktop DOM is a
+  superset of the mobile one. That premise holds while a screen's responsive
+  behaviour is the grid-collapses-to-cards pattern, and breaks the moment a
+  screen renders *different markup* below `lg` — a mobile nav drawer, for
+  instance. A screen that does needs its own mobile pass, which is a reason to
+  prefer the collapsing pattern.
+
 ### Coverage scope, and why the number is ~49% and not ~70%
 
 `coverage.include` is `src/lib/**` only. Pages, components and BFF route handlers
@@ -314,6 +344,18 @@ is configured not to bump the package's major or minor for exactly this reason
 
 **A baseline diff is a question, not a chore.** Regenerating is correct when you
 changed the design on purpose. If you did not, the diff is the finding.
+
+**Scope a screenshot to a section, not `fullPage`, on anything long.** The
+marketing surface is the case that forced the rule: a landing page captured
+whole is one very tall PNG per device project, so a copy edit anywhere rewrites
+all three and the diff gives no indication of what moved. Per-section captures
+keyed to a `data-testid` mean an FAQ edit touches the FAQ baseline alone.
+
+**The trap this tier sets for a macOS author.** `ignoreSnapshots` means a local
+run reports green having compared *nothing*, so a PR that adds a
+`toHaveScreenshot` call and no `*-linux.png` files looks fine locally and fails
+on CI's first run. Adding a visual assertion and running
+`make frontend-baselines` are one step, not two.
 
 ---
 

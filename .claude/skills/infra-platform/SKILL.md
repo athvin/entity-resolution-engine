@@ -1,6 +1,6 @@
 ---
 name: infra-platform
-description: Explains this repo's AWS and Kubernetes platform — the Terraform env/module layout and shared S3 state with lockfile locking, EKS Auto Mode (no node groups, no Karpenter), the EKS Pod Identity convention that replaces IRSA everywhere, the two Helm charts and the merged web-api pod, per-developer namespaces, and the deliberate IAM exceptions that must be retired before production. Use when editing Terraform or a Helm chart, granting a workload AWS access, bringing up or tearing down a dev environment, debugging a pod that cannot reach AWS, or reviewing an IAM policy. For CI workflows and the image build see ci-and-supply-chain; for lake storage semantics see ducklake-lakehouse.
+description: Explains how to author this repo's AWS and Kubernetes platform — the Terraform env/module layout and shared S3 state with lockfile locking, EKS Auto Mode (no node groups and no Karpenter installation, though its `karpenter.sh/v1` NodePool CRDs are how capacity is shaped), the EKS Pod Identity convention that replaces IRSA everywhere, the two Helm charts and the merged web-api pod, per-developer namespaces, and the deliberate IAM exceptions that must be retired before production. Use when editing Terraform or a Helm chart, writing a NodePool, bringing up or tearing down a dev environment, or reviewing an IAM policy. For operating or introspecting the live account — what is deployed, a bill, a quota error, the MCP tools and read-only guardrails — see aws-account-operations; for CI workflows and the image build see ci-and-supply-chain; for lake storage semantics see ducklake-lakehouse.
 ---
 
 # The platform
@@ -43,11 +43,26 @@ Consequences worth stating, because generic Kubernetes guidance assumes
 otherwise:
 
 - **No self-managed node groups** to size, patch or drain.
-- **No Karpenter.** Do not add a Karpenter `NodePool` or provisioner; capacity
-  is EKS's job. (The repo does carry its own `nodepools/` manifests for
-  workload placement — those are not Karpenter.)
+- **No Karpenter *installation*.** Do not add the Karpenter controller, a Helm
+  release for it, or a `NodeClass`/provisioner of your own; capacity is EKS's
+  job.
 - Load balancing and EBS come from the cluster's own configuration rather than
   separately installed controllers.
+
+**Karpenter CRDs are nevertheless how you shape capacity here, because Auto Mode
+runs its own Karpenter.** The three manifests in `infra/k8s/nodepools/` are
+literally `apiVersion: karpenter.sh/v1`, `kind: NodePool`, and
+`docs/infrastructure.md` §5.1 is titled "Karpenter disruption settings". So:
+
+- Writing a `karpenter.sh/v1` `NodePool` is **correct** and is the supported way
+  to declare instance families, capacity type and disruption policy.
+- Installing Karpenter, or managing its controller or a custom `NodeClass`, is
+  **wrong** — Auto Mode owns that.
+
+The distinction matters for disruption in particular:
+`WhenEmptyOrUnderutilized` is right for the stateless app pool and forbidden on
+the runner pools, because an app pod is a replaceable replica and a runner pod
+is an hour of work.
 
 Cluster access is granted through `aws_eks_access_entry` with an EKS access
 policy, not by editing the `aws-auth` ConfigMap.

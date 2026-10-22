@@ -195,16 +195,52 @@ lint_one_skill() {
 	# Claude partially reads files reached through another reference, so every
 	# reference must hang directly off SKILL.md. A reference linking to a
 	# sibling reference is the shape that breaks.
+	#
+	# All three spellings of that link have to be caught. This rule used to test
+	# only the `references/`-prefixed forms, which missed the one an author is
+	# actually most likely to write: from inside `references/`, the natural way
+	# to point at a sibling is its bare filename.
 	if [[ -d $dir/references ]]; then
+		local base rel
 		while IFS= read -r f; do
+			base=$(basename "$f")
 			while IFS= read -r target; do
 				[[ -n $target ]] || continue
-				case $target in
-				references/* | ./references/*)
+				rel=${target%%#*}            # drop any #fragment
+				[[ -n $rel ]] || continue    # a bare #anchor is same-file
+				rel=${rel#./}
+				case $rel in
+				references/*)
+					# `references/x.md` or `./references/x.md`
+					err "$slug: ${f#"$dir/"} links to a sibling reference ('$target') — references must be one level deep from SKILL.md"
+					;;
+				../*)
+					# Upward — `../SKILL.md` is legitimate and worth encouraging.
+					;;
+				*/*)
+					# Some other nested path; the missing-file check covers it.
+					;;
+				"$base")
+					# A self-link, e.g. to one of this file's own headings.
+					;;
+				*)
+					# No slash at all: a bare filename resolves inside this same
+					# references/ directory, so it is a sibling link.
 					err "$slug: ${f#"$dir/"} links to a sibling reference ('$target') — references must be one level deep from SKILL.md"
 					;;
 				esac
 			done < <(relative_links "$f")
+		done < <(find "$dir/references" -name '*.md' -type f | sort)
+
+		# The other half of "one level deep": every reference must actually hang
+		# off SKILL.md. A reference nothing links to is unreachable — Claude
+		# never loads it, so it goes stale invisibly while still reading like
+		# documentation. Only the no-sibling half of this rule was enforced
+		# before, so the orphan half had never been checked.
+		while IFS= read -r f; do
+			if ! grep -qF "](references/$(basename "$f"))" "$dir/SKILL.md"; then
+				err "$slug: references/$(basename "$f") is not linked from SKILL.md — an unreachable reference is never read"
+			fi
 		done < <(find "$dir/references" -name '*.md' -type f | sort)
 
 		# --- table of contents on long references ---------------------------
@@ -472,10 +508,376 @@ gen_tiers_and_thresholds() {
 		case $t in
 		unit | component) cmd='`pnpm test`' ;;
 		functional) cmd='`pnpm test:e2e`' ;;
-		e2e) cmd='`make frontend-e2e` — dormant, its seed script was deleted' ;;
+		e2e) cmd='`make frontend-e2e` — release gate, needs Docker (~10 min)' ;;
 		*) cmd='—' ;;
 		esac
 		printf '| %s | `frontend/tests/%s/` | %s |\n' "$t" "$t" "$cmd"
+	done
+}
+
+gen_design_tokens() {
+	local css=frontend/src/app/globals.css
+	echo "### Semantic tokens"
+	echo
+	echo "Values from \`:root\` and \`.dark\` in \`globals.css\`. The **utility** column"
+	echo "is present only when the token has an \`@theme inline\` entry; a token with no"
+	echo "utility cannot be used in a class name."
+	echo
+	echo "| Token | Light | Dark | Utility |"
+	echo "|---|---|---|---|"
+	# Token names in :root order. Only colour tokens are tabulated — a row is
+	# emitted when the light value is an oklch() literal, which excludes
+	# `--radius` and anything else non-chromatic that would show an empty Dark
+	# column and read as a defect.
+	local name light dark util
+	while read -r name; do
+		[[ -n $name ]] || continue
+		light=$(awk -v n="--$name:" '/^:root/ { r = 1 } /^\.dark/ { r = 0 } r && index($0, n) { sub(/^[^:]*:[[:space:]]*/, ""); sub(/;.*$/, ""); print; exit }' "$css")
+		[[ $light == oklch* ]] || continue
+		dark=$(awk -v n="--$name:" '/^\.dark/ { d = 1 } /^@theme/ { d = 0 } d && index($0, n) { sub(/^[^:]*:[[:space:]]*/, ""); sub(/;.*$/, ""); print; exit }' "$css")
+		if grep -qE "^[[:space:]]*--color-$name:" "$css"; then
+			util="\`*-$name\`"
+		else
+			util="**none — unreachable from a class name**"
+		fi
+		printf '| `--%s` | `%s` | `%s` | %s |\n' "$name" "$light" "${dark:-**missing**}" "$util"
+	done < <(awk '/^:root/ { r = 1; next } /^}/ { r = 0 } r && /^[[:space:]]*--/ { sub(/^[[:space:]]*--/, ""); sub(/:.*$/, ""); print }' "$css")
+	echo
+	echo "Any row whose Light or Dark value has a non-zero middle number carries"
+	echo "chroma. \`--destructive\` is the single deliberate exception; a second one"
+	echo "means the grayscale rule has been broken at the token level, where the"
+	echo "ESLint rule cannot see it. A **missing** Dark value or an unreachable"
+	echo "utility is likewise a defect rather than a choice."
+	echo
+	echo "Non-colour tokens are deliberately not tabulated above. The radius scale"
+	echo "is the one that matters:"
+	echo
+	echo '```css'
+	grep -E '^[[:space:]]*--radius(-[a-z]+)?:' "$css" | sed -e 's/^[[:space:]]*//' || true
+	echo '```'
+	echo
+	echo "### Primitives installed"
+	echo
+	echo "\`src/components/ui/\`, with the shadcn generator settings from"
+	echo "\`frontend/components.json\`:"
+	echo
+	echo '```json'
+	# Only the settings that change what `shadcn add` writes.
+	grep -E '"(style|rsc|tsx|baseColor|cssVariables|iconLibrary)"' frontend/components.json | sed -e 's/^[[:space:]]*//' || true
+	echo '```'
+	echo
+	local f
+	for f in frontend/src/components/ui/*.tsx; do
+		[[ -e $f ]] || continue
+		printf '%s\n' "- \`$(basename "$f" .tsx)\`"
+	done
+	echo
+	echo "Anything absent from that list is **not** installed. Add it with"
+	echo "\`pnpm dlx shadcn@latest add <name>\` rather than hand-rolling it, and check"
+	echo "first whether a native element does the job with no new dependency."
+	echo
+	echo "### The palette ban"
+	echo
+	echo "The \`no-restricted-syntax\` selector in \`frontend/eslint.config.mjs\` that"
+	echo "rejects Tailwind palette utilities, matched against both \`Literal\` and"
+	echo "\`TemplateElement\` nodes:"
+	echo
+	echo '```'
+	grep -oE 'selector: `Literal\[value=/[^`]*`' frontend/eslint.config.mjs | head -1 | sed -e 's/^selector: `//' -e 's/`$//' || true
+	echo '```'
+}
+
+gen_screens_coverage() {
+	local spec=frontend/tests/functional/a11y.spec.ts
+	local routes gated missing
+	# Route paths from the app router: strip the src/app prefix and /page.tsx
+	# suffix, then drop (group) segments, which are organisational and do not
+	# appear in a URL.
+	routes=$(
+		find frontend/src/app -name 'page.tsx' \
+			| sed -e 's#^frontend/src/app##' -e 's#/page\.tsx$##' \
+			| sed -e 's#/([^)]*)##g' \
+			| sed -e 's#^$#/#' \
+			| sort -u
+	)
+	# The gate addresses screens by `path:`. Tenant entries are template literals
+	# interpolating the fixture org; public ones are plain quoted strings. BOTH
+	# spellings must be read — matching only backticks reported the landing page
+	# as unchecked while it was in fact swept, and a gate that cries wolf about a
+	# covered screen is worse than one that stays quiet.
+	gated=$(
+		grep -oE 'path: (`[^`]*`|"[^"]*"|'"'"'[^'"'"']*'"'"')' "$spec" \
+			| sed -e 's/^path: //' -e 's/^[`"'"'"']//' -e 's/[`"'"'"']$//' -e 's#\${ORG}#[org]#g' \
+			| sort -u
+	)
+	echo "### Screens swept by the axe gate"
+	echo
+	if [[ -n ${gated//[[:space:]]/} ]]; then
+		printf '%s\n' "$gated" | while read -r p; do
+			[[ -n $p ]] || continue
+			printf '%s\n' "- \`$p\`"
+		done
+	else
+		echo "**None** — the \`SCREENS\` array parsed empty, which almost certainly means"
+		echo "the spec changed shape rather than that the gate was emptied."
+	fi
+	missing=$(comm -23 <(printf '%s\n' "$routes") <(printf '%s\n' "$gated") || true)
+	echo
+	echo "### Routes NOT in the axe gate"
+	echo
+	if [[ -n ${missing//[[:space:]]/} ]]; then
+		echo "Each of these renders without any accessibility check. See the prose above"
+		echo "for the three categories that legitimately sit outside the sweep."
+		echo
+		printf '%s\n' "$missing" | while read -r p; do
+			[[ -n $p ]] || continue
+			printf '%s\n' "- \`$p\`"
+		done
+	else
+		echo "Every route is swept."
+	fi
+}
+
+gen_aws_footprint() {
+	echo "### Resource types declared"
+	echo
+	echo "Distinct \`resource \"aws_*\"\` blocks across \`infra/terraform/\`, by count:"
+	echo
+	echo '```'
+	# The `awk` reformat is load-bearing: **`uniq -c` pads its count to a
+	# different width on BSD and GNU** (macOS `   9`, GNU `      9`). Leaving
+	# that padding in the output made every line of this block differ by leading
+	# whitespace between a developer's Mac and CI — the gate failed with exactly
+	# 63 insertions and 63 deletions while the same commit regenerated
+	# byte-identically on the machine that produced it. Nothing about the data
+	# had changed.
+	#
+	# This is the same class as the LC_ALL collation bug this script already
+	# guards against at the top: a generated artifact whose bytes depend on the
+	# developer's platform is a gate that cannot be green for everyone at once.
+	# Any generator that shells out to a coreutil should pin its own formatting
+	# rather than inherit the tool's.
+	#
+	# The sort also uses PER-KEY modifiers (`-k1,1nr -k2,2`) rather than a global
+	# `-rn`: a global `-n` makes key 2 numeric too, so all the names parse as 0
+	# and equal-count rows are ordered only by sort's last-resort rule. Per-key
+	# modifiers keep the count numeric-descending and make the name a plain
+	# ascending string sort, which is a total order because the names are unique
+	# after `uniq`.
+	grep -rhoE 'resource "aws_[a-z0-9_]+"' infra/terraform \
+		| sed -e 's/^resource "//' -e 's/"$//' \
+		| sort | uniq -c \
+		| awk '{ printf "%4d  %s\n", $1, $2 }' \
+		| sort -k1,1nr -k2,2 || true
+	echo '```'
+	echo
+	echo "### Identity Center permission sets"
+	echo
+	echo "| Permission set | Session | Inline policy |"
+	echo "|---|---|---|"
+	# Split on the double quote so the value is a field rather than a regex
+	# capture: a greedy `.*"` strip eats the value itself.
+	awk -F'"' '
+		/resource "aws_ssoadmin_permission_set"/ { inblock = 1; label = $4; name = ""; dur = "" }
+		inblock && $1 ~ /^[[:space:]]*name[[:space:]]*=[[:space:]]*$/ { name = $2 }
+		inblock && $1 ~ /session_duration[[:space:]]*=[[:space:]]*$/ { dur = $2 }
+		inblock && name != "" && dur != "" {
+			printf "%s\t%s\t%s\n", name, dur, label
+			inblock = 0
+		}
+	' infra/terraform/modules/identity-center/main.tf | while IFS=$'\t' read -r name dur label; do
+		# An inline policy is attached by referencing the permission set's
+		# resource label, so the presence of that reference is the fact worth
+		# showing: a set with no inline policy carries only its managed policy
+		# attachments, and so has no deny statements at all.
+		#
+		# `p` MUST reset at every `resource "` line. Setting it once on the first
+		# inline-policy block and leaving it set searches the whole rest of the
+		# file, where every label appears again in its account assignment — which
+		# reported all three sets as guarded, including the one that is not.
+		if awk -v l="$label" '
+			/^resource "/ { p = ($0 ~ /^resource "aws_ssoadmin_permission_set_inline_policy"/) }
+			p && index($0, "aws_ssoadmin_permission_set." l ".arn") { found = 1 }
+			END { exit !found }
+		' infra/terraform/modules/identity-center/main.tf; then
+			printf '| `%s` | %s | yes |\n' "$name" "$dur"
+		else
+			printf '| `%s` | %s | **none** |\n' "$name" "$dur"
+		fi
+	done
+	echo
+	echo "### The AWS SDK surface in the Rust workspace"
+	echo
+	echo "Every \`aws-*\` dependency, with the crate that declares it. All must stay"
+	echo "\`default-features = false\`; the reasons are in \`bedrock-and-sdks.md\`."
+	echo
+	# [a-z0-9-] not [a-z-]: every SDK crate carries a version in its name
+	# (aws-sdk-sesv2, aws-sdk-s3), and omitting the digits silently drops the
+	# ones that matter most.
+	local hits
+	hits=$(grep -rhoE '^aws-[a-z0-9-]+' rust/crates/*/Cargo.toml | sort -u || true)
+	if [[ -n ${hits//[[:space:]]/} ]]; then
+		local crate
+		echo "| Crate | Declared by |"
+		echo "|---|---|"
+		printf '%s\n' "$hits" | while read -r dep; do
+			[[ -n $dep ]] || continue
+			crate=$(grep -lE "^$dep = " rust/crates/*/Cargo.toml | sed -e 's#^rust/crates/##' -e 's#/Cargo.toml$##' | paste -sd, -)
+			printf '| `%s` | `%s` |\n' "$dep" "$crate"
+		done
+	else
+		echo "**No \`aws-*\` dependency in the workspace.**"
+	fi
+	echo
+	echo "Any crate above whose declaration is missing \`default-features = false\`"
+	echo "will fail the image build — \`aws-lc-sys\` needs a \`cmake\` the build image"
+	echo "does not carry:"
+	echo
+	echo '```'
+	grep -rhE '^aws-[a-z0-9-]+ = ' rust/crates/*/Cargo.toml \
+		| grep -v 'default-features = false' || echo "(every aws-* declaration pins default-features = false)"
+	echo '```'
+	echo
+	echo "### Terraform and provider pins"
+	echo
+	echo '```'
+	grep -rhE 'required_version|source[[:space:]]*=[[:space:]]*"hashicorp/|version[[:space:]]*=[[:space:]]*"~>' \
+		infra/terraform/envs/*/versions.tf \
+		| sed -e 's/^[[:space:]]*//' | sort -u || true
+	echo '```'
+	echo
+	echo "### Where the engine's AWS access actually comes from"
+	echo
+	echo "Workload credentials, by mechanism — the thing to check first when a pod"
+	echo "cannot reach AWS:"
+	echo
+	echo "| Mechanism | Count |"
+	echo "|---|---|"
+	printf '| `aws_eks_pod_identity_association` blocks | %s |\n' \
+		"$(grep -rc 'resource "aws_eks_pod_identity_association"' infra/terraform --include='*.tf' | awk -F: '{ s += $2 } END { print s + 0 }')"
+	printf '| `aws_iam_user` blocks (should be the lake key and the builder key only) | %s |\n' \
+		"$(grep -rc 'resource "aws_iam_user"' infra/terraform --include='*.tf' | awk -F: '{ s += $2 } END { print s + 0 }')"
+	printf '| `aws_iam_openid_connect_provider` blocks (GitHub Actions only; never for workloads) | %s |\n' \
+		"$(grep -rc 'resource "aws_iam_openid_connect_provider"' infra/terraform --include='*.tf' | awk -F: '{ s += $2 } END { print s + 0 }')"
+}
+
+# The inventory table that docs/agent-skills.md and CLAUDE.md each carry.
+# Derived from the frontmatter so adding a skill cannot leave either one stale —
+# the defect that produced the "no skill states a count" rule in the first
+# place. The two documents want different columns, so this takes a mode:
+#
+#   covers — `| Skill | Covers |`, from the description's first em-dash clause
+#   doing  — `| Doing | Skill |`, from the description's "Use when" clause
+#
+# Both projections come from the same field, which is what keeps them agreeing.
+
+# Clip a description clause to a readable summary: stop at a comma, but only one
+# that sits OUTSIDE parentheses, and keep consuming clauses until the result is
+# long enough to be informative.
+#
+# Both halves are load-bearing. A naive `${s%%,*}` cuts "the stage chain (ingest,
+# standardize, match…)" to "the stage chain (ingest", and cuts "blocking rules,
+# comparison levels, m/u probabilities…" to a useless "blocking rules". Commas
+# and parentheses are ASCII, so awk is safe here under LC_ALL=C — unlike the
+# em-dash, which is why the caller uses parameter expansion for that split.
+clip_clause() {
+	awk -v s="$1" -v min="${2:-60}" -v max="${3:-200}" '
+		BEGIN {
+			depth = 0
+			cut = 0
+			for (i = 1; i <= length(s); i++) {
+				c = substr(s, i, 1)
+				if (c == "(" || c == "[") depth++
+				else if (c == ")" || c == "]") depth--
+				else if ((c == "," || c == ";") && depth == 0 && i >= min) { cut = i - 1; break }
+			}
+			out = (cut > 0) ? substr(s, 1, cut) : s
+			if (length(out) > max) {
+				out = substr(out, 1, max)
+				sub(/ [^ ]*$/, "", out)
+				out = out "…"
+			}
+			# An odd backtick count means the clip landed inside an inline-code
+			# span, which renders the rest of the table row as code. Back up to
+			# before the opening backtick instead.
+			n = gsub(/`/, "`", out)
+			if (n % 2 == 1) {
+				sub(/`[^`]*$/, "", out)
+				sub(/[[:space:]]+$/, "", out)
+				sub(/[[:punct:]]+$/, "", out)
+				if (out != "") out = out "…"
+			}
+			print out
+		}'
+}
+
+gen_skill_inventory() {
+	local mode=$1
+	local dir slug name desc cell manual
+	case $mode in
+	covers) printf '| Skill | Covers |\n|---|---|\n' ;;
+	doing) printf '| Doing | Skill |\n|---|---|\n' ;;
+	*)
+		err "gen_skill_inventory: unknown mode '$mode'"
+		return
+		;;
+	esac
+	for dir in "$skills_dir"/*/; do
+		[[ -f "$dir/SKILL.md" ]] || continue
+		slug=$(basename "${dir%/}")
+		name=$(frontmatter_value "$dir/SKILL.md" name)
+		name=${name:-$slug}
+		desc=$(frontmatter_value "$dir/SKILL.md" description)
+		manual=""
+		if grep -qE '^disable-model-invocation:[[:space:]]*true' "$dir/SKILL.md"; then
+			manual=" (user-invoked only)"
+		fi
+
+		if [[ $mode == covers ]]; then
+			# Everything after the first em-dash, clipped at the first comma.
+			#
+			# Done with parameter expansion rather than sed, deliberately: the
+			# script runs under LC_ALL=C (see the top of this file), where an
+			# em-dash is three bytes and `[^—]` is a negated set of those three
+			# BYTES — so `s/^[^—]*— *//` silently fails to strip the prefix on
+			# some descriptions and not others. `${desc#*—}` is byte-exact.
+			cell=${desc#*—}
+			[[ $cell != "$desc" ]] || cell=$desc # no em-dash: use the whole thing
+			cell=${cell#"${cell%%[![:space:]]*}"}
+			cell=${cell%%. *}
+			cell=$(clip_clause "$cell")
+		else
+			# The first items of the trigger list — written to be the shortest
+			# phrase that routes correctly, which is exactly this column's job.
+			#
+			# Three openings are in use and all three must be handled, because a
+			# skill that matches none falls back to its whole description and
+			# produces a table cell hundreds of characters wide: most say "Use
+			# when", rust-conventions says "Use before", and pentest (the one
+			# user-invoked skill) says "Invoke manually as".
+			# Extract the trigger phrase FIRST, and only then trim to one
+			# sentence. Doing both in one sed means a description with no
+			# trigger phrase still gets shortened, so testing "did the string
+			# change" cannot tell the two cases apart — which is how pentest
+			# ended up falling through every branch.
+			local trigger
+			trigger=$(printf '%s\n' "$desc" | sed -E 's/^.*[Uu]se (when|before) //')
+			if [[ $trigger == "$desc" ]]; then
+				trigger=$(printf '%s\n' "$desc" | sed -E 's/^.*[Ii]nvoke manually as /invoking /')
+			fi
+			if [[ $trigger == "$desc" ]]; then
+				# No trigger phrasing at all: fall back to the em-dash clause
+				# rather than to the whole description.
+				trigger=${desc#*—}
+				trigger=${trigger#"${trigger%%[![:space:]]*}"}
+			fi
+			cell=$(clip_clause "${trigger%%. *}" 40 110)
+		fi
+		if [[ $mode == covers ]]; then
+			printf '| `%s` | %s%s |\n' "$name" "$cell" "$manual"
+		else
+			printf '| %s%s | `%s` |\n' "$cell" "$manual" "$name"
+		fi
 	done
 }
 
@@ -518,12 +920,22 @@ splice() {
 # The files `regen` owns. The drift check diffs ONLY these: diffing the whole
 # skills tree would report an author's in-progress prose edits as generated
 # staleness, which is exactly the moment the message would be most confusing.
+#
+# Two of these live OUTSIDE the skills tree. `gen_skill_inventory` owns the
+# inventory table in docs/agent-skills.md and the "Doing → Skill" table in
+# CLAUDE.md, because those were the two places a human had to remember to edit
+# when adding a skill — and both said "Fifteen" while the tree held more.
 generated_files=(
 	"$skills_dir/entity-framework/references/entities-index.md"
 	"$skills_dir/rust-conventions/references/crate-map.md"
 	"$skills_dir/sql-analysis/references/diagnostics.md"
 	"$skills_dir/ci-and-supply-chain/references/required-checks.md"
 	"$skills_dir/frontend-testing/references/tiers-and-thresholds.md"
+	"$skills_dir/frontend-design-system/references/tokens-and-primitives.md"
+	"$skills_dir/frontend-data-ui/references/screens.md"
+	"$skills_dir/aws-account-operations/references/footprint.md"
+	"docs/agent-skills.md"
+	"CLAUDE.md"
 )
 
 run_regen() {
@@ -546,8 +958,25 @@ run_regen() {
 	gen_tiers_and_thresholds >"$tmp"
 	splice "$skills_dir/frontend-testing/references/tiers-and-thresholds.md" tiers-and-thresholds "$tmp"
 
+	gen_design_tokens >"$tmp"
+	splice "$skills_dir/frontend-design-system/references/tokens-and-primitives.md" design-tokens "$tmp"
+
+	gen_screens_coverage >"$tmp"
+	splice "$skills_dir/frontend-data-ui/references/screens.md" screens-coverage "$tmp"
+
+	gen_aws_footprint >"$tmp"
+	splice "$skills_dir/aws-account-operations/references/footprint.md" aws-footprint "$tmp"
+
+	# Two projections of one field, so the two documents cannot disagree about
+	# which skills exist even though they show different columns.
+	gen_skill_inventory covers >"$tmp"
+	splice "docs/agent-skills.md" skill-inventory "$tmp"
+
+	gen_skill_inventory doing >"$tmp"
+	splice "CLAUDE.md" skill-inventory "$tmp"
+
 	rm -f "$tmp"
-	note "regenerated 5 reference files"
+	note "regenerated ${#generated_files[@]} generated files"
 }
 
 run_drift_check() {
@@ -556,6 +985,13 @@ run_drift_check() {
 	if ! git diff --quiet HEAD -- "${generated_files[@]}"; then
 		red "FAIL generated skill references are stale. Run 'make skills-check' and commit the diff."
 		git --no-pager diff --stat HEAD -- "${generated_files[@]}"
+		# The CONTENT, not just the stat. A stat line says a file changed and
+		# gives no way to tell "someone forgot to commit the regen" from "this
+		# generator emits different bytes on your machine than on CI" — the
+		# second being invisible locally, because locally it always agrees with
+		# itself. Telling those apart from a `126 ++---` line alone cost an hour.
+		# Capped so a genuinely large regeneration does not bury the message.
+		git --no-pager diff --no-color HEAD -- "${generated_files[@]}" | head -60
 		fail=1
 	else
 		note "generated references are current"
