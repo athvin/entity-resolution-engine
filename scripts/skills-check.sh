@@ -158,7 +158,7 @@ lint_one_skill() {
 	fi
 
 	# --- links ---------------------------------------------------------------
-	local f target
+	local f target path
 	while IFS= read -r f; do
 		[[ -n $f ]] || continue
 		while IFS= read -r target; do
@@ -166,7 +166,11 @@ lint_one_skill() {
 			case $target in
 			*\\*) err "$slug: ${f#"$dir/"} links with a backslash path ('$target')" ;;
 			esac
-			if [[ ! -e $(dirname "$f")/$target ]]; then
+			# Test the path without any `#fragment`, but report what was
+			# written — a link to a heading in another file is legitimate.
+			path=${target%%#*}
+			[[ -n $path ]] || continue
+			if [[ ! -e $(dirname "$f")/$path ]]; then
 				err "$slug: ${f#"$dir/"} links to a missing file ('$target')"
 			fi
 		done < <(relative_links "$f")
