@@ -62,7 +62,7 @@ pub struct Reconciled {
     pub catalog_hash: String,
     /// The statements applied, in order; empty when the store was current.
     pub applied: Vec<Planned>,
-    /// Columns the store carries beyond the catalog (see [`Severity::Ahead`]).
+    /// Columns the store carries beyond the catalog (see [`crate::Severity::Ahead`]).
     pub ahead: Vec<DiffItem>,
     /// Whether the ledger already recorded this catalog version before the
     /// call (so nothing was written this time).
