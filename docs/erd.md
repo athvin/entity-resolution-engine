@@ -704,3 +704,5 @@ erDiagram
 | `acct_int_std_records` | stage | One current standardized account record per record key: the account standardization stage's output (supersession applied, tombstones excluded) and the matching stage's input. |
 | `acct_golden_records` | stage | One resolved account/organization: the surviving value per attribute, at a snapshot. |
 | `acct_golden_lineage` | stage | Per-attribute survivorship provenance for a resolved account: which record each surviving value came from. |
+
+<!-- DELIBERATE STALENESS: verifying the entities gate fails. To be reverted. -->

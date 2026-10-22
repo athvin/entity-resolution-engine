@@ -53,6 +53,12 @@ costing 10m34 of critical path. And cold-vs-warm is a 3× swing on the one job
 that gates every merge, so **reducing how often cold happens is worth more than
 any per-step optimisation.**
 
+Every compile job also spends ~1m in `apt-get update && apt-get install -y mold`
+— an unpinned network dependency repeated six times, which on 2026-10-22 was
+observed **hanging for over 20 minutes** on one runner. On a required job that is
+not a failure, it is a 45-minute timeout. Worth replacing with a pinned binary or
+a cached `.deb`.
+
 Elsewhere: `test` spends 2m33 in the disk-reclaim step before compiling, and
 10m47 in `cargo test --workspace`. `ducklake-e2e` splits 16m36 / 9m47 between its
 four-crate test and the rapidfuzz extension test. `coverage` is 22m10 of
@@ -334,6 +340,7 @@ rust-cache entry, so making the profile real buys cache headroom twice.
 | Key rust-cache on `Cargo.toml` too | yes | it does not by default, so the `[profile.*]` change hit an exact key, logged `Cache up-to-date` and never saved — leaving an immortal pre-profile entry |
 | Split the serial `fmt + clippy + docs` | yes | 2026-10-22: `entities` split out and made required. Only the two tree-paying steps earned a job — see the measurement, which overturned splitting the other two |
 | Split `DuckLake + extensions e2e` | **no** | tried, then reverted on the numbers: its 8m17 step is its own work, not a tree it inherited, so a separate job would pay a tree build on top and come out slower. Now the critical path, so this is the open question |
+| Stop `apt-get install mold` per job | **open** | ~1m of every compile job's critical path, over an unpinned network dependency. Observed hanging for 20+ minutes on one runner, which on a required job is a 45-minute timeout rather than a failure |
 | cargo-nextest | no | build time dominates execution time here; revisit after the above |
 | `.cargo/config.toml` for local mold/sccache | no | helps laptops, not CI; worth doing, not yet scoped |
 | cargo-chef + cache mounts in `rust/Dockerfile` | no | `COPY . .` + one `cargo build --release` means any source change rebuilds DuckDB in release mode; real, separate |
@@ -484,13 +491,24 @@ already the worst case — worse.
 
 ## Next step: sccache on S3
 
-**Promoted from contingency to the recommended next move** by the 97% hit rate
-above: sccache is the primary cache, so capping it to protect a shared 10 GB
-budget is the wrong trade. Take it out of the Actions cache entirely by pointing
-it at S3
+**Agreed as the eventual fix, 2026-10-22, and deliberately deferred** — the
+improvements above land first. Promoted from contingency to the plan by the 99%
+hit rate measured above: sccache is the primary cache, so capping it to protect a
+shared 10 GB budget is the wrong trade, and every entry the nightly prune deletes
+is a future compile. Take it out of the Actions cache entirely by pointing it at
+S3
 (`SCCACHE_BUCKET` + `SCCACHE_REGION`). That removes ~4.3 GiB and ~2,700 entries
 from a 10 GB shared budget in one step, lifts the size cap, and keeps the
 dependency-bump resilience that is the reason to keep sccache at all.
+
+When it happens, **delete the `cache-prune` job** — its whole reason to exist
+goes with the shared budget — but **keep `sccache --show-stats`**, which is what
+proved sccache was load-bearing and is the only way to notice if the hit rate
+regresses on the new backend. Two further details: a job needing
+`id-token: write` must restate `contents: read`, because job-level `permissions:`
+replaces the workflow-level set rather than extending it; and on a public repo a
+fork PR must get read-only or no access to the bucket, since write access is a
+cache-poisoning path.
 
 The plumbing already exists: `images.yml:95-105` assumes an AWS role through
 GitHub OIDC in `us-east-2`, and `infra/terraform` is where the bucket, its
