@@ -10,6 +10,7 @@ against it.
 
 - The measured baseline (2026-10-22)
 - The first measurement after the change
+- `actions/cache/usage` lags; enumerate instead
 - Capping one prefix made the prune a no-op
 - Where it ended up
 - Why cold happens: the Actions cache budget
@@ -207,6 +208,31 @@ First measured result, after relieving the backlog by hand: **10,999,396,329 →
 7,029,161,413 bytes (6.54 GiB) across 4,485 entries** — under the ceiling with
 ~3.4 GB of headroom, which is where the eviction stops.
 
+### `actions/cache/usage` lags; enumerate instead
+
+Measured 2026-10-22, immediately after the prune deleted 29 entries worth
+~2.7 GiB. Three reads 45 seconds apart:
+
+```
+reported 10.02 GiB   enumerated 7.27 GiB   delta 2.75 GiB
+reported 10.02 GiB   enumerated 7.33 GiB   delta 2.69 GiB
+reported 10.02 GiB   enumerated 7.28 GiB   delta 2.74 GiB
+```
+
+`active_caches_size_in_bytes` was byte-identical on all three while the
+enumerated sum tracked live writes, and the delta was exactly what had been
+deleted. It is a cached aggregate that does not reflect deletions promptly.
+
+Two consequences. **When judging the budget, enumerate** — the aggregate will
+tell you the repository is at the ceiling long after it is not, which is a good
+way to spend an afternoon fixing something already fixed. And `cache-prune`
+reports its own totals by enumeration for the same reason: reporting from the
+aggregate printed an unchanged before/after and made a working prune look like
+a no-op, which is a hygiene job's only output lying about its own effect.
+
+Steady state after the first real prune: **7.3 GiB of 10**, both capped
+prefixes under budget, ~2.7 GiB of headroom.
+
 ### Capping one prefix made the prune a no-op
 
 First real run of `cache-prune`, run `39838150331`, printed its accounting and
@@ -366,7 +392,8 @@ measures **22m10 warm against a 60-minute timeout**: llvm-cov owns `RUSTFLAGS`,
 so every unit including dependencies rebuilds, and `shared-key: rust` cannot
 substitute. That trades 1.8 GiB for a timeout failure. It is also unnecessary —
 `[profile.test]` inherits the dep setting below, so the entry shrinks on its own,
-the bulk of it having been the duckdb rlib — measured at **1301 MiB -> 364 MiB**
+the bulk of it having been the duckdb rlib — **measured: `v1-rust-coverage`
+came in at 611 MiB against the 1,885 MiB it held before** — measured at **1301 MiB -> 364 MiB**
 for the `rust` key once the key fix let a fresh entry be written at all.
 
 A fourth contributor is not CI's: `rust/Cargo.toml` carried **no `[profile.*]`

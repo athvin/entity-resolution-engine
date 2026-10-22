@@ -838,9 +838,25 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Totals by ENUMERATION, not from `actions/cache/usage`. That
+          # endpoint is a lagging aggregate: measured 2026-10-22 immediately
+          # after this job deleted 29 entries worth ~2.7 GiB, it returned the
+          # identical byte count on three reads 45s apart while the enumerated
+          # sum tracked live writes —
+          #
+          #     reported 10.02 GiB   enumerated 7.27 GiB   delta 2.75 GiB
+          #     reported 10.02 GiB   enumerated 7.33 GiB   delta 2.69 GiB
+          #     reported 10.02 GiB   enumerated 7.28 GiB   delta 2.74 GiB
+          #
+          # i.e. the delta was exactly what had been deleted. Reporting from it
+          # would print an unchanged before/after and make a working prune look
+          # like a no-op — a hygiene job whose only output lies about its own
+          # effect. The enumeration costs one extra paginated sweep.
           report() {
-            gh api "repos/$GITHUB_REPOSITORY/actions/cache/usage" --jq \
-              '"\(.active_caches_count) entries, \(.active_caches_size_in_bytes) bytes"'
+            gh api --paginate "repos/$GITHUB_REPOSITORY/actions/caches?per_page=100" \
+              --jq '.actions_caches[].size_in_bytes' |
+              awk '{s+=$1; n++}
+                   END {printf "%d entries, %d bytes (%.2f GiB enumerated)\n", n, s, s/1073741824}'
           }
 
           echo "::group::before"
