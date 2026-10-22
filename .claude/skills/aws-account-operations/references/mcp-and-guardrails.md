@@ -1,12 +1,5 @@
 # The three guardrail layers, and what each one misses
 
-> **Partially applied.** The MCP proxy and the Bash guard are live. The IAM
-> statement and the `PlatformReadOnly` permission set are **written and
-> `terraform validate`d but NOT applied** — applying them is a human action, and
-> until it happens Layer 2 does not exist and Layer 1 runs as an admin profile
-> constrained only by the proxy flag. Treat the account as having two of three
-> layers.
-
 ## Contents
 
 - Why three layers
@@ -59,15 +52,18 @@ means `aws sso login`, not a broken config.
 
 ### The profile this runs as
 
-`ProdDataReadOnly` is too narrow to be the introspection identity — it cannot
-list buckets or read Budgets. So the proxy runs as `PlatformAdmin` via the
-`er-platform` profile, with the read-only constraint supplied by the flag and by
-Layer 2 rather than by the permission set.
+`er-readonly` → the `PlatformReadOnly` permission set, which carries the
+AWS-managed `ReadOnlyAccess` policy with an 8-hour session.
 
-That is a real compromise and worth knowing: **Layer 1's profile is an admin
-credential.** The target state is a `PlatformReadOnly` permission set carrying
-the AWS-managed `ReadOnlyAccess` policy and an `er-readonly` profile pointing at
-it, after which the flag stops being the only client-side constraint.
+That matters because it means the proxy's `--read-only` flag is **not** the only
+thing standing between an agent and a mutation: the credential itself cannot
+write. `ProdDataReadOnly` could not serve here — it covers the prod lake,
+`rds-db:connect`, `eks:Describe*` and logs, so it cannot list buckets or read
+Budgets, which is most of what introspection asks.
+
+An expired SSO token is the usual reason the server answers nothing. The fix is
+`aws sso login --profile er-readonly`, not a config change — the proxy re-reads
+credentials from disk per request, so no restart is needed.
 
 ## Layer 2: IAM condition keys, server-side
 
@@ -79,10 +75,17 @@ server:
 | `aws:ViaAWSMCPService` | Bool | true when the request came through an AWS-managed MCP server |
 | `aws:CalledViaAWSMCP` | String | the server's service principal, e.g. `aws-mcp.amazonaws.com` |
 
-The deny lives as a statement in
+The deny lives as the `DenyMutationViaMCP` statement in
 `aws_ssoadmin_permission_set_inline_policy.platform_admin_guard` — the same
 inline policy that already carries the prod-mutation denies, so this extends a
-proven pattern rather than adding a resource.
+proven pattern rather than adding a resource. **Applied**, and verifiable
+without Terraform:
+
+```sh
+aws sso-admin get-inline-policy-for-permission-set \
+  --instance-arn "$INSTANCE" --permission-set-arn "$PLATFORM_ADMIN" \
+  --query InlinePolicy --output text | jq '.Statement[] | select(.Sid=="DenyMutationViaMCP")'
+```
 
 **The critical limitation, restated because it is easy to forget:** these keys
 apply *exclusively* to requests flowing through an AWS-managed MCP server.
