@@ -584,6 +584,9 @@ export function initialState() {
     "wizard-ios",
     "wizard-android",
     "selectall-dev",
+    // Scoping a run to a segment starts one, which takes the org's single
+    // writer slot — it cannot share with the Runs page's Run-now test.
+    "segment-dev",
     // Activating a version ARCHIVES the one it replaces, so the registry gets
     // one org per device project: all three share this server, and a project
     // that activates would otherwise flip the state another is asserting.
@@ -1591,6 +1594,63 @@ const server = http.createServer((req, res) => {
     }
     // Newest first, a bare array — `read::imports_recent`. The fixtures below
     // are stored in this order (id …0003 before …0002).
+    // ── blocking estimate + the config's segment catalog (E6c) ─────────────
+    //
+    // Field names are `BlockingEstimate`'s, read off the Rust struct: the
+    // marginal column is `marginal_pairs`, the running total
+    // `cumulative_pairs`. `largest` caps the block list.
+    if ((match = /^\/v1\/orgs\/([^/]+)\/blocking-estimate$/.exec(path)) && req.method === "GET") {
+      // An org with no model has nothing to estimate — a 409 the UI renders as
+      // a designed state, not an error.
+      if (match[1] === "fresh-dev") {
+        return send(res, 409, {
+          detail: "no model yet (ER_MODEL_PATH); publish or compile one first",
+        });
+      }
+      const largest = Math.min(50, Number(url.searchParams.get("largest") ?? 5));
+      return send(res, 200, {
+        total_possible_pairs: 124750,
+        candidate_pairs: 1842,
+        per_rule: [
+          {
+            blocking_rule: 'l."email" = r."email"',
+            match_key: 0,
+            marginal_pairs: 1203,
+            cumulative_pairs: 1203,
+          },
+          {
+            blocking_rule: 'l."phone_e164" = r."phone_e164"',
+            match_key: 1,
+            marginal_pairs: 512,
+            cumulative_pairs: 1715,
+          },
+          {
+            // A rule that earns almost nothing: the point of the marginal
+            // column is that this is visible.
+            blocking_rule: "SUBSTRING(l.family_name, 1, 4) = SUBSTRING(r.family_name, 1, 4)",
+            match_key: 2,
+            marginal_pairs: 127,
+            cumulative_pairs: 1842,
+          },
+        ].slice(0, 3),
+        largest_blocks: [
+          { key_values: ["", "94103"], pairs: 406 },
+          { key_values: ["smit", "10001"], pairs: 91 },
+        ].slice(0, largest),
+      });
+    }
+    if ((match = /^\/v1\/orgs\/([^/]+)\/segments$/.exec(path)) && req.method === "GET") {
+      // The published config's `segments:` block — name plus predicate, so an
+      // operator can see what a slice covers. NOT the campaigns saved-segment
+      // store, which lives in the erweb database.
+      return send(res, 200, {
+        segments: [
+          { name: "west", predicate: "addr_region in ('CA','OR','WA')" },
+          { name: "recent", predicate: "updated_at > '2026-01-01'" },
+        ],
+      });
+    }
+
     // ── model registry ──────────────────────────────────────────────────────
     //
     // `active` is a LIST, one entry per name, ordered by name — mirroring

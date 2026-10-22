@@ -44,6 +44,11 @@ export const TRIAGE_ORGS = [
   // it cannot share one with the Runs page's own Run-now test: whichever ran
   // second would find the button correctly disabled and fail.
   "palette-dev",
+  // Starting a run takes the org's ONE writer slot, so the segment-scoping test
+  // cannot share an org with the Runs page's own Run-now test: whichever ran
+  // second would find the button correctly disabled. Same reason as
+  // `palette-dev`.
+  "segment-dev",
   // The model registry: activating a version ARCHIVES the one it replaces, so
   // a project that activates would flip the state another project is asserting
   // — all three share one mock server.

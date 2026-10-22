@@ -17,6 +17,8 @@ export const queryKeys = {
   models: (org: string) => ["org", org, "models"] as const,
   modelVersion: (org: string, name: string, version: number) =>
     ["org", org, "models", name, version] as const,
+  blockingEstimate: (org: string) => ["org", org, "blocking-estimate"] as const,
+  configSegments: (org: string) => ["org", org, "config-segments"] as const,
   adminOrgs: () => ["admin", "orgs"] as const,
   adminOrg: (org: string) => ["admin", "orgs", org] as const,
   adminJobs: (params?: Record<string, string>) => ["admin", "jobs", params ?? {}] as const,
