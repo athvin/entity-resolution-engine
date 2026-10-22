@@ -22,6 +22,28 @@
 # the DuckDB static link is far cheaper. The heavy perf jobs (bench compile,
 # 50k scale) run only on main + nightly, not on every PR — the PR gate is
 # lint + test + the DuckLake integration e2e + cargo-deny.
+#
+# The two caches are a SHARED, CAPPED resource — 10 GB per repository, LRU-evicted
+# past it — and they fail differently, which is why both exist. rust-cache keys on
+# `Cargo.lock` and so misses wholesale on any dependency change; sccache is
+# content-addressed per compilation unit and still hits for every crate a bump did
+# not touch. Three rules follow, each load-bearing:
+#
+#   1. `lint` is the SINGLE WRITER of `shared-key: rust`, and only from `main`;
+#      the other four compile jobs are restore-only (`save-if: false`).
+#      `coverage` keeps the writer on its own key — see the note there for why
+#      dropping it would buy 1.8 GiB and a timeout.
+#   2. sccache is pruned to a budget nightly (`cache-prune`), because its backend
+#      writes one entry per compilation object and nothing else caps it.
+#   3. Every compile job reports `sccache --show-stats`, so the hit rate is
+#      observable rather than assumed.
+#
+# Without 1 and 2 the repository sat at the ceiling and GitHub evicted its largest
+# LRU victim — the rust-cache entry every compile job restores from — producing
+# cold runs with no dependency change to explain them. Cold is a 3x penalty on the
+# critical-path job. The measurements, and the decisions taken against them
+# (including why headstart is not one of them), are in the `ci-and-supply-chain`
+# skill's build-cost reference.
 name: rust
 
 on:
@@ -137,6 +159,32 @@ jobs:
         with:
           workspaces: rust
           shared-key: rust
+          # THIS job is the single writer of `shared-key: rust`. The other four
+          # compile jobs restore from it and set `save-if: false`, because the
+          # 10 GB per-repository Actions cache is a shared, capped resource and
+          # this workspace does not fit in it twice.
+          #
+          # What went wrong without this: five jobs all saved the same key, PR
+          # branches minted their own ~1.5 GB entries, and sccache's GHA backend
+          # — one cache entry per compilation object, nothing capping it — added
+          # ~2,700 entries and 4.3 GiB. Measured at 10,653,007,178 bytes across
+          # 2,594 entries, i.e. at the ceiling, so GitHub evicted LRU and the
+          # victim was the big rust-cache entry. That is why cold runs kept
+          # happening with no dependency change to explain them, and cold is a
+          # 3x penalty on this job (42m27 vs 14m15).
+          #
+          # Writing only from `main` is the other half: a PR must not be able to
+          # evict the entry every other PR depends on.
+          #
+          # The trade-off, stated so it is not discovered later: a PR that
+          # changes `Cargo.lock` no longer saves its own entry, so every push to
+          # it restores main's by `restore-keys` prefix match and rebuilds the
+          # changed crates again. It is a partial restore, not a cold build, and
+          # sccache covers what the prefix match misses — but a duckdb bump will
+          # feel it on each push. `sccache --show-stats` below is how to tell
+          # whether that is actually costing anything before trading the budget
+          # back for it.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - name: entity framework verify (stale-output + analyser passes)
@@ -167,6 +215,23 @@ jobs:
           git -C .. fetch --no-tags --depth=1 origin main || exit 0
           git -C .. show origin/main:frontend/src/lib/api/openapi.json > /tmp/base-openapi.json 2>/dev/null || exit 0
           cargo run -q -p er-server --bin er-openapi-check -- /tmp/base-openapi.json || true
+      - name: Build cost (sccache stats, target size)
+        # Never a gate: `always()` so a red job still reports, `|| true` so the
+        # reporting itself cannot fail one.
+        #
+        # The sccache hit rate has never been observable in this repo, which is
+        # why nobody could say whether it earns the ~4.3 GiB and ~2,700 entries
+        # it takes out of a 10 GB per-repository cache. It is the input to the
+        # two decisions deferred in the `ci-and-supply-chain` skill's build-cost
+        # reference: whether to move sccache to S3, and whether it could be
+        # dropped (which is also precondition 1 for revisiting headstart).
+        #
+        # Read it as a pair: a cold run shows what the misses cost, a warm run
+        # shows what the hits save. One number alone says nothing.
+        if: always()
+        run: |
+          sccache --show-stats || true
+          du -sh target || true
 
   test:
     name: test
@@ -176,22 +241,11 @@ jobs:
     timeout-minutes: 30
     env:
       RUSTC_WRAPPER: sccache
-      # Dependencies build WITHOUT debug info, which is the whole ballgame on
-      # this workspace. `libduckdb-sys` compiles bundled DuckDB C++ through
-      # cc-rs, which emits `-g` whenever cargo tells it the profile wants debug
-      # info — and the resulting rlib is ~1.5 GB, linked into every test binary.
-      # Measured on `cargo test -p er-server --no-run`: the duckdb rlib goes
-      # 1480 MB -> 240 MB and the whole build 12631 MB -> 7234 MB.
-      #
-      # Nobody debugs into bundled DuckDB from CI, and workspace code keeps its
-      # line tables below, so backtraces still name a file and a line.
-      #
-      # Recorded because the obvious knob is the wrong one:
-      # `CARGO_PROFILE_DEV_DEBUG=line-tables-only` saves only ~7%, since any
-      # non-false debug setting still makes cargo pass DEBUG=true to build
-      # scripts and cc keeps emitting full C++ symbols. It has to be 0.
-      CARGO_PROFILE_DEV_DEBUG: 0
-      CARGO_PROFILE_TEST_DEBUG: line-tables-only
+      # The debug-info settings that used to live here are now
+      # `[profile.dev.package."*"]` / `[profile.test]` in `rust/Cargo.toml`, with
+      # the measurement. They were job env on this job alone, so `lint`,
+      # `ducklake-e2e`, `bench-compile`, `scale-tests` and every laptop paid a
+      # 1.9x larger build; the profile gives it to all of them.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Reclaim runner disk
@@ -205,8 +259,9 @@ jobs:
         # third-party action, to keep every `uses:` in this workflow SHA-pinned.
         # Headroom, not the fix. Measured: this frees the runner from 86 GB to
         # 111 GB available — and `cargo test --workspace` still exhausted it,
-        # which is what sent the search to the debug-info settings in `env`
-        # above. Keep both: the build is large even without C++ symbols.
+        # which is what sent the search to the debug-info settings now in
+        # `rust/Cargo.toml`'s `[profile.dev.package."*"]`. Keep both: the build
+        # is large even without C++ symbols.
         # Removing the tool cache is safe for THIS job specifically: it installs
         # Rust with rustup and mold with apt, and the two actions it does use
         # (sccache, rust-cache) are JS, so nothing here reads `setup-*`'s cache.
@@ -225,7 +280,19 @@ jobs:
         with:
           workspaces: rust
           shared-key: rust
+          # Restore-only. `lint` is the single writer of this key — see the long
+          # comment there for why five writers on a 10 GB capped cache is what
+          # kept producing cold runs.
+          save-if: false
       - run: cargo test --workspace
+      - name: Build cost (sccache stats, target size)
+        # See the `lint` job's copy for why. This job is also where the disk wall
+        # shows up, so the `target` size is the number to watch here.
+        if: always()
+        run: |
+          sccache --show-stats || true
+          du -sh target || true
+          df -h / | tail -1
 
   security:
     name: cargo-deny (advisories + licenses + bans)
@@ -257,10 +324,6 @@ jobs:
     timeout-minutes: 45
     env:
       RUSTC_WRAPPER: sccache
-      # Same reasoning as `test`: this job links bundled DuckDB into every test
-      # binary it builds, so it is one crate away from the same disk wall.
-      CARGO_PROFILE_DEV_DEBUG: 0
-      CARGO_PROFILE_TEST_DEBUG: line-tables-only
       DEDUPE_E2E_DUCKLAKE: "1"
       DEDUPE_E2E_EXTENSIONS: "1"
       # The er-server control-plane queue gate runs against this service.
@@ -290,6 +353,10 @@ jobs:
         with:
           workspaces: rust
           shared-key: rust
+          # Restore-only. `lint` is the single writer of this key — see the long
+          # comment there for why five writers on a 10 GB capped cache is what
+          # kept producing cold runs.
+          save-if: false
       - name: Cache DuckDB extensions
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -304,6 +371,12 @@ jobs:
       - run: cargo test -p dedupe-cli -p er-cli -p er-server -p er-entity-diff
       - name: Extension loading (rapidfuzz)
         run: cargo test -p dedupe-core --test extensions
+      - name: Build cost (sccache stats, target size)
+        # See the `lint` job's copy for why.
+        if: always()
+        run: |
+          sccache --show-stats || true
+          du -sh target || true
 
   # --- heavy perf jobs: main + nightly only (skipped on PRs for latency) ---
 
@@ -325,8 +398,18 @@ jobs:
         with:
           workspaces: rust
           shared-key: rust
+          # Restore-only. `lint` is the single writer of this key — see the long
+          # comment there for why five writers on a 10 GB capped cache is what
+          # kept producing cold runs.
+          save-if: false
       # Keep benches building; running them is manual (they take minutes).
       - run: cargo bench -p dedupe-core --no-run
+      - name: Build cost (sccache stats, target size)
+        # See the `lint` job's copy for why.
+        if: always()
+        run: |
+          sccache --show-stats || true
+          du -sh target || true
 
   scale-tests:
     name: scale golden (50k)
@@ -347,7 +430,17 @@ jobs:
         with:
           workspaces: rust
           shared-key: rust
+          # Restore-only. `lint` is the single writer of this key — see the long
+          # comment there for why five writers on a 10 GB capped cache is what
+          # kept producing cold runs.
+          save-if: false
       - run: cargo test -p dedupe-core --test golden_historical_50k
+      - name: Build cost (sccache stats, target size)
+        # See the `lint` job's copy for why.
+        if: always()
+        run: |
+          sccache --show-stats || true
+          du -sh target || true
 
   # --- coverage: nightly + on-demand only (never on PRs or main pushes) ---
   #
@@ -390,6 +483,24 @@ jobs:
         with:
           workspaces: rust
           shared-key: coverage
+          # This key KEEPS its writer, unlike the four restore-only jobs above,
+          # and the reasoning is worth recording because the opposite looks
+          # obviously right: the entry held 1,885 MiB, 19% of the repository's
+          # whole 10 GB budget, for a job that runs nightly and is not required.
+          #
+          # Dropping it would make this job permanently cold, and the `llvm-cov`
+          # step already measures 22m10 WARM against a 60-minute timeout. An
+          # instrumented cold build has no cache to fall back on — llvm-cov owns
+          # RUSTFLAGS, so every unit including dependencies rebuilds, and the
+          # `shared-key: rust` entry cannot substitute. That trades 1.8 GiB for a
+          # timeout failure.
+          #
+          # It also is not necessary. `[profile.test]` inherits
+          # `[profile.dev.package."*"] debug = false` from rust/Cargo.toml, so
+          # this entry shrinks on its own — the bulk of it was the ~1.5 GB duckdb
+          # rlib. The single-writer rule, the nightly sccache cap and that shrink
+          # free enough on their own; check the real number here before
+          # considering anything more aggressive.
       - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cargo-llvm-cov
@@ -401,3 +512,86 @@ jobs:
           restore-keys: |
             duckdb-extensions-
       - run: cargo llvm-cov --workspace --summary-only --fail-under-lines 45
+
+  # --- cache hygiene: nightly + on-demand only ---
+  #
+  # GitHub allows 10 GB of Actions cache per repository and evicts LRU past it.
+  # sccache's GHA backend writes ONE ENTRY PER COMPILATION OBJECT and nothing
+  # caps it, so it grows without bound — measured at ~2,706 entries and 4,410 MiB,
+  # 99% of the repository's entries and 44% of its bytes. At that size the
+  # repository sat at the ceiling (10,653,007,178 bytes across 2,594 entries) and
+  # GitHub evicted the largest LRU victim, which is the ~1.5 GB `shared-key: rust`
+  # entry that five compile jobs restore from. So sccache was evicting the cache
+  # it was added to complement, and the cost was a 42m27 `lint` instead of 14m15.
+  #
+  # Pruning OLDEST-ACCESSED-FIRST rather than by prefix is deliberate: an sccache
+  # entry is content-addressed, so an old one is still a valid hit if that crate
+  # version comes back, and the least-recently-accessed ones are the versions the
+  # lockfile has already moved past. Deleting the whole prefix would throw away
+  # the thing sccache is uniquely good at — surviving a `Cargo.lock` change, which
+  # rust-cache cannot do at all.
+  #
+  # Kept as its own job, never a step on a required one: cache hygiene must not
+  # be able to fail a merge.
+  cache-prune:
+    name: prune sccache to budget
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    permissions:
+      # Deleting a cache entry needs write; nothing else here does.
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      # sccache's share of the 10 GB budget. Sized from the steady state of
+      # everything else — one `shared-key: rust` entry (~1.3 GB), the pnpm store,
+      # the Next build cache, the buildkit blobs from images.yml and the DuckDB
+      # extensions come to ~2.1 GiB — so this leaves several GiB of slack rather
+      # than running the budget to the edge between nightly runs.
+      SCCACHE_BUDGET_MIB: "2048"
+    steps:
+      - name: Prune
+        # No checkout, so step off the workflow's `rust` working-directory
+        # default, which would not exist.
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+
+          report() {
+            gh api "repos/$GITHUB_REPOSITORY/actions/cache/usage" --jq \
+              '"\(.active_caches_count) entries, \(.active_caches_size_in_bytes) bytes"'
+          }
+
+          echo "::group::before"
+          echo "total: $(report)"
+          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/caches?per_page=100" \
+            --jq '.actions_caches[] | "\(.size_in_bytes)\t\(.key | split("/")[0])"' |
+            awk -F'\t' '{c[$2]++; s[$2]+=$1}
+                        END {for (k in c) printf "%7d entries %9.1f MiB  %s\n", c[k], s[k]/1048576, k}' |
+            sort -k3 -rn
+          echo "::endgroup::"
+
+          entries=$(mktemp)
+          gh api --paginate \
+            "repos/$GITHUB_REPOSITORY/actions/caches?per_page=100&key=sccache&sort=last_accessed_at&direction=asc" \
+            --jq '.actions_caches[] | "\(.id)\t\(.size_in_bytes)"' >"$entries"
+
+          total=$(awk -F'\t' '{s+=$2} END {print s+0}' "$entries")
+          budget=$((SCCACHE_BUDGET_MIB * 1048576))
+          printf 'sccache: %d entries, %d MiB (budget %d MiB)\n' \
+            "$(wc -l <"$entries")" "$((total / 1048576))" "$SCCACHE_BUDGET_MIB"
+
+          deleted=0 freed=0
+          while IFS=$'\t' read -r id size; do
+            if [ "$total" -le "$budget" ]; then break; fi
+            # A concurrent run may have evicted it already; that is not a failure.
+            if gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/caches/$id" --silent 2>/dev/null; then
+              total=$((total - size))
+              freed=$((freed + size))
+              deleted=$((deleted + 1))
+            fi
+          done <"$entries"
+
+          printf 'deleted %d oldest-accessed sccache entries, freed %d MiB\n' \
+            "$deleted" "$((freed / 1048576))"
+          echo "total: $(report)"
