@@ -62,7 +62,8 @@ Each column:
 
 `timestamp` is the one per-store divergence (lake naive, control tz-aware).
 `list<varchar>` cannot BIND as a lake statement parameter (duckdb-rs limit) —
-see the `chr(31)` idiom in [statements.md](statements.md).
+see the `chr(31)` idiom in `statements.md`, beside this one and reached
+from the skill body.
 
 ## What each generate flag emits, and where
 
@@ -102,7 +103,7 @@ intermediates, shared stage tables) are declared in
 `tests/model_registry_golden.json`. The registry's renderer also produces the
 entity lake DDL, so there is exactly one DDL renderer. "There is no third
 place": a persistent table enters through an entity.yaml or the registry —
-nothing else ships (see [gates.md](gates.md)).
+nothing else ships (`gates.md`, beside this one, carries the detail).
 
 ## The ERD
 

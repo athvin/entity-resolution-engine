@@ -113,9 +113,24 @@ This is enforced, not just documented: a `no-restricted-syntax` rule in
 (`bg-emerald-500`, `text-red-600`, …) in string and template literals, so
 `make frontend` fails on a reintroduction. Use the semantic tokens in
 `globals.css` — all chroma-0 in both themes — and signal state with weight,
-scale, spacing or motion rather than hue. The techniques that replaced the 47
-colour utilities this rule found are tabulated in `docs/frontend-testing.md`,
-along with the one known exception (`--destructive` is still red).
+scale, spacing or motion rather than hue. The `frontend-design-system` skill is
+the standard: the token system, the channel to reach for instead of each hue,
+and the one known exception (`--destructive` is still red). The techniques that
+replaced the 47 colour utilities this rule originally found are also tabulated
+in `docs/frontend-testing.md`.
+
+**All infrastructure is Terraform. Never generate CDK, CloudFormation or SAM.**
+Terraform under `infra/terraform/` is the only infrastructure language here:
+there is no `cdk.json`, no `template.yaml`, no `samconfig`, and that is a
+decision rather than a gap. A CDK app is not a smaller first step — it is a
+second, unmanaged source of truth for the same AWS account.
+
+This is worth stating at the top level because the installed AWS toolkit plugin
+ships CDK and CloudFormation skills (hidden via `skillOverrides`, but its
+documentation search still returns their idioms). Reading CloudFormation is
+fine — an EKS addon may surface as a stack AWS manages for you. Adding to it is
+not. The `aws-account-operations` skill carries the operating rules; the
+`infra-platform` skill carries the authoring ones.
 
 **Use `cargo add`** to add dependencies or features rather than editing
 `Cargo.toml` by hand.
@@ -133,35 +148,56 @@ bridging hook that actually runs.
 
 ### Repo skills
 
-Fifteen first-party skills in `.claude/skills/`, organised by what you are
-doing rather than by crate. **[`docs/agent-skills.md`](docs/agent-skills.md) is
-the standard** — the authoring rules, why everything sits at the root, and how
-the gate works.
+First-party skills in `.claude/skills/`, organised by what you are doing rather
+than by crate. **[`docs/agent-skills.md`](docs/agent-skills.md) is the
+standard** — the authoring rules, why everything sits at the root, which
+third-party skills and MCP servers are vetted in, and how the gate works.
 
+The table below is **generated** from each skill's frontmatter by
+`scripts/skills-check.sh regen`. Do not hand-edit it.
+
+<!-- BEGIN GENERATED: skill-inventory -->
 | Doing | Skill |
 |---|---|
-| adding a table, column or SQL statement | `entity-framework` |
-| an E0xx failure, a statement that will not plan | `sql-analysis` |
-| blocking, comparisons, training, term frequency, scores | `er-matching` |
-| running the pipeline with the `er` CLI | `er-engine-ops` |
-| attaching a lake, partition/sort choices, maintenance | `ducklake-lakehouse` |
-| a slow stage or query, a layout experiment | `ducklake-performance` |
-| an endpoint, guard, job or the dispatcher | `er-server-control-plane` |
-| changing a request/response shape | `api-contract` |
-| authoring or reviewing any Rust | `rust-conventions` |
-| a BFF route handler, sessions, the browser/server line | `frontend-bff` |
-| a frontend test or a red frontend job | `frontend-testing` |
-| Terraform, Helm, EKS, IAM | `infra-platform` |
-| a CI job failing for no diff-related reason, dependency bumps | `ci-and-supply-chain` |
-| reviewing something for a vulnerability class | `security` |
-| the autonomous campaign (`/pentest`, manual only) | `pentest` |
+| adding or changing an endpoint's request or response shape | `api-contract` |
+| asking what is deployed, investigating a bill | `aws-account-operations` |
+| a CI job fails for reasons unrelated to the diff | `ci-and-supply-chain` |
+| opening or attaching a lake, choosing a partition or sort key | `ducklake-lakehouse` |
+| a stage or query is slow, when proposing a partition | `ducklake-performance` |
+| adding or changing a table, column, or SQL statement | `entity-framework` |
+| running or scripting a pipeline stage, setting up a development lake | `er-engine-ops` |
+| changing blocking or comparison config, training or retraining a model | `er-matching` |
+| adding or reviewing an endpoint, handler | `er-server-control-plane` |
+| adding or reviewing a route handler under `src/app/api` | `frontend-bff` |
+| building or changing a table, list, chart | `frontend-data-ui` |
+| building or restyling a component or page | `frontend-design-system` |
+| adding or fixing a frontend test, when a Playwright or vitest run fails | `frontend-testing` |
+| editing Terraform or a Helm chart, writing a NodePool | `infra-platform` |
+| invoking /pentest, /pentest <category>, /pentest live (user-invoked only) | `pentest` |
+| authoring or reviewing any Rust in this repo | `rust-conventions` |
+| reviewing an endpoint or handler for SSRF/injection/tenant-isolation/auth/business-logic abuse | `security` |
+| an E0xx diagnostic fails, when a statement will not plan | `sql-analysis` |
+<!-- END GENERATED: skill-inventory -->
 
-Each carries an `evals.md` of three hand-run scenarios. `make skills-check`
-enforces the mechanical rules; counts and version numbers live in generated
-reference blocks, never in prose, because a hand-written count in this repo
-goes stale within weeks.
+Each carries an `evals.md` of hand-run scenarios. `make skills-check` enforces
+the mechanical rules; counts and version numbers live in generated reference
+blocks, never in prose, because a hand-written count in this repo goes stale
+within weeks — including the count that used to sit in this very paragraph.
 
-The symposium-synced skills under `rust/.claude/skills/` are third-party and
-gitignored. One of them, `rust-best-practice`, prescribes a finish line of
-`cargo fmt` + `cargo clippy` + `cargo test`; that checklist is **incomplete
-here** (it skips `entities-check`), and `rust-conventions` overrides it.
+### Three general-purpose skills are overridden
+
+A normal session loads skills that are each wrong for this repo in a specific
+way. In every case the house skill states the supersession in its own body and
+wins structurally, because root skills load at startup while nested and plugin
+skills load later. The override is partial each time — only the conflicting
+claim is superseded.
+
+| Skill | Wrong here because | Overridden by |
+|---|---|---|
+| `rust-best-practice` (symposium-synced under `rust/.claude/skills/`, gitignored) | its `cargo fmt` + `cargo clippy` + `cargo test` finish line **skips `entities-check`** | `rust-conventions` |
+| `frontend-design` | asks for a palette of 4–6 named hex values and deliberate aesthetic risk, against a product whose design doc forbids any palette | `frontend-design-system` |
+| `dataviz` | assumes a charting library and a colour-bearing palette, against a codebase whose charts are hand-rolled DOM/CSS by decision | `frontend-data-ui` |
+
+Which third-party plugins and MCP servers are vetted in, which are deliberately
+out, and why, is recorded in
+[`docs/agent-skills.md`](docs/agent-skills.md).

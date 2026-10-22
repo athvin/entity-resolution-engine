@@ -62,7 +62,7 @@ Four checks in one:
    its output behind; gen never deletes).
 3. **Analyse** — loads every statement, plans full-mode ones via DataFusion,
    runs the E0xx passes. Failure: `[E0xx] path: message` → the remedy table in
-   [statements.md](statements.md).
+   `statements.md`, beside this one and reached from the skill body.
 
 ## The oracle
 

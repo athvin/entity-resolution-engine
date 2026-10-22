@@ -1,6 +1,6 @@
 ---
 name: frontend-bff
-description: Explains the Next.js backend-for-frontend boundary in this repo — that the browser never reaches the Rust control plane, the split between the server-only upstream client and the browser's same-origin client, where authorization actually happens and why the proxy cannot do it, the three gates that enforce the boundary (the authz script, the semgrep rules including the no-NEXT_PUBLIC policy, and `server-only`), and the monochrome design rule. Use when adding or reviewing a route handler under `src/app/api`, wiring a component to data, handling sessions or impersonation, adding an environment variable, or touching anything that crosses the browser/server line. For the generated API types see api-contract; for test tiers and gates see frontend-testing.
+description: Explains the Next.js backend-for-frontend boundary in this repo — that the browser never reaches the Rust control plane, the split between the server-only upstream client and the browser's same-origin client, where authorization actually happens and why the proxy cannot do it, and the three gates that enforce the boundary (the authz script, the semgrep rules including the no-NEXT_PUBLIC policy, and `server-only`). Use when adding or reviewing a route handler under `src/app/api`, wiring a component to data, handling sessions or impersonation, adding an environment variable, or touching anything that crosses the browser/server line. For tokens, styling and interface copy see frontend-design-system; for tables, charts and dense data surfaces see frontend-data-ui; for the generated API types see api-contract; for test tiers and gates see frontend-testing.
 ---
 
 # The BFF boundary
@@ -91,16 +91,12 @@ can import those modules — see the frontend-testing skill.
 ## The UI is strictly black and white
 
 Both themes are grayscale: no brand accent, no coloured chips or badges, no
-palette. This is **ESLint-enforced**, not just documented: a
-`no-restricted-syntax` rule rejects Tailwind palette utilities
-(`bg-emerald-500`, `text-red-600`, …).
+palette, and it is **ESLint-enforced** rather than merely documented. The
+tokens, the techniques that replace hue, and the one `--destructive` exception
+belong to the frontend-design-system skill — read that before styling anything.
 
-The rule matches the **string literal**, not the JSX attribute, deliberately —
-so it also catches class strings built inside `cn()`, `cva()` variants, and
-helpers. Signal state with weight, scale, spacing or motion instead of hue, and
-use the semantic tokens in `globals.css` (all chroma-0 in both themes).
-
-One exception exists: `--destructive` is still red.
+It is named here only because it is the rule most often broken while doing BFF
+work, when a handler's new state needs rendering somewhere.
 
 ## Layout
 
@@ -135,5 +131,6 @@ a route handler.
 against the browser client. Note that `query/**` is deliberately outside the
 unit-coverage scope — it is Playwright's territory.
 
-**Adding a status indicator.** No colour. Use weight, scale, spacing or motion;
-the ESLint rule will reject a palette utility even inside a `cva` variant.
+**Adding a status indicator.** No colour. The channel to use instead, and why,
+is the frontend-design-system skill's territory; the ESLint rule will reject a
+palette utility even inside a `cva` variant.
