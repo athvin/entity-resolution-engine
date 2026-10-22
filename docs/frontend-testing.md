@@ -319,13 +319,27 @@ mock has to be faithful or it manufactures green. **The W0.4a contract gate
 compares routes, not response shapes**; a shape-level mock-vs-OpenAPI check would
 have caught this and is still unbuilt.
 
-### Known failures, and what each one is
+### What this tier found, and what each finding became
 
-This tier is **red by design right now**: it reports real defects rather than
-being tuned to pass. 8 of 15 cases pass. Do not "fix" these in the specs.
+It was revived red at 8 of 15 and left that way on purpose — the failures were
+real defects, not spec drift. Every one has since been fixed, each in its own PR
+and each locked by a test observed failing first:
 
-| Case | Diagnosis |
-|---|---|
+| Case | Finding | Fix |
+|---|---|---|
+| `run-the-business` → suspended tenant refuses work (×2) | Submitting a job to a suspended org returned **202, not 409**. `create_job`, `add_assertion` and `record_overlay_action` all went role-check → org-exists → `pg::enqueue`, so a suspended tenant could be made to spend compute and mutate its own lake — while the admin UI promised otherwise. `publish_config_version`, `delivery_preconditions` and `put_lexicon` each already refused, in three different idioms. | D6 — a shared `refuse_unless_active` on the three that had none |
+| `see-your-data` → provisions a tenant through the UI (×2) | `create_org` returned 503 without a `config_path` — the path the tenant-create UI uses, so self-onboarding was broken in the product. The `orgs.state` enum, the mock, the registry's `provision_job_id` and the UI's progress poller all already assumed the flow; only the server was missing. Six of the dead `ERSERVER_*` variables were its configuration. | D8 — a declared provisioning profile (local / Postgres) plus a `provision` job |
+| `fix-your-data` → assertion library shows the actor | Expected `steward@acme.dev`, got `key:<uuid>`. The BFF had **always** sent `x-acting-user` and its own comment promised `user:<email> via key:…`; er-server had zero references to the header. | D7 — honour it for attribution only, never for authorization |
+| `grow-your-data` → wizard activates a new source | `?limit=3` returned every job the org had ever had: the handler had no `Query` extractor and `pg::list_jobs` passed `i64::MAX`, while the BFF forwarded `limit` and `state` and the UI asked for `?limit=20`. The spec's three-kind assertion could never hold. | this PR — a `Query` extractor routing to the existing `pg::list_jobs_all` |
+| `see-your-data` → jobs table lists `run_all` | A **cold-route** flake, not slow data: `next start` initialises the dynamic route on first hit and the default 5 s expired while `jobs.isPending` was true, with the Skeleton rendering no text — so the card's whole content was its own title and the failure read as "element not found". | a 60 s budget on that first assertion |
+
+Four of the five were the same shape — **the frontend states a contract the
+backend never fulfilled** — which is the class `mock_contract.rs` was built for
+and can only partly see; it compares route and method, not response shapes,
+headers or query parameters. That gap is the strongest remaining argument for a
+shape-level gate.
+
+---|---|
 | `see-your-data` → provisions a tenant through the UI (×2) | **Product gap.** `create_org` returns 503 "auto-provisioning not configured" without a `config_path` — the path the admin tenant-create UI uses. The Python server provisioned server-side from the dead `ERSERVER_*` variables; the Rust port never reimplemented it. Tenant self-onboarding is broken in the product, not the test. |
 | `run-the-business` → suspended tenant refuses work (×2) | **Real bug.** Submitting a job to a suspended org returns **202, not 409**: `create_job` has no suspension guard, while `publish_config_version` and `delivery_preconditions` both have one. The UI promises "a suspended tenant refuses jobs, imports and steward actions" — jobs is the one that does not. |
 | `fix-your-data` → assertion library shows the actor | **Product gap.** Expects `steward@acme.dev`; gets `key:<uuid>`. `Principal.actor` is derived solely from the API key and the BFF forwards no end-user identity, so every human action is attributed to a service credential. Fixing it means forwarding the authenticated user for *attribution only* — never for authorization, or it becomes an impersonation vector. |

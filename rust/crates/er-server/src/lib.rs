@@ -2469,10 +2469,30 @@ async fn list_jobs(
     principal: Principal,
     State(state): State<AppState>,
     Path(org): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
 ) -> axum::response::Response {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
+    // `limit` and `state` were accepted and IGNORED: this handler had no `Query`
+    // extractor at all, and `pg::list_jobs` passed `i64::MAX` ("no page cap on
+    // the per-org view"). Meanwhile the BFF forwards both (`PASSTHROUGH` in
+    // `api/orgs/[org]/jobs/route.ts`), `useJobs` asks for `?limit=20`, and
+    // `grow-your-data.spec.ts` asks for `?limit=3` and then asserts exactly
+    // three kinds — which cannot hold on a tenant that accumulates jobs.
+    //
+    // Validated and parsed the same way `jobs_global` does, so the two job views
+    // answer the same query the same way.
+    if let Some(s) = params.get("state")
+        && !JOB_STATES.contains(&s.as_str())
+    {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("unknown state '{s}'"),
+        );
+    }
+    let limit = read::parse_limit(params.get("limit").map(String::as_str));
+    let state_filter = params.get("state").map(String::as_str);
     if let Some(dsn) = &state.dsn {
         let client = match connect_pg(dsn).await {
             Ok(c) => c,
@@ -2482,7 +2502,10 @@ async fn list_jobs(
             Ok(r) => r,
             Err(r) => return *r,
         };
-        return match pg::list_jobs(&client, &org_row.id).await {
+        // Through `list_jobs_all` scoped to this org: it already takes limit and
+        // state and clamps the limit, so the per-org view no longer serializes
+        // every job an org has ever had.
+        return match pg::list_jobs_all(&client, Some(&org_row.id), state_filter, limit).await {
             Ok(jobs) => Json(json!({ "jobs": jobs })).into_response(),
             Err(e) => pg_err(e),
         };
@@ -2493,6 +2516,8 @@ async fn list_jobs(
         .iter()
         .rev()
         .filter(|j| j.org_id == org)
+        .filter(|j| state_filter.is_none_or(|s| j.state == s))
+        .take(usize::try_from(limit).unwrap_or(usize::MAX))
         .collect();
     Json(json!({ "jobs": jobs })).into_response()
 }

@@ -1286,11 +1286,19 @@ const server = http.createServer((req, res) => {
     }
     if ((match = /^\/v1\/orgs\/([^/]+)\/jobs$/.exec(path)) && req.method === "GET") {
       const limit = Number(url.searchParams.get("limit") ?? 50);
+      const wanted = url.searchParams.get("state");
       // `{ jobs: [...] }`, matching er-server, which wraps every list response.
       // This mock returned a bare array until the full-stack tier was revived
       // and showed the BFF route passing the real object through to a UI that
       // expected an array — the mock's unfaithfulness is what hid it.
-      return send(res, 200, { jobs: (state.jobs[match[1]] ?? []).slice(0, limit) });
+      //
+      // `state` is filtered here for the same reason: the real handler honours
+      // it now, and a mock that ignores a parameter the server respects is how
+      // the next one of these hides.
+      const rows = (state.jobs[match[1]] ?? []).filter(
+        (job) => wanted === null || job.state === wanted,
+      );
+      return send(res, 200, { jobs: rows.slice(0, limit) });
     }
     if ((match = /^\/v1\/orgs\/([^/]+)\/jobs\/([^/:]+)$/.exec(path)) && req.method === "GET") {
       const job = (state.jobs[match[1]] ?? []).find((row) => row.id === match[2]);

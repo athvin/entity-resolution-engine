@@ -26,7 +26,7 @@ COMPOSE=(docker compose -f "${SCRIPT_DIR}/compose.yaml")
 
 source "${SCRIPT_DIR}/env.sh"
 
-mkdir -p "${CONFIG_DIR}" "${DROP_DIR}" "${LAKE_DIR}" "${STATE_DIR}/logs"
+mkdir -p "${CONFIG_DIR}" "${DROP_DIR}" "${LAKE_DIR}" "${ER_PROVISION_ROOT}" "${STATE_DIR}/logs"
 
 echo "==> starting the control-plane container"
 "${COMPOSE[@]}" up -d controlplane-db
