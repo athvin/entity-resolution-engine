@@ -914,8 +914,8 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          `a_deleted_record_stops_being_resurrected_by_its_own_stale_scores` covers bugs 1 and 2.
          `er run-all` gains `--mode` and `--allow-escalate`, behind the same drift guard the
          control plane applies; DesignDoc specified both and neither existed.
-         Still unbuilt: tombstone *event* attribution in `entity_events` (already a documented
-         gap in `run_reconcile`'s own note), and retiring `entities` rows that lose every member.
+         Both leftovers landed in **D2** below: tombstone *event* attribution, and retiring
+         `entities` rows that lose every member. Scoping them found the two were one bug.
    - [x] **E6b segment scoping (#54) — splitting the work without splitting the data.**
          The incumbent caps a run at 3 hours and tells you to split your dataset. Splitting the
          *corpus* is the obvious reading and it is destructive: every cross-segment duplicate
@@ -1510,6 +1510,43 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          (asserted satisfiable, which is the half the source-wizard stall got wrong), and the
          query-key nesting `useDeleteWebhook` relies on for its invalidation to reach the filtered
          caches at all.
+   - [x] **D2 the E7 leftovers — and deletion was allocating, not deleting.** Scoped by probing
+         the lake rather than by reading the note, which is why what it found is not what the
+         note described: a deleted record was being minted a **brand-new entity**.
+         `reconcile_plan`'s orphan rule gives every prior record the clustering placed nowhere a
+         fresh singleton entity, with a `created` event. That is right for a SUPPRESSED record —
+         still in the corpus, excluded from clustering, and entitled to keep an identity — and
+         wrong for a TOMBSTONED one. The pure core cannot tell them apart: it sees only the old
+         and new partitions, and "absent from the new partition" is equally true of both. So
+         every deletion allocated an entity, the membership prune then emptied it, and the lake
+         kept an **`active` entity with zero members** that the ledger had announced as created.
+         Observed, not reasoned: the probe printed one orphan entity per deleted record.
+         The fix is in `er-cli`, which is the only place that knows the corpus — the pure core
+         and its Python-golden tests are untouched except for three additions that change no
+         behaviour (a `DEPARTED` cause constant, a public `PlannedEvent::new`, and
+         `sort_planned_events`, extracted so the S4.5.4 D1 ordering has exactly one
+         implementation now that a caller appends events). `p_old` is filtered to the corpus, so
+         the orphan rule stops firing for departures; the departures are collected rather than
+         dropped and announced as `member_removed` with **`cause: departed`**.
+         That cause is new because `recluster` was the only one there was, so a deletion reached
+         a subscriber claiming the model had changed its mind about where a record belonged —
+         the quietest kind of wrong, since both statements are about the same row leaving the
+         same entity. The sabotage run shows the old behaviour emitting BOTH causes for one
+         departure.
+         Retirement is read from the lake AFTER the membership prune (new declared
+         `resolved_entity/read/orphaned_live`, `pin: live` with `reads: [entity_membership]`),
+         because the prune is the step that can empty an entity and the plan runs before it. It
+         is also written after the plan's own transitions, so a retirement wins over an `active`
+         the plan may have written for the same id.
+         O3c-2's aggregate is what makes this urgent rather than tidy: `entity.created` was
+         over-reporting by exactly the phantom count and `entity.retired` under-reporting by the
+         orphan count, so the webhook stream described a corpus that never existed.
+         Three gates, each observed failing. Putting departed records back in `p_old` reproduces
+         the phantom `created` *and* the duplicate `member_removed`. Disabling the orphan sweep
+         leaves the entity `active` with nobody in it. And `reconciling_an_unchanged_corpus_is_a_no_op`
+         is the INV-EQ half: both new passes run on every reconcile, so the risk they carry is
+         retiring or re-announcing something on a corpus that did not change — same partition,
+         same lifecycle, zero events. No fixture or golden file moved.
    - [x] **O7a resolution metrics over time (#45/#57's trend half).** Every dashboard number has
          always been computed LIVE from the lake, so the product could say what is true now and
          nothing about the direction of travel — and "is the duplicate rate going up" is the

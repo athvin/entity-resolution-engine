@@ -30,7 +30,7 @@ statements is read or written only through the engine's own stage SQL, not
 through a typed query function.
 
 <!-- BEGIN GENERATED: entities-index -->
-**35 entities, 151 declared statements.**
+**35 entities, 152 declared statements.**
 
 | Entity | Relation | Store | Key | Natural key | History |
 |---|---|---|---|---|---|
@@ -99,7 +99,7 @@ Declared statements per entity and operation:
 | `raw_record` | 0 | 2 | 0 | 0 |
 | `record_overlay` | 1 | 2 | 1 | 1 |
 | `record_quality` | 1 | 2 | 0 | 1 |
-| `resolved_entity` | 0 | 1 | 1 | 0 |
+| `resolved_entity` | 0 | 2 | 1 | 0 |
 | `review` | 0 | 4 | 3 | 0 |
 | `run` | 1 | 3 | 1 | 0 |
 | `schedule` | 2 | 2 | 3 | 1 |

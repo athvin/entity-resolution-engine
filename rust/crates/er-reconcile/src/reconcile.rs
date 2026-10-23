@@ -22,6 +22,20 @@ pub const MEMBER_REMOVED: &str = "member_removed";
 pub const SPLIT: &str = "split";
 /// `member_removed.cause` for a member the new partition placed elsewhere (S4.5.5).
 pub const RECLUSTER: &str = "recluster";
+/// `member_removed.cause` for a member that LEFT THE CORPUS — a tombstoned
+/// record, which standardize drops.
+///
+/// Distinct from [`RECLUSTER`] because the two are different facts to anyone
+/// reading the ledger: a recluster says the model changed its mind about where
+/// a record belongs, a departure says the record is gone. Reporting a deletion
+/// as a recluster was this ledger's quietest lie — the only `member_removed`
+/// cause that existed, so a departure necessarily arrived mislabelled.
+///
+/// The CALLER attributes this, not [`reconcile_plan`]: the plan sees only the
+/// old and new partitions, and "absent from the new partition" is equally true
+/// of a tombstoned record and a suppressed one. Only the stage holding the
+/// corpus can tell those apart.
+pub const DEPARTED: &str = "departed";
 
 /// S5 event ordering; `entity_events` is emitted in this order then by entity_id
 /// then details_hash (S4.5.4 D1).
@@ -39,6 +53,23 @@ fn event_rank(event_type: &str) -> usize {
         .iter()
         .position(|t| *t == event_type)
         .expect("known event type")
+}
+
+/// Put `events` in the S4.5.4 D1 order: event type, then entity id, then
+/// details digest.
+///
+/// Public so a caller that APPENDS events — the lake stage's departures and
+/// retirements, which need the corpus this crate does not see — can re-impose
+/// the same order instead of leaving its own rows in a tail. The ordering is
+/// part of the spec, so there must be exactly one implementation of it.
+pub fn sort_planned_events(events: &mut [PlannedEvent]) {
+    events.sort_by(|a, b| {
+        (event_rank(&a.event_type), &a.entity_id, &a.details_hash).cmp(&(
+            event_rank(&b.event_type),
+            &b.entity_id,
+            &b.details_hash,
+        ))
+    });
 }
 
 /// The S4.5.4 details digest: SHA-256 over the canonical JSON (sorted keys,
@@ -63,7 +94,14 @@ pub struct PlannedEvent {
 }
 
 impl PlannedEvent {
-    fn new(entity_id: &str, event_type: &str, details: serde_json::Value) -> Self {
+    /// One planned event, with its [`details_hash`] computed from `details`.
+    ///
+    /// Public because the lake stage appends events the pure plan cannot
+    /// derive — a departure and the retirement it causes both need the corpus,
+    /// which this crate deliberately does not know about. Constructing them
+    /// through here is what keeps the digest and the stored bytes one thing.
+    #[must_use]
+    pub fn new(entity_id: &str, event_type: &str, details: serde_json::Value) -> Self {
         let details_hash = details_hash(&details);
         Self {
             entity_id: entity_id.to_string(),
@@ -363,13 +401,7 @@ pub fn reconcile_plan(
 
     assignments.sort_by(|a, b| a.record_key.cmp(&b.record_key));
     transitions.sort_by(|a, b| a.entity_id.cmp(&b.entity_id));
-    events.sort_by(|a, b| {
-        (event_rank(&a.event_type), &a.entity_id, &a.details_hash).cmp(&(
-            event_rank(&b.event_type),
-            &b.entity_id,
-            &b.details_hash,
-        ))
-    });
+    sort_planned_events(&mut events);
     let minted: Vec<String> = mint_keys.iter().map(|k| minted_ids[k].clone()).collect();
 
     ReconcilePlan {

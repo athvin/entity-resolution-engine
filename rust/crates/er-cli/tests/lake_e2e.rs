@@ -1183,6 +1183,247 @@ fn a_deleted_record_stops_being_resurrected_by_its_own_stale_scores() {
          {partners:?}: {after:?}"
     );
 
+    // D2: the departure is attributed, and nothing was ALLOCATED for it.
+    //
+    // Before D2 the plan's orphan rule gave this deleted record a brand-new
+    // singleton entity with a `created` event, and the membership prune then
+    // emptied it — so the lake held an ACTIVE entity with zero members that the
+    // ledger announced as created. Deletion did not delete; it allocated.
+    let events = session
+        .query_strings(&format!(
+            "select entity_id, event_type, details from {} \
+             where run_id = '01INCDEL000000000000DEL000' order by seq",
+            er_cli::ENTITY_EVENTS
+        ))
+        .unwrap();
+    assert!(
+        !events.iter().any(|e| e[1] == "created"),
+        "deleting a record must not CREATE an entity: {events:?}"
+    );
+    let removed: Vec<&Vec<String>> = events.iter().filter(|e| e[1] == "member_removed").collect();
+    assert_eq!(
+        removed.len(),
+        1,
+        "exactly one entity lost the deleted record: {events:?}"
+    );
+    assert!(
+        removed[0][2].contains(&victim),
+        "the removal must name the record that left: {:?}",
+        removed[0]
+    );
+    // `departed`, not `recluster`. The two are different facts to anyone reading
+    // the ledger — the model changing its mind versus the record being gone —
+    // and `recluster` was the only cause that existed, so every deletion
+    // arrived mislabelled.
+    assert!(
+        removed[0][2].contains("\"cause\":\"departed\""),
+        "a deletion is a departure, not a recluster: {:?}",
+        removed[0]
+    );
+    // ...and it is attributed to the entity the record was actually in.
+    let was_in = before
+        .iter()
+        .find(|c| c.contains(&victim))
+        .expect("the victim had an entity");
+    let surviving = session
+        .query_strings(&format!(
+            "select entity_id from {} where record_key = '{}'",
+            er_cli::ENTITY_MEMBERSHIP,
+            was_in.iter().find(|k| **k != victim).unwrap()
+        ))
+        .unwrap();
+    assert_eq!(
+        removed[0][0], surviving[0][0],
+        "the removal is attributed to the entity the record left, not a new one"
+    );
+
+    // No entity is left active with nobody in it.
+    let orphans = session
+        .query_strings(
+            "select e.id, e.status from lake.main.entities e \
+             left join lake.main.entity_membership m on m.entity_id = e.id \
+             group by e.id, e.status having count(m.record_key) = 0 order by e.id",
+        )
+        .unwrap();
+    assert!(
+        orphans.iter().all(|o| o[1] == "retired"),
+        "an entity with no members must be retired, not active: {orphans:?}"
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// An entity that loses its LAST member is retired, and says so.
+///
+/// The pure plan retires an entity whose members all moved within the
+/// clustering; it cannot see one emptied by the membership prune, which runs
+/// after it. So before D2 a single-record entity whose record was deleted kept
+/// an `active` row with nothing in it — a tombstone the lifecycle never
+/// recorded, and one that `GET /duplicates` and the entity count both still
+/// believed in.
+#[test]
+fn an_entity_that_loses_every_member_is_retired() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let (session, config, tmp) = open_seeded_lake("inc_retire");
+    run_all_phase(
+        &session,
+        &config,
+        "incremental_batch",
+        "base",
+        "01INCRET0000000000000BASE00",
+        "2026-01-01 00:00:00",
+        "full",
+    );
+
+    // A SINGLETON entity this time: its one record leaving empties it, which is
+    // the case the plan cannot reach.
+    let before = partition(&membership_rows(&session));
+    let victim = before
+        .iter()
+        .find(|c| c.len() == 1)
+        .map(|c| c.iter().next().unwrap().clone())
+        .expect("the base corpus has a single-record entity");
+    let entity_id = session
+        .query_strings(&format!(
+            "select entity_id from {} where record_key = '{victim}'",
+            er_cli::ENTITY_MEMBERSHIP
+        ))
+        .unwrap()[0][0]
+        .clone();
+    let (source, record_id) = victim.split_once(':').unwrap();
+
+    let csv = std::fs::read_to_string(repo_fixture(&format!(
+        "incremental_batch/base/{source}.csv"
+    )))
+    .unwrap();
+    let mut kept: Vec<&str> = csv.lines().take(1).collect();
+    kept.extend(
+        csv.lines()
+            .skip(1)
+            .filter(|l| !l.is_empty() && !l.starts_with(&format!("{record_id},"))),
+    );
+    assert_eq!(
+        kept.len(),
+        csv.lines().filter(|l| !l.is_empty()).count() - 1,
+        "the victim row must actually have been removed from the delivery"
+    );
+    er_cli::run_ingest(
+        &session,
+        &config,
+        source,
+        &format!("{}\n", kept.join("\n")),
+        "01INCRET000000000000DEL000",
+        "2026-06-01 00:00:00",
+        true,
+    )
+    .unwrap();
+    er_cli::run_standardize(&session, &config, "2026-06-01 00:00:00").unwrap();
+    er_cli::run_reconcile(
+        &session,
+        &config,
+        "01INCRET000000000000DEL000",
+        "2026-06-01 00:00:00",
+    )
+    .unwrap();
+
+    let status = session
+        .query_strings(&format!(
+            "select status from lake.main.entities where id = '{entity_id}'"
+        ))
+        .unwrap();
+    assert_eq!(
+        status[0][0], "retired",
+        "the entity that lost its only member is still {:?}",
+        status[0][0]
+    );
+    let events = session
+        .query_strings(&format!(
+            "select entity_id, event_type, details from {} \
+             where run_id = '01INCRET000000000000DEL000' order by seq",
+            er_cli::ENTITY_EVENTS
+        ))
+        .unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|e| e[0] == entity_id && e[1] == "retired"),
+        "the retirement must be in the ledger, not only in the status column: {events:?}"
+    );
+    // And the departure names the record, so "why did this entity end" is
+    // answerable from the ledger alone.
+    assert!(
+        events.iter().any(|e| e[1] == "member_removed"
+            && e[2].contains(&victim)
+            && e[2].contains("departed")),
+        "the retirement must be preceded by the departure that caused it: {events:?}"
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// With nothing departed, D2 changes nothing — the INV-EQ obligation.
+///
+/// The `p_old` filter and the orphan sweep both run on every reconcile, so the
+/// risk they carry is retiring or re-announcing something on a corpus that did
+/// not change. A re-reconcile of an untouched corpus must therefore be a
+/// no-op: same partition, no new events, no status moved.
+#[test]
+fn reconciling_an_unchanged_corpus_is_a_no_op() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let (session, config, tmp) = open_seeded_lake("inc_noop");
+    run_all_phase(
+        &session,
+        &config,
+        "incremental_batch",
+        "base",
+        "01INCNOP0000000000000BASE00",
+        "2026-01-01 00:00:00",
+        "full",
+    );
+    let before = partition(&membership_rows(&session));
+    let statuses_before = session
+        .query_strings("select id, status, merged_into from lake.main.entities order by id")
+        .unwrap();
+
+    er_cli::run_reconcile(
+        &session,
+        &config,
+        "01INCNOP000000000000AGAIN0",
+        "2026-06-01 00:00:00",
+    )
+    .unwrap();
+
+    assert_eq!(
+        partition(&membership_rows(&session)),
+        before,
+        "re-reconciling an unchanged corpus moved the partition"
+    );
+    assert_eq!(
+        session
+            .query_strings("select id, status, merged_into from lake.main.entities order by id")
+            .unwrap(),
+        statuses_before,
+        "re-reconciling an unchanged corpus changed an entity's lifecycle"
+    );
+    let events = session
+        .query_strings(&format!(
+            "select event_type, entity_id, details from {} \
+             where run_id = '01INCNOP000000000000AGAIN0'",
+            er_cli::ENTITY_EVENTS
+        ))
+        .unwrap();
+    assert!(
+        events.is_empty(),
+        "a no-op reconcile announced {} event(s): {events:?}",
+        events.len()
+    );
+
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
