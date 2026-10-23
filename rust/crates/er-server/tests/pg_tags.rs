@@ -183,17 +183,17 @@ async fn tags_are_named_applied_and_retired_without_losing_what_they_touched() {
     );
     assert_eq!(
         apply("apply", &steward_key, "entity", "E1").await.status(),
-        StatusCode::NO_CONTENT
+        StatusCode::OK
     );
     // Twice is the same fact. The unique index makes the second a no-op, so two
     // stewards clicking at once cannot produce two rows.
     assert_eq!(
         apply("apply", &steward_key, "entity", "E1").await.status(),
-        StatusCode::NO_CONTENT
+        StatusCode::OK
     );
     assert_eq!(
         apply("apply", &steward_key, "review", "R7").await.status(),
-        StatusCode::NO_CONTENT
+        StatusCode::OK
     );
     // A kind outside the closed set is refused, rather than written and then
     // matching nothing any filter looks for.
@@ -281,7 +281,7 @@ async fn tags_are_named_applied_and_retired_without_losing_what_they_touched() {
         apply("unapply", &steward_key, "review", "R7")
             .await
             .status(),
-        StatusCode::NO_CONTENT
+        StatusCode::OK
     );
     assert_eq!(
         apply("unapply", &steward_key, "review", "R7")
@@ -322,7 +322,7 @@ async fn tags_are_named_applied_and_retired_without_losing_what_they_touched() {
             .await
             .unwrap()
             .status(),
-        StatusCode::NO_CONTENT,
+        StatusCode::OK,
         "a tag with applications must still be retirable — the whole point of the soft delete"
     );
 

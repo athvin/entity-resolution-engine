@@ -5836,7 +5836,12 @@ async fn retire_tag(
     };
     let _ = pg::set_actor(&client, &principal.actor).await;
     match pg::retire_tag(&client, &org_row.id, &tag_id).await {
-        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        // A JSON body rather than 204, matching `delete_webhook`: the BFF's only
+        // forwarding helper parses the response as JSON, so a 204 reaches it as
+        // `SyntaxError: Unexpected end of JSON input` — the upstream write
+        // succeeds and the UI shows an error. No control-plane mutation here
+        // answers 204, and this is why.
+        Ok(true) => Json(json!({ "retired": true })).into_response(),
         Ok(false) => detail_err(StatusCode::NOT_FOUND, "no such tag"),
         Err(e) => pg_err(e),
     }
@@ -5925,7 +5930,14 @@ async fn tag_application(
         .await
     };
     match outcome {
-        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        // A JSON body rather than 204, for the reason `retire_tag` records.
+        Ok(true) => {
+            if apply {
+                Json(json!({ "applied": true })).into_response()
+            } else {
+                Json(json!({ "removed": true })).into_response()
+            }
+        }
         // On apply this is "no such tag"; on unapply, "it was not applied".
         // Both are 404 on the thing the caller named.
         Ok(false) => detail_err(
