@@ -258,8 +258,10 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
       would keep it inside AWS. For a dev instance the cheapest path needs no domain at all: SES
       sandbox can verify a single *email address* identity, which costs nothing and needs one
       click in the inbox.
-- [x] **W0.1 worktree + this tracker section.** All program work happens in a dedicated
-      worktree (`../ere-datagroomr-parity`) so it cannot disturb other local branches.
+- [x] **W0.1 this tracker section.** The dedicated worktree this originally called for
+      (`../ere-datagroomr-parity`) no longer exists and was not used: every program PR has
+      been a branch off `main` in the primary checkout. Recorded because the instruction to
+      work in it outlived the worktree, and a reader following it would create a second one.
 - [x] **W0.7 the webhook SSRF — the repo's own headline finding, closed.**
       `.claude/skills/security/references/ssrf-egress.md` has described this since the security
       suite was written (2026-10-19) and nothing had been built: `create_webhook` validated its
@@ -1186,7 +1188,6 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          `CombineMode`). A doc that maps the incumbent's three modes onto the existing config is
          probably the whole deliverable.
    - [ ] E9c S3 auto-ingestion (#47).
-   - [ ] E9c S3 auto-ingestion (#47).
 3. **Learning loop**
    - [x] **E10a the `train` job, which the dispatcher had no arm for.** `train` has been in
          `SCHEDULABLE_KINDS` since the queue shipped — so the schedule API accepted it, and every
@@ -1441,7 +1442,31 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          asserts it rather than trusting it. Observed failing: disabling the label pass fails
          it by name. Training still lands a **draft**, unchanged from E10a — training is not
          consent to re-cluster a tenant's data.
-   - [ ] E10c-4 related-record features (#26), household/link entities (#33).
+   - [ ] E10c-4 related-record features (#26), household/link entities (#33). **Deeper than
+         the one-liner suggests, and the reason is worth knowing before starting:** the plan
+         says `features.related:` is "compiled into the concat stage by `er-compile`", but
+         er-compile produces SETTINGS — the concat relation is built by
+         `dedupe_core::predict::materialize_concat_multi`, and at least four golden suites
+         (`golden_batch1/3/4`, `golden_accuracy`) read through it. So this changes
+         execution-oracle-governed engine SQL and carries a determinism obligation, not just a
+         config block. Worth its own session with that in view.
+   - [x] **D4 tracker hygiene — the count was wrong in three different ways.**
+         Before: 7 open items, of which **3 were duplicates** and ~14 more were invisible.
+         After: 18 open, 86 done, and every one countable.
+         The three defects were not the same defect. `E9c` appeared twice as literally
+         identical adjacent lines. The two `V0` bullets were NOT duplicates — the earlier one
+         still listed `V1` as open, which shipped in #238, so the stale copy went and the
+         current one stayed. And Waves 6–8 were prose paragraphs with no checkboxes at all,
+         so fifteen PRs could not be counted by anything; they now carry one box each.
+         Also corrected: W0.1 claimed "all program work happens in a dedicated worktree
+         (`../ere-datagroomr-parity`)". That worktree does not exist and was never used —
+         every program PR has been a branch off `main` in the primary checkout. An instruction
+         that outlived its subject is worse than no instruction: a reader following it would
+         have created a second one.
+         Left deliberately: `F3` is marked absorbed rather than open, because the insights
+         page and dashboard trends shipped with the attribution work (#292/#295/#297), and
+         `O10` now records that it wants `#[utoipa::path]` first — the response-envelope
+         question it was once blocked on is already answered by D13's derived ledger.
 4. **Operating at scale**
    - [x] **O3b webhook delivery becomes an outbox (#43's reliability half).** Delivery was
          `let _ = webhook::emit_job_event(...)` at three call sites: the POST happened **inline**
@@ -2257,9 +2282,6 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          same corpus five months later LOWERS the total (so freshness is computed rather than
          stubbed), that re-scoring corrects rather than duplicates, and that every scored record
          lands in exactly one bucket.
-   - [ ] V0 SES apply (one input away — the account has no domain; recommend the sandbox
-         email-identity path), V1 transform rules (#61), V2 international standardization (#60),
-         V4 AWS-native verification suite (#64-#72).
    - [x] **V1 transform (cleanse) rules (#61).** Ordered per-attribute rules — `lower`, `upper`,
          `trim`, `replace`, `regex_replace`, `strip`, `substring`, `default`, `dictionary` —
          compiled into the staging projection and applied to the RAW value **before**
@@ -2293,9 +2315,12 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
    - [ ] V0 SES apply (one input away — the account has no domain; recommend the sandbox
          email-identity path), V2 international standardization (#60), V4 AWS-native verification
          suite (#64-#72).
-6. **AI on Bedrock** — Bedrock wiring + per-org BYO LLM (#77), LLM adjudication (#27),
-   NL rule authoring (#29), AI schema mapping + model setup (#48/#35), staged agent
-   write-actions (#81).
+6. **AI on Bedrock**
+   - [ ] V5 Bedrock runtime path + per-org BYO LLM (#77).
+   - [ ] V6 LLM adjudication on gray-band reviews (#27). Auto-apply off by default.
+   - [ ] V7 NL rule authoring + explain-rule (#29). Writes a DRAFT version, never publishes.
+   - [ ] V8 AI schema mapping + AI model setup (#48/#35). Sends a profile summary, never rows.
+   - [ ] V9 staged agent write-actions (#81), through the existing steward-action path.
 
    **Blocked on one account-level decision, verified 2026-10-20.** Probed live with the
    `er-builder` profile against `us-east-2`:
@@ -2318,11 +2343,24 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
    decision and not something to fabricate. Everything else in Wave 6 can be built and tested
    against the existing `ANTHROPIC_BASE_URL` seam and the Playwright mock's scripted
    `/anthropic/v1/messages`, so this blocks live verification, not progress.
-7. **Governance + platform** — config promotion (#76), MCP server + service identity
-   (#79/#78), embeddable widget (#59), saved views (#87), metering (#88), field-value
-   rollback UI (#12/#13).
-8. **Review-UI depth** — group merge editor (#8), pre-load integrity check (#46), insights
-   UI (#45/#57), verify-before-export (#86 de-Salesforced).
+7. **Governance + platform**
+   - [ ] O9 config promotion: export/import/diff across orgs (#76).
+   - [ ] O10 MCP server over the generated OpenAPI + org service identity (#79/#78). **Wants
+         `#[utoipa::path]` on the handlers first** — `openapi.json` documents zero paths by a
+         recorded decision, so there is nothing for an MCP server to generate tools from. The
+         response-ENVELOPE question is already answered without it, by the derived ledger D13
+         built (`frontend/src/lib/api/envelopes.json`).
+   - [ ] O11 embeddable duplicate widget: a signed-token read-only micro-page (#59).
+   - [ ] O12a saved views / folders (#87).
+   - [ ] O12b usage metering ledger (#88).
+   - [ ] O12c field-value rollback UI (#12/#13).
+8. **Review-UI depth**
+   - [ ] F1 group merge editor (#8) — today's inbox is a PAIR adjudicator; this adds the
+         master-editing half. Reuses `field-compare-grid`.
+   - [ ] F2 pre-load data integrity check (#46), riding E9b's staging.
+   - [ ] F4 verify-before-export (#86, de-Salesforced).
+   - [x] **F3 absorbed into O7b** — the insights page and the dashboard trend charts shipped
+         with the attribution work (#292/#295/#297), which is why #45/#57 are not listed here.
 
 **The false-green rule** this program runs under: every new gate is observed *failing* before
 it is trusted, and a mock-tier green is never evidence that a backend exists. Any feature
