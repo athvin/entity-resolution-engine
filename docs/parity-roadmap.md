@@ -1624,6 +1624,28 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          unit; it now says `+9.8 points`. The insights page also gains a visual baseline, which it
          lacked: this screen is CHARTS, and a bar that silently rendered at the wrong width would
          read as a different corpus rather than as a bug.
+   - [x] **D11 a webhook could not be deleted once it had delivered anything.** Found by clicking
+         Remove on the real stack — the API answered `{"detail":"db: db error"}`.
+         `webhook_deliveries.webhook_id` references `webhooks.id` with no `ON DELETE` action, so
+         the hard `DELETE FROM public.webhooks` could not run once a subscription had emitted
+         anything, which is every subscription that ever worked. The tenant got an opaque
+         five-word error for a button the UI offers.
+         **No test caught it because the existing one deleted a webhook that had never
+         delivered** — the foreign key was simply never exercised. The regression test now emits
+         to the subscription first and asserts THIS webhook is among the delivery targets, so the
+         constraint is on the path rather than nearby.
+         The fix is a soft delete, and the data model was already built for one: `by_id`,
+         `for_delivery` and `list_active` all filter `AND active`, so deactivating is
+         indistinguishable from deletion to every read, while the delivery log survives. That is
+         the right semantics anyway — the log is history, and a tenant auditing what was sent to
+         a subscriber they have since removed is the case it exists for. The statement moves from
+         `delete/` to `update/deactivate`, because the framework checks the SQL verb against its
+         folder.
+         **The mock was right and the server was wrong**, which is the inverse of this program's
+         usual direction: `tests/mock-erserver` removes the subscription and keeps its
+         deliveries, exactly the behaviour the server now has. The O3c-3 spec asserting
+         "removing a subscription keeps its delivery history" was describing the intended
+         contract the backend could not honour.
    - [x] **D10 `er` never reconciled its lake, so a lake older than a column stayed older.**
          Found by booting the full-stack dev stack and reading the seed output — the tier exists
          for exactly this and had not been run in a while:

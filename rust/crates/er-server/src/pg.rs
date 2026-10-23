@@ -1253,16 +1253,25 @@ pub async fn webhook_endpoint(
         .map(|w| (w.url, w.secret)))
 }
 
-/// Delete a webhook (`webhooks.py` `delete`). `true` iff a row was removed.
+/// Retire a webhook (`webhooks.py` `delete`). `true` iff a row changed.
+///
+/// A SOFT delete. `webhook_deliveries.webhook_id` references `webhooks.id`, so
+/// the hard DELETE this replaces could not run at all once a subscription had
+/// delivered anything — which is every subscription that ever worked — and the
+/// foreign-key violation reached the tenant as an opaque `db: db error`. Every
+/// read filters `AND active`, so deactivating is indistinguishable from
+/// deletion to the listing, the delivery lookup and the by-id read, while the
+/// delivery log stays intact: it is history, and a tenant auditing what was
+/// sent to a subscriber they have since removed is the case it exists for.
 ///
 /// # Errors
-/// Propagates the delete error.
+/// Propagates the update error.
 pub async fn delete_webhook(
     client: &Client,
     org_id: &str,
     webhook_id: &str,
 ) -> Result<bool, PgError> {
-    let n = er_entities::webhook::delete::delete(client, org_id, webhook_id).await?;
+    let n = er_entities::webhook::update::deactivate(client, org_id, webhook_id).await?;
     Ok(n == 1)
 }
 

@@ -1,0 +1,8 @@
+kind: statement
+operation: update
+mode: partial
+description: "Retire a webhook. A SOFT delete, because `webhook_deliveries.webhook_id` references this row and the delivery log is history a tenant is entitled to keep — the hard DELETE this replaces could not run at all once a subscription had delivered anything, which is every subscription that ever worked, and the foreign-key violation surfaced as an opaque `db: db error`. Every read already filters `AND active`, so deactivating is indistinguishable from deletion to the listing, the delivery lookup and the by-id read, while the history survives. The `AND active` here makes a second retire affect zero rows, so a repeated call honestly reports that nothing changed."
+params:
+  - { name: org_id, type: varchar }
+  - { name: webhook_id, type: varchar }
+returns: none

@@ -111,6 +111,33 @@ async fn webhooks_crud() {
             .any(|w| w["url"] == "https://hooks.example/acme")
     );
 
+    // A subscription that has DELIVERED something must still be removable.
+    //
+    // `webhook_deliveries.webhook_id` references `webhooks.id`, so the hard
+    // DELETE this used to do could not run at all once anything had been
+    // emitted — which is every subscription that ever worked. The failure
+    // reached the tenant as an opaque `db: db error`, and no test caught it
+    // because this one deleted a webhook that had never delivered: the foreign
+    // key was never exercised. Found by clicking Remove on the real stack.
+    let org_id = pg::org_id_by_name(&client, "acme")
+        .await
+        .unwrap()
+        .expect("acme exists");
+    let queued = er_server::webhook::emit(
+        &client,
+        &org_id,
+        "acme",
+        "job.succeeded",
+        &serde_json::json!({ "job_id": "01TESTJOB0000000000000000", "kind": "run_all_full" }),
+    )
+    .await
+    .unwrap();
+    assert!(
+        queued.iter().any(|d| d.webhook_id == webhook_id),
+        "THIS subscription must be among the delivery targets, or the foreign \
+         key below is never exercised and the test proves nothing"
+    );
+
     // Delete is idempotent.
     let resp = app
         .clone()
@@ -122,6 +149,18 @@ async fn webhooks_crud() {
         .await
         .unwrap();
     assert_eq!(json_body(resp).await["deleted"], true);
+
+    // ...and the delivery log survives it. The log is history: a tenant
+    // auditing what was sent to a subscriber they have since removed is the
+    // case it exists for, which is why this is a soft delete rather than a
+    // cascade.
+    let surviving = er_entities::webhook_delivery::read::page(&client, &org_id, None, None, 50)
+        .await
+        .unwrap();
+    assert!(
+        surviving.iter().any(|d| d.webhook_id == webhook_id),
+        "removing a subscription must not erase what it was sent"
+    );
     let resp = app
         .clone()
         .oneshot(op(
