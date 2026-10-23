@@ -30,6 +30,16 @@ export interface ReviewRow {
 export interface ReviewPage {
   items: ReviewRow[];
   next_cursor: string | null;
+  /**
+   * How many OPEN reviews a confidence band excluded for having no score.
+   *
+   * A `never_unsatisfiable` escalation is a structural contradiction rather
+   * than a scored pair, so it is in no band — and it is the highest-priority
+   * item in the queue. The server reports the count so the inbox can SAY what
+   * the band is hiding; vanishing behind a slider is how it goes unanswered.
+   * Absent (0) when no band is active.
+   */
+  unscored_hidden?: number;
 }
 
 export interface ResolveResult {
@@ -38,15 +48,37 @@ export interface ResolveResult {
   apply_job?: string;
 }
 
-const inboxKey = (org: string, reason: string | null) =>
-  [...queryKeys.org(org), "review-inbox", reason ?? "all"] as const;
+/** A confidence band on the inbox: `null` on either side means unbounded. */
+export interface ReviewBand {
+  min: number | null;
+  max: number | null;
+}
 
-export function useReviewInbox(org: string, reason: string | null) {
+const inboxKey = (org: string, reason: string | null, band: ReviewBand) =>
+  [
+    ...queryKeys.org(org),
+    "review-inbox",
+    reason ?? "all",
+    band.min ?? "any",
+    band.max ?? "any",
+  ] as const;
+
+export function useReviewInbox(
+  org: string,
+  reason: string | null,
+  band: ReviewBand = { min: null, max: null },
+) {
   return useInfiniteQuery({
-    queryKey: inboxKey(org, reason),
+    queryKey: inboxKey(org, reason, band),
     queryFn: ({ pageParam }) => {
-      const params = new URLSearchParams({ limit: "50" });
+      // `status=open` is sent EXPLICITLY. It was never sent, the mock defaulted
+      // to open, and the server ignored the parameter entirely — so the real
+      // inbox listed resolved reviews on every refetch while the mock-backed
+      // test stayed green. Both halves are fixed; this is the half that asks.
+      const params = new URLSearchParams({ limit: "50", status: "open" });
       if (reason) params.set("reason", reason);
+      if (band.min !== null) params.set("min_probability", String(band.min));
+      if (band.max !== null) params.set("max_probability", String(band.max));
       if (pageParam) params.set("cursor", pageParam);
       return bffFetch<ReviewPage>(`/api/orgs/${org}/reviews?${params.toString()}`);
     },

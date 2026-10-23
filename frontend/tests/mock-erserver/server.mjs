@@ -302,7 +302,16 @@ export function initialState() {
         rec_b_key: `webforms:W-${String(2000 + index)}`,
         entity_id: null,
         reason: index === 13 ? "never_unsatisfiable" : "gray_band",
-        match_probability: 0.82 + index * 0.005,
+        // A `never_unsatisfiable` escalation has NO probability: the engine
+        // writes `CAST(NULL AS double)` because it is a structural
+        // contradiction, not a scored pair. The mock gave it one, which would
+        // have made a confidence band appear to include it — the mock
+        // encoding a belief about the server rather than its behaviour.
+        // Spread across the whole gray band (0.62 to 0.92) rather than bunched
+        // in 0.82-0.88: a fixture whose rows all sit in ONE band cannot
+        // distinguish a working confidence filter from an ignored one, which is
+        // the same trap the entity-event detail test fell into.
+        match_probability: index === 13 ? null : 0.62 + index * 0.025,
         waterfall: {
           gamma_email: 2,
           mw_email: 4.1,
@@ -1570,8 +1579,23 @@ const server = http.createServer((req, res) => {
       const status = url.searchParams.get("status") ?? "open";
       const reason = url.searchParams.get("reason");
       const cursor = url.searchParams.get("cursor");
+      const minProbability = url.searchParams.get("min_probability");
+      const maxProbability = url.searchParams.get("max_probability");
       let rows = (state.reviews[match[1]] ?? []).filter((row) => row.status === status);
       if (reason) rows = rows.filter((row) => row.reason === reason);
+      // The confidence band (O6). A row with NO probability is excluded by any
+      // band — it is a structural contradiction, not a scored pair — and the
+      // count of those is reported rather than left to be discovered.
+      const banded = minProbability !== null || maxProbability !== null;
+      const unscoredOpen = rows.filter((row) => row.match_probability === null).length;
+      if (banded) {
+        rows = rows.filter(
+          (row) =>
+            row.match_probability !== null &&
+            (minProbability === null || row.match_probability >= Number(minProbability)) &&
+            (maxProbability === null || row.match_probability <= Number(maxProbability)),
+        );
+      }
       if (cursor) {
         try {
           const decoded = decodeCursor(cursor);
@@ -1583,7 +1607,11 @@ const server = http.createServer((req, res) => {
       const items = rows.slice(0, limit);
       const next_cursor =
         rows.length > limit ? encodeCursor(0, items[items.length - 1].review_id) : null;
-      return send(res, 200, { items, next_cursor });
+      return send(res, 200, {
+        items,
+        next_cursor,
+        unscored_hidden: banded ? unscoredOpen : 0,
+      });
     }
     if ((match = /^\/v1\/orgs\/([^/]+)\/reviews\/([^/:]+)$/.exec(path)) && req.method === "GET") {
       const row = (state.reviews[match[1]] ?? []).find((r) => r.id === match[2]);

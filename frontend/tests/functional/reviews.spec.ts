@@ -21,7 +21,7 @@ test.describe("review inbox — rendering", () => {
       await expect(page.getByTestId("swipe-card")).toContainText("crm:C-1000");
     } else {
       await expect(page.getByTestId("review-list")).toContainText("crm:C-1000");
-      await expect(page.getByTestId("decision-panel")).toContainText("82.0%");
+      await expect(page.getByTestId("decision-panel")).toContainText("62.0%");
     }
     const chart = page.getByTestId("waterfall-chart").first();
     await expect(chart).toContainText("email: agree — supports the match (+4.1)");
@@ -37,6 +37,33 @@ test.describe("review inbox — rendering", () => {
     await page.getByTestId("reason-filter").selectOption("never_unsatisfiable");
     await expect(page.getByTestId("review-list")).toContainText("crm:C-1013");
     await expect(page.getByTestId("review-list")).not.toContainText("crm:C-1000");
+  });
+
+  test("the confidence band narrows the queue and says what it hides", async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(isMobile, "the filter control is identical; keep the matrix lean");
+    // A steward with a long queue clears it fastest from the top. The queue is
+    // FIFO by review id and had no way to say so.
+    await expect(page.getByTestId("review-list")).toContainText("crm:C-1000");
+    await page.getByTestId("band-filter").selectOption("high");
+    // The fixture's probabilities run 0.820 upward in 0.005 steps, so only the
+    // tail reaches 0.90.
+    await expect(page.getByTestId("review-list")).not.toContainText("crm:C-1000");
+    await expect(page.getByTestId("review-list")).toContainText("crm:C-1012");
+
+    // ...and the escalation it necessarily excludes is DISCLOSED. A
+    // `never_unsatisfiable` item carries no probability — it is a structural
+    // contradiction, not a scored pair — and it is the most urgent thing in the
+    // queue. Vanishing behind a slider is how it goes unanswered for months.
+    await expect(page.getByTestId("unscored-hidden")).toContainText("no score");
+    await expect(page.getByTestId("review-list")).not.toContainText("crm:C-1013");
+
+    // Clearing the band brings it back, and the disclosure goes with it.
+    await page.getByTestId("band-filter").selectOption("all");
+    await expect(page.getByTestId("review-list")).toContainText("crm:C-1013");
+    await expect(page.getByTestId("unscored-hidden")).toHaveCount(0);
   });
 
   test("viewers cannot act", async ({ page, isMobile }) => {

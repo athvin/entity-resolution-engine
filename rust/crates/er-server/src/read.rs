@@ -399,6 +399,7 @@ pub fn duplicates(
     entity_type: EntityType,
     snapshot: i64,
     after: Option<&str>,
+    min_members: Option<i64>,
     limit: i64,
 ) -> Result<(Vec<Value>, Option<String>), String> {
     use std::collections::BTreeMap;
@@ -409,6 +410,7 @@ pub fn duplicates(
         conn,
         snapshot,
         after,
+        min_members,
         limit + 1,
     )
     .map_err(|e| e.to_string())?;
@@ -809,6 +811,22 @@ fn typed_page<T: serde::Serialize>(
     (items, next)
 }
 
+/// How a review page is narrowed.
+///
+/// A struct rather than four positional arguments because two of them are
+/// `Option<&str>` and two are `Option<f64>`, and at a call site that reads as
+/// noise — clippy says so about the arity too. `status` and `reason` have been
+/// declared as passthrough query parameters by the BFF since the inbox shipped
+/// and were accepted and IGNORED by the server, which is the defect class this
+/// program keeps finding.
+#[derive(Default, Clone, Copy)]
+pub struct ReviewFilters<'a> {
+    pub status: Option<&'a str>,
+    pub reason: Option<&'a str>,
+    pub min_probability: Option<f64>,
+    pub max_probability: Option<f64>,
+}
+
 /// The open-review queue, FIFO by `id` (`readapi.reviews_list`).
 ///
 /// # Errors
@@ -817,10 +835,20 @@ pub fn reviews_list(
     session: &Session,
     snapshot: i64,
     after: Option<&str>,
+    filters: ReviewFilters<'_>,
     limit: i64,
 ) -> Result<(Vec<Value>, Option<String>), String> {
     let limit = limit.clamp(1, MAX_LIMIT);
-    match er_entities::review::read::page(session.connection(), snapshot, after, limit + 1) {
+    match er_entities::review::read::page(
+        session.connection(),
+        snapshot,
+        after,
+        filters.status,
+        filters.reason,
+        filters.min_probability,
+        filters.max_probability,
+        limit + 1,
+    ) {
         Ok(rows) => Ok(typed_page(&rows, snapshot, limit, |r| &r.id)),
         Err(e) => {
             let s = e.to_string();
@@ -1452,6 +1480,26 @@ pub fn entity_of_record_key(
             } else {
                 Err(s)
             }
+        }
+    }
+}
+
+/// How many OPEN reviews carry no match probability at `snapshot`.
+///
+/// The `never_unsatisfiable` escalations, which a confidence band necessarily
+/// excludes — they are not scored pairs but structural contradictions, so they
+/// are in no band. Counted so the inbox can SAY how many items a band is
+/// hiding: an unsatisfiable constraint is a question for a human, and a filter
+/// that silently removes it is how it goes unanswered forever.
+///
+/// # Errors
+/// Propagates a non-missing-table lake query error.
+pub fn unscored_open_reviews(session: &Session, snapshot: i64) -> Result<i64, String> {
+    match er_entities::review::read::unscored_open_count(session.connection(), snapshot) {
+        Ok(rows) => Ok(rows.first().and_then(|r| r.n).unwrap_or(0)),
+        Err(e) => {
+            let s = e.to_string();
+            if is_missing_table(&s) { Ok(0) } else { Err(s) }
         }
     }
 }

@@ -1607,6 +1607,41 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          not "the snapshot is what it was when I wrote this" — asserts `duplicate_records >
          duplicate_groups` on base_10 so the two definitions are distinguishable, and asserts a
          re-run of the same id corrects rather than appends.
+   - [x] **O6-2 confidence bands, group-size floors — and two filters that were doing nothing.**
+         The review queue was FIFO by review id with no way to say "the high-confidence tail
+         first", which is the order that clears a 40,000-item backlog fastest. Duplicates paged by
+         entity id with no size floor, and the clusters an over-merge hides in are the LARGE ones.
+         Both are now declared statement parameters, so the filtering happens in the lake rather
+         than after the page.
+         **Two filters were already declared and ignored.** The BFF has listed `status` and
+         `reason` as passthrough query parameters since the review inbox shipped, and
+         `reviews_list` read neither — so the inbox's "Filter by reason" dropdown did nothing in
+         production. Worse, the hook never sent `status` at all and the server had no status
+         filter, so the queue listed RESOLVED reviews on every refetch. Both are the defect class
+         this program keeps finding, and both were green in Playwright because the mock filters on
+         exactly the parameters the server ignored — the mock encoding the frontend's belief
+         rather than the server's behaviour, for the tenth time.
+         **The band has to be honest about what it excludes.** A `never_unsatisfiable` escalation
+         carries `CAST(NULL AS double)` for its probability — it is a structural contradiction,
+         not a scored pair — so it is in no band, and it is the most urgent item in the queue.
+         Three options were weighed: include it in every band (the filter then lies about itself),
+         exclude it silently (the highest-priority work disappears behind a slider), or exclude it
+         and SAY SO. The third: `unscored_open_count` is read whenever a band is active and the
+         inbox renders "N escalations have no score and are outside every band". With no band the
+         page is byte-identical to what it was before bands existed, nulls included.
+         `min_members` is floored at 2 **in the statement**, not in Rust, because the statement's
+         own description claims it: a one-member entity is not a duplicate group, so admitting one
+         would change what the endpoint means. The analyser's planner has no `greatest`, so it is
+         a CASE.
+         **Two mock corrections, both the same class.** Its `never_unsatisfiable` row carried a
+         probability where the engine writes NULL, which would have made the band appear to
+         include it and the disclosure test vacuous. And its review probabilities were bunched in
+         0.82-0.88, so every row sat in ONE band — the same trap the entity-event detail test fell
+         into, where one kind cannot distinguish a working filter from an ignored one. Spread to
+         0.62-0.92.
+         Four sabotages observed, each independently: ignoring the band, ignoring the floor,
+         suppressing the disclosure, and the Rust-side `status`/`reason` assertions that return
+         the whole queue when the filter is dropped.
    - [x] **O6-1 bulk suppress and protect — and N correction passes for one decision.** The
          overlay endpoints took exactly one `record_key`, so the entity view's multi-select
          looped: one HTTP call per record, each with `apply_now`. Every one of those calls

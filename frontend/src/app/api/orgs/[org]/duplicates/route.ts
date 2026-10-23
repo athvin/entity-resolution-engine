@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { forward, requireOrgAccess, respond } from "@/lib/bff/proxy";
 
-const PASSTHROUGH = ["cursor", "limit"] as const;
+const PASSTHROUGH = ["min_members", "cursor", "limit"] as const;
 
 export async function GET(
   request: Request,

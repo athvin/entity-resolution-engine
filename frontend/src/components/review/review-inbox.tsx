@@ -21,6 +21,42 @@ import { cn } from "@/lib/utils";
 import { DecisionPanel, probabilityLabel } from "./decision-panel";
 import { SwipeCard } from "./swipe-card";
 
+/**
+ * What a confidence band is hiding, said out loud.
+ *
+ * A `never_unsatisfiable` escalation carries no match probability — it is a
+ * structural contradiction, not a scored pair — so it falls outside every
+ * band, and it is the most urgent item in the queue. A filter that removes it
+ * silently is how an unanswerable constraint goes unanswered for months.
+ */
+function UnscoredHidden({ hidden, active }: { hidden: number; active: boolean }) {
+  if (!active || hidden === 0) return null;
+  return (
+    <p className="text-muted-foreground text-xs" data-testid="unscored-hidden">
+      {hidden} escalation{hidden === 1 ? "" : "s"} {hidden === 1 ? "has" : "have"} no score and{" "}
+      {hidden === 1 ? "is" : "are"} outside every band — clear the filter to see{" "}
+      {hidden === 1 ? "it" : "them"}.
+    </p>
+  );
+}
+
+/**
+ * The confidence bands the inbox offers.
+ *
+ * A steward with a long queue clears it fastest from the top: the
+ * high-confidence tail is where the decisions are quickest and most of them are
+ * merges. The queue is FIFO by review id and had no way to say so.
+ *
+ * Bounds are inclusive on both sides, which is how the server reads them; the
+ * labels say so rather than leaving a reader to discover which end is open.
+ */
+const BANDS: { key: string; label: string; min: number | null; max: number | null }[] = [
+  { key: "all", label: "any confidence", min: null, max: null },
+  { key: "high", label: "0.90 and above", min: 0.9, max: null },
+  { key: "mid", label: "0.75 to 0.90", min: 0.75, max: 0.9 },
+  { key: "low", label: "0.75 and below", min: null, max: 0.75 },
+];
+
 const REASONS = ["gray_band", "never_unsatisfiable", "coherence"] as const;
 
 function StagedBanner({ org }: { org: string }) {
@@ -60,7 +96,15 @@ function LastResult({ status }: { status: "applied" | "staged" | null }) {
 /** The steward inbox (design §5.3): triage like a mail client, not form-filling. */
 export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolean }) {
   const [reason, setReason] = useState<string | null>(null);
-  const inbox = useReviewInbox(org, reason);
+  const [bandKey, setBandKey] = useState<string>("all");
+  const band = BANDS.find((b) => b.key === bandKey);
+  const bandActive = bandKey !== "all";
+  const inbox = useReviewInbox(org, reason, {
+    min: band?.min ?? null,
+    max: band?.max ?? null,
+  });
+  // Constant for a snapshot, so the first page is the answer.
+  const unscoredHidden = inbox.data?.pages[0]?.unscored_hidden ?? 0;
   const resolve = useResolveReview(org);
   const bulk = useBulkResolve(org);
   const [cursor, setCursor] = useState(0);
@@ -214,8 +258,11 @@ export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolea
             <p>
               {reason
                 ? "No open reviews with this reason."
-                : "The gray band is clear — nothing needs a human right now."}
+                : bandActive
+                  ? "No open reviews in this confidence band."
+                  : "The gray band is clear — nothing needs a human right now."}
             </p>
+            <UnscoredHidden hidden={unscoredHidden} active={bandActive} />
           </CardContent>
         </Card>
       </div>
@@ -256,7 +303,24 @@ export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolea
             </option>
           ))}
         </select>
+        <select
+          value={bandKey}
+          onChange={(event) => {
+            setBandKey(event.target.value);
+            setCursor(0);
+          }}
+          className="border-input bg-background h-9 rounded-md border px-2 text-sm"
+          aria-label="Filter by confidence"
+          data-testid="band-filter"
+        >
+          {BANDS.map((b) => (
+            <option key={b.key} value={b.key}>
+              {b.label}
+            </option>
+          ))}
+        </select>
         <LastResult status={lastStatus} />
+        <UnscoredHidden hidden={unscoredHidden} active={bandActive} />
         <span className="flex-1" />
         {isSteward && selected.size > 0 && (
           <div className="flex items-center gap-1.5" data-testid="bulk-bar">

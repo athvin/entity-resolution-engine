@@ -1,9 +1,13 @@
 kind: statement
 operation: read
-description: "One keyset page of the review queue at a pinned snapshot, FIFO by review id."
+description: "One keyset page of the review queue at a pinned snapshot, FIFO by review id, optionally narrowed to a confidence band. With NEITHER bound set the result is exactly what it was before bands existed, nulls included. With EITHER bound set, rows with no `match_probability` are excluded — a `never_unsatisfiable` escalation is not a scored pair but a structural contradiction, so it is in no band, and returning it inside one would make the filter lie about itself. It must not vanish silently either: the caller reports how many unscored items a band is hiding, counted by `unscored_open_count`. `status` and `reason` narrow to one value each — the BFF has declared both as passthrough query parameters since the inbox shipped and the server accepted and IGNORED them, which is the defect class this program keeps finding: a contract the frontend states and the backend never fulfilled."
 params:
   - { name: snapshot, type: bigint }
   - { name: after, type: varchar, nullable: true }
+  - { name: status, type: varchar, nullable: true }
+  - { name: reason, type: varchar, nullable: true }
+  - { name: min_probability, type: double, nullable: true }
+  - { name: max_probability, type: double, nullable: true }
   - { name: limit, type: bigint }
 returns:
   - { name: id, type: varchar, nullable: false }
