@@ -91,6 +91,54 @@ FROM lake.main.entities
         let batches = stmt.query_arrow(::duckdb::params![])?.collect::<Vec<_>>();
         CountLiveRow::from_batches(&batches)
     }
+
+    /// One row of `orphaned_live`: Active entities with no members left — the ones reconcile must retire. An entity exists because records resolved to it, so one with zero members is a tombstone the lifecycle never recorded: every member either left the corpus or moved elsewhere, and `status` still said `active`. Read after the membership prune, which is the step that can empty one.
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct OrphanedLiveRow {
+        pub id: String,
+    }
+
+    impl OrphanedLiveRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![("id", ::arrow::datatypes::DataType::Utf8)]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "id")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        id: crate::batch::req(crate::batch::opt_str(c0, i), "id", i)?,
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// Active entities with no members left — the ones reconcile must retire. An entity exists because records resolved to it, so one with zero members is a tombstone the lifecycle never recorded: every member either left the corpus or moved elsewhere, and `status` still said `active`. Read after the membership prune, which is the step that can empty one.
+    pub fn orphaned_live(conn: &::duckdb::Connection) -> ::duckdb::Result<Vec<OrphanedLiveRow>> {
+        const SQL: &str = "SELECT e.id
+FROM lake.main.entities e
+LEFT JOIN lake.main.entity_membership m ON m.entity_id = e.id
+WHERE e.status = 'active'
+GROUP BY e.id
+HAVING count(m.record_key) = 0
+ORDER BY e.id
+";
+        let mut stmt = conn.prepare(SQL)?;
+        let batches = stmt.query_arrow(::duckdb::params![])?.collect::<Vec<_>>();
+        OrphanedLiveRow::from_batches(&batches)
+    }
 }
 
 pub mod update {

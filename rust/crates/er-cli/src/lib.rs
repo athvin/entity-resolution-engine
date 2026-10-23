@@ -30,7 +30,9 @@ use er_match::{build_frozen_tf_tables, load_model};
 use er_reconcile::assertions::{Assertion, AssertionKind};
 use er_reconcile::cluster::label_propagate;
 use er_reconcile::never_cut::{PathEdge, never_cut_fixpoint};
-use er_reconcile::reconcile::reconcile_plan;
+use er_reconcile::reconcile::{
+    DEPARTED, MEMBER_REMOVED, PlannedEvent, RETIRED, reconcile_plan, sort_planned_events,
+};
 use er_standardize::{build_acct_int_std_records, build_int_std_records};
 use std::collections::BTreeSet;
 
@@ -2459,8 +2461,20 @@ fn screen_deliveries(session: &Session, config: &Config, inputs: &PipelineInputs
 /// membership / `entities` lifecycle / `entity_events` back to the lake.
 ///
 /// NOTE: this is the pure-core path (label_propagate + reconcile_plan) wired to
-/// the lake — correct for full-mode base resolution. The relational edge-cut /
-/// tombstone event attribution (assertions/deletion) is the next enhancement.
+/// the lake — correct for full-mode base resolution. The relational edge-cut
+/// (`cut_edges`) still has no writer; tombstone attribution landed in D2 and is
+/// the `departed` half below.
+///
+/// Two facts the pure plan cannot derive, because it sees only the old and new
+/// partitions and "absent from the new partition" is equally true of a
+/// tombstoned record and a suppressed one:
+///
+/// * a DEPARTURE — a record that left the corpus — which is filtered out of
+///   `p_old` here (so the plan's orphan rule stops minting a fresh entity for
+///   a deleted record) and announced as `member_removed` with
+///   `cause: departed`;
+/// * a RETIREMENT of an entity the membership prune emptied, which the plan
+///   cannot see because the prune runs after it.
 ///
 /// # Errors
 /// Propagates lake DDL / query / write errors.
@@ -2492,6 +2506,12 @@ pub fn run_reconcile(session: &Session, config: &Config, run_id: &str, run_at: &
             .map(|r| r.record_key)
             .collect()
     };
+    // The corpus, kept before suppression narrows `nodes` below. A SUPPRESSED
+    // record is still in the corpus and must keep its identity; a TOMBSTONED one
+    // is not, and must lose it. Telling those two apart is the whole of D2, and
+    // it is only possible here — `reconcile_plan` sees the old and new
+    // partitions, where "absent from the new partition" is equally true of both.
+    let corpus: BTreeSet<String> = nodes.iter().cloned().collect();
 
     // S4.4 assertion adjustment (identical to er-match's proven in-memory path).
     // Empty when the lake has no assertions, so the base run is unchanged.
@@ -2587,10 +2607,29 @@ pub fn run_reconcile(session: &Session, config: &Config, run_id: &str, run_at: &
     }
     let edges: Vec<(String, String)> = edges.into_iter().map(|(a, b, _)| (a, b)).collect();
 
-    // Prior active membership (empty on the first run).
+    // Prior active membership (empty on the first run), MINUS the records that
+    // have left the corpus.
+    //
+    // The filter is load-bearing. `reconcile_plan`'s orphan rule gives every
+    // prior record the clustering placed nowhere a brand-new singleton entity —
+    // right for a suppressed record, which still exists and should keep an
+    // identity, and wrong for a tombstoned one, which does not. Unfiltered, a
+    // deleted record was minted a fresh entity with a `created` event, and the
+    // membership prune below then emptied it: the lake ended up with an ACTIVE
+    // entity holding zero members, announced to the world as created. Deletion
+    // did not delete; it allocated.
+    //
+    // Departures are collected rather than merely dropped, because a record
+    // leaving is a fact the ledger owes a subscriber — see the events appended
+    // after the plan.
     let mut p_old: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut departed: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for r in er_entities::entity_membership::read::all_pairs_live(conn)? {
-        p_old.entry(r.entity_id).or_default().push(r.record_key);
+        if corpus.contains(&r.record_key) {
+            p_old.entry(r.entity_id).or_default().push(r.record_key);
+        } else {
+            departed.entry(r.entity_id).or_default().push(r.record_key);
+        }
     }
 
     let labels = label_propagate(&nodes, &edges);
@@ -2690,24 +2729,90 @@ pub fn run_reconcile(session: &Session, config: &Config, run_id: &str, run_at: &
         session.execute_batch("drop table __ent_src")?;
     }
 
-    if !plan.events.is_empty() {
-        for (i, e) in plan.events.iter().enumerate() {
-            let details = serde_json::to_string(&e.details).unwrap_or_else(|_| "{}".to_string());
-            // Content-derived and rerun-stable: the retired per-run counter
-            // stream minted DUPLICATE event ids across runs (it restarted at 0).
-            let event_id = er_ids::natural_id("entity_events", &[run_id, &i.to_string()]);
-            er_entities::entity_event::create::append(
-                session.connection(),
-                &event_id,
-                i64::try_from(i).unwrap_or(i64::MAX),
-                run_id,
-                &e.entity_id,
-                &e.event_type,
-                &details,
-                &e.details_hash,
-                run_at,
-            )?;
+    // The two things the pure plan could not derive, because both need the
+    // corpus — recorded AFTER the plan's own transitions so a retirement wins
+    // over an `active` the plan may have written for the same entity.
+    //
+    // 1. A DEPARTURE. `member_removed` with `cause: departed`, attributed to the
+    //    entity the record was actually in. Before this the only cause that
+    //    existed was `recluster`, so a deletion reached a subscriber claiming
+    //    the model had changed its mind about where the record belonged.
+    let mut events = plan.events;
+    for (entity_id, keys) in &departed {
+        let mut keys = keys.clone();
+        // Sorted because `details_hash` digests these bytes and the digest is
+        // part of the event ordering: an unsorted list would make the same
+        // departure hash differently between reruns.
+        keys.sort();
+        events.push(PlannedEvent::new(
+            entity_id,
+            MEMBER_REMOVED,
+            serde_json::json!({ "member_keys": keys, "cause": DEPARTED }),
+        ));
+    }
+
+    // 2. A RETIREMENT. An entity exists because records resolved to it, so one
+    //    with no members left is a tombstone the lifecycle never recorded. The
+    //    plan retires an entity whose members all moved WITHIN the clustering;
+    //    it cannot see one emptied by the prune, which is why this is read from
+    //    the lake after that prune rather than planned before it.
+    let orphaned: Vec<String> = er_entities::resolved_entity::read::orphaned_live(conn)?
+        .into_iter()
+        .map(|r| r.id)
+        .collect();
+    if !orphaned.is_empty() {
+        for entity_id in &orphaned {
+            // What it lost is what just left it. For the departure case that is
+            // the tombstoned keys; where the plan moved them instead it already
+            // said so, and an empty list here reads as "emptied by moves the
+            // ledger already describes" rather than inventing a cause.
+            let mut lost = departed.get(entity_id).cloned().unwrap_or_default();
+            lost.sort();
+            events.push(PlannedEvent::new(
+                entity_id,
+                RETIRED,
+                serde_json::json!({ "member_keys": lost }),
+            ));
         }
+        let rows: Vec<String> = orphaned
+            .iter()
+            .map(|id| format!("('{}', '{RETIRED}', null)", esc(id)))
+            .collect();
+        session.execute_batch("drop table if exists __ent_src")?;
+        session.execute_batch(&format!(
+            "create temp table __ent_src as select * from (values {}) \
+             as t(entity_id, status, merged_into)",
+            rows.join(", ")
+        ))?;
+        er_entities::resolved_entity::update::upsert_from_src(
+            session.connection(),
+            run_at,
+            run_id,
+        )?;
+        session.execute_batch("drop table __ent_src")?;
+    }
+
+    // One ordered write. The appended events are re-sorted into the S4.5.4 D1
+    // order rather than left in a tail: `seq` is the ledger's reading order, and
+    // a run whose departures all sat after its merges would describe the same
+    // facts in an order no other run uses.
+    sort_planned_events(&mut events);
+    for (i, e) in events.iter().enumerate() {
+        let details = serde_json::to_string(&e.details).unwrap_or_else(|_| "{}".to_string());
+        // Content-derived and rerun-stable: the retired per-run counter stream
+        // minted DUPLICATE event ids across runs (it restarted at 0).
+        let event_id = er_ids::natural_id("entity_events", &[run_id, &i.to_string()]);
+        er_entities::entity_event::create::append(
+            session.connection(),
+            &event_id,
+            i64::try_from(i).unwrap_or(i64::MAX),
+            run_id,
+            &e.entity_id,
+            &e.event_type,
+            &details,
+            &e.details_hash,
+            run_at,
+        )?;
     }
     Ok(())
 }

@@ -1,0 +1,9 @@
+kind: statement
+operation: read
+description: "Active entities with no members left — the ones reconcile must retire. An entity exists because records resolved to it, so one with zero members is a tombstone the lifecycle never recorded: every member either left the corpus or moved elsewhere, and `status` still said `active`. Read after the membership prune, which is the step that can empty one."
+pin: live
+pin_reason: "er-cli composes this read inside the writer's own transaction, immediately after the prune that empties these entities; there is no committed snapshot containing that state."
+reads: [entity_membership]
+params: []
+returns:
+  - { name: id, type: varchar, nullable: false }
