@@ -596,6 +596,57 @@ export function initialState() {
       ],
       "mutable-dev": [],
     },
+    // Retained metric snapshots, NEWEST FIRST — the order `metric_snapshot/read/
+    // recent` pages in. The rates are DERIVED on read by the server, so they
+    // are sent here too; a null rate is what an empty corpus produces and is
+    // deliberately present in the series so the gap branch is exercised.
+    insights: {
+      "acme-dev": [
+        {
+          run_id: "01jm0000000000000000000003",
+          captured_at: "2026-09-24T06:05:00Z",
+          records: 13,
+          entities: 10,
+          duplicate_records: 6,
+          duplicate_groups: 3,
+          largest_group: 4,
+          review_backlog: 40,
+          auto_merge_pairs: 5,
+          review_band_pairs: 40,
+          duplicate_rate: 0.4615,
+          records_per_entity: 1.3,
+        },
+        {
+          run_id: "01jm0000000000000000000002",
+          captured_at: "2026-09-23T06:05:00Z",
+          records: 11,
+          entities: 9,
+          duplicate_records: 4,
+          duplicate_groups: 2,
+          largest_group: 3,
+          review_backlog: 36,
+          auto_merge_pairs: 3,
+          review_band_pairs: 36,
+          duplicate_rate: 0.3636,
+          records_per_entity: 1.22,
+        },
+        {
+          run_id: "01jm0000000000000000000001",
+          captured_at: "2026-09-22T06:05:00Z",
+          records: 0,
+          entities: 0,
+          duplicate_records: 0,
+          duplicate_groups: 0,
+          largest_group: 0,
+          review_backlog: 0,
+          auto_merge_pairs: 0,
+          review_band_pairs: 0,
+          duplicate_rate: null,
+          records_per_entity: null,
+        },
+      ],
+      "mutable-dev": [],
+    },
     configs: {
       "acme-dev": {
         version: 1,
@@ -740,6 +791,7 @@ export function initialState() {
       provenance: { ...m.provenance },
     }));
     state.receipts[org] = [];
+    state.insights[org] = state.insights["acme-dev"].map((s) => ({ ...s }));
     state.schedules[org] = [];
     // The webhook page's own orgs start seeded, so the list and the log have
     // something to render before the spec creates anything; every other org
@@ -2098,6 +2150,16 @@ const server = http.createServer((req, res) => {
       const index = rows.findIndex((r) => r.id === match[2]);
       if (index >= 0) rows.splice(index, 1);
       return send(res, 200, { deleted: index >= 0 });
+    }
+    if ((match = /^\/v1\/orgs\/([^/]+)\/insights$/.exec(path)) && req.method === "GET") {
+      // `{snapshot, series}` — the real envelope. The BFF unwraps to the bare
+      // array the browser contract uses, and a mock that answered a bare array
+      // would make a wrong BFF look right.
+      const limit = Number(url.searchParams.get("limit") ?? 50);
+      return send(res, 200, {
+        snapshot: 3,
+        series: (state.insights[match[1]] ?? []).slice(0, limit),
+      });
     }
     if ((match = /^\/v1\/orgs\/([^/]+)\/config$/.exec(path)) && req.method === "GET") {
       const config = state.configs[match[1]];

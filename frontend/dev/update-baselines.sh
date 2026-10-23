@@ -20,7 +20,13 @@ docker run --rm -v "${FRONTEND_DIR}:/host" -w /tmp "${IMAGE}" bash -eu -o pipefa
   corepack prepare --activate
   pnpm install --frozen-lockfile
   pnpm build
-  pnpm test:e2e --update-snapshots --grep @visual
+  # `=all`, not the default `changed`. `changed` honours
+  # `maxDiffPixelRatio` (0.01 — about 16,800 pixels on a 1440x1170 full-page
+  # shot), so a real change SMALLER than the tolerance is neither failed nor
+  # rewritten: the committed baseline silently stops depicting the app and goes
+  # on masking the next change too. Observed — adding a nav item costs ~1,050
+  # pixels, so every rail-bearing baseline stayed stale while the gate passed.
+  pnpm test:e2e --update-snapshots=all --grep @visual
   cd tests
   find . -type d -name "*-snapshots" | while read -r dir; do
     rm -rf "/host/tests/${dir#./}"

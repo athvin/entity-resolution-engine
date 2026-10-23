@@ -110,6 +110,16 @@ const SCREENS: {
     },
   },
   {
+    // Four tiles with sparklines and a wide table: the chart is hand-rolled DOM
+    // precisely so it is legible to assistive tech, which is only true if
+    // something checks.
+    name: "insights",
+    path: `/${ORG}/insights`,
+    ready: async (page) => {
+      await expect(page.getByTestId("insights-series")).toBeVisible();
+    },
+  },
+  {
     // Same rule as the models page above: listed in the change that adds it.
     // This one has the most form controls of any settings screen — a checkbox
     // per catalogued event and two filter selects — so it is the one most
