@@ -174,3 +174,220 @@ fn a_synthesizing_rule_is_rejected_on_the_composite_address() {
         "expected an address error, got: {err}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// 1.6c: field sets that survive together.
+// ---------------------------------------------------------------------------
+
+use er_config::load_config_str;
+use er_golden::lineage::{resolved_groups, resolved_scalars};
+
+const BASE: &str = include_str!("../../er-config/tests/fixtures/test.yaml");
+
+/// `BASE` with groups declared on the parsed config.
+///
+/// Built by mutating the struct rather than by splicing YAML: a grouped field
+/// must not keep its own chain (the publish check refuses that), and removing a
+/// key from a `BTreeMap` is exact where editing text is not.
+fn with_groups(groups: &[(&str, &[&str], Option<&str>)]) -> er_config::Config {
+    let mut config = load_config_str(BASE).expect("base config parses");
+    for (token, fields, controlling) in groups {
+        for field in *fields {
+            config.survivorship.remove(*field);
+        }
+        config
+            .survivorship
+            .entry((*token).to_string())
+            .or_insert_with(|| {
+                vec![
+                    "source_priority".to_string(),
+                    "recency".to_string(),
+                    "record_key ASC".to_string(),
+                ]
+            });
+        config.survivorship_groups.insert(
+            (*token).to_string(),
+            er_config::SurvivorshipGroup {
+                fields: fields.iter().map(|f| (*f).to_string()).collect(),
+                controlling: controlling.map(ToString::to_string),
+            },
+        );
+    }
+    config
+}
+
+#[test]
+fn an_empty_block_resolves_to_exactly_the_builtin_address_group() {
+    // The determinism obligation of 1.6c, stated as a test rather than trusted:
+    // every golden fixture pins the generated SQL, and the SQL is built from
+    // these two lists.
+    let config = load_config_str(BASE).unwrap();
+    let groups = resolved_groups(&config, false);
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].token, "address");
+    assert_eq!(
+        groups[0].fields,
+        vec![
+            "addr_number",
+            "addr_street",
+            "addr_unit",
+            "addr_city",
+            "addr_region",
+            "addr_postal"
+        ]
+    );
+    assert!(
+        groups[0].controlling.is_none(),
+        "the built-in address group ranks on the whole composite, as it always has"
+    );
+    assert_eq!(
+        resolved_scalars(&config, false),
+        vec![
+            "given_name",
+            "family_name",
+            "email",
+            "phone_e164",
+            "birth_date"
+        ],
+        "with no groups declared the scalar list is the whole vocabulary, in order"
+    );
+}
+
+#[test]
+fn a_declared_group_claims_its_fields_from_the_scalar_list() {
+    // The motivating case: `given_name` and `family_name` are elected
+    // independently today, so a golden record can take one from each source and
+    // describe a person who never existed.
+    let config = with_groups(&[(
+        "full_name",
+        &["given_name", "family_name"],
+        Some("family_name"),
+    )]);
+    let scalars = resolved_scalars(&config, false);
+    assert!(
+        !scalars.contains(&"given_name") && !scalars.contains(&"family_name"),
+        "a grouped field must stop being elected on its own: {scalars:?}"
+    );
+    assert_eq!(scalars, vec!["email", "phone_e164", "birth_date"]);
+
+    let groups = resolved_groups(&config, false);
+    let tokens: Vec<&str> = groups.iter().map(|g| g.token).collect();
+    assert_eq!(
+        tokens,
+        vec!["address", "full_name"],
+        "the built-in address group survives alongside a declared one, in token order"
+    );
+    let full_name = groups.iter().find(|g| g.token == "full_name").unwrap();
+    assert_eq!(full_name.controlling, Some("family_name"));
+}
+
+#[test]
+fn naming_address_overrides_the_builtin_rather_than_duplicating_it() {
+    // Otherwise two relations called `attr_address` would be generated — the
+    // config would be accepted and the SQL would not compile.
+    let config = with_groups(&[(
+        "address",
+        &["addr_city", "addr_region", "addr_postal"],
+        Some("addr_postal"),
+    )]);
+    let groups = resolved_groups(&config, false);
+    assert_eq!(
+        groups.len(),
+        1,
+        "exactly one address group: {:?}",
+        groups.iter().map(|g| g.token).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        groups[0].fields,
+        vec!["addr_city", "addr_region", "addr_postal"]
+    );
+    assert_eq!(groups[0].controlling, Some("addr_postal"));
+}
+
+#[test]
+fn the_account_vocabulary_comes_from_the_caller_not_the_config() {
+    // The Account builders generate for Account by construction. Reading the
+    // vocabulary off `config.entity_type` instead let a defaulted config emit
+    // person columns into Account SQL — caught by er-sql-check's account mart
+    // test as `No field named r.given_name`, a planning failure a long way
+    // from its cause.
+    let config = load_config_str(BASE).unwrap();
+    assert_eq!(
+        resolved_scalars(&config, true),
+        vec!["company_name", "domain", "phone_e164"]
+    );
+    assert_eq!(
+        resolved_groups(&config, true)[0].fields,
+        vec!["addr_street", "addr_city", "addr_region", "addr_postal"],
+        "Account has no addr_number/addr_unit"
+    );
+}
+
+#[test]
+fn a_group_takes_every_field_from_one_record() {
+    // The property, executed rather than asserted about SQL text. Two records
+    // where the "best" given_name and the "best" family_name live in DIFFERENT
+    // records: elected independently they combine into a name nobody has.
+    let config = with_groups(&[(
+        "full_name",
+        &["given_name", "family_name"],
+        Some("family_name"),
+    )]);
+    let session = Session::open_in_memory(SessionOptions::deterministic()).unwrap();
+    session
+        .execute_batch(
+            "CREATE OR REPLACE TABLE cand(
+                 entity_id VARCHAR, record_key VARCHAR,
+                 given_name VARCHAR, family_name VARCHAR,
+                 value VARCHAR)",
+        )
+        .unwrap();
+    // `value` is the controlling field's value, which is what the chain ranks.
+    session
+        .execute_batch(
+            "INSERT INTO cand VALUES
+               ('e1', 'r1', 'Bob',    'Chen',      'Chen'),
+               ('e1', 'r2', 'Robert', 'Chenoweth', 'Chenoweth')",
+        )
+        .unwrap();
+    let chain = vec!["longest".to_string(), "record_key ASC".to_string()];
+    let sql = survivorship_decision_sql("full_name", &chain, "cand").unwrap();
+    let out = session.query_strings(&sql).unwrap();
+    assert_eq!(out.len(), 1);
+    let winner = &out[0][2];
+    assert_eq!(
+        winner, "r2",
+        "the chain ranks on the controlling field, so the longer family name wins"
+    );
+
+    // ...and the group projection reads BOTH fields from that one winner, which
+    // is the whole point: `Robert Chenoweth`, never `Robert Chen`.
+    let pairs = session
+        .query_strings(&format!(
+            "with d as ({sql}) select c.given_name, c.family_name \
+             from d join cand c on c.record_key = d.record_key"
+        ))
+        .unwrap();
+    assert_eq!(
+        pairs[0],
+        vec!["Robert".to_string(), "Chenoweth".to_string()]
+    );
+
+    // The group's token is what lineage records, so the projection filters on it.
+    let projection = er_golden::golden_records_sql(
+        &config,
+        "lake.main.golden_lineage",
+        "lake.main.int_std_records",
+        "lake.main.entity_membership",
+        "lake.main.entities",
+        "2026-01-01 00:00:00",
+    );
+    assert!(
+        projection.contains("filter (where l.attribute = 'full_name') as given_name"),
+        "given_name must be read from the full_name decision, not its own"
+    );
+    assert!(
+        projection.contains("filter (where l.attribute = 'full_name') as family_name"),
+        "family_name must be read from the same decision as given_name"
+    );
+}

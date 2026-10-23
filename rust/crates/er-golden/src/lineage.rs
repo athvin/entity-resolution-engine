@@ -38,6 +38,84 @@ pub const ACCT_SCALAR_ATTRIBUTES: [&str; 3] = ["company_name", "domain", "phone_
 pub const ACCT_ADDRESS_COLUMNS: [&str; 4] =
     ["addr_street", "addr_city", "addr_region", "addr_postal"];
 
+/// One field set that survives together, resolved for a config.
+///
+/// `token` is the `golden_lineage.attribute` the group's single decision is
+/// recorded under; `fields` are the standardized columns taken from the winning
+/// record; `controlling` is the field the chain ranks on, or `None` to rank on
+/// the concatenation of every field.
+pub struct ResolvedGroup<'a> {
+    pub token: &'a str,
+    pub fields: Vec<&'a str>,
+    pub controlling: Option<&'a str>,
+}
+
+/// The groups in effect for `config`: the built-in `address` unless the config
+/// declares its own, plus any others it declares.
+///
+/// An EMPTY `survivorship_groups` block must resolve to exactly the built-in
+/// address group, in the position it has always occupied, because the generated
+/// SQL is what the golden fixtures pin. That is the whole determinism
+/// obligation of 1.6c and it is why the default is expressed here rather than
+/// left to the caller.
+#[must_use]
+pub fn resolved_groups(config: &Config, account: bool) -> Vec<ResolvedGroup<'_>> {
+    // The VOCABULARY comes from the caller, not from `config.entity_type`. Each
+    // builder generates for one entity type by construction — `acct_*` is the
+    // Account one — and taking it from the config instead would let a config
+    // whose `entity_type` is defaulted or wrong generate person columns into
+    // Account SQL, which is a planning failure a long way from its cause.
+    let builtin: &[&str] = if account {
+        &ACCT_ADDRESS_COLUMNS
+    } else {
+        &ADDRESS_COLUMNS
+    };
+    let mut groups: Vec<ResolvedGroup<'_>> = Vec::new();
+    if !config.survivorship_groups.contains_key("address") {
+        groups.push(ResolvedGroup {
+            token: "address",
+            fields: builtin.to_vec(),
+            controlling: None,
+        });
+    }
+    // BTreeMap order, so the generated SQL does not depend on YAML key order.
+    for (token, group) in &config.survivorship_groups {
+        groups.push(ResolvedGroup {
+            token,
+            fields: group.fields.iter().map(String::as_str).collect(),
+            controlling: group.controlling.as_deref(),
+        });
+    }
+    groups.sort_by_key(|g| g.token);
+    groups
+}
+
+/// The scalar attributes still elected INDEPENDENTLY for `config` — the
+/// vocabulary minus every field a group claimed.
+///
+/// A field cannot be both: two decisions writing the same column is the
+/// ambiguity groups exist to remove, and silently preferring one would be the
+/// dead-config shape this repo refuses.
+#[must_use]
+pub fn resolved_scalars(config: &Config, account: bool) -> Vec<&'static str> {
+    // Caller-chosen, for the same reason as `resolved_groups`.
+    let vocabulary: &[&'static str] = if account {
+        &ACCT_SCALAR_ATTRIBUTES
+    } else {
+        &SCALAR_ATTRIBUTES
+    };
+    let claimed: std::collections::BTreeSet<&str> = config
+        .survivorship_groups
+        .values()
+        .flat_map(|g| g.fields.iter().map(String::as_str))
+        .collect();
+    vocabulary
+        .iter()
+        .copied()
+        .filter(|a| !claimed.contains(*a))
+        .collect()
+}
+
 /// The `<attr>_valid` input column the `validated` rule reads. `int_std_records`
 /// spells phone's flag `phone_valid`, so the attr relation aliases it to
 /// `phone_e164_valid` (S4.6 names the fragment `<attr>_valid`).
@@ -89,15 +167,32 @@ pub fn golden_lineage_sql(
     let version = config.versions.survivorship_version.replace('\'', "''");
     let run_at = run_at.replace('\'', "''");
 
-    let address_composite = ADDRESS_COLUMNS
-        .iter()
-        .map(|c| format!("coalesce({c}, '')"))
-        .collect::<Vec<_>>()
-        .join(",\n            ");
+    // The field sets that survive together (1.6c). With no declared groups this
+    // is exactly the built-in `address`, which is what keeps the generated SQL —
+    // and so every golden fixture — byte-identical for an existing config.
+    let groups = resolved_groups(config, false);
+    let scalars = resolved_scalars(config, false);
+
+    // One composite column per group that ranks on its whole value rather than
+    // on a controlling field. `chr(31)` (unit separator) joins the parts, so a
+    // value containing a comma cannot forge a different composite.
+    let mut member_selects: Vec<String> = vec![format!("{} as _sources", sources_map(config))];
+    for group in groups.iter().filter(|g| g.controlling.is_none()) {
+        let parts = group
+            .fields
+            .iter()
+            .map(|c| format!("coalesce({c}, '')"))
+            .collect::<Vec<_>>()
+            .join(",\n            ");
+        member_selects.push(format!(
+            "concat_ws(\n            chr(31),\n            {parts}\n        ) as _{}_composite",
+            group.token
+        ));
+    }
 
     // Per-attribute relations in LONG form: value + the keys every rule reads.
     let mut attr_ctes: Vec<String> = Vec::new();
-    for attribute in SCALAR_ATTRIBUTES {
+    for attribute in &scalars {
         let valid = validated_column(attribute).map_or(String::new(), |col| {
             format!(",\n        {col} as {attribute}_valid")
         });
@@ -111,20 +206,35 @@ pub fn golden_lineage_sql(
 )"
         ));
     }
-    attr_ctes.push(
-        "attr_address as (
+    for group in &groups {
+        // A controlling field ranks on ITS value; without one the chain ranks on
+        // the concatenation, which is what `address` has always done —
+        // `most_common` over an address picks the most common address, not the
+        // most common street.
+        let value = group.controlling.map_or_else(
+            || format!("_{}_composite", group.token),
+            ToString::to_string,
+        );
+        attr_ctes.push(format!(
+            "attr_{} as (
     select
         entity_id, record_key, source_system, source_record_id,
         updated_at_source, ingested_at, _sources as sources,
-        _address_composite as value
+        {value} as value
     from member_rows
-)"
-        .to_string(),
-    );
+)",
+            group.token
+        ));
+    }
 
     // Each attribute's winner via its survivorship chain.
+    let tokens: Vec<&str> = scalars
+        .iter()
+        .copied()
+        .chain(groups.iter().map(|g| g.token))
+        .collect();
     let mut decision_ctes: Vec<String> = Vec::new();
-    for attribute in SCALAR_ATTRIBUTES.iter().chain(std::iter::once(&"address")) {
+    for attribute in &tokens {
         let chain = config.survivorship.get(*attribute).ok_or_else(|| {
             anyhow::anyhow!("survivorship chain missing for attribute {attribute:?}")
         })?;
@@ -133,9 +243,8 @@ pub fn golden_lineage_sql(
     }
 
     // The grid: one arm per vocabulary token, a literal attribute per arm.
-    let grid_arms: Vec<String> = SCALAR_ATTRIBUTES
+    let grid_arms: Vec<String> = tokens
         .iter()
-        .chain(std::iter::once(&"address"))
         .map(|attribute| {
             format!(
                 "    select entity_id, '{attribute}' as attribute, record_key, rule\n    \
@@ -144,7 +253,7 @@ pub fn golden_lineage_sql(
         })
         .collect();
 
-    let sources = sources_map(config);
+    let member_block = member_selects.join(",\n        ");
     let attr_block = attr_ctes.join(",\n");
     let decision_block = decision_ctes.join(",\n");
     let grid_block = grid_arms.join("\n    union all\n");
@@ -159,11 +268,7 @@ pub fn golden_lineage_sql(
 member_rows as (
     select
         *,
-        {sources} as _sources,
-        concat_ws(
-            chr(31),
-            {address_composite}
-        ) as _address_composite
+        {member_block}
     from members
 ),
 {attr_block},
@@ -202,14 +307,32 @@ pub fn acct_golden_lineage_sql(
     let version = config.versions.survivorship_version.replace('\'', "''");
     let run_at = run_at.replace('\'', "''");
 
-    let address_composite = ACCT_ADDRESS_COLUMNS
-        .iter()
-        .map(|c| format!("coalesce({c}, '')"))
-        .collect::<Vec<_>>()
-        .join(",\n            ");
+    // The field sets that survive together (1.6c). With no declared groups this
+    // is exactly the built-in `address`, which is what keeps the generated SQL —
+    // and so every golden fixture — byte-identical for an existing config.
+    let groups = resolved_groups(config, true);
+    let scalars = resolved_scalars(config, true);
 
+    // One composite column per group that ranks on its whole value rather than
+    // on a controlling field. `chr(31)` (unit separator) joins the parts, so a
+    // value containing a comma cannot forge a different composite.
+    let mut member_selects: Vec<String> = vec![format!("{} as _sources", sources_map(config))];
+    for group in groups.iter().filter(|g| g.controlling.is_none()) {
+        let parts = group
+            .fields
+            .iter()
+            .map(|c| format!("coalesce({c}, '')"))
+            .collect::<Vec<_>>()
+            .join(",\n            ");
+        member_selects.push(format!(
+            "concat_ws(\n            chr(31),\n            {parts}\n        ) as _{}_composite",
+            group.token
+        ));
+    }
+
+    // Per-attribute relations in LONG form: value + the keys every rule reads.
     let mut attr_ctes: Vec<String> = Vec::new();
-    for attribute in ACCT_SCALAR_ATTRIBUTES {
+    for attribute in &scalars {
         let valid = acct_validated_column(attribute).map_or(String::new(), |col| {
             format!(",\n        {col} as {attribute}_valid")
         });
@@ -223,22 +346,35 @@ pub fn acct_golden_lineage_sql(
 )"
         ));
     }
-    attr_ctes.push(
-        "attr_address as (
+    for group in &groups {
+        // A controlling field ranks on ITS value; without one the chain ranks on
+        // the concatenation, which is what `address` has always done —
+        // `most_common` over an address picks the most common address, not the
+        // most common street.
+        let value = group.controlling.map_or_else(
+            || format!("_{}_composite", group.token),
+            ToString::to_string,
+        );
+        attr_ctes.push(format!(
+            "attr_{} as (
     select
         entity_id, record_key, source_system, source_record_id,
         updated_at_source, ingested_at, _sources as sources,
-        _address_composite as value
+        {value} as value
     from member_rows
-)"
-        .to_string(),
-    );
+)",
+            group.token
+        ));
+    }
 
-    let mut decision_ctes: Vec<String> = Vec::new();
-    for attribute in ACCT_SCALAR_ATTRIBUTES
+    // Each attribute's winner via its survivorship chain.
+    let tokens: Vec<&str> = scalars
         .iter()
-        .chain(std::iter::once(&"address"))
-    {
+        .copied()
+        .chain(groups.iter().map(|g| g.token))
+        .collect();
+    let mut decision_ctes: Vec<String> = Vec::new();
+    for attribute in &tokens {
         let chain = config.survivorship.get(*attribute).ok_or_else(|| {
             anyhow::anyhow!("survivorship chain missing for attribute {attribute:?}")
         })?;
@@ -246,9 +382,9 @@ pub fn acct_golden_lineage_sql(
         decision_ctes.push(format!("decision_{attribute} as (\n{decision}\n)"));
     }
 
-    let grid_arms: Vec<String> = ACCT_SCALAR_ATTRIBUTES
+    // The grid: one arm per vocabulary token, a literal attribute per arm.
+    let grid_arms: Vec<String> = tokens
         .iter()
-        .chain(std::iter::once(&"address"))
         .map(|attribute| {
             format!(
                 "    select entity_id, '{attribute}' as attribute, record_key, rule\n    \
@@ -257,7 +393,7 @@ pub fn acct_golden_lineage_sql(
         })
         .collect();
 
-    let sources = sources_map(config);
+    let member_block = member_selects.join(",\n        ");
     let attr_block = attr_ctes.join(",\n");
     let decision_block = decision_ctes.join(",\n");
     let grid_block = grid_arms.join("\n    union all\n");
@@ -272,11 +408,7 @@ pub fn acct_golden_lineage_sql(
 member_rows as (
     select
         *,
-        {sources} as _sources,
-        concat_ws(
-            chr(31),
-            {address_composite}
-        ) as _address_composite
+        {member_block}
     from members
 ),
 {attr_block},

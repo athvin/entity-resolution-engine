@@ -14,7 +14,7 @@
 //! and governed by dedupe-core's execution-oracle golden fixtures (the captured
 //! SQL/parquet baselines), not by the static analyser.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use er_config::{Config, EntityType, canonical_attributes};
 
@@ -181,6 +181,75 @@ pub fn config_reference_problems(config: &Config) -> Vec<String> {
         }
     }
 
+    // Survivorship groups (1.6c). Every one of these is a refusal rather than a
+    // silent preference, because a group that half-applies is worse than no
+    // group: the golden record looks consistent and is not.
+    let scalar_vocabulary: &[&str] = if account {
+        &er_golden::lineage::ACCT_SCALAR_ATTRIBUTES
+    } else {
+        &er_golden::lineage::SCALAR_ATTRIBUTES
+    };
+    let mut claimed_by: BTreeMap<&str, &str> = BTreeMap::new();
+    for (token, group) in &config.survivorship_groups {
+        if group.fields.len() < 2 {
+            // A one-field group is a scalar wearing a group's name: it would
+            // generate a lineage row under a token nothing else uses and change
+            // no outcome. Saying so beats letting a tenant believe it grouped.
+            problems.push(format!(
+                "survivorship_groups `{token}` lists {} field(s); a group needs at least two, \
+                 or it is just that field's own survivorship chain",
+                group.fields.len()
+            ));
+        }
+        if !config.survivorship.contains_key(token) {
+            problems.push(format!(
+                "survivorship_groups `{token}` has no survivorship chain; a group is decided \
+                 once, under its own name — add `survivorship.{token}`"
+            ));
+        }
+        for field in &group.fields {
+            if !valid.contains(field) {
+                problems.push(format!(
+                    "survivorship_groups `{token}` references unknown standardized column \
+                     `{field}`"
+                ));
+                continue;
+            }
+            if let Some(other) = claimed_by.insert(field.as_str(), token.as_str()) {
+                problems.push(format!(
+                    "`{field}` is in both survivorship_groups `{other}` and `{token}`; two \
+                     decisions writing one column is the ambiguity groups exist to remove"
+                ));
+            }
+            // A field in a group is decided BY the group, so its own chain would
+            // be dead config — the shape this repo refuses outright rather than
+            // honouring one of the two.
+            if config.survivorship.contains_key(field) {
+                problems.push(format!(
+                    "`{field}` is in survivorship_groups `{token}` and also has its own \
+                     `survivorship.{field}` chain; the group decides it, so that chain would \
+                     never be read"
+                ));
+            }
+        }
+        if let Some(controlling) = &group.controlling
+            && !group.fields.iter().any(|f| f == controlling)
+        {
+            problems.push(format!(
+                "survivorship_groups `{token}` ranks on `{controlling}`, which is not one of its \
+                 own fields"
+            ));
+        }
+        // A token that is also an independently-elected attribute would generate
+        // two relations with one name.
+        if scalar_vocabulary.contains(&token.as_str()) && !group.fields.iter().any(|f| f == token) {
+            problems.push(format!(
+                "survivorship_groups `{token}` collides with the attribute `{token}`, which is \
+                 still elected on its own; name the group something else or put `{token}` in it"
+            ));
+        }
+    }
+
     problems.sort();
     problems.dedup();
     problems
@@ -342,6 +411,106 @@ mod tests {
                     .iter()
                     .any(|p| p.contains(&format!("constraint column `{column}`"))),
                 "{block}: [{column}] must be refused, got {problems:?}"
+            );
+        }
+    }
+
+    /// `GOOD` with a group block appended, and the named chains removed from
+    /// `survivorship:` so the fixture can declare a legal group too.
+    fn with_group_block(block: &str, drop_chains: &[&str]) -> Config {
+        let mut config = load(&format!("{GOOD}\n{block}"));
+        for attr in drop_chains {
+            config.survivorship.remove(*attr);
+        }
+        config
+    }
+
+    #[test]
+    fn a_legal_survivorship_group_has_no_problems() {
+        // The positive case first: a refusal list that rejects everything is
+        // indistinguishable from one that is simply broken.
+        let mut config = with_group_block(
+            "survivorship_groups:\n  full_name:\n    fields: [given_name, family_name]\n    \
+             controlling: family_name\n",
+            &["given_name", "family_name"],
+        );
+        config
+            .survivorship
+            .insert("full_name".to_string(), vec!["recency".to_string()]);
+        assert_eq!(config_reference_problems(&config), Vec::<String>::new());
+    }
+
+    #[test]
+    fn every_survivorship_group_mistake_is_refused_at_publish() {
+        // Each case is a config that half-works: the golden record would look
+        // internally consistent and not be. Refused rather than preferred,
+        // because a group that half-applies is worse than no group.
+        let cases: [(&str, &[&str], &str); 6] = [
+            (
+                // A field that is not a standardized column at all.
+                "survivorship_groups:\n  full_name:\n    fields: [given_name, surname]\n",
+                &["given_name"],
+                "unknown standardized column `surname`",
+            ),
+            (
+                // One field: a scalar wearing a group's name.
+                "survivorship_groups:\n  solo:\n    fields: [given_name]\n",
+                &["given_name"],
+                "a group needs at least two",
+            ),
+            (
+                // No chain under the group's own name, so nothing decides it.
+                "survivorship_groups:\n  full_name:\n    fields: [given_name, family_name]\n",
+                &["given_name", "family_name"],
+                "has no survivorship chain",
+            ),
+            (
+                // Ranking on a field the group does not contain.
+                "survivorship_groups:\n  full_name:\n    fields: [given_name, family_name]\n    \
+                 controlling: email\n",
+                &["given_name", "family_name"],
+                "which is not one of its own fields",
+            ),
+            (
+                // The grouped field keeps its own chain: dead config.
+                "survivorship_groups:\n  full_name:\n    fields: [given_name, family_name]\n",
+                &["family_name"],
+                "would\n                     never be read",
+            ),
+            (
+                // A token that is also still an independently-elected attribute,
+                // which would generate two relations with one name.
+                "survivorship_groups:\n  email:\n    fields: [given_name, family_name]\n",
+                &["given_name", "family_name"],
+                "collides with the attribute `email`",
+            ),
+        ];
+        for (block, drop_chains, expected) in cases {
+            let mut config = with_group_block(block, drop_chains);
+            // Give every case the chain its group needs, except the case that is
+            // about the missing chain.
+            if !expected.contains("no survivorship chain") {
+                let token = if block.contains("  solo:") {
+                    "solo"
+                } else if block.contains("  email:") {
+                    "email"
+                } else {
+                    "full_name"
+                };
+                config
+                    .survivorship
+                    .entry(token.to_string())
+                    .or_insert_with(|| vec!["recency".to_string()]);
+            }
+            let problems = config_reference_problems(&config);
+            let needle: String = expected.split_whitespace().collect::<Vec<_>>().join(" ");
+            assert!(
+                problems.iter().any(|p| p
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .contains(&needle)),
+                "{block:?} must be refused with {needle:?}, got {problems:?}"
             );
         }
     }
