@@ -120,8 +120,8 @@ async fn drain_and_correct_applies_through_dispatcher() {
     let mut client = pg::connect(&dsn).await.unwrap();
     client
         .batch_execute(
-            "DROP TABLE IF EXISTS staged_steward_actions, audit_log, schedules, config_versions, \
-             api_keys, jobs, orgs CASCADE;",
+            "DROP TABLE IF EXISTS webhook_deliveries, webhooks, staged_steward_actions, \
+             audit_log, schedules, config_versions, api_keys, jobs, orgs CASCADE;",
         )
         .await
         .unwrap();
@@ -153,6 +153,23 @@ async fn drain_and_correct_applies_through_dispatcher() {
         .as_str()
         .unwrap()
         .to_string();
+
+    // Subscribe to the outbound write-back (O4) BEFORE the drain. The emitter
+    // checks for subscribers before opening the lake, so without this the
+    // assertions below would pass for the wrong reason — nothing to deliver
+    // looks exactly like nothing delivered.
+    let resp = app
+        .clone()
+        .oneshot(op(
+            "POST",
+            "/v1/orgs/acme/webhooks",
+            Body::from(
+                r#"{"url":"https://example.test/writeback","events":["entity.write_back"]}"#,
+            ),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
 
     // Stage an assertion + a review resolution (stage only; drain is separate).
     let resp = app
@@ -263,6 +280,64 @@ async fn drain_and_correct_applies_through_dispatcher() {
         labels.len(),
         1,
         "only the review resolution yields a label, got {labels:?}"
+    );
+
+    // ─── O4: the outbound write-back carries the MASTER, not a notification ──
+    //
+    // The incumbent's merge write-back is a paid add-on; here it is a
+    // catalogued event through the same signed, retried, logged outbox every
+    // other event uses, so a tenant that wants to apply the merge in their own
+    // system gets the resulting record rather than a nudge to go fetch it.
+    let deliveries = er_entities::webhook_delivery::read::page(
+        &client,
+        &oid(&client, "acme").await,
+        None,
+        None,
+        100,
+    )
+    .await
+    .unwrap();
+    let write_backs: Vec<_> = deliveries
+        .iter()
+        .filter(|d| d.event_type == "entity.write_back")
+        .collect();
+    assert_eq!(
+        write_backs.len(),
+        1,
+        "the match collapsed the pair into ONE entity, so one master changed: {:?}",
+        deliveries
+            .iter()
+            .map(|d| (&d.event_type, &d.payload))
+            .collect::<Vec<_>>()
+    );
+    let payload = &write_backs[0].payload;
+    assert_eq!(payload["cause"], "review_resolved");
+    assert_eq!(payload["run_id"], "01DISPCORRECT0000000000000001");
+    // The master is the assembled golden record, read AFTER the correction —
+    // the whole reason this fires from the drain and not from the resolve
+    // endpoint. A `given_name` present proves it is the record and not an id.
+    assert!(
+        payload["master"]["given_name"].is_string(),
+        "the write-back must carry the assembled master: {payload}"
+    );
+    assert_eq!(
+        payload["entity_id"], payload["master"]["id"],
+        "the named entity and the delivered master must be the same thing"
+    );
+    // ...and the members, so a receiving system knows which of ITS records the
+    // master now stands for. Both halves of the resolved pair are in it.
+    let members = payload["members"].as_array().expect("members is a list");
+    let keys: Vec<&str> = members
+        .iter()
+        .filter_map(|m| m["record_key"].as_str())
+        .collect();
+    assert!(
+        keys.contains(&label.rec_a_key.as_str()) && keys.contains(&label.rec_b_key.as_str()),
+        "the resolved pair must both be members of the master: {keys:?}"
+    );
+    assert_eq!(
+        write_backs[0].state, "pending",
+        "emit records, the drain delivers — the outbox property O3b established"
     );
 
     let _ = std::fs::remove_dir_all(&tmp);

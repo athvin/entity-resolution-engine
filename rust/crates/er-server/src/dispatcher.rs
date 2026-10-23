@@ -1045,7 +1045,9 @@ pub async fn drain_and_correct(
     let pending = pg::pending_actions(client, org_id)
         .await
         .map_err(|e| format!("read pending actions: {e}"))?;
-    let env = env.clone();
+    // Cloned for the blocking half, which owns what it is handed; the borrowed
+    // `env` stays live for the write-back below.
+    let env_owned = env.clone();
     let run_id_owned = run_id.to_string();
     let now = fmt_epoch(unix_now());
     let DrainOutcome {
@@ -1053,9 +1055,11 @@ pub async fn drain_and_correct(
         labels,
         resolutions,
         correct,
-    } = tokio::task::spawn_blocking(move || apply_and_correct(&env, &pending, &run_id_owned, &now))
-        .await
-        .unwrap_or_else(|e| DrainOutcome::failed(format!("drain task panicked: {e}")));
+    } = tokio::task::spawn_blocking(move || {
+        apply_and_correct(&env_owned, &pending, &run_id_owned, &now)
+    })
+    .await
+    .unwrap_or_else(|e| DrainOutcome::failed(format!("drain task panicked: {e}")));
     for id in &applied {
         pg::mark_action_applied(client, id)
             .await
@@ -1123,7 +1127,129 @@ pub async fn drain_and_correct(
             }
         }
     }
+    // The outbound write-back (O4): the resulting MASTER record, not a
+    // notification that one changed.
+    //
+    // Only when the correction succeeded. A write-back describes the corpus
+    // after the resolution took effect, so sending one for a correction that
+    // failed would hand the tenant's system a master the engine does not
+    // believe in — the same reason `review.resolved` fires from the drain
+    // rather than from the resolve endpoint, one step further along.
+    if correct.is_ok() && !labels.is_empty() {
+        write_back_resolutions(client, org_id, env, run_id, &labels).await;
+    }
     correct
+}
+
+/// Queue one `entity.write_back` per entity a resolution changed.
+///
+/// Driven off the derived LABELS rather than the raw resolutions, which gets
+/// the dismissals right for free: a dismissal yields no label because it is not
+/// a verdict about the pair, and it changes no master either, so there is
+/// nothing to write back. The labels also carry the canonical pair keys, which
+/// is what the lookup needs.
+///
+/// Both of a pair's keys are resolved, and the entity ids deduplicated: a
+/// `match` collapses them to one entity and a `no_match` leaves two, and a
+/// subscriber wanting to apply the change physically needs whichever it is
+/// without having to work it out.
+///
+/// Best-effort throughout, like the labels and `review.resolved` before it: the
+/// resolution is in the lake and the corpus is corrected, so failing the drain
+/// to report on it would undo real work. Every skip is logged with its reason,
+/// because a write-back that silently does not happen is indistinguishable from
+/// a tenant whose endpoint is fine.
+async fn write_back_resolutions(
+    client: &tokio_postgres::Client,
+    org_id: &str,
+    env: &Value,
+    run_id: &str,
+    labels: &[(er_cli::DerivedLabel, String)],
+) {
+    // Nothing to do when no subscriber wants it — checked before opening the
+    // lake, because the read below costs a session and a snapshot pin.
+    match pg::webhooks_for_delivery(client, org_id, "entity.write_back").await {
+        Ok(targets) if targets.is_empty() => return,
+        Ok(_) => {}
+        Err(e) => {
+            eprintln!("run {run_id}: write-back subscriber lookup failed: {e}");
+            return;
+        }
+    }
+    let Some(catalog) = env_str(env, "ER_LAKE_CATALOG") else {
+        eprintln!("run {run_id}: write-back skipped: org env missing ER_LAKE_CATALOG");
+        return;
+    };
+    let Some(data_path) = env_str(env, "ER_LAKE_DATA_PATH") else {
+        eprintln!("run {run_id}: write-back skipped: org env missing ER_LAKE_DATA_PATH");
+        return;
+    };
+    let entity_type = crate::entity_type_from_env(env);
+
+    // A fresh session at the LATEST snapshot: the blocking half has committed,
+    // so this is the first point at which the corrected corpus is readable.
+    let (payloads, org_name) = {
+        let session = match er_cli::open_lake(catalog, data_path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("run {run_id}: write-back skipped: open lake: {e:#}");
+                return;
+            }
+        };
+        let snapshot = match crate::read::latest_snapshot(&session) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("run {run_id}: write-back skipped: {e}");
+                return;
+            }
+        };
+        let mut entity_ids: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for (label, _) in labels {
+            for key in [&label.rec_a_key, &label.rec_b_key] {
+                match crate::read::entity_of_record_key(&session, snapshot, key) {
+                    Ok(Some(id)) => {
+                        entity_ids.insert(id);
+                    }
+                    // A record the corpus no longer has resolves to nothing.
+                    // That is a real outcome (it was deleted between staging and
+                    // drain), not an error, and the other half of the pair may
+                    // still resolve.
+                    Ok(None) => {}
+                    Err(e) => eprintln!("run {run_id}: write-back lookup for {key}: {e}"),
+                }
+            }
+        }
+        let mut payloads: Vec<(String, Value)> = Vec::new();
+        for entity_id in &entity_ids {
+            match crate::read::entity_detail(&session, entity_type, snapshot, entity_id) {
+                Ok(Some(detail)) => payloads.push((entity_id.clone(), detail)),
+                Ok(None) => {}
+                Err(e) => eprintln!("run {run_id}: write-back detail for {entity_id}: {e}"),
+            }
+        }
+        let org_name = match pg::get_org_by_id(client, org_id).await {
+            Ok(Some(org)) => org.name,
+            Ok(None) => org_id.to_string(),
+            Err(e) => {
+                eprintln!("run {run_id}: write-back skipped: resolving the org: {e}");
+                return;
+            }
+        };
+        (payloads, org_name)
+    };
+
+    for (entity_id, detail) in payloads {
+        let data = serde_json::json!({
+            "entity_id": entity_id,
+            "run_id": run_id,
+            "cause": "review_resolved",
+            "master": detail.get("golden").cloned().unwrap_or(Value::Null),
+            "members": detail.get("members").cloned().unwrap_or(Value::Null),
+        });
+        if let Err(e) = webhook::emit(client, org_id, &org_name, "entity.write_back", &data).await {
+            eprintln!("run {run_id}: entity.write_back for {entity_id} not queued: {e}");
+        }
+    }
 }
 
 /// What the blocking half of [`drain_and_correct`] produced.

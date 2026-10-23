@@ -1,0 +1,8 @@
+kind: statement
+operation: read
+description: "The entity one record currently belongs to, at a pinned snapshot. The write-back handler's lookup (O4): a resolution names a PAIR of record keys, and what the tenant's system needs back is the master those records now resolve to — which may be a newly merged entity, or two separate ones after a no_match. Returns no row for a record the corpus no longer has."
+params:
+  - { name: snapshot, type: bigint }
+  - { name: record_key, type: varchar }
+returns:
+  - { name: entity_id, type: varchar, nullable: false }

@@ -2031,6 +2031,11 @@ const server = http.createServer((req, res) => {
             event: "entity.retired",
             description: "Entities stopped existing. Aggregated per kind per run.",
           },
+          {
+            event: "entity.write_back",
+            description:
+              "A resolution was applied; carries the resulting master record and its members. Not aggregated — one per affected entity.",
+          },
         ],
       });
     }

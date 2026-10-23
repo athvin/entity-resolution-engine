@@ -1607,9 +1607,42 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          not "the snapshot is what it was when I wrote this" — asserts `duplicate_records >
          duplicate_groups` on base_10 so the two definitions are distinguishable, and asserts a
          re-run of the same id corrects rather than appends.
-   - [ ] O2b emailed run reports (#58's reporting half), O3b webhook outbox + entity events,
-         O4 write-back handler (#44), O5 tags/approval (#51), O6 bulk depth (#9/#62/#52),
-         O7 insights + time series (#45/#57/#85), O8 workflows + triggers (#55/#56).
+   - [x] **O4 the outbound write-back — the master record, not a notification.** The incumbent
+         charges for merge write-back as an add-on. Here it is a catalogued event through the
+         same signed, retried, logged outbox every other event uses, so there is no second
+         delivery mechanism to operate: a tenant subscribes to `entity.write_back` and that
+         subscription IS the per-org handler, with the secret, the delivery log and the UI all
+         already built by O3b and O3c-3.
+         **Deliberately NOT aggregated**, which is the one place it diverges from O3c-2 and the
+         divergence is the design: an `entity.*` aggregate exists because a run's ledger volume
+         scales with the corpus, while a write-back's volume is bounded by resolutions a HUMAN
+         applied. And the receiving system needs the record — a count it would then have to fetch
+         is not a write-back. Stated in the catalog entry itself so the contrast is readable
+         where a subscriber chooses.
+         **Driven off the derived LABELS, not the raw resolutions**, which gets dismissals right
+         for free: a dismissal yields no label because it is not a verdict about the pair, and it
+         changes no master either. The labels also already carry the canonical pair keys, which
+         is exactly what the lookup needs. Both of a pair's keys are resolved and the entity ids
+         deduplicated, so a `match` delivers one master and a `no_match` delivers both — a
+         subscriber applying the change physically should not have to work out which.
+         Fires only when the correction SUCCEEDED, one step further along than `review.resolved`:
+         a write-back describes the corpus after the resolution took effect, so sending one for a
+         failed correction would hand the tenant a master the engine does not believe in. A fresh
+         session at the latest snapshot is opened after the blocking half commits, because that
+         is the first point the corrected corpus is readable.
+         Reuse rather than new machinery: one new declared read
+         (`entity_membership/read/entity_of_key`) and the existing `read::entity_detail`, which is
+         already entity-type aware — so person and Account both work with no parallel copy.
+         Subscribers are checked BEFORE the lake is opened, since the read costs a session and a
+         snapshot pin. Best-effort throughout, with every skip logged and its reason named,
+         because a write-back that silently does not happen is indistinguishable from a tenant
+         whose endpoint is fine.
+         Two sabotages observed: suppressing the emit leaves the delivery list empty, and nulling
+         the master leaves a payload the test rejects while still showing all four members — so
+         the two halves of the assertion fail independently.
+   - [ ] O2b emailed run reports (#58's reporting half), O5 tags/approval (#51),
+         O6 bulk depth (#9/#62/#52), O8 workflows + triggers (#55/#56). (O3b, O3c and O7a have
+         shipped; O7b's insights depth is the remaining half of #45/#57/#85.)
 5. **Cleanse + verify**
    - [x] **V3 per-record data-quality scoring (#63/#73).** 0-100 per record, with the three
          dimensions kept separately — because they fail independently and a single number says a

@@ -3046,7 +3046,7 @@ async fn org_lake_auto_merge(
 /// The org's entity type, from its `ER_CONFIG_PATH` yaml. Person when the key is
 /// absent, the file is unreadable, or the config omits `entity_type` — so person
 /// orgs read exactly as before.
-fn entity_type_from_env(env: &Value) -> er_config::EntityType {
+pub(crate) fn entity_type_from_env(env: &Value) -> er_config::EntityType {
     env.get("ER_CONFIG_PATH")
         .and_then(Value::as_str)
         .and_then(|p| std::fs::read_to_string(p).ok())

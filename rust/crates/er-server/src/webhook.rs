@@ -25,7 +25,7 @@ use crate::pg;
 /// Adding an event means adding it here, which is also what makes it
 /// subscribable. A type absent from this list is refused at registration
 /// instead of accepted and silently never delivered.
-pub const EVENT_CATALOG: [(&str, &str); 12] = [
+pub const EVENT_CATALOG: [(&str, &str); 13] = [
     (
         "job.succeeded",
         "A queued job finished successfully. Fired once per OUTCOME, not per \
@@ -104,6 +104,16 @@ pub const EVENT_CATALOG: [(&str, &str); 12] = [
         "Entities stopped existing — every member moved elsewhere. Aggregated \
          per run. A subscriber holding a reference to one needs to know it is \
          now a tombstone rather than absent.",
+    ),
+    (
+        "entity.write_back",
+        "A steward's resolution was applied and this is the resulting master \
+         record, with its members — the outbound write-back (O4). Deliberately \
+         NOT aggregated, unlike the `entity.*` events above: a write-back's \
+         volume is bounded by resolutions a human applied rather than by corpus \
+         size, and the receiving system needs the RECORD, not a count it would \
+         then have to fetch. Fires once per affected entity, so a `no_match` \
+         that separates a pair delivers both.",
     ),
 ];
 
