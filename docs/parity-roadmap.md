@@ -1607,6 +1607,35 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          not "the snapshot is what it was when I wrote this" — asserts `duplicate_records >
          duplicate_groups` on base_10 so the two definitions are distinguishable, and asserts a
          re-run of the same id corrects rather than appends.
+   - [x] **O6-1 bulk suppress and protect — and N correction passes for one decision.** The
+         overlay endpoints took exactly one `record_key`, so the entity view's multi-select
+         looped: one HTTP call per record, each with `apply_now`. Every one of those calls
+         enqueues an `apply_corrections` job, and that job runs a correction pass over the
+         **whole corpus** — so selecting ten members queued ten full passes to express one
+         decision, and a steward clearing 500 junk records queued 500.
+         It was slow rather than refused, which is why nothing noticed: `jobs_one_active_per_org`
+         covers `dispatching|running|canceling` and NOT `queued`, so the jobs all queue happily
+         and then run serially.
+         `record_keys` now carries a batch, with `record_key` still accepted beside it — every
+         existing caller keeps working, and a steward scripting against the API does not have to
+         change to stay working. Keys are de-duplicated (the same key twice is one decision, not
+         two audit rows) and order-preserving, so the staged actions read back in the order the
+         steward chose. Still **one staged action per record**, because each is independently
+         auditable and independently retractable; what the batch shares is the apply.
+         Capped at 2,000 — the same ceiling the mass-update path uses — and over it is a 422
+         naming both numbers rather than a truncation. A caller that believes it suppressed 3,000
+         records and actually suppressed 2,000 has no way to find out which 1,000 are still live.
+         A partial failure reports **what already staged**, because those actions are real and
+         will drain; a bare "failed" would leave the caller retracting nothing and re-staging
+         everything.
+         `staged_response` gained a sibling rather than a wider signature: three other handlers
+         stage exactly one action and their response shape is read by the frontend and pinned by
+         tests.
+         Both halves observed failing. Restoring the per-record apply makes the Postgres test
+         report `left: 3, right: 1` on "three records must enqueue ONE correction pass"; restoring
+         the frontend loop makes the Playwright test count two requests where it expects one. The
+         UI reported "protected N records" either way, which is exactly why the test counts
+         requests instead of reading the status line.
    - [x] **O7b-1 the insights surface — and a visual gate that was absorbing whole UI changes.**
          O7a retained the metric snapshots because every dashboard number had always been computed
          LIVE: the product could say what is true now and nothing about the direction of travel,

@@ -1455,12 +1455,36 @@ const server = http.createServer((req, res) => {
     // steward path. The read-path master override is exercised by the Rust e2e;
     // here we just confirm the staged acknowledgement the UI reports.
     if (
-      (match = /^\/v1\/orgs\/([^/]+)\/records\/(protect|unprotect)$/.exec(path)) &&
+      (match = /^\/v1\/orgs\/([^/]+)\/records\/(protect|unprotect|suppress|unsuppress)$/.exec(
+        path,
+      )) &&
       req.method === "POST"
     ) {
+      // Both body shapes, and the real batch response (O6). ONE `apply_job`
+      // however many records came in — that is the property the endpoint exists
+      // for, so a mock that invented one job per record would let a client loop
+      // look correct here and queue N full correction passes in production.
+      const body = await readBody(req);
+      const keys = [
+        ...(Array.isArray(body.record_keys) ? body.record_keys.map(String) : []),
+        ...(body.record_key ? [String(body.record_key)] : []),
+      ].filter((k, i, all) => k.trim() !== "" && all.indexOf(k) === i);
+      if (keys.length === 0) {
+        return send(res, 422, {
+          detail: "record_key or a non-empty record_keys is required",
+        });
+      }
+      if (keys.length > 2000) {
+        return send(res, 422, {
+          detail: `${keys.length} records requested; at most 2000 per call — split the batch`,
+        });
+      }
+      const actionIds = keys.map((_, i) => `mock-${match[2]}-${String(i)}`);
       return send(res, 201, {
         status: "staged",
-        action_id: `mock-${match[2]}`,
+        action_id: actionIds[0],
+        action_ids: actionIds,
+        count: keys.length,
         pending_until_next_reconcile: false,
         apply_job: `mock-${match[2]}-job`,
       });

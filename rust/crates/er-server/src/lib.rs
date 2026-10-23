@@ -5479,6 +5479,27 @@ async fn steward_stage(
 /// The staged-action response envelope (`_steward_action`): always `staged`
 /// here, so `pending_until_next_reconcile` is false (immediate apply is the
 /// infra-bound writer-lock path).
+/// The staged response for a call that staged SEVERAL actions (O6).
+///
+/// A sibling of [`staged_response`] rather than a widening of it: three other
+/// handlers stage exactly one action, and their response shape is read by the
+/// frontend and pinned by tests. `action_id` is carried for the callers that
+/// predate the list — it is the first of `action_ids`, which is the whole
+/// truth.
+fn staged_batch_response(status: StatusCode, action_ids: &[String]) -> axum::response::Response {
+    (
+        status,
+        Json(json!({
+            "status": "staged",
+            "action_id": action_ids.first(),
+            "action_ids": action_ids,
+            "count": action_ids.len(),
+            "pending_until_next_reconcile": false,
+        })),
+    )
+        .into_response()
+}
+
 fn staged_response(status: StatusCode, action_id: &str) -> axum::response::Response {
     (
         status,
@@ -5583,9 +5604,47 @@ async fn add_assertion(
 
 #[derive(Deserialize)]
 struct SuppressIn {
-    record_key: String,
+    /// One record. Kept alongside `record_keys` because every existing caller
+    /// sends this shape and a steward scripting against the API should not have
+    /// to change to stay working.
+    #[serde(default)]
+    record_key: Option<String>,
+    /// Several records in ONE call (O6). The point is not convenience: each
+    /// call with `apply_now` enqueues an `apply_corrections` job, and that job
+    /// runs a correction pass over the whole corpus — so suppressing 500
+    /// records a call at a time queues 500 full passes. The frontend's entity
+    /// view loops exactly like that today.
+    #[serde(default)]
+    record_keys: Vec<String>,
     #[serde(default)]
     apply_now: bool,
+}
+
+/// How many records one overlay call may carry.
+///
+/// The same ceiling the mass-update path uses, and surfaced the same way: over
+/// it is a 422 naming the cap, never a silent truncation. A caller that thinks
+/// it suppressed 3,000 records and actually suppressed 2,000 has no way to find
+/// out which 1,000 are still live.
+const MAX_OVERLAY_KEYS: usize = 2000;
+
+impl SuppressIn {
+    /// The requested keys, de-duplicated, in the order given.
+    ///
+    /// Order-preserving rather than sorted so the staged actions read back in
+    /// the order the steward chose, and de-duplicated because staging the same
+    /// overlay twice is two audit rows describing one decision.
+    fn keys(&self) -> Vec<String> {
+        let mut seen: BTreeSet<&str> = BTreeSet::new();
+        self.record_keys
+            .iter()
+            .chain(self.record_key.iter())
+            .map(|k| k.trim())
+            .filter(|k| !k.is_empty())
+            .filter(|k| seen.insert(k))
+            .map(ToString::to_string)
+            .collect()
+    }
 }
 
 /// Steward+: stage a record overlay (`overlay` = `"suppress"` or `"protect"`), or
@@ -5605,8 +5664,24 @@ async fn record_overlay_action(
     if let Err(e) = guard(&principal, &org, Role::Steward) {
         return e.into_response();
     }
-    if body.record_key.trim().is_empty() {
-        return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "record_key is required");
+    let keys = body.keys();
+    if keys.is_empty() {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "record_key or a non-empty record_keys is required",
+        );
+    }
+    if keys.len() > MAX_OVERLAY_KEYS {
+        // Named, never truncated. A caller that thinks it suppressed 3,000
+        // records and actually suppressed 2,000 has no way to find out which
+        // 1,000 are still live.
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!(
+                "{} records requested; at most {MAX_OVERLAY_KEYS} per call — split the batch",
+                keys.len()
+            ),
+        );
     }
     let Some(dsn) = &state.dsn else {
         return detail_err(
@@ -5618,26 +5693,47 @@ async fn record_overlay_action(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    let action = if retract {
-        json!({
-            "type": "retract_record_overlay",
-            "record_key": body.record_key,
-            "kind": overlay,
-            "created_by": principal.actor,
-        })
-    } else {
-        json!({
-            "type": format!("{overlay}_record"),
-            "record_key": body.record_key,
-            "created_by": principal.actor,
-        })
-    };
-    let action_id = match steward_stage(&client, &principal.actor, &org, &action).await {
-        Ok(id) => id,
-        Err(r) => return *r,
-    };
+    // One staged action per record: each is independently auditable and
+    // independently retractable, and the drain applies them one at a time
+    // regardless. What the batch SHARES is the apply, below.
+    let mut action_ids: Vec<String> = Vec::with_capacity(keys.len());
+    for record_key in &keys {
+        let action = if retract {
+            json!({
+                "type": "retract_record_overlay",
+                "record_key": record_key,
+                "kind": overlay,
+                "created_by": principal.actor,
+            })
+        } else {
+            json!({
+                "type": format!("{overlay}_record"),
+                "record_key": record_key,
+                "created_by": principal.actor,
+            })
+        };
+        match steward_stage(&client, &principal.actor, &org, &action).await {
+            Ok(id) => action_ids.push(id),
+            Err(r) => {
+                // Partway through, the actions already staged are REAL and will
+                // drain. Reporting only "failed" would leave a caller retracting
+                // nothing and re-staging everything.
+                if action_ids.is_empty() {
+                    return *r;
+                }
+                return detail_err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!(
+                        "staged {} of {} records before failing; the staged ones will still apply",
+                        action_ids.len(),
+                        keys.len()
+                    ),
+                );
+            }
+        }
+    }
     if !body.apply_now {
-        return staged_response(StatusCode::CREATED, &action_id);
+        return staged_batch_response(StatusCode::CREATED, &action_ids);
     }
     let idem = format!("{overlay}-apply:{}", er_ids::new_v7());
     let params = json!({ "skip_ingest": true });
@@ -5659,11 +5755,17 @@ async fn record_overlay_action(
     )
     .await
     {
+        // ONE apply job for the whole batch, however many records it carried.
+        // That is the point of taking a list: `apply_corrections` runs a
+        // correction pass over the entire corpus, so N calls mean N full passes
+        // to express one decision.
         Ok(job) => (
             StatusCode::CREATED,
             Json(json!({
                 "status": "staged",
-                "action_id": action_id,
+                "action_id": action_ids.first(),
+                "action_ids": action_ids,
+                "count": keys.len(),
                 "pending_until_next_reconcile": false,
                 "apply_job": job.id,
             })),
