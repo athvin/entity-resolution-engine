@@ -3307,6 +3307,57 @@ async fn duplicates_list(
     }
 }
 
+/// Viewer+: one run's per-source duplicate attribution
+/// (`GET /v1/orgs/{org}/insights/sources`). Query `run_id`; defaults to the
+/// newest snapshot's run.
+///
+/// The corpus-wide rate says a tenant has a problem; this says which feed it
+/// came from, which is the difference between knowing and being able to act.
+async fn insight_sources(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let session = match org_lake(&state, &org).await {
+        Ok(s) => s,
+        Err(r) => return *r,
+    };
+    let snapshot = match read::latest_snapshot(&session) {
+        Ok(s) => s,
+        Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
+    };
+    // Default to the newest run rather than making the caller know one:
+    // "which source is causing this" is a question asked about now.
+    let run_id = match params.get("run_id").map(String::as_str) {
+        Some(id) if !id.is_empty() => id.to_string(),
+        _ => match read::insights(&session, snapshot, 1) {
+            Ok(series) => match series.first().and_then(|r| r["run_id"].as_str()) {
+                Some(id) => id.to_string(),
+                None => {
+                    return Json(json!({ "snapshot": snapshot, "run_id": null, "sources": [] }))
+                        .into_response();
+                }
+            },
+            Err(e) => {
+                return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}"));
+            }
+        },
+    };
+    match read::insight_sources(&session, snapshot, &run_id) {
+        Ok(sources) => Json(json!({
+            "snapshot": snapshot,
+            "run_id": run_id,
+            "sources": sources,
+        }))
+        .into_response(),
+        Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
+    }
+}
+
 /// Viewer+: the resolution metrics over time (`GET /v1/orgs/{org}/insights`).
 ///
 /// Every dashboard number has always been computed live, so it could say what
@@ -6727,6 +6778,7 @@ fn build_routes(state: AppState) -> Router {
         .route("/v1/orgs/{org}/labeling/next", get(labeling_next))
         .route("/v1/orgs/{org}/labels", post(create_label).get(labels_list))
         .route("/v1/orgs/{org}/insights", get(insights))
+        .route("/v1/orgs/{org}/insights/sources", get(insight_sources))
         .route("/v1/orgs/{org}/quality", get(quality))
         .route("/v1/orgs/{org}/segments", get(segments_catalog))
         .route(

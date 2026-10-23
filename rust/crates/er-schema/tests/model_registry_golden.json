@@ -4,6 +4,7 @@
   "match_scores",
   "scored_records",
   "metric_snapshots",
+  "metric_snapshot_sources",
   "record_qualities",
   "entity_membership",
   "entities",
@@ -1274,6 +1275,71 @@
       "tf_snapshot_id"
      ],
      "where": null
+    }
+   ],
+   "owner": "ddl"
+  },
+  "metric_snapshot_sources": {
+   "columns": [
+    {
+     "name": "id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "run_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "source_system",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "captured_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "records",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "duplicate_records",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "contributed_groups",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "created_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "updated_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    }
+   ],
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.metric_snapshot_sources (\n  id VARCHAR NOT NULL,\n  run_id VARCHAR NOT NULL,\n  source_system VARCHAR NOT NULL,\n  captured_at TIMESTAMP NOT NULL,\n  records BIGINT NOT NULL,\n  duplicate_records BIGINT NOT NULL,\n  contributed_groups BIGINT NOT NULL,\n  created_at TIMESTAMP NOT NULL,\n  updated_at TIMESTAMP NOT NULL\n);",
+   "enums": {},
+   "keys": [
+    {
+     "columns": [
+      "id"
+     ]
+    },
+    {
+     "columns": [
+      "run_id",
+      "source_system"
+     ]
     }
    ],
    "owner": "ddl"

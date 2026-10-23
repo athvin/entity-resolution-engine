@@ -429,6 +429,24 @@ fn ddl_specs() -> Vec<TableSpec> {
             vec![key(&["id"]), key(&["run_id"])],
             BTreeMap::new(),
         ),
+        // Per-source duplicate attribution (O7b-2), beside the corpus-wide
+        // snapshot it is assembled with.
+        tspec(
+            "metric_snapshot_sources",
+            vec![
+                nn("id", VARCHAR),
+                nn("run_id", VARCHAR),
+                nn("source_system", VARCHAR),
+                nn("captured_at", TIMESTAMP),
+                nn("records", BIGINT),
+                nn("duplicate_records", BIGINT),
+                nn("contributed_groups", BIGINT),
+                nn("created_at", TIMESTAMP),
+                nn("updated_at", TIMESTAMP),
+            ],
+            vec![key(&["id"]), key(&["run_id", "source_system"])],
+            BTreeMap::new(),
+        ),
         tspec(
             "record_qualities",
             vec![

@@ -25,6 +25,7 @@ pub mod lake_schema_migration;
 pub mod match_score;
 pub mod matching_model;
 pub mod metric_snapshot;
+pub mod metric_snapshot_source;
 pub mod org;
 pub mod pair_label;
 pub mod raw_record;

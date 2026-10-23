@@ -1,0 +1,48 @@
+kind: entity
+version: 1
+name: metric_snapshot_source
+relation: metric_snapshot_sources
+description: "One run's duplicate attribution, per source system. The corpus-wide duplicate rate says a tenant has a problem; it does not say WHERE the problem comes from, and the answer is nearly always one feed. Retained per run beside metric_snapshots for the same reason that table exists: a live number says what is true now and nothing about whether a source is getting better or worse."
+key: [id]
+natural_key: [run_id, source_system]
+generate:
+  stores: [duckdb]
+  languages: [rust, typescript]
+  wire: [json]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "Content-derived row id: sha256('metric_snapshot_sources:' || run_id || ':' || source_system)."
+  - name: run_id
+    type: varchar
+    nullable: false
+    description: "The run this attribution describes; shares its id with the metric_snapshots row."
+  - name: source_system
+    type: varchar
+    nullable: false
+    description: "The delivering source system."
+  - name: captured_at
+    type: timestamp
+    nullable: false
+    description: "The run's logical timestamp, duplicated here so the series is readable without joining."
+  - name: records
+    type: bigint
+    nullable: false
+    description: "How many of this source's records are in the corpus."
+  - name: duplicate_records
+    type: bigint
+    nullable: false
+    description: "How many of them share an entity with at least one other record — counted by RECORD rather than by group, the same judgement metric_snapshots made: counting groups calls a five-record cluster and a pair the same amount of duplication."
+  - name: contributed_groups
+    type: bigint
+    nullable: false
+    description: "How many duplicate groups contain at least one of this source's records. A source can account for few duplicate RECORDS while touching many groups, which is the signature of a feed that adds one bad row to everything rather than one bad batch."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Creation stamp (the run's logical timestamp)."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Last-update stamp; a re-run of the same run_id corrects rather than appends."

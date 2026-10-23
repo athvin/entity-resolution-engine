@@ -1,0 +1,6 @@
+kind: statement
+operation: create
+mode: partial
+description: "MERGE the run's per-source duplicate attribution from the session's __metric_source_src staging, on (run_id, source_system). A re-run of the same run id corrects rather than appends, exactly as the corpus-wide snapshot does."
+params: []
+returns: none

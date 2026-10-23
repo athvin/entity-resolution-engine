@@ -1607,6 +1607,31 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          not "the snapshot is what it was when I wrote this" — asserts `duplicate_records >
          duplicate_groups` on base_10 so the two definitions are distinguishable, and asserts a
          re-run of the same id corrects rather than appends.
+   - [x] **O7b-2 per-source duplicate attribution — and a gate with a hole in it.** The
+         corpus-wide duplicate rate says a tenant has a problem; it does not say WHERE the
+         problem comes from, and the answer is nearly always one feed. New
+         `metric_snapshot_source` relation keyed `(run_id, source_system)`, written beside the
+         corpus-wide snapshot and read by `GET /v1/orgs/{org}/insights/sources`.
+         **Assembled in the same call, from the same `groups` CTE**, which is O7a's rule applied
+         rather than restated: a snapshot built from several independent reads can describe a
+         corpus that never existed. The test asserts it directly — the per-source record counts
+         and duplicate counts must SUM to the corpus-wide figures, so the two cannot disagree.
+         `contributed_groups` is kept as its own number beside `duplicate_records`, because a
+         source can account for few duplicate records while TOUCHING many groups, which is the
+         signature of a feed that adds one bad row to everything rather than one bad batch. Rows
+         come back worst first: the question is "which feed is causing this", so the answer should
+         be the first row. Rates are derived on read and null rather than 0.0 for a source with no
+         records, the same judgement the corpus-wide series makes.
+         **The gate that should have caught my mistake did not.** The new entity had no
+         `er_schema::model::all_specs()` entry, so `create_ddl_table` could not build its table —
+         and `write_metric_snapshot` is best-effort, so the failure arrived as a swallowed log
+         line (`metric_snapshot_sources spec missing from S5 registry`) and the table simply never
+         appeared. #283's registry-drift gate passed throughout: it compared only relations
+         present in BOTH sources, skipping an absent one on the reasoning that "an entity may be
+         declared before its registry entry exists". That reasoning was wrong — a DuckDB entity
+         the registry has never heard of can never be created at all — and the skip is now an
+         assertion naming the relation. Verified by removing the spec again and watching the gate
+         fail with `["metric_snapshot_sources"]`.
    - [x] **O6-2 confidence bands, group-size floors — and two filters that were doing nothing.**
          The review queue was FIFO by review id with no way to say "the high-confidence tail
          first", which is the order that clears a 40,000-item backlog fastest. Duplicates paged by

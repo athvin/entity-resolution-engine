@@ -1,0 +1,13 @@
+kind: statement
+operation: read
+description: "One run's per-source duplicate attribution, worst first. Ordered by duplicate_records rather than by name because the question this answers is 'which feed is causing this', and the answer should be the first row."
+params:
+  - { name: snapshot, type: bigint }
+  - { name: run_id, type: varchar }
+returns:
+  - { name: run_id, type: varchar, nullable: false }
+  - { name: source_system, type: varchar, nullable: false }
+  - { name: captured_at, type: timestamp, nullable: false }
+  - { name: records, type: bigint, nullable: false }
+  - { name: duplicate_records, type: bigint, nullable: false }
+  - { name: contributed_groups, type: bigint, nullable: false }
