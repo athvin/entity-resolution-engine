@@ -1468,6 +1468,48 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          a near-duplicate that joins an existing entity and one a stranger that makes a new one,
          so the partition moves in two directions at once and a filter that is ignored stops
          being indistinguishable from one that works.
+   - [x] **O3c-3 the webhook UI — the first surface for any of it.** O3a built the catalog, O3b
+         the outbox and the delivery log, O3c-1 the control-plane events and O3c-2 the entity
+         aggregates, and `grep webhook frontend/src` returned nothing but generated entity
+         bindings. So a tenant could not discover which events exist, could not subscribe without
+         an API call, and — the one that actually costs them — could not see that their endpoint
+         had been returning 500s for a day. Those three gaps are the page's three cards.
+         **The failure reason is in the ROW, not behind a click.** The first draft put it in the
+         expandable payload panel and the spec caught it: a reason one expand away is a reason
+         nobody reads, and "nobody could find out that an endpoint was broken" is the whole gap
+         the outbox closed. The row carries the response code, the reason, and attempts out of the
+         ceiling, so "given up on" is distinguishable from "still trying" at a glance.
+         Grayscale per §3.3, so the three delivery states are told apart by SHAPE — a check, a
+         slash, a dashed ring — each with its word beside it, because a glyph alone is a legend
+         the operator has to learn. An unrecognised state renders as pending rather than throwing:
+         the safe reading of an unknown outcome is that it has not arrived.
+         **`listFrom` turns the recurring envelope bug into a tested function.** er-server has no
+         single list envelope — `{jobs}`, `{deliveries}`, `{events}`, `{items}`, and one bare array
+         on `/webhooks` — and the BFF's browser contract is a bare array everywhere. W0.5b shipped
+         that mismatch as `forward<unknown[]>` over `{jobs: […]}`, a type assertion about an HTTP
+         body TypeScript cannot check, so the runs page rendered an empty table against the real
+         backend while every mock-backed tier was green. The cast is now one helper with a unit
+         test, and the jobs route moved onto it too.
+         **A layout bug the new tab exposed.** The settings nav was a non-wrapping flex row; a
+         sixth tab overflowed a 360px viewport and pushed the config studio's Save button under
+         the lexicon list, so the click landed on a nickname. Found by `grow.spec.ts` on
+         mobile-chrome, and the cause was confirmed by removing the tab and watching the test pass.
+         `flex-wrap` fixes it; the two mobile config-studio baselines shifted and were regenerated
+         (desktop fits six, so it did not) — the same "shared chrome invalidates baselines for
+         screens the diff never mentions" rule E6c and E9b both paid.
+         Two new wire-contract pairs, both observed failing: inventing `last_delivered_at` on
+         `WebhookRow` fails `tsc` with `UNDECLARED_WIRE_FIELDS: "last_delivered_at"`. The gate
+         cannot catch an *omission*, only an invention, which is why the reasoning for leaving
+         `secret` off the row type is written beside the pair rather than relied on —
+         `webhooks_index` never projects it, so a type that carried it would state a contract the
+         server refuses on purpose.
+         Coverage: the page's hooks are Playwright's, so the four floors were cleared by moving
+         real logic out of the component into tested modules rather than by lowering a threshold —
+         the delivery filters (server parameter names, and an empty filter omitted because `state=`
+         is a 422 rather than "any"), the removed-subscription fallback, the subscribe guard
+         (asserted satisfiable, which is the half the source-wizard stall got wrong), and the
+         query-key nesting `useDeleteWebhook` relies on for its invalidation to reach the filtered
+         caches at all.
    - [x] **O7a resolution metrics over time (#45/#57's trend half).** Every dashboard number has
          always been computed LIVE from the lake, so the product could say what is true now and
          nothing about the direction of travel — and "is the duplicate rate going up" is the

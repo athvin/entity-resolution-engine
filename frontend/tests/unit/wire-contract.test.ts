@@ -52,12 +52,15 @@ import type { Job } from "@/lib/entities/bindings/Job";
 import type { MatchingModel } from "@/lib/entities/bindings/MatchingModel";
 import type { Org } from "@/lib/entities/bindings/Org";
 import type { Schedule } from "@/lib/entities/bindings/Schedule";
+import type { Webhook } from "@/lib/entities/bindings/Webhook";
+import type { WebhookDelivery } from "@/lib/entities/bindings/WebhookDelivery";
 import type { AdminOrgRow } from "@/lib/query/admin";
 import type { ConfigVersionRow } from "@/lib/query/config";
 import type { ReceiptRow } from "@/components/sources/sources-content";
 import type { JobRow, LineageRow } from "@/lib/query/hooks";
 import type { ModelVersionDetail, ModelVersionRow } from "@/lib/query/models";
 import type { ScheduleRow } from "@/lib/query/steward";
+import type { WebhookDeliveryRow, WebhookRow } from "@/lib/query/webhooks";
 
 /**
  * `true` when every key of `Ui` is either a field of `Entity` or a declared
@@ -128,6 +131,17 @@ const PAIRS = {
    */
   receipt: true satisfies NoUndeclaredFields<ReceiptRow, IngestBatch>,
 
+  /**
+   * The subscription as the index lists it — four fields, and deliberately not
+   * the fifth: `webhooks_index` never projects `secret`, so a UI type that
+   * carried it would state a contract the server refuses on purpose. The gate
+   * cannot catch an omission, only an invention, which is why that reasoning is
+   * written here rather than relied on.
+   */
+  webhook: true satisfies NoUndeclaredFields<WebhookRow, Webhook>,
+
+  webhookDelivery: true satisfies NoUndeclaredFields<WebhookDeliveryRow, WebhookDelivery>,
+
   configVersion: true satisfies NoUndeclaredFields<ConfigVersionRow, ConfigVersion>,
   lineage: true satisfies NoUndeclaredFields<LineageRow, GoldenLineage>,
   schedule: true satisfies NoUndeclaredFields<ScheduleRow, Schedule>,
@@ -149,6 +163,8 @@ describe("wire contract: UI response shapes vs the generated entity bindings", (
       "modelVersionDetail",
       "receipt",
       "schedule",
+      "webhook",
+      "webhookDelivery",
     ]);
   });
 

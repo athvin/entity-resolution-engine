@@ -60,6 +60,11 @@ export const TRIAGE_ORGS = [
   // read-only (duplicates view + wizard up to the Map step, no publish), so a
   // single shared org is race-safe and is never pixel-compared.
   "orgs-dev",
+  // Subscribing and removing both mutate the subscription list, so the webhook
+  // page gets one org per device project for the same reason the registry does.
+  "webhooks-dev",
+  "webhooks-ios",
+  "webhooks-android",
 ] as const;
 
 export async function installTestFixtures(db: Db): Promise<void> {
