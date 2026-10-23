@@ -1652,6 +1652,19 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          refusing to invent values for a NOT NULL column, which is the contract working rather
          than a problem.
          Two sabotages observed: reporting zero applied, and removing the reconcile entirely.
+         **One behavioural consequence, and it is the intended one.** Reconciling creates every
+         catalog relation, so a CLI lake now carries the whole schema from the first command
+         rather than growing it lazily as `create_ddl_table` was called. That is exactly what a
+         dispatcher-provisioned lake has always looked like — the CLI was the odd one out.
+         `cli_e2e`'s "a data file per table" assertion held only because of the lazy creation; it
+         now names the four relations base_10 never writes (`assertions`, `golden_overrides`,
+         `record_overlays`, `record_qualities`) and fails if a populated one ever joins them,
+         which is a stronger statement than the one it replaced.
+         Caught by CI, not locally — `make check` **did not run `cargo doc`** despite CLAUDE.md
+         claiming it "mirrors rust.yml", so a public doc linking to a private item passed here
+         and failed there. `make doc` now runs rust.yml's exact rustdoc command and `check`
+         depends on it; verified by restoring the broken link and watching it fail with the same
+         message.
    - [x] **O7b-2 per-source duplicate attribution — and a gate with a hole in it.** The
          corpus-wide duplicate rate says a tenant has a problem; it does not say WHERE the
          problem comes from, and the answer is nearly always one feed. New
