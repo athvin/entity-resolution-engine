@@ -1,0 +1,63 @@
+kind: entity
+version: 1
+name: tagging
+relation: taggings
+description: "One tag applied to one subject: the attachment, kept apart from the tag so retiring a tag does not rewrite what it was applied to."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+  wire: [json]
+  history: true
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "The tagging's unique id (UUIDv7, minted by the application)."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant. Denormalised from the tag so every read is scoped by one predicate rather than a join — the same reason every other tenant-scoped relation carries it."
+  - name: tag_id
+    type: varchar
+    nullable: false
+    references: { relation: tags, column: id }
+    description: "The tag applied."
+  - name: subject_type
+    type: varchar
+    nullable: false
+    description: "What was tagged: `entity` (a resolved cluster, by its entity id) or `review` (an open review item). Two kinds rather than two tables, because a filter and a bulk action want one list of 'things tagged X' and a union of two relations would make every such read a join."
+  - name: subject_id
+    type: varchar
+    nullable: false
+    description: "The entity id or review id. Deliberately NOT a foreign key: an entity lives in the lake and a review is rebuilt by every reconcile, so a database-level reference would be to a row this store does not own. A tagging whose subject has gone is harmless — it reads as absent and is cleaned up by nothing, which is the honest cost of tagging something another store owns."
+  - name: created_by
+    type: varchar
+    nullable: false
+    description: "The actor that applied the tag. Kept because tagging is how work is assigned, so who claimed it matters."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the tag was applied."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Wall-clock last-write time."
+indexes:
+  # "What is tagged X" — the filter and every bulk action scoped by tag.
+  - name: taggings_org_tag
+    columns: [org_id, tag_id]
+  # "What is this thing tagged" — the chips on one entity or review.
+  - name: taggings_org_subject
+    columns: [org_id, subject_type, subject_id]
+  # Applying the same tag twice is the same fact, so it is one row. Makes the
+  # apply endpoint idempotent at the schema rather than by a read-then-write
+  # race.
+  - name: taggings_unique_application
+    columns: [org_id, tag_id, subject_type, subject_id]
+    unique: true

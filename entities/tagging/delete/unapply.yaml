@@ -1,0 +1,9 @@
+kind: statement
+operation: delete
+description: "Remove one application. A real DELETE, unlike retiring a tag: nothing references a tagging, so there is no foreign key to fail on — the distinction D11's sweep made explicit. The history companion keeps the row image, so who removed it is still answerable."
+params:
+  - { name: org_id, type: varchar }
+  - { name: tag_id, type: varchar }
+  - { name: subject_type, type: varchar }
+  - { name: subject_id, type: varchar }
+returns: none

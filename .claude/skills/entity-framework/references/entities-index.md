@@ -30,7 +30,7 @@ statements is read or written only through the engine's own stage SQL, not
 through a typed query function.
 
 <!-- BEGIN GENERATED: entities-index -->
-**36 entities, 156 declared statements.**
+**38 entities, 164 declared statements.**
 
 | Entity | Relation | Store | Key | Natural key | History |
 |---|---|---|---|---|---|
@@ -67,6 +67,8 @@ through a typed query function.
 | `schema_migration` | `schema_migrations` | postgres | `id` | — | — |
 | `scored_record` | `scored_records` | duckdb | `id` | `record_key` | — |
 | `staged_steward_action` | `staged_steward_actions` | postgres | `id` | — | — |
+| `tag` | `tags` | postgres | `id` | — | yes |
+| `tagging` | `taggings` | postgres | `id` | — | yes |
 | `tenant_schema_state` | `tenant_schema_states` | postgres | `id` | `org_id` | — |
 | `webhook` | `webhooks` | postgres | `id` | — | yes |
 | `webhook_delivery` | `webhook_deliveries` | postgres | `id` | — | — |
@@ -108,6 +110,8 @@ Declared statements per entity and operation:
 | `schema_migration` | 1 | 1 | 0 | 0 |
 | `scored_record` | 0 | 1 | 1 | 1 |
 | `staged_steward_action` | 1 | 1 | 1 | 0 |
+| `tag` | 1 | 3 | 1 | 0 |
+| `tagging` | 1 | 1 | 0 | 1 |
 | `tenant_schema_state` | 1 | 1 | 0 | 0 |
 | `webhook` | 1 | 3 | 1 | 0 |
 | `webhook_delivery` | 1 | 1 | 2 | 0 |

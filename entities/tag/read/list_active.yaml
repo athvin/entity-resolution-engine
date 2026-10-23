@@ -1,0 +1,6 @@
+kind: statement
+operation: read
+description: "The tenant's live vocabulary, alphabetical. Retired tags are excluded here and everywhere else a tag is offered, so a soft delete is indistinguishable from a delete to every reader — the pattern `webhook/read/list_active` established."
+params:
+  - { name: org_id, type: varchar }
+returns: entity

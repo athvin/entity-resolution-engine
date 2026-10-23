@@ -1,0 +1,9 @@
+kind: statement
+operation: read
+description: "What carries a tag — the filter, and the scope every bulk action by tag will read. Optionally narrowed to one subject kind. The explicit ::varchar casts are needed because Postgres cannot infer a parameter's type from `$x IS NULL` alone and resolves left to right."
+params:
+  - { name: org_id, type: varchar }
+  - { name: tag_id, type: varchar }
+  - { name: subject_type, type: varchar, nullable: true }
+  - { name: limit, type: bigint }
+returns: entity

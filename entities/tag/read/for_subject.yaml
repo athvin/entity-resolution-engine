@@ -1,0 +1,9 @@
+kind: statement
+operation: read
+description: "The live tags on one subject — the chips shown on an entity or a review. Declared on `tag` rather than `tagging` because it returns TAG rows, and a control-plane statement's `returns: entity` means its own entity's shape: a read belongs to the entity it returns, not the one it joins through. Joins rather than denormalising the name onto the tagging, so renaming a tag needs no backfill."
+reads: [tagging]
+params:
+  - { name: org_id, type: varchar }
+  - { name: subject_type, type: varchar }
+  - { name: subject_id, type: varchar }
+returns: entity

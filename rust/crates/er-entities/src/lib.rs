@@ -39,6 +39,8 @@ pub mod schema;
 pub mod schema_migration;
 pub mod scored_record;
 pub mod staged_steward_action;
+pub mod tag;
+pub mod tagging;
 pub mod tenant_schema_state;
 pub mod webhook;
 pub mod webhook_delivery;

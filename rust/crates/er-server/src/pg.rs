@@ -1292,3 +1292,144 @@ pub async fn publish_config_version(
     er_entities::org::update::set_active_config(client, version, org_name).await?;
     Ok(())
 }
+
+// ---- tags (O5) --------------------------------------------------------------
+
+/// The subject kinds a tag can be applied to.
+///
+/// A closed set checked here rather than a free string, for the reason
+/// `webhook.events` was closed in #223: an unconstrained value is accepted and
+/// then matches nothing on read, which is a silence nobody can diagnose. A
+/// typo'd `entities` would tag something no filter ever looks for.
+pub const TAG_SUBJECT_KINDS: [&str; 2] = ["entity", "review"];
+
+/// Whether `kind` is a subject a tag may be applied to.
+#[must_use]
+pub fn is_tag_subject(kind: &str) -> bool {
+    TAG_SUBJECT_KINDS.contains(&kind)
+}
+
+/// Add a label to the tenant's vocabulary. `Ok(None)` means the name is already
+/// taken by a live tag.
+///
+/// The duplicate is detected from the UNIQUE VIOLATION sqlstate rather than by
+/// reading first — a read-then-write races two stewards naming the same tag —
+/// and by the sqlstate rather than by matching the index name in the message,
+/// which is a string a Postgres upgrade is free to change. Same shape as
+/// `create_org`'s handling a few hundred lines up.
+pub async fn create_tag(
+    client: &Client,
+    org_id: &str,
+    name: &str,
+    description: Option<&str>,
+    actor: &str,
+) -> Result<Option<er_entities::tag::Tag>, PgError> {
+    let tag_id = er_ids::new_v7();
+    match er_entities::tag::create::create(client, &tag_id, org_id, name, description, actor).await
+    {
+        Ok(rows) => Ok(rows.into_iter().next()),
+        Err(e) if e.code() == Some(&tokio_postgres::error::SqlState::UNIQUE_VIOLATION) => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// The tenant's live vocabulary, alphabetical.
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn list_tags(
+    client: &Client,
+    org_id: &str,
+) -> Result<Vec<er_entities::tag::Tag>, PgError> {
+    er_entities::tag::read::list_active(client, org_id).await
+}
+
+/// The live tags on one subject — the chips for an entity or a review.
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn tags_for_subject(
+    client: &Client,
+    org_id: &str,
+    subject_type: &str,
+    subject_id: &str,
+) -> Result<Vec<er_entities::tag::Tag>, PgError> {
+    er_entities::tag::read::for_subject(client, org_id, subject_type, subject_id).await
+}
+
+/// Retire a tag. `true` if a live tag was retired, `false` if there was none.
+///
+/// # Errors
+/// Propagates the update error.
+pub async fn retire_tag(client: &Client, org_id: &str, tag_id: &str) -> Result<bool, PgError> {
+    Ok(er_entities::tag::update::retire(client, org_id, tag_id).await? == 1)
+}
+
+/// Apply a tag to a subject. Idempotent: applying twice is the same fact, and
+/// the unique index makes the second a no-op rather than a second row.
+///
+/// `Ok(false)` means the tag does not exist (or is retired), which the caller
+/// maps to 404 — checked here so an apply cannot create a tagging pointing at a
+/// tag nobody can see.
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn apply_tag(
+    client: &Client,
+    org_id: &str,
+    tag_id: &str,
+    subject_type: &str,
+    subject_id: &str,
+    actor: &str,
+) -> Result<bool, PgError> {
+    if er_entities::tag::read::by_id(client, org_id, tag_id)
+        .await?
+        .is_empty()
+    {
+        return Ok(false);
+    }
+    let tagging_id = er_ids::new_v7();
+    er_entities::tagging::create::apply(
+        client,
+        &tagging_id,
+        org_id,
+        tag_id,
+        subject_type,
+        subject_id,
+        actor,
+    )
+    .await?;
+    Ok(true)
+}
+
+/// Remove one application. `true` if a tagging was removed.
+///
+/// # Errors
+/// Propagates the delete error.
+pub async fn unapply_tag(
+    client: &Client,
+    org_id: &str,
+    tag_id: &str,
+    subject_type: &str,
+    subject_id: &str,
+) -> Result<bool, PgError> {
+    Ok(
+        er_entities::tagging::delete::unapply(client, org_id, tag_id, subject_type, subject_id)
+            .await?
+            > 0,
+    )
+}
+
+/// What carries a tag — the filter, and the scope a bulk action by tag reads.
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn subjects_for_tag(
+    client: &Client,
+    org_id: &str,
+    tag_id: &str,
+    subject_type: Option<&str>,
+    limit: i64,
+) -> Result<Vec<er_entities::tagging::Tagging>, PgError> {
+    er_entities::tagging::read::subjects_by_tag(client, org_id, tag_id, subject_type, limit).await
+}

@@ -1,0 +1,7 @@
+kind: statement
+operation: read
+description: "One live tag, for validating an application before it is written. Filters `active` so applying a retired tag is a 404 rather than resurrecting it by reference."
+params:
+  - { name: org_id, type: varchar }
+  - { name: tag_id, type: varchar }
+returns: entity

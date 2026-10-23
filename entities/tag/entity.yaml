@@ -1,0 +1,60 @@
+kind: entity
+version: 1
+name: tag
+relation: tags
+description: "A tenant's own label for entities and review groups: the vocabulary a steward sorts work by."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+  wire: [json]
+  history: true
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "The tag's unique id (UUIDv7, minted by the application)."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant that owns the tag. A tag is never shared across tenants: it names one tenant's own workflow."
+  - name: name
+    type: varchar
+    nullable: false
+    description: "The label a steward sees and types. Unique per tenant among active tags, because two tags with one name make a filter ambiguous and a bulk action unsafe."
+  - name: description
+    type: varchar
+    description: "What the tag means, for the steward who inherits it. Null when nobody wrote one."
+  - name: active
+    type: boolean
+    nullable: false
+    default: "true"
+    description: "Whether the tag is in use. Retiring is a soft delete: `taggings` references this row, every foreign key in this schema is NO ACTION, and a hard DELETE would therefore fail for exactly the tags that had been used — which is the bug D11 found in webhooks. Keeping the row also keeps the history legible: what a group was once marked as is part of why it was handled the way it was."
+  - name: created_by
+    type: varchar
+    nullable: false
+    description: "The actor that created the tag."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the tag was created."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Wall-clock last-write time."
+indexes:
+  # The tenant's vocabulary, alphabetical.
+  - name: tags_org_name
+    columns: [org_id, name]
+  # One live tag per name per tenant. Partial on `active`, so retiring a tag
+  # frees its name for reuse while the retired row stays for history — the same
+  # shape `matching_models_one_active_per_name` uses for the same reason.
+  - name: tags_one_active_per_name
+    columns: [org_id, name]
+    unique: true
+    where: "active"
