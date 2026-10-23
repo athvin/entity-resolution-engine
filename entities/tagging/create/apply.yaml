@@ -1,0 +1,12 @@
+kind: statement
+operation: create
+mode: partial
+description: "Apply a tag to a subject, idempotently. Applying the same tag twice is the same fact, so DO NOTHING rather than DO UPDATE: there is nothing to change, and the original created_by/created_at record who first claimed the work. Idempotent at the schema rather than by a read-then-write, which two stewards clicking at once would race."
+params:
+  - { name: tagging_id, type: varchar }
+  - { name: org_id, type: varchar }
+  - { name: tag_id, type: varchar }
+  - { name: subject_type, type: varchar }
+  - { name: subject_id, type: varchar }
+  - { name: created_by, type: varchar }
+returns: none

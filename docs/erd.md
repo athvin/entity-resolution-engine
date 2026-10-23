@@ -158,6 +158,26 @@ erDiagram
         timestamp applied_at
         timestamp updated_at
     }
+    tags {
+        varchar id PK
+        varchar org_id FK
+        varchar name
+        varchar description
+        boolean active
+        varchar created_by
+        timestamp created_at
+        timestamp updated_at
+    }
+    taggings {
+        varchar id PK
+        varchar org_id FK
+        varchar tag_id FK
+        varchar subject_type
+        varchar subject_id
+        varchar created_by
+        timestamp created_at
+        timestamp updated_at
+    }
     tenant_schema_states {
         varchar id PK
         varchar org_id FK
@@ -201,6 +221,9 @@ erDiagram
     pair_labels }o--|| orgs : "org_id → id"
     schedules }o--|| orgs : "org_id → id"
     staged_steward_actions }o--|| orgs : "org_id → id"
+    tags }o--|| orgs : "org_id → id"
+    taggings }o--|| orgs : "org_id → id"
+    taggings }o--|| tags : "tag_id → id"
     tenant_schema_states }o--|| orgs : "org_id → id"
     webhooks }o--|| orgs : "org_id → id"
     webhook_deliveries }o--|| orgs : "org_id → id"
@@ -220,6 +243,8 @@ erDiagram
 | `schedules` | A recurring job schedule for a tenant: its kind, cron and source. |
 | `schema_migrations` | The control-plane schema ledger: one row per DDL statement the reconciler applied to public.*, plus one `verified` row each time a new catalog version found the live schema already current. The latest row's catalog_hash is the version the database is at. |
 | `staged_steward_actions` | A steward action staged for review/apply: its payload, state and outcome. |
+| `tags` | A tenant's own label for entities and review groups: the vocabulary a steward sorts work by. |
+| `taggings` | One tag applied to one subject: the attachment, kept apart from the tag so retiring a tag does not rewrite what it was applied to. |
 | `tenant_schema_states` | The control plane's cache of each tenant lake's schema position: the catalog version the lake was last reconciled or checked against and how that went. The lake's own schema_migrations ledger is authoritative; this row is what the deploy report and the drift check read without opening every lake. |
 | `webhooks` | A tenant webhook endpoint: its URL, subscribed events and signing secret. |
 | `webhook_deliveries` | One attempt-tracked delivery of one event to one subscriber. The event is recorded here BEFORE any network call, so a subscriber that is briefly unreachable gets the event late instead of never. |

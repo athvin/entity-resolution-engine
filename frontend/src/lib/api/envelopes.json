@@ -40,6 +40,8 @@
   "GET /v1/orgs/{org}/schedules": { "envelope": "bare" },
   "GET /v1/orgs/{org}/segments": { "envelope": "wrapped", "key": "segments" },
   "GET /v1/orgs/{org}/staged": { "envelope": "wrapped", "key": "pending_count" },
+  "GET /v1/orgs/{org}/tags": { "envelope": "wrapped", "key": "tags" },
+  "GET /v1/orgs/{org}/tags/{tag_id}/subjects": { "envelope": "wrapped", "key": "subjects" },
   "GET /v1/orgs/{org}/webhooks": { "envelope": "bare" },
   "GET /v1/orgs/{org}/webhooks/deliveries": { "envelope": "wrapped", "key": "deliveries" },
   "GET /v1/orgs/{org}/webhooks/events": { "envelope": "wrapped", "key": "events" }

@@ -128,6 +128,11 @@ pub const ENTITY_YAML: &[(&str, &str)] = &[
         "staged_steward_action",
         include_str!("../../../../entities/staged_steward_action/entity.yaml"),
     ),
+    ("tag", include_str!("../../../../entities/tag/entity.yaml")),
+    (
+        "tagging",
+        include_str!("../../../../entities/tagging/entity.yaml"),
+    ),
     (
         "tenant_schema_state",
         include_str!("../../../../entities/tenant_schema_state/entity.yaml"),

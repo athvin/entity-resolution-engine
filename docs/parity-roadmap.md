@@ -2112,7 +2112,50 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          real *delivery* waits on an SES identity. The two `dispatch_once_with` test call sites
          pass `Mailer::off()` deliberately — their orgs configure no recipients, and a mailer
          that cannot send turns a stray report into a logged error instead of a silent success.
-   - [ ] O5 tags/approval (#51),
+   - [x] **O5a the tag vocabulary — and a soft delete decided before the first one was written.**
+         Two entities (`tag`, `tagging`), eight declared statements, six handlers, five routes.
+         A tenant can now name its own workflow and sort entities and review groups by it,
+         which is the scope every bulk-action-by-tag will read.
+         **Retiring a tag is a soft delete, and that is D11's lesson applied rather than
+         rediscovered.** `taggings.tag_id` references `tags.id`, every foreign key in this
+         schema is `NO ACTION`, so a hard `DELETE` would have failed for exactly the tags that
+         had actually been used — which is precisely the webhook bug, where delete worked right
+         up until the subscription had delivered something. Proven rather than asserted:
+         swapping `retire.sql` to a `DELETE` makes the pg test 500 with "a tag with
+         applications must still be retirable". **Applying a tag first is the only way a test
+         can tell**, which is why the one that existed for webhooks missed it.
+         The unique index on `(org_id, name) WHERE active` is partial for a reason the test
+         pins: retiring frees the name for reuse while the retired row stays for history, the
+         same shape `matching_models_one_active_per_name` uses.
+         **Two framework rules learned by tripping them.** A cross-entity `returns` does not
+         exist — `returns: entity` means *this* entity's shape, and typed column lists are
+         lake-only for a control read — so a read belongs to the entity it RETURNS, not the one
+         it joins through: `for_subject` returns tag rows and therefore lives on `tag`. And
+         E009 then required the join be declared (`reads: [tagging]`) so the impact surface of
+         a change to that relation is explicit rather than found by grep.
+         **Duplicate detection is by SQLSTATE, not message text.** The first version matched
+         the index name in the error string, which a Postgres upgrade is free to change;
+         `pg.rs` already had the right idiom a few hundred lines up (`UNIQUE_VIOLATION` →
+         `Ok(None)`). Detected at the schema rather than by reading first, because a
+         read-then-write races two stewards naming the same tag.
+         The role ladder: viewer reads, steward names **and** applies, admin retires. Steward
+         creates because a steward who cannot name the work will put the distinction in a note
+         field nothing can filter on; admin retires because it affects every subject the tag
+         touched and every filter naming it. `subject_id` is deliberately **not** a foreign
+         key — an entity lives in the lake and a review is rebuilt by every reconcile, so a
+         database reference would point at a row this store does not own; the cost (a tagging
+         whose subject has gone) is written into the column description rather than discovered.
+         Applying is idempotent at the schema: the same tag twice is the same fact, so
+         `DO NOTHING` keeps the original `created_by`, which is who first claimed the work.
+         The envelope ledger from D13 caught the three new GET routes and forced a regenerate —
+         that gate doing its job on the first unrelated change since it landed.
+   - [ ] **O5b the tag surface — chips and filters. REQUIRED NEXT, not optional.** O5a is
+         headless: nothing in the UI can create or apply a tag, so the capability is inert in
+         exactly the way E10b's labels were until E10c-2 built them a screen. That trap has
+         now been paid for twice in this program; the backend shipped separately only to keep
+         a two-entity schema change reviewable.
+   - [ ] O5c approval-gated scheduled merges (#51's approval half: the scheduler acts only on
+         an approved tag, named in config rather than by a magic flag),
          O6 bulk depth (#9/#62/#52), O8 workflows + triggers (#55/#56). (O3b, O3c and O7a have
          shipped; O7b's insights depth is the remaining half of #45/#57/#85.)
 5. **Cleanse + verify**

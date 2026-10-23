@@ -5691,6 +5691,299 @@ async fn webhooks_index(
 }
 
 /// Admin+: delete a webhook (`DELETE /v1/orgs/{org}/webhooks/{webhook_id}`).
+#[derive(Deserialize)]
+struct TagIn {
+    name: String,
+    #[serde(default)]
+    description: Option<String>,
+}
+
+/// Steward+: the tenant's tag vocabulary, or the tags on one subject
+/// (`GET /v1/orgs/{org}/tags`, optionally `?subject_type=&subject_id=`).
+///
+/// One route for both because a caller rendering chips and a caller rendering a
+/// filter want the same shape; the subject pair narrows it. Viewer+, since
+/// seeing how work is labelled is not changing it.
+async fn tags_index(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "tags require Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    let subject = (
+        params.get("subject_type").map(String::as_str),
+        params.get("subject_id").map(String::as_str),
+    );
+    let found = match subject {
+        (Some(kind), Some(id)) => {
+            if !pg::is_tag_subject(kind) {
+                return detail_err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    format!("subject_type must be one of {:?}", pg::TAG_SUBJECT_KINDS),
+                );
+            }
+            pg::tags_for_subject(&client, &org_row.id, kind, id).await
+        }
+        // Half a subject is a caller bug, not a request for the whole
+        // vocabulary: answering the unfiltered list would look like "this thing
+        // has every tag".
+        (Some(_), None) | (None, Some(_)) => {
+            return detail_err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "subject_type and subject_id must be given together",
+            );
+        }
+        (None, None) => pg::list_tags(&client, &org_row.id).await,
+    };
+    match found {
+        Ok(tags) => Json(json!({ "tags": tags })).into_response(),
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Steward+: add a label to the vocabulary (`POST /v1/orgs/{org}/tags`).
+///
+/// Steward rather than admin: naming the work is part of doing it, and a
+/// steward who cannot create a tag will put the distinction in a note field
+/// where nothing can filter on it.
+async fn create_tag(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Json(body): Json<TagIn>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
+    let name = body.name.trim();
+    if name.is_empty() {
+        return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "name is required");
+    }
+    if name.len() > 100 {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "name is at most 100 characters",
+        );
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "tags require Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    let _ = pg::set_actor(&client, &principal.actor).await;
+    let description = body
+        .description
+        .as_deref()
+        .map(str::trim)
+        .filter(|d| !d.is_empty());
+    match pg::create_tag(&client, &org_row.id, name, description, &principal.actor).await {
+        Ok(Some(tag)) => (StatusCode::CREATED, Json(json!(tag))).into_response(),
+        // The partial unique index is what rejects a duplicate, so a race
+        // between two stewards naming the same tag ends here rather than
+        // creating two tags one filter cannot tell apart.
+        Ok(None) => detail_err(
+            StatusCode::CONFLICT,
+            format!("a tag named {name:?} already exists"),
+        ),
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Admin+: retire a tag (`DELETE /v1/orgs/{org}/tags/{tag_id}`).
+///
+/// Admin rather than steward, because retiring affects every subject the tag
+/// was applied to and every filter that names it — a wider blast radius than
+/// applying one. A SOFT delete: see the entity's `active` column for why a hard
+/// one would fail for exactly the tags that had been used.
+async fn retire_tag(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, tag_id)): Path<(String, String)>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Admin) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "tags require Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    let _ = pg::set_actor(&client, &principal.actor).await;
+    match pg::retire_tag(&client, &org_row.id, &tag_id).await {
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(false) => detail_err(StatusCode::NOT_FOUND, "no such tag"),
+        Err(e) => pg_err(e),
+    }
+}
+
+#[derive(Deserialize)]
+struct TagApplyIn {
+    subject_type: String,
+    subject_id: String,
+}
+
+/// Steward+: apply or remove a tag
+/// (`POST /v1/orgs/{org}/tags/{tag_id}/apply` and `.../unapply`).
+///
+/// Two routes onto one handler because the bodies and the checks are identical
+/// and only the verb differs; `apply` is idempotent at the schema, so a repeat
+/// is 204 rather than a duplicate row.
+async fn apply_tag(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, tag_id)): Path<(String, String)>,
+    Json(body): Json<TagApplyIn>,
+) -> impl IntoResponse {
+    tag_application(principal, state, org, tag_id, body, true).await
+}
+
+async fn unapply_tag(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, tag_id)): Path<(String, String)>,
+    Json(body): Json<TagApplyIn>,
+) -> impl IntoResponse {
+    tag_application(principal, state, org, tag_id, body, false).await
+}
+
+async fn tag_application(
+    principal: Principal,
+    state: AppState,
+    org: String,
+    tag_id: String,
+    body: TagApplyIn,
+    apply: bool,
+) -> axum::response::Response {
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
+    if !pg::is_tag_subject(&body.subject_type) {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("subject_type must be one of {:?}", pg::TAG_SUBJECT_KINDS),
+        );
+    }
+    if body.subject_id.trim().is_empty() {
+        return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "subject_id is required");
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "tags require Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    let _ = pg::set_actor(&client, &principal.actor).await;
+    let outcome = if apply {
+        pg::apply_tag(
+            &client,
+            &org_row.id,
+            &tag_id,
+            &body.subject_type,
+            &body.subject_id,
+            &principal.actor,
+        )
+        .await
+    } else {
+        pg::unapply_tag(
+            &client,
+            &org_row.id,
+            &tag_id,
+            &body.subject_type,
+            &body.subject_id,
+        )
+        .await
+    };
+    match outcome {
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        // On apply this is "no such tag"; on unapply, "it was not applied".
+        // Both are 404 on the thing the caller named.
+        Ok(false) => detail_err(
+            StatusCode::NOT_FOUND,
+            if apply {
+                "no such tag"
+            } else {
+                "that tag is not applied to that subject"
+            },
+        ),
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Viewer+: what carries a tag (`GET /v1/orgs/{org}/tags/{tag_id}/subjects`).
+async fn tag_subjects(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, tag_id)): Path<(String, String)>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    if let Some(kind) = params.get("subject_type")
+        && !pg::is_tag_subject(kind)
+    {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("subject_type must be one of {:?}", pg::TAG_SUBJECT_KINDS),
+        );
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "tags require Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    let limit = read::parse_limit(params.get("limit").map(String::as_str));
+    match pg::subjects_for_tag(
+        &client,
+        &org_row.id,
+        &tag_id,
+        params.get("subject_type").map(String::as_str),
+        limit,
+    )
+    .await
+    {
+        Ok(rows) => Json(json!({ "subjects": rows })).into_response(),
+        Err(e) => pg_err(e),
+    }
+}
+
 async fn delete_webhook(
     principal: Principal,
     State(state): State<AppState>,
@@ -6971,6 +7264,14 @@ fn build_routes(state: AppState) -> Router {
             "/v1/orgs/{org}/runs/{run_id}/entity-events",
             get(run_entity_events),
         )
+        .route("/v1/orgs/{org}/tags", get(tags_index).post(create_tag))
+        .route(
+            "/v1/orgs/{org}/tags/{tag_id}",
+            axum::routing::delete(retire_tag),
+        )
+        .route("/v1/orgs/{org}/tags/{tag_id}/apply", post(apply_tag))
+        .route("/v1/orgs/{org}/tags/{tag_id}/unapply", post(unapply_tag))
+        .route("/v1/orgs/{org}/tags/{tag_id}/subjects", get(tag_subjects))
         .route("/v1/orgs/{org}/merge-plans", get(merge_plans))
         .route(
             "/v1/orgs/{org}/schedules",

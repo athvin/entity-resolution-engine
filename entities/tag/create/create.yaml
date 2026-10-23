@@ -1,0 +1,11 @@
+kind: statement
+operation: create
+mode: partial
+description: "Add a label to the tenant's vocabulary. The partial unique index on (org_id, name) WHERE active rejects a duplicate at the schema, so two tags with one name cannot exist to make a filter ambiguous."
+params:
+  - { name: tag_id, type: varchar }
+  - { name: org_id, type: varchar }
+  - { name: name, type: varchar }
+  - { name: description, type: varchar, nullable: true }
+  - { name: created_by, type: varchar }
+returns: entity

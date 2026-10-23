@@ -1,0 +1,8 @@
+kind: statement
+operation: update
+mode: partial
+description: "Retire a tag. A soft delete rather than a DELETE, decided before the first one was written: `taggings.tag_id` references this row and every foreign key in this schema is NO ACTION, so a hard delete would fail for exactly the tags that had been used — the bug D11 found in webhooks, where the delete worked until the subscription had delivered something. Retiring also keeps the history readable, since what a group was marked as is part of why it was handled that way."
+params:
+  - { name: org_id, type: varchar }
+  - { name: tag_id, type: varchar }
+returns: none
