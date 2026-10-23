@@ -1548,6 +1548,203 @@ async fn get_model_version(
     }
 }
 
+/// Precision, recall, F1 and accuracy from a confusion matrix, or `Null` for any
+/// ratio whose denominator is zero.
+///
+/// Null rather than `0.0`, which is O7a's rule and matters more here than on a
+/// dashboard tile: a precision of 0.0 says "the model got every positive wrong",
+/// while a null says "it made no positive predictions on this label set". Those
+/// are opposite conclusions and a steward acts differently on each.
+fn confusion_metrics(tp: u64, fp: u64, fn_: u64, tn: u64) -> Value {
+    let ratio = |num: u64, den: u64| -> Value {
+        if den == 0 {
+            Value::Null
+        } else {
+            json!(num as f64 / den as f64)
+        }
+    };
+    let precision = ratio(tp, tp + fp);
+    let recall = ratio(tp, tp + fn_);
+    // F1 needs both halves; it is null when either is, rather than 0.
+    let f1 = match (precision.as_f64(), recall.as_f64()) {
+        (Some(p), Some(r)) if p + r > 0.0 => json!(2.0 * p * r / (p + r)),
+        _ => Value::Null,
+    };
+    json!({
+        "tp": tp, "fp": fp, "fn": fn_, "tn": tn,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "accuracy": ratio(tp + tn, tp + fp + fn_ + tn),
+    })
+}
+
+/// The confusion matrix over `labels` at `threshold`, as `(tp, fp, fn, tn)`.
+fn confusion_at(
+    labels: &[&er_entities::pair_label::PairLabel],
+    threshold: f64,
+) -> (u64, u64, u64, u64) {
+    let mut counts = (0u64, 0u64, 0u64, 0u64);
+    for l in labels {
+        // Only evaluable rows reach here, so the score is present.
+        let predicted_match = l.score_at_label.unwrap_or(f64::NEG_INFINITY) >= threshold;
+        match (l.verdict.as_str(), predicted_match) {
+            ("match", true) => counts.0 += 1,
+            ("no_match", true) => counts.1 += 1,
+            ("match", false) => counts.2 += 1,
+            ("no_match", false) => counts.3 += 1,
+            _ => {}
+        }
+    }
+    counts
+}
+
+/// How one model version scored against the labels collected under it.
+///
+/// **The version is identified by its `model_version_label`, not its integer
+/// version**, because that is what the scoring pass stamps onto
+/// `match_scores.model_version` and what the labelling queue hands the client to
+/// echo back. Filtering on the integer would match nothing and report an honest
+/// but useless "0 labels".
+///
+/// Only labels carrying the score *that version* produced are evaluable
+/// (`model_version` matches and `score_at_label` is present) — which is the
+/// whole reason `score_at_label` is a column: its own description says it exists
+/// "so a later accuracy pass can tell what the model thought at the time rather
+/// than what it thinks now". A label recorded with no score in front of the
+/// labeller (every `reviewer`-origin label, by construction) carries no
+/// prediction and cannot be scored against any threshold.
+///
+/// Evaluating version B against labels collected under version A is deliberately
+/// **not** attempted. It would mean re-scoring those pairs with B, which needs
+/// the lake and the model bytes — that belongs with a training/evaluation job,
+/// not a read endpoint, and silently mixing A's scores into B's metrics would be
+/// worse than declining.
+fn label_evaluation(
+    labels: &[er_entities::pair_label::PairLabel],
+    model_version_label: &str,
+    threshold: f64,
+) -> Value {
+    let for_version: Vec<&er_entities::pair_label::PairLabel> = labels
+        .iter()
+        .filter(|l| l.model_version.as_deref() == Some(model_version_label))
+        .collect();
+    let is_verdict =
+        |l: &er_entities::pair_label::PairLabel| l.verdict == "match" || l.verdict == "no_match";
+    let evaluable: Vec<&er_entities::pair_label::PairLabel> = for_version
+        .iter()
+        .copied()
+        .filter(|l| l.score_at_label.is_some() && is_verdict(l))
+        .collect();
+
+    // Reported beside the metrics, never silently dropped: a figure computed
+    // over three labels has to be distinguishable from one over three hundred.
+    let excluded = json!({
+        "labels_for_version": for_version.len(),
+        "evaluable": evaluable.len(),
+        "no_score": for_version.iter().filter(|l| l.score_at_label.is_none()).count(),
+        "not_a_verdict": for_version.iter().filter(|l| !is_verdict(l)).count(),
+    });
+
+    let (tp, fp, fn_, tn) = confusion_at(&evaluable, threshold);
+    let mut by_origin = serde_json::Map::new();
+    for origin in ["human", "reviewer", "llm"] {
+        let subset: Vec<&er_entities::pair_label::PairLabel> = evaluable
+            .iter()
+            .copied()
+            .filter(|l| l.origin == origin)
+            .collect();
+        if subset.is_empty() {
+            continue;
+        }
+        let (tp, fp, misses, tn) = confusion_at(&subset, threshold);
+        by_origin.insert(origin.to_string(), confusion_metrics(tp, fp, misses, tn));
+    }
+
+    // The trade-off curve, computed exactly at each step rather than from a
+    // histogram: every label is already in memory, so there is no reason to
+    // approximate at bucket edges.
+    let curve: Vec<Value> = (0..=20)
+        .map(|i| {
+            let cut = f64::from(i) / 20.0;
+            let (tp, fp, misses, tn) = confusion_at(&evaluable, cut);
+            let mut point = confusion_metrics(tp, fp, misses, tn);
+            point["threshold"] = json!(cut);
+            point
+        })
+        .collect();
+
+    json!({
+        "model_version_label": model_version_label,
+        "threshold": threshold,
+        "counts": excluded,
+        "overall": confusion_metrics(tp, fp, fn_, tn),
+        "by_origin": Value::Object(by_origin),
+        "curve": curve,
+    })
+}
+
+/// Viewer+: how a model version scored against its own labels
+/// (`GET /v1/orgs/{org}/models/{name}/versions/{version}/evaluation`).
+///
+/// Answers "can I trust this version" with the tenant's own verdicts rather than
+/// a number from training. `?threshold=` overrides the org's configured
+/// auto-merge threshold, which is the default because that is the cut the product
+/// actually acts on.
+async fn model_version_evaluation(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, name, version)): Path<(String, String, i64)>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "evaluation requires Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    let model = match pg::model_version(&client, &org_row.id, &name, version).await {
+        Ok(Some(m)) => m,
+        Ok(None) => {
+            return detail_err(
+                StatusCode::NOT_FOUND,
+                format!("no model version {name}/{version}"),
+            );
+        }
+        Err(e) => return pg_err(e),
+    };
+    let threshold = match read::parse_f64(params.get("threshold").map(String::as_str)) {
+        Some(t) if (0.0..=1.0).contains(&t) => t,
+        Some(_) => {
+            return detail_err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "threshold must be between 0 and 1",
+            );
+        }
+        None => match org_active_config(&client, &org_row).await {
+            Ok(c) => c.thresholds.auto_merge,
+            Err(r) => return *r,
+        },
+    };
+    let labels = match er_entities::pair_label::read::all(&client, &org_row.id).await {
+        Ok(l) => l,
+        Err(e) => return pg_err(e),
+    };
+    let mut body = label_evaluation(&labels, &model.model_version_label, threshold);
+    body["name"] = json!(name);
+    body["version"] = json!(version);
+    body["state"] = json!(model.state);
+    Json(body).into_response()
+}
+
 /// Admin+: activate a model version
 /// (`POST /v1/orgs/{org}/models/{name}/versions/{version}/activate`).
 ///
@@ -6680,6 +6877,10 @@ fn build_routes(state: AppState) -> Router {
             get(get_model_version),
         )
         .route(
+            "/v1/orgs/{org}/models/{name}/versions/{version}/evaluation",
+            get(model_version_evaluation),
+        )
+        .route(
             "/v1/orgs/{org}/models/{name}/versions/{version}/activate",
             post(activate_model_version),
         )
@@ -6886,6 +7087,168 @@ pub async fn state_from_env() -> AppState {
     state
         .with_mail(mail::Mailer::from_env().await)
         .with_provision(provision::Profile::from_env())
+}
+
+#[cfg(test)]
+mod evaluation_tests {
+    use super::{confusion_metrics, label_evaluation};
+    use er_entities::pair_label::PairLabel;
+
+    /// A label on an arbitrary pair. `score` of `None` is a label recorded with
+    /// no score in front of the labeller.
+    fn label(
+        verdict: &str,
+        origin: &str,
+        model_version: Option<&str>,
+        score: Option<f64>,
+    ) -> PairLabel {
+        PairLabel {
+            id: format!("l-{verdict}-{origin}-{score:?}"),
+            org_id: "o1".into(),
+            rec_a_key: "a".into(),
+            rec_b_key: "b".into(),
+            verdict: verdict.into(),
+            origin: origin.into(),
+            labeled_by: "steward@example.com".into(),
+            model_version: model_version.map(ToString::to_string),
+            score_at_label: score,
+            note: None,
+            // Fixed rather than `now()`: nothing here reads the timestamps, and
+            // a constant keeps the fixture deterministic.
+            created_at: "2026-01-01T00:00:00Z".parse().expect("a fixed timestamp"),
+            updated_at: "2026-01-01T00:00:00Z".parse().expect("a fixed timestamp"),
+        }
+    }
+
+    #[test]
+    fn a_ratio_with_no_denominator_is_null_not_zero() {
+        // The distinction a steward acts on: "got every positive wrong" vs
+        // "made no positive predictions at all".
+        let m = confusion_metrics(0, 0, 3, 5);
+        assert!(m["precision"].is_null(), "{m}");
+        assert_eq!(m["recall"], serde_json::json!(0.0));
+        assert!(m["f1"].is_null(), "{m}");
+        let empty = confusion_metrics(0, 0, 0, 0);
+        assert!(empty["accuracy"].is_null(), "{empty}");
+    }
+
+    #[test]
+    fn a_perfect_separation_scores_one() {
+        let labels = vec![
+            label("match", "human", Some("v1"), Some(0.99)),
+            label("match", "human", Some("v1"), Some(0.96)),
+            label("no_match", "human", Some("v1"), Some(0.10)),
+        ];
+        let out = label_evaluation(&labels, "v1", 0.95);
+        assert_eq!(out["overall"]["precision"], serde_json::json!(1.0));
+        assert_eq!(out["overall"]["recall"], serde_json::json!(1.0));
+        assert_eq!(out["overall"]["f1"], serde_json::json!(1.0));
+        assert_eq!(out["counts"]["evaluable"], serde_json::json!(3));
+    }
+
+    #[test]
+    fn the_threshold_moves_the_matrix() {
+        let labels = vec![
+            label("match", "human", Some("v1"), Some(0.80)),
+            label("no_match", "human", Some("v1"), Some(0.70)),
+        ];
+        // At 0.95 neither is predicted a match: one false negative, one true
+        // negative, and no positive predictions at all.
+        let strict = label_evaluation(&labels, "v1", 0.95);
+        assert!(strict["overall"]["precision"].is_null(), "{strict}");
+        assert_eq!(strict["overall"]["fn"], serde_json::json!(1));
+        // At 0.5 both are: one true positive, one false positive.
+        let loose = label_evaluation(&labels, "v1", 0.5);
+        assert_eq!(loose["overall"]["tp"], serde_json::json!(1));
+        assert_eq!(loose["overall"]["fp"], serde_json::json!(1));
+        assert_eq!(loose["overall"]["precision"], serde_json::json!(0.5));
+    }
+
+    #[test]
+    fn another_versions_labels_are_not_counted() {
+        // The trap this guards: filtering on the integer `version` instead of
+        // the `model_version_label` matches nothing, and a run of this endpoint
+        // would report an honest but useless "0 labels" for every version.
+        let labels = vec![
+            label("match", "human", Some("v1"), Some(0.99)),
+            label("no_match", "human", Some("v2"), Some(0.99)),
+        ];
+        let out = label_evaluation(&labels, "v1", 0.95);
+        assert_eq!(out["counts"]["labels_for_version"], serde_json::json!(1));
+        assert_eq!(out["overall"]["tp"], serde_json::json!(1));
+        assert_eq!(out["overall"]["fp"], serde_json::json!(0));
+    }
+
+    #[test]
+    fn an_unscored_label_is_excluded_and_counted() {
+        // Every `reviewer`-origin label is unscored by construction (resolving a
+        // review has no probability in front of the human), so this is the
+        // normal case rather than an edge one.
+        let labels = vec![
+            label("match", "human", Some("v1"), Some(0.99)),
+            label("match", "reviewer", Some("v1"), None),
+            label("dismiss", "human", Some("v1"), Some(0.40)),
+        ];
+        let out = label_evaluation(&labels, "v1", 0.95);
+        assert_eq!(out["counts"]["labels_for_version"], serde_json::json!(3));
+        assert_eq!(out["counts"]["evaluable"], serde_json::json!(1));
+        assert_eq!(out["counts"]["no_score"], serde_json::json!(1));
+        assert_eq!(out["counts"]["not_a_verdict"], serde_json::json!(1));
+    }
+
+    #[test]
+    fn metrics_are_split_by_origin() {
+        // E10b's rule: an accuracy number must say whose labels it was measured
+        // against. An origin with no evaluable label is absent rather than
+        // present-and-null, so the reader cannot mistake it for a measurement.
+        let labels = vec![
+            label("match", "human", Some("v1"), Some(0.99)),
+            label("no_match", "llm", Some("v1"), Some(0.99)),
+        ];
+        let out = label_evaluation(&labels, "v1", 0.95);
+        assert_eq!(
+            out["by_origin"]["human"]["precision"],
+            serde_json::json!(1.0)
+        );
+        assert_eq!(out["by_origin"]["llm"]["precision"], serde_json::json!(0.0));
+        assert!(out["by_origin"].get("reviewer").is_none(), "{out}");
+        // The overall figure mixes them, which is why the split exists.
+        assert_eq!(out["overall"]["precision"], serde_json::json!(0.5));
+    }
+
+    #[test]
+    fn the_curve_spans_the_range_and_is_monotone_in_recall() {
+        let labels = vec![
+            label("match", "human", Some("v1"), Some(0.9)),
+            label("match", "human", Some("v1"), Some(0.5)),
+            label("no_match", "human", Some("v1"), Some(0.1)),
+        ];
+        let out = label_evaluation(&labels, "v1", 0.95);
+        let curve = out["curve"].as_array().expect("curve").clone();
+        assert_eq!(curve.len(), 21);
+        assert_eq!(curve[0]["threshold"], serde_json::json!(0.0));
+        assert_eq!(curve[20]["threshold"], serde_json::json!(1.0));
+        // Raising the threshold can only predict fewer matches, so recall is
+        // non-increasing. A curve that wobbles means the matrix is wrong.
+        let recalls: Vec<f64> = curve
+            .iter()
+            .map(|p| p["recall"].as_f64().unwrap_or(0.0))
+            .collect();
+        for pair in recalls.windows(2) {
+            assert!(
+                pair[1] <= pair[0],
+                "recall rose across thresholds: {recalls:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn no_labels_for_a_version_reports_nothing_rather_than_zero() {
+        let out = label_evaluation(&[], "v1", 0.95);
+        assert_eq!(out["counts"]["evaluable"], serde_json::json!(0));
+        assert!(out["overall"]["precision"].is_null(), "{out}");
+        assert!(out["overall"]["accuracy"].is_null(), "{out}");
+    }
 }
 
 #[cfg(test)]

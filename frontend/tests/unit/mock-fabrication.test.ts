@@ -72,6 +72,18 @@ const EXPLAINED: Record<string, string> = {
     "a wire rename: the entity's `id` column is serialized as `assertion_id` (er-server/src/lib.rs:5974)",
   "run.auto_merged_pairs":
     "derived on read from the auto_merge threshold (er-server/src/read.rs:1020), asserted by pg_golden_read.rs",
+  // The five below are one response, not five strays. `model_version_evaluation`
+  // computes them in `label_evaluation` (er-server/src/lib.rs) and echoes the
+  // model's identity fields alongside — which is *why* they land here: the
+  // object shares name/version/state/model_version_label with `matching_model`,
+  // so best-match attribution calls it a matching_model row with five invented
+  // fields. It is a computed response and not a row at all. This is the
+  // attribution limit this file's header describes, seen from the inside.
+  "matching_model.threshold": "the evaluation's threshold, computed by model_version_evaluation",
+  "matching_model.counts": "the evaluation's label counts, computed by label_evaluation",
+  "matching_model.overall": "the evaluation's confusion matrix, computed by label_evaluation",
+  "matching_model.by_origin": "the per-origin split, computed by label_evaluation",
+  "matching_model.curve": "the threshold curve, computed by label_evaluation",
 };
 
 /** entity name -> declared column names, from the generated-from source of truth. */

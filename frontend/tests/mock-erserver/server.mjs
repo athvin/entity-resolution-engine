@@ -1948,6 +1948,57 @@ const server = http.createServer((req, res) => {
       });
     }
     if (
+      (match = /^\/v1\/orgs\/([^/]+)\/models\/([^/]+)\/versions\/(\d+)\/evaluation$/.exec(path)) &&
+      req.method === "GET"
+    ) {
+      const row = (state.models[match[1]] ?? []).find(
+        (m) => m.name === match[2] && m.version === Number(match[3]),
+      );
+      if (!row) return send(res, 404, { detail: "not found" });
+      // Shaped from the server's own arithmetic rather than invented: 6 of 7
+      // predicted merges agreed, 2 true matches fell below the threshold. Every
+      // ratio below is what confusion_metrics computes from those counts, so a
+      // panel that renders these numbers renders real ones.
+      const threshold = Number(new URL(req.url, "http://x").searchParams.get("threshold") ?? 0.95);
+      const metrics = (tp, fp, fn, tn) => {
+        const ratio = (n, d) => (d === 0 ? null : n / d);
+        const precision = ratio(tp, tp + fp);
+        const recall = ratio(tp, tp + fn);
+        const f1 =
+          precision !== null && recall !== null && precision + recall > 0
+            ? (2 * precision * recall) / (precision + recall)
+            : null;
+        return {
+          tp,
+          fp,
+          fn,
+          tn,
+          precision,
+          recall,
+          f1,
+          accuracy: ratio(tp + tn, tp + fp + fn + tn),
+        };
+      };
+      return send(res, 200, {
+        name: match[2],
+        version: Number(match[3]),
+        state: row.state,
+        model_version_label: row.model_version_label,
+        threshold,
+        counts: { labels_for_version: 14, evaluable: 12, no_score: 2, not_a_verdict: 0 },
+        overall: metrics(6, 1, 2, 3),
+        by_origin: { human: metrics(5, 0, 1, 2), llm: metrics(1, 1, 1, 1) },
+        curve: Array.from({ length: 21 }, (_, i) => {
+          const t = i / 20;
+          // Recall is non-increasing in the threshold; precision rises. Shaped
+          // so the panel's curve has the crossing a reader looks for.
+          const tp = Math.max(0, 8 - Math.round(i * 0.4));
+          const fp = Math.max(0, 7 - Math.round(i * 0.35));
+          return { ...metrics(tp, fp, 8 - tp, 4 - Math.min(4, fp)), threshold: t };
+        }),
+      });
+    }
+    if (
       (match = /^\/v1\/orgs\/([^/]+)\/models\/([^/]+)\/versions\/(\d+)\/activate$/.exec(path)) &&
       req.method === "POST"
     ) {

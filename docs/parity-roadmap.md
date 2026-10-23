@@ -1297,9 +1297,65 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          asserting a relationship directly is not adjudicating a pair the model proposed).
          Observed failing: suppressing the derivation fails on "the match resolution leaves exactly
          one reviewer label, got []".
-   - [ ] E10c per-version evaluation (precision/recall/ROC over the labels), label-driven
-         training (`m_from_labels` into `train_and_register`), related-record features (#26),
-         household/link entities (#33).
+   - [x] **E10c-1 per-version evaluation: what the model thought at the time.**
+         `GET /v1/orgs/{org}/models/{name}/versions/{version}/evaluation` plus the panel on the
+         models page. The engine could always compute accuracy — `dedupe-core::accuracy` has
+         carried `truth_space_from_labels_table` and `prediction_errors_from_labels_table` from
+         the start — and until E10b there was no label to measure against. This is the first
+         surface that answers "can I trust this version" from the tenant's own verdicts rather
+         than from a training number.
+         **The plan's central design problem for this PR did not exist.** It said every accuracy
+         function wants a DuckDB `TableHandle` while `pair_labels` is Postgres-only, so labels
+         must be materialised into a lake temp table first. They do not need to be:
+         `pair_labels.score_at_label` already stores the probability shown to the labeller, and
+         its own column description says why it exists — "so a later accuracy pass can tell what
+         the model thought at the time rather than what it thinks now". E10b stored it for
+         exactly this. The evaluation is therefore pure Postgres with **no lake access, no
+         re-scoring, and no entity change at all**, and it is more faithful than re-scoring
+         would be, because it measures the score the model actually produced.
+         **The join is on `model_version_label`, not the integer `version`.** The scoring pass
+         stamps `match_scores.model_version` with the label (`v0001`), the labelling queue hands
+         it to the client per item (`uncertain_page` returns it per row), and the client echoes
+         it back. Filtering on the integer matches nothing, which would have produced an honest
+         but useless "0 labels" for every version — so a unit test pins that trap by name.
+         **Two framework facts found by probing rather than reading the plan.** A control-plane
+         read must declare `returns: entity`; aggregate column lists are lake-only in this
+         phase, so the confusion matrix cannot be a `GROUP BY` in SQL. That is not a limitation
+         to work around: `pair_label/read/all`'s own description already records the pattern —
+         count in Rust from entity rows, deliberately unbounded because labels are
+         human-authored and a LIMIT "would silently train on a prefix". So this PR adds **zero
+         declared statements**; two were written and deleted once the existing read turned out
+         to be the sanctioned one.
+         **Null is not zero, and the distinction is the point.** A null precision means the
+         model made no positive predictions on this label set; 0.0 means it made them and got
+         every one wrong. A steward acts oppositely on each, so every ratio is null-on-no-
+         denominator (O7a's rule) and the panel renders the dash with a title saying which.
+         Metrics ship **split by origin** (E10b's rule: a number measured on an LLM's own
+         suggestions is not the same claim as one measured on a human's), with an absent origin
+         omitted rather than present-and-null, and beside `counts` naming every exclusion — a
+         figure over 12 labels has to be distinguishable from one over 1,200.
+         **Evaluating version B against version A's labels is declined, not approximated.** It
+         needs re-scoring those pairs with B, which wants the lake and the model bytes; that
+         belongs to a training job, not a read endpoint, and silently mixing A's scores into B's
+         metrics would be worse than refusing. Stated in the handler rather than left implicit.
+         A consequence worth knowing, pinned by the pg phase: **a correction drops a label out of
+         its version's evaluation**, because the upsert assigns `model_version =
+         EXCLUDED.model_version` and a correction sends none. That is right — the old score was
+         shown against the verdict that was replaced.
+         The curve is hand-rolled DOM/CSS (no chart library, per `frontend-data-ui`), computed
+         exactly at each step rather than from a histogram since every label is already in
+         memory. Observed failing: swapping `fp`/`fn` fails 3 of 8 unit tests — and notably NOT
+         the perfect-separation one, because `fp = fn = 0` there makes the swap invisible, which
+         is a reminder that the happy-path test is the weakest; and widening the version filter
+         to accept every label fails the pg phase at 4 labels instead of 2.
+         Two gates caught my own wrong claims mid-build: the envelope ledger showed this route
+         is `scalar`, not the `record` my BFF comment asserted, and the mock-fabrication gate
+         flagged the five computed response fields until they were accounted for in `EXPLAINED`
+         (the evaluation echoes `matching_model`'s identity fields, so best-match attribution
+         reads it as that entity — the attribution limit that file documents, seen from inside).
+   - [ ] E10c-2 label-driven training (`m_from_labels` into `train_and_register`, still landing
+         a draft), the labelling-queue UI (E10b is still headless), related-record features
+         (#26), household/link entities (#33).
 4. **Operating at scale**
    - [x] **O3b webhook delivery becomes an outbox (#43's reliability half).** Delivery was
          `let _ = webhook::emit_job_event(...)` at three call sites: the POST happened **inline**

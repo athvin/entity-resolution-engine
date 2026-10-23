@@ -47,6 +47,43 @@ test.describe("model registry", () => {
     await expect(weights).toContainText("email is NULL");
   });
 
+  test("the evaluation panel measures a version against its own labels", async ({
+    page,
+  }, testInfo) => {
+    const org = modelOrg(testInfo.project.name);
+    await login(page, USERS.steward);
+    await page.goto(`/${org}/settings/models`);
+    await page.getByTestId("model-weights-default-1").click();
+
+    const evaluation = page.getByTestId("model-evaluation");
+    // 6 of 7 predicted merges agreed => precision 85.7%; 6 of 8 true matches
+    // found => recall 75.0%. Both read off the server's confusion matrix, so a
+    // panel that computed its own would disagree here.
+    await expect(evaluation.getByTestId("eval-precision")).toContainText("85.7%");
+    await expect(evaluation.getByTestId("eval-recall")).toContainText("75.0%");
+    await expect(evaluation.getByTestId("eval-matrix")).toBeVisible();
+    await expect(evaluation.getByTestId("eval-fp")).toContainText("1");
+
+    // The threshold the figures were measured at is stated, because a precision
+    // without one is not actionable — it is the whole point of the band.
+    await expect(evaluation).toContainText("0.95");
+
+    // The exclusions ship with the metrics: 12 of 14 labels were evaluable, and
+    // a reader must be able to tell a figure over 12 from one over 1,200.
+    await expect(evaluation).toContainText("12 labelled pairs");
+
+    // Split by source, because a number measured on an LLM's own suggestions is
+    // a different claim from one measured on a human's.
+    const byOrigin = evaluation.getByTestId("eval-by-origin");
+    await expect(byOrigin).toContainText("human");
+    await expect(byOrigin).toContainText("llm");
+
+    // The curve is hand-rolled DOM, so its bars are assertable rather than
+    // being one opaque canvas bitmap.
+    await expect(evaluation.getByTestId("eval-curve")).toBeVisible();
+    await expect(evaluation.getByTestId("eval-curve-recall-0.50")).toBeVisible();
+  });
+
   test("a steward sees the registry but cannot change it", async ({ page }, testInfo) => {
     const org = modelOrg(testInfo.project.name);
     await login(page, USERS.steward);
