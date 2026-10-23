@@ -1,5 +1,6 @@
 import {
   Copy,
+  LineChart,
   Inbox,
   LayoutDashboard,
   Megaphone,
@@ -63,6 +64,13 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Runs",
     icon: Play,
     path: (org) => `/${org}/runs`,
+    enabled: true,
+  },
+  {
+    id: "insights",
+    label: "Insights",
+    icon: LineChart,
+    path: (org) => `/${org}/insights`,
     enabled: true,
   },
   {

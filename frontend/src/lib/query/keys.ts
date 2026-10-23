@@ -17,6 +17,7 @@ export const queryKeys = {
   models: (org: string) => ["org", org, "models"] as const,
   modelVersion: (org: string, name: string, version: number) =>
     ["org", org, "models", name, version] as const,
+  insights: (org: string) => ["org", org, "insights"] as const,
   webhooks: (org: string) => ["org", org, "webhooks"] as const,
   webhookEvents: (org: string) => ["org", org, "webhook-events"] as const,
   // The filtered key nests under the unfiltered one so invalidating the

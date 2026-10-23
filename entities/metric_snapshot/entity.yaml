@@ -7,7 +7,13 @@ key: [id]
 natural_key: [run_id]
 generate:
   stores: [duckdb]
-  languages: [rust]
+  languages: [rust, typescript]
+  # The snapshot has been on the JSON wire since O7a shipped `GET /insights` —
+  # it just had no caller, so nothing noticed it was undeclared and no
+  # TypeScript binding existed for the wire-contract gate to check an `InsightRow`
+  # against. Declaring it is what brings the insights page's interface under
+  # that gate, the same way E9b brought the delivery receipt under it.
+  wire: [json]
 columns:
   - name: id
     type: varchar

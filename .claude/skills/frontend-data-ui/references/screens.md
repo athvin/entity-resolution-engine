@@ -60,6 +60,7 @@ below `lg`.
 - `/[org]/campaigns`
 - `/[org]/dashboard`
 - `/[org]/duplicates`
+- `/[org]/insights`
 - `/[org]/records`
 - `/[org]/reviews`
 - `/[org]/runs`

@@ -49,6 +49,7 @@ import type { ConfigVersion } from "@/lib/entities/bindings/ConfigVersion";
 import type { GoldenLineage } from "@/lib/entities/bindings/GoldenLineage";
 import type { IngestBatch } from "@/lib/entities/bindings/IngestBatch";
 import type { Job } from "@/lib/entities/bindings/Job";
+import type { MetricSnapshot } from "@/lib/entities/bindings/MetricSnapshot";
 import type { MatchingModel } from "@/lib/entities/bindings/MatchingModel";
 import type { Org } from "@/lib/entities/bindings/Org";
 import type { Schedule } from "@/lib/entities/bindings/Schedule";
@@ -56,6 +57,7 @@ import type { Webhook } from "@/lib/entities/bindings/Webhook";
 import type { WebhookDelivery } from "@/lib/entities/bindings/WebhookDelivery";
 import type { AdminOrgRow } from "@/lib/query/admin";
 import type { ConfigVersionRow } from "@/lib/query/config";
+import type { InsightRow } from "@/lib/query/insights";
 import type { ReceiptRow } from "@/components/sources/sources-content";
 import type { JobRow, LineageRow } from "@/lib/query/hooks";
 import type { ModelVersionDetail, ModelVersionRow } from "@/lib/query/models";
@@ -138,6 +140,18 @@ const PAIRS = {
    * cannot catch an omission, only an invention, which is why that reasoning is
    * written here rather than relied on.
    */
+  /**
+   * The two rates are DERIVED on read, not stored: `read::insights` computes
+   * `duplicate_records / records` and `records / entities` and sends null
+   * rather than 0.0 for an empty corpus. The entity has no such columns and
+   * should not — they are a view over two it does have.
+   */
+  insight: true satisfies NoUndeclaredFields<
+    InsightRow,
+    MetricSnapshot,
+    "duplicate_rate" | "records_per_entity"
+  >,
+
   webhook: true satisfies NoUndeclaredFields<WebhookRow, Webhook>,
 
   webhookDelivery: true satisfies NoUndeclaredFields<WebhookDeliveryRow, WebhookDelivery>,
@@ -157,6 +171,7 @@ describe("wire contract: UI response shapes vs the generated entity bindings", (
     expect(Object.keys(PAIRS).sort()).toEqual([
       "adminOrg",
       "configVersion",
+      "insight",
       "job",
       "lineage",
       "modelVersion",

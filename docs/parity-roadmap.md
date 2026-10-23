@@ -1607,6 +1607,34 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          not "the snapshot is what it was when I wrote this" — asserts `duplicate_records >
          duplicate_groups` on base_10 so the two definitions are distinguishable, and asserts a
          re-run of the same id corrects rather than appends.
+   - [x] **O7b-1 the insights surface — and a visual gate that was absorbing whole UI changes.**
+         O7a retained the metric snapshots because every dashboard number had always been computed
+         LIVE: the product could say what is true now and nothing about the direction of travel,
+         and "is the duplicate rate going up" is the question an operator actually has. It then
+         had **no caller at all** — no BFF route, no page. This is the caller: four tiles with
+         sparklines, the signed change since the previous run, and the full series.
+         Charts are hand-rolled DOM/CSS per the standing decision (pixel-deterministic for the
+         baselines, legible to assistive tech). Two judgements the sparkline makes explicit:
+         it scales **from zero**, because a series scaled to its own range makes a rate that moved
+         from 4.0% to 4.1% look like a crisis; and a null point is a **gap, not a bar**, because
+         O7a sends null rather than 0.0 for a rate it cannot compute and drawing a floor-height
+         bar would assert the rate was zero. Both are asserted, the second by sabotage.
+         `metric_snapshot` gained `wire: [json]` — it had been on the JSON wire since O7a shipped
+         and never declared it, so no TypeScript binding existed and `InsightRow` had nothing to be
+         checked against. Same omission E9b found in the delivery receipt, and the same fix. The
+         two derived rates are declared as composed fields, which is what the gate is for.
+         **The finding is bigger than the page.** Adding a nav item changed nothing in any
+         baseline, which should have been impossible. Measured: a whole nav entry costs ~1,050
+         pixels, and `maxDiffPixelRatio: 0.01` on a 1440x1170 full-page shot is a tolerance of
+         about **16,800** — 16x headroom. Worse, `--update-snapshots` defaults to `changed`, which
+         honours that tolerance, so a real change smaller than it is neither failed nor rewritten:
+         the committed baseline silently stops depicting the app and goes on masking the next
+         change too. Switching the regen to `=all` rewrote **20** stale baselines, including
+         `marketing-hero-*` (which has no nav at all — pure accumulated drift) and the dashboard's
+         job strip, which had still been showing the fabricated `progress` stage text D9 removed.
+         The tolerance itself is left alone deliberately: tightening it is a gate-wide calibration
+         that needs its own change, where the baselines it moves can be read as evidence rather
+         than as noise inside a feature PR.
    - [x] **O4 the outbound write-back — the master record, not a notification.** The incumbent
          charges for merge write-back as an add-on. Here it is a catalogued event through the
          same signed, retried, logged outbox every other event uses, so there is no second
