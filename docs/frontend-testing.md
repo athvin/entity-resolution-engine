@@ -129,6 +129,7 @@ Run locally with `make frontend` (the PR-equivalent) and `make frontend-audit`
 | types | `tsc --noEmit` | — |
 | **BFF authz** | `pnpm authz:check` | — |
 | **wire contract** | `tsc --noEmit` (`tests/unit/wire-contract.test.ts`) | `er-server/tests/mock_contract.rs` |
+| **mock fabrication** | `vitest run` (`tests/unit/mock-fabrication.test.ts`) | `er-server/tests/mock_contract.rs` |
 | unit + component + coverage floor | `vitest run --coverage` | `cargo llvm-cov --fail-under-lines` |
 | generated API drift | `pnpm gen:api` + `git diff --exit-code` | `er-entity verify` |
 | **advisories** | `pnpm audit:check` | `cargo deny check advisories` |
@@ -175,9 +176,41 @@ oldest-first (W0.5d) are per-path facts, and `src/lib/api/openapi.json` document
 **zero** paths — `er-server/src/openapi.rs` registers `components.schemas` only,
 on purpose. Those 12 schemas are these same entity structs, which is why the
 field half is buildable today and the envelope half needs `#[utoipa::path]` on
-the handlers first. The mock's two remaining fabrications (`outcome`,
-`exit_code` on jobs — absent from er-server, read by no component) are left in
-place as the fixture that half will be built against.
+the handlers first.
+
+### The mock-fabrication gate
+
+`tests/unit/mock-fabrication.test.ts` is the other half of the wire contract.
+The wire-contract gate asks whether a **UI type** declares a field its entity
+lacks; this one asks whether the **mock emits** one. Neither that gate nor
+`mock_contract.rs` looked at what the mock actually sends, and the mock is where
+the defect is born: it encodes the frontend's belief about the API, so a field
+invented there reads as real in all three mock-backed tiers.
+
+It walks every object literal in `tests/mock-erserver/server.mjs` with the
+TypeScript AST, matches each against the entity it best fits, and fails on any
+key that entity does not declare. The authority is `entities/*/entity.yaml`
+rather than the generated bindings, because the lake-only entities (`assertion`
+among them) have no TypeScript binding and their rows would otherwise be
+misattributed to whichever entity happened to share the most fields — that one
+choice removed thirteen false positives.
+
+Server-composed fields are legitimate and belong in `EXPLAINED` with a note on
+where each comes from: `run.auto_merged_pairs` is derived on read,
+`assertion.assertion_id` is a wire rename of the entity's `id`. As with
+wire-contract's third type argument, the point is that such a field is
+*accounted for* rather than indistinguishable from a fabrication. A companion
+assertion fails on a **stale** `EXPLAINED` entry, since a note kept after the
+field stopped being emitted also silently permits its return.
+
+**This replaced an earlier decision.** The two known fabrications on jobs
+(`outcome`, `exit_code` — 11 sites each, absent from er-server, read by no
+component) were previously left in the mock on purpose, as the fixture the
+envelope half would be built against. They are now removed: a field-level gate
+exists, and a sabotage run that re-adds `exit_code` and watches the gate name it
+is a better fixture than a fabrication living in the shipped mock, which is a
+trap for the next person to surface a job field. The envelope half still needs
+`#[utoipa::path]` and still has no fixture; that is the honest state.
 
 ### The BFF authorization gate
 

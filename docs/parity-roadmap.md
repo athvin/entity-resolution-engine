@@ -1624,6 +1624,45 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          unit; it now says `+9.8 points`. The insights page also gains a visual baseline, which it
          lacked: this screen is CHARTS, and a bar that silently rendered at the wrong width would
          read as a different corpus rather than as a bug.
+   - [x] **D12 the mock invented two job fields, and nothing looked at what the mock emits.**
+         Found by sweeping the recurring class deliberately rather than by hitting it: the
+         defect that has bitten this program most often is *the frontend states a contract the
+         backend never fulfilled*, and the gates built for it both look at the frontend's
+         **types** (`wire-contract.test.ts`) or the **route table**
+         (`mock_contract.rs`). Neither reads what the mock actually sends, which is where the
+         belief is authored.
+         `exit_code` and `outcome` sat on the mock's job fixtures at 11 sites each — neither a
+         column on any entity, neither produced anywhere in `rust/`, both Python-era leftovers
+         (a subprocess exit status and an outcome string the Rust dispatcher never had). No
+         component read them, so nothing was broken; they were a **loaded trap**, because the
+         next UI to show `job.exit_code` would have gone green in all three mock-backed tiers
+         and shipped a field that is always `undefined`. That is precisely how `progress`
+         reached production and threw on three screens.
+         The gate walks every object literal in the mock with the TypeScript AST and fails on a
+         key the matched entity does not declare. **The authority choice was the whole
+         difference:** reading `entities/*/entity.yaml` instead of the generated TypeScript
+         bindings took it from 15 flagged fields to 2, because the lake-only entities
+         (`assertion` among them) have no binding, so their rows were being misattributed to
+         whichever entity shared the most fields. The 2 survivors were both real and are now
+         recorded with their provenance — `run.auto_merged_pairs` is derived on read,
+         `assertion.assertion_id` is a wire rename of the entity's `id`.
+         **This reverses a recorded decision.** Both fabrications were previously left in place
+         on purpose, as the fixture the envelope half of D9 would be built against. A sabotage
+         run that re-adds `exit_code` and watches the gate name it by line number is a better
+         fixture than a fabrication living in the shipped mock. The envelope half still needs
+         `#[utoipa::path]` and still has no fixture; that is stated rather than papered over.
+         Observed failing three ways before being trusted, per the house rule: the reintroduced
+         field, the entity authority reading nothing, and the mock parse reading nothing — the
+         last two because a gate whose input silently empties passes while examining nothing.
+         **Four other classes were swept clean in the same pass**, which is worth recording so
+         they are not re-derived: every control-plane foreign key is `NO ACTION` but no other
+         hard delete has children (`api_keys` already soft-retires, and no org-delete path
+         exists — `orgs` has 10 children); all six `forward<unknown[]>` routes genuinely return
+         bare arrays; every forwarded query param is read (of four candidates, two were my
+         check matching the POST handler on a shared path and two were a handler that
+         delegates, as `audit_index` does to `audit_feed` — so a per-handler textual check
+         needs to follow calls, or it reports the delegating case as dead); and all 78 routed
+         handlers enforce authorization, `healthz` excepted and correctly.
    - [x] **D11 a webhook could not be deleted once it had delivered anything.** Found by clicking
          Remove on the real stack — the API answered `{"detail":"db: db error"}`.
          `webhook_deliveries.webhook_id` references `webhooks.id` with no `ON DELETE` action, so

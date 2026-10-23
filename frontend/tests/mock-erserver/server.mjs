@@ -219,10 +219,8 @@ export function initialState() {
           run_id: "01jm0000000000000000000003",
           attempt: 1,
           max_attempts: 3,
-          exit_code: null,
           error_class: null,
           error_detail: null,
-          outcome: null,
         },
         {
           id: "01jm000000000000000000000b",
@@ -235,10 +233,8 @@ export function initialState() {
           run_id: null,
           attempt: 3,
           max_attempts: 3,
-          exit_code: 4,
           error_class: "transient_io",
           error_detail: "S3 connection reset during assemble",
-          outcome: null,
         },
         {
           id: "01jm000000000000000000000a",
@@ -251,10 +247,8 @@ export function initialState() {
           run_id: null,
           attempt: 1,
           max_attempts: 3,
-          exit_code: 0,
           error_class: null,
           error_detail: null,
-          outcome: "model_activated",
         },
       ],
       // Only tests that mutate job state touch this org, so acme-dev's fixtures
@@ -271,10 +265,8 @@ export function initialState() {
           run_id: null,
           attempt: 1,
           max_attempts: 3,
-          exit_code: null,
           error_class: null,
           error_detail: null,
-          outcome: null,
         },
         {
           id: "01jmmutable00000000000000m2",
@@ -287,10 +279,8 @@ export function initialState() {
           run_id: null,
           attempt: 3,
           max_attempts: 3,
-          exit_code: 4,
           error_class: "transient_io",
           error_detail: "disk full",
-          outcome: null,
         },
       ],
     },
@@ -906,10 +896,8 @@ export function initialState() {
       run_id: null,
       attempt: 1,
       max_attempts: 3,
-      exit_code: 3,
       error_class: "precondition",
       error_detail: "no model_registry row has status='active'",
-      outcome: null,
     },
     {
       id: "01jmfresh000000000000000f2",
@@ -922,10 +910,8 @@ export function initialState() {
       run_id: null,
       attempt: 1,
       max_attempts: 3,
-      exit_code: 3,
       error_class: "precondition",
       error_detail: "no model_registry row has status='active'",
-      outcome: null,
     },
   ];
 
@@ -1256,10 +1242,8 @@ const server = http.createServer((req, res) => {
             run_id: null,
             attempt: 1,
             max_attempts: 3,
-            exit_code: null,
             error_class: null,
             error_detail: null,
-            outcome: null,
           },
         ];
       }
@@ -1343,7 +1327,6 @@ const server = http.createServer((req, res) => {
           const provision = (state.jobs[org.name] ?? []).find((job) => job.kind === "provision");
           if (provision) {
             provision.state = "succeeded";
-            provision.exit_code = 0;
           }
         }
       }
@@ -1523,10 +1506,8 @@ const server = http.createServer((req, res) => {
         run_id: null,
         attempt: kind === "train" ? 1 : 0,
         max_attempts: 3,
-        exit_code: kind === "train" ? 0 : null,
         error_class: null,
         error_detail: null,
-        outcome: kind === "train" ? "model_activated" : null,
       };
       (state.jobs[match[1]] ??= []).unshift(job);
       return send(res, 202, job);
@@ -2028,10 +2009,8 @@ const server = http.createServer((req, res) => {
         run_id: null,
         attempt: 1,
         max_attempts: 3,
-        exit_code: 0,
         error_class: null,
         error_detail: null,
-        outcome: "resolved",
       };
       (state.jobs[org] ??= []).unshift(job);
       return send(res, 202, { delivery_id: `mockdelivery-${source}`, job });
@@ -2358,10 +2337,8 @@ const server = http.createServer((req, res) => {
           run_id: null,
           attempt: 1,
           max_attempts: 3,
-          exit_code: 0,
           error_class: null,
           error_detail: null,
-          outcome: kind === "train" ? "model_activated" : "resolved",
         }));
         for (const job of enqueued) (state.jobs[org] ??= []).unshift(job);
         return send(res, 200, {
