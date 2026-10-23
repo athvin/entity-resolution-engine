@@ -109,6 +109,6 @@ Declared statements per entity and operation:
 | `scored_record` | 0 | 1 | 1 | 1 |
 | `staged_steward_action` | 1 | 1 | 1 | 0 |
 | `tenant_schema_state` | 1 | 1 | 0 | 0 |
-| `webhook` | 1 | 3 | 0 | 1 |
+| `webhook` | 1 | 3 | 1 | 0 |
 | `webhook_delivery` | 1 | 1 | 2 | 0 |
 <!-- END GENERATED: entities-index -->

@@ -66,21 +66,28 @@ async fn history_companions_capture_row_images_with_the_actor() {
     .await
     .expect("create webhook");
 
-    // UPDATE (any mutation): deactivate via delete? webhooks only create/delete,
-    // so drive an UPDATE directly for the image shape.
-    client
-        .execute(
-            "UPDATE public.webhooks SET active = false, updated_at = now() WHERE id = $1",
-            &[&webhook_id],
-        )
-        .await
-        .expect("update webhook");
-
-    // DELETE through the wrapper.
+    // UPDATE through the wrapper. `delete_webhook` is a SOFT delete — it sets
+    // `active = false`, because `webhook_deliveries` references `webhooks.id`
+    // and a hard DELETE could not run once a subscription had delivered
+    // anything. Every read filters `AND active`, so this is deletion's
+    // observable semantics, and the history companion sees an update image.
+    //
+    // This used to drive the UPDATE by hand, under a comment reading "webhooks
+    // only create/delete" — true when it was written, and the reason the
+    // wrapper's own behaviour was never exercised here.
     let deleted = pg::delete_webhook(&client, &org_id, &webhook_id)
         .await
-        .expect("delete webhook");
-    assert!(deleted);
+        .expect("retire webhook");
+    assert!(deleted, "the first retire must report a row changed");
+
+    // DELETE: driven directly, because nothing in the product hard-deletes a
+    // webhook any more and the delete IMAGE still needs covering. Possible
+    // here only because this subscription never delivered — which is precisely
+    // the foreign key the soft delete exists for.
+    client
+        .execute("DELETE FROM public.webhooks WHERE id = $1", &[&webhook_id])
+        .await
+        .expect("hard delete for the image");
 
     let rows = history_rows(&client, &webhook_id).await;
     let shapes: Vec<(&str, &str)> = rows

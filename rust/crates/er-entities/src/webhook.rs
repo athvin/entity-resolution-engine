@@ -70,20 +70,6 @@ VALUES ($1, $2, $3, $4, $5)
     }
 }
 
-pub mod delete {
-    //! @generated query functions for this entity + operation.
-    /// Delete a webhook; zero rows removed means absent or another org's.
-    pub async fn delete(
-        client: &::tokio_postgres::Client,
-        org_id: &str,
-        webhook_id: &str,
-    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
-        const SQL: &str = "DELETE FROM public.webhooks WHERE org_id = $1 AND id = $2
-";
-        client.execute(SQL, &[&org_id, &webhook_id]).await
-    }
-}
-
 pub mod read {
     //! @generated query functions for this entity + operation.
     /// One active subscription by id, for the outbox drainer to resolve its url and secret at delivery time rather than freezing them into the queued row — so rotating a secret or correcting a URL takes effect on the next attempt. Filters on `active`, which is also how deactivating a webhook stops queued deliveries.
@@ -179,5 +165,21 @@ ORDER BY created_at
                 updated_at: row.get("updated_at"),
             })
             .collect())
+    }
+}
+
+pub mod update {
+    //! @generated query functions for this entity + operation.
+    /// Retire a webhook. A SOFT delete, because `webhook_deliveries.webhook_id` references this row and the delivery log is history a tenant is entitled to keep — the hard DELETE this replaces could not run at all once a subscription had delivered anything, which is every subscription that ever worked, and the foreign-key violation surfaced as an opaque `db: db error`. Every read already filters `AND active`, so deactivating is indistinguishable from deletion to the listing, the delivery lookup and the by-id read, while the history survives. The `AND active` here makes a second retire affect zero rows, so a repeated call honestly reports that nothing changed.
+    pub async fn deactivate(
+        client: &::tokio_postgres::Client,
+        org_id: &str,
+        webhook_id: &str,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str = "UPDATE public.webhooks
+SET active = false, updated_at = now()
+WHERE org_id = $1 AND id = $2 AND active
+";
+        client.execute(SQL, &[&org_id, &webhook_id]).await
     }
 }

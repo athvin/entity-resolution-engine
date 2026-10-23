@@ -1,8 +1,0 @@
-kind: statement
-operation: delete
-mode: partial
-description: "Delete a webhook; zero rows removed means absent or another org's."
-params:
-  - { name: org_id, type: varchar }
-  - { name: webhook_id, type: varchar }
-returns: none
