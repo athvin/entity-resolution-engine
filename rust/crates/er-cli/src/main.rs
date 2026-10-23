@@ -178,6 +178,12 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     let config = load_config(&cli.config)?;
     let session = er_cli::open_lake(&cli.catalog, &cli.data_path)?;
+    // A CLI invocation IS a lake job, and the design's rule is that every lake
+    // job reconciles its lake first — but only the dispatcher did it.
+    let applied = er_cli::reconcile_lake_schema(&session)?;
+    if applied > 0 {
+        eprintln!("lake schema reconciled: {applied} statement(s) applied");
+    }
 
     match cli.command {
         Command::Ingest {

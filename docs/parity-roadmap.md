@@ -1624,6 +1624,34 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          unit; it now says `+9.8 points`. The insights page also gains a visual baseline, which it
          lacked: this screen is CHARTS, and a bar that silently rendered at the wrong width would
          read as a different corpus rather than as a bug.
+   - [x] **D10 `er` never reconciled its lake, so a lake older than a column stayed older.**
+         Found by booting the full-stack dev stack and reading the seed output — the tier exists
+         for exactly this and had not been run in a while:
+         ```
+         run seed-base: screening crm could not be recorded: Binder Error:
+           Referenced update column matched_count not found in table!
+           Did you mean: "changed_count"
+         ```
+         Three links. `create_ddl_table` is `CREATE TABLE IF NOT EXISTS` — it creates a missing
+         table and never touches an existing one. The design's rule is that every lake job
+         reconciles its lake first, and `er_entity_diff::reconcile_lake` does exactly that, but
+         **only the dispatcher called it**; `er-cli` had no dependency on the reconciler at all.
+         So E9b's four `ingest_batches` columns reached every dispatcher-driven org and no
+         CLI-driven lake.
+         And it was **invisible**: the screening write is best-effort, so the run printed one line
+         and reported success while recording nothing. A best-effort path that swallows a
+         PERMANENT error — a column that does not exist is not going to start existing — reports
+         exactly like one that swallows a transient failure, which is how this survived.
+         The fix is `er_cli::reconcile_lake_schema`, called once in `main` after the lake opens,
+         because a CLI invocation IS a lake job. Additive changes apply in a transaction and are
+         ledgered; a breaking difference refuses and leaves the lake untouched — the same contract
+         the control plane holds itself to.
+         Worth recording from writing the test: those four columns are **nullable**, and that is
+         what makes them addable at all. A first draft of the fixture also omitted `path` and
+         `full_refresh_keys` and got `ERR_SCHEMA_BREAKING: column path is absent` — the reconciler
+         refusing to invent values for a NOT NULL column, which is the contract working rather
+         than a problem.
+         Two sabotages observed: reporting zero applied, and removing the reconcile entirely.
    - [x] **O7b-2 per-source duplicate attribution — and a gate with a hole in it.** The
          corpus-wide duplicate rate says a tenant has a problem; it does not say WHERE the
          problem comes from, and the answer is nearly always one feed. New
