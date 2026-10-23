@@ -61,6 +61,7 @@ below `lg`.
 - `/[org]/dashboard`
 - `/[org]/duplicates`
 - `/[org]/insights`
+- `/[org]/labeling`
 - `/[org]/records`
 - `/[org]/reviews`
 - `/[org]/runs`

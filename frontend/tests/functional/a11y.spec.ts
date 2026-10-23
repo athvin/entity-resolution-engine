@@ -101,6 +101,17 @@ const SCREENS: {
     },
   },
   {
+    // Added in the same change as the screen, for the reason the comment below
+    // gives. This one has a keyboard-first flow, so the axe sweep is doing more
+    // than usual here: the buttons carry visible `kbd` hints and must still be
+    // reachable and named without them.
+    name: "labeling",
+    path: `/${ORG}/labeling`,
+    ready: async (page) => {
+      await expect(page.getByTestId("labeling-queue")).toBeVisible();
+    },
+  },
+  {
     // A screen absent from this array is silently unchecked, which is why the
     // models page is listed in the same change that adds it.
     name: "models",
