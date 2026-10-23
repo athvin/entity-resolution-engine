@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := check
-.PHONY: build fmt lint test check check-e2e entities-check skills-check frontend frontend-audit frontend-coverage run frontend-dev frontend-e2e frontend-baselines frontend-dev-reset image-api dev-up dev-suspend dev-resume dev-down obs-up clean symposium
+.PHONY: build fmt lint doc test check check-e2e entities-check skills-check frontend frontend-audit frontend-coverage run frontend-dev frontend-e2e frontend-baselines frontend-dev-reset image-api dev-up dev-suspend dev-resume dev-down obs-up clean symposium
 
 # --- Rust backend: the application (engine, CLI, control plane) lives in rust/ ---
 #
@@ -14,6 +14,13 @@ fmt:
 
 lint:
 	cd rust && cargo clippy --workspace --all-targets -- -D warnings
+
+# rustdoc with warnings denied — the same step rust.yml's `fmt + clippy + docs`
+# job runs. It was missing here, so a public doc linking to a private item
+# passed `make check` and failed CI; the one thing this target promises is that
+# it does not do that.
+doc:
+	cd rust && RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items
 
 test:
 	cd rust && cargo test --workspace
@@ -36,7 +43,7 @@ skills-check:
 # The fast PR-equivalent backend gate (mirrors rust.yml's lint + test tiers),
 # plus the skill gate — a stale generated reference is the same class of defect
 # as a stale generated entity artifact.
-check: fmt lint entities-check skills-check test
+check: fmt lint doc entities-check skills-check test
 
 # The gated e2e tiers: the DuckLake + extension pipeline and the Postgres
 # control-plane queue/dispatch. Needs the DuckDB extensions and a local

@@ -2498,7 +2498,7 @@ fn screen_deliveries(session: &Session, config: &Config, inputs: &PipelineInputs
 ///
 /// A CLI invocation is a lake job, and the design's rule is that every lake job
 /// reconciles its lake first — but only the dispatcher did it. `er` drove a lake
-/// through [`create_ddl_table`], which is `CREATE TABLE IF NOT EXISTS`: it
+/// through `create_ddl_table`, which is `CREATE TABLE IF NOT EXISTS`: it
 /// creates a missing table and never touches an existing one. So a lake created
 /// before a column was added never gained it, and the write that needed it
 /// failed.
