@@ -547,6 +547,65 @@ async fn golden_records_read_over_ducklake() {
     assert_eq!(resp.status(), StatusCode::OK);
     assert_eq!(json_body(resp).await["items"].as_array().unwrap().len(), 0);
 
+    // O7b-2: per-source attribution. The corpus-wide rate says a tenant has a
+    // problem; it does not say WHERE it comes from, and the answer is nearly
+    // always one feed.
+    let resp = app
+        .clone()
+        .oneshot(op_get("/v1/orgs/acme/insights"))
+        .await
+        .unwrap();
+    let series = json_body(resp).await;
+    let newest = &series["series"][0];
+    let corpus_duplicate_records = newest["duplicate_records"].as_i64().unwrap();
+    let corpus_records = newest["records"].as_i64().unwrap();
+
+    let resp = app
+        .clone()
+        .oneshot(op_get("/v1/orgs/acme/insights/sources"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let attribution = json_body(resp).await;
+    assert_eq!(
+        attribution["run_id"], newest["run_id"],
+        "with no run named, the newest snapshot's run is the one described"
+    );
+    let sources = attribution["sources"].as_array().unwrap();
+    assert_eq!(sources.len(), 3, "base_10 lands three sources: {sources:?}");
+
+    // The per-source rows and the corpus-wide row are assembled from ONE group
+    // computation in one call, so their totals cannot disagree. This is the
+    // assertion that proves it — O7a's rule that a snapshot built from several
+    // independent reads can describe a corpus that never existed.
+    let summed_records: i64 = sources.iter().map(|s| s["records"].as_i64().unwrap()).sum();
+    let summed_duplicates: i64 = sources
+        .iter()
+        .map(|s| s["duplicate_records"].as_i64().unwrap())
+        .sum();
+    assert_eq!(
+        summed_records, corpus_records,
+        "the per-source record counts must sum to the corpus total"
+    );
+    assert_eq!(
+        summed_duplicates, corpus_duplicate_records,
+        "and so must the duplicate counts"
+    );
+
+    // Worst first, because the question this answers is "which feed is causing
+    // this" and the answer should be the first row.
+    let worst = sources[0]["duplicate_records"].as_i64().unwrap();
+    assert!(
+        sources
+            .iter()
+            .all(|s| s["duplicate_records"].as_i64().unwrap() <= worst),
+        "sources must be ordered worst first: {sources:?}"
+    );
+    // A rate is derived on read, and `contributed_groups` is its own number: a
+    // source can account for few duplicate RECORDS while touching many groups.
+    assert!(sources[0]["duplicate_rate"].is_f64());
+    assert!(sources[0]["contributed_groups"].as_i64().unwrap() >= 1);
+
     // Reviews: run_all populated review_queue with base_10's gray-band pair(s)
     // (probability in [review_low, auto_merge)). The shared-household trap at
     // ~0.857 is one such open gray_band review.

@@ -1655,6 +1655,44 @@ pub fn write_metric_snapshot(
     ))?;
     er_entities::metric_snapshot::create::upsert(session.connection())?;
     session.execute_batch("drop table __metric_src")?;
+
+    // Per-source attribution (O7b-2), written from the SAME group computation
+    // in the same call. The corpus-wide rate says a tenant has a problem; it
+    // does not say where the problem comes from, and the answer is nearly
+    // always one feed.
+    //
+    // Assembled in one query for the reason O7a established: a snapshot built
+    // from several independent reads can describe a corpus that never existed.
+    // The per-source rows and the corpus-wide row therefore share one `groups`
+    // CTE and one `captured_at`, so their totals cannot disagree.
+    create_ddl_table(session, "metric_snapshot_sources")?;
+    session.execute_batch("drop table if exists __metric_source_src")?;
+    session.execute_batch(&format!(
+        "create temp table __metric_source_src as
+         with groups as (
+             select entity_id, count(*) as members
+             from {ENTITY_MEMBERSHIP}
+             group by entity_id
+         )
+         select
+             '{run}' as run_id,
+             m.source_system,
+             cast('{at}' as timestamp) as captured_at,
+             count(*) as records,
+             -- By RECORD, like the corpus-wide figure: counting groups calls a
+             -- five-record cluster and a pair the same amount of duplication.
+             count(*) filter (where g.members > 1) as duplicate_records,
+             -- A source can account for few duplicate records while TOUCHING
+             -- many groups, which is the signature of a feed that adds one bad
+             -- row to everything rather than one bad batch.
+             count(distinct case when g.members > 1 then m.entity_id end)
+                 as contributed_groups
+         from {ENTITY_MEMBERSHIP} m
+         join groups g on g.entity_id = m.entity_id
+         group by m.source_system"
+    ))?;
+    er_entities::metric_snapshot_source::create::upsert(session.connection())?;
+    session.execute_batch("drop table __metric_source_src")?;
     Ok(())
 }
 

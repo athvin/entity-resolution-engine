@@ -30,7 +30,7 @@ statements is read or written only through the engine's own stage SQL, not
 through a typed query function.
 
 <!-- BEGIN GENERATED: entities-index -->
-**35 entities, 154 declared statements.**
+**36 entities, 156 declared statements.**
 
 | Entity | Relation | Store | Key | Natural key | History |
 |---|---|---|---|---|---|
@@ -54,6 +54,7 @@ through a typed query function.
 | `match_score` | `match_scores` | duckdb | `id` | `rec_a_key, rec_b_key, model_version, tf_snapshot_id` | — |
 | `matching_model` | `matching_models` | postgres | `id` | `org_id, name, version` | yes |
 | `metric_snapshot` | `metric_snapshots` | duckdb | `id` | `run_id` | — |
+| `metric_snapshot_source` | `metric_snapshot_sources` | duckdb | `id` | `run_id, source_system` | — |
 | `org` | `orgs` | postgres | `id` | `name` | yes |
 | `pair_label` | `pair_labels` | postgres | `id` | `org_id, rec_a_key, rec_b_key` | — |
 | `raw_record` | `raw_records` | duckdb | `id` | `source_system, source_record_id, content_hash` | — |
@@ -94,6 +95,7 @@ Declared statements per entity and operation:
 | `match_score` | 0 | 4 | 3 | 0 |
 | `matching_model` | 1 | 4 | 1 | 0 |
 | `metric_snapshot` | 1 | 1 | 0 | 0 |
+| `metric_snapshot_source` | 1 | 1 | 0 | 0 |
 | `org` | 2 | 3 | 3 | 0 |
 | `pair_label` | 1 | 2 | 0 | 0 |
 | `raw_record` | 0 | 2 | 0 | 0 |

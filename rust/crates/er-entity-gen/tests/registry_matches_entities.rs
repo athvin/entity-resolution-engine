@@ -35,15 +35,22 @@ fn every_entity_lake_table_matches_the_s5_registry() {
     let specs = all_specs();
 
     let mut compared: Vec<&str> = Vec::new();
+    let mut missing: Vec<&str> = Vec::new();
     for entity in catalog.entities() {
         if !entity.has_store(Store::Duckdb) {
             continue;
         }
-        // A relation the registry does not carry is not a drift: the registry
-        // also describes stage-owned relations the engine materialises, and an
-        // entity may be declared before its registry entry exists. The check
-        // is about the ones BOTH sources claim to describe.
         let Some(registry) = specs.iter().find(|s| s.name == entity.relation) else {
+            // ABSENT from the registry, which this test used to skip on the
+            // reasoning that "an entity may be declared before its registry
+            // entry exists". That reasoning cost a debugging cycle: a DuckDB
+            // entity the registry has never heard of can never be created,
+            // because `create_ddl_table` builds from the REGISTRY — and the one
+            // caller that matters (`write_metric_snapshot`) is best-effort, so
+            // the failure arrives as a swallowed log line reading
+            // "<relation> spec missing from S5 registry" and the table simply
+            // never appears.
+            missing.push(entity.relation.as_str());
             continue;
         };
         // Stage-owned relations have no DDL to compare: the engine materialises
@@ -64,6 +71,13 @@ fn every_entity_lake_table_matches_the_s5_registry() {
             entity.relation
         );
     }
+
+    assert!(
+        missing.is_empty(),
+        "these DuckDB entities have no S5 registry spec, so `create_ddl_table` \
+         cannot build their tables and every write to them fails at run time: \
+         {missing:?}. Add a `tspec` to `er_schema::model::all_specs()`."
+    );
 
     // A guard on the guard: every `continue` above is a silent skip, so a
     // catalog that stopped resolving — or an `owner` vocabulary change — would

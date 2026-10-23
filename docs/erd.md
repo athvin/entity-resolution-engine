@@ -387,6 +387,17 @@ erDiagram
         timestamp created_at
         timestamp updated_at
     }
+    metric_snapshot_sources {
+        varchar id PK
+        varchar run_id
+        varchar source_system
+        timestamp captured_at
+        bigint records
+        bigint duplicate_records
+        bigint contributed_groups
+        timestamp created_at
+        timestamp updated_at
+    }
     record_qualities {
         varchar id PK
         varchar record_key
@@ -683,13 +694,16 @@ erDiagram
     raw_records }o..|| entity_membership : "source_system, source_record_id"
     match_scores }o..|| metric_snapshots : "run_id"
     scored_records }o..|| metric_snapshots : "run_id"
+    metric_snapshot_sources }o..|| metric_snapshots : "run_id"
     record_qualities }o..|| metric_snapshots : "run_id"
     entity_membership }o..|| metric_snapshots : "run_id"
+    entity_membership }o..|| metric_snapshot_sources : "run_id, source_system"
     entity_events }o..|| metric_snapshots : "run_id"
     entity_events }o..|| run_stages : "run_id, seq"
     cut_edges }o..|| match_scores : "rec_a_key, rec_b_key, model_version, tf_snapshot_id"
     run_stages }o..|| metric_snapshots : "run_id"
     ingest_batches }o..|| metric_snapshots : "run_id"
+    ingest_batches }o..|| metric_snapshot_sources : "run_id, source_system"
     int_std_records }o..|| entity_membership : "source_system, source_record_id"
     int_std_records }o..|| raw_records : "source_system, source_record_id, content_hash"
     golden_lineage }o..|| golden_overrides : "entity_id, attribute"
@@ -708,6 +722,7 @@ erDiagram
     match_scores }o..|| runs : "run_id → id"
     scored_records }o..|| runs : "run_id → id"
     metric_snapshots }o..|| runs : "run_id → id"
+    metric_snapshot_sources }o..|| runs : "run_id → id"
     record_qualities }o..|| runs : "run_id → id"
     entity_membership }o..|| runs : "run_id → id"
     entity_events }o..|| runs : "run_id → id"
@@ -724,6 +739,7 @@ erDiagram
 | `match_scores` | ddl | One scored candidate pair (S4.3): the frozen model's match probability with its evidence waterfall, keyed by model and TF snapshot. |
 | `scored_records` | ddl | What the last successful match pass actually scored: one row per record in the corpus at the moment it was scored, with the content hash and model identity it was scored under. This is what makes an incremental run safe — a record is new or changed precisely when the standardized corpus disagrees with this ledger. |
 | `metric_snapshots` | ddl | One run's resolution metrics, kept so the dashboard can show a TREND rather than only a current value. The dashboard has always computed its numbers live from the lake, which means it can say what is true now and nothing about whether that is better or worse than last week — which is the question an operator actually has. |
+| `metric_snapshot_sources` | ddl | One run's duplicate attribution, per source system. The corpus-wide duplicate rate says a tenant has a problem; it does not say WHERE the problem comes from, and the answer is nearly always one feed. Retained per run beside metric_snapshots for the same reason that table exists: a live number says what is true now and nothing about whether a source is getting better or worse. |
 | `record_qualities` | ddl | A per-record data-quality score, 0-100, with the three dimensions kept separately. The dimensions are kept because a single number says a record is bad and not what to do about it: complete-but-invalid, valid-but-empty and simply old are three different jobs. |
 | `entity_membership` | ddl | One membership row per record (S4.4): which resolved entity the record's current version belongs to. |
 | `entities` | ddl | One resolved entity (S4.4): its lifecycle status and, for merge losers, the surviving entity it merged into. |

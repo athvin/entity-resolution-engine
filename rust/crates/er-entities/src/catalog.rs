@@ -82,6 +82,10 @@ pub const ENTITY_YAML: &[(&str, &str)] = &[
         "metric_snapshot",
         include_str!("../../../../entities/metric_snapshot/entity.yaml"),
     ),
+    (
+        "metric_snapshot_source",
+        include_str!("../../../../entities/metric_snapshot_source/entity.yaml"),
+    ),
     ("org", include_str!("../../../../entities/org/entity.yaml")),
     (
         "pair_label",

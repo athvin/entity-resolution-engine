@@ -1503,3 +1503,55 @@ pub fn unscored_open_reviews(session: &Session, snapshot: i64) -> Result<i64, St
         }
     }
 }
+
+/// One run's per-source duplicate attribution, worst first (O7b-2).
+///
+/// The corpus-wide duplicate rate says a tenant has a problem; it does not say
+/// WHERE the problem comes from, and the answer is nearly always one feed.
+/// Rates are derived on read rather than stored, the same rule the corpus-wide
+/// series follows — and null rather than 0.0 for a source with no records,
+/// because no records is not a 0% duplicate rate, it is no answer.
+///
+/// # Errors
+/// Propagates a non-missing-table lake query error.
+pub fn insight_sources(
+    session: &Session,
+    snapshot: i64,
+    run_id: &str,
+) -> Result<Vec<Value>, String> {
+    match er_entities::metric_snapshot_source::read::by_run(session.connection(), snapshot, run_id)
+    {
+        Ok(rows) => Ok(rows
+            .iter()
+            .map(|r| {
+                let rate = if r.records > 0 {
+                    #[expect(
+                        clippy::cast_precision_loss,
+                        reason = "a source large enough to lose f64 precision here is far past \
+                                  what a rate reported to three decimals can express"
+                    )]
+                    Some(r.duplicate_records as f64 / r.records as f64)
+                } else {
+                    None
+                };
+                json!({
+                    "run_id": r.run_id,
+                    "source_system": r.source_system,
+                    "captured_at": r.captured_at.to_string(),
+                    "records": r.records,
+                    "duplicate_records": r.duplicate_records,
+                    "contributed_groups": r.contributed_groups,
+                    "duplicate_rate": rate,
+                })
+            })
+            .collect()),
+        Err(e) => {
+            let s = e.to_string();
+            if is_missing_table(&s) {
+                Ok(Vec::new())
+            } else {
+                Err(s)
+            }
+        }
+    }
+}
