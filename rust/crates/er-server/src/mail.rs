@@ -22,7 +22,7 @@
 //! Pod Identity credentials takes that exit before the credential existed.
 //!
 //! Bodies are plain text assembled by `format!`. No template engine: there are
-//! three of them, each a handful of lines, and the alternative is a dependency
+//! a handful of them, each a few lines, and the alternative is a dependency
 //! plus a directory of files that can drift from the `params` its caller sends.
 //! A template's required params are named in one place — [`render`] — and a
 //! missing one is a 422 the caller sees immediately, not a blank in an email
@@ -38,7 +38,8 @@ use serde_json::Value;
 pub struct Message {
     /// The recipient address.
     pub to: String,
-    /// Which template to render (`invite`, `password_reset`, `signup_verify`).
+    /// Which template to render (`invite`, `password_reset`, `signup_verify`,
+    /// `run_report`).
     pub template: String,
     /// Template parameters; what is required depends on the template.
     #[serde(default)]
@@ -134,6 +135,48 @@ pub fn render(message: &Message) -> Result<Rendered, MailError> {
                      workspace name is not held past that. If you did not request this, you \
                      can ignore this message.\n"
                 ),
+            })
+        }
+        "run_report" => {
+            let org = required(params, "org")?;
+            let kind = required(params, "kind")?;
+            let state = required(params, "state")?;
+            let job_id = required(params, "job_id")?;
+            // Optional, because what a report can say depends on how the job
+            // ended: a failure has an error and no counts, a success the
+            // reverse, and a job that never reached the engine has neither.
+            let optional = |key: &str| params.get(key).and_then(Value::as_str).unwrap_or("");
+            let run_id = optional("run_id");
+            let error = optional("error");
+            let summary = optional("summary");
+
+            // Assembled as sections and joined rather than pushed: clippy's
+            // `format_push_string` objects to `push_str(&format!(..))`, and a
+            // section list also makes "which parts are conditional" readable.
+            let mut sections = vec![format!("The {kind} job on {org} {state}.")];
+            let mut facts = format!("job {job_id}");
+            if !run_id.is_empty() {
+                facts = format!("{facts}\nrun {run_id}");
+            }
+            sections.push(facts);
+            if !summary.is_empty() {
+                sections.push(format!("What it changed:\n{summary}"));
+            }
+            if !error.is_empty() {
+                // Already chain-flattened by the dispatcher (`error_detail`),
+                // so it reads as a sentence rather than the outermost
+                // wrapper's Display.
+                sections.push(format!("Why it failed:\n{error}"));
+            }
+            sections.push(
+                "This report was sent because this workspace has run reporting configured. \
+                 Ask an operator to remove ER_RUN_REPORT_TO to stop it."
+                    .to_string(),
+            );
+            let body = format!("{}\n", sections.join("\n\n"));
+            Ok(Rendered {
+                subject: format!("{org}: {kind} {state}"),
+                body,
             })
         }
         other => Err(MailError::Invalid(format!("unknown template {other:?}"))),

@@ -225,9 +225,13 @@ async fn entity_events_are_aggregated_per_kind_and_expand_through_the_detail_end
     let queued = pg::enqueue(&client, &org_id, "run_all_full", 0, None, None, None)
         .await
         .unwrap();
-    let ran = er_server::dispatcher::dispatch_once_with(&client, &Ok(None))
-        .await
-        .unwrap();
+    let ran = er_server::dispatcher::dispatch_once_with(
+        &client,
+        &Ok(None),
+        &er_server::mail::Mailer::off(),
+    )
+    .await
+    .unwrap();
     assert!(ran, "the queued run should have been claimed");
     let job = pg::get_job(&client, &org_id, &queued.id)
         .await
@@ -345,9 +349,13 @@ async fn entity_events_are_aggregated_per_kind_and_expand_through_the_detail_end
         .await
         .unwrap();
     assert!(
-        er_server::dispatcher::dispatch_once_with(&client, &Ok(None))
-            .await
-            .unwrap()
+        er_server::dispatcher::dispatch_once_with(
+            &client,
+            &Ok(None),
+            &er_server::mail::Mailer::off()
+        )
+        .await
+        .unwrap()
     );
     let second_job = pg::get_job(&client, &org_id, &second.id)
         .await
