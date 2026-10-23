@@ -53,6 +53,20 @@ export function modelOrg(projectName: string): string {
   return org;
 }
 
+/** Tagging's own org per project: creating a tag changes the vocabulary every
+ * other test on that org is offered, and all three projects share one mock
+ * server. Same reason the registry, webhooks and labelling each get three. */
+export function tagOrg(projectName: string): string {
+  const byProject: Record<string, string> = {
+    "desktop-chromium": "tags-dev",
+    "mobile-safari": "tags-ios",
+    "mobile-chrome": "tags-android",
+  };
+  const org = byProject[projectName];
+  if (!org) throw new Error(`no tag org for project ${projectName}`);
+  return org;
+}
+
 /** Labelling's own org per project: recording a verdict REMOVES the pair from
  * the queue (the server excludes already-labelled pairs), so a project that
  * labels would shrink the queue another project is asserting the length of. */

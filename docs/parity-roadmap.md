@@ -2149,11 +2149,43 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          `DO NOTHING` keeps the original `created_by`, which is who first claimed the work.
          The envelope ledger from D13 caught the three new GET routes and forced a regenerate —
          that gate doing its job on the first unrelated change since it landed.
-   - [ ] **O5b the tag surface — chips and filters. REQUIRED NEXT, not optional.** O5a is
-         headless: nothing in the UI can create or apply a tag, so the capability is inert in
-         exactly the way E10b's labels were until E10c-2 built them a screen. That trap has
-         now been paid for twice in this program; the backend shipped separately only to keep
-         a two-entity schema change reviewable.
+   - [x] **O5b the tag surface — and the 204 it found in O5a.**
+         Chips on the entity view, reusable for reviews by passing a different `subject` pair,
+         plus four BFF routes and the hooks. O5a is no longer inert.
+         **Building it immediately found a real bug in O5a's own server code**, which is the
+         argument for interleaving rather than shipping backends alone: apply, unapply and
+         retire returned `204 No Content`, and `forward<T>` — the BFF's only forwarding
+         helper — calls `response.json()` unconditionally. A 204 arrives as `SyntaxError:
+         Unexpected end of JSON input`. The failure mode is the nasty kind: the upstream write
+         SUCCEEDS, so the refetch shows the chip while the mutation's `onError` puts an error
+         under it. The first functional test passed with a visible error on screen. No
+         control-plane mutation in this server answers 204 — `delete_webhook` returns
+         `Json(json!({"deleted": …}))` — so these three were a convention invented here that
+         nothing on the client could consume. Fixed in O5a's PR rather than carried.
+         **Grayscale is why the chip states are worth a component test.** A tag system is the
+         most tempting place in the product to reach for colour, and with no palette the only
+         thing separating applied from available is FILL versus BORDER. Invert that and every
+         chip still renders and the screen still looks plausible, so nothing but an assertion
+         notices. `TagChipsView` is split from the container precisely so that render logic
+         sits in the component tier the repo defines for it ("a component whose output derives
+         from data... chips").
+         **Four diagnoses, three of them wrong first**, recorded because the sequence is the
+         lesson: the failure snapshot is the END state, so a picture with no chip was the
+         post-removal page rather than proof apply was broken; `mutateAsync` is a readability
+         win and NOT a bug fix, since the nested-callback form worked (the comment claiming
+         otherwise was corrected rather than left as a plausible story); the tests did race on
+         a shared entity, but that was not this failure; and the real cause was that the picker
+         stays open after a create — correct behaviour, since a steward tagging one thing
+         usually adds several — so `tag-add` is absent and the test was wrong, not the UI.
+         The viewer spec reads a SEEDED tag in the shared org, for the reason E10c-2 hit: the
+         erweb fixtures grant a viewer membership only in `ORG`, so a viewer in a per-project
+         org gets a 404 from the tenant layout. Seeded also means read-only, so it cannot race.
+         Coverage fell below the floor twice as the component landed and was restored by
+         testing real logic both times — never by lowering a threshold. The second pass
+         extracted `src/lib/bff/tags.ts`, which also removed the `applySchema` duplicated
+         across the apply and unapply routes. Three visual baselines moved: `entity-detail` on
+         all three device projects, which is exactly right, since the chips render at every
+         size and nothing shared changed.
    - [ ] O5c approval-gated scheduled merges (#51's approval half: the scheduler acts only on
          an approved tag, named in config rather than by a magic flag),
          O6 bulk depth (#9/#62/#52), O8 workflows + triggers (#55/#56). (O3b, O3c and O7a have

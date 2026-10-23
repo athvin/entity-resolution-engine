@@ -20,6 +20,11 @@ export const queryKeys = {
   modelEvaluation: (org: string, name: string, version: number) =>
     ["org", org, "models", name, version, "evaluation"] as const,
   labelingQueue: (org: string) => ["org", org, "labeling", "next"] as const,
+  tags: (org: string) => ["org", org, "tags"] as const,
+  // Nested under the vocabulary so invalidating the parent clears every
+  // subject's chips at once — a retired tag has to disappear from all of them.
+  subjectTags: (org: string, subjectType: string, subjectId: string) =>
+    ["org", org, "tags", subjectType, subjectId] as const,
   labels: (org: string) => ["org", org, "labels"] as const,
   insights: (org: string) => ["org", org, "insights"] as const,
   insightSources: (org: string) => ["org", org, "insights", "sources"] as const,

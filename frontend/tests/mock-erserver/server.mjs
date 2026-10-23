@@ -402,6 +402,42 @@ export function initialState() {
       })),
       "mutable-dev": [],
     },
+    // The tag vocabulary and its applications. Retiring is a SOFT delete
+    // upstream, so a retired tag keeps its taggings and simply stops being
+    // offered — mirrored here, or a spec would not see the real behaviour.
+    tags: {
+      // Seeded and already applied, so a READ-ONLY spec has chips to read
+      // without creating any. The viewer spec needs this org specifically: the
+      // erweb fixtures grant a viewer membership only in `acme-dev`, and the
+      // per-project orgs get admin and steward alone — a viewer there gets a
+      // 404 from the tenant layout rather than a readonly page.
+      "acme-dev": [
+        {
+          id: "01jmtagseed0000000000000001",
+          org_id: "uuid-acme-dev",
+          name: "watchlist",
+          description: "Kept an eye on",
+          active: true,
+          created_by: "steward@acme.dev",
+          created_at: "2026-09-24T07:00:00Z",
+          updated_at: "2026-09-24T07:00:00Z",
+        },
+      ],
+    },
+    taggings: {
+      "acme-dev": [
+        {
+          id: "01jmtaggingseed00000000001",
+          org_id: "uuid-acme-dev",
+          tag_id: "01jmtagseed0000000000000001",
+          subject_type: "entity",
+          subject_id: "01jm0e000000",
+          created_by: "steward@acme.dev",
+          created_at: "2026-09-24T07:00:00Z",
+          updated_at: "2026-09-24T07:00:00Z",
+        },
+      ],
+    },
     // Verdicts a human has recorded. Keyed by org and seeded empty: the
     // labelling queue excludes pairs that appear here, mirroring the server, so
     // a spec that records one and re-reads the queue sees it gone.
@@ -746,6 +782,11 @@ export function initialState() {
     "webhooks-dev",
     "webhooks-ios",
     "webhooks-android",
+    // Creating a tag changes the vocabulary every other test on that org is
+    // offered, so tagging gets one org per device project too.
+    "tags-dev",
+    "tags-ios",
+    "tags-android",
     // Recording a verdict REMOVES the pair from the queue (the server excludes
     // already-labelled pairs), so labelling gets one org per device project
     // for the same reason the registry and the webhook page do.
@@ -772,7 +813,13 @@ export function initialState() {
       open_reviews: 40,
       snapshot: 3,
     };
-    state.golden[org] = [];
+    // A single entity, so a surface rendered ON an entity (the tag chips) has
+    // something to render against. Empty golden is right for the orgs whose
+    // specs never open one; it is not right for these.
+    // THREE entities, not one: `fullyParallel` runs the tests in a file at the
+    // same time, so a spec that tags an entity needs its own or it races a
+    // sibling removing the tag it just applied. One per test in tags.spec.ts.
+    state.golden[org] = [goldenRecord(0), goldenRecord(1), goldenRecord(2)];
     state.runs[org] = [];
     state.jobs[org] = [];
     state.reviews[org] = Array.from({ length: 40 }, (_, index) => ({
@@ -795,6 +842,8 @@ export function initialState() {
     state.contradictions[org] = [];
     state.matchScores[org] = [];
     state.labels[org] = [];
+    state.tags[org] = [];
+    state.taggings[org] = [];
     // A registry of its own, structurally identical to acme-dev's: two names
     // active plus a draft, so each project can activate without racing.
     state.models[org] = state.models["acme-dev"].map((m) => ({
@@ -1478,6 +1527,114 @@ const server = http.createServer((req, res) => {
       const org = match[1];
       if (!state.orgs[org]) return send(res, 404, { detail: "not found" });
       return send(res, 200, { labels: [...(state.labels[org] ?? [])].reverse() });
+    }
+    // ---- tags (O5) ---------------------------------------------------------
+    if ((match = /^\/v1\/orgs\/([^/]+)\/tags$/.exec(path)) && req.method === "GET") {
+      const org = match[1];
+      if (!state.orgs[org]) return send(res, 404, { detail: "not found" });
+      const live = (state.tags[org] ?? []).filter((t) => t.active);
+      const kind = url.searchParams.get("subject_type");
+      const id = url.searchParams.get("subject_id");
+      if ((kind === null) !== (id === null)) {
+        return send(res, 422, { detail: "subject_type and subject_id must be given together" });
+      }
+      if (kind !== null && id !== null) {
+        const ids = new Set(
+          (state.taggings[org] ?? [])
+            .filter((g) => g.subject_type === kind && g.subject_id === id)
+            .map((g) => g.tag_id),
+        );
+        return send(res, 200, {
+          tags: live.filter((t) => ids.has(t.id)).sort((a, b) => a.name.localeCompare(b.name)),
+        });
+      }
+      return send(res, 200, { tags: [...live].sort((a, b) => a.name.localeCompare(b.name)) });
+    }
+    if ((match = /^\/v1\/orgs\/([^/]+)\/tags$/.exec(path)) && req.method === "POST") {
+      const org = match[1];
+      if (!state.orgs[org]) return send(res, 404, { detail: "not found" });
+      const body = await readBody(req);
+      const name = String(body.name ?? "").trim();
+      if (name === "") return send(res, 422, { detail: "name is required" });
+      const rows = (state.tags[org] ??= []);
+      // The partial unique index is on ACTIVE rows only, so a retired tag's
+      // name is free again — the behaviour the pg test pins.
+      if (rows.some((t) => t.active && t.name === name)) {
+        return send(res, 409, { detail: `a tag named "${name}" already exists` });
+      }
+      const row = {
+        id: `01jmtag${String(rows.length + 1).padStart(19, "0")}`,
+        org_id: `uuid-${org}`,
+        name,
+        description: body.description ?? null,
+        active: true,
+        created_by: "steward@acme.dev",
+        created_at: "2026-09-24T07:00:00Z",
+        updated_at: "2026-09-24T07:00:00Z",
+      };
+      rows.push(row);
+      return send(res, 201, row);
+    }
+    if ((match = /^\/v1\/orgs\/([^/]+)\/tags\/([^/]+)$/.exec(path)) && req.method === "DELETE") {
+      const org = match[1];
+      const tag = (state.tags[org] ?? []).find((t) => t.id === match[2] && t.active);
+      if (!tag) return send(res, 404, { detail: "no such tag" });
+      // SOFT: the taggings survive, and the tag stops being offered.
+      tag.active = false;
+      return send(res, 200, { retired: true });
+    }
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/tags\/([^/]+)\/(apply|unapply)$/.exec(path)) &&
+      req.method === "POST"
+    ) {
+      const [, org, tagId, verb] = match;
+      if (!state.orgs[org]) return send(res, 404, { detail: "not found" });
+      const body = await readBody(req);
+      if (body.subject_type !== "entity" && body.subject_type !== "review") {
+        return send(res, 422, { detail: "subject_type must be one of [entity, review]" });
+      }
+      const rows = (state.taggings[org] ??= []);
+      const at = rows.findIndex(
+        (g) =>
+          g.tag_id === tagId &&
+          g.subject_type === body.subject_type &&
+          g.subject_id === body.subject_id,
+      );
+      if (verb === "apply") {
+        const tag = (state.tags[org] ?? []).find((t) => t.id === tagId && t.active);
+        if (!tag) return send(res, 404, { detail: "no such tag" });
+        // Idempotent: the same tag twice is the same fact, so no second row.
+        if (at === -1) {
+          rows.push({
+            id: `01jmtagging${String(rows.length + 1).padStart(15, "0")}`,
+            org_id: `uuid-${org}`,
+            tag_id: tagId,
+            subject_type: body.subject_type,
+            subject_id: body.subject_id,
+            created_by: "steward@acme.dev",
+            created_at: "2026-09-24T07:00:00Z",
+            updated_at: "2026-09-24T07:00:00Z",
+          });
+        }
+        return send(res, 200, { applied: true });
+      }
+      if (at === -1) {
+        return send(res, 404, { detail: "that tag is not applied to that subject" });
+      }
+      rows.splice(at, 1);
+      return send(res, 200, { removed: true });
+    }
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/tags\/([^/]+)\/subjects$/.exec(path)) &&
+      req.method === "GET"
+    ) {
+      const org = match[1];
+      if (!state.orgs[org]) return send(res, 404, { detail: "not found" });
+      const kind = url.searchParams.get("subject_type");
+      const subjects = (state.taggings[org] ?? [])
+        .filter((g) => g.tag_id === match[2])
+        .filter((g) => kind === null || g.subject_type === kind);
+      return send(res, 200, { subjects });
     }
     if ((match = /^\/v1\/orgs\/([^/]+)\/records$/.exec(path)) && req.method === "GET") {
       if (!state.orgs[match[1]]) return send(res, 404, { detail: "not found" });
