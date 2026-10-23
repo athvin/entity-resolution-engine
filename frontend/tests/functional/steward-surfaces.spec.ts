@@ -183,4 +183,30 @@ test.describe("protect", () => {
     await expect(page.getByTestId("entity-members")).toBeVisible();
     await expect(page.getByTestId("protect-button")).toHaveCount(0);
   });
+
+  test("a multi-record selection goes as ONE request (O6)", async ({ page }) => {
+    // The property, counted rather than asserted about. This used to loop one
+    // request per record, and every one of them enqueues an
+    // `apply_corrections` job that runs a correction pass over the WHOLE
+    // corpus — so a ten-record selection queued ten full passes to express one
+    // decision. Counting the requests is the only way to see that from here:
+    // the UI reported "protected N records" either way.
+    const calls: unknown[] = [];
+    await page.route(`**/api/orgs/${ORG}/records/protect`, async (route) => {
+      calls.push(route.request().postDataJSON());
+      await route.continue();
+    });
+
+    await login(page, USERS.steward);
+    await page.goto(`/${ORG}/records/01jm0e000000`);
+    await expect(page.getByTestId("entity-view")).toContainText("source records");
+    const marks = page.locator("[data-testid^=mark-]");
+    await marks.nth(0).check();
+    await marks.nth(1).check();
+    await page.getByTestId("protect-button").click();
+    await expect(page.getByTestId("protect-status")).toContainText("protected 2 records");
+
+    expect(calls).toHaveLength(1);
+    expect((calls[0] as { record_keys?: string[] }).record_keys).toHaveLength(2);
+  });
 });

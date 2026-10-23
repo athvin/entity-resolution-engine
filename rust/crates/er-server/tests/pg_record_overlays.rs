@@ -270,6 +270,7 @@ async fn suppress_excludes_a_record_and_retract_restores_it() {
 
     // The suppression is audited.
     let resp = app
+        .clone()
         .oneshot(op("GET", "/v1/orgs/acme/audit", Body::empty()))
         .await
         .unwrap();
@@ -281,6 +282,118 @@ async fn suppress_excludes_a_record_and_retract_restores_it() {
             .iter()
             .any(|r| r["action"] == "steward.suppress_record"),
         "suppress_record is on the audit ledger"
+    );
+
+    // ─── O6: several records in ONE call, and ONE apply job ─────────────────
+    //
+    // The frontend's entity view loops over the selection calling this endpoint
+    // once per record with `apply_now`, and each call enqueues an
+    // `apply_corrections` job that runs a correction pass over the WHOLE
+    // corpus. Suppressing 500 records that way queues 500 full passes to
+    // express one decision. The one-active-per-org index covers
+    // dispatching/running/canceling but not `queued`, so they all queue and
+    // then run serially — slow rather than refused, which is why nothing
+    // noticed.
+    let org_id = oid(&client, "acme").await;
+    let jobs_before = pg::list_jobs(&client, &org_id).await.unwrap().len();
+    let batch: Vec<String> = members(&app, &entity_id)
+        .await
+        .into_iter()
+        .take(3)
+        .collect();
+    assert_eq!(
+        batch.len(),
+        3,
+        "the fixture entity needs three members to batch, got {batch:?}"
+    );
+    let resp = app
+        .clone()
+        .oneshot(op(
+            "POST",
+            "/v1/orgs/acme/records/suppress",
+            Body::from(serde_json::json!({ "record_keys": batch, "apply_now": true }).to_string()),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let staged = json_body(resp).await;
+    assert_eq!(staged["count"], 3);
+    assert_eq!(
+        staged["action_ids"].as_array().unwrap().len(),
+        3,
+        "one staged action per record — each is independently auditable and retractable"
+    );
+    assert_eq!(
+        staged["action_id"], staged["action_ids"][0],
+        "the single-record field stays, as the first of the list"
+    );
+    assert_eq!(
+        pg::list_jobs(&client, &org_id).await.unwrap().len(),
+        jobs_before + 1,
+        "three records must enqueue ONE correction pass, not three"
+    );
+
+    // De-duplicated, and `record_key` still works beside the list.
+    let resp = app
+        .clone()
+        .oneshot(op(
+            "POST",
+            "/v1/orgs/acme/records/unsuppress",
+            Body::from(
+                serde_json::json!({
+                    "record_key": batch[0],
+                    "record_keys": [batch[0], batch[1], batch[1]],
+                })
+                .to_string(),
+            ),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    assert_eq!(
+        json_body(resp).await["count"],
+        2,
+        "the same key twice is one decision, not two audit rows"
+    );
+
+    // An empty request is refused, and names both ways to supply records.
+    let resp = app
+        .clone()
+        .oneshot(op(
+            "POST",
+            "/v1/orgs/acme/records/suppress",
+            Body::from(r#"{"record_keys":[]}"#),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        json_body(resp).await["detail"]
+            .as_str()
+            .unwrap()
+            .contains("record_keys")
+    );
+
+    // Over the cap is refused with the number, never truncated: a caller that
+    // believes it suppressed 3,000 records and actually suppressed 2,000 cannot
+    // find out which 1,000 are still live.
+    let too_many: Vec<String> = (0..2001).map(|i| format!("crm:BULK{i}")).collect();
+    let resp = app
+        .oneshot(op(
+            "POST",
+            "/v1/orgs/acme/records/suppress",
+            Body::from(serde_json::json!({ "record_keys": too_many }).to_string()),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let detail = json_body(resp).await["detail"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        detail.contains("2001") && detail.contains("2000"),
+        "the refusal must name what was asked and what is allowed: {detail}"
     );
 
     let _ = std::fs::remove_dir_all(&tmp);

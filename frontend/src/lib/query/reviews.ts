@@ -307,13 +307,15 @@ export function useSuppressRecords(org: string, entityId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (records: string[]) => {
-      for (const record_key of records) {
-        await bffFetch(`/api/orgs/${org}/records/suppress`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ record_key }),
-        });
-      }
+      // ONE request for the whole selection. It used to loop, and each call
+      // enqueues an `apply_corrections` job that runs a correction pass over
+      // the entire corpus — so selecting ten members queued ten full passes to
+      // express one decision.
+      await bffFetch(`/api/orgs/${org}/records/suppress`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ record_keys: records }),
+      });
       return { suppressed: records.length };
     },
     onSettled: () => {
@@ -330,13 +332,15 @@ export function useProtectRecords(org: string, entityId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (records: string[]) => {
-      for (const record_key of records) {
-        await bffFetch(`/api/orgs/${org}/records/protect`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ record_key }),
-        });
-      }
+      // ONE request for the whole selection. It used to loop, and each call
+      // enqueues an `apply_corrections` job that runs a correction pass over
+      // the entire corpus — so selecting ten members queued ten full passes to
+      // express one decision.
+      await bffFetch(`/api/orgs/${org}/records/protect`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ record_keys: records }),
+      });
       return { protected: records.length };
     },
     onSettled: () => {
