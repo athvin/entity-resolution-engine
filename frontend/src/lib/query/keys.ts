@@ -17,6 +17,14 @@ export const queryKeys = {
   models: (org: string) => ["org", org, "models"] as const,
   modelVersion: (org: string, name: string, version: number) =>
     ["org", org, "models", name, version] as const,
+  webhooks: (org: string) => ["org", org, "webhooks"] as const,
+  webhookEvents: (org: string) => ["org", org, "webhook-events"] as const,
+  // The filtered key nests under the unfiltered one so invalidating the
+  // parent clears every filter combination at once — a deleted
+  // subscription has to disappear from the log's filter list too.
+  webhookDeliveriesAll: (org: string) => ["org", org, "webhook-deliveries"] as const,
+  webhookDeliveries: (org: string, params?: Record<string, string>) =>
+    ["org", org, "webhook-deliveries", params ?? {}] as const,
   blockingEstimate: (org: string) => ["org", org, "blocking-estimate"] as const,
   configSegments: (org: string) => ["org", org, "config-segments"] as const,
   adminOrgs: () => ["admin", "orgs"] as const,

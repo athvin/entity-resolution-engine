@@ -53,6 +53,20 @@ export function modelOrg(projectName: string): string {
   return org;
 }
 
+/** The webhook page's own org per project: subscribing and removing both
+ * mutate the list, and all three projects share one mock server, so a project
+ * that removes would delete the row another is asserting about. */
+export function webhookOrg(projectName: string): string {
+  const byProject: Record<string, string> = {
+    "desktop-chromium": "webhooks-dev",
+    "mobile-safari": "webhooks-ios",
+    "mobile-chrome": "webhooks-android",
+  };
+  const org = byProject[projectName];
+  if (!org) throw new Error(`no webhooks org for project ${projectName}`);
+  return org;
+}
+
 /** Sign in through the real BFF; page.request shares the page's cookie jar. */
 export async function login(page: Page, email: string): Promise<void> {
   const response = await page.request.post("/api/auth/login", {

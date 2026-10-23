@@ -10,12 +10,17 @@ export function SettingsNav({ org }: { org: string }) {
   const tabs = [
     { href: `/${org}/settings/config`, label: "Config studio" },
     { href: `/${org}/settings/models`, label: "Models" },
+    { href: `/${org}/settings/webhooks`, label: "Webhooks" },
     { href: `/${org}/settings/members`, label: "Members" },
     { href: `/${org}/settings/profile`, label: "Profile" },
     { href: `/${org}/settings/audit`, label: "Audit" },
   ];
   return (
-    <nav className="flex gap-1" aria-label="Settings">
+    // `flex-wrap`, not a non-wrapping row: six tabs do not fit a 360px
+    // viewport, and the overflow pushed the config studio's Save button under
+    // the lexicon list so the click landed on a nickname instead. A nav that
+    // runs off the side of the screen is also simply unreachable there.
+    <nav className="flex flex-wrap gap-1" aria-label="Settings">
       {tabs.map((tab) => (
         <Link
           key={tab.href}

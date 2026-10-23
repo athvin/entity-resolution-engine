@@ -515,6 +515,87 @@ export function initialState() {
       ],
       "mutable-dev": [],
     },
+    // Subscriptions and the delivery log. `events` is an array of catalogued
+    // names, exactly as the webhook entity's jsonb column stores it.
+    webhooks: {
+      "acme-dev": [
+        {
+          id: "01jmwh00000000000000000001",
+          url: "https://hooks.example.com/er/acme",
+          events: ["job.succeeded", "job.failed", "entity.merged"],
+          active: true,
+        },
+      ],
+      "mutable-dev": [],
+    },
+    deliveries: {
+      "acme-dev": [
+        {
+          id: "01jmwhd0000000000000000001",
+          webhook_id: "01jmwh00000000000000000001",
+          event_type: "job.succeeded",
+          payload: {
+            event: "job.succeeded",
+            org: "acme-dev",
+            job_id: "01jm0000000000000000000002",
+            kind: "run_all_full",
+            state: "succeeded",
+          },
+          state: "delivered",
+          attempt: 1,
+          max_attempts: 6,
+          next_attempt_at: null,
+          response_code: 200,
+          error: null,
+          delivered_at: "2026-09-24T06:00:02Z",
+          created_at: "2026-09-24T06:00:01Z",
+        },
+        {
+          id: "01jmwhd0000000000000000002",
+          webhook_id: "01jmwh00000000000000000001",
+          event_type: "entity.merged",
+          payload: {
+            event: "entity.merged",
+            org: "acme-dev",
+            run_id: "01jm0000000000000000000002",
+            job_id: "01jm0000000000000000000002",
+            event_type: "merged",
+            count: 3,
+            detail_path:
+              "/v1/orgs/acme-dev/runs/01jm0000000000000000000002/entity-events?event_type=merged",
+          },
+          state: "failed",
+          attempt: 6,
+          max_attempts: 6,
+          next_attempt_at: null,
+          response_code: 500,
+          error: "subscriber returned 500",
+          delivered_at: null,
+          created_at: "2026-09-24T06:00:03Z",
+        },
+        {
+          id: "01jmwhd0000000000000000003",
+          webhook_id: "01jmwh00000000000000000001",
+          event_type: "job.failed",
+          payload: {
+            event: "job.failed",
+            org: "acme-dev",
+            job_id: "01jm0000000000000000000009",
+            kind: "train",
+            state: "failed",
+          },
+          state: "pending",
+          attempt: 2,
+          max_attempts: 6,
+          next_attempt_at: "2026-09-24T06:02:00Z",
+          response_code: null,
+          error: "connection refused",
+          delivered_at: null,
+          created_at: "2026-09-24T06:01:00Z",
+        },
+      ],
+      "mutable-dev": [],
+    },
     configs: {
       "acme-dev": {
         version: 1,
@@ -604,6 +685,11 @@ export function initialState() {
     "models-dev",
     "models-ios",
     "models-android",
+    // Subscribing and removing both mutate the list, so the webhook page gets
+    // one org per device project for the same reason the registry does.
+    "webhooks-dev",
+    "webhooks-ios",
+    "webhooks-android",
     // Starting a run takes the org's one writer slot; sharing an org with the
     // Runs page's Run-now test would disable whichever button ran second.
     "palette-dev",
@@ -655,6 +741,16 @@ export function initialState() {
     }));
     state.receipts[org] = [];
     state.schedules[org] = [];
+    // The webhook page's own orgs start seeded, so the list and the log have
+    // something to render before the spec creates anything; every other org
+    // starts empty, which is also a state worth rendering.
+    const seedWebhooks = org.startsWith("webhooks-");
+    state.webhooks[org] = seedWebhooks
+      ? state.webhooks["acme-dev"].map((w) => ({ ...w, events: [...w.events] }))
+      : [];
+    state.deliveries[org] = seedWebhooks
+      ? state.deliveries["acme-dev"].map((d) => ({ ...d, payload: { ...d.payload, org } }))
+      : [];
     state.configs[org] = {
       version: 1,
       yaml: "tenant: mutable\nthresholds:\n  auto_merge: 0.95\n  review_low: 0.60\nsurvivorship:\n  email: [validated, recency]\nsources:\n  crm:\n    priority_rank: 1",
@@ -1869,6 +1965,131 @@ const server = http.createServer((req, res) => {
       req.method === "DELETE"
     ) {
       const rows = state.schedules[match[1]] ?? [];
+      const index = rows.findIndex((r) => r.id === match[2]);
+      if (index >= 0) rows.splice(index, 1);
+      return send(res, 200, { deleted: index >= 0 });
+    }
+    // ---- webhooks -------------------------------------------------------
+    //
+    // Three different envelopes, which is the whole reason this block spells
+    // each one out: `/webhooks` is a BARE array, `/webhooks/events` wraps in
+    // `{events}`, `/webhooks/deliveries` wraps in `{deliveries}`. Those are the
+    // real handlers' shapes (`webhooks_index` returns `Json(json!(out))`, the
+    // other two `Json(json!({...}))`), and getting one wrong here would make
+    // the mock agree with a BFF that is wrong about the real server — the
+    // false-green the jobs route already shipped once.
+    if ((match = /^\/v1\/orgs\/([^/]+)\/webhooks\/events$/.exec(path)) && req.method === "GET") {
+      // A fixture copy of `webhook::EVENT_CATALOG`, which is the authority and
+      // is itself gated by `pg_webhook_catalog.rs`. The descriptions are
+      // shortened; the NAMES must match, because the subscribe form offers
+      // exactly what this returns.
+      return send(res, 200, {
+        events: [
+          {
+            event: "job.succeeded",
+            description:
+              "A queued job finished successfully, once per outcome rather than per attempt.",
+          },
+          {
+            event: "job.failed",
+            description: "A job failed terminally. The payload carries its error_class.",
+          },
+          { event: "job.canceled", description: "An operator canceled the job." },
+          {
+            event: "config.published",
+            description:
+              "A config version became active. Carries the change tier and the blocks that moved.",
+          },
+          { event: "import.received", description: "A delivery landed and its run was queued." },
+          {
+            event: "review.resolved",
+            description: "A steward's resolution was applied to the lake, dismissals included.",
+          },
+          {
+            event: "entity.created",
+            description:
+              "A run created entities that did not exist before. Aggregated per kind per run.",
+          },
+          {
+            event: "entity.member_added",
+            description:
+              "Records joined entities that already existed. Aggregated per kind per run.",
+          },
+          {
+            event: "entity.member_removed",
+            description: "Records left entities that survived. Aggregated per kind per run.",
+          },
+          {
+            event: "entity.merged",
+            description: "Entities were merged into one. Aggregated per kind per run.",
+          },
+          {
+            event: "entity.split",
+            description: "An entity separated into several. Aggregated per kind per run.",
+          },
+          {
+            event: "entity.retired",
+            description: "Entities stopped existing. Aggregated per kind per run.",
+          },
+        ],
+      });
+    }
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/webhooks\/deliveries$/.exec(path)) &&
+      req.method === "GET"
+    ) {
+      const wanted = url.searchParams.get("webhook_id");
+      const wantedState = url.searchParams.get("state");
+      if (wantedState && !["pending", "delivered", "failed"].includes(wantedState)) {
+        return send(res, 422, {
+          detail: `unknown state '${wantedState}' (pending, delivered, failed)`,
+        });
+      }
+      let rows = state.deliveries[match[1]] ?? [];
+      if (wanted) rows = rows.filter((d) => d.webhook_id === wanted);
+      if (wantedState) rows = rows.filter((d) => d.state === wantedState);
+      return send(res, 200, { deliveries: rows });
+    }
+    if ((match = /^\/v1\/orgs\/([^/]+)\/webhooks$/.exec(path)) && req.method === "GET") {
+      return send(
+        res,
+        200,
+        (state.webhooks[match[1]] ?? []).map((w) => ({
+          id: w.id,
+          url: w.url,
+          events: w.events,
+          active: w.active,
+        })),
+      );
+    }
+    if ((match = /^\/v1\/orgs\/([^/]+)\/webhooks$/.exec(path)) && req.method === "POST") {
+      const body = await readBody(req);
+      const target = String(body.url ?? "");
+      if (target.trim() === "") {
+        return send(res, 422, { detail: "url is required" });
+      }
+      // The real server runs this through the outbound-URL guard. Reproducing
+      // the refusal for the obvious private targets keeps the spec able to
+      // assert that a tenant admin cannot aim the control plane inward.
+      if (/^https?:\/\/(localhost|127\.|10\.|169\.254\.|192\.168\.)/.test(target)) {
+        return send(res, 422, { detail: `refusing ${target}: resolves to a private address` });
+      }
+      const rows = (state.webhooks[match[1]] ??= []);
+      const made = {
+        id: `01jmwhnew${String(rows.length).padStart(17, "0")}`,
+        url: target,
+        events: Array.isArray(body.events) ? body.events.map(String) : [],
+        active: true,
+      };
+      rows.push(made);
+      // The signing secret is returned once and never listed again.
+      return send(res, 201, { ...made, secret: "a".repeat(48) });
+    }
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/webhooks\/([^/]+)$/.exec(path)) &&
+      req.method === "DELETE"
+    ) {
+      const rows = state.webhooks[match[1]] ?? [];
       const index = rows.findIndex((r) => r.id === match[2]);
       if (index >= 0) rows.splice(index, 1);
       return send(res, 200, { deleted: index >= 0 });

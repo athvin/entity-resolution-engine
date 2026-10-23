@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { listFrom } from "@/lib/bff/envelope";
 import { forward, requireOrgAccess, respond } from "@/lib/bff/proxy";
 
 const PASSTHROUGH = ["state", "limit"] as const;
@@ -27,9 +28,7 @@ export async function GET(
     // nothing and `/api/orgs/{org}/jobs` answered an object where three separate
     // consumers expected an array. Invisible because the mock returned a bare
     // array too — the W0.4a gate compares routes, not response shapes.
-    const page = await forward<{ jobs?: unknown[] }>(access, `/v1/orgs/${org}/jobs`, {
-      searchParams,
-    });
-    return NextResponse.json(page.jobs ?? []);
+    const page = await forward<unknown>(access, `/v1/orgs/${org}/jobs`, { searchParams });
+    return NextResponse.json(listFrom(page, "jobs"));
   });
 }

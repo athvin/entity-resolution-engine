@@ -109,6 +109,17 @@ const SCREENS: {
       await expect(page.getByTestId("models-table")).toBeVisible();
     },
   },
+  {
+    // Same rule as the models page above: listed in the change that adds it.
+    // This one has the most form controls of any settings screen — a checkbox
+    // per catalogued event and two filter selects — so it is the one most
+    // likely to grow an unlabelled control.
+    name: "webhooks",
+    path: `/${ORG}/settings/webhooks`,
+    ready: async (page) => {
+      await expect(page.getByTestId("webhooks-deliveries")).toBeVisible();
+    },
+  },
 ];
 
 test.describe("accessibility", () => {
