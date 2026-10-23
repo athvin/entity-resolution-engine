@@ -87,3 +87,58 @@ fn a_declared_segment_parses_and_does_move_the_config_hash() {
     );
     assert!(canonical_document(&scoped).contains("segments"));
 }
+
+/// An unused `approval` block must hash like no block at all (O5c).
+///
+/// The same obligation `segments` carries, and for the same reason: every
+/// existing tenant's `config_hash` has to be byte-identical after this field
+/// exists, or adding an approval workflow to the TYPE would look like a config
+/// change to every tenant that never asked for one.
+#[test]
+fn an_unused_approval_block_does_not_move_the_config_hash() {
+    let plain = load_config_str(fixture("test.yaml")).unwrap();
+    let with_empty = load_config_str(&format!("{}\napproval: {{}}\n", fixture("test.yaml")))
+        .expect("an explicitly empty approval block parses");
+
+    assert!(plain.approval.is_empty());
+    assert!(with_empty.approval.is_empty());
+    assert_eq!(
+        config_hash(&plain),
+        config_hash(&with_empty),
+        "an empty approval block must hash like no approval block at all"
+    );
+    assert!(
+        !canonical_document(&plain).contains("approval"),
+        "an unused block must not appear in the canonical document"
+    );
+}
+
+/// And a configured gate must move it, or turning the workflow on would not be
+/// recognised as a change — the republish would reuse the old model and the old
+/// behaviour.
+#[test]
+fn a_configured_approval_tag_moves_the_config_hash() {
+    let plain = load_config_str(fixture("test.yaml")).unwrap();
+    let gated = load_config_str(&format!(
+        "{}\napproval:\n  tag: approved-for-merge\n",
+        fixture("test.yaml")
+    ))
+    .expect("a configured approval block parses");
+
+    assert_eq!(gated.approval.tag, "approved-for-merge");
+    assert!(!gated.approval.is_empty());
+    assert_ne!(config_hash(&plain), config_hash(&gated));
+    assert!(canonical_document(&gated).contains("approved-for-merge"));
+}
+
+/// Whitespace is not a configuration. A tag of `"   "` would resolve against no
+/// tag in the vocabulary and silently do nothing every tick.
+#[test]
+fn a_blank_approval_tag_is_no_approval_workflow() {
+    let blank = load_config_str(&format!(
+        "{}\napproval:\n  tag: \"   \"\n",
+        fixture("test.yaml")
+    ))
+    .expect("a blank approval tag parses");
+    assert!(blank.approval.is_empty());
+}

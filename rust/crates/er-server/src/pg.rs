@@ -1433,3 +1433,24 @@ pub async fn subjects_for_tag(
 ) -> Result<Vec<er_entities::tagging::Tagging>, PgError> {
     er_entities::tagging::read::subjects_by_tag(client, org_id, tag_id, subject_type, limit).await
 }
+
+/// One live tag by NAME, for resolving a config's approval gate.
+///
+/// By name because a config is a document a human edits and copies between
+/// environments (O9), so an id would not survive the copy. `None` covers both
+/// "no such tag" and "it was retired", which are the same answer to a caller:
+/// the workflow is not active. Retiring the tag therefore disables the gate,
+/// which is what an operator would expect retiring it to do.
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn tag_by_name(
+    client: &Client,
+    org_id: &str,
+    name: &str,
+) -> Result<Option<er_entities::tag::Tag>, PgError> {
+    Ok(er_entities::tag::read::list_active(client, org_id)
+        .await?
+        .into_iter()
+        .find(|tag| tag.name == name))
+}

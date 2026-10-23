@@ -609,6 +609,33 @@ pub struct SurvivorshipGroup {
     pub controlling: Option<String>,
 }
 
+/// Which tag gates an automated merge (O5c).
+///
+/// Empty means no scheduled job ever merges on a tenant's behalf, and that is
+/// the default: an approval workflow that is on until switched off would merge
+/// groups nobody looked at.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Approval {
+    /// The tag name a steward applies to a review group to approve its merge.
+    ///
+    /// A NAME, resolved against the tenant's own vocabulary at run time, rather
+    /// than a tag id: a config is a document a human edits and copies between
+    /// environments (O9), and an id would not survive the copy. Resolving by
+    /// name also means retiring the tag disables the workflow, which is the
+    /// behaviour an operator would expect from retiring it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub tag: String,
+}
+
+impl Approval {
+    /// Whether no approval workflow is configured.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.tag.trim().is_empty()
+    }
+}
+
 /// The whole S6 document, validated. `config_hash` is NOT a field of it (S6).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -618,6 +645,12 @@ pub struct Config {
     /// byte-identically — `config_hash` is unchanged. Not an S6 block.
     #[serde(default, skip_serializing_if = "EntityType::is_person")]
     pub entity_type: EntityType,
+    /// The approval gate for automated merges (O5c). `skip_serializing_if` is
+    /// load-bearing: the canonical document feeds `config_hash`, so an absent
+    /// block must serialise to nothing and leave every existing tenant's hash
+    /// unchanged — the rule V1, E3 and E11a each followed.
+    #[serde(default, skip_serializing_if = "Approval::is_empty")]
+    pub approval: Approval,
     pub tenant: String,
     pub thresholds: Thresholds,
     /// The matching ensemble: an ordered list of registry model names, each

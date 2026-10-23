@@ -214,8 +214,12 @@ pub async fn dispatch_once_with(
     // not fit. The outcome is recorded per tenant whatever it was, so the deploy
     // report and the drift check read it without opening the lake. Provisioning
     // is the one kind that runs before the lake exists; it reconciles the lake
-    // it creates.
-    let schema = if job.kind == "provision" {
+    // it creates, and `apply_approved` is the one kind that never touches a lake
+    // at all — it reads the tenant's tags and stages actions, both Postgres, and
+    // the merging is the `apply_corrections` job it enqueues. Reconciling for it
+    // would buy nothing and would mean a tenant whose lake is unreachable could
+    // not even record approvals, which is the opposite of useful.
+    let schema = if job.kind == "provision" || job.kind == "apply_approved" {
         None
     } else {
         let env = org.env.clone();
@@ -255,6 +259,30 @@ pub async fn dispatch_once_with(
         provision_tenant(client, &org, &job.id, profile).await
     } else if job.kind == "apply_corrections" {
         drain_and_correct(client, &job.org_id, &env, &job.id).await
+    } else if job.kind == "apply_approved" {
+        // A LITERAL, not a constant. `dispatch_coverage` checks that every
+        // schedulable kind has an arm by scanning this source for the kind's
+        // string — so a constant here is invisible to it and reintroduces
+        // exactly the gap that let `train` sit in the list with no arm. The
+        // gate caught the constant on the first run, which is the gate working.
+        //
+        // Async half, and NOT in `run_job`: the approval gate is pure control
+        // plane — it reads the tenant's tags and stages actions, and never
+        // opens the lake. The merging itself is the `apply_corrections` job it
+        // enqueues, which is the only path that merges anything.
+        match config_from_env(&env) {
+            Ok(config) => apply_approved_merges(client, &job.org_id, &org.name, &config)
+                .await
+                .map(|staged| {
+                    if staged > 0 {
+                        eprintln!(
+                            "approval: staged {staged} approved merge(s) for {}",
+                            org.name
+                        );
+                    }
+                }),
+            Err(e) => Err(e),
+        }
     } else if job.kind == "train" {
         // Also async-half, and for the same reason as `apply_corrections`:
         // training's OUTPUT is a registry row, which needs the Postgres client
@@ -362,6 +390,123 @@ pub async fn dispatch_once_with(
     }
     Ok(true)
 }
+
+/// The tenant's published config, from the path in its env.
+///
+/// The same resolution `run_job` uses — `ER_CONFIG_PATH` out of the org's env
+/// JSON, which D5 made `POST /v1/orgs` keep in step with the `config_path`
+/// column — so the async half and the blocking half cannot disagree about which
+/// document is in force.
+fn config_from_env(env: &Value) -> Result<er_config::Config, String> {
+    let path = env_str(env, "ER_CONFIG_PATH").ok_or("org env missing ER_CONFIG_PATH")?;
+    let text = std::fs::read_to_string(path).map_err(|e| format!("read config {path}: {e}"))?;
+    er_config::load_config_str(&text).map_err(|e| format!("config: {}", crate::errfmt::chain(&e)))
+}
+
+/// Stage a resolve for every review carrying the tenant's approval tag, and
+/// enqueue one apply to work through them.
+///
+/// The approval gate decides WHAT to merge, never how: staging a
+/// `resolve_review` and letting the existing `apply_corrections` path apply it
+/// means this adds no second way to merge a group. A scheduled job that reached
+/// into the lake itself would be exactly that.
+///
+/// **The resolution is always `match`.** Approving a duplicate group means the
+/// records are the same; a steward who means `no_match` resolves it directly
+/// rather than approving it, and reading a tag as "whatever the steward
+/// intended" would be a guess the data cannot support.
+///
+/// **The tagging is removed as it is staged.** The tag means "approved, pending
+/// application": leaving it would re-stage the same review every tick, and the
+/// durable record is the staged action and its own history rather than the
+/// attachment. Removing it is also what makes this job idempotent — a second
+/// run with nothing newly approved stages nothing.
+///
+/// `Ok(0)` is the ordinary case for a tenant that has not configured the gate,
+/// has no such tag, or has approved nothing since the last tick.
+async fn apply_approved_merges(
+    client: &tokio_postgres::Client,
+    org_id: &str,
+    org_name: &str,
+    config: &er_config::Config,
+) -> Result<usize, String> {
+    if config.approval.is_empty() {
+        return Ok(0);
+    }
+    let name = config.approval.tag.trim();
+    // Resolved by name against the live vocabulary, so RETIRING the tag
+    // disables the workflow — which is what an operator would expect retiring
+    // it to do, and is why this is not an id in the config.
+    let Some(tag) = pg::tag_by_name(client, org_id, name)
+        .await
+        .map_err(|e| format!("reading the approval tag: {e}"))?
+    else {
+        return Ok(0);
+    };
+    let approved = pg::subjects_for_tag(client, org_id, &tag.id, Some("review"), MAX_APPROVED)
+        .await
+        .map_err(|e| format!("reading approved reviews: {e}"))?;
+    if approved.is_empty() {
+        return Ok(0);
+    }
+
+    let actor = format!("schedule:approval:{name}");
+    let mut staged = 0usize;
+    for tagging in &approved {
+        let action = json!({
+            "type": "resolve_review",
+            "review_id": tagging.subject_id,
+            "resolution": "match",
+        });
+        if let Err(e) = pg::stage_action(client, org_id, &action, &actor).await {
+            // One unstageable review must not strand the rest: the tag stays on
+            // it, so the next tick retries exactly that one.
+            eprintln!(
+                "approval: staging review {} for {org_name} failed: {e}",
+                tagging.subject_id
+            );
+            continue;
+        }
+        if let Err(e) =
+            pg::unapply_tag(client, org_id, &tag.id, "review", &tagging.subject_id).await
+        {
+            // Staged but still tagged: the next tick would stage it again. Said
+            // out loud rather than swallowed, because a duplicate staged resolve
+            // of the same review is a no-op on apply but noise in the ledger.
+            eprintln!(
+                "approval: review {} staged but its tag could not be removed: {e}",
+                tagging.subject_id
+            );
+        }
+        staged += 1;
+    }
+    if staged > 0 {
+        let params = json!({ "skip_ingest": true });
+        let idem = format!("approval:{org_id}:{}", approved.len());
+        if let Err(e) = pg::enqueue(
+            client,
+            org_id,
+            "apply_corrections",
+            0,
+            Some(&idem),
+            Some(&params),
+            Some(&actor),
+        )
+        .await
+        {
+            return Err(format!("enqueueing the approved apply: {e}"));
+        }
+    }
+    Ok(staged)
+}
+
+/// How many approved reviews one tick will stage.
+///
+/// A cap rather than unbounded: a tenant that tags a thousand groups should see
+/// them merged over several ticks instead of one job holding the org's single
+/// writer slot for an hour. The remainder keeps its tag and is picked up next
+/// tick, which is why removing the tag as it is staged matters.
+const MAX_APPROVED: i64 = 200;
 
 /// Job kinds a run report is sent for: the ones whose outcome a steward is
 /// waiting on.

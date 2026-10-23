@@ -5241,12 +5241,15 @@ async fn merge_plans(
 /// actually routed. `train` sat in this list with no dispatcher arm, failing
 /// every time it fired; a list of kinds the scheduler will enqueue is a promise
 /// that something handles them.
-pub const SCHEDULABLE_KINDS: [&str; 5] = [
+pub const SCHEDULABLE_KINDS: [&str; 6] = [
     "run_all_full",
     "run_all_incremental",
     "correct",
     "train",
     "lake_maintain",
+    // O5c. Harmless to schedule on a tenant with no `approval.tag`: the arm
+    // reads the config, finds no gate, and does nothing.
+    "apply_approved",
 ];
 
 /// Whether a cron expression is one the scheduler can actually run.
