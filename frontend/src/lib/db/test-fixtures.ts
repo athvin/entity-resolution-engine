@@ -60,6 +60,10 @@ export const TRIAGE_ORGS = [
   // read-only (duplicates view + wizard up to the Map step, no publish), so a
   // single shared org is race-safe and is never pixel-compared.
   "orgs-dev",
+  // Creating a tag changes the vocabulary every other test on that org sees.
+  "tags-dev",
+  "tags-ios",
+  "tags-android",
   // Recording a verdict REMOVES the pair from the labelling queue (the server
   // excludes already-labelled pairs), so a project that labels would shrink the
   // queue another project asserts the length of.

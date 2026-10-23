@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+
+import { TagChips } from "@/components/tags/tag-chips";
 import Link from "next/link";
 import { ArrowLeft, GitMerge, Split } from "lucide-react";
 
@@ -112,6 +114,12 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
               <GitMerge /> Merge with…
             </Button>
           )}
+        </div>
+        {/* Beneath the heading rather than inside it: the chips wrap, and a
+            wrapping row of tags inside a baseline-aligned heading pushes the
+            action buttons onto a second line on mobile. */}
+        <div className="mt-2">
+          <TagChips org={org} subjectType="entity" subjectId={golden.id} />
         </div>
         {mergeMessage && (
           <p className="text-muted-foreground mt-1 text-xs" data-testid="merge-note">
