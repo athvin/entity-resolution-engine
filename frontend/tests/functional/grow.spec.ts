@@ -290,6 +290,13 @@ test.describe("assistant", () => {
     await login(page, USERS.viewer);
     await page.goto(`/${ORG}/settings/config`);
     await expect(page.getByTestId("band-estimate")).toContainText("recently scored pairs");
+    // Wait for version history TOO. The band estimate resolves from a different
+    // query, so waiting only on it let the screenshot catch the history card
+    // still empty — 62px rather than 82px — and that twenty-pixel swing was the
+    // visual tier's only flake, hitting roughly two runs in five. A readiness
+    // check has to name every async region the shot contains, not the first one
+    // that happens to be convenient.
+    await expect(page.getByTestId("version-history")).toContainText("published");
     await expect(page).toHaveScreenshot("config-studio.png", { fullPage: true });
   });
 });
