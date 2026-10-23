@@ -44,6 +44,7 @@ delivery is the complete key set for that source: absent keys become tombstones.
 | `comparisons` | Comparison levels and term-frequency adjustments |
 | `thresholds` | `review_low` and `auto_merge`, with `0 < review_low < auto_merge <= 1` |
 | `survivorship` | Ordered rules for each golden attribute |
+| `survivorship_groups` | Field sets that survive TOGETHER from one record, with an optional `controlling` field the rules rank on. `address` is the built-in instance; declaring it overrides the default. Omitted when empty, so an existing config's `config_hash` is unchanged |
 | `training` | Deterministic rules, sampling seed and EM sessions |
 | `storage` | Data path, delivery root and model object prefix |
 | `versions` | Standardization, address-parser and survivorship versions |

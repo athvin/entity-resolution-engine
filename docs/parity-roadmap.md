@@ -176,6 +176,7 @@ assistant. Tenant username/password auth is fully built (argon2id). M6 (PR #56) 
       (verified: full `cargo test --workspace` green, zero golden drift). New Session-based election test (6 cases).
       **1.6b (deferred):** Bucket B `combined_list`/`sum` (synthesize a value not tied to one record → need a new
       lineage/assembly path) + generalized grouped/controlling fields (the hardcoded `address` grouping is the precedent).
+      Both landed: 1.6b below, and **1.6c** (generalized groups) with the DataGroomr wave.
 - [x] **1.6b Bucket B survivorship (`combined_list` / `sum`)** — value-SYNTHESIZING rules: `combined_list` unions each
       member's distinct non-empty value (sorted, `'; '`-joined); `sum` totals the numeric values (non-numeric → NULL,
       dropped). The challenge: a synthesized value has no owning record, but the golden path re-reads every value from one
@@ -1547,6 +1548,40 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          is the INV-EQ half: both new passes run on every reconcile, so the risk they carry is
          retiring or re-announcing something on a corpus that did not change — same partition,
          same lifecycle, zero events. No fixture or golden file moved.
+   - [x] **D3 / 1.6c generalized grouped + controlling survivorship fields.** The untracked half of
+         1.6b. `address` has always been exactly this mechanism — six `addr_*` columns, ONE
+         decision — and it was two `const` arrays in `er-golden`, so no tenant could declare
+         another. The consequence is sharper than "a missing knob": `given_name` and
+         `family_name` are elected independently, so a golden record can take one from each
+         source and describe **a person who never existed**. That is the motivating case and the
+         end-to-end test (`Robert Chenoweth`, never `Robert Chen`).
+         New `survivorship_groups:` block, keyed by the group's token — which is also the name
+         its chain is declared under and the `attribute` its `golden_lineage` row carries, so a
+         group costs no new relation. `fields` travel together; optional `controlling` names the
+         field the chain RANKS on, and its absence means rank on the concatenation, which is
+         exactly what `address` has always done (`most_common` over an address picks the most
+         common address, not the most common street). Naming `address` overrides the built-in
+         rather than duplicating it — two `attr_address` relations would be accepted by the
+         config and refused by the SQL.
+         **The determinism obligation is a test, not a hope.** The generated SQL is what every
+         golden fixture pins, so `resolved_groups`/`resolved_scalars` are written such that an
+         EMPTY block resolves to exactly the built-in address group in the position it has always
+         occupied — asserted directly, including the scalar list's order. 163 test binaries green
+         with zero fixture drift.
+         **Six publish-time refusals, not silent preferences**, in `config_reference_problems`
+         where the blocking and segment column checks already live: an unknown column, a
+         one-field group (a scalar wearing a group's name), a group with no chain, a
+         `controlling` field the group does not contain, a field in two groups, and a grouped
+         field that KEPT its own chain — the last being the dead-config shape this program
+         already deleted `ModelSpec.threshold` over. A group that half-applies is worse than no
+         group: the golden record looks internally consistent and is not. Observed failing by
+         disabling the validation loop.
+         **One bug the change exposed.** The Account builders were taking their vocabulary from
+         `config.entity_type`, and the first draft of the resolver did the same — so a config
+         whose `entity_type` was defaulted emitted person columns into Account SQL. Caught by
+         `er-sql-check`'s account mart test as `No field named r.given_name`, a planning failure
+         a long way from its cause. The vocabulary is now the CALLER's: `acct_*` generates for
+         Account by construction, and says so in its signature.
    - [x] **O7a resolution metrics over time (#45/#57's trend half).** Every dashboard number has
          always been computed LIVE from the lake, so the product could say what is true now and
          nothing about the direction of travel — and "is the duplicate rate going up" is the

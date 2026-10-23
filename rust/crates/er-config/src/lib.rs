@@ -584,6 +584,31 @@ impl Default for DataQuality {
     }
 }
 
+/// One set of fields that survive together from a single member record (1.6c).
+///
+/// The decision is made once for the whole group and every field in it is taken
+/// from the winning record, which is what keeps a composite value internally
+/// consistent. `address` is the long-standing instance of this shape; the block
+/// exists so a tenant can declare others.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SurvivorshipGroup {
+    /// The standardized columns that travel together. Must name real columns
+    /// for the config's `entity_type`, and no column may appear in two groups —
+    /// both refused at publish rather than discovered in a golden assembly.
+    pub fields: Vec<String>,
+    /// The field whose value the survivorship chain ranks on.
+    ///
+    /// Absent means rank on the CONCATENATION of every field in the group,
+    /// which is what `address` has always done: `most_common` over the whole
+    /// address picks the most common address, not the most common street. Name
+    /// one when the group has a natural key — rank a name pair on
+    /// `family_name`, or a postal address on `addr_postal` — and the other
+    /// fields follow the record that won.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub controlling: Option<String>,
+}
+
 /// The whole S6 document, validated. `config_hash` is NOT a field of it (S6).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -627,6 +652,22 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "DataQuality::is_unset")]
     pub data_quality: DataQuality,
     pub survivorship: BTreeMap<String, Vec<String>>,
+    /// Field sets that survive TOGETHER, from one member record (1.6c).
+    ///
+    /// Without this, every attribute is elected independently — so a golden
+    /// record can take `given_name` from one source and `family_name` from
+    /// another and describe a person who never existed. The `address` token has
+    /// always been exactly this mechanism, hardcoded: six `addr_*` columns, one
+    /// decision. Declaring a group generalises it to any field set.
+    ///
+    /// Keyed by the group's token, which is also the name its survivorship
+    /// chain is declared under and the `attribute` its `golden_lineage` row
+    /// carries. Naming `address` here overrides the built-in group.
+    ///
+    /// Omitted from the canonical document when empty, so every config written
+    /// before groups existed hashes identically.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub survivorship_groups: BTreeMap<String, SurvivorshipGroup>,
     pub training: Training,
     pub storage: Storage,
     pub versions: Versions,

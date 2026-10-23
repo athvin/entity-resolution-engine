@@ -7,9 +7,7 @@
 
 use er_config::Config;
 
-use crate::lineage::{
-    ACCT_ADDRESS_COLUMNS, ACCT_SCALAR_ATTRIBUTES, ADDRESS_COLUMNS, SCALAR_ATTRIBUTES,
-};
+use crate::lineage::{resolved_groups, resolved_scalars};
 use crate::survivorship::synthesized_value_expr;
 
 /// The per-scalar-attribute projection for the `survived` CTE. A Bucket A / base
@@ -48,6 +46,27 @@ fn scalar_projection(
         .join(",\n")
 }
 
+/// Every grouped field, read from the record that won ITS group's single
+/// decision (1.6c).
+///
+/// This is what makes a group a group: the `filter (where l.attribute = …)`
+/// names the group's token, so all of its fields come from one `golden_lineage`
+/// row and therefore from one member record. Elect them independently and a
+/// golden record can take `given_name` from one source and `family_name` from
+/// another, describing a person who never existed.
+fn group_projection(config: &Config, account: bool) -> String {
+    resolved_groups(config, account)
+        .iter()
+        .flat_map(|group| {
+            let token = group.token;
+            group.fields.iter().map(move |c| {
+                format!("    max(r.{c}) filter (where l.attribute = '{token}') as {c}")
+            })
+        })
+        .collect::<Vec<_>>()
+        .join(",\n")
+}
+
 /// The `golden_records` SELECT: assemble survived attribute values + metadata per
 /// entity, reading winners from `lineage_table` and values from `std_table`.
 /// `assembled_at` is the UTC assembly time (`volatile`: excluded from determinism
@@ -66,16 +85,12 @@ pub fn golden_records_sql(
 
     let scalar_select = scalar_projection(
         config,
-        &SCALAR_ATTRIBUTES,
+        &resolved_scalars(config, false),
         std_table,
         membership_table,
         entities_table,
     );
-    let address_select = ADDRESS_COLUMNS
-        .iter()
-        .map(|c| format!("    max(r.{c}) filter (where l.attribute = 'address') as {c}"))
-        .collect::<Vec<_>>()
-        .join(",\n");
+    let address_select = group_projection(config, false);
 
     format!(
         "with source_metadata as (
@@ -140,16 +155,12 @@ pub fn acct_golden_records_sql(
 
     let scalar_select = scalar_projection(
         config,
-        &ACCT_SCALAR_ATTRIBUTES,
+        &resolved_scalars(config, true),
         std_table,
         membership_table,
         entities_table,
     );
-    let address_select = ACCT_ADDRESS_COLUMNS
-        .iter()
-        .map(|c| format!("    max(r.{c}) filter (where l.attribute = 'address') as {c}"))
-        .collect::<Vec<_>>()
-        .join(",\n");
+    let address_select = group_projection(config, true);
 
     format!(
         "with source_metadata as (
