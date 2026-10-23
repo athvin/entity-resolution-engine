@@ -130,6 +130,7 @@ Run locally with `make frontend` (the PR-equivalent) and `make frontend-audit`
 | **BFF authz** | `pnpm authz:check` | — |
 | **wire contract** | `tsc --noEmit` (`tests/unit/wire-contract.test.ts`) | `er-server/tests/mock_contract.rs` |
 | **mock fabrication** | `vitest run` (`tests/unit/mock-fabrication.test.ts`) | `er-server/tests/mock_contract.rs` |
+| **BFF envelope** | `vitest run` (`tests/unit/bff-envelope-contract.test.ts`) | `er-server/tests/response_envelopes.rs` |
 | unit + component + coverage floor | `vitest run --coverage` | `cargo llvm-cov --fail-under-lines` |
 | generated API drift | `pnpm gen:api` + `git diff --exit-code` | `er-entity verify` |
 | **advisories** | `pnpm audit:check` | `cargo deny check advisories` |
@@ -211,6 +212,54 @@ exists, and a sabotage run that re-adds `exit_code` and watches the gate name it
 is a better fixture than a fabrication living in the shipped mock, which is a
 trap for the next person to surface a job field. The envelope half still needs
 `#[utoipa::path]` and still has no fixture; that is the honest state.
+
+### The BFF envelope gate
+
+`er-server/tests/response_envelopes.rs` generates
+`src/lib/api/envelopes.json` — one entry per routed GET, saying how its success
+response is shaped — and `tests/unit/bff-envelope-contract.test.ts` checks every
+BFF route against it. Together they close the envelope half that the
+wire-contract and mock-fabrication gates both record as out of reach.
+
+**There is no convention to infer, which is the whole reason this is needed.**
+Measured across 43 routed GETs:
+
+| shape | count | example |
+|---|---|---|
+| `bare` — no wrapper key | 10 | `/runs`, `/audit`, `/webhooks` |
+| `wrapped` — one key | 10 | `/jobs` → `{jobs}`, `/segments` → `{segments}` |
+| `record` — several keys | 10 | `/reviews` → `{items, snapshot, next_cursor, unscored_hidden}` |
+| `scalar` — a typed object | 10 | `/metrics`, `/quality` |
+| `page` — the shared helper | 2 | `/imports`, `/assertions` → `{items, next_cursor}` |
+| `arrow` — not JSON | 1 | `/golden-records`, cursor in **headers** |
+
+`/runs` is bare and `/jobs` wraps, one route apart. A developer reading two
+neighbours learns the wrong rule either way, which is exactly how W0.5b
+happened. Unifying the API is a breaking change for every tenant reading it
+directly, so the gate records the fact per route instead of demanding one.
+
+Three properties worth keeping:
+
+- **The ledger is derived, never declared.** A `#[utoipa::path]` response body,
+  or any hand-maintained table, is one more claim free to drift from the code —
+  the same shape as the defect it would be built to prevent. An envelope the
+  classifier cannot read is a hard failure naming the handler, not a skip.
+- **It checks the `listFrom` key, which is the one mistake nothing else can
+  catch.** `listFrom(body, key)` returns `[]` for a missing key by design, so a
+  wrong key is an empty table with no error anywhere — no crash, no log line.
+- **The claim is narrowed to what the source actually shows.** `bare` does not
+  say "array": `Json(json!(out))` in `list_orgs` is a list and
+  `Json(json!(job))` in `get_job` is one record, and the response construction
+  does not distinguish them. It says only that there is no envelope to unwrap,
+  which is the part the bug turned on.
+
+Two false positives had to be fixed before it was worth anything, both the same
+mistake — reading source without reading it properly. Comments are stripped
+first, because the jobs route's comment *quotes* the historical
+`forward<unknown[]>` bug and a naive scan reports the very defect that comment
+explains was fixed. And path parameters are erased on both sides plus the
+colon action spelling normalized (`assertions:contradictions`, which er-server
+accepts via `rewrite_action_path`), or every detail route reads as unrouted.
 
 ### The BFF authorization gate
 
@@ -460,6 +509,21 @@ Linux-only, and committed. Regenerate with `make frontend-baselines`, which runs
 same image the CI `e2e` job uses, so the comparison environment matches. On other
 platforms snapshot comparison is skipped (`ignoreSnapshots`), so local runs never
 fight font rendering.
+
+**One baseline churns on every run, and it is not your change.**
+`reviews.spec.ts-snapshots/reviews-mobile-chrome-linux.png` is rewritten by
+`make frontend-baselines` even against an unmodified tree — measured 2026-10-23
+by reverting it and re-running on identical code, which produced the same
+44813 → 44811 byte delta again. `--update-snapshots=all` rewrites
+unconditionally (that is the point: see the reasoning in
+`frontend/dev/update-baselines.sh`), so a difference below
+`maxDiffPixelRatio` is written out even though the comparison would pass. CI is
+unaffected.
+
+It is still worth fixing eventually, because the rule above — *an unexpected
+file in the baseline diff is itself a finding* — stops working when one file is
+always in it. Locating it needs a per-element probe on that screen like the one
+that found the `version-history` nondeterminism; it has not been done.
 
 `@playwright/test`'s version and that Docker tag must move together. Dependabot
 is configured not to bump the package's major or minor for exactly this reason

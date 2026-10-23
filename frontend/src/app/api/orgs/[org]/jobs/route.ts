@@ -18,9 +18,16 @@ export async function GET(
       const value = incoming.get(key);
       if (value !== null) searchParams.set(key, value);
     }
-    // er-server wraps every list response in an object — `items` for most,
-    // `jobs` here — so this unwraps to the bare array the browser contract uses
-    // (`useJobs` types it `JobRow[]`, and the e2e specs call `.some()` on it).
+    // er-server wraps *this* list in an object (`jobs`), so this unwraps to the
+    // bare array the browser contract uses (`useJobs` types it `JobRow[]`, and
+    // the e2e specs call `.some()` on it).
+    //
+    // It does NOT wrap every list, which this comment used to claim. The
+    // generated ledger `src/lib/api/envelopes.json` counts six shapes across 43
+    // routed GETs — 10 bare, 10 wrapped, 10 record, 10 scalar, 2 page, 1 arrow —
+    // with `/runs`, `/audit` and `/webhooks` bare right next to these. Read the
+    // ledger for a route rather than generalising from a neighbour; the gate in
+    // `tests/unit/bff-envelope-contract.test.ts` checks this file against it.
     //
     // It used to be `forward<unknown[]>(...)` passed straight through, which was
     // a type ASSERTION about an HTTP body TypeScript cannot check: the real

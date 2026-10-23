@@ -1624,6 +1624,54 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          unit; it now says `+9.8 points`. The insights page also gains a visual baseline, which it
          lacked: this screen is CHARTS, and a bar that silently rendered at the wrong width would
          read as a different corpus rather than as a bug.
+   - [x] **D13 the envelope half of D9 — nothing arbitrated the *shape* of a list response.**
+         The last gap the other three gates each record as out of reach: `mock_contract.rs`
+         compares route and method, `wire-contract.test.ts` and `mock-fabrication.test.ts`
+         compare field names. None sees W0.5b, where the jobs route declared
+         `forward<unknown[]>` over a body er-server sends as `{jobs: […]}` — a type *assertion*
+         about an HTTP body TypeScript cannot check.
+         **The plan said this needed `#[utoipa::path]` first. It did not, and that route would
+         have been wrong.** A utoipa response body is a hand-written claim sitting beside the
+         handler, free to drift from it — the same shape as the defect it would be built to
+         prevent, and the exact mistake D12 had just finished removing from the mock. So the
+         ledger is **derived**: `er-server/tests/response_envelopes.rs` reads every routed GET
+         handler's response construction and generates
+         `frontend/src/lib/api/envelopes.json`, byte-compared in `make check`. An envelope the
+         classifier cannot read is a hard failure naming the handler, never a skip.
+         **The measurement is the finding.** 43 routed GETs carry **six** shapes: 10 `bare`,
+         10 `wrapped` (one key), 10 `record` (several keys), 10 `scalar`, 2 `page`, 1 `arrow`
+         (`/golden-records` is Arrow IPC with the cursor in **headers** — not JSON at all).
+         `/runs` is bare and `/jobs` wraps, one route apart, so a developer reading two
+         neighbours learns the wrong rule either way. Unifying the API breaks every tenant
+         reading it directly, so the gate writes the fact down per route rather than demanding
+         one convention. The jobs route's comment claiming "er-server wraps every list
+         response" was corrected — it is false for 10 of them.
+         `tests/unit/bff-envelope-contract.test.ts` consumes the ledger and checks each BFF
+         route three ways: the upstream path is a routed GET, a `forward<T[]>` never sits over
+         a keyed body, and — the one that matters most — **the `listFrom` key is a key the
+         response actually has.** `listFrom` returns `[]` for a missing key by design, so a
+         wrong key is an empty table with no error anywhere; it is the single mistake the
+         tolerant helper cannot surface at runtime.
+         **Three honesty corrections during the build, each a wrong claim caught before it
+         shipped.** (a) `Json(json!(x))` was labelled `array`, but the source cannot tell a
+         `Vec` from one record — `list_orgs` and `get_job` use the identical form. Renamed
+         `bare`, claiming only that there is no envelope to unwrap. (b) Reporting an object
+         literal's *first* key called `get_org`'s inline record a wrapper named `id`; it now
+         carries every top-level key, so one key reads as a wrapper and several as a record.
+         (c) The error-arm stripper was line-based, so a handler with its match arms on one
+         line lost its success arm too — and `list_orgs`/`get_job` write
+         `Json(json!({"detail": …}))` inline rather than through `detail_err`, which left the
+         error key reading as the success key.
+         **Two false positives in the frontend half, both the same mistake:** the jobs route's
+         comment *quotes* the historical `forward<unknown[]>` bug, so comments must be stripped
+         before matching or the gate reports the defect that comment explains was fixed; and
+         the BFF spells actions with a colon (`assertions:contradictions`, normalized by
+         er-server's `rewrite_action_path`) with parameters named differently from the router,
+         so both spellings need erasing or every detail route reads as unrouted.
+         Observed failing five ways: a wrong `listFrom` key, a `forward<T[]>` over a wrapped
+         body, a changed handler envelope (`webhooks_index` made to wrap — the ledger went
+         stale AND the frontend named `orgs/[org]/webhooks/route.ts`, which is the loop
+         closing end to end), and each of the two inputs emptying.
    - [x] **D12 the mock invented two job fields, and nothing looked at what the mock emits.**
          Found by sweeping the recurring class deliberately rather than by hitting it: the
          defect that has bitten this program most often is *the frontend states a contract the
