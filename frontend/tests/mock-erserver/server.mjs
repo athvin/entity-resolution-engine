@@ -2203,6 +2203,50 @@ const server = http.createServer((req, res) => {
       if (index >= 0) rows.splice(index, 1);
       return send(res, 200, { deleted: index >= 0 });
     }
+    if ((match = /^\/v1\/orgs\/([^/]+)\/insights\/sources$/.exec(path)) && req.method === "GET") {
+      // Per-source attribution for the newest run, worst first. The counts sum
+      // to the newest snapshot's corpus-wide figures (13 records, 6 duplicate)
+      // because the real server assembles both from ONE group computation — a
+      // mock whose totals disagreed would make a broken writer look correct.
+      const series = state.insights[match[1]] ?? [];
+      const newest = series[0];
+      if (!newest) {
+        return send(res, 200, { snapshot: 3, run_id: null, sources: [] });
+      }
+      return send(res, 200, {
+        snapshot: 3,
+        run_id: newest.run_id,
+        sources: [
+          {
+            run_id: newest.run_id,
+            source_system: "webforms",
+            captured_at: newest.captured_at,
+            records: 4,
+            duplicate_records: 3,
+            contributed_groups: 2,
+            duplicate_rate: 0.75,
+          },
+          {
+            run_id: newest.run_id,
+            source_system: "crm",
+            captured_at: newest.captured_at,
+            records: 5,
+            duplicate_records: 2,
+            contributed_groups: 2,
+            duplicate_rate: 0.4,
+          },
+          {
+            run_id: newest.run_id,
+            source_system: "billing",
+            captured_at: newest.captured_at,
+            records: 4,
+            duplicate_records: 1,
+            contributed_groups: 1,
+            duplicate_rate: 0.25,
+          },
+        ],
+      });
+    }
     if ((match = /^\/v1\/orgs\/([^/]+)\/insights$/.exec(path)) && req.method === "GET") {
       // `{snapshot, series}` — the real envelope. The BFF unwraps to the bare
       // array the browser contract uses, and a mock that answered a bare array

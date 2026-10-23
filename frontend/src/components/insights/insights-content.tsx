@@ -3,7 +3,12 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sparkline } from "@/components/insights/sparkline";
-import { useInsights, type InsightRow } from "@/lib/query/insights";
+import {
+  useInsights,
+  useSourceAttribution,
+  type InsightRow,
+  type SourceAttribution,
+} from "@/lib/query/insights";
 
 /** A count with grouped digits. */
 function count(value: number): string {
@@ -33,17 +38,25 @@ function stamp(value: string): string {
  * moved +0.4 points and one that moved −0.4 are opposite news, and this product
  * has no hue to carry that.
  */
-function delta(series: InsightRow[], pick: (row: InsightRow) => number | null): string | null {
+function delta(
+  series: InsightRow[],
+  pick: (row: InsightRow) => number | null,
+  // A rate is DISPLAYED as a percentage, so its change must be too. Reporting
+  // the raw fraction renders a jump from 36.4% to 46.2% as "+0.1", which reads
+  // as a tenth of a point — the opposite of what happened. The unit a number is
+  // shown in and the unit its change is shown in have to be the same one.
+  unit: { scale: number; suffix: string } = { scale: 1, suffix: "" },
+): string | null {
   const [newest, previous] = series;
   if (!newest || !previous) return null;
   const a = pick(newest);
   const b = pick(previous);
   if (a === null || b === null) return null;
-  const diff = a - b;
-  if (diff === 0) return "no change";
+  const diff = (a - b) * unit.scale;
+  if (diff === 0) return `no change${unit.suffix}`;
   return `${diff > 0 ? "+" : "−"}${Math.abs(diff).toLocaleString(undefined, {
-    maximumFractionDigits: 2,
-  })} since the previous run`;
+    maximumFractionDigits: 1,
+  })}${unit.suffix} since the previous run`;
 }
 
 interface Tile {
@@ -70,7 +83,7 @@ const TILES: Tile[] = [
       "Records that share an entity with at least one other, as a share of the corpus. Counted by record rather than by group, so a five-record cluster weighs more than a pair.",
     value: (row) => percent(row.duplicate_rate),
     points: (series) => series.map((r) => r.duplicate_rate),
-    change: (series) => delta(series, (r) => r.duplicate_rate),
+    change: (series) => delta(series, (r) => r.duplicate_rate, { scale: 100, suffix: " points" }),
   },
   {
     id: "duplicate-groups",
@@ -152,6 +165,8 @@ export function InsightsContent({ org }: { org: string }) {
         ))}
       </div>
 
+      <SourceAttributionCard org={org} />
+
       <Card data-testid="insights-series">
         <CardHeader className="p-4 pb-1 lg:p-6 lg:pb-2">
           <CardTitle className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
@@ -202,5 +217,74 @@ export function InsightsContent({ org }: { org: string }) {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+/**
+ * Which feed the duplicates come from.
+ *
+ * Bars from zero rather than a pie: these quantities are COMPARED, not
+ * apportioned, and the design standard rules pies out for exactly that reason.
+ * Each source's bar is its share of the worst source's duplicate count, so the
+ * question "is one feed dominating this" is answerable at a glance.
+ *
+ * `contributed_groups` sits beside the count rather than inside the bar because
+ * it is a different fact: a source can account for few duplicate RECORDS while
+ * touching many groups, which is the signature of a feed that adds one bad row
+ * to everything rather than one bad batch.
+ */
+function SourceAttributionCard({ org }: { org: string }) {
+  const attribution = useSourceAttribution(org);
+  const sources: SourceAttribution[] = attribution.data?.sources ?? [];
+  const worst = Math.max(...sources.map((s) => s.duplicate_records), 1);
+
+  return (
+    <Card data-testid="insight-sources">
+      <CardHeader className="p-4 pb-1 lg:p-6 lg:pb-2">
+        <CardTitle className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+          Where the duplicates come from
+        </CardTitle>
+        <CardDescription>
+          Per source, for the newest run. The corpus-wide rate says you have a problem; this says
+          which feed to go and fix. Counted by record, and the group count is kept separately — a
+          source can account for few duplicate records while appearing in many groups.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="p-4 pt-2 lg:p-6 lg:pt-2">
+        {attribution.isPending ? (
+          <Skeleton className="h-24 w-full" />
+        ) : sources.length === 0 ? (
+          <p className="text-muted-foreground text-sm">
+            No attribution yet — one is written at the end of every run.
+          </p>
+        ) : (
+          <ul className="flex flex-col gap-2.5">
+            {sources.map((source) => (
+              <li key={source.source_system} data-testid={`insight-source-${source.source_system}`}>
+                <div className="flex items-baseline justify-between gap-3 text-sm">
+                  <span className="font-medium">{source.source_system}</span>
+                  <span className="text-muted-foreground tabular-nums">
+                    {count(source.duplicate_records)} of {count(source.records)} records ·{" "}
+                    {percent(source.duplicate_rate)} · {count(source.contributed_groups)} group
+                    {source.contributed_groups === 1 ? "" : "s"}
+                  </span>
+                </div>
+                <div className="bg-muted mt-1 h-2 w-full rounded-sm">
+                  <div
+                    className="bg-foreground/70 h-2 w-(--bar-w) rounded-sm"
+                    style={
+                      {
+                        "--bar-w": `${String(Math.max((source.duplicate_records / worst) * 100, 1))}%`,
+                      } as React.CSSProperties
+                    }
+                    data-testid={`insight-source-bar-${source.source_system}`}
+                  />
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
   );
 }
