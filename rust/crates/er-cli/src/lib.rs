@@ -3372,6 +3372,18 @@ pub struct TrainInputs<'a> {
     pub u_max_pairs: f64,
     pub model_version: &'a str,
     pub tf_snapshot_id: &'a str,
+    /// Known-match pairs to estimate `m` from, as `(rec_a_key, rec_b_key)`.
+    ///
+    /// **Matches only.** `estimate_m_from_pairwise_labels` reads no verdict
+    /// column — its own module doc says "every pair treated as a match" — so a
+    /// `no_match` pair in here is counted as agreement at whatever levels it
+    /// disagrees on. That does not fail: it skews every `m` toward
+    /// disagreement and moves every score the model will ever produce. The
+    /// caller filters, and this field's name is the contract.
+    ///
+    /// Empty means train exactly as before — EM for `m`, random sampling for
+    /// `u`. The label path only ever *replaces* `m`.
+    pub match_labels: &'a [(String, String)],
 }
 
 /// Export the frozen term-frequency snapshot the trained model scores against
@@ -3464,9 +3476,70 @@ pub fn run_train(
         out_tf,
     )?;
 
-    linker
-        .into_model()
+    // Captured before `into_model` consumes the linker: the label pass needs
+    // the same concat relation and frozen TF tables the EM pass used, or it
+    // would compute comparison vectors against a different corpus than the one
+    // the model was trained on.
+    let uid_column = linker.settings_ref().unique_id_column.clone();
+    let concat = linker.concat_ref().clone();
+    let tf_tables = linker.tf_tables_ref().to_vec();
+    let mut model = linker.into_model();
+
+    if !inputs.match_labels.is_empty() {
+        let labels = stage_match_labels(session, &uid_column, inputs.match_labels)?;
+        // Only `m` is replaced — `u` and the prior come from the EM/sampling
+        // pass above and are untouched, which is why this runs *after* training
+        // rather than instead of it. A tenant's verdicts are better evidence
+        // for "how often do matching records agree on this field" than EM's
+        // own guess; they say nothing about how often random records agree.
+        dedupe_core::training::m_from_labels::estimate_m_from_pairwise_labels(
+            session, &mut model, &concat, &tf_tables, &labels,
+        )
+        .map_err(|e| anyhow::anyhow!("m from labels: {e}"))?;
+    }
+
+    model
         .save_to_json_file(out_model)
         .map_err(|e| anyhow::anyhow!("save trained model: {e}"))?;
     Ok(())
+}
+
+/// Stage known-match pairs as a `<uid>_l` / `<uid>_r` table the m-estimator can
+/// read.
+///
+/// A session temp table rather than a lake relation: these pairs are an input
+/// to one training run, not tenant data, and persisting them would put a
+/// snapshot of the label set in the lake where the next run would find it
+/// stale. Batched inserts follow `__constraint_scope`'s precedent — a single
+/// `VALUES (…), (…)` would be a SQL string megabytes wide on a large label set.
+///
+/// The estimator canonicalises each pair itself (`case when id_l < id_r`), so
+/// the order rows go in does not matter here.
+fn stage_match_labels(
+    session: &Session,
+    uid_column: &str,
+    pairs: &[(String, String)],
+) -> Result<dedupe_core::session::TableHandle> {
+    let left = format!("{uid_column}_l");
+    let right = format!("{uid_column}_r");
+    session.execute_batch("drop table if exists __train_labels")?;
+    session.execute_batch(&format!(
+        "create temp table __train_labels(\"{left}\" varchar, \"{right}\" varchar)"
+    ))?;
+    const BATCH: usize = 1_000;
+    for chunk in pairs.chunks(BATCH) {
+        let rows: Vec<String> = chunk
+            .iter()
+            .map(|(a, b)| format!("('{}', '{}')", esc(a), esc(b)))
+            .collect();
+        session.execute_batch(&format!(
+            "insert into __train_labels values {}",
+            rows.join(", ")
+        ))?;
+    }
+    Ok(dedupe_core::session::TableHandle {
+        templated: "__train_labels".to_string(),
+        physical: "__train_labels".to_string(),
+        columns: vec![left, right],
+    })
 }

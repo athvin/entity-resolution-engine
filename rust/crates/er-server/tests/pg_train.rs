@@ -161,6 +161,16 @@ async fn training_registers_a_draft_and_leaves_the_active_model_alone() {
     assert_eq!(trained.version, 2, "versions are monotonic");
     assert_eq!(trained.created_by, "trainer");
     assert_eq!(trained.provenance["source"], "train");
+    // How `m` was estimated, recorded so a draft's origin is legible from the
+    // registry. This tenant has no verdicts, so the EM estimate stands and the
+    // count is zero — which must be WRITTEN rather than absent: a missing key
+    // and "trained without labels" read the same to a steward, and only one of
+    // them means the label path ran and found nothing.
+    assert_eq!(
+        trained.provenance["m_from_labels"], 0,
+        "a train with no labels records zero, not nothing: {}",
+        trained.provenance
+    );
     assert_eq!(
         trained.provenance["job_id"], "01TRAINJOB00000000000000000",
         "a registry row must be traceable to the job that made it"

@@ -823,10 +823,35 @@ pub async fn train_and_register(
     let tf_snapshot_id = format!("tf-{run_id}");
 
     // The sync half: open the lake, train, write the two artifacts.
+    // Read the tenant's verdicts here, where the Postgres client is: the
+    // training itself runs on a blocking thread with only the lake.
+    //
+    // MATCHES ONLY. `estimate_m_from_pairwise_labels` reads no verdict column —
+    // every pair it is given is counted as a match — so letting a `no_match`
+    // through would skew every `m` toward disagreement and move every score the
+    // model produces, silently and with no error anywhere.
+    let match_labels: Vec<(String, String)> =
+        match er_entities::pair_label::read::all(client, org_id).await {
+            Ok(rows) => rows
+                .into_iter()
+                .filter(|l| l.verdict == "match")
+                .map(|l| (l.rec_a_key, l.rec_b_key))
+                .collect(),
+            // A label read that fails must not fail the train: EM is a complete
+            // training method on its own, and it is what every run did before
+            // labels existed. Reported in provenance as zero labels used.
+            Err(e) => {
+                eprintln!("reading labels for training failed, falling back to EM-only: {e}");
+                Vec::new()
+            }
+        };
+    let labels_used = match_labels.len();
+
     let (model_json, tf_rows) = {
         let label = label.clone();
         let snap = tf_snapshot_id.clone();
         let training = config.training.clone();
+        let match_labels = match_labels.clone();
         tokio::task::spawn_blocking(move || -> Result<(String, String), String> {
             let session =
                 er_cli::open_lake(&catalog, &data_path).map_err(|e| format!("open lake: {e:#}"))?;
@@ -849,6 +874,7 @@ pub async fn train_and_register(
                     u_max_pairs: training.u_max_pairs as f64,
                     model_version: &label,
                     tf_snapshot_id: &snap,
+                    match_labels: &match_labels,
                 },
                 &out_model,
                 &out_tf,
@@ -874,6 +900,10 @@ pub async fn train_and_register(
         "job_id": run_id,
         "config_hash": er_config::config_hash(&config),
         "trained_from": label,
+        // How `m` was estimated, so a version's origin is legible from the
+        // registry rather than inferred. Zero means the EM estimate stands —
+        // either the tenant has no match verdicts yet, or reading them failed.
+        "m_from_labels": labels_used,
     });
     pg::create_model_version(
         client,

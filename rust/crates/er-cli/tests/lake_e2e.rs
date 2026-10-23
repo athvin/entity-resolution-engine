@@ -2346,6 +2346,11 @@ fn train_produces_a_scorable_model() {
             u_max_pairs: 1e7,
             model_version: "vtrain",
             tf_snapshot_id: "01TRAINSNAP0000000000000001",
+            // Empty on purpose, and this is the determinism obligation for the
+            // label path: with no labels the run must be byte-identical to what
+            // it produced before `match_labels` existed. The label pass only
+            // ever replaces `m`, so an empty set must not touch anything.
+            match_labels: &[],
         },
         &out_model,
         &out_tf,
@@ -3899,4 +3904,128 @@ fn screening_receipts(session: &Session) -> Vec<(String, i64, i64, i64, i64, boo
             )
         })
         .collect()
+}
+
+/// `(m, u, prior)` from a trained settings document, keyed by comparison and
+/// level so a diff names which level moved rather than just "the model".
+/// The learned probabilities of a trained settings document, keyed by
+/// comparison and level so a mismatch names which level moved.
+struct Probabilities {
+    m: Vec<(String, Option<f64>)>,
+    u: Vec<(String, Option<f64>)>,
+    prior: Option<f64>,
+}
+
+fn probabilities(model_json: &str) -> Probabilities {
+    let doc: serde_json::Value = serde_json::from_str(model_json).expect("a settings document");
+    let mut m = Vec::new();
+    let mut u = Vec::new();
+    for comparison in doc["comparisons"].as_array().into_iter().flatten() {
+        let column = comparison["output_column_name"].as_str().unwrap_or("?");
+        for (index, level) in comparison["comparison_levels"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .enumerate()
+        {
+            let key = format!("{column}[{index}]");
+            m.push((key.clone(), level["m_probability"].as_f64()));
+            u.push((key, level["u_probability"].as_f64()));
+        }
+    }
+    Probabilities {
+        m,
+        u,
+        prior: doc["probability_two_random_records_match"].as_f64(),
+    }
+}
+
+/// Train once, returning the settings document.
+fn train_once(
+    session: &Session,
+    tmp: &std::path::Path,
+    tag: &str,
+    match_labels: &[(String, String)],
+) -> String {
+    let template = std::fs::read_to_string(repo_fixture("model_test_v1.json")).unwrap();
+    let out_model = tmp.join(format!("{tag}.model.json"));
+    let out_tf = tmp.join(format!("{tag}.tf.csv"));
+    er_cli::run_train(
+        session,
+        &er_cli::TrainInputs {
+            template_settings_json: &template,
+            deterministic_rules: &[r#"l."email" = r."email""#.to_string()],
+            em_rules: &[r#"l."given_name" = r."given_name""#.to_string()],
+            recall: 0.9,
+            u_max_pairs: 1e7,
+            model_version: "vlabels",
+            tf_snapshot_id: "01LABELSNAP000000000000001",
+            match_labels,
+        },
+        &out_model,
+        &out_tf,
+    )
+    .unwrap();
+    std::fs::read_to_string(&out_model).unwrap()
+}
+
+/// The tenant's own verdicts estimate `m`, and `m` only.
+///
+/// `dedupe-core::training::m_from_labels` has existed since the start with no
+/// caller outside `dedupe-cli` and its own golden tests. What it needs is a
+/// labels table, and until E10b there was no way to produce a label at all.
+///
+/// Two claims, and the second is the one that makes the first safe to ship:
+///
+///  * an EMPTY label set must leave the run byte-identical, so the label path
+///    is additive rather than a change to how every existing tenant trains;
+///  * labels must move `m` and **nothing else** — `u` and the prior come from
+///    random sampling and EM, and a tenant's verdicts say nothing about how
+///    often two RANDOM records agree. The module doc claims exactly this
+///    ("Only m is trained"); this asserts it rather than trusting it.
+#[test]
+fn labels_estimate_m_and_only_m() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let (session, _config, tmp) = standardized_lake("mlabels");
+
+    let baseline = train_once(&session, &tmp, "baseline", &[]);
+    let repeat = train_once(&session, &tmp, "repeat", &[]);
+    assert_eq!(
+        baseline, repeat,
+        "training is deterministic, so two runs with no labels must agree — if this fails the \
+         comparison below cannot distinguish the label path from run-to-run noise"
+    );
+
+    // Genuine matches from base_10's expected membership: entity E1 is
+    // {billing:B001, crm:C001, crm:C009, webforms:W001}. Matches ONLY — the
+    // estimator counts every pair it is given as a match.
+    let labels = vec![
+        ("billing:B001".to_string(), "crm:C001".to_string()),
+        ("crm:C001".to_string(), "crm:C009".to_string()),
+        ("billing:B001".to_string(), "webforms:W001".to_string()),
+    ];
+    let labelled = train_once(&session, &tmp, "labelled", &labels);
+
+    let base = probabilities(&baseline);
+    let lab = probabilities(&labelled);
+
+    assert_eq!(
+        base.u, lab.u,
+        "u is estimated by random sampling and must be untouched by labels: a verdict says \
+         which records MATCH, never how often two random records agree"
+    );
+    assert_eq!(
+        base.prior, lab.prior,
+        "the prior must be untouched by labels for the same reason"
+    );
+    assert_ne!(
+        base.m, lab.m,
+        "m must change, or the label path is not wired: the estimator was called and its \
+         result discarded, which is indistinguishable from not calling it"
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
 }
