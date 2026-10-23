@@ -33,6 +33,12 @@ test.describe("webhooks", () => {
     // it is deliberately absent from the catalog. A form that offered it would
     // be offering a subscription that can never deliver.
     await expect(form.getByTestId("webhook-event-entity.edge_cut")).toHaveCount(0);
+
+    // The outbound write-back (O4) is the one event that is NOT aggregated, and
+    // the form says so — a tenant subscribing to it is choosing to receive a
+    // record per resolution rather than a count per run.
+    await expect(form.getByTestId("webhook-event-entity.write_back")).toBeVisible();
+    await expect(form).toContainText("Not aggregated");
   });
 
   test("subscribing shows the signing secret once", async ({ page }, testInfo) => {

@@ -338,6 +338,57 @@ LIMIT $2
         DuplicateGroupsPageRow::from_batches(&batches)
     }
 
+    /// One row of `entity_of_key`: The entity one record currently belongs to, at a pinned snapshot. The write-back handler's lookup (O4): a resolution names a PAIR of record keys, and what the tenant's system needs back is the master those records now resolve to — which may be a newly merged entity, or two separate ones after a no_match. Returns no row for a record the corpus no longer has.
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct EntityOfKeyRow {
+        pub entity_id: String,
+    }
+
+    impl EntityOfKeyRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![("entity_id", ::arrow::datatypes::DataType::Utf8)]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "entity_id")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        entity_id: crate::batch::req(crate::batch::opt_str(c0, i), "entity_id", i)?,
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// The entity one record currently belongs to, at a pinned snapshot. The write-back handler's lookup (O4): a resolution names a PAIR of record keys, and what the tenant's system needs back is the master those records now resolve to — which may be a newly merged entity, or two separate ones after a no_match. Returns no row for a record the corpus no longer has.
+    pub fn entity_of_key(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+        record_key: &str,
+    ) -> ::duckdb::Result<Vec<EntityOfKeyRow>> {
+        const SQL: &str = "SELECT entity_id
+FROM lake.main.entity_membership AT (VERSION => {snapshot})
+WHERE record_key = $1
+";
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = conn.prepare(&sql)?;
+        let batches = stmt
+            .query_arrow(::duckdb::params![record_key])?
+            .collect::<Vec<_>>();
+        EntityOfKeyRow::from_batches(&batches)
+    }
+
     /// One row of `member_keys`: The member record keys of one entity at a pinned snapshot, ascending (the unmerge precheck and the detail member list).
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
     pub struct MemberKeysRow {

@@ -1424,3 +1424,34 @@ pub fn entity_events_by_run(
         }
     }
 }
+
+/// The entity a record currently belongs to at `snapshot`, or `None` when the
+/// corpus no longer has it (or membership has not been materialized).
+///
+/// The write-back handler's lookup (O4): a resolution names a PAIR of record
+/// keys, and what the tenant's system needs back is the master those records
+/// now resolve to — one entity after a `match`, two after a `no_match`.
+///
+/// # Errors
+/// Propagates a non-missing-table lake query error.
+pub fn entity_of_record_key(
+    session: &Session,
+    snapshot: i64,
+    record_key: &str,
+) -> Result<Option<String>, String> {
+    match er_entities::entity_membership::read::entity_of_key(
+        session.connection(),
+        snapshot,
+        record_key,
+    ) {
+        Ok(rows) => Ok(rows.into_iter().next().map(|r| r.entity_id)),
+        Err(e) => {
+            let s = e.to_string();
+            if is_missing_table(&s) {
+                Ok(None)
+            } else {
+                Err(s)
+            }
+        }
+    }
+}

@@ -108,6 +108,7 @@ fn every_catalogued_event_has_a_state_that_reaches_the_emitter() {
             "entity.merged",
             "entity.split",
             "entity.retired",
+            "entity.write_back",
         ]
     );
     for (_, description) in webhook::EVENT_CATALOG {
@@ -209,6 +210,7 @@ async fn registration_refuses_an_event_nothing_emits() {
             "entity.merged",
             "entity.split",
             "entity.retired",
+            "entity.write_back",
         ],
         "discovery serves exactly the catalog, so the two cannot disagree"
     );
