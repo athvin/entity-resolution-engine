@@ -53,6 +53,20 @@ export function modelOrg(projectName: string): string {
   return org;
 }
 
+/** Labelling's own org per project: recording a verdict REMOVES the pair from
+ * the queue (the server excludes already-labelled pairs), so a project that
+ * labels would shrink the queue another project is asserting the length of. */
+export function labelingOrg(projectName: string): string {
+  const byProject: Record<string, string> = {
+    "desktop-chromium": "labeling-dev",
+    "mobile-safari": "labeling-ios",
+    "mobile-chrome": "labeling-android",
+  };
+  const org = byProject[projectName];
+  if (!org) throw new Error(`no labelling org for project ${projectName}`);
+  return org;
+}
+
 /** The webhook page's own org per project: subscribing and removing both
  * mutate the list, and all three projects share one mock server, so a project
  * that removes would delete the row another is asserting about. */

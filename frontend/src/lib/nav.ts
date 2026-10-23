@@ -1,5 +1,6 @@
 import {
   Copy,
+  GraduationCap,
   LineChart,
   Inbox,
   LayoutDashboard,
@@ -64,6 +65,13 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Runs",
     icon: Play,
     path: (org) => `/${org}/runs`,
+    enabled: true,
+  },
+  {
+    id: "labeling",
+    label: "Labelling",
+    icon: GraduationCap,
+    path: (org) => `/${org}/labeling`,
     enabled: true,
   },
   {

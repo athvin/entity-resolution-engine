@@ -1353,9 +1353,61 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          flagged the five computed response fields until they were accounted for in `EXPLAINED`
          (the evaluation echoes `matching_model`'s identity fields, so best-match attribution
          reads it as that entity — the attribution limit that file documents, seen from inside).
-   - [ ] E10c-2 label-driven training (`m_from_labels` into `train_and_register`, still landing
-         a draft), the labelling-queue UI (E10b is still headless), related-record features
-         (#26), household/link entities (#33).
+   - [x] **E10c-2 the labelling surface — the input every other label feature was missing.**
+         E10b built `pair_labels` and the uncertainty-sampled queue and shipped **no UI at
+         all**: `grep -r labeling frontend/src` returned nothing but a generated binding, and
+         there were zero BFF routes. So a tenant could not record a verdict, which meant
+         `m_from_labels` had nothing to train on and the per-version evaluation shipped in
+         E10c-1 would have read "no label can be scored against this version" forever, for
+         every tenant. Built ahead of label-driven training for that reason — measuring and
+         training both need a label to exist first.
+         The screen asks about one pair at a time with `FieldCompareGrid` (direct reuse, as the
+         plan anticipated for F1 — queue items carry only keys, a probability and `evidence`,
+         so without the record values the screen would ask a human to judge two opaque
+         strings), the score rendered beside the threshold that explains the ask, and a
+         keyboard flow (`m`/`n`/`s`). **There is no "unsure" verdict** — skip writes nothing,
+         matching the entity's own reasoning that a guessed label is indistinguishable
+         afterwards from a confident one.
+         **Four bugs, all found by the tests rather than by review.** (a) The component
+         advanced an index on a successful label while the server removes that pair from the
+         queue — the list shifted down and the cursor moved up, so one pair was never asked
+         about. Replaced with a skipped-set and "first pair not skipped", which is correct
+         under both operations. (b) `canLabel` was `effectiveRole(...) !== "viewer"`, and
+         `effectiveRole` returns **null while the session loads** — so `null !== "viewer"` is
+         true and a viewer was offered the label buttons until it settled. Permission is an
+         allowlist now. (c) The BFF POST passed `body: JSON.stringify(body)`, but `forward`
+         serializes `body` itself, so er-server received a JSON string *literal* and could not
+         deserialize `LabelIn`. (d) `forward`'s `role` defaults to `viewer` **and selects the
+         stored key**, so the steward-only write was forwarding a viewer credential — a 403
+         that would have read as a permissions bug in the product.
+         **A fifth was in my own fixture, and it was the instructive one.** The mock's queue
+         pairs were `crm:… / billing:…`, but `match_scores` stores a pair **lower-key-first**
+         and the label upsert canonicalises — so the already-labelled exclusion silently never
+         matched and the queue kept re-offering a pair the real server would have dropped. A
+         fixture that violates an invariant the real data holds makes the mock agree with a
+         broken client. Fixed by canonicalising the fixture, with the reason written beside it.
+         Three pure functions were extracted and unit-tested rather than left inline, chosen
+         because **none of them fails loudly when wrong**: the next-pair derivation, the
+         permission predicate, and `labelPayloadFor`, which carries `model_version` and
+         `score_at_label` from the queue item. That last is the contract with E10c-1 — drop
+         either field and the label still trains a model but can never be measured, with
+         nothing anywhere to explain the empty panel. Validation moved to
+         `src/lib/bff/labels.ts` (the house pattern, beside `csv.ts` and `envelope.ts`) where
+         the range check on `score_at_label` is testable: a value outside [0,1] is not a
+         probability and would quietly poison every precision figure.
+         Coverage fell below the per-PR floor when the component landed, and was restored by
+         testing that extracted logic rather than by lowering the threshold — 48.26% lines /
+         33.19% functions against floors of 48 / 33.
+         The screen is registered in `a11y.spec.ts`'s `SCREENS` in the same change that adds
+         it, so the axe sweep covers its keyboard affordances; the generated
+         `frontend-data-ui/references/screens.md` picks it up. **Nine visual baselines moved**,
+         all `desktop-chromium` — a nav entry is shared chrome, and those are exactly the
+         tenant screens rendering the rail. Mobile projects hide it and did not move; login,
+         admin and marketing have different chrome and did not either. Reviewing that the set
+         is precisely "tenant screens on desktop" is what makes the regeneration safe.
+   - [ ] E10c-3 label-driven training (`m_from_labels` into `train_and_register`, still
+         landing a draft — this is where the plan's lake-materialisation problem is real),
+         related-record features (#26), household/link entities (#33).
 4. **Operating at scale**
    - [x] **O3b webhook delivery becomes an outbox (#43's reliability half).** Delivery was
          `let _ = webhook::emit_job_event(...)` at three call sites: the POST happened **inline**

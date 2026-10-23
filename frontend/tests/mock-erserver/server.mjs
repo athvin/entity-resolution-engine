@@ -402,6 +402,12 @@ export function initialState() {
       })),
       "mutable-dev": [],
     },
+    // Verdicts a human has recorded. Keyed by org and seeded empty: the
+    // labelling queue excludes pairs that appear here, mirroring the server, so
+    // a spec that records one and re-reads the queue sees it gone.
+    labels: {
+      "acme-dev": [],
+    },
     // The model registry. Two names ACTIVE at once, because activation is
     // unique per (org, name) — the shape an ensemble has, and the shape the
     // page's `active` list has to render.
@@ -740,6 +746,12 @@ export function initialState() {
     "webhooks-dev",
     "webhooks-ios",
     "webhooks-android",
+    // Recording a verdict REMOVES the pair from the queue (the server excludes
+    // already-labelled pairs), so labelling gets one org per device project
+    // for the same reason the registry and the webhook page do.
+    "labeling-dev",
+    "labeling-ios",
+    "labeling-android",
     // Starting a run takes the org's one writer slot; sharing an org with the
     // Runs page's Run-now test would disable whichever button ran second.
     "palette-dev",
@@ -782,6 +794,7 @@ export function initialState() {
     state.assertions[org] = [];
     state.contradictions[org] = [];
     state.matchScores[org] = [];
+    state.labels[org] = [];
     // A registry of its own, structurally identical to acme-dev's: two names
     // active plus a draft, so each project can activate without racing.
     state.models[org] = state.models["acme-dev"].map((m) => ({
@@ -1376,6 +1389,95 @@ const server = http.createServer((req, res) => {
         stale_days: Number(url.searchParams.get("stale_days") ?? 365),
         snapshot: m.snapshot ?? 1,
       });
+    }
+    // ---- labelling (E10b's surface, built in E10c-2) -----------------------
+    if ((match = /^\/v1\/orgs\/([^/]+)\/labeling\/next$/.exec(path)) && req.method === "GET") {
+      const org = match[1];
+      if (!state.orgs[org]) return send(res, 404, { detail: "not found" });
+      const threshold = 0.95;
+      const bandMin = Number(url.searchParams.get("min") ?? 0.7);
+      const bandMax = Number(url.searchParams.get("max") ?? 1);
+      const limit = Number(url.searchParams.get("limit") ?? 25);
+      const labelled = new Set(
+        (state.labels[org] ?? []).map((l) => `${l.rec_a_key}|${l.rec_b_key}`),
+      );
+      // Ordered by distance from the threshold, like `uncertain_page`: the
+      // pair the model is least sure about comes first.
+      // Lower key FIRST, because that is how match_scores stores a pair and how
+      // the label upsert canonicalises it. A fixture in the other order makes
+      // the exclusion below silently never fire: the queue would keep offering
+      // a pair that had already been labelled, and the real server would not.
+      const all = Array.from({ length: 8 }, (_, i) => ({
+        rec_a_key: `billing:L-${String(200 + i)}`,
+        rec_b_key: `crm:L-${String(100 + i)}`,
+        match_probability: Number((0.94 - i * 0.03).toFixed(3)),
+        model_version: "v0001",
+        evidence: { gamma_email: 1, mw_email: 1.4, match_weight: 0.9 },
+        run_id: "01jm0000000000000000000002",
+        scored_at: "2026-09-24T06:01:00Z",
+      }));
+      const items = all
+        .filter((p) => p.match_probability >= bandMin && p.match_probability <= bandMax)
+        .filter((p) => !labelled.has(`${p.rec_a_key}|${p.rec_b_key}`))
+        .slice(0, limit);
+      const rows = state.labels[org] ?? [];
+      const count = (f) => rows.filter(f).length;
+      return send(res, 200, {
+        items,
+        snapshot: state.metrics[org]?.snapshot ?? 1,
+        threshold,
+        band: { min: bandMin, max: bandMax },
+        coverage: {
+          total: rows.length,
+          matches: count((l) => l.verdict === "match"),
+          non_matches: count((l) => l.verdict === "no_match"),
+          by_origin: {
+            human: count((l) => l.origin === "human"),
+            reviewer: count((l) => l.origin === "reviewer"),
+            llm: count((l) => l.origin === "llm"),
+          },
+        },
+      });
+    }
+    if ((match = /^\/v1\/orgs\/([^/]+)\/labels$/.exec(path)) && req.method === "POST") {
+      const org = match[1];
+      if (!state.orgs[org]) return send(res, 404, { detail: "not found" });
+      const body = await readBody(req);
+      if (body.verdict !== "match" && body.verdict !== "no_match") {
+        return send(res, 422, { detail: "verdict must be match or no_match" });
+      }
+      // Canonical order, lower key first — the order match_scores stores a pair
+      // in. A label kept as given would describe a pair nothing ever scored.
+      const [a, b] = [String(body.rec_a_key), String(body.rec_b_key)].sort();
+      const rows = (state.labels[org] ??= []);
+      const existing = rows.find((l) => l.rec_a_key === a && l.rec_b_key === b);
+      const row = {
+        id: existing?.id ?? `01jmlabel${String(rows.length + 1).padStart(17, "0")}`,
+        org_id: `uuid-${org}`,
+        rec_a_key: a,
+        rec_b_key: b,
+        verdict: body.verdict,
+        origin: "human",
+        labeled_by: "steward@acme.dev",
+        model_version: body.model_version ?? null,
+        score_at_label: body.score_at_label ?? null,
+        note: body.note ?? null,
+        created_at: existing?.created_at ?? "2026-09-24T07:00:00Z",
+        updated_at: "2026-09-24T07:00:00Z",
+      };
+      // Upsert, never append: two contradictory rows for one pair would make
+      // the training set ambiguous with no principled way to choose.
+      if (existing) {
+        Object.assign(existing, row);
+      } else {
+        rows.push(row);
+      }
+      return send(res, 201, row);
+    }
+    if ((match = /^\/v1\/orgs\/([^/]+)\/labels$/.exec(path)) && req.method === "GET") {
+      const org = match[1];
+      if (!state.orgs[org]) return send(res, 404, { detail: "not found" });
+      return send(res, 200, { labels: [...(state.labels[org] ?? [])].reverse() });
     }
     if ((match = /^\/v1\/orgs\/([^/]+)\/records$/.exec(path)) && req.method === "GET") {
       if (!state.orgs[match[1]]) return send(res, 404, { detail: "not found" });
