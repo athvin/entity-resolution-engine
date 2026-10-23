@@ -1607,6 +1607,23 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          not "the snapshot is what it was when I wrote this" — asserts `duplicate_records >
          duplicate_groups` on base_10 so the two definitions are distinguishable, and asserts a
          re-run of the same id corrects rather than appends.
+   - [x] **O7b-2b the attribution surface.** `GET /insights/sources` shipped headless like every
+         capability before it, so the card on the insights page is the same catch-up this program
+         keeps paying. Bars from zero, not a pie: these quantities are COMPARED, not apportioned,
+         which is the design standard's stated reason for ruling pies out. Each bar is a share of
+         the worst source's duplicate count, so "is one feed dominating this" is answerable at a
+         glance, and `contributed_groups` sits beside the count rather than inside the bar because
+         it is a different fact.
+         The spec asserts the per-source counts **sum** to the corpus-wide row, which is the same
+         property the Rust test asserts of the server — a mock whose totals drifted would make a
+         broken writer look correct, and that is this program's most-repeated defect. Observed
+         failing by changing one fixture number (`Expected: 13, Received: 18`).
+         **Reading the rendered baseline caught a bug in my own tile.** The duplicate-rate card
+         showed `46.2%` above a delta of `+0.1` — the raw fraction, which reads as a tenth of a
+         point when the rate had jumped nearly ten. A value and its change have to be in the same
+         unit; it now says `+9.8 points`. The insights page also gains a visual baseline, which it
+         lacked: this screen is CHARTS, and a bar that silently rendered at the wrong width would
+         read as a different corpus rather than as a bug.
    - [x] **O7b-2 per-source duplicate attribution — and a gate with a hole in it.** The
          corpus-wide duplicate rate says a tenant has a problem; it does not say WHERE the
          problem comes from, and the answer is nearly always one feed. New
