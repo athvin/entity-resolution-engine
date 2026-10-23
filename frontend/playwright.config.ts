@@ -30,7 +30,24 @@ export default defineConfig({
     ],
   ],
   expect: {
-    toHaveScreenshot: { maxDiffPixelRatio: 0.01, animations: "disabled" },
+    // 0.0005 is ~840 pixels on a 1440x1170 full-page shot. The old 0.01 was
+    // ~16,800, and a whole navigation item costs ~1,050 — measured in #292,
+    // where adding one changed NO baseline at all.
+    //
+    // Tightening was blocked until the instability the old number was masking
+    // was found and fixed. Five regenerate-and-compare cycles produced an
+    // intermittent failure in two of five:
+    //
+    //     Expected an image 393px by 2237px, received 393px by 2257px.
+    //
+    // A twenty-pixel HEIGHT swing, which a per-element probe traced to the
+    // config studio's version-history card: it rendered its heading with
+    // nothing under it while its query was in flight (62px) and 82px once a
+    // version arrived. The card now shows a skeleton instead, and the spec
+    // waits for it. Five cycles at ratio **0** now pass, so what is left here
+    // is margin for cross-architecture rasterization (baselines are
+    // regenerated on arm64, CI compares on amd64) and nothing else.
+    toHaveScreenshot: { maxDiffPixelRatio: 0.0005, animations: "disabled" },
   },
   use: {
     baseURL: "http://localhost:3100",

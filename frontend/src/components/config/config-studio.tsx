@@ -55,6 +55,21 @@ function VersionHistory({ org }: { org: string }) {
         <SectionTitle>Version history</SectionTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-2 p-4 pt-2 lg:p-6 lg:pt-2">
+        {/*
+          A heading with nothing under it says "this config has no history",
+          which is false while the query is still in flight — and it was the
+          page's only nondeterministic element: the card renders 62px empty and
+          82px once a version arrives, so a full-page screenshot caught one or
+          the other and the visual tier flaked roughly two runs in five. A
+          skeleton shaped like the row it replaces is both the honest state and
+          the stable one.
+        */}
+        {versions.isPending && <Skeleton className="h-5 w-64" data-testid="versions-loading" />}
+        {!versions.isPending && (versions.data ?? []).length === 0 && (
+          <p className="text-muted-foreground text-sm">
+            No versions yet — publishing one starts the history.
+          </p>
+        )}
         {(versions.data ?? []).map((row, index, all) => (
           <div key={row.version} className="flex flex-wrap items-center gap-2 text-sm">
             <History className="text-muted-foreground size-4" />
@@ -274,6 +289,7 @@ export function ConfigStudio({ org }: { org: string }) {
           <CardContent className="p-4 pt-2 lg:p-6 lg:pt-2">
             <ThresholdEditor
               probabilities={scores.data ?? []}
+              pending={scores.isPending}
               value={thresholds}
               onChange={setThresholds}
               disabled={!isAdmin}

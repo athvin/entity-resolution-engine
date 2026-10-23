@@ -12,6 +12,16 @@ interface ThresholdEditorProps {
   value: Thresholds;
   onChange: (next: Thresholds) => void;
   disabled: boolean;
+  /**
+   * Whether `probabilities` is still being fetched.
+   *
+   * Without it an empty array is indistinguishable from "no pairs have been
+   * scored", and the estimate below states that as a fact: "≈0 of the 0
+   * recently scored pairs fall in this review band" — a confident answer given
+   * before the question could be answered. Same bug as the version-history
+   * card one panel down, and the same fix.
+   */
+  pending?: boolean;
 }
 
 /**
@@ -24,6 +34,7 @@ export function ThresholdEditor({
   value,
   onChange,
   disabled,
+  pending = false,
 }: ThresholdEditorProps) {
   const buckets = useMemo(() => {
     const counts = new Array<number>(BUCKETS).fill(0);
@@ -143,7 +154,13 @@ export function ThresholdEditor({
         </label>
       </div>
       <p className="text-muted-foreground text-xs" data-testid="band-estimate">
-        ≈{inBand} of the {probabilities.length} recently scored pairs fall in this review band.
+        {pending
+          ? // Deliberately does NOT contain "recently scored pairs": the visual
+            // spec waits on that phrase, so keeping it out of the loading copy
+            // turns an existing wait into a real readiness check for this panel
+            // instead of one that matches both states.
+            "Estimating from recent scores…"
+          : `≈${String(inBand)} of the ${String(probabilities.length)} recently scored pairs fall in this review band.`}
       </p>
     </div>
   );

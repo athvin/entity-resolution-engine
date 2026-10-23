@@ -447,6 +447,89 @@ run reports green having compared *nothing*, so a PR that adds a
 on CI's first run. Adding a visual assertion and running
 `make frontend-baselines` are one step, not two.
 
+### The tolerance, and why it moved
+
+`maxDiffPixelRatio` was **0.01** — about 16,800 pixels on a 1440x1170 full-page
+shot. That is not a rounding allowance; it is a whole region of the screen.
+
+Found by adding a navigation item and watching **no baseline change at all**,
+which should have been impossible. Measured:
+
+| | pixels |
+|---|---|
+| a whole nav entry on the dashboard | ~1,050 |
+| the old tolerance | ~16,800 |
+
+Two things followed from it, and the second is worse than the first:
+
+1. A real change smaller than the tolerance **passed**.
+2. `--update-snapshots` defaults to `changed`, which honours the same
+   tolerance — so that change was neither failed nor rewritten. The committed
+   baseline silently stopped depicting the app, and went on masking the next
+   change too. Switching the regen to **`=all`** rewrote **20** stale
+   baselines, among them `marketing-hero-*` (which has no nav at all, so that
+   was pure accumulated drift) and the dashboard's job strip, still showing the
+   fabricated `progress` stage text D9 had removed.
+
+**The tolerance was masking a real instability, which had to be fixed first.**
+
+The obvious move is a much smaller ratio — 0.0005 is ~840 pixels on that shot,
+which would catch a nav item with margin. Within a single container run that
+looks safe: all 39 visual tests pass at ratio **0**, so there is no same-image
+nondeterminism at all.
+
+Across runs there is. Running the tier five times against freshly regenerated
+baselines produced an intermittent failure in roughly two runs out of five, and
+it is not antialiasing:
+
+```
+Expected an image 393px by 2237px, received 393px by 2257px.
+2947 pixels (ratio 0.00335 of all image pixels) are different.
+```
+
+A **twenty-pixel height swing** between identical runs of the config studio on
+mobile-safari. That is a layout nondeterminism — most likely a font or an
+async element settling after the screenshot is taken — and it is three
+orders of magnitude larger than rasterization noise.
+
+So 0.01 was not merely loose; it was **masking a real instability**. Anything
+tight enough to catch a nav item is also tight enough to make the tier flaky,
+and a flaky visual gate gets ignored — which is worse than a loose one.
+
+**What it was.** A per-element probe (print every child's height across six
+runs) ruled out the first suspect — the band estimate renders identical text
+and a constant 16px every time — and landed on the **version-history card**:
+62px while its query was in flight, 82px once a version arrived. It rendered
+its heading with *nothing underneath*, which also states something false, since
+the config does have a published v1.
+
+It was not the only one. Grepping the class — a component rendering
+`query.data ?? []` with no `isPending` branch — turned up a second in the card
+directly above: the threshold editor's band estimate read **"≈0 of the 0
+recently scored pairs fall in this review band"** before its scores arrived.
+Most call sites in the tree already use the `isPending ? … : empty ? …` shape;
+these two did not.
+
+Two fixes for the version history, because it was two bugs:
+
+1. the card now renders a `Skeleton` while pending and a sentence when the
+   history is genuinely empty, per the loading/empty conventions above;
+2. the visual spec waits for `version-history` as well as the band estimate.
+   It had waited only on the latter — **a different query** — so the screenshot
+   could be taken while the history card was still empty. A readiness check has
+   to name every async region the shot contains, not the first one that is
+   convenient.
+
+The band estimate's loading copy deliberately avoids the phrase "recently
+scored pairs", which is what the visual spec waits on — so an existing wait
+becomes a real readiness check for that panel instead of one that matches both
+states.
+
+With all of it in place, **five consecutive regenerate-and-compare cycles pass
+at ratio 0**, so the tolerance is now **0.0005** (~840 pixels on that shot) and
+what remains is margin for cross-architecture rasterization — baselines are
+regenerated on arm64, CI compares on amd64 — and nothing else.
+
 ---
 
 ## Proving a gate works
