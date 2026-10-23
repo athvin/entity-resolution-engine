@@ -1405,9 +1405,43 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          tenant screens rendering the rail. Mobile projects hide it and did not move; login,
          admin and marketing have different chrome and did not either. Reviewing that the set
          is precisely "tenant screens on desktop" is what makes the regeneration safe.
-   - [ ] E10c-3 label-driven training (`m_from_labels` into `train_and_register`, still
-         landing a draft — this is where the plan's lake-materialisation problem is real),
-         related-record features (#26), household/link entities (#33).
+   - [x] **E10c-3 the tenant's verdicts estimate `m`, and `m` only.**
+         `dedupe-core::training::m_from_labels` has existed since the start with no caller
+         outside `dedupe-cli` and its own golden tests. It needs a labels table; until E10b
+         there was no label, and until E10c-2 no way to record one. This is the last link:
+         `train_and_register` now reads the tenant's match verdicts and uses them for `m`.
+         **This is where the plan's lake-materialisation problem is genuinely real** — unlike
+         E10c-1, where `score_at_label` made it moot. `estimate_m_from_pairwise_labels` takes a
+         DuckDB `TableHandle` and `pair_labels` is Postgres, so the dispatcher reads the
+         verdicts where the client is and `run_train` stages them into a session temp table
+         (`__train_labels`, following `__constraint_scope`'s batched-insert precedent — one
+         `VALUES (…), (…)` would be a SQL string megabytes wide on a real label set). A
+         `TableHandle` is a plain struct with public fields, so no new API was needed.
+         **MATCHES ONLY, and this is the sharp edge.** The estimator reads **no verdict
+         column** — its own module doc says "every pair treated as a match" — so a `no_match`
+         pair reaching it is counted as agreement at whatever levels it disagrees on. That
+         does not fail: it skews every `m` toward disagreement and moves every score the model
+         will ever produce, silently. The dispatcher filters, the field is named
+         `match_labels`, and its doc comment carries the reason.
+         **Additive by construction.** The label pass runs AFTER `linker.train(...)` and
+         replaces `m` alone; `u` and the prior come from random sampling and EM and are
+         untouched — a tenant's verdicts say which records match, never how often two *random*
+         records agree. The field is required rather than defaulted so the compiler found all
+         three call sites: the CLI passes `&[]` (no control plane to read verdicts from), and
+         the existing e2e's `&[]` **is** the determinism obligation.
+         A label read that fails falls back to EM-only rather than failing the train, because
+         EM is a complete training method on its own and is what every run did before labels
+         existed. Provenance records `m_from_labels: <count>` so a draft's origin is legible
+         from the registry — and `pg_train` asserts a no-label train writes **0** rather than
+         omitting the key, because a missing key and "trained without labels" read identically
+         to a steward while only one of them means the path ran and found nothing.
+         `labels_estimate_m_and_only_m` asserts determinism FIRST — two no-label runs must be
+         identical — so the `m` difference that follows cannot be run-to-run noise, then that
+         `u` and the prior are byte-equal. The module doc claims "only m is trained"; this
+         asserts it rather than trusting it. Observed failing: disabling the label pass fails
+         it by name. Training still lands a **draft**, unchanged from E10a — training is not
+         consent to re-cluster a tenant's data.
+   - [ ] E10c-4 related-record features (#26), household/link entities (#33).
 4. **Operating at scale**
    - [x] **O3b webhook delivery becomes an outbox (#43's reliability half).** Delivery was
          `let _ = webhook::emit_job_event(...)` at three call sites: the POST happened **inline**

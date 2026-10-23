@@ -356,6 +356,10 @@ fn main() -> Result<()> {
                     u_max_pairs: max_pairs,
                     model_version: &model_version,
                     tf_snapshot_id: &tf_snapshot_id,
+                    // The CLI has no control plane to read verdicts from, so
+                    // training here is always the EM path. Label-driven `m` is
+                    // the dispatcher's, which holds the Postgres client.
+                    match_labels: &[],
                 },
                 &out_model,
                 &out_tf,
