@@ -85,6 +85,66 @@ export function useModelVersion(org: string, name: string, version: number | nul
   });
 }
 
+/**
+ * A confusion matrix and the ratios it implies. **Every ratio is nullable, and
+ * null does not mean zero**: a null `precision` is "made no positive
+ * predictions on this label set", a precision of 0 is "got every positive
+ * wrong". Rendering them the same way would invert what a steward concludes.
+ */
+export interface ConfusionMetrics {
+  tp: number;
+  fp: number;
+  fn: number;
+  tn: number;
+  precision: number | null;
+  recall: number | null;
+  f1: number | null;
+  accuracy: number | null;
+}
+
+/** Why labels were left out, so a figure says what it was measured on. */
+export interface EvaluationCounts {
+  labels_for_version: number;
+  evaluable: number;
+  /** Labels recorded with no score in front of the labeller. */
+  no_score: number;
+  /** Verdicts outside match/no_match (a dismissal is not a verdict). */
+  not_a_verdict: number;
+}
+
+export interface ModelEvaluation {
+  name: string;
+  version: number;
+  state: string;
+  /** The label the scoring pass stamps on `match_scores`, e.g. `v0001`. */
+  model_version_label: string;
+  threshold: number;
+  counts: EvaluationCounts;
+  overall: ConfusionMetrics;
+  /** Absent origins are omitted, never present-and-null. */
+  by_origin: Partial<Record<"human" | "reviewer" | "llm", ConfusionMetrics>>;
+  curve: (ConfusionMetrics & { threshold: number })[];
+}
+
+/**
+ * How a version scored against the labels collected under it.
+ *
+ * Only labels carrying that version's own score are evaluable, which is why
+ * `counts` ships beside the metrics rather than being inferred from them.
+ */
+export function useModelEvaluation(org: string, name: string, version: number | null) {
+  return useQuery({
+    queryKey: queryKeys.modelEvaluation(org, name, version ?? 0),
+    queryFn: () =>
+      bffFetch<ModelEvaluation>(
+        `/api/orgs/${org}/models/${encodeURIComponent(name)}/versions/${String(
+          version,
+        )}/evaluation`,
+      ),
+    enabled: version !== null && name !== "",
+  });
+}
+
 /** Everything that changes the registry invalidates the same index. */
 function useRegistryMutation<T>(org: string, run: () => Promise<T>) {
   const queryClient = useQueryClient();

@@ -17,6 +17,8 @@ export const queryKeys = {
   models: (org: string) => ["org", org, "models"] as const,
   modelVersion: (org: string, name: string, version: number) =>
     ["org", org, "models", name, version] as const,
+  modelEvaluation: (org: string, name: string, version: number) =>
+    ["org", org, "models", name, version, "evaluation"] as const,
   insights: (org: string) => ["org", org, "insights"] as const,
   insightSources: (org: string) => ["org", org, "insights", "sources"] as const,
   webhooks: (org: string) => ["org", org, "webhooks"] as const,

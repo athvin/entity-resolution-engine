@@ -4,6 +4,7 @@ import { useState } from "react";
 import { CircleCheck, FileUp, Wand2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { ModelEvaluation } from "@/components/settings/model-evaluation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -190,6 +191,10 @@ export function ModelsContent({ org }: { org: string }) {
           )}
         </CardContent>
       </Card>
+
+      {selected !== null && (
+        <ModelEvaluation org={org} name={selected.name} version={selected.version} />
+      )}
 
       {selected !== null && (
         <Card data-testid="model-weights">

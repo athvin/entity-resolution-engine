@@ -30,6 +30,7 @@
   "GET /v1/orgs/{org}/metrics": { "envelope": "scalar" },
   "GET /v1/orgs/{org}/models": { "envelope": "record", "keys": ["items", "active"] },
   "GET /v1/orgs/{org}/models/{name}/versions/{version}": { "envelope": "scalar" },
+  "GET /v1/orgs/{org}/models/{name}/versions/{version}/evaluation": { "envelope": "scalar" },
   "GET /v1/orgs/{org}/quality": { "envelope": "scalar" },
   "GET /v1/orgs/{org}/records": { "envelope": "record", "keys": ["items", "snapshot"] },
   "GET /v1/orgs/{org}/reviews": { "envelope": "record", "keys": ["items", "snapshot", "next_cursor", "unscored_hidden"] },

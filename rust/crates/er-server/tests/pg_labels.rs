@@ -32,6 +32,11 @@ use tower::ServiceExt;
 
 const DEFAULT_YAML: &str = include_str!("../../er-config/tests/fixtures/default.yaml");
 
+/// The committed engine model, reused rather than hand-written: a document
+/// `create_model_version` refuses is indistinguishable here from a bug in the
+/// evaluation path.
+const MODEL_JSON: &str = include_str!("../../../../fixtures/static/model_test_v1.json");
+
 fn req(method: &str, uri: &str, bearer: &str, body: Body) -> Request<Body> {
     Request::builder()
         .method(method)
@@ -307,6 +312,145 @@ async fn labels_are_recorded_canonically_and_corrections_replace() {
         "with no lake attached the queue should fail on the lake, not earlier: {:?}",
         json_body(resp).await
     );
+
+    // ---- per-version evaluation (E10c) --------------------------------------
+    // Neither label recorded above is attributable to a version by the time we
+    // get here, which makes this phase a sharper test than it looks:
+    // `crm:C001/webforms:W001` was never given one, and `billing:B001/crm:C009`
+    // WAS labelled under `v0001` with a score of 0.83 — but the correction that
+    // followed sent no `model_version`, and the upsert assigns
+    // `model_version = EXCLUDED.model_version`, so it is now null. A correction
+    // therefore drops a label out of its version's evaluation, which is right:
+    // the score 0.83 was shown against the verdict that was replaced, so
+    // scoring the new verdict against it would measure the model on a question
+    // it was never asked.
+    // Both must stay out of the counts below.
+    let admin_key = keys("admin").await;
+    let resp = app
+        .clone()
+        .oneshot(req(
+            "POST",
+            "/v1/orgs/acme/models/versions",
+            &admin_key,
+            Body::from(
+                serde_json::json!({
+                    "model_json": MODEL_JSON,
+                    "model_version_label": "v0001",
+                })
+                .to_string(),
+            ),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let created = json_body(resp).await;
+    let model_name = created["name"].as_str().unwrap().to_string();
+    let model_version = created["version"].as_i64().unwrap();
+
+    // Two scored labels under v0001: one the model got right above the 0.95
+    // auto-merge threshold, one it got wrong.
+    for (a, b, verdict, score) in [
+        ("crm:C100", "crm:C101", "match", 0.99),
+        ("crm:C200", "crm:C201", "no_match", 0.97),
+    ] {
+        let resp = app
+            .clone()
+            .oneshot(req(
+                "POST",
+                "/v1/orgs/acme/labels",
+                &steward_key,
+                Body::from(
+                    serde_json::json!({
+                        "rec_a_key": a,
+                        "rec_b_key": b,
+                        "verdict": verdict,
+                        "model_version": "v0001",
+                        "score_at_label": score,
+                    })
+                    .to_string(),
+                ),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED, "labelling {a}/{b}");
+    }
+
+    let eval_path =
+        format!("/v1/orgs/acme/models/{model_name}/versions/{model_version}/evaluation");
+    let resp = app
+        .clone()
+        .oneshot(req("GET", &eval_path, &viewer_key, Body::empty()))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = json_body(resp).await;
+    // Both labels predicted a match at 0.95; one verdict disagrees.
+    assert_eq!(body["counts"]["labels_for_version"], serde_json::json!(2));
+    assert_eq!(body["counts"]["evaluable"], serde_json::json!(2));
+    assert_eq!(body["overall"]["tp"], serde_json::json!(1));
+    assert_eq!(body["overall"]["fp"], serde_json::json!(1));
+    assert_eq!(body["overall"]["precision"], serde_json::json!(0.5));
+    assert_eq!(body["threshold"], serde_json::json!(0.95));
+    assert_eq!(body["model_version_label"], serde_json::json!("v0001"));
+    // The earlier unversioned labels are excluded by the version filter, not
+    // merely unscored — they never appear in the denominator at all.
+    assert!(
+        body["by_origin"]["human"]["tp"] == serde_json::json!(1),
+        "human-origin split missing: {body}"
+    );
+
+    // Raising the threshold past both scores leaves no positive prediction, so
+    // precision is null rather than 0.0 — "made no calls", not "got them wrong".
+    let resp = app
+        .clone()
+        .oneshot(req(
+            "GET",
+            &format!("{eval_path}?threshold=0.999"),
+            &viewer_key,
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let strict = json_body(resp).await;
+    assert!(strict["overall"]["precision"].is_null(), "{strict}");
+
+    // A threshold outside [0,1] is refused at the API rather than producing a
+    // matrix nothing could act on.
+    let resp = app
+        .clone()
+        .oneshot(req(
+            "GET",
+            &format!("{eval_path}?threshold=4"),
+            &viewer_key,
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    // An unknown version is a 404, not an empty evaluation that reads as "this
+    // model scored nothing".
+    let resp = app
+        .clone()
+        .oneshot(req(
+            "GET",
+            &format!("/v1/orgs/acme/models/{model_name}/versions/99/evaluation"),
+            &viewer_key,
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
+    // The role boundary: evaluation is Viewer+, so an unauthenticated caller
+    // gets 401 and never sees a tenant's accuracy.
+    let resp = app
+        .clone()
+        .oneshot(req("GET", &eval_path, "not-a-key", Body::empty()))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 
     let _ = std::fs::remove_file(&config_path);
 }
