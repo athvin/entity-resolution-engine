@@ -1641,6 +1641,15 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          a subscriber they have since removed is the case it exists for. The statement moves from
          `delete/` to `update/deactivate`, because the framework checks the SQL verb against its
          folder.
+         **One test had to be restructured, and it was hiding something.** `pg_history` drove its
+         UPDATE image by hand under a comment reading "webhooks only create/delete" — true when
+         written, and the reason the wrapper's own behaviour was never exercised there. It now
+         gets its update image FROM `delete_webhook` and drives a raw DELETE for the delete
+         image, which is only possible because that subscription never delivered — precisely the
+         foreign key the soft delete exists for.
+         Caught by CI rather than locally: `make check`'s Postgres tests self-skip without
+         `ER_TEST_PG_DSN`, and after changing a statement I ran only `pg_webhooks` with the DSN
+         rather than the whole tier. Running all of it is the step that was missing.
          **The mock was right and the server was wrong**, which is the inverse of this program's
          usual direction: `tests/mock-erserver` removes the subscription and keeps its
          deliveries, exactly the behaviour the server now has. The O3c-3 spec asserting
