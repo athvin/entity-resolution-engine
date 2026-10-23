@@ -8,5 +8,8 @@ drizzle/
 pnpm-lock.yaml
 src/lib/api/openapi.json
 src/lib/api/schema.d.ts
+# Generated and byte-compared by er-server/tests/response_envelopes.rs, so
+# reformatting it here would make that test fail on a formatting-only diff.
+src/lib/api/envelopes.json
 src/lib/entities/
 tests/functional/*-snapshots/
