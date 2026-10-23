@@ -176,7 +176,12 @@ struct ActiveModel {
 /// # Errors
 /// Propagates a Postgres claim/mark/lookup failure.
 pub async fn dispatch_once(client: &tokio_postgres::Client) -> Result<bool, tokio_postgres::Error> {
-    dispatch_once_with(client, &crate::provision::Profile::from_env()).await
+    dispatch_once_with(
+        client,
+        &crate::provision::Profile::from_env(),
+        &crate::mail::Mailer::from_env().await,
+    )
+    .await
 }
 
 /// [`dispatch_once`] with the provisioning profile handed in rather than read
@@ -189,6 +194,7 @@ pub async fn dispatch_once(client: &tokio_postgres::Client) -> Result<bool, toki
 pub async fn dispatch_once_with(
     client: &tokio_postgres::Client,
     profile: &Result<Option<crate::provision::Profile>, crate::provision::ProfileError>,
+    mailer: &crate::mail::Mailer,
 ) -> Result<bool, tokio_postgres::Error> {
     let Some(job) = pg::claim(client).await? else {
         return Ok(false);
@@ -342,7 +348,104 @@ pub async fn dispatch_once_with(
     if completed.state == "succeeded" && !entity_counts.is_empty() {
         emit_entity_aggregates(client, &completed, &entity_counts).await;
     }
+    // The run report rides the same settle, last. Mail is best-effort by
+    // design — every caller has a fallback — so a send that fails is logged and
+    // dropped rather than failing a job that already succeeded. Reporting an
+    // outcome is not part of producing it.
+    for message in run_report_messages(&org.name, &org.env, &completed, &entity_counts) {
+        if let Err(e) = mailer.send(&message).await {
+            eprintln!(
+                "run report for job {} to {} failed: {e}",
+                completed.id, message.to
+            );
+        }
+    }
     Ok(true)
+}
+
+/// Job kinds a run report is sent for: the ones whose outcome a steward is
+/// waiting on.
+///
+/// `lake_maintain` is deliberately absent — it is platform housekeeping on a
+/// schedule, and a tenant cannot act on it, so mailing them would train them to
+/// filter the whole thread. `provision` is absent because the tenant-create UI
+/// already polls it with a progress indicator. Both still emit webhooks and
+/// still appear in the runs list; this is about what is worth an interruption.
+const REPORTED_KINDS: [&str; 4] = ["run_all_full", "run_all_incremental", "correct", "train"];
+
+/// The org env key holding the report recipients, comma-separated.
+const REPORT_TO_KEY: &str = "ER_RUN_REPORT_TO";
+
+/// The run-report messages to send for a settled job, one per recipient.
+///
+/// Empty means send nothing, and there are four reasons for that: the tenant has
+/// not configured reporting, the kind is not one a steward waits on, the job was
+/// requeued rather than settled, or every configured address was blank.
+///
+/// **Recipients are an explicit address list, not a derived one.** er-server has
+/// no user roster — membership lives in the frontend's own database, and
+/// inventing a cross-store read for a notification would be a worse trade than
+/// asking an operator for addresses. So `ER_RUN_REPORT_TO` sits in the org's
+/// `env` beside the nine other `ER_*` keys the dispatcher already reads, and its
+/// ABSENCE is the opt-out: a tenant who has not asked for mail does not get any.
+///
+/// Pure so the whole decision is testable without a mailer, a Postgres or a
+/// job: every branch below is a rule someone will want to change later.
+fn run_report_messages(
+    org_name: &str,
+    env: &Value,
+    job: &Job,
+    entity_counts: &[(String, i64)],
+) -> Vec<crate::mail::Message> {
+    // A requeued job has not settled; reporting per attempt is how three
+    // notifications get sent for one incident. Same rule the webhook follows.
+    if job.state == "queued" || !REPORTED_KINDS.contains(&job.kind.as_str()) {
+        return Vec::new();
+    }
+    let Some(to) = env_str(env, REPORT_TO_KEY) else {
+        return Vec::new();
+    };
+    let recipients: Vec<&str> = to
+        .split(',')
+        .map(str::trim)
+        .filter(|address| !address.is_empty())
+        .collect();
+    if recipients.is_empty() {
+        return Vec::new();
+    }
+
+    let summary = entity_counts
+        .iter()
+        .map(|(kind, count)| format!("  {count} {kind}"))
+        .collect::<Vec<_>>()
+        .join(
+            "
+",
+        );
+    let mut params = std::collections::BTreeMap::new();
+    params.insert("org".to_string(), json!(org_name));
+    params.insert("kind".to_string(), json!(job.kind));
+    params.insert("state".to_string(), json!(job.state));
+    params.insert("job_id".to_string(), json!(job.id));
+    if let Some(run_id) = &job.run_id {
+        params.insert("run_id".to_string(), json!(run_id));
+    }
+    if let Some(detail) = &job.error_detail {
+        params.insert("error".to_string(), json!(detail));
+    }
+    if !summary.is_empty() {
+        params.insert("summary".to_string(), json!(summary));
+    }
+
+    recipients
+        .into_iter()
+        .map(|address| crate::mail::Message {
+            to: address.to_string(),
+            template: "run_report".to_string(),
+            params: params.clone(),
+            org: Some(org_name.to_string()),
+        })
+        .collect()
 }
 
 /// The `entity.*` webhook event name for one `entity_events.event_type`, or
@@ -1405,5 +1508,133 @@ mod tests {
     fn fmt_epoch_matches_known_instants() {
         assert_eq!(fmt_epoch(0), "1970-01-01 00:00:00");
         assert_eq!(fmt_epoch(1_767_323_045), "2026-01-02 03:04:05");
+    }
+}
+
+#[cfg(test)]
+mod run_report_tests {
+    use super::{REPORT_TO_KEY, run_report_messages};
+    use crate::Job;
+    use serde_json::json;
+
+    fn job(kind: &str, state: &str) -> Job {
+        let at = "2026-01-02T03:04:05Z".parse().expect("a fixed timestamp");
+        Job {
+            id: "01JOB000000000000000000001".to_string(),
+            org_id: "uuid-acme".to_string(),
+            kind: kind.to_string(),
+            params: json!({}),
+            state: state.to_string(),
+            priority: 0,
+            idempotency_key: None,
+            run_id: Some("01RUN000000000000000000001".to_string()),
+            attempt: 1,
+            max_attempts: 3,
+            error_class: None,
+            error_detail: None,
+            not_before: None,
+            created_by: None,
+            schedule_id: None,
+            resource_class: None,
+            trace_context: None,
+            created_at: at,
+            updated_at: at,
+            started_at: None,
+            finished_at: None,
+        }
+    }
+
+    #[test]
+    fn a_tenant_that_asked_for_reports_gets_one_per_recipient() {
+        let env = json!({ REPORT_TO_KEY: "ops@acme.test, steward@acme.test" });
+        let sent = run_report_messages("acme", &env, &job("run_all_full", "succeeded"), &[]);
+        assert_eq!(
+            sent.iter().map(|m| m.to.as_str()).collect::<Vec<_>>(),
+            vec!["ops@acme.test", "steward@acme.test"],
+            "addresses are split on commas and trimmed"
+        );
+        assert!(sent.iter().all(|m| m.template == "run_report"));
+        assert_eq!(sent[0].org.as_deref(), Some("acme"));
+    }
+
+    #[test]
+    fn absence_is_the_opt_out() {
+        // The default must be silence. A tenant who never asked for mail must
+        // not receive any because a run happened to finish.
+        assert!(
+            run_report_messages("acme", &json!({}), &job("run_all_full", "succeeded"), &[])
+                .is_empty()
+        );
+        // Configured-but-blank is the same answer, not a message to "".
+        for blank in ["", "   ", ",", " , "] {
+            let env = json!({ REPORT_TO_KEY: blank });
+            assert!(
+                run_report_messages("acme", &env, &job("run_all_full", "succeeded"), &[])
+                    .is_empty(),
+                "blank recipients {blank:?} must send nothing rather than mail an empty address"
+            );
+        }
+    }
+
+    #[test]
+    fn a_requeued_job_is_not_an_outcome() {
+        // The rule the webhook already follows: a job that fails twice and then
+        // succeeds is ONE outcome. Reporting per attempt is how three
+        // notifications get sent for one incident.
+        let env = json!({ REPORT_TO_KEY: "ops@acme.test" });
+        assert!(run_report_messages("acme", &env, &job("run_all_full", "queued"), &[]).is_empty());
+    }
+
+    #[test]
+    fn housekeeping_kinds_are_not_reported() {
+        let env = json!({ REPORT_TO_KEY: "ops@acme.test" });
+        for kind in ["lake_maintain", "provision", "apply_corrections"] {
+            assert!(
+                run_report_messages("acme", &env, &job(kind, "succeeded"), &[]).is_empty(),
+                "{kind} is not a kind a steward waits on, and mailing it teaches them to filter \
+                 the whole thread"
+            );
+        }
+        for kind in ["run_all_full", "run_all_incremental", "correct", "train"] {
+            assert_eq!(
+                run_report_messages("acme", &env, &job(kind, "succeeded"), &[]).len(),
+                1,
+                "{kind} changes a tenant's corpus or produces a model, so it is reported"
+            );
+        }
+    }
+
+    #[test]
+    fn a_failure_carries_its_reason_and_a_success_carries_its_counts() {
+        let env = json!({ REPORT_TO_KEY: "ops@acme.test" });
+
+        let mut failed = job("correct", "failed");
+        failed.error_detail = Some("no model_registry row has status='active'".to_string());
+        let sent = run_report_messages("acme", &env, &failed, &[]);
+        let rendered = crate::mail::render(&sent[0]).expect("renders");
+        assert!(
+            rendered.subject.contains("correct failed"),
+            "{}",
+            rendered.subject
+        );
+        assert!(
+            rendered.body.contains("no model_registry row"),
+            "a failure report must say why: {}",
+            rendered.body
+        );
+
+        let counts = vec![("merged".to_string(), 4_i64), ("created".to_string(), 2)];
+        let ok = run_report_messages("acme", &env, &job("run_all_full", "succeeded"), &counts);
+        let rendered = crate::mail::render(&ok[0]).expect("renders");
+        assert!(
+            rendered.body.contains("4 merged") && rendered.body.contains("2 created"),
+            "a success report must say what changed: {}",
+            rendered.body
+        );
+        assert!(
+            !rendered.body.contains("Why it failed"),
+            "a success must not carry a failure section: {}",
+            rendered.body
+        );
     }
 }

@@ -2075,7 +2075,44 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          Two sabotages observed: suppressing the emit leaves the delivery list empty, and nulling
          the master leaves a payload the test rejects while still showing all four members — so
          the two halves of the assertion fail independently.
-   - [ ] O2b emailed run reports (#58's reporting half), O5 tags/approval (#51),
+   - [x] **O2b emailed run reports — and the recipient question er-server cannot answer.**
+         `POST /v1/email` has existed since #203 and `AppState.mail` was touched by exactly one
+         caller: the `operator_only` send route. There was no dispatcher-side mailer at all, so
+         nothing the engine did could ever reach a human by mail.
+         **The plan's "which org members get a report" has no answer in this process**, and
+         that is the finding rather than a gap to fill: membership lives in the *frontend's*
+         database, so er-server has no user roster. Inventing a cross-store read for a
+         notification would be a far worse trade than asking an operator for addresses. So
+         recipients are an explicit list in the org's `env` under `ER_RUN_REPORT_TO` — the
+         channel the dispatcher already reads nine `ER_*` keys from — and its **absence is the
+         opt-out**: a tenant who never asked for mail does not get any because a run finished.
+         The mailer is built by `dispatch_once` from env and passed into `dispatch_once_with`,
+         mirroring exactly how `Profile::from_env()` is injected so tests can supply their own.
+         The report rides the same settle as the `job.*` webhook and obeys the same rule the
+         comment there already states — **one per OUTCOME, not per attempt**, because a job
+         that fails twice then succeeds is one success, and three notifications for one
+         incident is how an integration learns to ignore them. A send that fails is logged and
+         dropped: mail is best-effort by design, and reporting an outcome is not part of
+         producing it.
+         **Reported kinds are a decision, not a default**: `run_all_full`,
+         `run_all_incremental`, `correct`, `train` — the ones whose outcome a steward waits on.
+         `lake_maintain` is platform housekeeping a tenant cannot act on and `provision` is
+         already polled by the tenant-create UI with a progress indicator; mailing either
+         teaches a recipient to filter the whole thread. Both still emit webhooks and still
+         appear in the runs list.
+         The whole decision is one pure function (`run_report_messages`) so every rule is
+         testable without a mailer, a Postgres or a job — each branch is something someone will
+         want to change later. Observed failing two ways: reporting every kind fails
+         `housekeeping_kinds_are_not_reported`, and dropping the blank-address filter fails
+         `absence_is_the_opt_out` (configured-but-blank must send nothing rather than mail an
+         empty address). The success report carries the O3c entity counts and the failure
+         report carries `error_detail`, which is already chain-flattened so it reads as a
+         sentence rather than the outermost wrapper's Display.
+         Fully verifiable without V0: `ER_MAIL_BACKEND=log` renders to the server log, so only
+         real *delivery* waits on an SES identity. The two `dispatch_once_with` test call sites
+         pass `Mailer::off()` deliberately — their orgs configure no recipients, and a mailer
+         that cannot send turns a stray report into a logged error instead of a silent success.
+   - [ ] O5 tags/approval (#51),
          O6 bulk depth (#9/#62/#52), O8 workflows + triggers (#55/#56). (O3b, O3c and O7a have
          shipped; O7b's insights depth is the remaining half of #45/#57/#85.)
 5. **Cleanse + verify**

@@ -244,9 +244,16 @@ async fn provisioning_a_tenant_end_to_end() {
             data_template: None,
             env_extra: serde_json::from_str(r#"{"ER_DUCKDB_THREADS":"2"}"#).unwrap(),
         }));
-        let ran = er_server::dispatcher::dispatch_once_with(&client, &profile)
-            .await
-            .unwrap();
+        // `off` rather than `logging`: provisioning is not a reported kind, so a
+        // mailer that CAN send would pass this test whether the gate works or
+        // not — one that cannot send turns a stray report into an error.
+        let ran = er_server::dispatcher::dispatch_once_with(
+            &client,
+            &profile,
+            &er_server::mail::Mailer::off(),
+        )
+        .await
+        .unwrap();
         assert!(ran, "the provision job should have been claimed");
         let org = pg::get_org(&client, "acme").await.unwrap().unwrap();
         assert_eq!(org.state, "active", "provisioning promotes the org");
