@@ -248,7 +248,7 @@ WHERE status = 'open'
         OpenCountRow::from_batches(&batches)
     }
 
-    /// One row of `page`: One keyset page of the review queue at a pinned snapshot, FIFO by review id.
+    /// One row of `page`: One keyset page of the review queue at a pinned snapshot, FIFO by review id, optionally narrowed to a confidence band. With NEITHER bound set the result is exactly what it was before bands existed, nulls included. With EITHER bound set, rows with no `match_probability` are excluded — a `never_unsatisfiable` escalation is not a scored pair but a structural contradiction, so it is in no band, and returning it inside one would make the filter lie about itself. It must not vanish silently either: the caller reports how many unscored items a band is hiding, counted by `unscored_open_count`. `status` and `reason` narrow to one value each — the BFF has declared both as passthrough query parameters since the inbox shipped and the server accepted and IGNORED them, which is the defect class this program keeps finding: a contract the frontend states and the backend never fulfilled.
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
     pub struct PageRow {
         pub id: String,
@@ -355,11 +355,15 @@ WHERE status = 'open'
         }
     }
 
-    /// One keyset page of the review queue at a pinned snapshot, FIFO by review id.
+    /// One keyset page of the review queue at a pinned snapshot, FIFO by review id, optionally narrowed to a confidence band. With NEITHER bound set the result is exactly what it was before bands existed, nulls included. With EITHER bound set, rows with no `match_probability` are excluded — a `never_unsatisfiable` escalation is not a scored pair but a structural contradiction, so it is in no band, and returning it inside one would make the filter lie about itself. It must not vanish silently either: the caller reports how many unscored items a band is hiding, counted by `unscored_open_count`. `status` and `reason` narrow to one value each — the BFF has declared both as passthrough query parameters since the inbox shipped and the server accepted and IGNORED them, which is the defect class this program keeps finding: a contract the frontend states and the backend never fulfilled.
     pub fn page(
         conn: &::duckdb::Connection,
         snapshot: i64,
         after: Option<&str>,
+        status: Option<&str>,
+        reason: Option<&str>,
+        min_probability: Option<f64>,
+        max_probability: Option<f64>,
         limit: i64,
     ) -> ::duckdb::Result<Vec<PageRow>> {
         const SQL: &str = "SELECT id, subject_type, rec_a_key, rec_b_key, entity_id, reason,
@@ -367,13 +371,26 @@ WHERE status = 'open'
        resolved_by, resolved_at
 FROM lake.main.review_queue AT (VERSION => {snapshot})
 WHERE ($1 IS NULL OR id > $1)
+  AND ($2 IS NULL OR status = $2)
+  AND ($3 IS NULL OR reason = $3)
+  AND (($4 IS NULL AND $5 IS NULL)
+       OR (match_probability IS NOT NULL
+           AND ($4 IS NULL OR match_probability >= $4)
+           AND ($5 IS NULL OR match_probability <= $5)))
 ORDER BY id
-LIMIT $2
+LIMIT $6
 ";
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
         let mut stmt = conn.prepare(&sql)?;
         let batches = stmt
-            .query_arrow(::duckdb::params![after, limit])?
+            .query_arrow(::duckdb::params![
+                after,
+                status,
+                reason,
+                min_probability,
+                max_probability,
+                limit
+            ])?
             .collect::<Vec<_>>();
         PageRow::from_batches(&batches)
     }
@@ -431,6 +448,54 @@ WHERE id = $1
             .query_arrow(::duckdb::params![review_id])?
             .collect::<Vec<_>>();
         PairLiveRow::from_batches(&batches)
+    }
+
+    /// One row of `unscored_open_count`: How many OPEN reviews carry no match probability — the `never_unsatisfiable` escalations a confidence band necessarily excludes. Read so the inbox can say how many items a band is hiding rather than letting the highest-priority work in the queue disappear behind a slider: an unsatisfiable constraint is a question for a human, and a filter that silently removes it is how it goes unanswered forever.
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct UnscoredOpenCountRow {
+        pub n: Option<i64>,
+    }
+
+    impl UnscoredOpenCountRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![("n", ::arrow::datatypes::DataType::Int64)]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::Int64Array = crate::batch::col(batch, 0, "n")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        n: crate::batch::opt_i64(c0, i),
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// How many OPEN reviews carry no match probability — the `never_unsatisfiable` escalations a confidence band necessarily excludes. Read so the inbox can say how many items a band is hiding rather than letting the highest-priority work in the queue disappear behind a slider: an unsatisfiable constraint is a question for a human, and a filter that silently removes it is how it goes unanswered forever.
+    pub fn unscored_open_count(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+    ) -> ::duckdb::Result<Vec<UnscoredOpenCountRow>> {
+        const SQL: &str = "SELECT count(*) AS n
+FROM lake.main.review_queue AT (VERSION => {snapshot})
+WHERE status = 'open' AND match_probability IS NULL
+";
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = conn.prepare(&sql)?;
+        let batches = stmt.query_arrow(::duckdb::params![])?.collect::<Vec<_>>();
+        UnscoredOpenCountRow::from_batches(&batches)
     }
 }
 

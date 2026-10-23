@@ -3284,7 +3284,19 @@ async fn duplicates_list(
             }
         };
     let limit = read::parse_limit(params.get("limit").map(String::as_str));
-    match read::duplicates(&session, entity_type, snapshot, after.as_deref(), limit) {
+    // The clusters an over-merge hides in are the LARGE ones, and a page
+    // ordered by entity id will not surface them on its own.
+    let min_members = params
+        .get("min_members")
+        .and_then(|v| v.trim().parse::<i64>().ok());
+    match read::duplicates(
+        &session,
+        entity_type,
+        snapshot,
+        after.as_deref(),
+        min_members,
+        limit,
+    ) {
         Ok((items, next_cursor)) => Json(json!({
             "items": items,
             "snapshot": snapshot,
@@ -4133,12 +4145,55 @@ async fn reviews_list(
         Err(r) => return *r,
     };
     let limit = read::parse_limit(params.get("limit").map(String::as_str));
-    page_envelope(read::reviews_list(
-        &session,
-        snapshot,
-        after.as_deref(),
-        limit,
-    ))
+    // The confidence band (O6). A steward with a 40,000-item queue wants the
+    // high-confidence tail first — it clears fastest — and the queue was FIFO
+    // by id with no way to say so.
+    let probability = |key: &str| params.get(key).and_then(|v| v.trim().parse::<f64>().ok());
+    let text = |key: &str| {
+        params
+            .get(key)
+            .map(String::as_str)
+            .filter(|v| !v.trim().is_empty())
+    };
+    let filters = read::ReviewFilters {
+        status: text("status"),
+        reason: text("reason"),
+        min_probability: probability("min_probability"),
+        max_probability: probability("max_probability"),
+    };
+    let band = (filters.min_probability, filters.max_probability);
+    if let (Some(lo), Some(hi)) = band
+        && lo > hi
+    {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("min_probability {lo} is above max_probability {hi}; the band is empty"),
+        );
+    }
+    let (items, next_cursor) =
+        match read::reviews_list(&session, snapshot, after.as_deref(), filters, limit) {
+            Ok(page) => page,
+            Err(e) => {
+                return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}"));
+            }
+        };
+    // What the band HIDES, reported rather than left to be discovered. A
+    // `never_unsatisfiable` escalation carries no probability (it is a
+    // structural contradiction, not a scored pair), so it is in no band — and
+    // it is the highest-priority item in the queue. Silently removing it behind
+    // a slider is how it goes unanswered forever.
+    let unscored_hidden = if band.0.is_some() || band.1.is_some() {
+        read::unscored_open_reviews(&session, snapshot).unwrap_or(0)
+    } else {
+        0
+    };
+    Json(json!({
+        "items": items,
+        "snapshot": snapshot,
+        "next_cursor": next_cursor,
+        "unscored_hidden": unscored_hidden,
+    }))
+    .into_response()
 }
 
 /// Viewer+: one review by id (`GET /v1/orgs/{org}/reviews/{review_id}`), 404 if absent.

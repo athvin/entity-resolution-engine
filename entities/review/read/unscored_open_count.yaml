@@ -1,0 +1,7 @@
+kind: statement
+operation: read
+description: "How many OPEN reviews carry no match probability — the `never_unsatisfiable` escalations a confidence band necessarily excludes. Read so the inbox can say how many items a band is hiding rather than letting the highest-priority work in the queue disappear behind a slider: an unsatisfiable constraint is a question for a human, and a filter that silently removes it is how it goes unanswered forever."
+params:
+  - { name: snapshot, type: bigint }
+returns:
+  - { name: n, type: bigint }

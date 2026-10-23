@@ -398,6 +398,49 @@ async fn golden_records_read_over_ducklake() {
     assert!(groups[0]["member_count"].as_i64().unwrap() >= 2);
     assert!(groups[0]["members"].as_array().unwrap().len() >= 2);
 
+    // O6: `min_members` raises the floor. The clusters an over-merge hides in
+    // are the LARGE ones, and a page ordered by entity id will not surface them.
+    let biggest = groups
+        .iter()
+        .filter_map(|g| g["member_count"].as_i64())
+        .max()
+        .expect("at least one group");
+    let resp = app
+        .clone()
+        .oneshot(op_get(&format!(
+            "/v1/orgs/acme/duplicates?min_members={biggest}"
+        )))
+        .await
+        .unwrap();
+    let narrowed = json_body(resp).await;
+    let narrowed_groups = narrowed["items"].as_array().unwrap();
+    assert!(
+        !narrowed_groups.is_empty() && narrowed_groups.len() <= groups.len(),
+        "the floor must narrow, not empty, the page"
+    );
+    assert!(
+        narrowed_groups
+            .iter()
+            .all(|g| g["member_count"].as_i64().unwrap() >= biggest),
+        "every group must meet the floor: {narrowed_groups:?}"
+    );
+    // Floored at 2 regardless of what is asked — a one-member entity is not a
+    // duplicate group, so admitting one would change what the endpoint means.
+    let resp = app
+        .clone()
+        .oneshot(op_get("/v1/orgs/acme/duplicates?min_members=1"))
+        .await
+        .unwrap();
+    let floored = json_body(resp).await;
+    assert!(
+        floored["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|g| g["member_count"].as_i64().unwrap() >= 2),
+        "min_members=1 must not admit single-record entities"
+    );
+
     // Match-scores: base_10 has 19 active scored pairs with evidence.
     let resp = app
         .clone()
@@ -521,6 +564,96 @@ async fn golden_records_read_over_ducklake() {
     assert_eq!(review_items[0]["status"], "open");
     assert_eq!(review_items[0]["subject_type"], "pair");
     let review_id = review_items[0]["id"].as_str().unwrap().to_string();
+    let probability = review_items[0]["match_probability"].as_f64().unwrap();
+
+    // O6: the confidence band. A steward with a 40,000-item queue wants the
+    // high-confidence tail first, and the queue was FIFO by id with no way to
+    // say so.
+    let resp = app
+        .clone()
+        .oneshot(op_get(&format!(
+            "/v1/orgs/acme/reviews?min_probability={}",
+            probability + 0.05
+        )))
+        .await
+        .unwrap();
+    let above = json_body(resp).await;
+    assert!(
+        above["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|r| r["match_probability"].as_f64().unwrap() >= probability + 0.05),
+        "every row must be inside the band"
+    );
+    // What the band HIDES is reported, not discovered. A `never_unsatisfiable`
+    // escalation carries no probability — it is a structural contradiction, not
+    // a scored pair — so it is in no band, and it is the highest-priority item
+    // in the queue. The count is present whenever a band is active.
+    assert!(
+        above["unscored_hidden"].is_i64(),
+        "a banded read must say how many unscored items it excluded"
+    );
+    // ...and absent-band reads are unchanged, nulls included.
+    let resp = app
+        .clone()
+        .oneshot(op_get("/v1/orgs/acme/reviews"))
+        .await
+        .unwrap();
+    let unbanded = json_body(resp).await;
+    assert_eq!(
+        unbanded["items"].as_array().unwrap().len(),
+        review_items.len(),
+        "no band means the page is exactly what it was before bands existed"
+    );
+    assert_eq!(unbanded["unscored_hidden"], 0);
+
+    // An inverted band is refused rather than silently returning nothing.
+    let resp = app
+        .clone()
+        .oneshot(op_get(
+            "/v1/orgs/acme/reviews?min_probability=0.9&max_probability=0.1",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    // `status` and `reason` now DO something. The BFF has declared both as
+    // passthrough query parameters since the inbox shipped and the server
+    // accepted and ignored them — the defect class this program keeps finding,
+    // and the reason a filter that is merely declared is worse than none.
+    let resp = app
+        .clone()
+        .oneshot(op_get("/v1/orgs/acme/reviews?status=resolved_match"))
+        .await
+        .unwrap();
+    assert_eq!(
+        json_body(resp).await["items"].as_array().unwrap().len(),
+        0,
+        "nothing is resolved yet, so a status filter must return nothing — \
+         before this it returned the whole open queue"
+    );
+    let resp = app
+        .clone()
+        .oneshot(op_get("/v1/orgs/acme/reviews?reason=gray_band"))
+        .await
+        .unwrap();
+    let by_reason = json_body(resp).await;
+    assert_eq!(
+        by_reason["items"].as_array().unwrap().len(),
+        review_items.len(),
+        "every base_10 review is a gray_band one, so this filter keeps them all"
+    );
+    let resp = app
+        .clone()
+        .oneshot(op_get("/v1/orgs/acme/reviews?reason=never_unsatisfiable"))
+        .await
+        .unwrap();
+    assert_eq!(
+        json_body(resp).await["items"].as_array().unwrap().len(),
+        0,
+        "and a reason the corpus has none of returns none"
+    );
 
     // review-by-id resolves that review.
     let resp = app

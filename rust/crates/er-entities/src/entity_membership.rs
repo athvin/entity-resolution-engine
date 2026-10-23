@@ -276,7 +276,7 @@ FROM (
         DupGroupStatsRow::from_batches(&batches)
     }
 
-    /// One row of `duplicate_groups_page`: One keyset page of duplicate groups at a pinned snapshot: entities holding two or more member records.
+    /// One row of `duplicate_groups_page`: One keyset page of duplicate groups (entities with at least two members) at a pinned snapshot, with their member counts. `min_members` raises the floor — the clusters an over-merge hides in are the large ones, and a page ordered by entity id will not surface them on its own. Floored at 2 regardless of what is asked: a one-member entity is not a duplicate group, so admitting one would change what the endpoint means.
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
     pub struct DuplicateGroupsPageRow {
         pub entity_id: String,
@@ -315,25 +315,29 @@ FROM (
         }
     }
 
-    /// One keyset page of duplicate groups at a pinned snapshot: entities holding two or more member records.
+    /// One keyset page of duplicate groups (entities with at least two members) at a pinned snapshot, with their member counts. `min_members` raises the floor — the clusters an over-merge hides in are the large ones, and a page ordered by entity id will not surface them on its own. Floored at 2 regardless of what is asked: a one-member entity is not a duplicate group, so admitting one would change what the endpoint means.
     pub fn duplicate_groups_page(
         conn: &::duckdb::Connection,
         snapshot: i64,
         after: Option<&str>,
+        min_members: Option<i64>,
         limit: i64,
     ) -> ::duckdb::Result<Vec<DuplicateGroupsPageRow>> {
         const SQL: &str = "SELECT entity_id, count(*) AS member_count
 FROM lake.main.entity_membership AT (VERSION => {snapshot})
 WHERE ($1 IS NULL OR entity_id > $1)
 GROUP BY entity_id
-HAVING count(*) >= 2
+HAVING count(*) >= CASE
+         WHEN coalesce($2, 2) < 2 THEN 2
+         ELSE coalesce($2, 2)
+       END
 ORDER BY entity_id
-LIMIT $2
+LIMIT $3
 ";
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
         let mut stmt = conn.prepare(&sql)?;
         let batches = stmt
-            .query_arrow(::duckdb::params![after, limit])?
+            .query_arrow(::duckdb::params![after, min_members, limit])?
             .collect::<Vec<_>>();
         DuplicateGroupsPageRow::from_batches(&batches)
     }

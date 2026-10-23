@@ -1,9 +1,10 @@
 kind: statement
 operation: read
-description: "One keyset page of duplicate groups at a pinned snapshot: entities holding two or more member records."
+description: "One keyset page of duplicate groups (entities with at least two members) at a pinned snapshot, with their member counts. `min_members` raises the floor — the clusters an over-merge hides in are the large ones, and a page ordered by entity id will not surface them on its own. Floored at 2 regardless of what is asked: a one-member entity is not a duplicate group, so admitting one would change what the endpoint means."
 params:
   - { name: snapshot, type: bigint }
   - { name: after, type: varchar, nullable: true }
+  - { name: min_members, type: bigint, nullable: true }
   - { name: limit, type: bigint }
 returns:
   - { name: entity_id, type: varchar, nullable: false }
