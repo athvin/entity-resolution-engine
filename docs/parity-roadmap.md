@@ -2186,8 +2186,43 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          across the apply and unapply routes. Three visual baselines moved: `entity-detail` on
          all three device projects, which is exactly right, since the chips render at every
          size and nothing shared changed.
-   - [ ] O5c approval-gated scheduled merges (#51's approval half: the scheduler acts only on
-         an approved tag, named in config rather than by a magic flag),
+   - [x] **O5c the approval gate — off by default, and disabled by retiring the tag.**
+         A new schedulable kind `apply_approved`: for every review carrying the tenant's
+         approval tag it stages a `resolve_review` and enqueues the existing
+         `apply_corrections`. **The gate decides WHAT to merge and never how** — reusing the
+         steward apply path means this adds no second way to merge a group, which a scheduled
+         job reaching into the lake itself would have been.
+         **Off by default, and that is the assertion that matters.** No `approval.tag` means
+         nothing is ever staged; an approval workflow that is on until switched off would merge
+         groups nobody looked at. The sabotage that ignores the config gate fails on exactly
+         that phase. `approval` is `skip_serializing_if` empty, so `config_hash` is
+         byte-identical for every tenant that never asked for it — the rule V1, E3 and E11a
+         each followed, pinned here by its own test rather than left to the golden.
+         **The config names a tag by NAME, not id**, for two reasons that turned out to be the
+         same one: a config is a document a human edits and copies between environments (O9),
+         where an id would not survive the copy — and resolving by name against the LIVE
+         vocabulary means retiring the tag disables the workflow, which is what an operator
+         would expect retiring it to do. Asserted: a review still carrying the tagging stages
+         nothing once the tag is retired.
+         **The tag comes off as each review is staged.** It means "approved, pending
+         application", so leaving it would re-stage the same review every tick; the durable
+         record is the staged action and its history, not the attachment. That is also what
+         makes a second tick a no-op, and the sabotage that skips the untagging fails on it.
+         Resolution is always `match`: approving a duplicate group means the records are the
+         same, and reading a tag as "whatever the steward intended" would be a guess the data
+         cannot support. A steward who means `no_match` resolves it directly. Capped at 200 a
+         tick so a tenant approving a thousand groups sees them merged over several ticks
+         rather than one job holding the org's single writer slot — the remainder keeps its
+         tag, which is why removing it as it is staged matters.
+         **Two guard rails caught me, both working as designed.** `dispatch_coverage` rejected
+         my `APPROVED_MERGE_KIND` constant: it checks for a missing arm by scanning source for
+         the kind's LITERAL, so a constant is invisible to it and reintroduces exactly the gap
+         that let `train` sit in `SCHEDULABLE_KINDS` with no arm. Literals restored in both
+         places, with the reason at the arm. And the job failed with `org env missing
+         ER_LAKE_CATALOG` before reaching that arm, because every job reconciled its lake
+         first — but `apply_approved` never opens one, so it now joins `provision` in skipping
+         it. That is not merely expedient: it means a tenant whose lake is unreachable can
+         still RECORD approvals, where the apply reconciles when it runs.
          O6 bulk depth (#9/#62/#52), O8 workflows + triggers (#55/#56). (O3b, O3c and O7a have
          shipped; O7b's insights depth is the remaining half of #45/#57/#85.)
 5. **Cleanse + verify**
