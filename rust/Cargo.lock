@@ -1718,6 +1718,7 @@ dependencies = [
  "er-compile",
  "er-config",
  "er-entities",
+ "er-entity-diff",
  "er-golden",
  "er-hash",
  "er-ids",

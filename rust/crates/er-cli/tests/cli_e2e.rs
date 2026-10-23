@@ -265,12 +265,30 @@ fn er_run_all_reproduces_base_10_relations() {
         after.iter().any(|t| t["table"] == "golden_records"),
         "maintenance stats cover the lake tables"
     );
-    // Every table has at least one data file once inlined rows are flushed.
-    assert!(
-        after
-            .iter()
-            .all(|t| t["file_count"].as_i64().unwrap_or(-1) >= 1),
-        "flush produced a data file per table: {after:?}"
+    // Flush leaves no table with ROWS still inlined. A table with no rows has
+    // no data file, which is correct rather than a failure — and base_10
+    // populates neither the steward overlays nor the assertion ledger.
+    //
+    // This used to assert `>= 1` for every table, which held only because `er`
+    // created a table lazily, when something first wrote to it. It now
+    // reconciles its lake at startup like the dispatcher always has, so a CLI
+    // lake carries the whole catalog from the first command and the empty ones
+    // show up here. Naming them is the point: if a table base_10 DOES populate
+    // ever joins this list, that is a real regression and this fails.
+    let empty: Vec<&str> = after
+        .iter()
+        .filter(|t| t["file_count"].as_i64().unwrap_or(-1) < 1)
+        .filter_map(|t| t["table"].as_str())
+        .collect();
+    assert_eq!(
+        empty,
+        vec![
+            "assertions",
+            "golden_overrides",
+            "record_overlays",
+            "record_qualities"
+        ],
+        "only the relations base_10 never writes may be fileless: {after:?}"
     );
 
     let _ = std::fs::remove_dir_all(&tmp);

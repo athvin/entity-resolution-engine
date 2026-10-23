@@ -2493,6 +2493,44 @@ fn screen_deliveries(session: &Session, config: &Config, inputs: &PipelineInputs
     }
 }
 
+/// Bring a lake's schema up to the compiled catalog, returning how many
+/// statements were applied.
+///
+/// A CLI invocation is a lake job, and the design's rule is that every lake job
+/// reconciles its lake first — but only the dispatcher did it. `er` drove a lake
+/// through `create_ddl_table`, which is `CREATE TABLE IF NOT EXISTS`: it
+/// creates a missing table and never touches an existing one. So a lake created
+/// before a column was added never gained it, and the write that needed it
+/// failed.
+///
+/// That is not hypothetical. E9b added `matched_count`, `review_count`,
+/// `unmatched_count` and `screened_at` to `ingest_batches`; a lake older than
+/// that produced
+///
+/// ```text
+/// screening crm could not be recorded: Binder Error:
+///   Referenced update column matched_count not found in table!
+/// ```
+///
+/// on every ingest — and because the screening write is best-effort, the run
+/// logged one line and reported success while recording nothing.
+///
+/// Additive changes apply in a transaction and are ledgered; a BREAKING
+/// difference refuses and leaves the lake untouched, which is the same contract
+/// the control plane holds itself to.
+///
+/// # Errors
+/// A breaking difference, or a DDL/ledger failure.
+pub fn reconcile_lake_schema(session: &Session) -> Result<usize> {
+    let outcome = er_entity_diff::reconcile_lake(
+        session.connection(),
+        &er_entities::catalog::catalog(),
+        "er-cli",
+    )
+    .map_err(|e| anyhow::anyhow!("lake schema: {e}"))?;
+    Ok(outcome.applied.len())
+}
+
 /// S4.5 reconcile: cluster the active auto-merge pairs in `lake.main.match_scores`
 /// into connected components, reconcile them against the prior
 /// `lake.main.entity_membership` (INV-PERM), and write the resulting

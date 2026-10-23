@@ -6,7 +6,7 @@ Before calling backend work done, run **`make check`** from the repo root. It is
 the PR-equivalent gate and mirrors `.github/workflows/rust.yml`:
 
 ```
-make check   # = fmt + lint + entities-check + skills-check + test
+make check   # = fmt + lint + doc + entities-check + skills-check + test
 ```
 
 `cargo fmt` / `cargo clippy` / `cargo test` on their own are **not** sufficient —
