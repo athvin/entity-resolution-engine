@@ -243,10 +243,25 @@ spec:
         karpenter.sh/do-not-disrupt: "true"
     spec:
       restartPolicy: Never
+      # The namespace enforces PodSecurity baseline but warns and audits
+      # against restricted, so a probe without this is admitted and then
+      # generates four warnings on every single trial. The image already runs
+      # as uid 1001 (rust/Dockerfile), so satisfying restricted costs nothing
+      # and keeps the measurement from polluting the audit log.
+      # (No backticks in this heredoc: its delimiter is unquoted, so the shell
+      # would command-substitute them.)
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
 $sched
       containers:
         - name: probe
           image: $IMAGE
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           command: ["/bin/sh", "-c"]
           args:
             - |

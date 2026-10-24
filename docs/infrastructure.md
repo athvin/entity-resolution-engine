@@ -95,7 +95,23 @@ EKS per environment, on the newest minor current at build time (1.36 as of this 
 
 The runner pools are compute-optimized with local NVMe (`c6id` and siblings), not memory-optimized `r6id`, and list many families plus both capacity types deliberately (rationale: D-NODE, D-SPOT). One exclusion is load-bearing: **`c5d.4xlarge` carries only 400 GB of NVMe against the L class's 400 GiB spill limit (§5.3)** — negative headroom before image and kubelet overhead — so it stays out of `runner-l`, while `c5d.2xlarge` (200 GB against S/M's 40–150 GiB) stays in `runner-sm`. `c6id.8xlarge` (32 vCPU) is the top of the ladder, bounded by the `le=32` cap on `duckdb_threads`. Spare capacity is not waste: the one-active-job-per-org constraint means two *different* tenants' runs bin-pack onto one node, and at ~14 GiB per L pod a `c6id.4xlarge` holds two.
 
-**Account vCPU quota is the real floor on node size, and it bites a fresh account.** A new AWS account defaults the two quotas these NodePools draw on — *All Standard Spot Instance Requests* (`L-34B43A08`) and *Running On-Demand Standard instances* (`L-1216C47A`) — to **8 vCPU each**, measured in vCPUs, not instances. A single `runner-l` node is 16 vCPU, so under the default a class-L run can never place: Karpenter's fleet request fails `VcpuLimitExceeded`/`MaxSpotInstanceCountExceeded`, the NodeClaim is torn down and retried, and the runner pod sits `Pending` forever while the dispatcher dutifully keeps the job active (observed 2026-10-11, first 10M run). Both quotas are raised to **64 vCPU** (us-east-2) — enough for the 2-vCPU app node plus concurrent L and M runs with headroom, short of the ~128+ range that draws manual review. This is the §8 "dev shares prod's service quotas" hazard made concrete; revisit before Phase 3 onboards a real tenant.
+**Account vCPU quota is the real floor on node size, and it is still binding.** The two quotas these NodePools draw on — *All Standard Spot Instance Requests* (`L-34B43A08`) and *Running On-Demand Standard instances* (`L-1216C47A`) — are measured in vCPUs, not instances. A single `runner-l` node is 16 vCPU and a `runner-sm` node is 8, so when the ceiling is low a run can never place: Karpenter's fleet request fails `VcpuLimitExceeded`/`MaxSpotInstanceCountExceeded`, the NodeClaim is torn down and retried, and the pod sits `Pending` while nothing obvious appears in its own events (observed 2026-10-11, first 10M run).
+
+**The applied value is 8 on both, not the 64 this section claimed until 2026-10-24.** An increase to 64 was *requested* for both on 2026-10-11, and both requests are `CASE_CLOSED` without having been granted — `aws service-quotas get-service-quota` returns `8.0` for each, against an AWS default of 5. With the always-on `app` node (2 vCPU spot) and the `system` node (2 vCPU on-demand) up, that leaves 6 vCPU of headroom, which is **less than one `runner-sm` node**. Consequences worth stating plainly, because they are easy to misdiagnose as slowness:
+
+- no runner node of either class can be provisioned today;
+- anything that needs a cold runner-shaped node has to fit the headroom, which is why `scripts/measure_runner_startup.sh` provisions a `c6id.xlarge` probe pool rather than using `runner-sm`;
+- the first real class-M or class-L run will sit `Pending` until the quota is actually raised.
+
+Check the applied value rather than trusting this paragraph:
+
+```
+aws service-quotas get-service-quota --service-code ec2 --quota-code L-34B43A08 --region us-east-2
+aws service-quotas list-requested-service-quota-change-history-by-quota \
+  --service-code ec2 --quota-code L-34B43A08 --region us-east-2
+```
+
+A closed case is not a granted one. This is the §8 "dev shares prod's service quotas" hazard made concrete; it must be resolved before Phase 3 onboards a real tenant.
 
 ### 5.1 Karpenter disruption settings
 
@@ -135,7 +151,7 @@ One EKS cluster per environment, for cluster-scoped blast-radius containment, a 
 
 ### 5.5 EKS Auto Mode — chosen (D1, 2026-10-10)
 
-Auto Mode manages Karpenter and the core addons, removing the system node group and the burden of upgrading them. It honours `karpenter.sh/do-not-disrupt` across every consolidation policy and exposes `disruption.consolidationPolicy: WhenEmpty` with `consolidateAfter`, so the §5.1 runner controls survive verbatim; it formats instance-store NVMe RAID0 automatically (§5.3), enforces IMDSv2 hop-limit-1 unconditionally (§5.6), and ships SOCI parallel pull on by default (§11.1). Cost is ~12% of the on-demand rate per instance-hour (charged even on Spot) — roughly $9/mo for the always-on app node and cents per runner-hour. **It costs two things this design otherwise wanted:** no custom AMIs or `blockDeviceMappings`, so §11.1's snapshot-prebake rung is off the table; and since April 2026 its managed instances are hidden from `DescribeInstances`. **Revisit trigger:** if the Auto Mode fee line in the CUR exceeds ~$50/mo, re-run against self-managed Karpenter. Full history (declined rev 2, reopened rev 3, chosen D1): [infrastructure-decisions.md](infrastructure-decisions.md) D-AUTOMODE.
+Auto Mode manages Karpenter and the core addons, removing the system node group and the burden of upgrading them. It honours `karpenter.sh/do-not-disrupt` across every consolidation policy and exposes `disruption.consolidationPolicy: WhenEmpty` with `consolidateAfter`, so the §5.1 runner controls survive verbatim; it formats instance-store NVMe RAID0 automatically (§5.3) and enforces IMDSv2 hop-limit-1 unconditionally (§5.6). It does **not** give these pools SOCI parallel pull: that is scoped to G/P/Trn instances with local NVMe, not `c6id` (§11.1 rung 1 corrects the earlier claim here). Cost is ~12% of the on-demand rate per instance-hour (charged even on Spot) — roughly $9/mo for the always-on app node and cents per runner-hour. **It costs two things this design otherwise wanted:** no custom AMIs or `blockDeviceMappings`, so §11.1's snapshot-prebake rung is off the table; and since April 2026 its managed instances are hidden from `DescribeInstances`. **Revisit trigger:** if the Auto Mode fee line in the CUR exceeds ~$50/mo, re-run against self-managed Karpenter. Full history (declined rev 2, reopened rev 3, chosen D1): [infrastructure-decisions.md](infrastructure-decisions.md) D-AUTOMODE.
 
 ### 5.6 Node and pod hardening
 
@@ -497,7 +513,7 @@ ECR repositories live in the account's single registry, with tag immutability, s
 
 For the runner pools there is no node cache: §5.1 empties a runner node ~30s after its pod exits, so nearly every run starts on a freshly provisioned node pulling `er-pipeline` from scratch (the "let the node cache do the work" plan was defeated — D-PULL). The bytes are cheap (layer blobs ride the gateway endpoint, §4) but the minutes are real on an image carrying a full venv, baked extensions, compiled MinIO binaries, and the tests/fixtures/dev group. The mitigation ladder, cheapest first:
 
-1. **SOCI parallel pull — effectively free.** Ships in current EKS AL2023 and Bottlerocket AMIs, on by default under Auto Mode, up to ~60% faster pulls on 10 GB-class images.
+1. ~~**SOCI parallel pull — effectively free.**~~ **Does not apply to these pools.** The Auto Mode release note that enabled it (2025-11-19) scopes it to **G, P and Trn family instances with local NVMe** — "SOCI parallel pull and unpack is always used for *these instance families*". The runner pools are `c6id` and siblings, so they never get it, and there is no setting that turns it on. What *does* apply is the 2025-04-11 note, "improved image pull speed, particularly for instance types with local instance storage that can take advantage of the faster image decompression" — which is already in the measured pull times, not an available improvement. This rung was free only in the sense that it was never there.
 2. **A runtime/CI image split.** The runtime target drops `tests/`, `fixtures/`, `benchmarks/`, the dev group, and the MinIO server binary. This is a contract change: `test_dockerfile_contract.py` must move with it.
 3. **Snapshot-prebaked images.** Standard Karpenter only — unavailable under Auto Mode (§5.5) — and it adds an artifact to keep fresh, so it is the last rung.
 

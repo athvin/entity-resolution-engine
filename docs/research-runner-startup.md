@@ -1,8 +1,16 @@
 # Research: making runner pods start faster without paying for warm capacity
 
-*2026-10-21. Research only; nothing here is implemented. Companion to
-[infrastructure.md](infrastructure.md) §5/§6/§11 and
+*2026-10-21. Companion to [infrastructure.md](infrastructure.md) §5/§6/§11 and
 [infrastructure-decisions.md](infrastructure-decisions.md) D-PULL / D-DISRUPT / D-AUTOMODE.*
+
+> **Status, 2026-10-24: B and C are implemented and measured. A needs no work.**
+> The measurements §4 asked for exist as
+> [`measurements/runner-startup-20261024.json`](measurements/runner-startup-20261024.json),
+> taken with `scripts/measure_runner_startup.sh` on the live `er-dev` cluster;
+> that record, not this page, is the authority for any number. Four things this
+> page got wrong or could not have known are corrected inline below, each marked
+> **CORRECTION**. The option matrix in §2 and the reasoning in §3 otherwise
+> stand, and the "why the rest are no" verdicts were not revisited.
 
 ## 1. What the code and infra actually do today
 
@@ -61,6 +69,34 @@ the target design, and it also tells you what to keep from the in-process path.
    runner image) would cut the pull by roughly two-thirds. Measure with
    `docker image inspect` before deciding; §18.16 still has no number.
 
+> **CORRECTION (1): it is not one extension, it is four, and ~80 MB.** The
+> workspace pins `duckdb` with the plain `bundled` feature — **without** the
+> `parquet` and `json` features — and `libduckdb-sys`'s bundled build defines
+> `DUCKDB_EXTENSION_AUTOINSTALL_DEFAULT=1` and `AUTOLOAD_DEFAULT=1`. Only
+> `core_functions` is statically linked. So a cold process does not fetch
+> `ducklake` alone: it also autoinstalls `parquet` (every lake read and write),
+> `json` and `icu`. Bisected by running a full `run-all` with autoinstall off,
+> `ducklake`+`parquet` cannot even reconcile the lake schema, and dropping
+> either `json` or `icu` still fails. Uncompressed that is 107 MB of extension
+> for the five the deployed image now bakes (the fifth, `postgres_scanner`, is
+> for production's `ducklake:postgres:…` catalogs), ~33 MB compressed into the
+> image.
+>
+> So the fix is bigger than "saves one HTTPS round-trip", and it is also not
+> only a latency fix: it removes a hard runtime dependency on
+> `extensions.duckdb.org` being reachable, and takes that traffic off the NAT
+> gateway. `dedupe_core::session::BAKED_EXTENSIONS` carries the list and the
+> reasoning; `er-server install-extensions` populates the directory through the
+> same linked DuckDB that will read it, because the files are keyed by exact
+> version and platform.
+>
+> **CORRECTION (2): the three binaries were never all needed.** The chart only
+> ever ran `er-server` — the dispatcher runs in-process in the merged web-api
+> pod and the pipeline runs as a linked library — so `er-dispatcher` and `er`
+> were present in the image but never executed in a pod. The image now ships one
+> binary with two symlinks, dispatched on `argv[0]`, so no entrypoint changed and
+> no chart template moved.
+
 ## 2. The options, with what they cost
 
 Pricing is us-east-2, approximate (third-party aggregator, Oct 2026):
@@ -81,6 +117,29 @@ runner node therefore costs ≈ $0.13/h ≈ **$95/mo**; on-demand ≈ $0.45/h �
 | H | Nix instead of Docker | 0 s | engineering time | No: the image is already a static binary on `bookworm-slim`; Nix changes nothing about node boot |
 | I | Self-managed Karpenter + snapshot-prebaked AMI | ~pull time (~10–20 s) | loses Auto Mode, adds an AMI to keep fresh | No at this size; the pull is not the dominant cost |
 | J | Bottlerocket / different AMI | nothing | n/a | Auto Mode nodes already run Bottlerocket |
+
+> **CORRECTION (3): A is already in effect for every class, so it was not
+> built.** This section reads as though pod-per-run is the status quo and
+> in-process is the change. It is the other way round: `er-server`'s `main`
+> starts the dispatcher inside the API pod and `dispatcher.rs`'s `run_job` calls
+> `er_cli` as a linked library, for S, M and L alike. There is no `kube` or
+> `k8s-openapi` dependency in the workspace, `jobs.resource_class` is declared
+> but written nowhere (every row is NULL), and #276 marked the chart's launcher
+> keys NOT IMPLEMENTED.
+>
+> So A's "zero startup" path is already universal, and the work A actually
+> implies is *building* the Job launcher for M and L — which would **add**
+> startup latency, not remove it. That is a separate, large feature (RBAC, the
+> Job spec, progress-to-DB, cancellation, startup re-adoption) and nothing here
+> starts it. What A's second bullet asks for — bounding the in-process path's
+> threads and memory from the job row — is also still unbuilt, and is worse than
+> this section assumes: `er_cli::open_lake` hard-codes
+> `SessionOptions::deterministic()`, so **every dispatched job runs DuckDB
+> single-threaded with no memory limit**, and the per-tenant
+> `ER_DUCKDB_THREADS`/`ER_DUCKDB_MEMORY_LIMIT` stored in `orgs.env` reach no
+> session at all. That is a throughput bug rather than a startup one, it needs
+> its own validation against the determinism contract, and it is filed rather
+> than fixed here.
 
 ### A. Tiered dispatch: in-process for S, Job for M and L
 
