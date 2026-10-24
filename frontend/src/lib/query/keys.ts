@@ -39,6 +39,12 @@ export const queryKeys = {
   blockingEstimate: (org: string) => ["org", org, "blocking-estimate"] as const,
   configSegments: (org: string) => ["org", org, "config-segments"] as const,
   aiSettings: (org: string) => ["org", org, "ai-settings"] as const,
+  // The per-page key nests under the family so one new recommendation can
+  // invalidate every page at once — the row alone does not say which page's
+  // cache entry it belongs to.
+  reviewRecommendationsAll: (org: string) => ["org", org, "review-recommendations"] as const,
+  reviewRecommendations: (org: string, reviewIds: string[]) =>
+    ["org", org, "review-recommendations", reviewIds] as const,
   adminOrgs: () => ["admin", "orgs"] as const,
   adminOrg: (org: string) => ["admin", "orgs", org] as const,
   adminJobs: (params?: Record<string, string>) => ["admin", "jobs", params ?? {}] as const,

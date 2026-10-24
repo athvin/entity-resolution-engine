@@ -1,6 +1,7 @@
 import {
   boolean,
   customType,
+  doublePrecision,
   index,
   jsonb,
   pgSchema,
@@ -179,6 +180,43 @@ export const orgAiSettings = erweb.table("org_ai_settings", {
   updatedBy: text("updated_by").notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * An LLM's recommendation on one review pair (V6).
+ *
+ * **Deliberately not a `pair_label`.** That table's unique index is
+ * `(org_id, rec_a_key, rec_b_key)` with origin outside the key, and its upsert
+ * rewrites `origin` and `labeled_by` — so storing a suggestion there would
+ * silently overwrite a human's verdict and drop it from the training set. A
+ * suggestion is not a verdict. Keeping it here also keeps the arrow to
+ * er-server pointing one way, exactly as `segments` and `org_ai_settings` do.
+ *
+ * One row per review: a re-run REPLACES the recommendation rather than
+ * appending, because a stale second opinion beside a fresh one is a question
+ * the UI cannot answer. `review_id` is er-server's id and deliberately carries
+ * no foreign key — reviews live in the lake and are rebuilt every reconcile,
+ * so a constraint here would be unenforceable (the same call `taggings` made).
+ */
+export const reviewRecommendations = erweb.table(
+  "review_recommendations",
+  {
+    org: text("org").notNull(),
+    reviewId: text("review_id").notNull(),
+    verdict: text("verdict").notNull(),
+    confidence: doublePrecision("confidence").notNull(),
+    reasoning: text("reasoning").notNull(),
+    /** Which model said it — an accuracy claim has to name its source. */
+    model: text("model").notNull(),
+    /** The matcher's score at the time, so a later read can see what the model saw. */
+    matchProbability: doublePrecision("match_probability"),
+    requestedBy: text("requested_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.org, table.reviewId] }),
+    index("review_recommendations_org_idx").on(table.org),
+  ],
+);
 
 /** Saved segments over golden records (design §5.7). The definition is always
  * the inspectable structured filter — never a prompt — and deliberately limited

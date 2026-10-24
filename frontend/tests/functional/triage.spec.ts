@@ -139,4 +139,96 @@ test.describe("steward triage", () => {
     expect(body.apply_job).toBeTruthy();
     await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
   });
+
+  /**
+   * V6, and it belongs in the MUTATING tier even though it writes only to the
+   * BFF's own Postgres: asking stores a row, and the rendering specs run
+   * against a shared read-only tenant whose baselines a stored recommendation
+   * would move.
+   *
+   * This is the one test that crosses the whole seam — badge → BFF route →
+   * review detail → record pair → the scripted model → the store → back to the
+   * badge. The unit tier can prove the parse and the store in isolation; only
+   * this proves the route assembles the right request from two upstream reads.
+   */
+  test("asks the model to adjudicate a pair and shows the answer as a suggestion", async ({
+    page,
+    isMobile,
+  }, testInfo) => {
+    test.skip(isMobile, "the recommendation sits in the desktop decision panel");
+    await openInbox(page, testInfo.project.name);
+    await expect(page.getByTestId("decision-panel")).toBeVisible();
+
+    // Nothing has been asked for this pair yet, which is a different state from
+    // "asked and got nothing".
+    await expect(page.getByTestId("recommendation-request")).toBeVisible();
+
+    const [response] = await Promise.all([
+      page.waitForResponse(
+        (r) => r.url().includes("/recommend") && r.request().method() === "POST",
+      ),
+      page.getByTestId("recommendation-request").click(),
+    ]);
+    expect(response.status()).toBe(200);
+
+    const badge = page.getByTestId("recommendation");
+    await expect(badge).toBeVisible();
+    // The verdict in plain words, not the wire value.
+    await expect(page.getByTestId("recommendation-verdict")).toContainText("same entity");
+    await expect(page.getByTestId("recommendation-confidence")).toContainText("86%");
+    await expect(page.getByTestId("recommendation-reasoning")).toContainText("Same email");
+    // The advisory framing is the point of the whole surface: it must never
+    // read as a decision already taken.
+    await expect(badge).toContainText("AI suggests");
+    await expect(badge).toContainText("your resolve below is what counts");
+    // And the three resolve buttons are still the only way to act.
+    await expect(page.getByTestId("resolve-match")).toBeEnabled();
+  });
+
+  /**
+   * V6's bulk half. The thing worth proving end to end is that the cap is a
+   * REFUSAL and not a trim: a truncating cap would answer 200 here and leave
+   * blank badges that read as "the model had no opinion" rather than "we did
+   * not ask".
+   */
+  test("asks about several pairs at once, and refuses past the cost cap", async ({
+    page,
+    isMobile,
+  }, testInfo) => {
+    test.skip(isMobile, "bulk selection is the desktop grid path");
+    // The PER-PROJECT queue, not `selectall-dev`. My first draft used the
+    // latter for its 50 loaded rows and raced the select-all test, which
+    // resolves that whole tenant and leaves an empty inbox — `review-list`
+    // simply was not there. The header comment on this file already says the
+    // rule: each project gets its own queue so parallel runs never race.
+    await openInbox(page, testInfo.project.name);
+    await expect(page.getByTestId("review-list")).toBeVisible();
+
+    // Rows 35+, clear of the head the keyboard-20 test consumes and of the
+    // 30–33 window bulk-resolve uses. Asking does not resolve anything, so
+    // these rows stay put for the over-cap check below.
+    const boxes = page.getByTestId("review-list").locator("input[type=checkbox]");
+    for (let index = 35; index < 38; index += 1) {
+      await boxes.nth(index).check();
+    }
+    await expect(page.getByTestId("bulk-recommend")).toContainText("Ask AI (3)");
+
+    const [response] = await Promise.all([
+      page.waitForResponse((r) => r.url().includes("/reviews/recommend-bulk")),
+      page.getByTestId("bulk-recommend").click(),
+    ]);
+    expect(response.status()).toBe(200);
+    const body = (await response.json()) as { answered: number; asked: number };
+    expect(body.asked).toBe(3);
+    expect(body.answered).toBe(3);
+    await expect(page.getByTestId("bulk-recommend-note")).toContainText("Asked about 3 pairs");
+
+    // Eleven selected is one past the cap, and the control refuses rather than
+    // quietly asking about ten of them.
+    for (let index = 38; index < 46; index += 1) {
+      await boxes.nth(index).check();
+    }
+    await expect(page.getByTestId("bulk-recommend")).toContainText("Ask AI (11)");
+    await expect(page.getByTestId("bulk-recommend")).toBeDisabled();
+  });
 });
