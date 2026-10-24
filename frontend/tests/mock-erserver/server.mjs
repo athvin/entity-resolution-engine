@@ -1141,6 +1141,28 @@ const server = http.createServer((req, res) => {
       // block whose JSON matches ENRICH_SCHEMA. The addr_unit fill always
       // survives (seed is null); the birth_date one is a deliberate no-op (seed
       // is 1970-01-01) that the BFF must drop — exercising the no-op filter.
+      // V6 adjudication is ALSO a non-streaming structured-output call, so the
+      // two have to be told apart or the adjudicator receives enrichment's
+      // payload, finds no `verdict`, and the route 502s. The system prompt is
+      // the discriminator: it is the one part of the request that names the
+      // task, and both callers set it from their own pure module.
+      if (body.stream !== true && String(body.system ?? "").includes("adjudicator")) {
+        const recommendation = {
+          verdict: "match",
+          confidence: 0.86,
+          reasoning: "Same email and the same phone; the addresses differ only by unit formatting.",
+        };
+        return send(res, 200, {
+          id: "msg_mock_adjudicate",
+          type: "message",
+          role: "assistant",
+          model: String(body.model ?? "mock"),
+          content: [{ type: "text", text: JSON.stringify(recommendation) }],
+          stop_reason: "end_turn",
+          stop_sequence: null,
+          usage: { input_tokens: 40, output_tokens: 25 },
+        });
+      }
       if (body.stream !== true) {
         const suggestions = {
           suggestions: [

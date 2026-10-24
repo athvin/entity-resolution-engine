@@ -2391,7 +2391,32 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          seal credentials into PGlite without trouble — but any test that writes through the
          vault needs `// @vitest-environment node`. A probe found this in one run after two
          wrong theories.
-   - [ ] V6 LLM adjudication on gray-band reviews (#27). Auto-apply off by default.
+   - [x] V6 LLM adjudication on gray-band reviews (#27). **Advisory only, and there is no
+         auto-apply at all** — not a flag defaulting to off, which would be dead config, but
+         genuinely absent until someone asks. The model recommends; the steward presses one of
+         the same three buttons; that resolve is the audited act and remains the only way to
+         merge. The badge sits BELOW the evidence and ABOVE the buttons, which is the order a
+         steward reads in — at the top it would read as the answer.
+         **Needed no new read and no new er-server surface.** `useRecordPair` already fetches
+         both records' values for `field-compare-grid`, the review row carries
+         `match_probability` and the `waterfall`, and frontend-design §553 pins LLM calls to
+         the BFF — so cost-capped bulk is a bounded loop in a route, not a dispatcher job, and
+         no Bedrock SDK enters the Rust workspace.
+         Storage is `erweb.review_recommendations`, **not `pair_label`** — see the analysis
+         below; one row per review, replaced on a re-ask because two opinions on one pair is a
+         question the UI cannot answer. `review_id` carries no foreign key, as `taggings` does
+         not, since reviews live in the lake and are rebuilt every reconcile.
+         The model answers `match | no_match | skip` and **not `link`**: E11b is unbuilt, and a
+         verdict the product cannot perform is the dead-config shape this program has paid for
+         twice. `skip` is a real answer — these pairs are ambiguous by construction and a
+         forced guess is confident noise. Injection-safety copies 2.3: record values framed as
+         untrusted data, output pinned by a structured-output schema, and the verdict
+         allowlist re-enforced in `parseRecommendation` rather than trusted to the schema.
+         Tests: 21 on the prompt/parse core, 8 against real Postgres, 11 component, and one
+         functional spec crossing the whole seam. Two sabotages observed failing first — a
+         verdict allowlist that trusts the schema, and a batch read missing its `org`
+         predicate (**a cross-tenant disclosure of what a model said about another tenant's
+         records**) — each caught by exactly its own assertion.
          **Scoped 2026-10-23, and the obvious storage is blocked.** The good news first: V6
          needs no new read. `useRecordPair` already fetches both records' field values for
          `field-compare-grid`, and the review row carries `match_probability` plus the

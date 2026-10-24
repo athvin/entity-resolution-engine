@@ -25,6 +25,9 @@ interface DecisionPanelProps {
   disabled: boolean;
   onResolve: (resolution: Resolution) => void;
   showKeyHints: boolean;
+  /** The AI recommendation slot (V6). Optional so the panel renders without it —
+   * AI-off is a clean absence here, not a hole. */
+  recommendation?: React.ReactNode;
 }
 
 /** The right-hand decision panel (design §5.3): the pair, why it's here, the
@@ -37,6 +40,7 @@ export function DecisionPanel({
   disabled,
   onResolve,
   showKeyHints,
+  recommendation,
 }: DecisionPanelProps) {
   return (
     <Card className="flex h-full flex-col" data-testid="decision-panel">
@@ -61,6 +65,11 @@ export function DecisionPanel({
           <FieldCompareGrid org={org} keyA={review.rec_a_key} keyB={review.rec_b_key} />
           <WaterfallChart blob={review.waterfall} />
         </div>
+        {/* Above the buttons and below the evidence, which is the order a
+            steward reads in: the grid and waterfall are what they judge from,
+            the suggestion is a second opinion on it, and the verdict is
+            theirs. Putting it at the top would have it read as the answer. */}
+        {recommendation}
         <div className="grid grid-cols-3 gap-2">
           <Button
             variant="default"

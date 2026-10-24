@@ -321,6 +321,17 @@ erDiagram
         timestamptz used_at
         text user_id FK
     }
+    review_recommendations {
+        double confidence
+        timestamptz created_at
+        double match_probability
+        text model
+        text org PK
+        text reasoning
+        text requested_by
+        text review_id PK
+        text verdict
+    }
     segments {
         timestamptz created_at
         text created_by

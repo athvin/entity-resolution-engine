@@ -17,8 +17,11 @@ import {
   type Resolution,
   type ReviewRow,
 } from "@/lib/query/reviews";
+import { BffRequestError } from "@/lib/api/client";
+import { useRecommendReview, useReviewRecommendations } from "@/lib/query/adjudicate";
 import { cn } from "@/lib/utils";
 import { DecisionPanel, probabilityLabel } from "./decision-panel";
+import { RecommendationBadge } from "./recommendation-badge";
 import { SwipeCard } from "./swipe-card";
 
 /**
@@ -116,6 +119,14 @@ export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolea
 
   const rows = useMemo(() => (inbox.data?.pages ?? []).flatMap((page) => page.items), [inbox.data]);
   const active: ReviewRow | undefined = rows[Math.min(cursor, Math.max(rows.length - 1, 0))];
+
+  // V6: one lookup for every loaded row, not one per row. `useMemo` on the ids
+  // rather than passing `rows` straight through, so paging in more rows is what
+  // changes the query key — not every unrelated re-render.
+  const reviewIds = useMemo(() => rows.map((row) => row.id), [rows]);
+  const recommendations = useReviewRecommendations(org, reviewIds);
+  const recommend = useRecommendReview(org);
+  const [recommendFailure, setRecommendFailure] = useState<string | null>(null);
   const allLoadedSelected = rows.length > 0 && rows.every((row) => selected.has(row.id));
   const headerCheckbox = useRef<HTMLInputElement>(null);
 
@@ -469,6 +480,29 @@ export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolea
             disabled={!isSteward || resolve.isPending}
             onResolve={act}
             showKeyHints
+            recommendation={
+              <RecommendationBadge
+                recommendation={recommendations.data?.[active.id]}
+                // Reading an opinion is free; asking for one spends a tenant's
+                // tokens, so the request sits behind the same role as the write
+                // it precedes.
+                canRequest={isSteward}
+                busy={recommend.isPending}
+                failure={recommendFailure}
+                onRequest={() => {
+                  setRecommendFailure(null);
+                  recommend.mutate(active.id, {
+                    onError: (error) => {
+                      setRecommendFailure(
+                        error instanceof BffRequestError
+                          ? error.message
+                          : "could not get a recommendation",
+                      );
+                    },
+                  });
+                }}
+              />
+            }
           />
         )}
       </div>
