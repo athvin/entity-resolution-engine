@@ -19,7 +19,12 @@ export const erweb = pgSchema("erweb");
 
 export const roleEnum = erweb.enum("org_role", ["viewer", "steward", "admin"]);
 
-const bytea = customType<{ data: Buffer; notNull: true }>({
+// Nullability is left to each column's own `.notNull()` rather than pinned here.
+// `org_credentials` always has a sealed key so both of its columns declare it;
+// `org_ai_settings` holds one only when the tenant brought a key, and pinning
+// `notNull: true` on the type would have typed those reads as `Buffer` when the
+// value is really `Buffer | null`.
+const bytea = customType<{ data: Buffer }>({
   dataType() {
     return "bytea";
   },
@@ -144,6 +149,36 @@ export const orgCredentials = erweb.table(
   },
   (table) => [primaryKey({ columns: [table.org, table.role] })],
 );
+
+/**
+ * Per-org AI settings (V5): whether the assistant and enrichment are available
+ * to this tenant, which model they use, and an optional bring-your-own key.
+ *
+ * **The absence of a row means "inherit the deployment default"** — it does not
+ * mean disabled. A row is written only once an admin has expressed a
+ * preference, so this table starts empty and every existing tenant keeps
+ * exactly the behaviour it had when AI was a process-wide env var. Giving
+ * `enabled` a `false` default would instead have switched AI off for every
+ * tenant on deploy, which is a silent regression dressed as a migration.
+ *
+ * The key is sealed with the same AES-256-GCM vault as `org_credentials`, under
+ * the pseudo-role `ai`. Since the real roles are `viewer|steward|admin`, the
+ * AAD can never collide: a sealed erserver credential cannot be pasted into
+ * this table and decrypt, nor the reverse.
+ */
+export const orgAiSettings = erweb.table("org_ai_settings", {
+  org: text("org").primaryKey(),
+  enabled: boolean("enabled").notNull(),
+  /** Overrides BOTH the assistant and enrich model when set; null inherits each
+   * surface's own deployment default, which is why those stay separate in env. */
+  model: text("model"),
+  /** Null unless the tenant brought a key. Never leaves this process. */
+  ciphertext: bytea("ciphertext"),
+  nonce: bytea("nonce"),
+  keySetAt: timestamp("key_set_at", { withTimezone: true }),
+  updatedBy: text("updated_by").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 /** Saved segments over golden records (design §5.7). The definition is always
  * the inspectable structured filter — never a prompt — and deliberately limited

@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { resolveAiConfig } from "@/lib/ai/config";
 import { BffFailure, forward, requireOrgAccess, respond } from "@/lib/bff/proxy";
 import {
   ENRICH_SCHEMA,
@@ -10,7 +11,6 @@ import {
   parseSuggestions,
   type EnrichSuggestion,
 } from "@/lib/enrich/suggest";
-import { env } from "@/lib/env";
 
 const requestSchema = z.object({ entity_id: z.string().min(1) });
 
@@ -40,13 +40,12 @@ export async function POST(
   return respond(async () => {
     const { org } = await params;
     const access = await requireOrgAccess(org, "steward");
-    const settings = env();
-    if (!settings.ANTHROPIC_API_KEY) {
-      throw new BffFailure(
-        503,
-        "internal",
-        "enrichment is not configured (ANTHROPIC_API_KEY is unset)",
-      );
+    // Per-org (V5), same resolver as the assistant. `enrich` rather than
+    // `assistant` so a deployment keeps its separate default model for this
+    // surface; a tenant-level override applies to both.
+    const ai = await resolveAiConfig(org, "enrich");
+    if (!ai.ok) {
+      throw new BffFailure(503, "internal", `enrichment is unavailable: ${ai.reason}`);
     }
     const parsed = requestSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) {
@@ -60,14 +59,14 @@ export async function POST(
     );
 
     const client = new Anthropic({
-      apiKey: settings.ANTHROPIC_API_KEY,
-      ...(settings.ANTHROPIC_BASE_URL ? { baseURL: settings.ANTHROPIC_BASE_URL } : {}),
+      apiKey: ai.apiKey,
+      ...(ai.baseUrl ? { baseURL: ai.baseUrl } : {}),
     });
 
     let message: Anthropic.Message;
     try {
       message = await client.messages.create({
-        model: settings.ERWEB_ENRICH_MODEL,
+        model: ai.model,
         max_tokens: 2048,
         // Light extraction: low effort keeps cost/latency down; adaptive thinking
         // is the on-mode across the current model families. Structured output

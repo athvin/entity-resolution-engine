@@ -1,9 +1,9 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 
+import { resolveAiConfig } from "@/lib/ai/config";
 import { executeTool, systemPrompt, TOOL_DEFINITIONS } from "@/lib/assistant/tools";
 import { BffFailure, requireOrgAccess, respond } from "@/lib/bff/proxy";
-import { env } from "@/lib/env";
 import { NextResponse } from "next/server";
 
 const requestSchema = z.object({
@@ -36,13 +36,14 @@ export async function POST(
   return respond(async () => {
     const { org } = await params;
     const access = await requireOrgAccess(org, "viewer");
-    const settings = env();
-    if (!settings.ANTHROPIC_API_KEY) {
-      throw new BffFailure(
-        503,
-        "internal",
-        "the assistant is not configured (ANTHROPIC_API_KEY is unset)",
-      );
+    // Per-org (V5) rather than process-wide: the key, the endpoint and the
+    // model all come from the tenant's settings when it has any, and the
+    // deployment's env otherwise. The 503 now says WHICH of "switched off for
+    // this tenant" and "never configured here" it is, because only one of them
+    // is something the reader can act on.
+    const ai = await resolveAiConfig(org, "assistant");
+    if (!ai.ok) {
+      throw new BffFailure(503, "internal", `the assistant is unavailable: ${ai.reason}`);
     }
     const parsed = requestSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) {
@@ -50,10 +51,10 @@ export async function POST(
     }
 
     const client = new Anthropic({
-      apiKey: settings.ANTHROPIC_API_KEY,
-      ...(settings.ANTHROPIC_BASE_URL ? { baseURL: settings.ANTHROPIC_BASE_URL } : {}),
+      apiKey: ai.apiKey,
+      ...(ai.baseUrl ? { baseURL: ai.baseUrl } : {}),
     });
-    const model = settings.ERWEB_ASSISTANT_MODEL;
+    const model = ai.model;
     const history: Anthropic.MessageParam[] = parsed.data.messages.map((message) => ({
       role: message.role,
       content: message.content,

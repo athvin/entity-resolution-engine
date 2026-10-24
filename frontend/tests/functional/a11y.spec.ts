@@ -141,6 +141,17 @@ const SCREENS: {
       await expect(page.getByTestId("webhooks-deliveries")).toBeVisible();
     },
   },
+  {
+    // Same rule again: listed in the change that adds it. The sweep logs in as
+    // a STEWARD, and this screen is admin-write — so it is also the check that
+    // the read-only rendering is complete rather than a page of disabled
+    // controls with no accessible explanation of why.
+    name: "ai-settings",
+    path: `/${ORG}/settings/ai`,
+    ready: async (page) => {
+      await expect(page.getByTestId("ai-settings")).toBeVisible();
+    },
+  },
 ];
 
 test.describe("accessibility", () => {
