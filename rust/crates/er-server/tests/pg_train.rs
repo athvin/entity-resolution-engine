@@ -19,7 +19,11 @@
 //!   * the TF snapshot is APPENDED, so the active model's frozen term
 //!     frequencies still resolve to the same values afterwards. Overwriting
 //!     would retune the live model underneath itself, which is the guarantee
-//!     that makes an incremental run equal to a full one.
+//!     that makes an incremental run equal to a full one;
+//!   * **a model's own suggestions are not training signal.** `pair_label`
+//!     declares an `llm` origin and `read::all` does not filter on it, so a
+//!     suggestion would otherwise be fed back as ground truth — the model
+//!     trained on what it already believed.
 //!
 //! Run with e.g.
 //!   ER_TEST_PG_DSN='host=localhost port=5433 user=er password=er dbname=er' \
@@ -100,8 +104,16 @@ async fn training_registers_a_draft_and_leaves_the_active_model_alone() {
     let mut client = pg::connect(&dsn).await.unwrap();
     client
         .batch_execute(
-            "DROP TABLE IF EXISTS webhook_deliveries, matching_models, staged_steward_actions, \
-             audit_log, webhooks, schedules, config_versions, api_keys, jobs, orgs CASCADE;",
+            // `pair_labels` is in this list because the phase at the bottom
+            // writes some, and without it the labels outlive the run: the
+            // natural-key upsert in `create::record` does not save you, because
+            // the conflict target is `(org_id, rec_a_key, rec_b_key)` while the
+            // PRIMARY KEY is `id` — a fresh org each run means a new natural key
+            // and a colliding id, which is a hard pkey error rather than an
+            // upsert. `pg_approval.rs` already drops it for the same reason.
+            "DROP TABLE IF EXISTS pair_labels, webhook_deliveries, matching_models, \
+             staged_steward_actions, audit_log, webhooks, schedules, config_versions, \
+             api_keys, jobs, orgs CASCADE;",
         )
         .await
         .unwrap();
@@ -256,6 +268,64 @@ async fn training_registers_a_draft_and_leaves_the_active_model_alone() {
         1,
         "appending must not duplicate the CSV header"
     );
+
+    // ---- a model's own suggestions are not training signal -------------------
+    //
+    // Appended as a second train rather than folded into the first, so the
+    // assertions above keep measuring a no-label train and stay untouched.
+    //
+    // `pair_label.origin` declares `llm` for a model's own proposal and nothing
+    // writes one yet (V6 will). `read::all` has no origin filter, so without the
+    // guard in `train_and_register` a suggestion would be fed straight back in
+    // as ground truth — the model trained on what it already believed, with no
+    // error and nothing in provenance to show for it.
+    //
+    // `crm:C001`/`billing:B001` and `crm:C002`/`billing:B002` are genuinely the
+    // same people in base_10 (personas P1 and P2), so the two human labels are
+    // true and the count below is a real training set rather than a fiction.
+    let labels: [(&str, &str, &str, &str); 3] = [
+        ("crm:C001", "billing:B001", "match", "human"),
+        ("crm:C002", "billing:B002", "match", "human"),
+        // The one that must not count.
+        ("crm:C003", "billing:B003", "match", "llm"),
+    ];
+    for (i, (a, b, verdict, origin)) in labels.iter().enumerate() {
+        er_entities::pair_label::create::record(
+            &client,
+            &format!("01JLABEL000000000000000{i:03}"),
+            &org_id,
+            a,
+            b,
+            verdict,
+            origin,
+            &format!("{origin}:test"),
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("a label is recordable");
+    }
+
+    dispatcher::train_and_register(&client, &org_id, &env, "01TRAINJOB00000000000000001")
+        .await
+        .expect("training with labels should succeed");
+
+    let with_labels = pg::list_model_versions(&client, &org_id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|v| v.model_version_label == "trained-01TRAINJOB00000000000000001")
+        .expect("the second trained version is registered");
+    assert_eq!(
+        with_labels.provenance["m_from_labels"], 2,
+        "two human match labels are used and the `llm` one is excluded — training \
+         on a model's own suggestion is training on this system's output: {}",
+        with_labels.provenance
+    );
+    // Still a draft, for the same reason the first one is: labels do not make
+    // training consent to re-cluster a tenant's corpus either.
+    assert_eq!(with_labels.state, "draft");
 
     let _ = std::fs::remove_dir_all(&tmp);
 }

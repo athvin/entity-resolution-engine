@@ -2419,6 +2419,16 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          labeller") fits, and `labeled_by` can carry `llm:<model-id>` in the style of
          `key:<uuid>`. The `link` verdict the plan mentions cannot be expressed until E11b
          exists, so v1 is merge / no-match / skip.
+         **A second trap on the read side, and this one is now shut.** Even granting a
+         well-placed `llm` row, `train_and_register` read labels through
+         `pair_label::read::all` — which has no origin filter — and fed every `match` into
+         `estimate_m_from_pairwise_labels`. So a suggestion would have been trained on as
+         ground truth: the model pulled toward whatever the LLM already believed, with no
+         error and nothing in provenance to show for it. Fixed ahead of V6 rather than with
+         it, so the guard is verifiable on its own: the filter now excludes
+         `origin = 'llm'`, `m_from_labels` counts only labels actually used, and a
+         `pg_train` phase asserts two human labels are used while an `llm` one is not.
+         Observed failing first — removing the filter reports `m_from_labels: 3`.
    - [ ] V7 NL rule authoring + explain-rule (#29). Writes a DRAFT version, never publishes.
    - [ ] V8 AI schema mapping + AI model setup (#48/#35). Sends a profile summary, never rows.
    - [ ] V9 staged agent write-actions (#81), through the existing steward-action path.
