@@ -50,4 +50,15 @@ spec:
     # `WhenEmpty` and `expireAfter` do NOT change: D-DISRUPT's argument is that
     # `WhenEmptyOrUnderutilized` could discard an hour of a run mid-flight, and
     # a longer idle timer does nothing to that. Only the timer moves.
+    #
+    # ONE COUPLING TO KNOW ABOUT. A lingering idle node holds account vCPU
+    # quota, and that quota is currently the binding constraint, not cost: the
+    # applied ceiling is 8 vCPU (§5) and the always-on app and system nodes take
+    # 2 each. So a lingering 8-vCPU runner-sm node leaves nothing for a second
+    # runner of any size, and the next job for a *different* class would sit
+    # Pending behind an idle node rather than launching beside it. That was
+    # observed while measuring: with a probe node up, the cluster sat at exactly
+    # 8 vCPU. Sequential jobs — the case this timer exists for — are unaffected,
+    # since the second job wants the very node that is lingering. Raise the
+    # quota before relying on concurrent runners of different classes.
     consolidateAfter: 10m

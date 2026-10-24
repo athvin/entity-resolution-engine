@@ -257,24 +257,31 @@ Expected result: S-class jobs start instantly; the first M/L job of a session
 still pays ~60–90 s of node boot (which no AMI or image choice removes under
 Auto Mode); everything after it in the next ten minutes starts in seconds.
 
-> **CORRECTION (4): the cold start is ~30 s, not 60–90 s, and the terms are not
-> the ones this page weighted.** Measured on a `c6id` probe node
+> **CORRECTION (4): the cold start is ~30 s, not 60–90 s, and node boot is
+> nearly all of what matters.** Measured on a `c6id.xlarge` probe node, 3 trials
+> per arm
 > ([`measurements/runner-startup-20261024.json`](measurements/runner-startup-20261024.json)):
-> NodeClaim created to Ready is **~14 s**, the image pull is **~2 s**, and
-> submit to container running is **~30 s**. The ~90 s this page inherited from
-> plan-to-aws 1.3 was a hand observation with no artifact behind it, and Auto
-> Mode's June 2026 boot improvements appear to have overtaken it.
+> NodeClaim created to Ready is **14–18 s**, the image pull **1.6–3.4 s**, the
+> first session's extension work **1.8–2.5 s** before baking and **0.9–1.4 s**
+> after, and submit to container running **~30 s**. The ~90 s this page
+> inherited from plan-to-aws 1.3 was a hand observation with no artifact behind
+> it; Auto Mode's June 2026 boot improvements appear to have overtaken it.
 >
-> The practical consequence is for §2's ladder, not for the recommendation
-> order. **B is still worth doing and C is still worth doing**, but for
-> different reasons than stated: B's value is overwhelmingly the extension
-> fetch (~5 s, the largest term we control, and the one this page sized as a
-> round trip) rather than the image pull it also shrinks; and the pull being 2 s
-> closes D-PULL's image-split and snapshot-prebake rungs outright rather than
-> merely deprioritising them.
+> **Node provisioning dominates the terms we control by roughly five to one.**
+> That is the finding, and it reframes §2 rather than §3: B and C are both still
+> worth doing, but B buys ~0.9–1.1 s of first-session latency plus the removal
+> of an external dependency — not the large win the 80 MB download figure
+> suggests, because DuckDB fetches the extensions compressed and EC2 has
+> bandwidth to spare.
 >
-> **D and E are further out of the money than this page concluded.** A warm node
-> at ≈$95/mo buys back ~14 s of node boot, not 60–90 s.
+> **A caution about the extension term specifically.** A single rehearsal trial
+> put it at ~5 s, about three times the pull, and that number briefly reached
+> this page and two decision records before three proper trials contradicted it
+> (0.75–1.7 s, i.e. the same order as the pull and somewhat smaller). One trial
+> of a high-variance cluster measurement is not a measurement.
+>
+> **D and E are much further out of the money than this page concluded.** A warm
+> node at ≈$95/mo buys back 14–18 s of node boot, not 60–90 s.
 
 Only if the first-M/L-job cold start is still unacceptable, add one pause pod
 on `runner-sm` (D) and switch it off with the idle-suspend predicate. That is
@@ -289,9 +296,10 @@ reached for.
 
 - [x] `kubectl get events` timestamps on one cold run: NodeClaim created → node
   Ready → image pulled → container started. This is §18.16 and it splits the
-  90 s into launch / boot / pull / extension fetch. — **Done, and the 90 s was
-  itself wrong; the split is ~14 s node, ~2 s pull, ~5 s extension fetch,
-  ~30 s end to end.**
+  90 s into launch / boot / pull / extension fetch. — **Done, three trials per
+  arm rather than "one cold run", and the 90 s was itself wrong: 14–18 s node,
+  1.6–3.4 s pull, 0.75–1.7 s extension fetch, ~30 s end to end. Node
+  provisioning dominates the controllable terms about five to one.**
 - [x] Pull time of the current `er-api` image on a fresh runner node versus a
   single-binary image. — **Done, and it stopped being the deciding number: the
   pull is ~2 s either way, which is what closes D-PULL's ladder. The image size

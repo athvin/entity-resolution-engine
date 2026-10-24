@@ -267,7 +267,8 @@ t2=$(date +%s%3N)
 # extension and an attached, reconciled catalog.
 ok=0
 grep -q '"tenant"' /tmp/p1.out 2>/dev/null && ok=1
-relations=$(grep -c '"name"' /tmp/p1.out 2>/dev/null || echo 0)
+# `grep -c` prints 0 AND exits 1 on no match, so `|| echo 0` emitted it twice.
+relations=$(grep -c '"name"' /tmp/p1.out 2>/dev/null) || relations=0
 
 echo "PROBE_T0=$t0"
 echo "PROBE_T1=$t1"
@@ -747,7 +748,15 @@ else
     scope: "Runner startup: how long a pipeline run takes to begin, split into node launch, image pull and DuckDB extension load.",
     timing_scope: "Per arm. x1/x2 time the probe process itself (container start to DuckLake attached and queried) at millisecond resolution from the process clock. n1/n2 time the Kubernetes lifecycle (NodeClaim created through container started) at the one-second resolution Kubernetes records, except the image pull, which comes from the kubelet Pulled event message and is sub-second.",
     isolation: "One probe at a time on an otherwise idle dev cluster. n1/n2 run on a dedicated measurement NodePool that is deleted afterwards; x1/x2 run on the always-on app pool alongside the namespace web-api Deployment only.",
+    selection: "Both arms run the SAME image; the only variable is whether ER_DUCKDB_EXTENSION_DIR points at the baked directory. Comparing two images would vary every byte.",
+    # Left for the operator to fill from the run: the envelope and the caveats
+    # are judgement, not something the script can infer. An empty list here is a
+    # prompt, not a claim that there are none; see the measurement discipline
+    # in the ducklake-performance skill.
+    resource_envelope: {},
     limitations: [],
+    promotion_eligible: null,
+    promotion_note: "",
     arms: []
   }')"
 fi

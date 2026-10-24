@@ -763,20 +763,24 @@ Measurements and decisions this design is still waiting on. (Resolved items — 
 15. **Does `sslmode=verify-full` work with the Aurora CA bundle as the images are built?** Partially answered by inspection: the Dockerfile installs no `ca-certificates` or RDS bundle, so the runtime has only what `python:3.12-slim` ships. Expect an image change (install `ca-certificates` plus the RDS global bundle), not a secret change; what stays open is verifying the bundle path wiring in each DSN.
 16. ~~**Cold-node image pull time** for the current `er-pipeline`.~~ **Resolved 2026-10-24, and the answer is "climb no further".** Measured with `scripts/measure_runner_startup.sh` on `er-dev`; the record is [`measurements/runner-startup-20261024.json`](measurements/runner-startup-20261024.json) and is the authority for every figure here.
 
-    The whole cold start — job submitted to container running — is about **30 seconds**, and the image pull is about **2 seconds** of it. The §11.1 ladder exists to shave that 2 seconds: the runtime/CI image split is worth a fraction of it, and snapshot prebake costs Auto Mode (D-AUTOMODE) to chase the same fraction. Neither is justified. The ladder is closed, not climbed.
+    The whole cold start — job submitted to container running — is about **30 seconds**, and the image pull is **1.6–3.4 s** of it. The §11.1 ladder exists to shave that: the runtime/CI image split is worth a fraction of a couple of seconds, and snapshot prebake costs Auto Mode (D-AUTOMODE) to chase the same fraction. Neither is justified. The ladder is closed, not climbed.
 
-    What the 30 seconds is actually made of, on a `c6id` node:
+    What the cold start is made of, on a `c6id.xlarge` (3 trials per arm, every trial in the record):
 
     | Phase | Seconds | Who controls it |
     |---|---|---|
-    | NodeClaim created → Launched (EC2 fleet call) | ~2 | AWS |
-    | Launched → Registered (instance boot + kubelet join) | ~10 | AWS |
-    | Registered → Ready | ~2 | AWS |
+    | NodeClaim created → Ready (fleet call, boot, kubelet join) | **14–18** | AWS |
     | Pod Scheduled → Pulling | ~3 | kubelet |
-    | **image pull** | **~2** | **us** |
-    | **DuckDB extension fetch, first session** | **~5** | **us** |
+    | image pull | **1.6–3.4** | us |
+    | first session: extension work + attach + reconcile | **1.8–2.5** before, **0.9–1.4** after | us |
 
-    Two things worth carrying forward. **The ~90 s in plan-to-aws 1.3 is stale** — node provision is now ~14 s from NodeClaim to Ready, and Auto Mode's June 2026 boot improvements are the likely reason. And **the extension fetch was the larger of the two terms we control**, roughly three times the pull, which is the opposite of what this question assumed when it was filed; it is now baked into the image (§11, `dedupe_core::session::BAKED_EXTENSIONS`) and measured at effectively zero.
+    **Node provisioning dominates everything we control**, by roughly a factor of five. That is the headline, and it is why no image or AMI choice moves this number much.
+
+    Three things worth carrying forward:
+
+    - **The ~90 s in plan-to-aws 1.3 is stale.** NodeClaim to Ready is 14–18 s; Auto Mode's June 2026 boot improvements are the likely reason.
+    - **The extension fetch and the image pull are the same order of magnitude** — fetch 0.75–1.7 s against pull 1.6–3.4 s. An earlier single-trial rehearsal suggested the fetch was ~5 s and three times the pull; that figure briefly reached drafts of this entry and of D-PULL before three proper trials contradicted it. One trial of a high-variance cluster measurement is not a measurement. Baking the extensions (§11, `dedupe_core::session::BAKED_EXTENSIONS`) takes the fetch delta to 0.09–0.51 s on a cold node and to zero on a warm one, worth **~0.9–1.1 s** of first-session latency.
+    - **The pull term cannot be A/B-ed from this record.** Both arms run the same image — the variable is an env var, not a rebuild — and the observed pull variance (~1.4 s) is several times the ~0.33 s the added extensions are estimated to cost at the observed ~47 MB/s. That estimate is size × rate, not a measured difference, and is labelled as such in the artifact.
 
     `er-pipeline`, which this question named, no longer exists; the measurement is of `er-api`, the one image that now carries the engine CLI too.
 17. ~~**Whether Phase 4's two credential retirements land as one change or two.**~~ **Resolved, and it turned out to be one.** The SES half (§9.3) landed with the mailer, because writing the Rust sender against the SES API was cheaper than building the SMTP path the retirement was scheduled to undo. No SES key was ever created, so "no static keys anywhere" now rests on §9.2's S3 credential chain alone.
