@@ -709,7 +709,22 @@ else
 fi
 
 printf '%s' "$BASE" \
-  | jq --argjson a "$ARM_RECORD" '.arms = ((.arms // []) | map(select(.arm != $a.arm)) + [$a])' \
+  | jq --argjson a "$ARM_RECORD" '
+      # Appending trials, not replacing the arm: the arms have very different
+      # costs (an n2 trial is ~5 minutes of node time, an x1 trial ~1 minute),
+      # so they want different repetition counts and therefore separate
+      # invocations. A replacing merge silently dropped the earlier subset.
+      # Trials carry their own arm tag, so the record stays unambiguous.
+      .arms = (
+        ((.arms // [])) as $prev
+        | if ($prev | map(.arm) | index($a.arm)) != null
+          then ($prev | map(
+                 if .arm == $a.arm
+                 then ((.trials // []) as $old | . + $a | .trials = ($old + ($a.trials // [])))
+                 else . end))
+          else $prev + [$a]
+          end
+      )' \
   > "$WORK/out.json"
 mv "$WORK/out.json" "$OUT"
 log "wrote $OUT"
