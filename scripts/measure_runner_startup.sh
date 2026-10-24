@@ -9,11 +9,21 @@
 # with no artifact and no method behind them; this script is the method.
 #
 # It runs one or more arms, each 1..N trials, and emits a record following the
-# docs/measurements/*.json convention. Run it twice — once per image — and the
-# two arms become a before/after comparison:
+# docs/measurements/*.json convention. Run it twice over the SAME image — once
+# per arm — and the two become a before/after comparison:
 #
 #   scripts/measure_runner_startup.sh --image <registry>/er-api:<sha> --arm before
 #   scripts/measure_runner_startup.sh --image <registry>/er-api:<sha> --arm after
+#
+# ONE IMAGE, NOT TWO. The `before` arm forces `ER_DUCKDB_EXTENSION_DIR` empty in
+# the probe container, which makes `SessionOptions::with_baked_extensions` skip
+# and restores the previous code path exactly: `attach_ducklake` issues its
+# INSTALL, autoinstall stays on, and DuckDB fetches over the network. Same
+# image, same binary, same commit, same node — the only variable is whether the
+# baked directory is consulted. Comparing two images instead would vary every
+# byte, and the nearest comparable main-built image turned out to predate the
+# per-run lake-schema reconcile, so its probe exercised less of the session
+# path. Image *size* is answered from the registry, not from a probe.
 #
 # THE ARMS
 #
@@ -198,7 +208,7 @@ set -u
 # way to check from the outside.
 probe_once() {
   out="$1"; err="$2"; lake="$3"
-  mkdir -p "$lake"
+  mkdir -p "$lake" "${HOME:-/tmp/home}"
   er --catalog "$lake/probe.ducklake" --data-path "$lake/data" \
      --config /probe/config.yaml doctor >"$out" 2>"$err"
 }
@@ -242,9 +252,37 @@ SH
 # pool, so x1/x2 land on the always-on app node and n1/n2 land on a cold probe
 # node. backoffLimit 0 so a failure is one pod and one pod only — the same
 # reason §6.2 insists on it for real runs.
+#
+# THE BEFORE/AFTER CONTROL IS AN ENV VAR, NOT A SECOND IMAGE. On the `before`
+# arm the probe container gets `ER_DUCKDB_EXTENSION_DIR=""`, which makes
+# `SessionOptions::with_baked_extensions` skip and restores the previous code
+# path exactly: `attach_ducklake` issues its `INSTALL`, autoinstall stays on,
+# DuckDB looks in ~/.duckdb instead of the baked directory, and the extensions
+# are fetched over the network.
+#
+# This is a better experiment than comparing two images, and not just a cheaper
+# one. Same image, same binary, same commit, same node, same probe — the only
+# thing that differs is whether the baked directory is consulted, which is the
+# variable under test. Two images would have differed in every byte, and the
+# only image built from a commit comparable to this branch turned out to predate
+# the per-run lake-schema reconcile, so its probe exercised less of the session
+# path.
+#
+# Image *size* is a separate question and is answered from the registry
+# (`image_detail`), not from a probe.
 job_manifest() {
   local name="$1" runner="$2" netpol="$3"
   local sched=""
+  # Empty string, not unset: the chart/image sets this, so overriding it to
+  # empty is how a pod opts back out. `with_baked_extensions` filters empties.
+  local baked_env=""
+  if [ "$ARM" = before ]; then
+    baked_env=$(cat <<'YAML'
+            - name: ER_DUCKDB_EXTENSION_DIR
+              value: ""
+YAML
+)
+  fi
   if [ "$runner" = 1 ]; then
     sched=$(cat <<'YAML'
       nodeSelector:
@@ -302,6 +340,14 @@ $sched
           args:
             - |
 $(probe_script | sed 's/^/              /')
+          env:
+            # HOME so DuckDB's default ~/.duckdb is a writable, EMPTY directory
+            # per container. The image's user has /app as its home, and on the
+            # before arm the fetch has to land somewhere it will not be found
+            # again by the next trial.
+            - name: HOME
+              value: /tmp/home
+$baked_env
           volumeMounts:
             - name: probe-config
               mountPath: /probe
@@ -639,6 +685,10 @@ ARM_RECORD="$(jq -n \
   --arg measured_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg ns "$NAMESPACE" '
   {
     arm: $arm, image: $image, measured_at_utc: $measured_at,
+    baked_extensions: ($arm != "before"),
+    arm_definition: (if $arm == "before"
+      then "same image, ER_DUCKDB_EXTENSION_DIR forced empty so the baked directory is ignored: INSTALL runs, autoinstall is on, extensions are fetched over the network"
+      else "the image as shipped: ER_DUCKDB_EXTENSION_DIR points at the baked directory, autoinstall off, no extension egress" end),
     namespace: $ns, image_detail: $image_detail, cluster_nodes: $nodes,
     trials: $trials
   }')"
