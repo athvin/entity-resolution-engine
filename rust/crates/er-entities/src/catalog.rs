@@ -7,143 +7,2467 @@
 pub const ENTITY_YAML: &[(&str, &str)] = &[
     (
         "acct_golden_lineage",
-        include_str!("../../../../entities/acct_golden_lineage/entity.yaml"),
+        r#"kind: entity
+version: 1
+name: acct_golden_lineage
+relation: acct_golden_lineage
+description: "Per-attribute survivorship provenance for a resolved account: which record each surviving value came from."
+key: [id]
+natural_key: [entity_id, attribute]
+generate:
+  stores: [duckdb]
+  languages: [rust, typescript]
+  wire: [arrow, json]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "Content-derived row id: sha256('acct_golden_lineage:' || entity_id || ':' || attribute)."
+  - name: entity_id
+    type: varchar
+    nullable: false
+    description: "The resolved account this attribute decision belongs to."
+  - name: attribute
+    type: varchar
+    nullable: false
+    description: "The survivable attribute decided (e.g. company_name, domain, address)."
+  - name: record_key
+    type: varchar
+    nullable: false
+    description: "The source record that won the attribute."
+  - name: source_system
+    type: varchar
+    nullable: false
+    description: "Source system of the winning record."
+  - name: source_record_id
+    type: varchar
+    nullable: false
+    description: "Source-native id of the winning record."
+  - name: rule
+    type: varchar
+    nullable: false
+    description: "The survivorship rule that selected this value."
+  - name: survivorship_version
+    type: varchar
+    nullable: false
+    description: "Survivorship policy version that produced this row."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical creation time (the assembling run's clock; the mart is rebuilt whole)."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time (equals created_at; the mart is rebuilt whole)."
+"#,
     ),
     (
         "acct_golden_record",
-        include_str!("../../../../entities/acct_golden_record/entity.yaml"),
+        r#"kind: entity
+version: 1
+name: acct_golden_record
+relation: acct_golden_records
+description: "One resolved account/organization: the surviving value per attribute, at a snapshot."
+key: [id]
+generate:
+  stores: [duckdb]
+  languages: [rust, typescript]
+  wire: [arrow, json]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "Persistent entity id (deterministic UUIDv7, minted by reconcile); the survivorship key."
+  - name: company_name
+    type: varchar
+    description: "Surviving company name."
+  - name: domain
+    type: varchar
+    description: "Surviving web domain."
+  - name: phone_e164
+    type: varchar
+    description: "Surviving phone number in E.164 form."
+  - name: addr_street
+    type: varchar
+    description: "Surviving street of the address."
+  - name: addr_city
+    type: varchar
+    description: "Surviving city of the address."
+  - name: addr_region
+    type: varchar
+    description: "Surviving region/state of the address."
+  - name: addr_postal
+    type: varchar
+    description: "Surviving postal code of the address."
+  - name: metadata
+    type: json
+    description: "Surviving opaque per-source metadata object."
+  - name: survivorship_version
+    type: varchar
+    nullable: false
+    description: "Survivorship policy version that produced this row."
+  - name: assembled_at
+    type: timestamp
+    nullable: false
+    volatile: true
+    description: "Assembly time of this row (volatile)."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical creation time (the assembling run's clock; the mart is rebuilt whole)."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time (equals created_at; the mart is rebuilt whole)."
+"#,
     ),
     (
         "acct_int_std_record",
-        include_str!("../../../../entities/acct_int_std_record/entity.yaml"),
+        r#"kind: entity
+version: 1
+name: acct_int_std_record
+relation: acct_int_std_records
+description: "One current standardized account record per record key: the account standardization stage's output (supersession applied, tombstones excluded) and the matching stage's input."
+key: [id]
+natural_key: [record_key]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "Content-derived row id: sha256('acct_int_std_records:' || record_key)."
+  - name: record_key
+    type: varchar
+    nullable: false
+    description: "Stable record identity: `source_system:source_record_id`."
+  - name: source_system
+    type: varchar
+    nullable: false
+    description: "Source system the record was ingested from."
+  - name: source_record_id
+    type: varchar
+    nullable: false
+    description: "The record's id within its source system."
+  - name: content_hash
+    type: varchar
+    nullable: false
+    description: "Hash of the standardized payload: the change-detection identity of this version."
+  - name: std_version
+    type: varchar
+    nullable: false
+    description: "Standardization version that produced this row."
+  - name: company_name
+    type: varchar
+    description: "Standardized company name."
+  - name: company_name_norm
+    type: varchar
+    description: "Normalized company name, for matching."
+  - name: company_variants
+    type: list<varchar>
+    nullable: false
+    description: "Alias/variant expansions of the company name, for matching."
+  - name: domain
+    type: varchar
+    description: "Standardized web domain."
+  - name: domain_norm
+    type: varchar
+    description: "Normalized web domain, for matching."
+  - name: phone_e164
+    type: varchar
+    description: "Standardized phone number in E.164 form."
+  - name: phone_valid
+    type: boolean
+    description: "Whether the phone number passed validation."
+  - name: addr_street
+    type: varchar
+    description: "Standardized street name of the address."
+  - name: addr_city
+    type: varchar
+    description: "Standardized city of the address."
+  - name: addr_region
+    type: varchar
+    description: "Standardized region/state of the address."
+  - name: addr_postal
+    type: varchar
+    description: "Standardized postal code of the address."
+  - name: metadata
+    type: json
+    description: "Opaque per-source metadata object, passed through from the source."
+  - name: updated_at_source
+    type: timestamp
+    description: "When the record was last updated in its source system."
+  - name: ingest_batch_id
+    type: varchar
+    nullable: false
+    description: "Ingest batch that landed this version."
+  - name: ingested_at
+    type: timestamp
+    nullable: false
+    description: "When this version was ingested."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical creation time (the building run's clock; the mart is rebuilt whole)."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time (equals created_at; the mart is rebuilt whole)."
+"#,
     ),
     (
         "api_key",
-        include_str!("../../../../entities/api_key/entity.yaml"),
+        r#"kind: entity
+version: 1
+name: api_key
+relation: api_keys
+description: "An org-scoped API key: its role and the at-rest hash of the secret."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+  wire: [json]
+  history: true
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "The key's unique id (UUIDv7, minted at issue)."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant the key authenticates."
+  - name: role
+    type: varchar
+    nullable: false
+    accepted_values: [admin, steward, viewer]
+    description: "The role the key grants."
+  - name: key_hash
+    type: varchar
+    nullable: false
+    description: "SHA-256 hash of the secret (never the plaintext)."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the key was issued."
+  - name: revoked_at
+    type: timestamp
+    description: "When the key was revoked, if it has been."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Wall-clock last-write time (database default; advanced by mutations once the entity migrates)."
+"#,
     ),
     (
         "assertion",
-        include_str!("../../../../entities/assertion/entity.yaml"),
+        r#"kind: entity
+version: 1
+name: assertion
+relation: assertions
+description: "One steward assertion (S4.4.1): an always/never constraint on a record pair, retractable but never deleted."
+key: [id]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "The assertion id (the staged steward action's UUIDv7)."
+  - name: rec_a_key
+    type: varchar
+    nullable: false
+    description: "The pair's lower record key (canonical order)."
+  - name: rec_b_key
+    type: varchar
+    nullable: false
+    description: "The pair's higher record key (canonical order)."
+  - name: kind
+    type: varchar
+    nullable: false
+    description: "always or never."
+  - name: active
+    type: boolean
+    nullable: false
+    description: "Whether the row is in force (retraction flips this; rows are never deleted)."
+  - name: created_by
+    type: varchar
+    nullable: false
+    description: "The steward or system actor that created the row."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Creation stamp (the run's logical timestamp)."
+  - name: retracted_by
+    type: varchar
+    description: "Who retracted it; NULL while active."
+  - name: retracted_at
+    type: timestamp
+    description: "When it was retracted; NULL while active."
+  - name: note
+    type: varchar
+    description: "Optional steward note."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time (advanced by retract)."
+"#,
     ),
     (
         "audit_log",
-        include_str!("../../../../entities/audit_log/entity.yaml"),
+        r#"kind: entity
+version: 1
+name: audit_log
+relation: audit_log
+description: "The append-only audit ledger: one row per authenticated mutation (actor, action, optional org scope, and structured detail)."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+  wire: [json]
+columns:
+  - name: id
+    type: bigint
+    nullable: false
+    serial: true
+    description: "Monotonic ledger id (bigserial); the primary key."
+  - name: at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the audited action occurred."
+  - name: actor
+    type: varchar
+    nullable: false
+    description: "The principal that performed the action (the signed-in user's email, or an API key id)."
+  - name: org
+    type: varchar
+    description: "The tenant the action applies to, if the action is org-scoped."
+  - name: action
+    type: varchar
+    nullable: false
+    description: "The action name (e.g. steward.mass_update)."
+  - name: detail
+    type: json
+    nullable: false
+    default: "'{}'::jsonb"
+    description: "Structured detail for the action."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Wall-clock creation time (database default; `at` remains the domain event stamp)."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Wall-clock last-write time (equals created_at; audit rows are append-only)."
+"#,
     ),
     (
         "config_version",
-        include_str!("../../../../entities/config_version/entity.yaml"),
+        r#"kind: entity
+version: 1
+name: config_version
+relation: config_versions
+description: "A versioned config document for a tenant: its YAML, hash and publish state."
+key: [id]
+natural_key: [org_id, version]
+generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+  wire: [json]
+  history: true
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "The version row's unique id (UUIDv7, minted at draft)."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant this config version belongs to."
+  - name: version
+    type: bigint
+    nullable: false
+    description: "The monotonic version number within the tenant."
+  - name: yaml
+    type: varchar
+    nullable: false
+    description: "The config document source."
+  - name: config_hash
+    type: varchar
+    nullable: false
+    description: "Hash of the canonicalized config."
+  - name: state
+    type: varchar
+    nullable: false
+    default: "'draft'"
+    accepted_values: [draft, published]
+    description: "Whether the version is a draft or published."
+  - name: tier
+    type: varchar
+    description: "Optional service tier label."
+  - name: created_by
+    type: varchar
+    nullable: false
+    description: "Principal that created the version."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the version was created."
+  - name: published_at
+    type: timestamp
+    description: "When the version was published, if it has been."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Wall-clock last-write time (database default; advanced by mutations once the entity migrates)."
+"#,
     ),
     (
         "ddl_log",
-        include_str!("../../../../entities/ddl_log/entity.yaml"),
+        r#"kind: entity
+version: 1
+name: ddl_log
+relation: ddl_log
+description: "The DDL ledger: one row per DDL command executed against the control database, captured by the er_ddl_audit event triggers (migrations, operator DDL — boot replays are suppressed)."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: bigint
+    nullable: false
+    serial: true
+    description: "Monotonic ledger id (bigserial); the primary key. Database-minted — the ledger is written by an event trigger."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the DDL ran."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Row update stamp; equals created_at (the ledger is append-only)."
+  - name: actor
+    type: varchar
+    nullable: false
+    description: "current_setting('er.actor') when the writer declared itself, else the session user."
+  - name: phase
+    type: varchar
+    nullable: false
+    accepted_values: [ddl_command_end, sql_drop]
+    description: "Which event-trigger phase captured the row (sql_drop owns drops; ddl_command_end owns everything else)."
+  - name: ddl_tag
+    type: varchar
+    nullable: false
+    description: "The command tag (CREATE TABLE, ALTER TABLE, DROP INDEX, ...)."
+  - name: object_type
+    type: varchar
+    description: "The object type (table, index, ...) when the phase reports one."
+  - name: object_identity
+    type: varchar
+    description: "The schema-qualified identity (public.jobs) when the phase reports one."
+  - name: command_text
+    type: varchar
+    description: "Best-effort current_query(): the client's statement text, which may contain more than the one command."
+indexes:
+  - name: ddl_log_created_at
+    columns: [created_at]
+"#,
     ),
     (
         "entity_event",
-        include_str!("../../../../entities/entity_event/entity.yaml"),
+        r#"kind: entity
+version: 1
+name: entity_event
+relation: entity_events
+description: "One lifecycle event on an entity (S4.5.5): created/merged/split/retired and membership changes, with the run that caused it."
+key: [id]
+natural_key: [run_id, entity_id, event_type, details_hash]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "Content-derived event id: sha256('entity_events:' || run_id || ':' || seq)."
+  - name: seq
+    type: bigint
+    nullable: false
+    description: "Dense per-run ordering of the entity's events."
+  - name: run_id
+    type: varchar
+    nullable: false
+    description: "The run that wrote this row."
+  - name: entity_id
+    type: varchar
+    nullable: false
+    description: "The resolved entity's id (deterministic UUIDv7)."
+  - name: event_type
+    type: varchar
+    nullable: false
+    description: "The lifecycle event type."
+  - name: details
+    type: json
+    nullable: false
+    description: "The event's structured details."
+  - name: details_hash
+    type: varchar
+    nullable: false
+    description: "Hash of the details for replay idempotence."
+  - name: occurred_at
+    type: timestamp
+    nullable: false
+    description: "The run's logical timestamp for the event."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical creation time (the event's occurrence stamp; events are append-only)."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time (equals created_at; events are append-only)."
+"#,
     ),
     (
         "entity_membership",
-        include_str!("../../../../entities/entity_membership/entity.yaml"),
+        r#"kind: entity
+version: 1
+name: entity_membership
+relation: entity_membership
+description: "One membership row per record (S4.4): which resolved entity the record's current version belongs to."
+key: [id]
+natural_key: [source_system, source_record_id]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "Content-derived row id: sha256('entity_membership:' || source_system || ':' || source_record_id)."
+  - name: source_system
+    type: varchar
+    nullable: false
+    description: "The delivering source system."
+  - name: source_record_id
+    type: varchar
+    nullable: false
+    description: "The record's id in its source system."
+  - name: record_key
+    type: varchar
+    nullable: false
+    description: "The standardized record key."
+  - name: entity_id
+    type: varchar
+    nullable: false
+    description: "The resolved entity's id (deterministic UUIDv7)."
+  - name: assigned_at
+    type: timestamp
+    nullable: false
+    description: "When this membership was assigned."
+  - name: run_id
+    type: varchar
+    nullable: false
+    description: "The run that wrote this row."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical creation time (the assigning run's clock)."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time (the latest assigning run's clock)."
+"#,
     ),
     (
         "golden_lineage",
-        include_str!("../../../../entities/golden_lineage/entity.yaml"),
+        r#"kind: entity
+version: 1
+name: golden_lineage
+relation: golden_lineage
+description: "Per-attribute survivorship provenance: which record each surviving golden value came from."
+key: [id]
+natural_key: [entity_id, attribute]
+generate:
+  stores: [duckdb]
+  languages: [rust, typescript]
+  wire: [arrow, json]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "Content-derived row id: sha256('golden_lineage:' || entity_id || ':' || attribute)."
+  - name: entity_id
+    type: varchar
+    nullable: false
+    description: "The resolved entity this attribute decision belongs to."
+  - name: attribute
+    type: varchar
+    nullable: false
+    description: "The survivable attribute decided (e.g. given_name, email, address)."
+  - name: record_key
+    type: varchar
+    nullable: false
+    description: "The source record that won the attribute."
+  - name: source_system
+    type: varchar
+    nullable: false
+    description: "Source system of the winning record."
+  - name: source_record_id
+    type: varchar
+    nullable: false
+    description: "Source-native id of the winning record."
+  - name: rule
+    type: varchar
+    nullable: false
+    description: "The survivorship rule that selected this value."
+  - name: survivorship_version
+    type: varchar
+    nullable: false
+    description: "Survivorship policy version that produced this row."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical creation time (the assembling run's clock; the mart is rebuilt whole)."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time (equals created_at; the mart is rebuilt whole)."
+"#,
     ),
     (
         "golden_override",
-        include_str!("../../../../entities/golden_override/entity.yaml"),
+        r#"kind: entity
+version: 1
+name: golden_override
+relation: golden_overrides
+description: "One steward golden-field override (latest-wins per entity and attribute); a NULL value means the steward cleared the field."
+key: [id]
+natural_key: [entity_id, attribute]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "Content-derived row id: sha256('golden_overrides:' || entity_id || ':' || attribute)."
+  - name: entity_id
+    type: varchar
+    nullable: false
+    description: "The overridden entity's id (deterministic UUIDv7)."
+  - name: attribute
+    type: varchar
+    nullable: false
+    description: "The golden attribute the override pins."
+  - name: value
+    type: varchar
+    description: "The pinned value; NULL means the steward cleared the field."
+  - name: created_by
+    type: varchar
+    nullable: false
+    description: "The steward or system actor that created the row."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Creation stamp (the run's logical timestamp)."
+  - name: source_action_id
+    type: varchar
+    nullable: false
+    description: "The staged steward action that produced this row."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time (set at insert; overrides are replaced, not edited)."
+"#,
     ),
     (
         "golden_record",
-        include_str!("../../../../entities/golden_record/entity.yaml"),
+        r#"kind: entity
+version: 1
+name: golden_record
+relation: golden_records
+description: "One resolved person: the surviving value per attribute, at a snapshot."
+key: [id]
+generate:
+  stores: [duckdb]
+  languages: [rust, typescript]
+  wire: [arrow, json]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "Persistent entity id (deterministic UUIDv7, minted by reconcile); the survivorship key."
+  - name: given_name
+    type: varchar
+    description: "Surviving given name."
+  - name: family_name
+    type: varchar
+    description: "Surviving family name."
+  - name: email
+    type: varchar
+    description: "Surviving email address."
+  - name: phone_e164
+    type: varchar
+    description: "Surviving phone number in E.164 form."
+  - name: addr_number
+    type: varchar
+    description: "Surviving street number of the address."
+  - name: addr_street
+    type: varchar
+    description: "Surviving street name of the address."
+  - name: addr_unit
+    type: varchar
+    description: "Surviving unit/apartment of the address."
+  - name: addr_city
+    type: varchar
+    description: "Surviving city of the address."
+  - name: addr_region
+    type: varchar
+    description: "Surviving region/state of the address."
+  - name: addr_postal
+    type: varchar
+    description: "Surviving postal code of the address."
+  - name: birth_date
+    type: date
+    description: "Surviving birth date."
+  - name: metadata
+    type: json
+    description: "Surviving opaque per-source metadata object."
+  - name: survivorship_version
+    type: varchar
+    nullable: false
+    description: "Survivorship policy version that produced this row."
+  - name: assembled_at
+    type: timestamp
+    nullable: false
+    volatile: true
+    description: "Assembly time of this row (volatile; excluded from determinism comparisons)."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical creation time (the assembling run's clock; the mart is rebuilt whole)."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time (equals created_at; the mart is rebuilt whole)."
+"#,
     ),
     (
         "ingest_batch",
-        include_str!("../../../../entities/ingest_batch/entity.yaml"),
+        r#"kind: entity
+version: 1
+name: ingest_batch
+relation: ingest_batches
+description: "One delivery receipt (S4.1): per-source landing counts for a batch, including tombstones and resurrections."
+key: [id]
+generate:
+  stores: [duckdb]
+  languages: [rust, typescript]
+  # The receipt has been on the JSON wire since the read API shipped — the
+  # "did my file do anything?" panel renders it — but it never declared so, so
+  # no TypeScript binding existed and the frontend's hand-written `ReceiptRow`
+  # had nothing to be checked against. Declaring it is what lets the
+  # wire-contract gate (W0.4b) cover that interface.
+  wire: [json]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "The delivery batch's unique id (caller-supplied per delivery)."
+  - name: run_id
+    type: varchar
+    nullable: false
+    description: "The run that wrote this row."
+  - name: source_system
+    type: varchar
+    nullable: false
+    description: "The delivering source system."
+  - name: path
+    type: varchar
+    nullable: false
+    description: "The delivered file's path."
+  - name: new_count
+    type: bigint
+    nullable: false
+    description: "Rows landing a brand-new key."
+  - name: changed_count
+    type: bigint
+    nullable: false
+    description: "Rows superseding a key with new content."
+  - name: unchanged_count
+    type: bigint
+    nullable: false
+    description: "Rows matching the key's current content."
+  - name: tombstone_count
+    type: bigint
+    nullable: false
+    description: "Keys tombstoned by a full refresh."
+  - name: resurrected_count
+    type: bigint
+    nullable: false
+    description: "Previously tombstoned keys that returned."
+  - name: full_refresh_keys
+    type: boolean
+    nullable: false
+    description: "Whether the delivery tombstoned omitted keys."
+  - name: matched_count
+    type: bigint
+    description: "Screening (E9b): delivered records that joined an existing entity — their best active score reached `thresholds.auto_merge`. NULL means the delivery was never screened, which is the honest answer for a run that scored nothing (a correction pass, or a rebuild with `skip_ingest`); 0 means it was screened and nothing matched."
+  - name: review_count
+    type: bigint
+    description: "Screening (E9b): delivered records whose best active score landed in the gray band — at or above `review_low` but below `auto_merge`. These are the ones a steward has to decide."
+  - name: unmatched_count
+    type: bigint
+    description: "Screening (E9b): delivered records with no active score reaching `review_low` — genuinely new as far as the model can tell."
+  - name: screened_at
+    type: timestamp
+    description: "When the delivery was screened, NULL if it was not. Separate from the counts so that `screened with everything unmatched` (counts 0/0/N) is distinguishable from `never screened` (all NULL) without reading three columns."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Creation stamp (the run's logical timestamp)."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time. Receipts were written once until E9b; the screening pass now updates the row after the match stage, because the verdicts do not exist until the run has scored."
+"#,
     ),
     (
         "int_std_record",
-        include_str!("../../../../entities/int_std_record/entity.yaml"),
+        r#"kind: entity
+version: 1
+name: int_std_record
+relation: int_std_records
+description: "One current standardized person record per record key: the standardization stage's output (supersession applied, tombstones excluded) and the matching stage's input."
+key: [id]
+natural_key: [record_key]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "Content-derived row id: sha256('int_std_records:' || record_key)."
+  - name: record_key
+    type: varchar
+    nullable: false
+    description: "Stable record identity: `source_system:source_record_id`."
+  - name: source_system
+    type: varchar
+    nullable: false
+    description: "Source system the record was ingested from."
+  - name: source_record_id
+    type: varchar
+    nullable: false
+    description: "The record's id within its source system."
+  - name: content_hash
+    type: varchar
+    nullable: false
+    description: "Hash of the standardized payload: the change-detection identity of this version."
+  - name: std_version
+    type: varchar
+    nullable: false
+    description: "Standardization version that produced this row."
+  - name: given_name
+    type: varchar
+    description: "Standardized given name."
+  - name: family_name
+    type: varchar
+    description: "Standardized family name."
+  - name: name_variants
+    type: list<varchar>
+    nullable: false
+    description: "Nickname/variant expansions of the given name, for matching."
+  - name: email
+    type: varchar
+    description: "Standardized email address."
+  - name: email_valid
+    type: boolean
+    description: "Whether the email passed validation."
+  - name: phone_e164
+    type: varchar
+    description: "Standardized phone number in E.164 form."
+  - name: phone_valid
+    type: boolean
+    description: "Whether the phone number passed validation."
+  - name: addr_number
+    type: varchar
+    description: "Standardized street number of the address."
+  - name: addr_street
+    type: varchar
+    description: "Standardized street name of the address."
+  - name: addr_unit
+    type: varchar
+    description: "Standardized unit/apartment of the address."
+  - name: addr_city
+    type: varchar
+    description: "Standardized city of the address."
+  - name: addr_region
+    type: varchar
+    description: "Standardized region/state of the address."
+  - name: addr_postal
+    type: varchar
+    description: "Standardized postal code of the address."
+  - name: birth_date
+    type: date
+    description: "Standardized birth date."
+  - name: metadata
+    type: json
+    description: "Opaque per-source metadata object, passed through from the source."
+  - name: updated_at_source
+    type: timestamp
+    description: "When the record was last updated in its source system."
+  - name: ingest_batch_id
+    type: varchar
+    nullable: false
+    description: "Ingest batch that landed this version."
+  - name: ingested_at
+    type: timestamp
+    nullable: false
+    description: "When this version was ingested."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical creation time (the building run's clock; the mart is rebuilt whole)."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time (equals created_at; the mart is rebuilt whole)."
+"#,
     ),
-    ("job", include_str!("../../../../entities/job/entity.yaml")),
+    (
+        "job",
+        r#"kind: entity
+version: 1
+name: job
+relation: jobs
+description: "A unit of work on the dispatcher's queue: its kind, params, lifecycle state and retry bookkeeping."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+  wire: [json]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "The job's unique id (UUIDv7, minted at enqueue)."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant this job runs for."
+  - name: kind
+    type: varchar
+    nullable: false
+    description: "The job kind (run_all, correct, maintain, train, ...)."
+  - name: params
+    type: json
+    nullable: false
+    default: "'{}'::jsonb"
+    description: "Kind-specific parameters."
+  - name: state
+    type: varchar
+    nullable: false
+    default: "'queued'"
+    description: "Lifecycle state (queued, dispatching, running, succeeded, failed, canceling, canceled)."
+  - name: priority
+    type: bigint
+    nullable: false
+    default: "0"
+    description: "Claim priority; higher runs first."
+  - name: idempotency_key
+    type: varchar
+    description: "Optional dedup key, unique per org."
+  - name: run_id
+    type: varchar
+    description: "The run this job produced, once dispatched."
+  - name: attempt
+    type: bigint
+    nullable: false
+    default: "0"
+    description: "Attempts made so far."
+  - name: max_attempts
+    type: bigint
+    nullable: false
+    default: "3"
+    description: "Maximum attempts before the job fails."
+  - name: error_class
+    type: varchar
+    description: "Why the job failed, as a class the UI can act on: precondition (an input is missing — expected during onboarding), transient_io (worth retrying), config (the tenant config is wrong), internal (a bug). Null until a failure."
+  - name: error_detail
+    type: varchar
+    description: "The failure's human text, already chain-flattened. Kept beside error_class so a steward sees the reason without reading pod logs."
+  - name: not_before
+    type: timestamp
+    description: "Earliest time the job may be claimed. A retry sets it to the backoff deadline."
+  - name: created_by
+    type: varchar
+    description: "Principal that created the job."
+  - name: schedule_id
+    type: varchar
+    description: "The schedule that enqueued the job, if any."
+  - name: resource_class
+    type: varchar
+    description: "Requested runner resource class."
+  - name: trace_context
+    type: varchar
+    description: "Propagated trace context."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the job was enqueued."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the job row was last updated."
+  - name: started_at
+    type: timestamp
+    volatile: true
+    description: "When the job started running."
+  - name: finished_at
+    type: timestamp
+    volatile: true
+    description: "When the job finished."
+indexes:
+  - name: jobs_idempotency
+    columns: [org_id, idempotency_key]
+    unique: true
+    where: "idempotency_key IS NOT NULL"
+  - name: jobs_one_active_per_org
+    columns: [org_id]
+    unique: true
+    where: "state IN ('dispatching','running','canceling')"
+  - name: jobs_claimable
+    columns: [state, not_before, priority, id]
+"#,
+    ),
     (
         "lake_schema_migration",
-        include_str!("../../../../entities/lake_schema_migration/entity.yaml"),
+        r#"kind: entity
+version: 1
+name: lake_schema_migration
+relation: schema_migrations
+description: "A tenant lake's schema ledger: one row per DDL statement the reconciler applied to lake.main.*, plus one `verified` row each time a new catalog version found the lake already current. The latest row's catalog_hash is the version this lake is at; the lake, not the control plane, is authoritative for its own position."
+key: [id]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "The ledger row's unique id (UUIDv7, minted by the reconciler)."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "When the statement was applied (or the verification recorded)."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Row update stamp; equals created_at (the ledger is append-only)."
+  - name: catalog_hash
+    type: varchar
+    nullable: false
+    description: "The sha256 of the entity catalog's lake DDL that the reconciler was reconciling toward — the schema version."
+  - name: kind
+    type: varchar
+    nullable: false
+    description: "`applied`: this row's statement ran; `verified`: nothing was pending under a catalog version the ledger had not seen."
+  - name: relation
+    type: varchar
+    description: "The store-qualified relation the statement touched (lake.main.raw_records); NULL for a verification."
+  - name: statement
+    type: varchar
+    description: "The DDL statement as applied; NULL for a verification."
+  - name: applied_by
+    type: varchar
+    nullable: false
+    description: "The reconciler that wrote the row: the binary name and its code version."
+  - name: snapshot_id
+    type: bigint
+    description: "The DuckLake snapshot the lake was at after this row's statement committed; a cursor pinned to an older snapshot cannot read columns this statement added."
+"#,
     ),
     (
         "match_score",
-        include_str!("../../../../entities/match_score/entity.yaml"),
+        r#"kind: entity
+version: 1
+name: match_score
+relation: match_scores
+description: "One scored candidate pair (S4.3): the frozen model's match probability with its evidence waterfall, keyed by model and TF snapshot."
+key: [id]
+natural_key: [rec_a_key, rec_b_key, model_version, tf_snapshot_id]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "Content-derived row id: sha256('match_scores:' || rec_a_key || ':' || rec_b_key || ':' || model_version || ':' || tf_snapshot_id)."
+  - name: rec_a_key
+    type: varchar
+    nullable: false
+    description: "The pair's lower record key (canonical order)."
+  - name: rec_b_key
+    type: varchar
+    nullable: false
+    description: "The pair's higher record key (canonical order)."
+  - name: match_probability
+    type: double
+    nullable: false
+    description: "The frozen model's match probability for the pair."
+  - name: model_version
+    type: varchar
+    nullable: false
+    description: "The trained model that scored the pair."
+  - name: tf_snapshot_id
+    type: varchar
+    nullable: false
+    description: "The frozen term-frequency snapshot the score used."
+  - name: rec_a_content_hash
+    type: varchar
+    nullable: false
+    description: "Content hash of record A at scoring time."
+  - name: rec_b_content_hash
+    type: varchar
+    nullable: false
+    description: "Content hash of record B at scoring time."
+  - name: evidence
+    type: json
+    nullable: false
+    description: "The per-comparison evidence waterfall behind the score."
+  - name: is_active
+    type: boolean
+    nullable: false
+    description: "Whether this score is current (false once re-scored or invalidated)."
+  - name: invalidated_at
+    type: timestamp
+    description: "When the score was invalidated; NULL while active."
+  - name: invalidated_run_id
+    type: varchar
+    description: "The run that invalidated the score; NULL while active."
+  - name: run_id
+    type: varchar
+    nullable: false
+    description: "The run that wrote this row."
+  - name: scored_at
+    type: timestamp
+    nullable: false
+    description: "The run's logical scoring timestamp."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical creation time (the scoring run's clock)."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time (the latest scoring run's clock)."
+"#,
     ),
     (
         "matching_model",
-        include_str!("../../../../entities/matching_model/entity.yaml"),
+        r#"kind: entity
+version: 1
+name: matching_model
+relation: matching_models
+description: "An immutable version of a tenant's matching model: the settings document the engine scores against, its hash, provenance and activation state."
+key: [id]
+natural_key: [org_id, name, version]
+generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+  wire: [json]
+  history: true
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "The version row's unique id (UUIDv7, minted when the version is created)."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant this model version belongs to."
+  - name: name
+    type: varchar
+    nullable: false
+    description: "The model's name within the tenant; versions are monotonic within a name, so one tenant can keep several models (a classic rule model beside a trained one) and switch between them."
+  - name: version
+    type: bigint
+    nullable: false
+    description: "The monotonic version number within (org, name). Versions are immutable: a retrain or a weight override mints the next one rather than editing this."
+  - name: entity_type
+    type: varchar
+    nullable: false
+    default: "'person'"
+    accepted_values: [person, account]
+    description: "Which canonical schema the model scores against; a model cannot be activated for a lake of the other entity type."
+  - name: model_json
+    type: varchar
+    nullable: false
+    description: "The settings document the engine loads (comparison levels, their SQL, m/u probabilities, blocking rules). Stored as text, not jsonb, so it round-trips byte-exact — model_hash is taken over these bytes and the engine's determinism depends on them."
+  - name: model_hash
+    type: varchar
+    nullable: false
+    description: "SHA-256 of model_json, so a scored row can be tied back to the exact document that produced it."
+  - name: model_version_label
+    type: varchar
+    nullable: false
+    description: "The identity stamped onto every row this model scores (match_scores.model_version, runs.model_version). It is NOT the version number: it must equal the model_version the frozen term-frequency snapshot CSV is keyed by, because the TF lookup joins on (model_version, tf_snapshot_id) and a mismatch silently returns no term frequencies — changing a pair's score rather than failing. Seeded from the org's ER_MODEL_VERSION; required when uploading a model, for the same reason."
+  - name: tf_snapshot_id
+    type: varchar
+    description: "The frozen term-frequency snapshot this model scores against, when it has one. Paired with model_version_label by the TF lookup."
+  - name: state
+    type: varchar
+    nullable: false
+    default: "'draft'"
+    accepted_values: [draft, active, archived]
+    description: "Draft until activated; exactly one version of a name is active at a time, and activating the next archives the previous. There is deliberately no partial unique index enforcing that: a single UPDATE that moves both rows can transiently violate a non-deferrable unique index even when the end state is legal, so activation is instead one atomic statement that cannot produce two actives, and the active read orders by version so a hypothetical second one could never be served silently."
+  - name: provenance
+    type: json
+    nullable: false
+    default: "'{}'::jsonb"
+    description: "Where this version came from: the seeded starter file, a training run (corpus digest, args, seed), an authored upload, or the version it was derived from."
+  - name: created_by
+    type: varchar
+    nullable: false
+    description: "Principal that created the version."
+  - name: activated_at
+    type: timestamp
+    description: "When this version was activated, if it ever was."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the version was created."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Wall-clock last-write time (database default; advanced by mutations once the entity migrates)."
+indexes:
+  - name: matching_models_org_name_version
+    columns: [org_id, name, version]
+    unique: true
+  - name: matching_models_org_state
+    columns: [org_id, state]
+  # One active version per (org, NAME) — not per org. This entity's description
+  # already said "one tenant can keep several models", but `read/active` was
+  # `WHERE org_id AND state='active' LIMIT 1` and `update/activate` archived
+  # every other active row org-wide, so activating a second model silently
+  # retired the first. An ensemble is a list of named models all active at once
+  # (E5b), which makes the real invariant per name. Partial, so archived and
+  # draft versions stay unconstrained.
+  - name: matching_models_one_active_per_name
+    columns: [org_id, name]
+    unique: true
+    where: "state = 'active'"
+"#,
     ),
     (
         "metric_snapshot",
-        include_str!("../../../../entities/metric_snapshot/entity.yaml"),
+        r#"kind: entity
+version: 1
+name: metric_snapshot
+relation: metric_snapshots
+description: "One run's resolution metrics, kept so the dashboard can show a TREND rather than only a current value. The dashboard has always computed its numbers live from the lake, which means it can say what is true now and nothing about whether that is better or worse than last week — which is the question an operator actually has."
+key: [id]
+natural_key: [run_id]
+generate:
+  stores: [duckdb]
+  languages: [rust, typescript]
+  # The snapshot has been on the JSON wire since O7a shipped `GET /insights` —
+  # it just had no caller, so nothing noticed it was undeclared and no
+  # TypeScript binding existed for the wire-contract gate to check an `InsightRow`
+  # against. Declaring it is what brings the insights page's interface under
+  # that gate, the same way E9b brought the delivery receipt under it.
+  wire: [json]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "Content-derived row id: sha256('metric_snapshots:' || run_id)."
+  - name: run_id
+    type: varchar
+    nullable: false
+    description: "The run these metrics describe. One snapshot per run, so a re-run of the same id overwrites rather than double-counting."
+  - name: captured_at
+    type: timestamp
+    nullable: false
+    description: "The run's logical clock, not wall time — so a replayed fixture produces the same snapshot."
+  - name: records
+    type: bigint
+    nullable: false
+    description: "Records in the standardized corpus."
+  - name: entities
+    type: bigint
+    nullable: false
+    description: "Entities the run resolved them into."
+  - name: duplicate_records
+    type: bigint
+    nullable: false
+    description: "Records sitting in an entity with more than one member — the numerator of the duplicate rate. Counting GROUPS instead would call a 5-record cluster and a 2-record cluster the same amount of duplication."
+  - name: duplicate_groups
+    type: bigint
+    nullable: false
+    description: "Entities with more than one member."
+  - name: largest_group
+    type: bigint
+    nullable: false
+    description: "Members in the biggest entity. A sudden jump here is the signature of an over-merge, which an average cluster size hides completely."
+  - name: review_backlog
+    type: bigint
+    nullable: false
+    description: "Open review items after the run — the work the thresholds are handing to humans."
+  - name: auto_merge_pairs
+    type: bigint
+    nullable: false
+    description: "Active scores at or above the auto-merge threshold."
+  - name: review_band_pairs
+    type: bigint
+    nullable: false
+    description: "Active scores in the gray band: scored, not merged. The two together say where the thresholds are actually sitting."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical creation time."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time."
+"#,
     ),
     (
         "metric_snapshot_source",
-        include_str!("../../../../entities/metric_snapshot_source/entity.yaml"),
+        r#"kind: entity
+version: 1
+name: metric_snapshot_source
+relation: metric_snapshot_sources
+description: "One run's duplicate attribution, per source system. The corpus-wide duplicate rate says a tenant has a problem; it does not say WHERE the problem comes from, and the answer is nearly always one feed. Retained per run beside metric_snapshots for the same reason that table exists: a live number says what is true now and nothing about whether a source is getting better or worse."
+key: [id]
+natural_key: [run_id, source_system]
+generate:
+  stores: [duckdb]
+  languages: [rust, typescript]
+  wire: [json]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "Content-derived row id: sha256('metric_snapshot_sources:' || run_id || ':' || source_system)."
+  - name: run_id
+    type: varchar
+    nullable: false
+    description: "The run this attribution describes; shares its id with the metric_snapshots row."
+  - name: source_system
+    type: varchar
+    nullable: false
+    description: "The delivering source system."
+  - name: captured_at
+    type: timestamp
+    nullable: false
+    description: "The run's logical timestamp, duplicated here so the series is readable without joining."
+  - name: records
+    type: bigint
+    nullable: false
+    description: "How many of this source's records are in the corpus."
+  - name: duplicate_records
+    type: bigint
+    nullable: false
+    description: "How many of them share an entity with at least one other record — counted by RECORD rather than by group, the same judgement metric_snapshots made: counting groups calls a five-record cluster and a pair the same amount of duplication."
+  - name: contributed_groups
+    type: bigint
+    nullable: false
+    description: "How many duplicate groups contain at least one of this source's records. A source can account for few duplicate RECORDS while touching many groups, which is the signature of a feed that adds one bad row to everything rather than one bad batch."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Creation stamp (the run's logical timestamp)."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Last-update stamp; a re-run of the same run_id corrects rather than appends."
+"#,
     ),
-    ("org", include_str!("../../../../entities/org/entity.yaml")),
+    (
+        "org",
+        r#"kind: entity
+version: 1
+name: org
+relation: orgs
+description: "A tenant: its config pointer, lake env, lifecycle state and active config version."
+key: [id]
+natural_key: [name]
+generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+  wire: [json]
+  history: true
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "The tenant's unique id (UUIDv7, minted at creation)."
+  - name: name
+    type: varchar
+    nullable: false
+    description: "The tenant's unique name (the routing handle; URLs stay name-based)."
+  - name: config_path
+    type: varchar
+    nullable: false
+    description: "Path to the tenant's config document."
+  - name: env
+    type: json
+    nullable: false
+    default: "'{}'::jsonb"
+    description: "Lake connection env (catalog, data path, metadata schema)."
+  - name: drop_root
+    type: varchar
+    description: "Optional object-store root for tenant purge."
+  - name: active_config_version
+    type: bigint
+    description: "The currently published config version, if any."
+  - name: state
+    type: varchar
+    nullable: false
+    default: "'active'"
+    accepted_values: [provisioning, active, suspended, purging]
+    description: "Tenant lifecycle state."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the tenant was created."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Wall-clock last-write time (database default; advanced by mutations once the entity migrates)."
+"#,
+    ),
     (
         "pair_label",
-        include_str!("../../../../entities/pair_label/entity.yaml"),
+        r#"kind: entity
+version: 1
+name: pair_label
+relation: pair_labels
+description: "A human (or model) verdict on one candidate pair — the training signal the engine has always been able to learn from and never had. One row per (org, pair): a re-label corrects the previous verdict rather than stacking another."
+key: [id]
+natural_key: [org_id, rec_a_key, rec_b_key]
+generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+  wire: [json]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "UUIDv7, minted by the application."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant whose corpus the pair belongs to; every read is scoped by it."
+  - name: rec_a_key
+    type: varchar
+    nullable: false
+    description: "The pair's lower record key, canonical order — the same ordering match_scores uses, so a label and a score describe the same pair."
+  - name: rec_b_key
+    type: varchar
+    nullable: false
+    description: "The pair's higher record key, canonical order."
+  - name: verdict
+    type: varchar
+    nullable: false
+    accepted_values: [match, no_match]
+    description: "Whether these two records are the same entity. Deliberately binary: a labeller who is unsure should skip rather than guess, because a guessed label trains the model on noise and is indistinguishable afterwards from a confident one."
+  - name: origin
+    type: varchar
+    nullable: false
+    default: "'human'"
+    accepted_values: [human, reviewer, llm]
+    description: "Where the verdict came from. `human` is an explicit labelling session; `reviewer` is implicit feedback from resolving a review item; `llm` is a model's suggestion. Kept apart so training can weight or exclude a source, and so an accuracy number can say whose labels it was measured against."
+  - name: labeled_by
+    type: varchar
+    nullable: false
+    description: "The actor that recorded the verdict."
+  - name: model_version
+    type: varchar
+    description: "The model whose score prompted this label, when there was one. Null for a label recorded without a score in front of it."
+  - name: score_at_label
+    type: double
+    description: "The match probability shown to the labeller, so a later accuracy pass can tell what the model thought at the time rather than what it thinks now."
+  - name: note
+    type: varchar
+    description: "Optional free text from the labeller."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    volatile: true
+    default: now()
+    description: "When the verdict was first recorded."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    volatile: true
+    default: now()
+    description: "When it was last corrected."
+indexes:
+  # The tenant's label set, and the natural-key upsert target.
+  - name: pair_labels_org_pair
+    columns: [org_id, rec_a_key, rec_b_key]
+    unique: true
+  # "what has this tenant labelled lately", and the training read.
+  - name: pair_labels_org_recent
+    columns: [org_id, created_at]
+"#,
     ),
     (
         "raw_record",
-        include_str!("../../../../entities/raw_record/entity.yaml"),
+        r#"kind: entity
+version: 1
+name: raw_record
+relation: raw_records
+description: "One landed delivery row (S4.1): the source record's payload as delivered, content-hashed; append-only, with full-refresh tombstones."
+key: [id]
+natural_key: [source_system, source_record_id, content_hash]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+  append: true
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "Batch-salted content-derived row id: sha256('raw_records:' || source_system || ':' || source_record_id || ':' || content_hash || ':' || ingest_batch_id) — unique even when identical content re-lands in a later batch."
+  - name: source_system
+    type: varchar
+    nullable: false
+    description: "The delivering source system."
+  - name: source_record_id
+    type: varchar
+    nullable: false
+    description: "The record's id in its source system."
+  - name: payload
+    type: json
+    description: "The delivered row as JSON; NULL on an S4.1.1 full-refresh tombstone."
+  - name: content_hash
+    type: varchar
+    nullable: false
+    description: "SHA-256 of the mapped values (S4.1); the tombstone sentinel is 64 zeros."
+  - name: is_deleted
+    type: boolean
+    nullable: false
+    description: "Whether this version is a tombstone."
+  - name: deleted_at
+    type: timestamp
+    description: "Tombstone stamp; NULL on live versions."
+  - name: ingest_batch_id
+    type: varchar
+    nullable: false
+    description: "The delivery batch that landed this row."
+  - name: ingested_at
+    type: timestamp
+    nullable: false
+    description: "The delivery's logical landing timestamp."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical creation time (the delivery's landing timestamp; rows are append-only)."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time (equals created_at; rows are append-only)."
+"#,
     ),
     (
         "record_overlay",
-        include_str!("../../../../entities/record_overlay/entity.yaml"),
+        r#"kind: entity
+version: 1
+name: record_overlay
+relation: record_overlays
+description: "One steward record overlay (protect/suppress): a flag on a record key, retractable, applied at assembly."
+key: [id]
+natural_key: [record_key, kind]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "Content-derived row id: sha256('record_overlays:' || record_key || ':' || kind)."
+  - name: record_key
+    type: varchar
+    nullable: false
+    description: "The standardized record key."
+  - name: kind
+    type: varchar
+    nullable: false
+    description: "always or never."
+  - name: active
+    type: boolean
+    nullable: false
+    description: "Whether the row is in force (retraction flips this; rows are never deleted)."
+  - name: created_by
+    type: varchar
+    nullable: false
+    description: "The steward or system actor that created the row."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Creation stamp (the run's logical timestamp)."
+  - name: source_action_id
+    type: varchar
+    nullable: false
+    description: "The staged steward action that produced this row."
+  - name: retracted_at
+    type: timestamp
+    description: "When it was retracted; NULL while active."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time (advanced by retract)."
+"#,
     ),
     (
         "record_quality",
-        include_str!("../../../../entities/record_quality/entity.yaml"),
+        r#"kind: entity
+version: 1
+name: record_quality
+relation: record_qualities
+description: "A per-record data-quality score, 0-100, with the three dimensions kept separately. The dimensions are kept because a single number says a record is bad and not what to do about it: complete-but-invalid, valid-but-empty and simply old are three different jobs."
+key: [id]
+natural_key: [record_key]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "Content-derived row id: sha256('record_qualities:' || record_key)."
+  - name: record_key
+    type: varchar
+    nullable: false
+    description: "The standardized record scored."
+  - name: score
+    type: double
+    nullable: false
+    description: "0-100, the weighted mean of the dimensions that APPLY to this record. A dimension that cannot be judged is left out of the mean rather than counted as zero."
+  - name: completeness
+    type: double
+    nullable: false
+    description: "Weighted fraction of the configured attributes that are populated."
+  - name: validity
+    type: double
+    description: "Fraction of the PRESENT validatable fields that passed standardization. NULL when the record has none of them — a record with no email is already penalised by completeness, and scoring its validity zero would penalise the same absence twice."
+  - name: freshness
+    type: double
+    description: "1.0 within `fresh_days` of the run, decaying to 0.0 at `stale_days`. NULL when the source carries no timestamp, because unknown age is not the same as old."
+  - name: run_id
+    type: varchar
+    nullable: false
+    description: "The run that scored it."
+  - name: scored_at
+    type: timestamp
+    nullable: false
+    description: "That run's logical clock."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical creation time."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time."
+"#,
     ),
     (
         "resolved_entity",
-        include_str!("../../../../entities/resolved_entity/entity.yaml"),
+        r#"kind: entity
+version: 1
+name: resolved_entity
+relation: entities
+description: "One resolved entity (S4.4): its lifecycle status and, for merge losers, the surviving entity it merged into."
+key: [id]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "The resolved entity's id (UUIDv7, minted deterministically by reconcile)."
+  - name: status
+    type: varchar
+    nullable: false
+    description: "The entity's lifecycle status."
+  - name: merged_into
+    type: varchar
+    description: "The surviving entity for a merge loser; NULL otherwise."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Creation stamp (the run's logical timestamp)."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Last-update stamp (the run's logical timestamp)."
+  - name: created_run_id
+    type: varchar
+    nullable: false
+    description: "The run that created the entity."
+  - name: updated_run_id
+    type: varchar
+    nullable: false
+    description: "The run that last updated the entity."
+"#,
     ),
     (
         "review",
-        include_str!("../../../../entities/review/entity.yaml"),
+        r#"kind: entity
+version: 1
+name: review
+relation: review_queue
+description: "One open question for a steward (S4.4.3): a gray-band pair, an unsatisfiable never, or a coherence flag, with its resolution."
+key: [id]
+natural_key: [rec_a_key, rec_b_key, reason]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "Content-derived review id: sha256('review_queue:' || rec_a_key || ':' || rec_b_key || ':' || reason)."
+  - name: subject_type
+    type: varchar
+    nullable: false
+    description: "What the review is about: a record pair or an entity."
+  - name: rec_a_key
+    type: varchar
+    description: "The pair's lower record key (canonical order)."
+  - name: rec_b_key
+    type: varchar
+    description: "The pair's higher record key (canonical order)."
+  - name: entity_id
+    type: varchar
+    description: "The subject entity's id (UUIDv7) for entity-scoped reviews; NULL on pair reviews."
+  - name: reason
+    type: varchar
+    nullable: false
+    description: "Why it needs review: gray_band, never_unsatisfiable or coherence."
+  - name: match_probability
+    type: double
+    description: "The frozen model's match probability for the pair."
+  - name: waterfall
+    type: json
+    description: "The evidence waterfall snapshot shown to the steward."
+  - name: status
+    type: varchar
+    nullable: false
+    description: "The entity's lifecycle status."
+  - name: first_seen_run_id
+    type: varchar
+    nullable: false
+    description: "The run that first raised the item."
+  - name: last_seen_run_id
+    type: varchar
+    nullable: false
+    description: "The latest run that still raises it."
+  - name: resolved_by
+    type: varchar
+    description: "Who resolved it; NULL while open."
+  - name: resolved_at
+    type: timestamp
+    description: "When it was resolved; NULL while open."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical creation time (the writing run's clock)."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time (advanced by re-sighting and resolve)."
+"#,
     ),
-    ("run", include_str!("../../../../entities/run/entity.yaml")),
+    (
+        "run",
+        r#"kind: entity
+version: 1
+name: run
+relation: runs
+description: "The run ledger (S5.2): one row per pipeline run — mode, status, versions and the snapshot range it produced."
+key: [id]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "The run's unique id (caller-supplied; the dispatcher passes the job's UUIDv7)."
+  - name: tenant
+    type: varchar
+    nullable: false
+    description: "The tenant the run belongs to."
+  - name: mode
+    type: varchar
+    nullable: false
+    description: "The run mode (full, incremental, correction_pass, ...)."
+  - name: status
+    type: varchar
+    nullable: false
+    description: "The entity's lifecycle status."
+  - name: started_at
+    type: timestamp
+    nullable: false
+    description: "When the run started (its logical timestamp)."
+  - name: ended_at
+    type: timestamp
+    description: "When the run ended; NULL while running."
+  - name: config_hash
+    type: varchar
+    nullable: false
+    description: "The published config the run executed under."
+  - name: model_version
+    type: varchar
+    description: "The trained model that scored the pair."
+  - name: tf_snapshot_id
+    type: varchar
+    description: "The frozen term-frequency snapshot the score used."
+  - name: std_version
+    type: varchar
+    nullable: false
+    description: "The standardization code version."
+  - name: survivorship_version
+    type: varchar
+    nullable: false
+    description: "The survivorship policy version."
+  - name: lexicon_hash
+    type: varchar
+    description: "SHA-256 over the active nickname lexicon pairs; NULL before the lexicon joined the fingerprint."
+  - name: code_version
+    type: varchar
+    nullable: false
+    description: "The engine crate version."
+  - name: rebuild_reason
+    type: varchar
+    description: "Why a full rebuild ran; NULL otherwise."
+  - name: snapshot_start
+    type: bigint
+    description: "First lake snapshot version the run produced."
+  - name: snapshot_end
+    type: bigint
+    description: "Last lake snapshot version the run produced."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical creation time (the run's start stamp)."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time (advanced when the run finishes)."
+"#,
+    ),
     (
         "schedule",
-        include_str!("../../../../entities/schedule/entity.yaml"),
+        r#"kind: entity
+version: 1
+name: schedule
+relation: schedules
+description: "A recurring job schedule for a tenant: its kind, cron and source."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+  wire: [json]
+  history: true
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "The schedule's unique id."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant this schedule runs for."
+  - name: kind
+    type: varchar
+    nullable: false
+    description: "The job kind the schedule enqueues."
+  - name: params
+    type: json
+    nullable: false
+    default: "'{}'::jsonb"
+    description: "Kind-specific parameters."
+  - name: cron
+    type: varchar
+    nullable: false
+    description: "The cron expression."
+  - name: enabled
+    type: boolean
+    nullable: false
+    default: "true"
+    description: "Whether the schedule is active."
+  - name: source
+    type: varchar
+    nullable: false
+    default: "'api'"
+    description: "What created the schedule (api, config:correction_pass, system:lake_maintain)."
+  - name: last_enqueued_at
+    type: timestamp
+    description: "When the schedule last enqueued a job."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the schedule was created."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Wall-clock last-write time (database default; advanced by mutations once the entity migrates)."
+indexes:
+  - name: schedules_one_correction_per_org
+    columns: [org_id]
+    unique: true
+    where: "source = 'config:correction_pass'"
+  - name: schedules_one_maintenance_per_org
+    columns: [org_id]
+    unique: true
+    where: "source = 'system:lake_maintain'"
+"#,
     ),
     (
         "schema_migration",
-        include_str!("../../../../entities/schema_migration/entity.yaml"),
+        r#"kind: entity
+version: 1
+name: schema_migration
+relation: schema_migrations
+description: "The control-plane schema ledger: one row per DDL statement the reconciler applied to public.*, plus one `verified` row each time a new catalog version found the live schema already current. The latest row's catalog_hash is the version the database is at."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "The ledger row's unique id (UUIDv7, minted by the reconciler)."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the statement was applied (or the verification recorded)."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Row update stamp; equals created_at (the ledger is append-only)."
+  - name: catalog_hash
+    type: varchar
+    nullable: false
+    description: "The sha256 of the entity catalog's Postgres DDL that the reconciler was reconciling toward — the schema version."
+  - name: kind
+    type: varchar
+    nullable: false
+    accepted_values: [applied, verified]
+    description: "`applied`: this row's statement ran; `verified`: nothing was pending under a catalog version the ledger had not seen."
+  - name: relation
+    type: varchar
+    description: "The store-qualified relation the statement touched (public.jobs); NULL for a verification."
+  - name: statement
+    type: varchar
+    description: "The DDL statement as applied; NULL for a verification."
+  - name: applied_by
+    type: varchar
+    nullable: false
+    description: "The reconciler that wrote the row: the binary name and its code version."
+indexes:
+  - name: schema_migrations_created_at
+    columns: [created_at]
+"#,
     ),
     (
         "scored_record",
-        include_str!("../../../../entities/scored_record/entity.yaml"),
+        r#"kind: entity
+version: 1
+name: scored_record
+relation: scored_records
+description: "What the last successful match pass actually scored: one row per record in the corpus at the moment it was scored, with the content hash and model identity it was scored under. This is what makes an incremental run safe — a record is new or changed precisely when the standardized corpus disagrees with this ledger."
+key: [id]
+natural_key: [record_key]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "Content-derived row id: sha256('scored_records:' || record_key)."
+  - name: record_key
+    type: varchar
+    nullable: false
+    description: "The standardized record this row accounts for."
+  - name: content_hash
+    type: varchar
+    nullable: false
+    description: "The record's content hash at scoring time. A differing hash in int_std_records is what identifies a changed record."
+  - name: model_version
+    type: varchar
+    nullable: false
+    description: "The trained model the record was scored under. An incremental pass over a different model cannot reuse these scores."
+  - name: tf_snapshot_id
+    type: varchar
+    nullable: false
+    description: "The frozen term-frequency snapshot the scoring used; frozen TF is what makes a reused score equal to a re-computed one."
+  - name: run_id
+    type: varchar
+    nullable: false
+    description: "The run whose match pass scored this record."
+  - name: scored_at
+    type: timestamp
+    nullable: false
+    description: "That run's logical scoring timestamp."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical creation time (the scoring run's clock)."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time (the latest scoring run's clock)."
+"#,
     ),
     (
         "staged_steward_action",
-        include_str!("../../../../entities/staged_steward_action/entity.yaml"),
+        r#"kind: entity
+version: 1
+name: staged_steward_action
+relation: staged_steward_actions
+description: "A steward action staged for review/apply: its payload, state and outcome."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+  wire: [json]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "The staged action's unique id."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant the action applies to."
+  - name: action
+    type: json
+    nullable: false
+    description: "The action payload."
+  - name: state
+    type: varchar
+    nullable: false
+    default: "'pending'"
+    accepted_values: [pending, applied, failed]
+    description: "Whether the action is pending, applied or failed."
+  - name: error
+    type: varchar
+    description: "The failure reason, if the action failed."
+  - name: created_by
+    type: varchar
+    nullable: false
+    description: "Principal that staged the action."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the action was staged."
+  - name: applied_at
+    type: timestamp
+    description: "When the action was applied, if it has been."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Wall-clock last-write time (database default; advanced by mutations once the entity migrates)."
+indexes:
+  - name: staged_pending
+    columns: [org_id, state]
+"#,
     ),
-    ("tag", include_str!("../../../../entities/tag/entity.yaml")),
+    (
+        "tag",
+        r#"kind: entity
+version: 1
+name: tag
+relation: tags
+description: "A tenant's own label for entities and review groups: the vocabulary a steward sorts work by."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+  wire: [json]
+  history: true
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "The tag's unique id (UUIDv7, minted by the application)."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant that owns the tag. A tag is never shared across tenants: it names one tenant's own workflow."
+  - name: name
+    type: varchar
+    nullable: false
+    description: "The label a steward sees and types. Unique per tenant among active tags, because two tags with one name make a filter ambiguous and a bulk action unsafe."
+  - name: description
+    type: varchar
+    description: "What the tag means, for the steward who inherits it. Null when nobody wrote one."
+  - name: active
+    type: boolean
+    nullable: false
+    default: "true"
+    description: "Whether the tag is in use. Retiring is a soft delete: `taggings` references this row, every foreign key in this schema is NO ACTION, and a hard DELETE would therefore fail for exactly the tags that had been used — which is the bug D11 found in webhooks. Keeping the row also keeps the history legible: what a group was once marked as is part of why it was handled the way it was."
+  - name: created_by
+    type: varchar
+    nullable: false
+    description: "The actor that created the tag."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the tag was created."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Wall-clock last-write time."
+indexes:
+  # The tenant's vocabulary, alphabetical.
+  - name: tags_org_name
+    columns: [org_id, name]
+  # One live tag per name per tenant. Partial on `active`, so retiring a tag
+  # frees its name for reuse while the retired row stays for history — the same
+  # shape `matching_models_one_active_per_name` uses for the same reason.
+  - name: tags_one_active_per_name
+    columns: [org_id, name]
+    unique: true
+    where: "active"
+"#,
+    ),
     (
         "tagging",
-        include_str!("../../../../entities/tagging/entity.yaml"),
+        r#"kind: entity
+version: 1
+name: tagging
+relation: taggings
+description: "One tag applied to one subject: the attachment, kept apart from the tag so retiring a tag does not rewrite what it was applied to."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+  wire: [json]
+  history: true
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "The tagging's unique id (UUIDv7, minted by the application)."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant. Denormalised from the tag so every read is scoped by one predicate rather than a join — the same reason every other tenant-scoped relation carries it."
+  - name: tag_id
+    type: varchar
+    nullable: false
+    references: { relation: tags, column: id }
+    description: "The tag applied."
+  - name: subject_type
+    type: varchar
+    nullable: false
+    description: "What was tagged: `entity` (a resolved cluster, by its entity id) or `review` (an open review item). Two kinds rather than two tables, because a filter and a bulk action want one list of 'things tagged X' and a union of two relations would make every such read a join."
+  - name: subject_id
+    type: varchar
+    nullable: false
+    description: "The entity id or review id. Deliberately NOT a foreign key: an entity lives in the lake and a review is rebuilt by every reconcile, so a database-level reference would be to a row this store does not own. A tagging whose subject has gone is harmless — it reads as absent and is cleaned up by nothing, which is the honest cost of tagging something another store owns."
+  - name: created_by
+    type: varchar
+    nullable: false
+    description: "The actor that applied the tag. Kept because tagging is how work is assigned, so who claimed it matters."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the tag was applied."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Wall-clock last-write time."
+indexes:
+  # "What is tagged X" — the filter and every bulk action scoped by tag.
+  - name: taggings_org_tag
+    columns: [org_id, tag_id]
+  # "What is this thing tagged" — the chips on one entity or review.
+  - name: taggings_org_subject
+    columns: [org_id, subject_type, subject_id]
+  # Applying the same tag twice is the same fact, so it is one row. Makes the
+  # apply endpoint idempotent at the schema rather than by a read-then-write
+  # race.
+  - name: taggings_unique_application
+    columns: [org_id, tag_id, subject_type, subject_id]
+    unique: true
+"#,
     ),
     (
         "tenant_schema_state",
-        include_str!("../../../../entities/tenant_schema_state/entity.yaml"),
+        r#"kind: entity
+version: 1
+name: tenant_schema_state
+relation: tenant_schema_states
+description: "The control plane's cache of each tenant lake's schema position: the catalog version the lake was last reconciled or checked against and how that went. The lake's own schema_migrations ledger is authoritative; this row is what the deploy report and the drift check read without opening every lake."
+key: [id]
+natural_key: [org_id]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "The row's unique id (UUIDv7, minted on first write)."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant whose lake this row describes."
+  - name: catalog_hash
+    type: varchar
+    nullable: false
+    description: "The catalog version the lake was reconciled toward on the last attempt."
+  - name: status
+    type: varchar
+    nullable: false
+    accepted_values: [current, migrated, breaking, error]
+    description: "`current`: nothing was pending; `migrated`: safe statements were applied; `breaking`: the lake differs in a way the reconciler refuses to auto-apply (a rebuild is needed); `error`: the lake could not be opened or the apply failed."
+  - name: detail
+    type: varchar
+    description: "What was applied, what is breaking, or the error text — the per-tenant line of the deploy report."
+  - name: checked_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the lake was last reconciled or checked."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row was first written."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Wall-clock last-write time."
+indexes:
+  - name: tenant_schema_states_org
+    columns: [org_id]
+"#,
     ),
     (
         "webhook",
-        include_str!("../../../../entities/webhook/entity.yaml"),
+        r#"kind: entity
+version: 1
+name: webhook
+relation: webhooks
+description: "A tenant webhook endpoint: its URL, subscribed events and signing secret."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+  wire: [json]
+  history: true
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "The webhook's unique id."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant that owns the webhook."
+  - name: url
+    type: varchar
+    nullable: false
+    description: "The delivery URL."
+  - name: events
+    type: json
+    nullable: false
+    default: "'[]'::jsonb"
+    description: "The subscribed event types."
+  - name: secret
+    type: varchar
+    nullable: false
+    description: "HMAC signing secret for deliveries."
+  - name: active
+    type: boolean
+    nullable: false
+    default: "true"
+    description: "Whether the webhook is active."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the webhook was registered."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Wall-clock last-write time (database default; advanced by mutations once the entity migrates)."
+"#,
     ),
     (
         "webhook_delivery",
-        include_str!("../../../../entities/webhook_delivery/entity.yaml"),
+        r#"kind: entity
+version: 1
+name: webhook_delivery
+relation: webhook_deliveries
+description: "One attempt-tracked delivery of one event to one subscriber. The event is recorded here BEFORE any network call, so a subscriber that is briefly unreachable gets the event late instead of never."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+  # `wire: [json]` is what makes the typescript binding actually emit — without
+  # it the `typescript` language is silently ignored (V16).
+  wire: [json]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "UUIDv7, minted by the application."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant whose subscriber this is for; every read is scoped by it."
+  - name: webhook_id
+    type: varchar
+    nullable: false
+    references: { relation: webhooks, column: id }
+    description: "The subscription being delivered to."
+  - name: event_type
+    type: varchar
+    nullable: false
+    description: "The catalogued event (webhook::EVENT_CATALOG), e.g. job.succeeded."
+  - name: payload
+    type: json
+    nullable: false
+    description: "The exact body to POST. Stored rather than rebuilt so a retry delivers the same bytes the signature was computed over, and so the log shows what was actually sent."
+  - name: state
+    type: varchar
+    nullable: false
+    default: "'pending'"
+    accepted_values: [pending, delivered, failed]
+    description: "pending until a drain settles it; delivered on a 2xx; failed when retries are exhausted or the destination is refused outright."
+  - name: attempt
+    type: bigint
+    nullable: false
+    default: "0"
+    description: "Attempts handed out. Counted when claimed, not when reported, so a drainer that dies still consumes one."
+  - name: max_attempts
+    type: bigint
+    nullable: false
+    default: "6"
+    description: "Attempts before giving up. Six with the backoff below spans about ten minutes."
+  - name: next_attempt_at
+    type: timestamp
+    description: "When this becomes claimable. NULL means immediately; set to a backoff in the future after a retryable failure."
+  - name: response_code
+    type: bigint
+    description: "The subscriber's HTTP status, when the POST completed at all."
+  - name: error
+    type: varchar
+    description: "Why the last attempt did not deliver: a transport error, or the outbound-URL guard's refusal."
+  - name: delivered_at
+    type: timestamp
+    description: "When a 2xx was received; NULL unless state is delivered."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    volatile: true
+    default: now()
+    description: "When the event was recorded, which is before any delivery was attempted."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    volatile: true
+    default: now()
+    description: "Last write."
+indexes:
+  # The per-tenant delivery log, newest first.
+  - name: webhook_deliveries_org_recent
+    columns: [org_id, created_at]
+  # The drainer's claim scan: pending rows whose backoff has elapsed.
+  - name: webhook_deliveries_claimable
+    columns: [state, next_attempt_at]
+"#,
     ),
 ];
 
