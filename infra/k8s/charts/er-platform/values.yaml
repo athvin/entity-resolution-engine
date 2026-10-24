@@ -28,12 +28,22 @@ images:
     repository: er-web
     tag: ""
     digest: ""
-  # The image the planned runner Job will run (§6.2/§11: er-pipeline — the
-  # engine CLI and the baked DuckDB extensions), to be resolved to
+  # The image the planned runner Job will run, to be resolved to
   # ERSERVER_RUNNER_IMAGE on the dispatcher; the same tag-pinning rule as above
   # will apply. NOT IMPLEMENTED today — there are no runner Jobs and
   # ERSERVER_RUNNER_IMAGE is read nowhere; see the `dispatcher:` block below.
-  # The image itself is real and is built by CI; it is what `er` runs locally.
+  #
+  # `er-pipeline` DOES NOT EXIST. It was the Python-era runner; no workflow
+  # builds it (images.yml's header says so), the last tag was pushed
+  # 2026-10-12, and `docker/Dockerfile` went with the Python tree. This comment
+  # claimed "the image itself is real and is built by CI" until 2026-10-24,
+  # which was wrong in both halves.
+  #
+  # When the launcher is built, the value should be `er-api`: that one image now
+  # carries the engine CLI as `er` and the baked DuckDB extensions — the two
+  # things `er-pipeline` was for — in a single multicall binary (rust/Dockerfile).
+  # The repository below is left as-is rather than silently repointed, because
+  # changing it would look like configuration when nothing reads it.
   runner:
     repository: er-pipeline
     tag: ""

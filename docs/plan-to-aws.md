@@ -157,7 +157,7 @@ catches cross-module leaks here.
 - [x] **1.2 EKS cluster** (§5; Auto Mode per D1) — *er-dev ACTIVE 2026-10-10, v1.36 pinned in Terraform, API access entries (PlatformAdmin cluster-admin). Auto Mode supplies compute/storage/LB/CNI controllers, so the addon list reduces to EFS CSI + the Helm-installed pair (external-dns, ESO) in 1.4/1.6.*
   - [x] `kubectl` works via Identity Center.
   - [ ] The `view`-only group cannot read Secrets — deferred until the view mapping exists (prod era).
-- [x] **1.3 Nodes + hardening** (§5, §5.1, §5.6; Auto Mode per D1) — *app/runner-sm/runner-l NodePools applied with the §5.1 disruption settings; a probe pod provisioned a node in ~90s.*
+- [x] **1.3 Nodes + hardening** (§5, §5.1, §5.6; Auto Mode per D1) — *app/runner-sm/runner-l NodePools applied with the §5.1 disruption settings; a probe pod provisioned a node in ~90s.* **The ~90 s is stale (2026-10-24):** measured on a `c6id` probe node, NodeClaim created to Ready is now ~14 s and the whole submit-to-container-running path is ~30 s — see [measurements/runner-startup-20261024.json](measurements/runner-startup-20261024.json) and §18.16. Auto Mode's June 2026 boot improvements are the likely cause. The original figure was a hand observation with no artifact, which is exactly why it went unchallenged for two weeks.
   - [x] `app` NodePool provisions; system pods scheduled.
   - [x] IMDS probe (2026-10-10), refined: a tokenless GET returns 401 (IMDSv1 disabled) and the IMDSv2 token PUT **times out** (hop limit 1) — the credential path is dead, which is the property the probe exists for.
   - [x] A privileged test pod is rejected in a namespace labeled `baseline` (PSS enforcing).

@@ -80,8 +80,9 @@ pub fn open_org_lake(env: &Value) -> Result<Session, String> {
         .get("ER_LAKE_METADATA_SCHEMA")
         .and_then(Value::as_str)
         .unwrap_or("main");
-    let mut session = Session::open_in_memory(SessionOptions::deterministic())
-        .map_err(|e| crate::errfmt::chain(&e))?;
+    let mut session =
+        Session::open_in_memory(SessionOptions::deterministic().with_baked_extensions())
+            .map_err(|e| crate::errfmt::chain(&e))?;
     session
         .attach_ducklake(&DuckLakeConfig {
             metadata: catalog.to_string(),

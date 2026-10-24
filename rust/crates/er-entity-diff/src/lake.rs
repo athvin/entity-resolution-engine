@@ -13,6 +13,11 @@ use crate::LiveColumn;
 /// CLI's `--store duckdb`, which has no engine session; the server and the
 /// dispatcher reconcile through the session they already hold.
 ///
+/// Honours `ER_DUCKDB_EXTENSION_DIR` the same way `SessionOptions::with_baked_extensions`
+/// does, so this path does not reach the DuckDB extension repository inside a
+/// container either. Keeping the two in step is the whole reason this duplication
+/// is called out above rather than left to be discovered.
+///
 /// # Errors
 /// Propagates the extension load or the ATTACH error.
 pub fn attach_lake(
@@ -21,7 +26,18 @@ pub fn attach_lake(
     data_path: Option<&str>,
     read_only: bool,
 ) -> duckdb::Result<()> {
-    conn.execute_batch("INSTALL ducklake; LOAD ducklake;")?;
+    let baked = std::env::var("ER_DUCKDB_EXTENSION_DIR")
+        .ok()
+        .filter(|d| !d.is_empty());
+    if let Some(dir) = &baked {
+        conn.execute_batch(&format!(
+            "SET extension_directory = '{}';\nSET autoinstall_known_extensions = false;",
+            dir.replace('\'', "''")
+        ))?;
+    } else {
+        conn.execute_batch("INSTALL ducklake;")?;
+    }
+    conn.execute_batch("LOAD ducklake;")?;
     let mut options = Vec::new();
     if let Some(dp) = data_path {
         options.push(format!("DATA_PATH '{}'", dp.replace('\'', "''")));

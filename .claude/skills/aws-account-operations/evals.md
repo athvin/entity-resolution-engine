@@ -71,8 +71,16 @@ Must:
   down and retried, and the pod stays Pending throughout — which is why there is
   nothing obvious in the pod's own events.
 
-Credit for knowing both were raised to 64 in `us-east-2`, and for connecting it
-to the single-account model: dev and prod share service quotas.
+Credit for connecting it to the single-account model: dev and prod share
+service quotas.
+
+Credit for knowing the applied value is **8 on both**, and extra credit for
+reaching for `get-service-quota` rather than answering from memory. This line
+awarded credit for "both were raised to 64" until 2026-10-24; that was wrong —
+the 2026-10-11 increase requests are `CASE_CLOSED` but were never granted, and
+`Quota.Value` is `8.0`. An answer that asserts 64 is now a **miss**, because at
+8 there are only 6 vCPU of headroom behind the always-on nodes and no runner
+node of either class can place at all.
 
 > **Maintainer's note on the wording.** This asks about a *NodePool scale-up*,
 > deliberately, not about a stuck pipeline run. The earlier wording — "a 10M-row

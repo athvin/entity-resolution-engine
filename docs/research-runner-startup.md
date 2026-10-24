@@ -1,8 +1,16 @@
 # Research: making runner pods start faster without paying for warm capacity
 
-*2026-10-21. Research only; nothing here is implemented. Companion to
-[infrastructure.md](infrastructure.md) §5/§6/§11 and
+*2026-10-21. Companion to [infrastructure.md](infrastructure.md) §5/§6/§11 and
 [infrastructure-decisions.md](infrastructure-decisions.md) D-PULL / D-DISRUPT / D-AUTOMODE.*
+
+> **Status, 2026-10-24: B and C are implemented and measured. A needs no work.**
+> The measurements §4 asked for exist as
+> [`measurements/runner-startup-20261024.json`](measurements/runner-startup-20261024.json),
+> taken with `scripts/measure_runner_startup.sh` on the live `er-dev` cluster;
+> that record, not this page, is the authority for any number. Four things this
+> page got wrong or could not have known are corrected inline below, each marked
+> **CORRECTION**. The option matrix in §2 and the reasoning in §3 otherwise
+> stand, and the "why the rest are no" verdicts were not revisited.
 
 ## 1. What the code and infra actually do today
 
@@ -61,6 +69,34 @@ the target design, and it also tells you what to keep from the in-process path.
    runner image) would cut the pull by roughly two-thirds. Measure with
    `docker image inspect` before deciding; §18.16 still has no number.
 
+> **CORRECTION (1): it is not one extension, it is four, and ~80 MB.** The
+> workspace pins `duckdb` with the plain `bundled` feature — **without** the
+> `parquet` and `json` features — and `libduckdb-sys`'s bundled build defines
+> `DUCKDB_EXTENSION_AUTOINSTALL_DEFAULT=1` and `AUTOLOAD_DEFAULT=1`. Only
+> `core_functions` is statically linked. So a cold process does not fetch
+> `ducklake` alone: it also autoinstalls `parquet` (every lake read and write),
+> `json` and `icu`. Bisected by running a full `run-all` with autoinstall off,
+> `ducklake`+`parquet` cannot even reconcile the lake schema, and dropping
+> either `json` or `icu` still fails. Uncompressed that is 107 MB of extension
+> for the five the deployed image now bakes (the fifth, `postgres_scanner`, is
+> for production's `ducklake:postgres:…` catalogs), ~33 MB compressed into the
+> image.
+>
+> So the fix is bigger than "saves one HTTPS round-trip", and it is also not
+> only a latency fix: it removes a hard runtime dependency on
+> `extensions.duckdb.org` being reachable, and takes that traffic off the NAT
+> gateway. `dedupe_core::session::BAKED_EXTENSIONS` carries the list and the
+> reasoning; `er-server install-extensions` populates the directory through the
+> same linked DuckDB that will read it, because the files are keyed by exact
+> version and platform.
+>
+> **CORRECTION (2): the three binaries were never all needed.** The chart only
+> ever ran `er-server` — the dispatcher runs in-process in the merged web-api
+> pod and the pipeline runs as a linked library — so `er-dispatcher` and `er`
+> were present in the image but never executed in a pod. The image now ships one
+> binary with two symlinks, dispatched on `argv[0]`, so no entrypoint changed and
+> no chart template moved.
+
 ## 2. The options, with what they cost
 
 Pricing is us-east-2, approximate (third-party aggregator, Oct 2026):
@@ -81,6 +117,29 @@ runner node therefore costs ≈ $0.13/h ≈ **$95/mo**; on-demand ≈ $0.45/h �
 | H | Nix instead of Docker | 0 s | engineering time | No: the image is already a static binary on `bookworm-slim`; Nix changes nothing about node boot |
 | I | Self-managed Karpenter + snapshot-prebaked AMI | ~pull time (~10–20 s) | loses Auto Mode, adds an AMI to keep fresh | No at this size; the pull is not the dominant cost |
 | J | Bottlerocket / different AMI | nothing | n/a | Auto Mode nodes already run Bottlerocket |
+
+> **CORRECTION (3): A is already in effect for every class, so it was not
+> built.** This section reads as though pod-per-run is the status quo and
+> in-process is the change. It is the other way round: `er-server`'s `main`
+> starts the dispatcher inside the API pod and `dispatcher.rs`'s `run_job` calls
+> `er_cli` as a linked library, for S, M and L alike. There is no `kube` or
+> `k8s-openapi` dependency in the workspace, `jobs.resource_class` is declared
+> but written nowhere (every row is NULL), and #276 marked the chart's launcher
+> keys NOT IMPLEMENTED.
+>
+> So A's "zero startup" path is already universal, and the work A actually
+> implies is *building* the Job launcher for M and L — which would **add**
+> startup latency, not remove it. That is a separate, large feature (RBAC, the
+> Job spec, progress-to-DB, cancellation, startup re-adoption) and nothing here
+> starts it. What A's second bullet asks for — bounding the in-process path's
+> threads and memory from the job row — is also still unbuilt, and is worse than
+> this section assumes: `er_cli::open_lake` hard-codes
+> `SessionOptions::deterministic()`, so **every dispatched job runs DuckDB
+> single-threaded with no memory limit**, and the per-tenant
+> `ER_DUCKDB_THREADS`/`ER_DUCKDB_MEMORY_LIMIT` stored in `orgs.env` reach no
+> session at all. That is a throughput bug rather than a startup one, it needs
+> its own validation against the determinism contract, and it is filed rather
+> than fixed here.
 
 ### A. Tiered dispatch: in-process for S, Job for M and L
 
@@ -198,6 +257,25 @@ Expected result: S-class jobs start instantly; the first M/L job of a session
 still pays ~60–90 s of node boot (which no AMI or image choice removes under
 Auto Mode); everything after it in the next ten minutes starts in seconds.
 
+> **CORRECTION (4): the cold start is ~30 s, not 60–90 s, and the terms are not
+> the ones this page weighted.** Measured on a `c6id` probe node
+> ([`measurements/runner-startup-20261024.json`](measurements/runner-startup-20261024.json)):
+> NodeClaim created to Ready is **~14 s**, the image pull is **~2 s**, and
+> submit to container running is **~30 s**. The ~90 s this page inherited from
+> plan-to-aws 1.3 was a hand observation with no artifact behind it, and Auto
+> Mode's June 2026 boot improvements appear to have overtaken it.
+>
+> The practical consequence is for §2's ladder, not for the recommendation
+> order. **B is still worth doing and C is still worth doing**, but for
+> different reasons than stated: B's value is overwhelmingly the extension
+> fetch (~5 s, the largest term we control, and the one this page sized as a
+> round trip) rather than the image pull it also shrinks; and the pull being 2 s
+> closes D-PULL's image-split and snapshot-prebake rungs outright rather than
+> merely deprioritising them.
+>
+> **D and E are further out of the money than this page concluded.** A warm node
+> at ≈$95/mo buys back ~14 s of node boot, not 60–90 s.
+
 Only if the first-M/L-job cold start is still unacceptable, add one pause pod
 on `runner-sm` (D) and switch it off with the idle-suspend predicate. That is
 the first option that costs real money (≈ $95/mo), so it should be the last one
@@ -205,13 +283,54 @@ reached for.
 
 ## 4. Measurements to take before implementing
 
-- `kubectl get events` timestamps on one cold run: NodeClaim created → node
+*Taken 2026-10-24. The harness is `scripts/measure_runner_startup.sh`
+(`make measure-runner-startup`) and the record is
+[`measurements/runner-startup-20261024.json`](measurements/runner-startup-20261024.json).*
+
+- [x] `kubectl get events` timestamps on one cold run: NodeClaim created → node
   Ready → image pulled → container started. This is §18.16 and it splits the
-  90 s into launch / boot / pull / extension fetch.
-- Pull time of the current `er-api` image on a fresh runner node versus a
-  single-binary image.
-- Wall time of an S-class `run_all_full` in-process on the `m6i.large` app node
-  with 2 threads, so the in-process cap is set from a number.
+  90 s into launch / boot / pull / extension fetch. — **Done, and the 90 s was
+  itself wrong; the split is ~14 s node, ~2 s pull, ~5 s extension fetch,
+  ~30 s end to end.**
+- [x] Pull time of the current `er-api` image on a fresh runner node versus a
+  single-binary image. — **Done, and it stopped being the deciding number: the
+  pull is ~2 s either way, which is what closes D-PULL's ladder. The image size
+  comparison comes from the registry rather than a probe.**
+- [ ] Wall time of an S-class `run_all_full` in-process on the `m6i.large` app
+  node with 2 threads, so the in-process cap is set from a number. — **Not
+  taken, and it needs a prior fix.** `er_cli::open_lake` hard-codes
+  `SessionOptions::deterministic()`, so every dispatched job currently runs
+  DuckDB *single-threaded* with no memory limit and the per-tenant
+  `ER_DUCKDB_THREADS`/`ER_DUCKDB_MEMORY_LIMIT` reach no session. Measuring "at
+  2 threads" is not possible until that is wired, and wiring it needs its own
+  validation against the determinism contract.
+
+### What the harness measures, and what it cannot
+
+Four arms. Two are timings and two are the kind of result that does not need a
+number:
+
+- **x1** — container start to DuckLake attached and queried, twice over, so the
+  first run's extension fetch is isolated as a delta against the second. A
+  single run cannot distinguish "the fetch was fast" from "the fetch did not
+  happen".
+- **x2** — the same probe with egress denied by NetworkPolicy. Binary: without
+  the baked directory it must fail, with it it must succeed. This is what
+  demonstrates the external dependency is *gone* rather than merely faster.
+- **n1** — the cold-node lifecycle split (§18.16).
+- **n2** — whether a second job 2 minutes after the first reuses the node. This
+  is C's whole claim, and it is a yes/no, not a duration.
+
+Three limits are worth stating. The node arms run on a `c6id.xlarge` probe pool
+rather than `runner-sm`'s `c6id.2xlarge`, because the applied vCPU quota is 8
+and a 2xlarge cannot place (§5); launch, boot and join transfer, but the pull
+term may be marginally optimistic since Auto Mode's instance-store pull path
+scales with NVMe device count. Kubernetes records node-lifecycle conditions at
+one-second resolution, so those phases are whole seconds; the pull comes from
+the kubelet's own `Pulled` message and the probe from the process clock, both
+sub-second. And the probe is `er doctor` against a fresh local lake — it
+exercises session open, extension load, ATTACH and the schema reconcile, but not
+a scoring run, so it is a startup measurement and not a throughput one.
 
 ## Sources
 
