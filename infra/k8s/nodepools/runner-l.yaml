@@ -32,4 +32,7 @@ spec:
       expireAfter: 72h
   disruption:
     consolidationPolicy: WhenEmpty
-    consolidateAfter: 30s
+    # See runner-sm.yaml for the reasoning and the cost. The L class is the more
+    # expensive node to re-provision and the slower one to boot, so if anything
+    # the linger pays for itself faster here.
+    consolidateAfter: 10m

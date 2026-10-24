@@ -35,4 +35,19 @@ spec:
       expireAfter: 72h
   disruption:
     consolidationPolicy: WhenEmpty
-    consolidateAfter: 30s
+    # Let a finished runner node linger, so the NEXT job in a chain does not pay
+    # a cold start. A pipeline session is a chain — provision, then imports, then
+    # train, then run_all — and at 30s every link provisioned a fresh instance,
+    # because the previous node was reclaimed half a minute after its pod exited.
+    # Ten minutes turns that into one cold start per working session.
+    #
+    # The cost is the linger window when no second job arrives, which at the
+    # measured c6id spot rate (incl. the ~12% Auto Mode fee, charged even on
+    # spot) is about $0.02 per run against $0.001 at 30s — a few dollars a month
+    # at one or two nodes. AWS's cost guidance for bursty workloads says keep
+    # this short, which is right for a fleet of CI runners and wrong here.
+    #
+    # `WhenEmpty` and `expireAfter` do NOT change: D-DISRUPT's argument is that
+    # `WhenEmptyOrUnderutilized` could discard an hour of a run mid-flight, and
+    # a longer idle timer does nothing to that. Only the timer moves.
+    consolidateAfter: 10m

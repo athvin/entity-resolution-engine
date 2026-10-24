@@ -1,0 +1,64 @@
+# A measurement-only NodePool, applied and deleted by
+# `scripts/measure_runner_startup.sh`. It is NOT part of the deployed platform
+# and must not be applied by `make nodepools`, which is why it sits in this
+# subdirectory rather than beside app/runner-sm/runner-l.
+#
+# WHY IT EXISTS AT ALL. The §18.16 measurement needs a cold node on a runner-
+# shaped pool, and `runner-sm` cannot provide one in this account: the applied
+# EC2 Standard vCPU quotas are 8 for both spot (L-34B43A08) and on-demand
+# (L-1216C47A) — the 2026-10-11 requests for 64 were closed without being
+# granted — and the always-on app + system nodes hold 2 vCPU each. A
+# `c6id.2xlarge` (8 vCPU) therefore can never place, and the NodeClaim would
+# churn with VcpuLimitExceeded while the pod stayed Pending.
+#
+# WHAT IS AND IS NOT FAITHFUL. Everything that governs node startup is copied
+# from runner-sm verbatim: the same NodeClass, the same taint, amd64, spot-then-
+# on-demand, WhenEmpty consolidation, expireAfter. Only `instance-size` differs
+# — `xlarge` (4 vCPU, 237 GB NVMe) instead of `2xlarge` (8 vCPU, 474 GB) — so it
+# fits the 6 vCPU of headroom. Launch, boot, join and extension-fetch timings
+# transfer; the image *pull* term may be marginally optimistic, since Auto Mode's
+# instance-store pull path scales with the number of NVMe devices. Any artifact
+# produced here has to say so, and the committed one does.
+#
+# Unlike the three deployed pools this one carries `limits`, so a runaway
+# measurement cannot quietly provision a fleet.
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: runner-probe
+  labels:
+    er.dupezero.com/purpose: measurement
+spec:
+  template:
+    spec:
+      nodeClassRef:
+        group: eks.amazonaws.com
+        kind: NodeClass
+        name: default
+      taints:
+        - key: er.dupezero.com/runner
+          value: "true"
+          effect: NoSchedule
+      requirements:
+        - key: eks.amazonaws.com/instance-family
+          operator: In
+          values: ["c6id"]
+        - key: eks.amazonaws.com/instance-size
+          operator: In
+          values: ["xlarge"]
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["spot", "on-demand"]
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["amd64"]
+      expireAfter: 72h
+  # One node at a time: the measurement is sequential by design, and this caps
+  # the blast radius of a script that fails between apply and delete.
+  limits:
+    cpu: "4"
+  disruption:
+    consolidationPolicy: WhenEmpty
+    # Overridden per-arm by the script: the N2 (warm reuse) arm is precisely a
+    # comparison of this timer, so it is set explicitly rather than inherited.
+    consolidateAfter: 30s

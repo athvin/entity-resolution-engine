@@ -1,5 +1,5 @@
 //! `er-server` binary: bind and serve the control-plane router (P3), or run one
-//! of two deploy-time subcommands and exit:
+//! of three deploy-time subcommands and exit:
 //!
 //! - `migrate` — ensure the control-plane schema (baseline + reconciler) and
 //!   install the DDL-ledger event triggers; the web-api pod's init container,
@@ -8,13 +8,58 @@
 //!   active org, wait for the dispatcher to run them, print the per-tenant
 //!   report, exit non-zero if any tenant is breaking, errored or timed out;
 //!   the chart's post-upgrade hook and its drift CronJob.
+//! - `install-extensions --dir PATH` — populate a DuckDB extension directory to
+//!   bake into the image. Build-time only; see below.
+//!
+//! # One binary, three names
+//!
+//! This binary is a **multicall**: invoked as `er` it is the pipeline CLI, and
+//! as `er-dispatcher` it is the standalone dispatcher daemon. The image ships
+//! this one executable plus two symlinks, because each of the three used to be
+//! its own binary statically linking its own copy of DuckDB — the image paid
+//! for DuckDB three times, and only one of the three was ever the entrypoint.
+//!
+//! Dispatch is on `argv[0]`, which keeps every documented invocation working
+//! unchanged (`er ingest …`, `er-server migrate`, `er-dispatcher`) and needs no
+//! chart change. All three `[[bin]]` targets still build for local use.
+//!
+//! The `er` arm runs **before** the tokio runtime starts: the pipeline CLI is
+//! synchronous (DuckDB is), and entering it from inside a runtime would put
+//! blocking DuckDB work on a reactor thread.
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
+    // `er`: synchronous, so it must not run inside the runtime.
+    if program_name(&args) == "er" {
+        return er_cli::cli::run().map_err(|e| -> Box<dyn std::error::Error> {
+            // anyhow's alternate formatter walks the source chain; `to_string`
+            // alone would print only the outermost message.
+            format!("{e:#}").into()
+        });
+    }
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(async_main(args))
+}
+
+/// The file name this process was invoked as, with no path and no `.exe`.
+fn program_name(args: &[String]) -> String {
+    args.first()
+        .map(std::path::Path::new)
+        .and_then(std::path::Path::file_stem)
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+async fn async_main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
+    if program_name(&args) == "er-dispatcher" {
+        return er_server::dispatcher_bin::run().await;
+    }
     match args.get(1).map(String::as_str) {
         Some("migrate") => return migrate().await,
         Some("migrate-tenants") => return migrate_tenants(&args[2..]).await,
+        Some("install-extensions") => return install_extensions(&args[2..]),
         _ => {}
     }
     // Ensure the control-plane schema at boot (it "rides the API boot", as the
@@ -118,6 +163,55 @@ async fn migrate_tenants(args: &[String]) -> Result<(), Box<dyn std::error::Erro
     if failed > 0 {
         return Err(format!("{failed} tenant(s) did not reconcile").into());
     }
+    Ok(())
+}
+
+/// `er-server install-extensions --dir PATH`: populate a DuckDB extension
+/// directory, for the image build to bake in.
+///
+/// This runs from **this** binary on purpose. Extension binaries are keyed by
+/// the exact DuckDB version and platform
+/// (`<dir>/v<version>/<platform>/<name>.duckdb_extension`), so a directory built
+/// by a `duckdb` CLI of a different version, or on a different platform, is
+/// silently ignored at runtime — DuckDB would just autoinstall over the network
+/// again and the bake would look like it worked. Installing through the same
+/// statically-linked DuckDB that will later read the directory removes that
+/// whole failure mode, and a `duckdb` version bump cannot leave the two out of
+/// step.
+///
+/// Needs network egress; it is a build-time step, not a runtime one.
+fn install_extensions(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let mut dir: Option<String> = None;
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--dir" => dir = Some(it.next().ok_or("--dir needs a value")?.clone()),
+            other => return Err(format!("unknown argument {other:?}").into()),
+        }
+    }
+    let dir = dir.ok_or("--dir is required (where to write the extension binaries)")?;
+    std::fs::create_dir_all(&dir)?;
+
+    let conn = duckdb::Connection::open_in_memory()?;
+    conn.execute_batch(&format!(
+        "SET extension_directory = '{}';",
+        dir.replace('\'', "''")
+    ))?;
+    for ext in dedupe_core::session::BAKED_EXTENSIONS {
+        // The list is a compile-time constant of bare identifiers, so this
+        // interpolation cannot carry anything but one of those names.
+        conn.execute_batch(&format!("INSTALL {ext};"))
+            .map_err(|e| format!("installing the {ext} extension into {dir}: {e}"))?;
+        // Load it too: an INSTALL that wrote an unusable file should fail the
+        // build, not the first query in production.
+        conn.execute_batch(&format!("LOAD {ext};"))
+            .map_err(|e| format!("loading the freshly installed {ext} from {dir}: {e}"))?;
+        eprintln!("er-server install-extensions: {ext}");
+    }
+    eprintln!(
+        "er-server install-extensions: {} extension(s) in {dir}",
+        dedupe_core::session::BAKED_EXTENSIONS.len()
+    );
     Ok(())
 }
 
