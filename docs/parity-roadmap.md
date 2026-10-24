@@ -2392,6 +2392,33 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          vault needs `// @vitest-environment node`. A probe found this in one run after two
          wrong theories.
    - [ ] V6 LLM adjudication on gray-band reviews (#27). Auto-apply off by default.
+         **Scoped 2026-10-23, and the obvious storage is blocked.** The good news first: V6
+         needs no new read. `useRecordPair` already fetches both records' field values for
+         `field-compare-grid`, and the review row carries `match_probability` plus the
+         `waterfall` evidence — so an adjudicator has everything it needs from endpoints that
+         exist. And `docs/frontend-design.md` §553 pins the mechanics: the Anthropic API is
+         called **from the BFF, never the browser**, which makes cost-capped bulk a bounded
+         loop in a route rather than a dispatcher job — and means no Bedrock SDK enters the
+         Rust workspace, as V5 already established.
+         The blocked part is **where a recommendation is stored**. `pair_label` looks like the
+         answer: it already declares `origin: [human, reviewer, llm]`, `llm` has no producer,
+         and its own description says `llm` "is a model's suggestion… kept apart so training
+         can weight or exclude a source". But `pair_labels_org_pair` is **unique on
+         `(org_id, rec_a_key, rec_b_key)`** — one verdict per pair, origin not included — so
+         writing an LLM suggestion there would *overwrite a human's label on the same pair*.
+         That is exactly backwards, and it is silent: the upsert succeeds and the human
+         verdict is simply gone from the training set.
+         So the declared `llm` value collides with the index that governs it. Three ways out,
+         to be decided when V6 is built rather than guessed now: add `origin` to the unique
+         key (but then training sees two contradictory rows for one pair); write only when no
+         human or reviewer label exists (cheap, but a recommendation then silently vanishes
+         for exactly the pairs a human already judged); or keep recommendations out of
+         `pair_label` entirely, on the ground that a *suggestion* is not a *verdict* and the
+         index encodes that distinction correctly. The third is the one to beat.
+         A recommendation also needs reasoning text; `note` ("optional free text from the
+         labeller") fits, and `labeled_by` can carry `llm:<model-id>` in the style of
+         `key:<uuid>`. The `link` verdict the plan mentions cannot be expressed until E11b
+         exists, so v1 is merge / no-match / skip.
    - [ ] V7 NL rule authoring + explain-rule (#29). Writes a DRAFT version, never publishes.
    - [ ] V8 AI schema mapping + AI model setup (#48/#35). Sends a profile summary, never rows.
    - [ ] V9 staged agent write-actions (#81), through the existing steward-action path.
