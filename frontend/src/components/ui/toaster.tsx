@@ -71,7 +71,24 @@ export function ToasterProvider({ children }: { children: React.ReactNode }) {
           <div
             key={toast.id}
             className={cn(
-              "bg-background pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-md border p-3 text-sm shadow-lg",
+              // A toast is an occasional event whose arrival the user did not
+              // necessarily initiate, and it appears away from where they are
+              // looking — which is the case the motion rules allow a standard
+              // entrance for. It lifts from below because that is the edge it
+              // is anchored to on both breakpoints.
+              //
+              // This fades, despite carrying `text-muted-foreground` in the
+              // description — one of the three carve-outs in globals.css's
+              // contrast rule. A toast exists only after a mutation, and the
+              // axe sweep performs none, so there is no sample to land
+              // mid-fade. A toast that slid in without fading would also just
+              // look wrong.
+              //
+              // Entrance only. An exit would have to outlive its own state
+              // entry, which means either a removal queue here or
+              // `motion/react` and its reduced-motion guard; neither is worth
+              // it for something that auto-dismisses after six seconds.
+              "animate-lift-in bg-background pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-md border p-3 text-sm shadow-lg",
               toast.tone === "destructive" && "border-destructive/50 text-destructive",
             )}
           >

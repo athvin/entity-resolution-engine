@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { AlertTriangle, CheckCircle2, Circle, Inbox, Loader2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Circle, Inbox } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Working } from "@/components/ui/working";
 import { BffRequestError } from "@/lib/api/client";
 import {
   useDataQuality,
@@ -139,7 +140,10 @@ function Tile({
         {value === undefined ? (
           <Skeleton className="h-8 w-20" />
         ) : (
-          <div className="text-2xl font-semibold tabular-nums lg:text-3xl">
+          // Fading the number in covers the skeleton-to-value swap, which is
+          // otherwise a hard cut from a grey block to a figure. 240ms is short
+          // enough to be felt rather than watched.
+          <div className="animate-fade-in text-2xl font-semibold tabular-nums lg:text-3xl">
             {value.toLocaleString()}
           </div>
         )}
@@ -169,7 +173,7 @@ function PctTile({
         {value === undefined ? (
           <Skeleton className="h-8 w-20" />
         ) : (
-          <div className="text-2xl font-semibold tabular-nums lg:text-3xl">
+          <div className="animate-fade-in text-2xl font-semibold tabular-nums lg:text-3xl">
             {Math.round(value * 100)}%
           </div>
         )}
@@ -310,9 +314,18 @@ export function DashboardContent({ org }: { org: string }) {
       {metrics.data?.records === 0 && <OnboardingChecklist org={org} jobs={jobs.data ?? []} />}
 
       {activeJob && (
-        <Card data-testid="active-job-strip">
+        // The strip appears because a job started — a state change the user
+        // may not have initiated from this tab — so it arrives rather than
+        // blinking into place.
+        //
+        // It moves without fading. This strip mounts *late*, when the jobs
+        // query resolves, which can be the exact moment the axe sweep samples
+        // the dashboard; a fade would catch its `text-muted-foreground` state
+        // label mid-opacity and fail `color-contrast`. That is not a
+        // hypothetical — it is how this line got written.
+        <Card className="animate-rise-in" data-testid="active-job-strip">
           <CardContent className="flex items-center gap-3 p-4 text-sm">
-            <Loader2 className="size-4 animate-spin" />
+            <Working className="text-foreground" />
             <span className="font-medium">{activeJob.kind}</span>
             <span className="text-muted-foreground">
               {activeJob.state}

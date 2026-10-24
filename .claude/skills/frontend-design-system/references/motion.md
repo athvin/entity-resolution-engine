@@ -5,6 +5,7 @@
 - The gate: should this animate at all
 - Trap 1: `prefers-reduced-motion` does not reach `motion/react`
 - Trap 2: Playwright's `animations: "disabled"` does not either
+- Trap 3: fading muted text fails the axe gate
 - Which tool, in order of preference
 - The property and curve rules
 - The one existing worked example
@@ -60,6 +61,45 @@ So a `motion/react` *entrance* animation on a surface that has a visual baseline
 will flake — the screenshot lands at whatever intermediate frame the animation
 happened to be on. Either animate it in CSS, or exclude that surface from
 baselines. See the frontend-testing skill for how baselines are generated.
+
+## Trap 3: fading muted text fails the axe gate
+
+`--muted-foreground` is `oklch(0.5 0 0)` because that is what clears WCAG AA at
+4.5:1 — which means it has **no headroom**. An element part-way through a fade
+renders below its own opacity, so muted text mid-fade is under the floor and
+`axe` reports `color-contrast` at `serious`.
+
+> **An element containing `text-muted-foreground` must not animate opacity.**
+> Use `animate-rise-in`, which moves without fading.
+
+The tempting weaker version of this rule — "just don't *delay* the fade" — is
+wrong, and costs a CI cycle to discover. The window is not bounded by first
+paint. Anything that mounts when a query resolves begins its fade at an
+arbitrary moment, which can be exactly when the sweep samples. Both failures
+found while the motion scale was built were this shape:
+
+| What | Why it fired |
+|---|---|
+| Hero evidence rows | staggered fade — text parked under the floor for the delay |
+| Dashboard active-job strip | **no delay at all**; it mounts when the jobs query lands |
+
+Because it depends on when the sample lands, it fails *intermittently*, which
+is more expensive than a clean failure.
+
+Opacity entrances remain fine for three things: high-contrast text
+(`--foreground` on a card clears 4.5:1 even at a third opacity, which is why
+the dashboard's tile figures may fade), decorative `aria-hidden` elements, and
+surfaces the sweep cannot reach — a toast or a modal, which exist only after an
+interaction the sweep never performs.
+
+Stagger is stricter again: only on elements with no text in them whatsoever.
+The marketing hero is the worked example — its five evidence bars stagger
+because they sit inside an `aria-hidden` span and animate `transform` alone,
+while every word around them is painted at full opacity from the first frame.
+
+This is the same rule as the design language's ban on
+`text-muted-foreground/70`, arriving along the time axis instead of through a
+class name.
 
 ## Which tool, in order of preference
 
