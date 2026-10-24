@@ -181,23 +181,59 @@ ensure_config() {
 probe_script() {
   cat <<'SH'
 set -u
+# Run the probe TWICE, against two separate fresh lakes.
+#
+# This is what isolates the extension fetch without needing to instrument
+# DuckDB. The first run pays whatever the process has to download; the second
+# cannot, because by then the binaries are in the extension directory (either
+# the one baked into the image, or ~/.duckdb populated by the first run). So:
+#
+#   baseline image -> run1 includes the download, run2 does not; the delta IS
+#                     the fetch, measured rather than inferred
+#   baked image    -> run1 ~= run2, because nothing is ever fetched
+#
+# A one-run probe cannot tell "the fetch was fast" from "the fetch did not
+# happen", which is exactly the ambiguity that showed up the first time this
+# ran: 740 ms for a reported ~33 MB of extension felt wrong and there was no
+# way to check from the outside.
+probe_once() {
+  out="$1"; err="$2"; lake="$3"
+  mkdir -p "$lake"
+  er --catalog "$lake/probe.ducklake" --data-path "$lake/data" \
+     --config /probe/config.yaml doctor >"$out" 2>"$err"
+}
+
 t0=$(date +%s%3N)
-rc=0
-er --catalog /tmp/probe.ducklake --data-path /tmp/probe-data \
-   --config /probe/config.yaml doctor >/tmp/probe.out 2>/tmp/probe.err || rc=$?
+rc1=0
+probe_once /tmp/p1.out /tmp/p1.err /tmp/lake1 || rc1=$?
 t1=$(date +%s%3N)
+rc2=0
+probe_once /tmp/p2.out /tmp/p2.err /tmp/lake2 || rc2=$?
+t2=$(date +%s%3N)
+
+# `er doctor` exits non-zero against a lake with no runs in it, so the report
+# itself is the success signal. It cannot be produced without a loaded ducklake
+# extension and an attached, reconciled catalog.
 ok=0
-grep -q '"tenant"' /tmp/probe.out 2>/dev/null && ok=1
+grep -q '"tenant"' /tmp/p1.out 2>/dev/null && ok=1
+relations=$(grep -c '"name"' /tmp/p1.out 2>/dev/null || echo 0)
+
 echo "PROBE_T0=$t0"
 echo "PROBE_T1=$t1"
-echo "PROBE_RC=$rc"
+echo "PROBE_RC=$rc1"
 echo "PROBE_OK=$ok"
+echo "PROBE_RELATIONS=$relations"
 echo "PROBE_ELAPSED_MS=$((t1 - t0))"
-echo "--- probe stderr ---"
-tail -5 /tmp/probe.err 2>/dev/null || true
-# The container must exit 0 on a successful probe so the Job reaches Complete;
-# the arms read PROBE_OK, and a non-zero exit here would only mean "the report
-# never came out".
+echo "PROBE_SECOND_ELAPSED_MS=$((t2 - t1))"
+echo "PROBE_SECOND_RC=$rc2"
+# first - second, i.e. what the first run paid that the second did not.
+echo "PROBE_FETCH_MS=$(( (t1 - t0) - (t2 - t1) ))"
+echo "--- probe stderr (run 1) ---"
+cat /tmp/p1.err 2>/dev/null || true
+echo "--- probe stderr (run 2) ---"
+cat /tmp/p2.err 2>/dev/null || true
+# Exit 0 on a successful probe so the Job reaches Complete; the arms read
+# PROBE_OK, and a non-zero exit here would only mean "the report never came out".
 [ "$ok" = 1 ] || exit 1
 SH
 }
@@ -388,12 +424,19 @@ harvest_pod() {
       probe_elapsed_ms: mark("PROBE_ELAPSED_MS"),
       probe_rc: mark("PROBE_RC"),
       probe_ok: (mark("PROBE_OK") == 1),
-      probe_tail: ($logs | split("\n") | map(select(length > 0)) | .[-14:])
+      probe_relations: mark("PROBE_RELATIONS"),
+      probe_second_elapsed_ms: mark("PROBE_SECOND_ELAPSED_MS"),
+      probe_second_rc: mark("PROBE_SECOND_RC"),
+      # First run minus second run: what the first paid and the second
+      # did not. On a baked image this should collapse toward zero.
+      probe_fetch_ms: mark("PROBE_FETCH_MS"),
+      probe_tail: ($logs | split("\n") | map(select(length > 0)) | .[-30:])
     }'
 }
 
 arm_x1() {
-  local trial="$1" name="probe-x1-$RUNTAG-$trial"
+  local trial="$1"
+  local name="probe-x1-$RUNTAG-$trial"
   log "x1 trial $trial: first-query latency on the app pool"
   job_manifest "$name" 0 "open" | "${K[@]}" apply -f - >/dev/null
   local rc=0; wait_job "$name" || rc=$?
@@ -406,7 +449,8 @@ arm_x1() {
 }
 
 arm_x2() {
-  local trial="$1" name="probe-x2-$RUNTAG-$trial"
+  local trial="$1"
+  local name="probe-x2-$RUNTAG-$trial"
   log "x2 trial $trial: the same probe with egress denied"
   netpol_manifest | "${K[@]}" apply -f - >/dev/null
   job_manifest "$name" 0 "denied" | "${K[@]}" apply -f - >/dev/null
@@ -472,7 +516,8 @@ harvest_nodeclaim() {
 }
 
 arm_n1() {
-  local trial="$1" name="probe-n1-$RUNTAG-$trial"
+  local trial="$1"
+  local name="probe-n1-$RUNTAG-$trial"
   log "n1 trial $trial: cold-node split on the probe pool"
   reset_probe_pool "30s"
   local submit; submit="$(date -u +%s)"
@@ -623,7 +668,7 @@ log "wrote $OUT"
 jq -r '
   .arms[] | "arm=\(.arm) image=\(.image)",
   ( .trials[]
-    | if .arm == "x1" then "  x1/\(.trial): probe \(.pod.probe_elapsed_ms // "?")ms ok=\(.pod.probe_ok // false) pull=\(.pod.pull_seconds // "?")s"
+    | if .arm == "x1" then "  x1/\(.trial): run1=\(.pod.probe_elapsed_ms // "?")ms run2=\(.pod.probe_second_elapsed_ms // "?")ms fetch=\(.pod.probe_fetch_ms // "?")ms ok=\(.pod.probe_ok // false) pull=\(.pod.pull_seconds // "?")s"
       elif .arm == "x2" then "  x2/\(.trial): job_result=\(.job_result) meets_expectation=\(.meets_expectation)"
       elif .arm == "n1" then "  n1/\(.trial): nodeclaim=\(.nodeclaim.created_at // "?") ready=\(.nodeclaim.ready_at // "?") pull=\(.pod.pull_seconds // "?")s probe=\(.pod.probe_elapsed_ms // "?")ms"
       else "  n2/\(.trial): consolidateAfter=\(.consolidate_after) reused_node=\(.reused_node)"
