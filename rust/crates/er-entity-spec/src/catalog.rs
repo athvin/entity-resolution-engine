@@ -65,6 +65,14 @@ pub enum SpecError {
 #[derive(Debug, Clone, Default)]
 pub struct Catalog {
     entities: Vec<Entity>,
+    /// Each entity's YAML source text, by entity name, as read from disk.
+    ///
+    /// Populated only by [`Catalog::load_dir`] — a catalog assembled from
+    /// already-parsed entities has no files behind it and leaves this empty.
+    /// `er-entity-gen` embeds these bytes in the generated catalog module, so
+    /// the generated `er-entities` crate is self-contained inside the cargo
+    /// workspace rather than reaching out to the repo-root `entities/` tree.
+    sources: BTreeMap<String, String>,
 }
 
 impl Catalog {
@@ -88,7 +96,10 @@ impl Catalog {
                 }
             }
         }
-        Ok(Self { entities })
+        Ok(Self {
+            entities,
+            sources: BTreeMap::new(),
+        })
     }
 
     /// Load every `<root>/*/entity.yaml`, parse and validate it, and build the
@@ -107,6 +118,7 @@ impl Catalog {
         dirs.sort();
 
         let mut entities = Vec::new();
+        let mut sources = BTreeMap::new();
         for dir in dirs {
             let file = dir.join("entity.yaml");
             if !file.exists() {
@@ -121,15 +133,26 @@ impl Catalog {
                     path: file.clone(),
                     source,
                 })?;
+            sources.insert(entity.name.clone(), text);
             entities.push(entity);
         }
-        Self::from_entities(entities)
+        let mut catalog = Self::from_entities(entities)?;
+        catalog.sources = sources;
+        Ok(catalog)
     }
 
     /// Every entity, in load order.
     #[must_use]
     pub fn entities(&self) -> &[Entity] {
         &self.entities
+    }
+
+    /// One entity's YAML source text, as read from disk by
+    /// [`Catalog::load_dir`]. `None` for a catalog built from already-parsed
+    /// entities, which has no files behind it.
+    #[must_use]
+    pub fn source(&self, name: &str) -> Option<&str> {
+        self.sources.get(name).map(String::as_str)
     }
 
     /// Find an entity by name.

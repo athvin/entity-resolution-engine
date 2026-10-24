@@ -176,6 +176,23 @@ fn load_catalog(entities_dir: &Path) -> Result<Catalog> {
 fn load_tree(root: &Path) -> Result<GeneratedTree> {
     let entities_dir = root.join("entities");
     let catalog = load_catalog(&entities_dir)?;
+    // The generated catalog module inlines each entity's YAML text, which only
+    // `Catalog::load_dir` carries. Every entity must have it: an entity whose
+    // source went missing would be silently dropped from the compiled-in
+    // catalog, and the schema reconciler would then stop reconciling its table
+    // without failing anything.
+    if let Some(entity) = catalog
+        .entities()
+        .iter()
+        .find(|e| catalog.source(&e.name).is_none())
+    {
+        anyhow::bail!(
+            "entity {:?} has no YAML source text — the catalog was not loaded from \
+             {}, so the generated catalog module would omit it",
+            entity.name,
+            entities_dir.display()
+        );
+    }
     let mut tree = generate(&catalog).context("generating artifacts")?;
     append_query_modules(&entities_dir, &catalog, &mut tree)?;
     tree.files.push(er_entity_gen::GeneratedFile {
