@@ -1,6 +1,6 @@
 "use client";
 
-import { useAnimate } from "motion/react";
+import { useAnimate, useReducedMotion } from "motion/react";
 import { motion, useMotionValue, useTransform } from "motion/react";
 
 import type { Resolution, ReviewRow } from "@/lib/query/reviews";
@@ -27,6 +27,26 @@ export function SwipeCard({ org, review, onResolve }: SwipeCardProps) {
   const matchOpacity = useTransform(x, [24, SWIPE_THRESHOLD], [0, 1]);
   const noMatchOpacity = useTransform(x, [-SWIPE_THRESHOLD, -24], [1, 0]);
   const [scope, animate] = useAnimate();
+  // `motion/react` animates inline styles through requestAnimationFrame, which
+  // the `prefers-reduced-motion` clamp in globals.css cannot reach — that
+  // clamp only touches CSS animations and transitions. So this is the one
+  // place in the app that has to ask the question itself.
+  //
+  // Only the *commit* is gated. The drag and its rotation follow the user's
+  // own finger, and suppressing direct manipulation would remove the feature
+  // rather than calm it; the card flying off on its own is the autonomous
+  // movement the preference is actually about.
+  const reduced = useReducedMotion();
+
+  function commit(resolution: Resolution, toX: number) {
+    if (reduced) {
+      onResolve(resolution);
+      return;
+    }
+    void animate(scope.current, { x: toX, opacity: 0 }, { duration: 0.18 }).then(() => {
+      onResolve(resolution);
+    });
+  }
 
   return (
     <motion.div
@@ -38,13 +58,9 @@ export function SwipeCard({ org, review, onResolve }: SwipeCardProps) {
       dragElastic={0.7}
       onDragEnd={(_event, info) => {
         if (info.offset.x > SWIPE_THRESHOLD) {
-          void animate(scope.current, { x: 500, opacity: 0 }, { duration: 0.18 }).then(() => {
-            onResolve("match");
-          });
+          commit("match", 500);
         } else if (info.offset.x < -SWIPE_THRESHOLD) {
-          void animate(scope.current, { x: -500, opacity: 0 }, { duration: 0.18 }).then(() => {
-            onResolve("no_match");
-          });
+          commit("no_match", -500);
         }
       }}
       data-testid="swipe-card"

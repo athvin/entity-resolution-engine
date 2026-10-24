@@ -432,8 +432,12 @@ export function NewSourceWizard({ org }: { org: string }) {
         {STEPS.map((label, index) => (
           <li
             key={label}
+            // The pill changes plane twice as the wizard advances (muted →
+            // primary → secondary). Easing the change is what makes it read as
+            // *this* step handing off to the next, rather than as three
+            // unrelated pills repainting at once.
             className={cn(
-              "flex items-center gap-1 rounded-full px-2.5 py-1",
+              "ease-emphasized flex items-center gap-1 rounded-full px-2.5 py-1 transition-colors duration-(--duration-fast)",
               index === step
                 ? "bg-primary text-primary-foreground"
                 : index < step
@@ -441,7 +445,7 @@ export function NewSourceWizard({ org }: { org: string }) {
                   : "bg-muted text-muted-foreground",
             )}
           >
-            {index < step && <CheckCircle2 className="size-3" />}
+            {index < step && <CheckCircle2 className="animate-mark-in size-3" />}
             {label}
           </li>
         ))}
@@ -453,8 +457,13 @@ export function NewSourceWizard({ org }: { org: string }) {
         </p>
       )}
 
+      {/* Each step panel mounts fresh when `step` changes, so a single
+       * entrance class on each Card is the whole transition — no wrapper, no
+       * exit state, and `prefers-reduced-motion` is covered by the global
+       * clamp. The panel arrives while the breadcrumb above it recolours,
+       * which together read as one move forward. */}
       {step === 0 && (
-        <Card>
+        <Card className="animate-rise-in">
           <CardContent className="flex flex-col items-center gap-3 p-10 text-center">
             <FileUp className="text-muted-foreground size-8" />
             <p className="text-sm font-medium">Upload a sample of the new source</p>
@@ -476,7 +485,7 @@ export function NewSourceWizard({ org }: { org: string }) {
       )}
 
       {step === 1 && (
-        <Card data-testid="wizard-profile">
+        <Card className="animate-rise-in" data-testid="wizard-profile">
           <CardHeader className="p-4 pb-1">
             <CardTitle className="text-base">
               {state.fileName} — {state.rowCount} sample rows, {state.columns.length} columns
@@ -510,7 +519,7 @@ export function NewSourceWizard({ org }: { org: string }) {
       )}
 
       {step === 2 && (
-        <Card data-testid="wizard-map">
+        <Card className="animate-rise-in" data-testid="wizard-map">
           <CardHeader className="p-4 pb-1">
             <CardTitle className="text-base">Map columns to canonical attributes</CardTitle>
             <CardDescription>
@@ -547,7 +556,7 @@ export function NewSourceWizard({ org }: { org: string }) {
       )}
 
       {step === 3 && (
-        <Card data-testid="wizard-identity">
+        <Card className="animate-rise-in" data-testid="wizard-identity">
           <CardHeader className="p-4 pb-1">
             <CardTitle className="text-base">Identity & ordering</CardTitle>
           </CardHeader>
@@ -636,7 +645,7 @@ export function NewSourceWizard({ org }: { org: string }) {
       )}
 
       {step === 4 && (
-        <Card data-testid="wizard-review">
+        <Card className="animate-rise-in" data-testid="wizard-review">
           <CardHeader className="p-4 pb-1">
             <CardTitle className="text-base">Review — this becomes config YAML</CardTitle>
             <CardDescription>

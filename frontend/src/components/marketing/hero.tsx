@@ -2,7 +2,9 @@ import Link from "next/link";
 
 import { HERO } from "@/components/marketing/content";
 import { Button } from "@/components/ui/button";
+import { stagger } from "@/lib/motion";
 import { PORTAL_ENTRY_PATH } from "@/lib/site/routes";
+import { cn } from "@/lib/utils";
 
 /**
  * The hero.
@@ -16,11 +18,57 @@ import { PORTAL_ENTRY_PATH } from "@/lib/site/routes";
  * Hierarchy comes from type scale and weight, not hue. The single inversion
  * allowed per viewport is spent on the primary CTA, which is why nothing else
  * here uses `bg-foreground`.
+ *
+ * ## Only the bars move
+ *
+ * No text on this page animates — not the headline, not the records, not the
+ * golden record. Every word is legible on first paint. What animates is the
+ * five evidence bars, which grow out from the centre axis in sequence, so the
+ * figure's argument (the evidence accumulates, and the merge is its result) is
+ * carried by the one part of the figure that is purely graphical.
+ *
+ * That boundary is not a stylistic preference, it is a contrast requirement,
+ * and the axe gate failed before it was respected. `--muted-foreground` is set
+ * to `oklch(0.5 0 0)` precisely so it clears WCAG AA at 4.5:1 — which leaves it
+ * no headroom at all. An element mid-fade renders below its own opacity, so a
+ * staggered fade parked this figure's muted labels under the floor and axe
+ * reported `color-contrast` at `serious`.
+ *
+ * The rule the rest of the app now follows is in `globals.css`: muted text
+ * moves, it does not fade. The bars are exempt because they have no contrast
+ * to lose — they sit inside an `aria-hidden` span and animate `transform`
+ * alone — which is exactly why they are the part that gets to move.
+ *
+ * Two further consequences worth keeping: `prefers-reduced-motion` is handled
+ * by the global clamp in globals.css with no guard needed here, and Playwright
+ * fast-forwards finite animations to completion for screenshots, so the
+ * committed visual baseline sees the same pixels it always did.
  */
+
+/** The five comparisons, in the order the waterfall would print them. The
+ *  weights sum to the +12.8 shown as the total; changing one without the
+ *  other makes the figure lie about arithmetic the product is selling. */
+const EVIDENCE = [
+  { field: "first name", value: "Jonathan vs Jon", weight: 1.8 },
+  { field: "surname", value: "Reyes vs Reyes", weight: 4.1 },
+  { field: "email local part", value: "j.reyes vs jreyes", weight: 2.6 },
+  { field: "phone", value: "normalised match", weight: 5.2 },
+  { field: "middle initial", value: "A. vs absent", weight: -0.9 },
+] as const;
 
 /** One comparison row, in the vocabulary of the real evidence waterfall: a
  *  signed weight, and a bar whose side of the axis carries the polarity. */
-function Evidence({ field, value, weight }: { field: string; value: string; weight: number }) {
+function Evidence({
+  field,
+  value,
+  weight,
+  step,
+}: {
+  field: string;
+  value: string;
+  weight: number;
+  step: number;
+}) {
   const supports = weight >= 0;
   // Widths are a share of the half-track, carried in a custom property so the
   // positioning stays in the class string and only the number is inline.
@@ -31,12 +79,20 @@ function Evidence({ field, value, weight }: { field: string; value: string; weig
       <span className="relative h-4" aria-hidden="true">
         <span className="bg-border absolute inset-y-0 left-1/2 w-px" />
         <span
-          className={
-            supports
-              ? "bg-foreground/70 absolute inset-y-[3px] left-1/2 w-(--bar-w) rounded-sm"
-              : "bg-foreground/70 absolute inset-y-[3px] right-1/2 w-(--bar-w) rounded-sm"
+          // The bar grows *away from the centre axis*, so the direction of
+          // growth is the same signal the bar's resting side carries: support
+          // pushes right, objection pushes left. Hence the origin flips with
+          // the sign rather than being a constant.
+          className={cn(
+            "bg-foreground/70 animate-bar-grow absolute inset-y-[3px] w-(--bar-w) rounded-sm",
+            supports ? "left-1/2 origin-left" : "right-1/2 origin-right",
+          )}
+          style={
+            {
+              "--bar-w": `${String(Math.max(share, 2))}%`,
+              ...stagger(step),
+            } as React.CSSProperties
           }
-          style={{ "--bar-w": `${String(Math.max(share, 2))}%` } as React.CSSProperties}
         />
       </span>
       <span className="text-right font-mono tabular-nums">
@@ -50,7 +106,17 @@ function Evidence({ field, value, weight }: { field: string; value: string; weig
   );
 }
 
-function SourceRecord({ source, name, email, phone }: Record<string, string>) {
+function SourceRecord({
+  source,
+  name,
+  email,
+  phone,
+}: {
+  source: string;
+  name: string;
+  email: string;
+  phone: string;
+}) {
   return (
     <div className="min-w-0 rounded-md border p-3">
       <p className="text-muted-foreground mb-2 text-xs">{source}</p>
@@ -97,11 +163,9 @@ function ResolutionFigure() {
 
       <div className="my-4 space-y-1.5 border-y py-4">
         <p className="text-muted-foreground mb-2 text-xs">Evidence</p>
-        <Evidence field="first name" value="Jonathan vs Jon" weight={1.8} />
-        <Evidence field="surname" value="Reyes vs Reyes" weight={4.1} />
-        <Evidence field="email local part" value="j.reyes vs jreyes" weight={2.6} />
-        <Evidence field="phone" value="normalised match" weight={5.2} />
-        <Evidence field="middle initial" value="A. vs absent" weight={-0.9} />
+        {EVIDENCE.map((row, index) => (
+          <Evidence key={row.field} {...row} step={index} />
+        ))}
         <div className="flex items-baseline justify-between pt-2 text-xs">
           <span className="text-muted-foreground">total match weight</span>
           <span className="font-mono font-medium tabular-nums">+12.8</span>

@@ -63,6 +63,7 @@ utility cannot be used in a class name.
 | `--border` | `oklch(0.922 0 0)` | `oklch(1 0 0 / 10%)` | `*-border` |
 | `--input` | `oklch(0.922 0 0)` | `oklch(1 0 0 / 15%)` | `*-input` |
 | `--ring` | `oklch(0.708 0 0)` | `oklch(0.556 0 0)` | `*-ring` |
+| `--skeleton-sheen` | `oklch(0.145 0 0 / 7%)` | `oklch(0.985 0 0 / 10%)` | **none — unreachable from a class name** |
 
 Any row whose Light or Dark value has a non-zero middle number carries
 chroma. `--destructive` is the single deliberate exception; a second one
@@ -103,6 +104,7 @@ is the one that matters:
 - `label`
 - `skeleton`
 - `toaster`
+- `working`
 
 Anything absent from that list is **not** installed. Add it with
 `pnpm dlx shadcn@latest add <name>` rather than hand-rolling it, and check

@@ -5,7 +5,15 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+  // The press scale is the only motion here, and it is deliberately barely
+  // perceptible: a button is pressed tens of times a day, which the motion
+  // rules put in the "near-imperceptible or nothing" band. It is feedback for
+  // an action the user just took, not an announcement.
+  //
+  // The property list is explicit rather than `transition-all` — adding
+  // `transform` to `transition-colors` is the whole change, and `transition-all`
+  // would also animate layout properties on every variant switch.
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-[color,background-color,border-color,transform] duration-(--duration-fast) ease-emphasized active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 disabled:active:scale-100 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {

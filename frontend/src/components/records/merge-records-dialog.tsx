@@ -101,7 +101,7 @@ export function MergeRecordsDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-4 lg:items-center"
+      className="animate-fade-in fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-4 lg:items-center"
       onKeyDown={(event) => {
         if (event.key === "Escape") onClose();
       }}
@@ -113,7 +113,10 @@ export function MergeRecordsDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby={headingId}
-        className="bg-background flex max-h-[85vh] w-full max-w-2xl flex-col gap-3 overflow-y-auto rounded-lg border p-5 shadow-xl"
+        // Lifts from below on both breakpoints: it is a bottom sheet on
+        // mobile (`items-end`) and a centred modal above `lg`, and arriving
+        // from the direction a sheet lives reads correctly in both.
+        className="animate-lift-in bg-background flex max-h-[85vh] w-full max-w-2xl flex-col gap-3 overflow-y-auto rounded-lg border p-5 shadow-xl"
         data-testid="merge-dialog"
       >
         <h2 id={headingId} className="flex items-center gap-2 text-base font-semibold">
@@ -181,6 +184,12 @@ export function MergeRecordsDialog({
                   {target.data ? displayName(target.data.golden, entityType) || "target" : "target"}
                 </span>
               </div>
+              {/* Not animated. These rows carry `text-muted-foreground`,
+               * whose contrast is tuned to exactly the 4.5:1 floor, so any
+               * opacity below 1 puts them under it. The panel's own
+               * `lift-in` already marks the arrival of the whole comparison;
+               * animating the rows as well would buy nothing and cost the
+               * one thing this surface cannot spend. */}
               {comparison.map((row) => (
                 <div
                   key={row.key}
