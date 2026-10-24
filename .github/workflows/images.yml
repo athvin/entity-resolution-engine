@@ -31,7 +31,20 @@ on:
         required: false
 
 concurrency:
-  group: images-${{ github.ref }}
+  # Keyed on the ref AND the dispatched commit, not the ref alone.
+  #
+  # `workflow_dispatch` has to run on `main` because the ECR push role's OIDC
+  # trust pins the `sub` claim to `refs/heads/main` (infra/terraform/modules/github-oidc),
+  # so the `ref` input exists to build some *other* commit with main's identity.
+  # Grouping on `github.ref` alone made every such dispatch share one group, so
+  # dispatching a second commit silently cancelled the first — which is exactly
+  # what happened while building a before/after image pair for the §18.16
+  # measurement, and it looks like a build failure rather than a cancellation
+  # until you read the run's conclusion.
+  #
+  # On a `push` the inputs are empty, so this collapses to the old behaviour:
+  # a newer push to main still cancels an in-flight build of an older one.
+  group: images-${{ github.ref }}-${{ github.event.inputs.ref || '' }}
   cancel-in-progress: true
 
 jobs:

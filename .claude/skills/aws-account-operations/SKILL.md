@@ -170,14 +170,32 @@ proposing a dashboard or alarm is adding the first one, not extending a set.
 Billing console** — activation takes up to 24 hours and does not apply
 retroactively. Spend before activation is permanently unattributable.
 
-**A fresh account's vCPU quotas silently prevent large nodes from placing.**
-*All Standard Spot Instance Requests* (`L-34B43A08`) and *Running On-Demand
-Standard instances* (`L-1216C47A`) default to **8 vCPU each** — measured in
-vCPUs, not instances. A 16-vCPU runner node therefore can never place: the
-fleet request fails `VcpuLimitExceeded` / `MaxSpotInstanceCountExceeded`, the
-NodeClaim is torn down and retried, and the pod sits `Pending` forever while the
-dispatcher keeps the job active. Both are raised to 64 in `us-east-2`. A pod
-stuck `Pending` with no scheduling event is this, until proven otherwise.
+**The account's vCPU quotas silently prevent large nodes from placing, and
+they are still binding.** *All Standard Spot Instance Requests*
+(`L-34B43A08`) and *Running On-Demand Standard instances* (`L-1216C47A`) are
+measured in vCPUs, not instances. When the ceiling is low a large node can
+never place: the fleet request fails `VcpuLimitExceeded` /
+`MaxSpotInstanceCountExceeded`, the NodeClaim is torn down and retried, and the
+pod sits `Pending` with nothing obvious in its own events. **A pod stuck
+`Pending` with no scheduling event is this, until proven otherwise.**
+
+**Both read `8.0` applied** (AWS default 5). An increase to 64 was requested
+for both on 2026-10-11 and both requests are `CASE_CLOSED` *without having been
+granted* — this skill said "raised to 64" until 2026-10-24, which was wrong. A
+closed case is not a granted one, so read the applied value rather than
+trusting any doc:
+
+```
+aws service-quotas get-service-quota --service-code ec2 \
+  --quota-code L-34B43A08 --region us-east-2 --query 'Quota.Value'
+aws service-quotas list-requested-service-quota-change-history-by-quota \
+  --service-code ec2 --quota-code L-34B43A08 --region us-east-2 \
+  --query 'RequestedQuotas[].[Status,DesiredValue]'
+```
+
+At 8, with the always-on `app` and `system` nodes holding 2 vCPU each, there
+are 6 vCPU of headroom — less than one 8-vCPU `runner-sm` node. No runner node
+of either class can be provisioned until this is raised.
 
 Budgets, the CUR 2.0 pipeline and per-tenant attribution:
 [references/cost-and-billing.md](references/cost-and-billing.md).

@@ -33,6 +33,41 @@ pub struct TableHandle {
     pub columns: Vec<String>,
 }
 
+/// The DuckDB extensions a deployed image must carry, in `INSTALL` order.
+///
+/// All five are **core** (signed, from `extensions.duckdb.org`), so they install
+/// without `FROM community`. The optional comparison extensions —
+/// `rapidfuzz`, `splink_udfs`, `lsh` — are deliberately absent: they are
+/// per-config opt-ins through [`SessionOptions::extensions`], community-sourced,
+/// and no deployed config loads one.
+///
+/// Why each is here, given that `duckdb` is pinned with the plain `bundled`
+/// feature and therefore statically links only `core_functions`. The first four
+/// were established by bisection, not assumption: a full `run-all` over the
+/// `base_10` fixture with `autoinstall_known_extensions` off fails on any
+/// smaller set — `ducklake`+`parquet` alone cannot even reconcile the lake
+/// schema, and dropping either `json` or `icu` still fails.
+///
+/// - `ducklake` — the catalog itself; `attach_ducklake` loads it explicitly.
+/// - `parquet` — every lake read and write. Not a bundled feature, so without
+///   this the first scan autoinstalls it.
+/// - `json` — required to reconcile the lake schema (the `metadata`/`jsonb`
+///   columns and the history row images).
+/// - `icu` — also required by reconcile, through the timestamp and collation
+///   paths DuckDB autoloads it for.
+/// - `postgres_scanner` — a production tenant catalog is a Postgres DSN
+///   (`er_server::provision` builds `ducklake:postgres:…`), so the deployed
+///   image needs it even though a local dev lake is a plain `.ducklake` file.
+///   This one is reasoned rather than bisected: a local lake never exercises it.
+///
+/// `httpfs` and `aws` are **not** here: the engine has no S3 code path today, so
+/// baking them would be cargo-culting weight into the image. Add them with the
+/// change that adds an `s3://` lake, not before.
+///
+/// Cost, for the record: 107 MB on disk, ~33 MB compressed into the image, to
+/// remove ~80 MB of download from every cold process start.
+pub const BAKED_EXTENSIONS: &[&str] = &["ducklake", "parquet", "json", "icu", "postgres_scanner"];
+
 /// Tuning knobs applied to a [`Session`]'s DuckDB connection at open time.
 ///
 /// The engine is a SQL generator — DuckDB does the actual compute — so these
@@ -129,6 +164,29 @@ impl SessionOptions {
         self.temp_directory = Some(dir.into());
         self
     }
+
+    /// Point DuckDB at the extension directory baked into the container image,
+    /// when the image says it has one.
+    ///
+    /// The image sets `ER_DUCKDB_EXTENSION_DIR` (see `rust/Dockerfile`); nothing
+    /// else does, so a local `cargo run` and the test suites keep DuckDB's
+    /// default `~/.duckdb/extensions` and its autoinstall behaviour. That split
+    /// is deliberate: a developer should not have to bake extensions to run the
+    /// engine, and a deployed pod should never fetch one.
+    ///
+    /// Both production session constructors — `er_cli::open_lake` and
+    /// `er_server::read`'s per-org attach — go through this, so neither can
+    /// drift from the other.
+    #[must_use]
+    pub fn with_baked_extensions(mut self) -> Self {
+        if let Some(dir) = std::env::var("ER_DUCKDB_EXTENSION_DIR")
+            .ok()
+            .filter(|d| !d.is_empty())
+        {
+            self.extension_directory = Some(dir);
+        }
+        self
+    }
 }
 
 pub struct Session {
@@ -139,6 +197,14 @@ pub struct Session {
     /// A spill directory this session created (because the caller supplied
     /// none) and is responsible for removing on drop.
     owned_temp_dir: Option<PathBuf>,
+    /// Whether this session may reach the DuckDB extension repository.
+    ///
+    /// False exactly when the caller named an [`SessionOptions::extension_directory`]:
+    /// the binaries are baked, so `INSTALL` is both unnecessary and a network
+    /// round-trip we are trying to remove. `apply_options` additionally turns
+    /// `autoinstall_known_extensions` off in that case, so a *missing* baked
+    /// extension fails loudly instead of quietly downloading itself.
+    may_install_extensions: bool,
 }
 
 impl Drop for Session {
@@ -192,6 +258,7 @@ impl Session {
             None
         };
 
+        let may_install_extensions = opts.extension_directory.is_none();
         Self::apply_options(&conn, &opts)?;
         Self::load_extensions(&conn, &opts)?;
         Ok(Session {
@@ -200,6 +267,7 @@ impl Session {
             seq: Cell::new(0),
             lake: None,
             owned_temp_dir,
+            may_install_extensions,
         })
     }
 
@@ -227,6 +295,19 @@ impl Session {
         }
         if let Some(dir) = &opts.extension_directory {
             stmts.push(format!("SET extension_directory = {};", quote(dir)));
+            // The binaries are baked, so nothing may be fetched. Autoload stays
+            // ON deliberately — it is what resolves `parquet`, `json` and `icu`
+            // out of the baked directory on first use, with no network and no
+            // need to enumerate them here. Autoinstall is the network half, and
+            // turning it off is what converts "silently download a missing
+            // extension" into a loud failure.
+            //
+            // This matters because the workspace pins `duckdb` with the plain
+            // `bundled` feature, without `parquet`/`json`, and the bundled build
+            // defines DUCKDB_EXTENSION_AUTOINSTALL_DEFAULT=1. Only
+            // `core_functions` is statically linked, so every Parquet read — all
+            // of DuckLake — would otherwise reach extensions.duckdb.org.
+            stmts.push("SET autoinstall_known_extensions = false;".to_string());
         }
         if !stmts.is_empty() {
             conn.execute_batch(&stmts.join("\n"))?;
@@ -262,8 +343,14 @@ impl Session {
     /// catalog; the lake is used only to read inputs and write outputs. The
     /// catalog is never `USE`d — all lake references are fully qualified.
     pub fn attach_ducklake(&mut self, cfg: &ducklake::DuckLakeConfig) -> Result<()> {
-        self.conn
-            .execute_batch("INSTALL ducklake; LOAD ducklake;")?;
+        // `INSTALL` only where there is no baked extension directory. With one,
+        // this ran a network fetch on *every* lake open — once per dispatched
+        // job, and on a fresh pod with an empty `~/.duckdb` it downloaded the
+        // whole 27 MB extension before the first row was read.
+        if self.may_install_extensions {
+            self.conn.execute_batch("INSTALL ducklake;")?;
+        }
+        self.conn.execute_batch("LOAD ducklake;")?;
         let mut options = Vec::new();
         if let Some(dp) = &cfg.data_path {
             options.push(format!("DATA_PATH '{}'", dp.replace('\'', "''")));

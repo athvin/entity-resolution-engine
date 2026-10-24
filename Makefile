@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := check
-.PHONY: build fmt lint doc test check check-e2e entities-check skills-check frontend frontend-audit frontend-coverage run frontend-dev frontend-e2e frontend-baselines frontend-dev-reset image-api dev-up dev-suspend dev-resume dev-down obs-up clean symposium
+.PHONY: build fmt lint doc test check check-e2e entities-check skills-check frontend frontend-audit frontend-coverage run frontend-dev frontend-e2e frontend-baselines frontend-dev-reset image-api nodepools measure-runner-startup dev-up dev-suspend dev-resume dev-down obs-up clean symposium
 
 # --- Rust backend: the application (engine, CLI, control plane) lives in rust/ ---
 #
@@ -135,9 +135,10 @@ frontend-dev-reset:
 
 # --- container images (replaces the deleted ci.yaml image build) ---
 #
-# Build + push the Rust control-plane image to ECR by git sha. The one image
-# serves er-api (the server), er-dispatcher (CMD override), and the `er`
-# pipeline CLI — see rust/Dockerfile. Then `make dev-up TAG=<sha>` rolls it out.
+# Build + push the Rust control-plane image to ECR by git sha. The image holds
+# ONE binary serving all three entry points — er-server, er-dispatcher and the
+# `er` pipeline CLI — dispatched on argv[0], with the latter two as symlinks;
+# see rust/Dockerfile. Then `make dev-up TAG=<sha>` rolls it out.
 # Needs AWS creds with ECR push. (er-web is built from frontend/Dockerfile by
 # the frontend pipeline.)
 ECR_REGISTRY ?= 797781631727.dkr.ecr.us-east-2.amazonaws.com
@@ -162,6 +163,31 @@ image-api:
 # credentials (see its header for the optional ER_DEV_* inputs).
 
 ER_DEV_CONTEXT ?= er-dev
+
+# Apply the cluster-scoped Karpenter NodePools (app / runner-sm / runner-l).
+#
+# These are Kubernetes manifests, not AWS API objects, so Terraform does not own
+# them (infra/terraform/modules/eks/main.tf says so) and no chart renders them.
+# Until this target existed nothing applied them at all: they were applied by
+# hand once, in plan-to-aws task 1.3, and an edit to a disruption setting
+# changed nothing anywhere until someone remembered to re-apply it. `infra.yml`
+# does not even trigger on these paths, so there is no drift gate either —
+# `--dry-run=server` here at least shows what would move.
+#
+# infra/k8s/nodepools/measure/ is deliberately NOT applied: it holds the
+# throwaway pool scripts/measure_runner_startup.sh creates and deletes.
+nodepools:
+	kubectl --context $(ER_DEV_CONTEXT) apply -f infra/k8s/nodepools/
+	kubectl --context $(ER_DEV_CONTEXT) get nodepools
+
+# Measure runner startup on the live cluster (docs/infrastructure.md §18.16).
+# Run once per image to build a before/after record:
+#   make measure-runner-startup IMAGE=<ecr>/er-api:<sha> ARM=before
+measure-runner-startup:
+	@test -n "$(IMAGE)" || { echo "usage: make measure-runner-startup IMAGE=<ref> ARM=before|after"; exit 2; }
+	@test -n "$(ARM)" || { echo "ARM=before|after required"; exit 2; }
+	bash scripts/measure_runner_startup.sh --image $(IMAGE) --arm $(ARM) \
+	  $(if $(TRIALS),--trials $(TRIALS)) $(if $(ARMS),--arms $(ARMS)) $(if $(OUT),--out $(OUT))
 
 # Stand a developer environment up from nothing: make dev-up DEV=alice TAG=<git sha>
 # (CI pushes er-api/er-web to ECR by commit sha; pass API_DIGEST/WEB_DIGEST to pin harder.)

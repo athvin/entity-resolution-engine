@@ -33,6 +33,7 @@
 pub mod config_check;
 pub mod cron;
 pub mod dispatcher;
+pub mod dispatcher_bin;
 pub mod errfmt;
 pub mod mail;
 pub mod openapi;

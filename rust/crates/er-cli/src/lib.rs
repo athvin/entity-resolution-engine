@@ -13,6 +13,12 @@
 //!
 //! This is built up stage by stage; ingest + standardize land first.
 
+/// The `er` command-line surface. It lives in the library, not in `src/main.rs`,
+/// so the deployed image can host every entry point in one binary rather than
+/// shipping three copies of statically-linked DuckDB — see `rust/Dockerfile`
+/// and the multicall dispatch in `er-server`'s `main`.
+pub mod cli;
+
 use std::path::Path;
 
 use anyhow::Result;
@@ -81,7 +87,8 @@ pub const LEXICON: &str = "nickname_variants";
 /// # Errors
 /// Propagates the dedupe-core session open / DuckLake attach errors.
 pub fn open_lake(catalog: &str, data_path: &str) -> Result<Session> {
-    let mut session = Session::open_in_memory(SessionOptions::deterministic())?;
+    let mut session =
+        Session::open_in_memory(SessionOptions::deterministic().with_baked_extensions())?;
     session.attach_ducklake(&DuckLakeConfig {
         metadata: catalog.to_string(),
         data_path: Some(data_path.to_string()),
