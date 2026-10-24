@@ -1078,11 +1078,23 @@ pub async fn train_and_register(
     // every pair it is given is counted as a match — so letting a `no_match`
     // through would skew every `m` toward disagreement and move every score the
     // model produces, silently and with no error anywhere.
+    //
+    // AND NO MODEL SUGGESTIONS. `pair_label.origin` declares `llm` for a
+    // model's own proposal, and training on those is training on this system's
+    // output — the scores drift toward whatever the LLM already believed, with
+    // no error and nothing in provenance to show for it. The entity says as
+    // much, that the origins are "kept apart so training can weight or exclude
+    // a source"; this is the exclusion, and it is written BEFORE anything
+    // produces an `llm` row (V6 will) so the trap is shut before it can open.
+    //
+    // `read::all` has no origin filter and returns every row, so the guard has
+    // to live here. The exclusion is deliberately by origin rather than by
+    // `labeled_by`: a future second LLM producer gets caught by this too.
     let match_labels: Vec<(String, String)> =
         match er_entities::pair_label::read::all(client, org_id).await {
             Ok(rows) => rows
                 .into_iter()
-                .filter(|l| l.verdict == "match")
+                .filter(|l| l.verdict == "match" && l.origin != "llm")
                 .map(|l| (l.rec_a_key, l.rec_b_key))
                 .collect(),
             // A label read that fails must not fail the train: EM is a complete
@@ -1151,6 +1163,9 @@ pub async fn train_and_register(
         // How `m` was estimated, so a version's origin is legible from the
         // registry rather than inferred. Zero means the EM estimate stands —
         // either the tenant has no match verdicts yet, or reading them failed.
+        // Counts the labels actually USED, so it excludes `no_match` and
+        // `origin = 'llm'` rows: a number that counted suggestions the training
+        // then ignored would misdescribe every draft it appears on.
         "m_from_labels": labels_used,
     });
     pg::create_model_version(
