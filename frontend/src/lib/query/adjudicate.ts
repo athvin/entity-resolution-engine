@@ -43,6 +43,42 @@ export function useReviewRecommendations(org: string, reviewIds: string[]) {
   });
 }
 
+/** One pair's outcome in a bulk run. */
+export interface BulkOutcome {
+  review_id: string;
+  ok: boolean;
+  verdict?: string;
+  error?: string;
+}
+
+export interface BulkAdjudicateResult {
+  outcomes: BulkOutcome[];
+  answered: number;
+  asked: number;
+}
+
+/**
+ * Adjudicate several pairs at once.
+ *
+ * Always resolves on a 200 — the route reports per-item outcomes rather than a
+ * status for the batch, because "7 of 10 answered" has no HTTP status. The
+ * caller reads `answered`/`asked` to say what happened.
+ */
+export function useRecommendBulk(org: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (reviewIds: string[]) =>
+      bffFetch<BulkAdjudicateResult>(`/api/orgs/${org}/reviews/recommend-bulk`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ review_ids: reviewIds }),
+      }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.reviewRecommendationsAll(org) });
+    },
+  });
+}
+
 export function useRecommendReview(org: string) {
   const client = useQueryClient();
   return useMutation({

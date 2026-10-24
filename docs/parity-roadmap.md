@@ -2412,11 +2412,32 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          forced guess is confident noise. Injection-safety copies 2.3: record values framed as
          untrusted data, output pinned by a structured-output schema, and the verdict
          allowlist re-enforced in `parseRecommendation` rather than trusted to the schema.
-         Tests: 21 on the prompt/parse core, 8 against real Postgres, 11 component, and one
-         functional spec crossing the whole seam. Two sabotages observed failing first — a
-         verdict allowlist that trusts the schema, and a batch read missing its `org`
-         predicate (**a cross-tenant disclosure of what a model said about another tenant's
-         records**) — each caught by exactly its own assertion.
+         **Bulk is capped by a REFUSAL, not a trim.** `MAX_BULK = 10`, enforced in the body
+         parser: truncating would report success for pairs nobody asked about, leaving a blank
+         badge that reads as "the model had no opinion" rather than "we did not ask". The cap
+         is a count because a count is what a steward can decide about before pressing the
+         button — a token budget is not, and the UI could only estimate it. De-duplication
+         happens AFTER the cap check, or twenty ids collapsing to ten would smuggle a
+         twenty-pair request past it. Every item is independent: one unjudgeable pair is
+         reported against its own id and the rest proceed, so the response is **always 200
+         with per-item outcomes** — "7 of 10 answered" has no HTTP status, and picking one
+         would misreport the other seven. Three at a time; sequential would park the request
+         for a minute, unbounded would open ten model calls and ten upstream read pairs
+         against one tenant's control plane.
+         Tests: 21 on the prompt/parse core, 9 on the cap, 8 against real Postgres, 11
+         component, and two functional specs crossing the whole seam. Three sabotages observed
+         failing first — a verdict allowlist that trusts the schema, a batch read missing its
+         `org` predicate (**a cross-tenant disclosure of what a model said about another
+         tenant's records**), and a cap that truncates instead of refusing — each caught by
+         exactly its own assertion.
+         *A process note worth keeping:* both functional specs failed for three different
+         wrong reasons before passing, and none was the code. Playwright's
+         `reuseExistingServer` adopted a **stale Next build** without the new component, so
+         the test failed before it ever reached the POST; a leaked mock process from an
+         earlier run held port 8010; and a copy of the mock placed in `/tmp` never started at
+         all, because it imports `./arrow.mjs` relative to its own directory. `pnpm
+         test:e2e:fresh` (which runs `dev/kill-servers.sh`) is the command, and a probe run
+         **in place** with the port verified clear is what finally separated the three.
          **Scoped 2026-10-23, and the obvious storage is blocked.** The good news first: V6
          needs no new read. `useRecordPair` already fetches both records' field values for
          `field-compare-grid`, and the review row carries `match_probability` plus the

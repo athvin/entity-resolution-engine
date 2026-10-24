@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Inbox, Layers, SkipForward, X } from "lucide-react";
+import { Check, Inbox, Layers, SkipForward, Sparkles, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -18,7 +18,12 @@ import {
   type ReviewRow,
 } from "@/lib/query/reviews";
 import { BffRequestError } from "@/lib/api/client";
-import { useRecommendReview, useReviewRecommendations } from "@/lib/query/adjudicate";
+import { MAX_BULK } from "@/lib/bff/adjudicate-bulk";
+import {
+  useRecommendBulk,
+  useRecommendReview,
+  useReviewRecommendations,
+} from "@/lib/query/adjudicate";
 import { cn } from "@/lib/utils";
 import { DecisionPanel, probabilityLabel } from "./decision-panel";
 import { RecommendationBadge } from "./recommendation-badge";
@@ -126,7 +131,34 @@ export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolea
   const reviewIds = useMemo(() => rows.map((row) => row.id), [rows]);
   const recommendations = useReviewRecommendations(org, reviewIds);
   const recommend = useRecommendReview(org);
+  const recommendBulk = useRecommendBulk(org);
   const [recommendFailure, setRecommendFailure] = useState<string | null>(null);
+  const [bulkRecommendNote, setBulkRecommendNote] = useState<string | null>(null);
+
+  /**
+   * Ask about the selected pairs.
+   *
+   * Reports what came back rather than "done": a batch where three pairs could
+   * not be judged leaves three blank badges, and a bare success message would
+   * let that read as "the model had no opinion" instead of "it was not asked".
+   */
+  const askBulk = useCallback(() => {
+    setBulkRecommendNote(null);
+    recommendBulk.mutate([...selected], {
+      onSuccess: (result) => {
+        setBulkRecommendNote(
+          result.answered === result.asked
+            ? `Asked about ${String(result.asked)} pairs.`
+            : `Answered ${String(result.answered)} of ${String(result.asked)} — the rest could not be judged.`,
+        );
+      },
+      onError: (error) => {
+        setBulkRecommendNote(
+          error instanceof BffRequestError ? error.message : "could not ask about these pairs",
+        );
+      },
+    });
+  }, [recommendBulk, selected]);
   const allLoadedSelected = rows.length > 0 && rows.every((row) => selected.has(row.id));
   const headerCheckbox = useRef<HTMLInputElement>(null);
 
@@ -367,7 +399,31 @@ export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolea
             >
               <SkipForward /> Dismiss all
             </Button>
+            {/* V6's bulk half, beside the resolve actions but deliberately NOT
+                one of them: this asks, it does not decide. Separated by a rule
+                so it does not read as a fourth verdict. */}
+            <span className="bg-border mx-1 h-5 w-px" aria-hidden />
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={askBulk}
+              disabled={recommendBulk.isPending || selected.size > MAX_BULK}
+              title={
+                selected.size > MAX_BULK
+                  ? `Select at most ${String(MAX_BULK)} to ask about at once`
+                  : undefined
+              }
+              data-testid="bulk-recommend"
+            >
+              <Sparkles />
+              {recommendBulk.isPending ? "Asking…" : `Ask AI (${String(selected.size)})`}
+            </Button>
           </div>
+        )}
+        {bulkRecommendNote !== null && (
+          <p className="text-muted-foreground text-xs" data-testid="bulk-recommend-note">
+            {bulkRecommendNote}
+          </p>
         )}
       </div>
 

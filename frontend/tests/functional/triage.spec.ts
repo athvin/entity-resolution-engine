@@ -184,4 +184,51 @@ test.describe("steward triage", () => {
     // And the three resolve buttons are still the only way to act.
     await expect(page.getByTestId("resolve-match")).toBeEnabled();
   });
+
+  /**
+   * V6's bulk half. The thing worth proving end to end is that the cap is a
+   * REFUSAL and not a trim: a truncating cap would answer 200 here and leave
+   * blank badges that read as "the model had no opinion" rather than "we did
+   * not ask".
+   */
+  test("asks about several pairs at once, and refuses past the cost cap", async ({
+    page,
+    isMobile,
+  }, testInfo) => {
+    test.skip(isMobile, "bulk selection is the desktop grid path");
+    // The PER-PROJECT queue, not `selectall-dev`. My first draft used the
+    // latter for its 50 loaded rows and raced the select-all test, which
+    // resolves that whole tenant and leaves an empty inbox — `review-list`
+    // simply was not there. The header comment on this file already says the
+    // rule: each project gets its own queue so parallel runs never race.
+    await openInbox(page, testInfo.project.name);
+    await expect(page.getByTestId("review-list")).toBeVisible();
+
+    // Rows 35+, clear of the head the keyboard-20 test consumes and of the
+    // 30–33 window bulk-resolve uses. Asking does not resolve anything, so
+    // these rows stay put for the over-cap check below.
+    const boxes = page.getByTestId("review-list").locator("input[type=checkbox]");
+    for (let index = 35; index < 38; index += 1) {
+      await boxes.nth(index).check();
+    }
+    await expect(page.getByTestId("bulk-recommend")).toContainText("Ask AI (3)");
+
+    const [response] = await Promise.all([
+      page.waitForResponse((r) => r.url().includes("/reviews/recommend-bulk")),
+      page.getByTestId("bulk-recommend").click(),
+    ]);
+    expect(response.status()).toBe(200);
+    const body = (await response.json()) as { answered: number; asked: number };
+    expect(body.asked).toBe(3);
+    expect(body.answered).toBe(3);
+    await expect(page.getByTestId("bulk-recommend-note")).toContainText("Asked about 3 pairs");
+
+    // Eleven selected is one past the cap, and the control refuses rather than
+    // quietly asking about ten of them.
+    for (let index = 38; index < 46; index += 1) {
+      await boxes.nth(index).check();
+    }
+    await expect(page.getByTestId("bulk-recommend")).toContainText("Ask AI (11)");
+    await expect(page.getByTestId("bulk-recommend")).toBeDisabled();
+  });
 });
