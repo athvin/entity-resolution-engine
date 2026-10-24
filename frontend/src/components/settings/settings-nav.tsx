@@ -17,10 +17,20 @@ export function SettingsNav({ org }: { org: string }) {
     { href: `/${org}/settings/audit`, label: "Audit" },
   ];
   return (
-    // `flex-wrap`, not a non-wrapping row: six tabs do not fit a 360px
-    // viewport, and the overflow pushed the config studio's Save button under
-    // the lexicon list so the click landed on a nickname instead. A nav that
-    // runs off the side of the screen is also simply unreachable there.
+    // `flex-wrap`, not a non-wrapping row: these tabs have not fitted a 360px
+    // viewport since there were six of them, and the overflow pushed the config
+    // studio's Save button under the lexicon list so the click landed on a
+    // nickname instead. A nav that runs off the side of the screen is also
+    // simply unreachable there.
+    //
+    // Wrapping has a cost worth knowing before adding an eighth: a tab added
+    // here REARRANGES the rows on a narrow viewport rather than just appending.
+    // The AI tab pushed "Members" onto the second row on Pixel 7 — same two
+    // rows, same page height, but enough relayout to exceed
+    // `maxDiffPixelRatio` and fail `config-studio-mobile-chrome-linux.png`.
+    // It slid UNDER that tolerance on desktop and mobile-safari, which is the
+    // silent staleness `update-baselines.sh` runs `--update-snapshots=all` to
+    // prevent: all three baselines were rewritten, not the one CI named.
     <nav className="flex flex-wrap gap-1" aria-label="Settings">
       {tabs.map((tab) => (
         <Link
