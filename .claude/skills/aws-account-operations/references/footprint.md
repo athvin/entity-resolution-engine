@@ -145,9 +145,11 @@ does not carry:
 
 ```
 required_version = ">= 1.11"
+source  = "cloudflare/cloudflare"
 source  = "hashicorp/aws"
 source  = "hashicorp/random"
 version = "~> 3.0"
+version = "~> 5.0"
 version = "~> 6.0"
 ```
 

@@ -741,7 +741,11 @@ gen_aws_footprint() {
 	echo "### Terraform and provider pins"
 	echo
 	echo '```'
-	grep -rhE 'required_version|source[[:space:]]*=[[:space:]]*"hashicorp/|version[[:space:]]*=[[:space:]]*"~>' \
+	# Any registry namespace, not just hashicorp/: the version alternative below
+	# matches every `~>` pin, so narrowing the source alternative listed a bare
+	# `version = "~> 5.0"` with no provider beside it the moment a third-party
+	# provider was added (cloudflare, for the SES DNS records).
+	grep -rhE 'required_version|source[[:space:]]*=[[:space:]]*"[a-z0-9-]+/|version[[:space:]]*=[[:space:]]*"~>' \
 		infra/terraform/envs/*/versions.tf \
 		| sed -e 's/^[[:space:]]*//' | sort -u || true
 	echo '```'

@@ -16,9 +16,17 @@
 # early; and sandbox limits (200 messages/day, verified recipients only) are
 # fine for dev indefinitely if developers verify their own addresses.
 #
-# DNS is deliberately NOT managed here. The zone lives in Cloudflare (§18.8)
-# while this is an AWS provider, so the records are outputs to publish rather
-# than resources. `verification_dns` and `mail_from_dns` are exactly that list.
+# DNS is not managed HERE, and that is about the provider, not about whether
+# Terraform owns it. §18.8 resolved the DNS plane to Cloudflare (`dupezero.com`
+# at Cloudflare Registrar, which pins the apex to Cloudflare's nameservers —
+# there is deliberately no Route 53 zone), so the records are written by the
+# `cloudflare` provider in the calling environment rather than by this module.
+# `verification_dns`, `mail_from_dns` and `mail_from_domain` are what the caller
+# publishes from; see `envs/dev/ses.tf`.
+#
+# Keeping the records out of this module is what lets it stay single-provider:
+# a module that reached for `cloudflare_dns_record` would force every caller to
+# configure that provider even when its zone lives somewhere else.
 
 variable "name" {
   description = "Environment-scoped name prefix, e.g. er-dev."
@@ -157,6 +165,30 @@ output "verification_dns" {
       value = "${token}.dkim.amazonses.com"
     }
   ]
+}
+
+output "mail_from_domain" {
+  description = <<-EOT
+    The custom MAIL FROM subdomain, e.g. `mail.dev.example.com`. Exposed
+    because a caller publishing records itself needs the NAME, and because
+    Cloudflare's MX resource takes `priority` as its own field — so
+    `mail_from_dns`'s "10 feedback-smtp…" string cannot be used verbatim there.
+  EOT
+  value       = local.mail_from_domain
+}
+
+output "mail_from_mx_host" {
+  description = <<-EOT
+    The MAIL FROM MX target without its priority, for a DNS provider that takes
+    priority separately. Priority is 10; `mail_from_dns` carries the combined
+    form for anything that wants one string.
+  EOT
+  value       = "feedback-smtp.${data.aws_region.current.region}.amazonses.com"
+}
+
+output "mail_from_spf_value" {
+  description = "The SPF TXT value for the MAIL FROM domain."
+  value       = "v=spf1 include:amazonses.com ~all"
 }
 
 output "mail_from_dns" {
