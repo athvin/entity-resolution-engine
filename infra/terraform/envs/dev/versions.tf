@@ -10,6 +10,15 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.0"
     }
+    # §18.8 resolved the DNS plane to Cloudflare, and named this provider as
+    # what writes into it: the wildcard dev certificate's ACM validation CNAME
+    # and the SES DKIM / MAIL FROM records both land in the Cloudflare zone
+    # this way. v5 is the current major; its record resource is
+    # `cloudflare_dns_record` (v4's was `cloudflare_record`).
+    cloudflare = {
+      source  = "cloudflare/cloudflare"
+      version = "~> 5.0"
+    }
   }
 }
 
@@ -26,3 +35,11 @@ provider "aws" {
     }
   }
 }
+
+# Credentials come from `CLOUDFLARE_API_TOKEN` in the environment, read by the
+# provider natively. Deliberately not a Terraform variable: a variable would
+# put the token in the plan file and in state, and this way the token is never
+# written anywhere Terraform persists. The scoped token external-dns uses
+# (Secrets Manager, §18.8) is the same kind of credential; export it before
+# running a plan.
+provider "cloudflare" {}

@@ -2312,9 +2312,33 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          declare rules moves `config_hash`, which promotes the next incremental run to a full one
          through the existing drift guard — correct, because the corpus was standardized
          differently.
-   - [ ] V0 SES apply (one input away — the account has no domain; recommend the sandbox
-         email-identity path), V2 international standardization (#60), V4 AWS-native verification
-         suite (#64-#72).
+   - [ ] **V0 SES apply — the DNS half is now Terraform's; what remains is an apply.**
+         The blocker was never "the account has no domain". §18.8 resolved that on 2026-10-10:
+         **`dupezero.com`, registered at Cloudflare**, which pins the apex to Cloudflare's
+         nameservers — so there is deliberately **no Route 53 zone**, and the same decision
+         named the Terraform `cloudflare` provider as what writes into the zone ("SES
+         Easy-DKIM CNAMEs and MAIL FROM records land in the Cloudflare zone the same way" as
+         the ACM validation CNAME).
+         `ses.tf` contradicted that: it listed "publish these records in Cloudflare" as a
+         manual step, and the module's header said DNS was "deliberately NOT managed here" as
+         though that meant not managed by Terraform at all. It meant not by THAT module's
+         provider. The provider is now declared (`cloudflare ~> 5.0`, reading
+         `CLOUDFLARE_API_TOKEN` from the environment so no token reaches state) and the three
+         DKIM CNAMEs plus the MAIL FROM MX and SPF TXT are `cloudflare_dns_record` resources
+         in `envs/dev/ses.tf`. The module stays single-provider on purpose — one that reached
+         for `cloudflare_dns_record` would force every caller to configure that provider even
+         when its zone lives elsewhere.
+         **Not applied, and not validated by `terraform`**: this area is human-applied, and
+         the agent session cannot run `init`/`validate`/`plan` (a hook enforces it), so the v5
+         resource schema is written from the provider's documented shape and wants a `validate`
+         before an apply. Two details worth a second look there: `cloudflare_dns_record` takes
+         MX `priority` as its own field (which is why the module now exposes
+         `mail_from_mx_host` separately from `mail_from_dns`'s combined string), and the DKIM
+         records use `count = 3` rather than `for_each`, because the tokens are computed and
+         `for_each` over them fails at plan time.
+         What is genuinely left: export `CLOUDFLARE_API_TOKEN`, supply `ses_domain` and
+         `cloudflare_zone_id`, apply — then file SES production access, which is a
+         human-reviewed request and nobody's Terraform.
 6. **AI on Bedrock**
    - [ ] V5 Bedrock runtime path + per-org BYO LLM (#77).
    - [ ] V6 LLM adjudication on gray-band reviews (#27). Auto-apply off by default.
