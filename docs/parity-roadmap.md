@@ -2340,7 +2340,57 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          `cloudflare_zone_id`, apply — then file SES production access, which is a
          human-reviewed request and nobody's Terraform.
 6. **AI on Bedrock**
-   - [ ] V5 Bedrock runtime path + per-org BYO LLM (#77).
+   - [x] V5 Bedrock runtime path + per-org BYO LLM (#77). **The runtime path was already
+         there** — `ANTHROPIC_BASE_URL` is applied at the only two call sites, so pointing the
+         deployment at Bedrock is a base-URL + model-id swap and always was. What was missing
+         was that all three knobs (on/off, model, key) were **process-wide environment
+         variables**: a tenant could not switch the assistant off, could not use its own
+         account, and — the one that actually mattered — could not find out why it was
+         refusing, because both routes answered the same "ANTHROPIC_API_KEY is unset" whatever
+         the real reason.
+         So this is `erweb.org_ai_settings` plus a resolver, and four design calls:
+         * **No row means INHERIT, not disabled.** `enabled` has no column default and a row
+           is written only when an admin expresses a preference, so the table ships empty and
+           every existing tenant keeps exactly the behaviour it had. A `false` default would
+           have switched AI off for the whole fleet on deploy — a silent regression dressed as
+           a migration.
+         * **A tenant's key forces the PUBLIC Anthropic API**, never the deployment's
+           `ANTHROPIC_BASE_URL`. On a Bedrock deployment that base URL is a Bedrock endpoint,
+           and an Anthropic key sent there fails with a 401 that reads as "the tenant typed
+           their key wrong". The endpoint has to follow the credential; this is the one rule
+           here that is correctness rather than preference.
+         * **The off switch outranks a stored key**, or switching AI off would also require
+           deleting the key, and the off state would be unreachable for anyone on the
+           deployment key.
+         * **Saving VERIFIES**, with one `max_tokens: 1` call against the merged
+           configuration — which is what removes the need for a model allowlist. A closed set
+           is right for `subject_type` and `webhook.events` because an unconstrained value
+           there is *silent*; a wrong model id is a loud 404, so an allowlist would only have
+           to track every id across the public API and whatever Bedrock profiles a deployment
+           uses, and would reject a model that works. `previewAiConfig` does the merge because
+           only it can read the stored key: verifying the submitted fields alone would check a
+           new model id against the deployment key while the tenant's own key is what the call
+           will really use.
+         The key is sealed in the existing AES-GCM vault under the pseudo-role `ai`, which
+         cannot collide with `viewer|steward|admin`, so a credential row pasted across fails
+         to decrypt rather than being used as a model key. It is **never returned** by either
+         verb, not even truncated — an org has at most one, so `key_set` + `key_set_at`
+         identifies it completely and a last-4 hint would be disclosure that buys nothing.
+         The read is open to any member (the state is what tells a steward why the assistant
+         is refusing) and the write is admin-only.
+         Tests: 42 on the three-state encoding and the resolution precedence, 16 against real
+         Postgres (PGlite) for the vault round-trip, the AAD binding and the partial-write
+         merge. Two sabotages observed failing first — a tenant key keeping the deployment
+         base URL, and an empty key box sending `null` — each caught by exactly the assertion
+         written for it.
+         **A test-environment trap found here, worth knowing before writing the next vault
+         test:** the unit tier runs in jsdom, which installs its own `Uint8Array` global, so a
+         Node `Buffer` fails `instanceof Uint8Array` and PGlite's bytea serializer rejects
+         every sealed key with `Invalid input for bytea type`. It is purely an artifact — in
+         the server runtime a Buffer *is* a Uint8Array, which is why the Playwright fixtures
+         seal credentials into PGlite without trouble — but any test that writes through the
+         vault needs `// @vitest-environment node`. A probe found this in one run after two
+         wrong theories.
    - [ ] V6 LLM adjudication on gray-band reviews (#27). Auto-apply off by default.
    - [ ] V7 NL rule authoring + explain-rule (#29). Writes a DRAFT version, never publishes.
    - [ ] V8 AI schema mapping + AI model setup (#48/#35). Sends a profile summary, never rows.

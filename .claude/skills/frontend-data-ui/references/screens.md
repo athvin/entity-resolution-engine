@@ -65,6 +65,7 @@ below `lg`.
 - `/[org]/records`
 - `/[org]/reviews`
 - `/[org]/runs`
+- `/[org]/settings/ai`
 - `/[org]/settings/config`
 - `/[org]/settings/members`
 - `/[org]/settings/models`

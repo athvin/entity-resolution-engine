@@ -279,6 +279,16 @@ erDiagram
         org_role role "in {admin, steward, viewer}"
         text token_hash UK
     }
+    org_ai_settings {
+        bytea ciphertext
+        boolean enabled
+        timestamptz key_set_at
+        text model
+        bytea nonce
+        text org PK
+        timestamptz updated_at
+        text updated_by
+    }
     org_credentials {
         bytea ciphertext
         timestamptz created_at
