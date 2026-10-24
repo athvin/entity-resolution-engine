@@ -211,6 +211,13 @@ baselines.
 | 10M/100K scale test (2026-09-23) | [measurements/workload-10m-100k-20260923.json](measurements/workload-10m-100k-20260923.json) |
 | Training/blocking quality screen (2026-09-23) | [measurements/performance-screening-20260923.json](measurements/performance-screening-20260923.json) |
 | EM-cap full-load confirmation (2026-09-23) | [measurements/training-full-load-20260923.json](measurements/training-full-load-20260923.json) |
+| Runner startup, cold node + extension bake (2026-10-24) | [measurements/runner-startup-20261024.json](measurements/runner-startup-20261024.json) |
+
+Unlike the rows above it, the runner-startup record's harness still exists and
+still runs: `scripts/measure_runner_startup.sh` against the dev cluster, or
+`make measure-runner-startup IMAGE=<ref> ARM=before|after`. It measures cluster
+startup rather than pipeline throughput, so it is indexed here for discovery but
+says nothing about the engine's own performance.
 
 The work-in-progress thread-scaling campaign (2026-09-29, PR #54) has no machine-readable
 record — its raw outputs were git-ignored under `artifacts/bench/threads6-*` on

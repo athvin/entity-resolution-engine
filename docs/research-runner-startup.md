@@ -257,6 +257,25 @@ Expected result: S-class jobs start instantly; the first M/L job of a session
 still pays ~60–90 s of node boot (which no AMI or image choice removes under
 Auto Mode); everything after it in the next ten minutes starts in seconds.
 
+> **CORRECTION (4): the cold start is ~30 s, not 60–90 s, and the terms are not
+> the ones this page weighted.** Measured on a `c6id` probe node
+> ([`measurements/runner-startup-20261024.json`](measurements/runner-startup-20261024.json)):
+> NodeClaim created to Ready is **~14 s**, the image pull is **~2 s**, and
+> submit to container running is **~30 s**. The ~90 s this page inherited from
+> plan-to-aws 1.3 was a hand observation with no artifact behind it, and Auto
+> Mode's June 2026 boot improvements appear to have overtaken it.
+>
+> The practical consequence is for §2's ladder, not for the recommendation
+> order. **B is still worth doing and C is still worth doing**, but for
+> different reasons than stated: B's value is overwhelmingly the extension
+> fetch (~5 s, the largest term we control, and the one this page sized as a
+> round trip) rather than the image pull it also shrinks; and the pull being 2 s
+> closes D-PULL's image-split and snapshot-prebake rungs outright rather than
+> merely deprioritising them.
+>
+> **D and E are further out of the money than this page concluded.** A warm node
+> at ≈$95/mo buys back ~14 s of node boot, not 60–90 s.
+
 Only if the first-M/L-job cold start is still unacceptable, add one pause pod
 on `runner-sm` (D) and switch it off with the idle-suspend predicate. That is
 the first option that costs real money (≈ $95/mo), so it should be the last one
@@ -264,13 +283,54 @@ reached for.
 
 ## 4. Measurements to take before implementing
 
-- `kubectl get events` timestamps on one cold run: NodeClaim created → node
+*Taken 2026-10-24. The harness is `scripts/measure_runner_startup.sh`
+(`make measure-runner-startup`) and the record is
+[`measurements/runner-startup-20261024.json`](measurements/runner-startup-20261024.json).*
+
+- [x] `kubectl get events` timestamps on one cold run: NodeClaim created → node
   Ready → image pulled → container started. This is §18.16 and it splits the
-  90 s into launch / boot / pull / extension fetch.
-- Pull time of the current `er-api` image on a fresh runner node versus a
-  single-binary image.
-- Wall time of an S-class `run_all_full` in-process on the `m6i.large` app node
-  with 2 threads, so the in-process cap is set from a number.
+  90 s into launch / boot / pull / extension fetch. — **Done, and the 90 s was
+  itself wrong; the split is ~14 s node, ~2 s pull, ~5 s extension fetch,
+  ~30 s end to end.**
+- [x] Pull time of the current `er-api` image on a fresh runner node versus a
+  single-binary image. — **Done, and it stopped being the deciding number: the
+  pull is ~2 s either way, which is what closes D-PULL's ladder. The image size
+  comparison comes from the registry rather than a probe.**
+- [ ] Wall time of an S-class `run_all_full` in-process on the `m6i.large` app
+  node with 2 threads, so the in-process cap is set from a number. — **Not
+  taken, and it needs a prior fix.** `er_cli::open_lake` hard-codes
+  `SessionOptions::deterministic()`, so every dispatched job currently runs
+  DuckDB *single-threaded* with no memory limit and the per-tenant
+  `ER_DUCKDB_THREADS`/`ER_DUCKDB_MEMORY_LIMIT` reach no session. Measuring "at
+  2 threads" is not possible until that is wired, and wiring it needs its own
+  validation against the determinism contract.
+
+### What the harness measures, and what it cannot
+
+Four arms. Two are timings and two are the kind of result that does not need a
+number:
+
+- **x1** — container start to DuckLake attached and queried, twice over, so the
+  first run's extension fetch is isolated as a delta against the second. A
+  single run cannot distinguish "the fetch was fast" from "the fetch did not
+  happen".
+- **x2** — the same probe with egress denied by NetworkPolicy. Binary: without
+  the baked directory it must fail, with it it must succeed. This is what
+  demonstrates the external dependency is *gone* rather than merely faster.
+- **n1** — the cold-node lifecycle split (§18.16).
+- **n2** — whether a second job 2 minutes after the first reuses the node. This
+  is C's whole claim, and it is a yes/no, not a duration.
+
+Three limits are worth stating. The node arms run on a `c6id.xlarge` probe pool
+rather than `runner-sm`'s `c6id.2xlarge`, because the applied vCPU quota is 8
+and a 2xlarge cannot place (§5); launch, boot and join transfer, but the pull
+term may be marginally optimistic since Auto Mode's instance-store pull path
+scales with NVMe device count. Kubernetes records node-lifecycle conditions at
+one-second resolution, so those phases are whole seconds; the pull comes from
+the kubelet's own `Pulled` message and the probe from the process clock, both
+sub-second. And the probe is `er doctor` against a fresh local lake — it
+exercises session open, extension load, ATTACH and the schema reconcile, but not
+a scoring run, so it is a startup measurement and not a throughput one.
 
 ## Sources
 

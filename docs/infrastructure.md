@@ -761,5 +761,22 @@ Measurements and decisions this design is still waiting on. (Resolved items — 
 13. **Which Trust Services Criteria the first audit is scoped to.** Security is mandatory. **Confidentiality** is the natural second given the data, largely covered by §8.3 and §8.1. **Availability** is the expensive one, because it brings a documented RPO/RTO and *evidence of a restore test* — so §18.6's deferred DR posture becomes required work the moment Availability is in scope. Scoping to Security + Confidentiality first is the lighter path.
 14. **The Anthropic data flow needs a documented position**, not just an inventory entry (§8.6). The assistant sends names, emails, and full golden records to a third party. Minimum: a DPA, a configured retention posture on the vendor side, customer disclosure, and a decision on whether tenants can opt out. Product work with a compliance deadline attached. **One of the four is now built**: the opt-out exists as a per-tenant toggle (`erweb.org_ai_settings`, V5), and a tenant that switches AI off makes no outbound call from either the assistant or enrichment. A tenant may also supply its **own** API key, in which case the data still leaves but under that tenant's own vendor agreement rather than ours — which is a different disclosure, not an absent one. The DPA, the retention posture and the disclosure text remain open, and they are the three that need a lawyer rather than a commit.
 15. **Does `sslmode=verify-full` work with the Aurora CA bundle as the images are built?** Partially answered by inspection: the Dockerfile installs no `ca-certificates` or RDS bundle, so the runtime has only what `python:3.12-slim` ships. Expect an image change (install `ca-certificates` plus the RDS global bundle), not a secret change; what stays open is verifying the bundle path wiring in each DSN.
-16. **Cold-node image pull time** for the current `er-pipeline`. Decides how far down the §11.1 ladder to climb — SOCI alone, the image split, or snapshot prebake — and nothing measures it today.
+16. ~~**Cold-node image pull time** for the current `er-pipeline`.~~ **Resolved 2026-10-24, and the answer is "climb no further".** Measured with `scripts/measure_runner_startup.sh` on `er-dev`; the record is [`measurements/runner-startup-20261024.json`](measurements/runner-startup-20261024.json) and is the authority for every figure here.
+
+    The whole cold start — job submitted to container running — is about **30 seconds**, and the image pull is about **2 seconds** of it. The §11.1 ladder exists to shave that 2 seconds: the runtime/CI image split is worth a fraction of it, and snapshot prebake costs Auto Mode (D-AUTOMODE) to chase the same fraction. Neither is justified. The ladder is closed, not climbed.
+
+    What the 30 seconds is actually made of, on a `c6id` node:
+
+    | Phase | Seconds | Who controls it |
+    |---|---|---|
+    | NodeClaim created → Launched (EC2 fleet call) | ~2 | AWS |
+    | Launched → Registered (instance boot + kubelet join) | ~10 | AWS |
+    | Registered → Ready | ~2 | AWS |
+    | Pod Scheduled → Pulling | ~3 | kubelet |
+    | **image pull** | **~2** | **us** |
+    | **DuckDB extension fetch, first session** | **~5** | **us** |
+
+    Two things worth carrying forward. **The ~90 s in plan-to-aws 1.3 is stale** — node provision is now ~14 s from NodeClaim to Ready, and Auto Mode's June 2026 boot improvements are the likely reason. And **the extension fetch was the larger of the two terms we control**, roughly three times the pull, which is the opposite of what this question assumed when it was filed; it is now baked into the image (§11, `dedupe_core::session::BAKED_EXTENSIONS`) and measured at effectively zero.
+
+    `er-pipeline`, which this question named, no longer exists; the measurement is of `er-api`, the one image that now carries the engine CLI too.
 17. ~~**Whether Phase 4's two credential retirements land as one change or two.**~~ **Resolved, and it turned out to be one.** The SES half (§9.3) landed with the mailer, because writing the Rust sender against the SES API was cheaper than building the SMTP path the retirement was scheduled to undo. No SES key was ever created, so "no static keys anywhere" now rests on §9.2's S3 credential chain alone.
