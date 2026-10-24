@@ -188,7 +188,48 @@ ensure_config() {
 # signal: it is JSON ending in a `"tenant"` field, and it cannot be produced
 # without a loaded ducklake extension and an attached catalog. PROBE_OK is what
 # the x2 arm's verdict is built on; PROBE_RC is kept alongside it for the record.
+# `probe_script [wait_for_egress_block]`. With the argument set to 1 the probe
+# first establishes that its own egress is actually blocked, and refuses to run
+# otherwise.
+#
+# THIS CONTROL IS NOT OPTIONAL. The AWS VPC CNI programs NetworkPolicy
+# asynchronously, *after* the pod is already running, so there is a window in
+# which nothing is enforced. Measured on this cluster with a labelled pod
+# dialling extensions.duckdb.org:443 in a loop: connected at t=0, blocked at
+# t=10 s and t=20 s. The x2 probe completes its fetch in well under a second, so
+# it sailed straight through that window and the arm reported a *success* under
+# a policy that was not yet in force.
+#
+# The direction of that failure is what makes the control mandatory. On the
+# before arm the canary is loud — the fetch succeeds when it was supposed to
+# fail. On the after arm it is silent: the probe succeeds because the extensions
+# are baked, and it would have succeeded anyway, so "egress denied and it still
+# worked" would have been claimed on the strength of a policy that never
+# applied. A test that cannot fail proves nothing.
 probe_script() {
+  local wait_for_block="${1:-0}"
+  if [ "$wait_for_block" = 1 ]; then
+    cat <<'SH'
+set -u
+# Positive control: do not measure anything until egress is demonstrably shut.
+# If it never shuts, exit 2 so the arm is recorded as void rather than passing.
+egress_blocked=0
+for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+  if timeout 5 bash -c 'exec 3<>/dev/tcp/extensions.duckdb.org/443' 2>/dev/null; then
+    sleep 5
+  else
+    egress_blocked=1
+    break
+  fi
+done
+echo "PROBE_EGRESS_BLOCKED=$egress_blocked"
+if [ "$egress_blocked" != 1 ]; then
+  echo "control failed: egress to the extension repo was never blocked, so this"
+  echo "arm would prove nothing about whether the image needs it"
+  exit 2
+fi
+SH
+  fi
   cat <<'SH'
 set -u
 # Run the probe TWICE, against two separate fresh lakes.
@@ -272,6 +313,7 @@ SH
 # (`image_detail`), not from a probe.
 job_manifest() {
   local name="$1" runner="$2" netpol="$3"
+  local wait_for_block="${4:-0}"
   local sched=""
   # Empty string, not unset: the chart/image sets this, so overriding it to
   # empty is how a pod opts back out. `with_baked_extensions` filters empties.
@@ -336,10 +378,10 @@ $sched
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
-          command: ["/bin/sh", "-c"]
+          command: ["/bin/bash", "-c"]
           args:
             - |
-$(probe_script | sed 's/^/              /')
+$(probe_script "$wait_for_block" | sed 's/^/              /')
           env:
             # HOME so DuckDB's default ~/.duckdb is a writable, EMPTY directory
             # per container. The image's user has /app as its home, and on the
@@ -471,6 +513,8 @@ harvest_pod() {
       probe_rc: mark("PROBE_RC"),
       probe_ok: (mark("PROBE_OK") == 1),
       probe_relations: mark("PROBE_RELATIONS"),
+      # 1 only when the pod proved its own egress was shut before measuring.
+      egress_blocked: mark("PROBE_EGRESS_BLOCKED"),
       probe_second_elapsed_ms: mark("PROBE_SECOND_ELAPSED_MS"),
       probe_second_rc: mark("PROBE_SECOND_RC"),
       # First run minus second run: what the first paid and the second
@@ -499,7 +543,7 @@ arm_x2() {
   local name="probe-x2-$RUNTAG-$trial"
   log "x2 trial $trial: the same probe with egress denied"
   netpol_manifest | "${K[@]}" apply -f - >/dev/null
-  job_manifest "$name" 0 "denied" | "${K[@]}" apply -f - >/dev/null
+  job_manifest "$name" 0 "denied" 1 | "${K[@]}" apply -f - >/dev/null
   local rc=0; wait_job "$name" || rc=$?
   local pod; pod="$(pod_of "$name")"
   local h; h="$(harvest_pod "$pod")"
