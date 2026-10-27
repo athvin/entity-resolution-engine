@@ -54,3 +54,25 @@ export function useExplainRule(org: string) {
       }),
   });
 }
+
+export interface StarterResult {
+  summary: string;
+  version?: unknown;
+}
+
+/**
+ * Propose a STARTING matching config (V8b).
+ *
+ * Invalidates the config family for the reason `useDraftFromProse` does: the
+ * new draft has to appear in the version history, which is the review surface.
+ */
+export function useStarterConfig(org: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      bffFetch<StarterResult>(`/api/orgs/${org}/config/starter`, { method: "POST" }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: configKey(org) });
+    },
+  });
+}

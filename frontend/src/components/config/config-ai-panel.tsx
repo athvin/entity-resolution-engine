@@ -26,6 +26,9 @@ export interface ConfigAiPanelProps {
   onBlockChange: (value: string) => void;
   onDraft: () => void;
   onExplain: () => void;
+  /** V8b: propose a whole starting matching config. Admin, like drafting. */
+  starting: boolean;
+  onStarter: () => void;
 }
 
 /**
@@ -57,6 +60,8 @@ export function ConfigAiPanel({
   onBlockChange,
   onDraft,
   onExplain,
+  starting,
+  onStarter,
 }: ConfigAiPanelProps) {
   return (
     <Card data-testid="config-ai">
@@ -131,6 +136,15 @@ export function ConfigAiPanel({
                 className="self-start"
               >
                 {drafting ? "Drafting…" : "Draft it"}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={onStarter}
+                disabled={starting}
+                data-testid="config-ai-starter"
+              >
+                {starting ? "Proposing…" : "Propose a starting config"}
               </Button>
               {draftSummary !== null && (
                 <span className="text-muted-foreground text-sm" data-testid="config-ai-summary">

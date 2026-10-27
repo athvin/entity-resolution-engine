@@ -2548,9 +2548,35 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          *Self-correction worth recording:* the first draft of that spec asserted
          `body.toContain("aaa@aaa.aaa".slice(0, 1))` — i.e. that the body contains the letter
          `a`. Vacuous, and it would have passed against a payload full of raw values.
-   - [ ] V8b AI model setup (#35) — a suggested starter matching config per entity type,
-         landing as a draft. Unbuilt; the mapping half above was the larger and more
-         privacy-sensitive one, and V7's `draft-from-prose` route is the shape it should take.
+   - [x] V8b AI model setup (#35) — a suggested starter matching config, landing as a draft.
+         V7 drafts a change from a description and so needs you to know what you want; this
+         proposes a STARTING POINT for a tenant whose sources are mapped but whose matching
+         rules are still the provisioned default — the state the incumbent's learning curve
+         bites hardest.
+         **Data-informed without seeing data.** The model gets the mapped attribute NAMES from
+         the tenant's own config and nothing else: no values, no shapes, no counts, because a
+         matching rule depends on which attributes exist rather than what is in them. Column
+         names already travel under V8's rule, since they are the question rather than the
+         answer.
+         Two refusals carry it, and each prevents a failure a diff-reader would not catch.
+         **Only `blocking`/`comparisons`/`thresholds`** — a proposal that also rewrote
+         `sources` or `storage` breaks ingestion, and nobody scanning a matching-rule diff is
+         looking for that; the route merges the three blocks over the live config so the draft
+         is still a whole document. **Only attributes this tenant maps** — a rule naming an
+         unmapped attribute is an error nowhere, it simply never matches, so recall quietly
+         drops. That is the silent-failure shape this program has now hit in five places.
+         The prompt's load-bearing clause is about COST: blocking is the only part of a
+         matching config whose mistakes are expensive rather than wrong, and a low-cardinality
+         blocking key turns a short run into an hour in a way the YAML does not show.
+         15 unit tests plus a functional spec; sabotaging the forbidden-block check fails two
+         of them.
+         *Two self-corrections.* `referencedAttributes` first scanned blocking expressions for
+         bare identifiers — which would have rejected `lower(email)` on `lower` — while
+         carrying a comment claiming it did not; blocking now belongs to `er-sql-check` at
+         publish, which has the real catalog instead of a regex. And the mock's generic
+         mutable config had `sources.crm` with no `columns:` at all, claiming a tenant that
+         maps nothing — a state the wizard cannot produce. Corrected to the shape a real
+         config has.
    - [x] V9 staged agent write-actions (#81), through the existing steward-action path.
          **The model proposes; it never performs.** `propose_actions` is the only tool in the
          box whose handler makes no `forward` call — it validates and answers "shown for

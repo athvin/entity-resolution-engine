@@ -29,7 +29,7 @@ import {
   useScoreSample,
 } from "@/lib/query/config";
 import { extractBlock, isExplainableBlock } from "@/lib/config-ai/blocks";
-import { useDraftFromProse, useExplainRule } from "@/lib/query/config-ai";
+import { useDraftFromProse, useExplainRule, useStarterConfig } from "@/lib/query/config-ai";
 import { effectiveRole, useSession } from "@/lib/query/hooks";
 import { cn } from "@/lib/utils";
 import { BlockingEditor } from "./blocking-editor";
@@ -169,6 +169,7 @@ export function ConfigStudio({ org }: { org: string }) {
   // props-only and its render branches are testable without a query client.
   const draftFromProse = useDraftFromProse(org);
   const explainRule = useExplainRule(org);
+  const starterConfig = useStarterConfig(org);
   const [aiInstruction, setAiInstruction] = useState("");
   const [aiBlock, setAiBlock] = useState<string>("blocking");
   const [aiExplanation, setAiExplanation] = useState<string | null>(null);
@@ -306,6 +307,7 @@ export function ConfigStudio({ org }: { org: string }) {
         draftSummary={aiSummary}
         declined={aiDeclined}
         drafting={draftFromProse.isPending}
+        starting={starterConfig.isPending}
         explaining={explainRule.isPending}
         failure={aiFailure}
         onInstructionChange={setAiInstruction}
@@ -314,6 +316,23 @@ export function ConfigStudio({ org }: { org: string }) {
           // The old explanation described the old block; leaving it on screen
           // under a new selection is the kind of wrong that looks right.
           setAiExplanation(null);
+        }}
+        onStarter={() => {
+          setAiFailure(null);
+          setAiSummary(null);
+          setAiDeclined(null);
+          starterConfig.mutate(undefined, {
+            onSuccess: (result) => {
+              setAiSummary(result.summary);
+            },
+            onError: (error) => {
+              setAiFailure(
+                error instanceof BffRequestError
+                  ? error.message
+                  : "could not propose a starting config",
+              );
+            },
+          });
         }}
         onDraft={() => {
           setAiFailure(null);

@@ -112,6 +112,30 @@ test.describe("config studio", () => {
     await expect(page.getByTestId("version-history")).toContainText("draft");
   });
 
+  /**
+   * V8b. The mock's config for this org maps `email`, so the proposal's
+   * `comparisons.email` survives validation — a proposal naming something the
+   * tenant does not map would be refused, which is the point of the check.
+   */
+  test("an admin gets a proposed starting config as a draft", async ({ page, isMobile }) => {
+    test.skip(isMobile, "the config journey runs once, on desktop");
+    await login(page, USERS.admin);
+    await page.goto("/configai-dev/settings/config");
+    await expect(page.getByTestId("config-ai")).toBeVisible();
+
+    const [response] = await Promise.all([
+      page.waitForResponse((r) => r.url().includes("/config/starter")),
+      page.getByTestId("config-ai-starter").click(),
+    ]);
+    expect(response.status()).toBe(201);
+    await expect(page.getByTestId("config-ai-summary")).toContainText("auto-merge");
+
+    // A DRAFT, like every other AI write in this product: the active version
+    // has not moved and nothing was published.
+    await expect(page.getByTestId("publish-result")).toHaveCount(0);
+    await expect(page.getByTestId("version-history")).toContainText("draft");
+  });
+
   test("an admin publishes a blocking change as tier B", async ({ page, isMobile }) => {
     test.skip(isMobile, "the publish journey runs once, on desktop");
     // Its own mutating org: the tier-A journey publishes on the triage org in

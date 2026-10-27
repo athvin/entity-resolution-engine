@@ -870,7 +870,11 @@ export function initialState() {
       : [];
     state.configs[org] = {
       version: 1,
-      yaml: "tenant: mutable\nthresholds:\n  auto_merge: 0.95\n  review_low: 0.60\nsurvivorship:\n  email: [validated, recency]\nsources:\n  crm:\n    priority_rank: 1",
+      // `columns:` is present because that is the shape a REAL config has
+      // (`er-cli/tests/fixtures/test.yaml`) and the shape V8b's
+      // `mappedAttributes` reads. Without it this fixture claimed a tenant
+      // whose sources map nothing, which is a state the wizard cannot produce.
+      yaml: "tenant: mutable\nthresholds:\n  auto_merge: 0.95\n  review_low: 0.60\nsurvivorship:\n  email: [validated, recency]\nsources:\n  crm:\n    priority_rank: 1\n    columns:\n      given_name: fname\n      family_name: lname\n      email: email_address",
       config_hash: "mockhash3",
       state: "published",
       tier: null,
@@ -1180,6 +1184,29 @@ const server = http.createServer((req, res) => {
           stop_reason: "end_turn",
           stop_sequence: null,
           usage: { input_tokens: 150, output_tokens: 60 },
+        });
+      }
+      // V8b starter: the three matching blocks only, keyed on attributes the
+      // prompt listed — so the route's "unknown attribute" refusal is exercised
+      // by what it does NOT return as much as by what it does.
+      if (body.stream !== true && String(body.system ?? "").includes("STARTING matching")) {
+        return send(res, 200, {
+          id: "msg_mock_starter",
+          type: "message",
+          role: "assistant",
+          model: String(body.model ?? "mock"),
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                yaml: 'blocking:\n  - { key_type: email_exact, expr: "email" }\ncomparisons:\n  email:\n    levels: [exact]\nthresholds:\n  review_low: 0.62\n  auto_merge: 0.96\n',
+                summary: "Blocks on email, scores it exactly, conservative auto-merge at 0.96.",
+              }),
+            },
+          ],
+          stop_reason: "end_turn",
+          stop_sequence: null,
+          usage: { input_tokens: 90, output_tokens: 120 },
         });
       }
       // V7 authoring: returns a COMPLETE config document. Echoes the one it was
