@@ -16,6 +16,7 @@ import {
   MAX_COMPARED_MEMBERS,
   useMemberValues,
 } from "@/lib/query/member-values";
+import { EntityLinksPanel } from "./entity-links-panel";
 import { GroupMergeEditor } from "./group-merge-editor";
 import { useMassUpdate, type GoldenField } from "@/lib/query/mass-update";
 import { useRuns } from "@/lib/query/hooks";
@@ -317,6 +318,13 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
       )}
 
       {isSteward && <EnrichPanel org={org} entityId={entityId} golden={golden} />}
+
+      {/* E11b. Below the merge editor, not beside it: someone on this page is
+          usually deciding whether the MEMBERS belong together, and linking is
+          the answer once they have decided the members are right and some
+          other entity is related. Offering the subtler tool first would invite
+          a link where a merge was meant. */}
+      <EntityLinksPanel org={org} entityId={entityId} canEdit={isSteward} />
 
       <Card data-testid="entity-members">
         <CardHeader className="flex-col items-start gap-2 space-y-0 p-4 pb-1 sm:flex-row sm:items-center sm:justify-between lg:p-6 lg:pb-2">

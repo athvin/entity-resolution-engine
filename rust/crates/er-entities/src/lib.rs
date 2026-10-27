@@ -14,6 +14,7 @@ pub mod catalog;
 pub mod config_version;
 pub mod ddl_log;
 pub mod entity_event;
+pub mod entity_link;
 pub mod entity_membership;
 pub mod golden_lineage;
 pub mod golden_override;

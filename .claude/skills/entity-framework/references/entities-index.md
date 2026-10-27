@@ -30,7 +30,7 @@ statements is read or written only through the engine's own stage SQL, not
 through a typed query function.
 
 <!-- BEGIN GENERATED: entities-index -->
-**39 entities, 169 declared statements.**
+**40 entities, 172 declared statements.**
 
 | Entity | Relation | Store | Key | Natural key | History |
 |---|---|---|---|---|---|
@@ -43,6 +43,7 @@ through a typed query function.
 | `config_version` | `config_versions` | postgres | `id` | `org_id, version` | yes |
 | `ddl_log` | `ddl_log` | postgres | `id` | — | — |
 | `entity_event` | `entity_events` | duckdb | `id` | `run_id, entity_id, event_type, details_hash` | — |
+| `entity_link` | `entity_links` | postgres | `id` | `org_id, parent_entity_id, child_entity_id, kind` | yes |
 | `entity_membership` | `entity_membership` | duckdb | `id` | `source_system, source_record_id` | — |
 | `golden_lineage` | `golden_lineage` | duckdb | `id` | `entity_id, attribute` | — |
 | `golden_override` | `golden_overrides` | duckdb | `id` | `entity_id, attribute` | — |
@@ -87,6 +88,7 @@ Declared statements per entity and operation:
 | `config_version` | 1 | 2 | 1 | 0 |
 | `ddl_log` | 0 | 1 | 0 | 0 |
 | `entity_event` | 1 | 3 | 0 | 0 |
+| `entity_link` | 1 | 1 | 0 | 1 |
 | `entity_membership` | 0 | 7 | 1 | 1 |
 | `golden_lineage` | 0 | 1 | 0 | 0 |
 | `golden_override` | 1 | 0 | 0 | 1 |
