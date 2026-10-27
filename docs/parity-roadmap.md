@@ -2801,7 +2801,34 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
    - [ ] F1 group merge editor (#8) — today's inbox is a PAIR adjudicator; this adds the
          master-editing half. Reuses `field-compare-grid`.
    - [ ] F2 pre-load data integrity check (#46), riding E9b's staging.
-   - [ ] F4 verify-before-export (#86, de-Salesforced).
+   - [x] F4 verify-before-export (#86, de-Salesforced). The need is plain: do not send a
+         campaign to records you cannot reach. An export of 10,000 rows where 3,000 have no
+         email is not a segment, it is a 30% bounce rate someone discovers later.
+         **Scoped honestly: this is a COMPLETENESS check on the exported columns, not a read
+         of V3's `record_quality` scores.** Those are real and built, but scored per SOURCE
+         RECORD while an export is per ENTITY — using them wants a declared read joining
+         golden → members → quality, which is a worthwhile follow-up rather than something to
+         smuggle in here. What this does is answer the question from the page the exporter
+         already holds.
+         `require` defaults to `any`, which is the behaviour every existing caller had: a new
+         option that silently filtered would change what every saved export produces with no
+         diff anyone would see. Whitespace counts as absence, because `" "` is
+         indistinguishable from empty to whoever receives the file — treating it as present is
+         how a "verified" export still bounces.
+         The response carries `x-export-summary` and `x-export-skipped`: **the count left out
+         is the number that matters**, and it has to be reported rather than inferred, since
+         an export silently returning 7,000 of 10,000 rows looks like a broken query and the
+         reader's next move is to re-run it rather than trust it.
+         *A bug the filter introduced and the same change had to fix:* the loop pages until it
+         has `limit` EXPORTABLE rows, so a requirement almost nothing satisfies would have
+         walked the entire corpus one page at a time. Bounded to the pages a full unfiltered
+         export would have taken plus headroom — past that the honest answer is a short file
+         whose summary says why, not a request that takes minutes.
+         13 unit tests, including that one requirement is never satisfied by another column —
+         the bug that would make a "verified" export bounce.
+         **Not built: the campaigns Schedule button.** The plan pairs it with this item, but it
+         needs O8's parameterized export job to have somewhere to send its parameters; wiring
+         a button to a job shape that does not exist yet would be dead config.
    - [x] **F3 absorbed into O7b** — the insights page and the dashboard trend charts shipped
          with the attribution work (#292/#295/#297), which is why #45/#57 are not listed here.
 
