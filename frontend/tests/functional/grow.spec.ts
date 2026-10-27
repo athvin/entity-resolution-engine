@@ -112,6 +112,30 @@ test.describe("config studio", () => {
     await expect(page.getByTestId("version-history")).toContainText("draft");
   });
 
+  /**
+   * V8b. The mock's config for this org maps `email`, so the proposal's
+   * `comparisons.email` survives validation — a proposal naming something the
+   * tenant does not map would be refused, which is the point of the check.
+   */
+  test("an admin gets a proposed starting config as a draft", async ({ page, isMobile }) => {
+    test.skip(isMobile, "the config journey runs once, on desktop");
+    await login(page, USERS.admin);
+    await page.goto("/configai-dev/settings/config");
+    await expect(page.getByTestId("config-ai")).toBeVisible();
+
+    const [response] = await Promise.all([
+      page.waitForResponse((r) => r.url().includes("/config/starter")),
+      page.getByTestId("config-ai-starter").click(),
+    ]);
+    expect(response.status()).toBe(201);
+    await expect(page.getByTestId("config-ai-summary")).toContainText("auto-merge");
+
+    // A DRAFT, like every other AI write in this product: the active version
+    // has not moved and nothing was published.
+    await expect(page.getByTestId("publish-result")).toHaveCount(0);
+    await expect(page.getByTestId("version-history")).toContainText("draft");
+  });
+
   test("an admin publishes a blocking change as tier B", async ({ page, isMobile }) => {
     test.skip(isMobile, "the publish journey runs once, on desktop");
     // Its own mutating org: the tier-A journey publishes on the triage org in
@@ -191,6 +215,39 @@ async function walkToReview(page: Page, org: string, sourceName: string): Promis
 }
 
 test.describe("new-source wizard", () => {
+  /**
+   * F2. The check that matters is the duplicate record id: two source rows
+   * collapse into one and data is lost with no error anywhere. The wizard must
+   * REFUSE rather than warn, which is what this proves.
+   */
+  test("refuses to continue past a file whose record id repeats", async ({ page, isMobile }) => {
+    test.skip(isMobile, "the wizard journey runs once, on desktop");
+    await login(page, USERS.steward);
+    await page.goto(`/${wizardOrg("desktop-chromium")}/sources/new`);
+
+    await page.getByTestId("wizard-file").setInputFiles({
+      name: "dupes.csv",
+      mimeType: "text/csv",
+      // The SAME headers `walkToReview` uses, so the regex maps every canonical
+      // attribute and step 2's own gate is satisfied — the only thing stopping
+      // this file is the repeated record id, which is what the test is about.
+      buffer: Buffer.from(
+        "erp_id,fname,lname,email_address,phone,street_address,city,state,zip,dob,last_modified\n" +
+          "1,Ada,Lovelace,ada@example.com,+14155550001,10 Main St,SF,CA,94103,1970-01-01,2026-01-01\n" +
+          "1,Grace,Hopper,grace@example.com,+14155550002,11 Main St,SF,CA,94104,1971-02-02,2026-01-02\n",
+      ),
+    });
+    await page.getByTestId("wizard-next").click(); // profile -> map
+    await page.getByTestId("wizard-next").click(); // map -> identity
+
+    // The panel says what is wrong, before anything has uploaded.
+    await expect(page.getByTestId("wizard-integrity")).toBeVisible();
+    await expect(page.getByTestId("integrity-block")).toContainText("repeats in the sampled rows");
+
+    // And Next is refused: a blocker is not a warning.
+    await expect(page.getByTestId("wizard-next")).toBeDisabled();
+  });
+
   /**
    * V8. The file this is for is the one with OPAQUE headers — `fnm`, `eml` —
    * which is exactly where the regex table gives up and a person is left

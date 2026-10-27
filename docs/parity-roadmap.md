@@ -2548,9 +2548,35 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          *Self-correction worth recording:* the first draft of that spec asserted
          `body.toContain("aaa@aaa.aaa".slice(0, 1))` — i.e. that the body contains the letter
          `a`. Vacuous, and it would have passed against a payload full of raw values.
-   - [ ] V8b AI model setup (#35) — a suggested starter matching config per entity type,
-         landing as a draft. Unbuilt; the mapping half above was the larger and more
-         privacy-sensitive one, and V7's `draft-from-prose` route is the shape it should take.
+   - [x] V8b AI model setup (#35) — a suggested starter matching config, landing as a draft.
+         V7 drafts a change from a description and so needs you to know what you want; this
+         proposes a STARTING POINT for a tenant whose sources are mapped but whose matching
+         rules are still the provisioned default — the state the incumbent's learning curve
+         bites hardest.
+         **Data-informed without seeing data.** The model gets the mapped attribute NAMES from
+         the tenant's own config and nothing else: no values, no shapes, no counts, because a
+         matching rule depends on which attributes exist rather than what is in them. Column
+         names already travel under V8's rule, since they are the question rather than the
+         answer.
+         Two refusals carry it, and each prevents a failure a diff-reader would not catch.
+         **Only `blocking`/`comparisons`/`thresholds`** — a proposal that also rewrote
+         `sources` or `storage` breaks ingestion, and nobody scanning a matching-rule diff is
+         looking for that; the route merges the three blocks over the live config so the draft
+         is still a whole document. **Only attributes this tenant maps** — a rule naming an
+         unmapped attribute is an error nowhere, it simply never matches, so recall quietly
+         drops. That is the silent-failure shape this program has now hit in five places.
+         The prompt's load-bearing clause is about COST: blocking is the only part of a
+         matching config whose mistakes are expensive rather than wrong, and a low-cardinality
+         blocking key turns a short run into an hour in a way the YAML does not show.
+         15 unit tests plus a functional spec; sabotaging the forbidden-block check fails two
+         of them.
+         *Two self-corrections.* `referencedAttributes` first scanned blocking expressions for
+         bare identifiers — which would have rejected `lower(email)` on `lower` — while
+         carrying a comment claiming it did not; blocking now belongs to `er-sql-check` at
+         publish, which has the real catalog instead of a regex. And the mock's generic
+         mutable config had `sources.crm` with no `columns:` at all, claiming a tenant that
+         maps nothing — a state the wizard cannot produce. Corrected to the shape a real
+         config has.
    - [x] V9 staged agent write-actions (#81), through the existing steward-action path.
          **The model proposes; it never performs.** `propose_actions` is the only tool in the
          box whose handler makes no `forward` call — it validates and answers "shown for
@@ -2624,21 +2650,233 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
    against the existing `ANTHROPIC_BASE_URL` seam and the Playwright mock's scripted
    `/anthropic/v1/messages`, so this blocks live verification, not progress.
 7. **Governance + platform**
-   - [ ] O9 config promotion: export/import/diff across orgs (#76).
+   - [x] O9 config promotion: export/import/diff across orgs (#76). The dev→prod story — a
+         config was already versioned and diffable WITHIN an org; this adds the
+         cross-environment half.
+         **The authorization rule is the whole feature.** A promotion names two orgs and the
+         obvious mistake is checking the one in the URL: that would let someone who
+         administers staging read production's configuration, which names its sources,
+         thresholds and business rules. Both sides are checked at ADMIN, independently, with
+         two `requireOrgAccess` calls rather than one taking a list — that is the shape the
+         authz gate recognises and every other route uses. The URL's org is checked first, so
+         a caller with no access to it gets the ordinary 404 and learns nothing about whether
+         the other org exists.
+         `POST` rather than `GET` for the compare, because the other org arrives in a body:
+         an org name in a query string is a referrer-logged, cache-keyed value, and this one
+         is an authorization input.
+         **Import is gated behind compare in the UI**, and that asymmetry is the point.
+         Copying a config between tenants unread is the mistake this surface prevents — the
+         two may map different sources, and `er-sql-check` does not say so until publish, by
+         which point a draft has been approved by someone who never saw the diff. The copy
+         lands as a DRAFT like every other write in this program.
+         Diffed server-side with the same `diffLines` the version history uses, so an in-org
+         and a cross-org diff cannot disagree about what changed.
+         23 tests (10 on the request shapes and the self-promotion refusal, 13 on the panel).
+         Sabotaging the compare-before-import gate fails one by name.
+         *A real bug the component test caught:* `DiffLine.kind` is `added`/`removed` and my
+         panel matched `add`/`remove`, so every line would have rendered as unchanged — a
+         diff silently claiming two configs are identical, which is worse than no diff.
    - [ ] O10 MCP server over the generated OpenAPI + org service identity (#79/#78). **Wants
          `#[utoipa::path]` on the handlers first** — `openapi.json` documents zero paths by a
          recorded decision, so there is nothing for an MCP server to generate tools from. The
          response-ENVELOPE question is already answered without it, by the derived ledger D13
          built (`frontend/src/lib/api/envelopes.json`).
-   - [ ] O11 embeddable duplicate widget: a signed-token read-only micro-page (#59).
-   - [ ] O12a saved views / folders (#87).
-   - [ ] O12b usage metering ledger (#88).
-   - [ ] O12c field-value rollback UI (#12/#13).
+   - [x] O11 embeddable duplicate widget: a signed-token read-only micro-page (#59). A tenant
+         drops an iframe into their own CRM and sees "possible duplicates for record X". It is
+         the product's ONLY surface served without a session, so the token in the URL is the
+         entire credential and every decision follows from that.
+         **Scoped to one RECORD, not to an org** — an org-scoped token that leaked from a
+         single embed would read the whole corpus. **It expires**, because an embed lives in a
+         page the tenant controls and we do not, so a token in a browser history or a referrer
+         header has to stop working. **The signature is checked BEFORE the expiry**: answering
+         "expired" for a forged token tells a forger their signature verified. Every failure —
+         forged, expired, malformed, unknown — answers the same 404, and the route never leaks
+         upstream detail, because an error body is a fingerprint of the backend behind it.
+         The upstream call uses a new `viewerCredentialFor(org)` that takes no role parameter
+         and **cannot fall back to the operator token** the way `credentialForAccess` does for
+         a super admin without membership. That fallback must not be reachable from an
+         unauthenticated path, where it would turn a leaked widget token into fleet-wide
+         access. The signing key is derived from `ERWEB_SESSION_SECRET` with a distinct label
+         so a widget token and a session cookie are never interchangeable.
+         11 token tests; sabotaging the check order fails the one named for it.
+         **It also found a hole in the BFF authz gate, which is the more valuable half.**
+         Adding `src/app/api/widget/` made the gate report "all authorize" while never having
+         looked at it: the gate scanned only `api/orgs` and `api/admin`, so any new top-level
+         API directory was invisible — the false-green shape this repo has been bitten by
+         repeatedly, silently covering less surface over time. An unknown directory is now a
+         FAILURE, with an `UNAUTHENTICATED_DIRS` allowlist carrying the reason each is safe.
+         Running it immediately found a pre-existing one: **`src/app/api/impersonation`**,
+         serving HTTP unexamined since it was written. It authorizes correctly
+         (`requireSuperAdmin` to start, `requireIdentity` to end — a session whose operator
+         rights were revoked mid-impersonation must still be able to leave), so no
+         vulnerability; but nothing was checking. It is now a rule rather than an exemption,
+         and the gate was observed failing on both an uncovered directory and an unauthorized
+         route inside a covered one.
+   - [x] O12a saved views / folders (#87). **Not the same thing as `segments`, and the
+         distinction is load-bearing.** A segment is a campaign artefact: a named population an
+         export or a scheduled job acts ON. A view is a shortcut for a human — "the filter I
+         use every Monday" — and acting on it is not something the product does. Collapsing
+         them would make every bookmark a steward saves into a target some automated job might
+         one day run against.
+         This does NOT close the gap the frontend-data-ui skill names (filter state still
+         lives in `useState`, so a view still cannot be linked or shared by URL). It makes the
+         filter RE-REACHABLE, which is the part a steward needs: the filter survives a reload
+         and is there for a colleague.
+         Two refusals, both because the failure is a view that looks deliberate to whoever
+         finds it later. **An empty definition** is a bookmark for "everything" — the state the
+         screen already opens in — and is almost always Save pressed before the filter was
+         set; the control itself is disabled, with the reason in its title. **An inverted band**
+         (min above max) matches nothing and renders an empty list rather than an error, so it
+         is refused where the reader can still see what they typed.
+         Shared across the org rather than owned by one person: a view worth saving is usually
+         worth the next steward seeing, and `created_by` records whose it was without hiding
+         it. Starting private and going public is the harder migration.
+         13 unit tests plus a functional spec that proves the ROUND TRIP — saved, reloaded,
+         re-applied, and the band selector back where it started. A view that saves and then
+         restores the wrong filter is the silent-wrongness shape, and only an end-to-end test
+         can catch it.
+   - [x] O12b usage metering ledger (#88). **Metering, not billing** — no price column and no
+         credit balance, because the pricing story is per-run on cheap compute and a figure
+         nobody can reconcile against an invoice is worse than none. The copy on the panel
+         says so rather than leaving a reader to wonder.
+         Wave 6 is what made this worth building: six AI surfaces now call a model on a
+         tenant's behalf and **nothing recorded it anywhere**. A tenant on its own BYO key
+         needs it most, since that bill arrives from Anthropic rather than from us.
+         Two properties make it safe on six hot paths. **`meter` never throws** — a ledger
+         write that fails must not fail the feature it measures, so failures are logged and
+         dropped, which makes the ledger a FLOOR on usage rather than an authoritative count;
+         stated in the code so nobody later treats it as invoice-grade. And **`tokensFrom`
+         tolerates whatever the SDK returns**, because it parses a third party's field on a
+         path that must not break.
+         Metered per TOOL ROUND for the assistant, not per conversation: a tool loop can make
+         eight model calls for one question, and charging one "assistant call" would
+         under-report by the factor that actually drives the bill. Enrichment meters BEFORE
+         the refusal branch, because a refusal consumed tokens and is billed as one —
+         metering only the happy path would under-report exactly the calls a tenant is most
+         surprised by.
+         The read is viewer-level: the person who most needs to see "the assistant is burning
+         tokens" is often a steward who cannot change the AI settings, and telling them to ask
+         an admin for a number is how a surprising bill becomes a surprising argument. The
+         panel sits on the AI settings page because that is where the lever is.
+         13 tests against real Postgres. Two sabotages observed failing: dropping the org
+         predicate (the cross-tenant leak shape V6 had) and letting `meter` throw.
+         *A lint that was right about the types and wrong about reality:* `sql<number>` made
+         `Number(row.units)` look redundant, and deleting it would have left string
+         concatenation in the panel's total — postgres.js returns `sum` as a string while
+         PGlite returns a number. The type was the bug; it is now `string | number`.
+   - [x] O12c field-value rollback UI (#12/#13). **No new table.** DuckLake keeps every
+         version of `golden_records` and `golden_lineage`, and the run ledger already records
+         the snapshot range each run produced — so "what did this field used to be" is a read
+         at an older lake version. The history existed; it was simply never reachable, because
+         `golden_record_detail` hardcoded `latest_snapshot`. It now takes an optional
+         `?snapshot=N`, which is the whole backend change.
+         The alternative would have been a change-log table written on every golden assembly:
+         a second source of truth for something the lake already stores exactly.
+         **Only COMPLETED runs are offered.** A failed or running one may have produced a
+         partial snapshot range, and letting a reader restore "as of" a half-finished run
+         would resurrect a state the product never published. Snapshots are de-duplicated
+         because a run that changed nothing ends where the last one did, and two identical
+         entries in a history picker is a choice with no difference.
+         **Only snapshots where the value CHANGED are listed.** A history showing every run
+         would be mostly rows saying "still Bob", burying the one row that matters — the
+         moment it became something else. Absence and empty string count as the same value,
+         since a field never set and one set to `""` are indistinguishable to a reader.
+         Restoring writes through the existing audited `override_field` path rather than
+         rewriting history: the old value becomes the current one by the same mechanism a
+         human typing it would use, so the audit log records who restored what and the lake
+         keeps both versions.
+         Out-of-range snapshots are refused by the lake rather than clamped — silently serving
+         the newest data for a pinned historical read would show today's value under
+         yesterday's heading. The BFF validates the parameter is a non-negative integer so a
+         junk value does not reach the lake as a type error and surface as a 503 that reads
+         like an outage.
+         12 unit tests; sabotaging the completed-run filter fails the one named for it.
+         *A bug an existing spec caught that neither tsc nor eslint could:* `useFieldHistory`
+         was first placed after the component's pending/error early returns, making it a
+         CONDITIONAL hook — React throws the moment the component takes a different path, so
+         it took down the entire entity view rather than just the history panel. Both static
+         gates were green; only rendering the page found it. Hooks now sit above every early
+         return, with a comment saying why.
 8. **Review-UI depth**
-   - [ ] F1 group merge editor (#8) — today's inbox is a PAIR adjudicator; this adds the
-         master-editing half. Reuses `field-compare-grid`.
-   - [ ] F2 pre-load data integrity check (#46), riding E9b's staging.
-   - [ ] F4 verify-before-export (#86, de-Salesforced).
+   - [x] F1 group merge editor (#8). The inbox is a PAIR adjudicator — it answers "are these
+         the same". This answers what comes after: the group is right, but is the golden
+         record holding the best value from it? Every field is shown across every member, and
+         adopting one writes through the same audited `override_field` path a typed edit
+         uses — so the audit log cannot tell this from a manual edit, which is correct,
+         because it is one.
+         **A member's EMPTY value is never offered as adoptable.** It differs from a populated
+         master, but adopting it would CLEAR the field, and a one-click control that silently
+         deletes a value is the destructive mistake this surface could most easily make. The
+         useful direction still works: a member filling a gap the golden record has is
+         offered, because that creates nothing.
+         Differences compare against the MASTER, not between members: two members disagreeing
+         with each other while both matching the golden value is not something a reader needs
+         flagged. Show-differences-only defaults ON, because a person opening this is looking
+         for disagreements and a full grid where everything agrees is a wall to scroll past.
+         Members are capped at 8 with the rest REPORTED ("comparing 8 of 23"), not hidden — a
+         household can have dozens of source records, past a handful nobody is comparing
+         anything, and a silent truncation would read as the whole group.
+         It reuses the `?key=` read the pair compare grid uses rather than a new one: a group
+         editor built on a different read would drift from the pair adjudicator's idea of what
+         a record's values are. Rendered only for multi-member entities — a one-column table
+         is a worse way to read a single record than the grid above it.
+         9 unit tests; sabotaging the empty-value guard fails two by name, and the guard was
+         also confirmed in the real DOM — `addr_unit` offers adoption from the member that has
+         `4B` and not from the one that is empty.
+         *Six visual baselines regenerated*, three of them the reviews screen from O12a's views
+         bar, which an earlier commit had left stale: `ignoreSnapshots` is true off Linux, so
+         a local `make frontend` reports those specs as passing while comparing nothing.
+   - [x] F2 pre-load data integrity check (#46). **Before the upload, not after it.** The plan
+         says this rides E9b's staging; it should not. E9b-1 screens how records landed
+         *against the corpus* once the dispatcher has them — that answers "did my file do
+         anything". This answers the earlier question, "will my file work at all", at the one
+         moment the answer is still cheap: the file is in the browser and nothing has been
+         written. So it needs no backend and costs no upload.
+         Three severities, and the boundary between them is the design. **block** means
+         ingestion will fail or silently corrupt, and the wizard refuses to continue;
+         **warn** means it will load but probably not as expected; **info** is worth knowing.
+         A check that cannot decide belongs at warn — blocking a file that would have worked
+         teaches people to distrust the gate, and a gate nobody trusts is worse than none.
+         The blocker that matters is a **repeated record id**: two source rows collapse into
+         one and data is lost with no error anywhere. A blank id is the same family — a record
+         with no id cannot be addressed by an update, a suppression, or anything else.
+         **The row-level checks say they are a SAMPLE.** `profileCsv` parses the first 200
+         rows, so a duplicate beyond that is not seen; the finding reads "repeats in the
+         sampled rows" because reporting a clean result as a guarantee over a million-row file
+         would be exactly the false assurance this panel exists to avoid.
+         Severity reads from the glyph and from a heading saying what it MEANS ("must be fixed
+         before this file can load"), not from hue — the palette is unavailable, and a
+         sentence beats a coloured dot a reader has to decode.
+         16 unit tests plus a functional spec proving the wizard refuses rather than warns.
+         Sabotaging the duplicate-id blocker to a warn fails the test named for it.
+   - [x] F4 verify-before-export (#86, de-Salesforced). The need is plain: do not send a
+         campaign to records you cannot reach. An export of 10,000 rows where 3,000 have no
+         email is not a segment, it is a 30% bounce rate someone discovers later.
+         **Scoped honestly: this is a COMPLETENESS check on the exported columns, not a read
+         of V3's `record_quality` scores.** Those are real and built, but scored per SOURCE
+         RECORD while an export is per ENTITY — using them wants a declared read joining
+         golden → members → quality, which is a worthwhile follow-up rather than something to
+         smuggle in here. What this does is answer the question from the page the exporter
+         already holds.
+         `require` defaults to `any`, which is the behaviour every existing caller had: a new
+         option that silently filtered would change what every saved export produces with no
+         diff anyone would see. Whitespace counts as absence, because `" "` is
+         indistinguishable from empty to whoever receives the file — treating it as present is
+         how a "verified" export still bounces.
+         The response carries `x-export-summary` and `x-export-skipped`: **the count left out
+         is the number that matters**, and it has to be reported rather than inferred, since
+         an export silently returning 7,000 of 10,000 rows looks like a broken query and the
+         reader's next move is to re-run it rather than trust it.
+         *A bug the filter introduced and the same change had to fix:* the loop pages until it
+         has `limit` EXPORTABLE rows, so a requirement almost nothing satisfies would have
+         walked the entire corpus one page at a time. Bounded to the pages a full unfiltered
+         export would have taken plus headroom — past that the honest answer is a short file
+         whose summary says why, not a request that takes minutes.
+         13 unit tests, including that one requirement is never satisfied by another column —
+         the bug that would make a "verified" export bounce.
+         **Not built: the campaigns Schedule button.** The plan pairs it with this item, but it
+         needs O8's parameterized export job to have somewhere to send its parameters; wiring
+         a button to a job shape that does not exist yet would be dead config.
    - [x] **F3 absorbed into O7b** — the insights page and the dashboard trend charts shipped
          with the attribution work (#292/#295/#297), which is why #45/#57 are not listed here.
 

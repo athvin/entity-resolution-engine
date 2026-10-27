@@ -21,6 +21,7 @@ import { BffRequestError } from "@/lib/api/client";
 import { addSourceBlock } from "@/lib/domain/config";
 import {
   canonicalAttributes,
+  parseCsv,
   profileCsv,
   suggestIdColumn,
   suggestMapping,
@@ -29,6 +30,8 @@ import {
   type ColumnProfile,
 } from "@/lib/domain/csv-profile";
 import { useActiveConfig, useCreateDraft, useOrgEntityType, usePublish } from "@/lib/query/config";
+import { checkIntegrity, hasBlocker } from "@/lib/domain/integrity";
+import { IntegrityPanel } from "./integrity-panel";
 import { useSuggestMapping } from "@/lib/query/schema-ai";
 import { redactProfile } from "@/lib/schema-ai/redact";
 import { useImportFile, useSources } from "@/lib/query/steward";
@@ -54,6 +57,9 @@ interface WizardState {
   file: File | null;
   columns: ColumnProfile[];
   rowCount: number;
+  /** F2: the same 200 rows `profileCsv` sampled, for the row-level checks. */
+  sampledRows: string[][];
+  header: string[];
   name: string;
   mapping: Partial<Record<CanonicalAttribute, string>>;
   idColumn: string;
@@ -102,6 +108,8 @@ export function NewSourceWizard({ org }: { org: string }) {
     file: null,
     columns: [],
     rowCount: 0,
+    sampledRows: [],
+    header: [],
     name: "",
     mapping: {},
     idColumn: "",
@@ -129,6 +137,17 @@ export function NewSourceWizard({ org }: { org: string }) {
     return rank;
   }, [usedRanks]);
   const columnNames = state.columns.map((column) => column.name);
+  // F2. Recomputed as the mapping changes, so a column mapped to the wrong
+  // place is reported the moment it is chosen rather than at upload.
+  const findings = checkIntegrity({
+    columns: state.columns,
+    rowCount: state.rowCount,
+    idColumn: state.idColumn,
+    mapping: state.mapping,
+    rows: state.sampledRows,
+    header: state.header,
+  });
+  const blocked = hasBlocker(findings);
 
   // The sources query may resolve after the file was picked; keep the default
   // rank collision-free until the user takes it over.
@@ -196,6 +215,9 @@ export function NewSourceWizard({ org }: { org: string }) {
     setError(null);
     const text = await file.text();
     const { columns, rowCount } = profileCsv(text);
+    // F2 needs the rows themselves for the duplicate-id check; `profileCsv`
+    // samples the same 200, so this adds no parse cost.
+    const sampled = parseCsv(text);
     if (columns.length === 0) {
       setError("that file has no header row — a CSV with column names is required");
       return;
@@ -207,6 +229,8 @@ export function NewSourceWizard({ org }: { org: string }) {
       file,
       columns,
       rowCount,
+      sampledRows: sampled.slice(1),
+      header: sampled[0] ?? [],
       name: file.name
         .replace(/\.csv$/i, "")
         .replaceAll(/[^a-z0-9_]/gi, "_")
@@ -652,6 +676,20 @@ export function NewSourceWizard({ org }: { org: string }) {
         </Card>
       )}
 
+      {step === 3 && state.columns.length > 0 && (
+        <Card className="animate-rise-in" data-testid="wizard-integrity">
+          <CardHeader className="p-4 pb-1">
+            <CardTitle className="text-base">File check</CardTitle>
+            <CardDescription>
+              Checked here, before anything uploads — the file is still in your browser.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="p-4 pt-2">
+            <IntegrityPanel findings={findings} />
+          </CardContent>
+        </Card>
+      )}
+
       {step === 3 && (
         <Card className="animate-rise-in" data-testid="wizard-identity">
           <CardHeader className="p-4 pb-1">
@@ -784,7 +822,11 @@ export function NewSourceWizard({ org }: { org: string }) {
                   !state.idColumn ||
                   !state.updatedAtColumn ||
                   usedRanks.has(state.priorityRank) ||
-                  existingNames.has(state.name)))
+                  existingNames.has(state.name) ||
+                  // F2: a blocker means ingestion would fail or silently
+                  // corrupt — a duplicate record id collapses two rows into
+                  // one with no error anywhere. Warnings do not stop anyone.
+                  blocked))
             }
             data-testid="wizard-next"
             onClick={() => {

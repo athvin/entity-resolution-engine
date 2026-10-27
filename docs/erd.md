@@ -332,6 +332,15 @@ erDiagram
         text review_id PK
         text verdict
     }
+    saved_views {
+        timestamptz created_at
+        text created_by
+        jsonb definition
+        text id PK
+        text name
+        text org
+        text surface
+    }
     segments {
         timestamptz created_at
         text created_by
@@ -351,6 +360,15 @@ erDiagram
         timestamptz last_seen_at
         text token_hash UK
         text user_id FK
+    }
+    usage_events {
+        timestamptz at
+        text detail
+        text id PK
+        text kind
+        text org
+        text unit
+        double units
     }
     users {
         timestamptz created_at

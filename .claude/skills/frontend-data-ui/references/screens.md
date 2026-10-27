@@ -95,4 +95,5 @@ for the three categories that legitimately sit outside the sweep.
 - `/login`
 - `/reset`
 - `/reset/[token]`
+- `/widget/[token]`
 <!-- END GENERATED: screens-coverage -->

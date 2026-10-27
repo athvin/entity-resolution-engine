@@ -37,6 +37,8 @@ function props(over: Partial<ConfigAiPanelProps> = {}): ConfigAiPanelProps {
     onBlockChange: vi.fn(),
     onDraft: vi.fn(),
     onExplain: vi.fn(),
+    starting: false,
+    onStarter: vi.fn(),
     ...over,
   };
 }

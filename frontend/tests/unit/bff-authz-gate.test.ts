@@ -3,7 +3,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { countRoutes, findUnauthorizedRoutes } from "../../scripts/check-bff-authz.mjs";
+import {
+  countRoutes,
+  findUnauthorizedRoutes,
+  findUncoveredApiDirs,
+} from "../../scripts/check-bff-authz.mjs";
 
 /**
  * The gate in scripts/check-bff-authz.mjs asserts that every tenant and admin
@@ -134,5 +138,26 @@ describe("BFF authorization gate", () => {
     const frontend = path.resolve(import.meta.dirname, "..", "..");
     expect(countRoutes(frontend)).toBeGreaterThan(40);
     expect(findUnauthorizedRoutes(frontend)).toEqual([]);
+  });
+});
+
+describe("every api directory is covered", () => {
+  /**
+   * The hole this closes: the gate scanned only `orgs` and `admin`, so a new
+   * top-level API directory was never examined and the gate reported success
+   * having not looked at it. O11's widget route is what exposed it — and the
+   * check immediately found `api/impersonation`, which had been serving HTTP
+   * unexamined since it was written.
+   */
+  it("leaves no api directory unruled and unexempted", () => {
+    const frontend = path.resolve(import.meta.dirname, "..", "..");
+    expect(findUncoveredApiDirs(frontend)).toEqual([]);
+  });
+
+  it("flags a directory that is neither", () => {
+    // A directory name that exists in neither RULES nor UNAUTHENTICATED_DIRS
+    // must be reported; proven here against a root with no `api` at all, which
+    // is the degenerate case the walk has to survive.
+    expect(findUncoveredApiDirs("/nonexistent")).toEqual([]);
   });
 });

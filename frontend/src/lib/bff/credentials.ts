@@ -33,3 +33,34 @@ export async function credentialForAccess(
     nonce: Buffer.from(row.nonce),
   });
 }
+
+/**
+ * The org's stored VIEWER key, resolved from an org name alone (O11).
+ *
+ * For the one surface with no session: the embeddable widget, whose caller
+ * holds a signed token rather than a cookie.
+ *
+ * **Viewer, hardcoded, and never the operator token.** `credentialForAccess`
+ * falls back to the operator credential when a super admin acts without
+ * membership — that fallback must not be reachable from an unauthenticated
+ * path, where it would turn a leaked widget token into fleet-wide access. This
+ * function takes no role parameter for the same reason: there is no caller that
+ * should be able to ask for more.
+ */
+export async function viewerCredentialFor(org: string): Promise<string> {
+  const database = await db();
+  const rows = await database
+    .select()
+    .from(schema.orgCredentials)
+    .where(and(eq(schema.orgCredentials.org, org), eq(schema.orgCredentials.role, "viewer")))
+    .limit(1);
+  const row = rows[0];
+  if (!row) {
+    throw new BffFailure(503, "internal", `no stored viewer credential for ${org}`);
+  }
+  const key = Buffer.from(env().ERWEB_CREDENTIAL_KEY, "base64");
+  return open(key, org, "viewer", {
+    ciphertext: Buffer.from(row.ciphertext),
+    nonce: Buffer.from(row.nonce),
+  });
+}

@@ -12,6 +12,8 @@ import { aiSettingsBody } from "@/lib/ai/form";
 import { BffRequestError } from "@/lib/api/client";
 import { effectiveRole, useSession } from "@/lib/query/hooks";
 import { useAiSettings, useUpdateAiSettings, type AiSettings } from "@/lib/query/ai-settings";
+import { useUsage } from "@/lib/query/usage";
+import { UsagePanel } from "./usage-panel";
 
 function formatStamp(value: string | null): string {
   if (value === null) return "—";
@@ -225,6 +227,7 @@ export function AiContent({ org }: { org: string }) {
   const settings = useAiSettings(org);
   const session = useSession();
   const update = useUpdateAiSettings(org);
+  const usage = useUsage(org);
   const canEdit = effectiveRole(session.data, org) === "admin";
 
   const [enabled, setEnabled] = useState(false);
@@ -266,37 +269,48 @@ export function AiContent({ org }: { org: string }) {
   }
 
   return (
-    <AiSettingsView
-      settings={loaded}
-      form={{ enabled, model, apiKey, clearKey }}
-      canEdit={canEdit}
-      busy={update.isPending}
-      saved={saved}
-      failure={failure}
-      onEnabledChange={setEnabled}
-      onModelChange={setModel}
-      onApiKeyChange={setApiKey}
-      onClearKeyChange={(value) => {
-        setClearKey(value);
-        // Clearing and typing are mutually exclusive acts, so checking the box
-        // empties the field rather than leaving a typed key that `aiSettingsBody`
-        // would then prefer — a checkbox that silently does nothing.
-        if (value) setApiKey("");
-      }}
-      onSave={() => {
-        setFailure(null);
-        setSaved(false);
-        update.mutate(aiSettingsBody({ enabled, model, apiKey, clearKey }), {
-          onSuccess: () => {
-            setSaved(true);
-          },
-          onError: (error) => {
-            setFailure(
-              error instanceof BffRequestError ? error.message : "could not save these settings",
-            );
-          },
-        });
-      }}
-    />
+    <div className="flex flex-col gap-4">
+      <AiSettingsView
+        settings={loaded}
+        form={{ enabled, model, apiKey, clearKey }}
+        canEdit={canEdit}
+        busy={update.isPending}
+        saved={saved}
+        failure={failure}
+        onEnabledChange={setEnabled}
+        onModelChange={setModel}
+        onApiKeyChange={setApiKey}
+        onClearKeyChange={(value) => {
+          setClearKey(value);
+          // Clearing and typing are mutually exclusive acts, so checking the box
+          // empties the field rather than leaving a typed key that `aiSettingsBody`
+          // would then prefer — a checkbox that silently does nothing.
+          if (value) setApiKey("");
+        }}
+        onSave={() => {
+          setFailure(null);
+          setSaved(false);
+          update.mutate(aiSettingsBody({ enabled, model, apiKey, clearKey }), {
+            onSuccess: () => {
+              setSaved(true);
+            },
+            onError: (error) => {
+              setFailure(
+                error instanceof BffRequestError ? error.message : "could not save these settings",
+              );
+            },
+          });
+        }}
+      />
+      {/* O12b. Here rather than on its own page: someone reading a surprising
+          token count is one scroll from the switch that turns it off or the
+          field that points it at their own key. */}
+      <UsagePanel
+        rows={usage.data?.rows}
+        days={usage.data?.days ?? 30}
+        pending={usage.isPending}
+        failed={usage.isError}
+      />
+    </div>
   );
 }

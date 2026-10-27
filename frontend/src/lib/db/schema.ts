@@ -218,6 +218,83 @@ export const reviewRecommendations = erweb.table(
   ],
 );
 
+/**
+ * Metered usage, one row per billable act (O12b).
+ *
+ * **Metering, not billing.** There is no price here and no credit balance: the
+ * pricing story is per-run on cheap compute, and a `cost` column would be a
+ * number nobody could reconcile against an invoice. What a tenant needs is "how
+ * much of this am I doing", which is a count.
+ *
+ * Append-only and never updated — a usage ledger that can be rewritten cannot
+ * answer the question it exists for. Rows are summed on read rather than kept
+ * as a running total, because a total is a cache and this is the source.
+ *
+ * `units` is deliberately generic: AI calls meter in TOKENS, verification in
+ * lookups, jobs in runs. One table with a `kind` beats three tables whose
+ * queries all have to be unioned to answer "what did this org do last month".
+ */
+export const usageEvents = erweb.table(
+  "usage_events",
+  {
+    id: text("id").primaryKey(),
+    org: text("org").notNull(),
+    /** `ai_assistant`, `ai_enrich`, `ai_adjudicate`, … — see lib/usage/kinds. */
+    kind: text("kind").notNull(),
+    units: doublePrecision("units").notNull(),
+    /** What `units` counts, so a reader never has to guess: "tokens", "calls". */
+    unit: text("unit").notNull(),
+    /** Which model or service, when there is one. Null for a plain job. */
+    detail: text("detail"),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // Org first, then time: every read is "this org, this window", and a
+    // time-leading index would scan every tenant's rows to answer it.
+    index("usage_events_org_at_idx").on(table.org, table.at),
+  ],
+);
+
+/**
+ * A saved view over a browsable surface (O12a).
+ *
+ * **Not the same thing as `segments`, and the distinction is load-bearing.** A
+ * segment is a campaign artefact: a named population that an export or a
+ * scheduled job acts ON. A view is a shortcut for a human — "the filter I use
+ * every Monday" — and acting on it is not a thing the product does. Collapsing
+ * them would mean every bookmark a steward saves becomes a target an automated
+ * job might one day run against.
+ *
+ * `surface` scopes a view to the screen it belongs to, because a records filter
+ * is meaningless on the duplicates queue. `definition` is jsonb for the reason
+ * `segments.definition` is: the filter vocabulary differs per surface and will
+ * grow, and a column per filter would be a migration every time.
+ *
+ * Shared across the ORG rather than owned by one person: a view worth saving is
+ * usually worth the next steward seeing, and `created_by` records whose it was
+ * without hiding it. A private-views feature can be added later; starting
+ * private and going public is the harder migration.
+ */
+export const savedViews = erweb.table(
+  "saved_views",
+  {
+    id: text("id").primaryKey(),
+    org: text("org").notNull(),
+    /** `records` | `duplicates` | `reviews` — the screen this filter belongs to. */
+    surface: text("surface").notNull(),
+    name: text("name").notNull(),
+    definition: jsonb("definition").notNull(),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // One name per surface per org: two views called "Needs review" on the same
+    // screen is a picker nobody can use.
+    uniqueIndex("saved_views_org_surface_name_idx").on(table.org, table.surface, table.name),
+    index("saved_views_org_surface_idx").on(table.org, table.surface),
+  ],
+);
+
 /** Saved segments over golden records (design §5.7). The definition is always
  * the inspectable structured filter — never a prompt — and deliberately limited
  * to what the read API can evaluate today (search + client conditions). */

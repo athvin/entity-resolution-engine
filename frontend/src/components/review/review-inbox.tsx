@@ -18,7 +18,9 @@ import {
   type ReviewRow,
 } from "@/lib/query/reviews";
 import { BffRequestError } from "@/lib/api/client";
+import { ViewsBar } from "@/components/views/views-bar";
 import { MAX_BULK } from "@/lib/bff/adjudicate-bulk";
+import { useDeleteView, useSaveView, useSavedViews } from "@/lib/query/views";
 import {
   useRecommendBulk,
   useRecommendReview,
@@ -134,6 +136,20 @@ export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolea
   const recommendBulk = useRecommendBulk(org);
   const [recommendFailure, setRecommendFailure] = useState<string | null>(null);
   const [bulkRecommendNote, setBulkRecommendNote] = useState<string | null>(null);
+  // O12a. The inbox has the richest filter state in the product — a reason and
+  // a confidence band — which makes it the surface where re-reaching a filter
+  // is worth most.
+  const savedViews = useSavedViews(org, "reviews");
+  const saveView = useSaveView(org, "reviews");
+  const deleteView = useDeleteView(org, "reviews");
+  const [activeViewId, setActiveViewId] = useState<string | null>(null);
+  const [viewFailure, setViewFailure] = useState<string | null>(null);
+  const currentDefinition = {
+    q: "",
+    min: band?.min ?? null,
+    max: band?.max ?? null,
+    reason,
+  };
 
   /**
    * Ask about the selected pairs.
@@ -315,6 +331,52 @@ export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolea
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3" data-testid="review-inbox">
       <div className="flex flex-wrap items-center gap-2">
+        <ViewsBar
+          views={savedViews.data ?? []}
+          current={currentDefinition}
+          activeId={activeViewId}
+          canSave={isSteward}
+          busy={saveView.isPending || deleteView.isPending}
+          failure={viewFailure}
+          onApply={(view) => {
+            setViewFailure(null);
+            setActiveViewId(view.id);
+            setReason(view.definition.reason);
+            // Map the saved band back onto the BANDS list, since the selector
+            // is keyed by name rather than by bounds.
+            const match = BANDS.find(
+              (candidate) =>
+                (candidate.min ?? null) === view.definition.min &&
+                (candidate.max ?? null) === view.definition.max,
+            );
+            setBandKey(match?.key ?? "all");
+          }}
+          onSave={(name) => {
+            setViewFailure(null);
+            saveView.mutate(
+              { name, definition: currentDefinition },
+              {
+                onError: (error) => {
+                  setViewFailure(
+                    error instanceof BffRequestError ? error.message : "could not save that view",
+                  );
+                },
+              },
+            );
+          }}
+          onDelete={(view) => {
+            setViewFailure(null);
+            if (view.id === activeViewId) setActiveViewId(null);
+            deleteView.mutate(view.id, {
+              onError: (error) => {
+                setViewFailure(
+                  error instanceof BffRequestError ? error.message : "could not delete that view",
+                );
+              },
+            });
+          }}
+        />
+
         {isSteward && (
           <input
             ref={headerCheckbox}

@@ -10,6 +10,15 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BffRequestError } from "@/lib/api/client";
+import { useFieldHistory } from "@/lib/query/history";
+import {
+  compareAcrossMembers,
+  MAX_COMPARED_MEMBERS,
+  useMemberValues,
+} from "@/lib/query/member-values";
+import { GroupMergeEditor } from "./group-merge-editor";
+import { useMassUpdate, type GoldenField } from "@/lib/query/mass-update";
+import { useRuns } from "@/lib/query/hooks";
 import { goldenAttributes, displayName } from "@/lib/domain/attributes";
 import { useOrgEntityType } from "@/lib/query/config";
 import {
@@ -21,6 +30,7 @@ import {
   type LineageRow,
 } from "@/lib/query/hooks";
 import { useProtectRecords, useSuppressRecords, useUnmerge } from "@/lib/query/reviews";
+import { FieldHistory } from "./field-history";
 import { EnrichPanel } from "./enrich-panel";
 import { MergeRecordsDialog } from "./merge-records-dialog";
 
@@ -47,6 +57,25 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
   const [suppressMessage, setSuppressMessage] = useState<string | null>(null);
   const [protectMessage, setProtectMessage] = useState<string | null>(null);
   const [mergeOpen, setMergeOpen] = useState(false);
+  // O12c. One attribute's history at a time: the panel is per field, so two
+  // open at once would be two answers to one question.
+  const [historyAttribute, setHistoryAttribute] = useState<string | null>(null);
+  const [restoringSnapshot, setRestoringSnapshot] = useState<number | null>(null);
+  const [restoreFailure, setRestoreFailure] = useState<string | null>(null);
+  const runs = useRuns(org);
+  const restore = useMassUpdate(org);
+  // ABOVE the early returns: this is a hook, and calling it after the
+  // pending/error branches makes it conditional — React throws the moment the
+  // component takes a different path, which is how it broke the entity view
+  // entirely rather than just the history panel.
+  const history = useFieldHistory(org, entityId, historyAttribute, runs.data ?? []);
+  // F1. Member VALUES, not just keys — `members` from the detail read carries
+  // only record keys. Same `?key=` endpoint the pair compare grid uses.
+  const memberKeys = (query.data?.members ?? []).map((member) => member.record_key);
+  const memberValues = useMemberValues(org, memberKeys);
+  const [differencesOnly, setDifferencesOnly] = useState(true);
+  const [adopting, setAdopting] = useState<string | null>(null);
+  const [adoptFailure, setAdoptFailure] = useState<string | null>(null);
   const [mergeMessage, setMergeMessage] = useState<string | null>(null);
   const role = effectiveRole(session.data, org);
   const isSteward = role !== null && ROLE_RANK[role] >= ROLE_RANK.steward;
@@ -154,7 +183,23 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
               const provenance = lineageByAttribute.get(key);
               return (
                 <div key={key}>
-                  <div className="text-muted-foreground text-xs">{label}</div>
+                  <div className="text-muted-foreground flex items-baseline gap-2 text-xs">
+                    {label}
+                    {/* O12c. Per field rather than one panel for the record: the
+                        question is always about a particular value, and a
+                        record-level history would make the reader hunt. */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setHistoryAttribute(historyAttribute === key ? null : key);
+                        setRestoreFailure(null);
+                      }}
+                      className="hover:text-foreground underline underline-offset-2"
+                      data-testid={`history-${key}`}
+                    >
+                      history
+                    </button>
+                  </div>
                   <div className="text-sm font-medium">{String(value)}</div>
                   {provenance && (
                     <div
@@ -169,8 +214,107 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
               );
             })}
           </div>
+          {historyAttribute !== null && (
+            <div className="mt-3">
+              <FieldHistory
+                attribute={historyAttribute}
+                rows={history.rows}
+                pending={history.pending}
+                canRestore={isSteward}
+                restoringSnapshot={restoringSnapshot}
+                failure={restoreFailure}
+                onClose={() => {
+                  setHistoryAttribute(null);
+                }}
+                onRestore={(row) => {
+                  setRestoreFailure(null);
+                  setRestoringSnapshot(row.snapshot);
+                  // Through the EXISTING audited override path, not a new one:
+                  // the old value becomes current by the same mechanism a human
+                  // typing it would use, so the audit log records who restored
+                  // what and nothing in the past is rewritten.
+                  restore.mutate(
+                    [
+                      {
+                        entity_id: entityId,
+                        attribute: historyAttribute as GoldenField,
+                        ...(row.value === null ? { clear: true } : { value: row.value }),
+                      },
+                    ],
+                    {
+                      onSettled: () => {
+                        setRestoringSnapshot(null);
+                      },
+                      onSuccess: () => {
+                        setHistoryAttribute(null);
+                      },
+                      onError: (error) => {
+                        setRestoreFailure(
+                          error instanceof BffRequestError
+                            ? error.message
+                            : "could not restore that value",
+                        );
+                      },
+                    },
+                  );
+                }}
+              />
+            </div>
+          )}
         </CardContent>
       </Card>
+
+      {members.length > 1 && (
+        <Card data-testid="entity-merge-editor">
+          <CardHeader className="p-4 pb-1 lg:p-6 lg:pb-2">
+            <CardTitle className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+              Merge editor
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-4 pt-2 lg:p-6 lg:pt-2">
+            {/* F1. Only for a group: a single-member entity has nothing to
+                compare, and a one-column table is a worse way to read one
+                record than the grid above. */}
+            <GroupMergeEditor
+              fields={compareAcrossMembers(
+                attributes.map(({ key }) => key),
+                golden,
+                memberValues.data?.items ?? [],
+              )}
+              memberKeys={(memberValues.data?.items ?? []).map((item) => item.record_key)}
+              notShown={Math.max(0, members.length - MAX_COMPARED_MEMBERS)}
+              pending={memberValues.isPending}
+              canEdit={isSteward}
+              applying={adopting}
+              failure={adoptFailure}
+              differencesOnly={differencesOnly}
+              onToggleDifferences={setDifferencesOnly}
+              onAdopt={(attribute, value) => {
+                setAdoptFailure(null);
+                setAdopting(attribute);
+                // The SAME audited override path O12c's restore uses — there is
+                // no merge-specific write, so the audit log cannot tell this
+                // from a typed edit, which is correct: it is one.
+                restore.mutate(
+                  [{ entity_id: entityId, attribute: attribute as GoldenField, value }],
+                  {
+                    onSettled: () => {
+                      setAdopting(null);
+                    },
+                    onError: (error) => {
+                      setAdoptFailure(
+                        error instanceof BffRequestError
+                          ? error.message
+                          : "could not adopt that value",
+                      );
+                    },
+                  },
+                );
+              }}
+            />
+          </CardContent>
+        </Card>
+      )}
 
       {isSteward && <EnrichPanel org={org} entityId={entityId} golden={golden} />}
 

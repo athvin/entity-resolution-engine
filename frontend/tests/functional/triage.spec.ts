@@ -141,6 +141,42 @@ test.describe("steward triage", () => {
   });
 
   /**
+   * O12a. The round trip is what matters: a view saved on one visit has to be
+   * APPLIED on the next, which means the stored definition must survive the
+   * trip back onto the band selector. A view that saves and then restores the
+   * WRONG filter is the silent-wrongness shape — the reader believes they are
+   * looking at a narrowed queue and are not.
+   */
+  test("a saved view survives a reload and restores its filter", async ({
+    page,
+    isMobile,
+  }, testInfo) => {
+    test.skip(isMobile, "the views bar is the desktop filter row");
+    await openInbox(page, testInfo.project.name);
+    await expect(page.getByTestId("views-bar")).toBeVisible();
+
+    // Nothing filtered yet, so saving is refused by the control itself.
+    await expect(page.getByTestId("view-add")).toBeDisabled();
+
+    await page.getByTestId("band-filter").selectOption("high");
+    await expect(page.getByTestId("view-add")).toBeEnabled();
+    await page.getByTestId("view-add").click();
+    await page.getByTestId("view-name").fill("High confidence");
+    await Promise.all([
+      page.waitForResponse((r) => r.url().includes("/views") && r.request().method() === "POST"),
+      page.getByTestId("view-save").click(),
+    ]);
+    await expect(page.getByTestId("view-High confidence")).toBeVisible();
+
+    // The round trip: reload, clear the filter, and the saved view restores it.
+    await page.reload();
+    await expect(page.getByTestId("view-High confidence")).toBeVisible();
+    await page.getByTestId("band-filter").selectOption("all");
+    await page.getByTestId("view-High confidence").click();
+    await expect(page.getByTestId("band-filter")).toHaveValue("high");
+  });
+
+  /**
    * V6, and it belongs in the MUTATING tier even though it writes only to the
    * BFF's own Postgres: asking stores a row, and the rendering specs run
    * against a shared read-only tenant whose baselines a stored recommendation
