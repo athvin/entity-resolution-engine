@@ -35,6 +35,57 @@ test.describe("golden records", () => {
     await expect(page.getByTestId("records-empty")).toBeVisible();
   });
 
+  // E11b. One entity per device project: the three projects share one mock
+  // server, and this spec CREATES links on the entity it views — so a shared
+  // entity would have desktop's link in mobile's list and the counts would
+  // depend on which project ran first.
+  const LINK_ENTITY: Record<string, string> = {
+    "desktop-chromium": "01jm0e000012",
+    "mobile-safari": "01jm0e000015",
+    "mobile-chrome": "01jm0e000018",
+  };
+
+  test("links two entities without merging them (E11b)", async ({ page }, testInfo) => {
+    const entity = LINK_ENTITY[testInfo.project.name] ?? "01jm0e000012";
+    await login(page, USERS.steward);
+    await page.goto(`/${ORG}/records/${entity}`);
+
+    const panel = page.getByTestId("entity-links");
+    await expect(panel).toBeVisible();
+    await expect(page.getByTestId("entity-links-empty")).toBeVisible();
+
+    await page.getByTestId("entity-link-target").fill("01jm0e000099");
+    await page.getByTestId("entity-link-kind").selectOption("household");
+    await page.getByTestId("entity-link-add").click();
+
+    // The link lands WITHOUT merging: the panel names the relationship and the
+    // other entity, and both keep their own records.
+    const list = page.getByTestId("entity-links-list");
+    await expect(list).toContainText("Same household");
+    await expect(list).toContainText("01jm0e000099");
+    // The viewed entity is the parent, so the sentence is "contains" — the
+    // same row read from the other end says "belongs to", and a panel that
+    // said one thing for both would be wrong half the time.
+    await expect(list).toContainText("contains");
+    // The entity is still its own entity: linking is not merging, so the
+    // members list is untouched.
+    await expect(page.getByTestId("entity-members")).toBeVisible();
+
+    // Removing it leaves nothing behind.
+    await list.getByRole("button", { name: /Remove the Same household link/ }).click();
+    await expect(page.getByTestId("entity-links-empty")).toBeVisible();
+  });
+
+  test("a viewer reads links but is offered no controls (E11b)", async ({ page }) => {
+    await login(page, USERS.viewer);
+    await page.goto(`/${ORG}/records/${MULTI_MEMBER_ENTITY}`);
+    await expect(page.getByTestId("entity-links")).toBeVisible();
+    // Seeing that an entity belongs to a household is reading; creating the
+    // link is a steward's judgement.
+    await expect(page.getByTestId("entity-link-target")).toHaveCount(0);
+    await expect(page.getByTestId("entity-link-add")).toHaveCount(0);
+  });
+
   test("entity detail explains provenance, members and history", async ({ page }) => {
     await page.goto(`/${ORG}/records/${MULTI_MEMBER_ENTITY}`);
     await expect(page.getByTestId("entity-name")).toContainText("Ada Lovelace");

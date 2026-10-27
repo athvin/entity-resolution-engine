@@ -1,0 +1,8 @@
+kind: statement
+operation: delete
+mode: partial
+description: "Remove one link, scoped by org so a link id learned elsewhere cannot delete another tenant's row. A hard delete rather than a tombstone: the history companion already records what was removed and by whom, so a status column would be a second, weaker record of the same fact."
+params:
+  - { name: org_id, type: varchar }
+  - { name: link_id, type: varchar }
+returns: none

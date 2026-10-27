@@ -6001,6 +6001,182 @@ async fn retire_tag(
     }
 }
 
+/// The link kinds the API accepts, mirroring `entity_link.kind`'s accepted
+/// values. Checked here rather than left to the column constraint so a typo
+/// comes back as a 422 naming the alternatives instead of a 500 naming a
+/// Postgres check.
+pub const LINK_KINDS: [&str; 3] = ["household", "company", "related"];
+
+#[derive(Deserialize)]
+struct EntityLinkIn {
+    parent_entity_id: String,
+    child_entity_id: String,
+    kind: String,
+    #[serde(default)]
+    note: Option<String>,
+}
+
+/// Steward+: link two entities WITHOUT merging them
+/// (`POST /v1/orgs/{org}/entity-links`), or correct an existing link of the
+/// same kind.
+///
+/// The product has one answer to "these two records belong together" — merge
+/// them — and that answer is wrong for a husband and wife at one address, or a
+/// subsidiary and its parent. Merging loses the distinction and no later run
+/// recovers it; recording nothing loses the relationship.
+///
+/// Steward, not admin: this is the same judgement a steward already makes when
+/// they resolve a review, and it is strictly LESS destructive than the merge
+/// they can already perform. Gating it higher would mean the cheapest way to
+/// record "these are related" is to merge them, which is the outcome this
+/// exists to avoid.
+async fn create_entity_link(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Json(body): Json<EntityLinkIn>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
+    if !LINK_KINDS.contains(&body.kind.as_str()) {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("kind must be one of {LINK_KINDS:?}"),
+        );
+    }
+    let (parent, child) = (body.parent_entity_id.trim(), body.child_entity_id.trim());
+    if parent.is_empty() || child.is_empty() {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "parent_entity_id and child_entity_id are required",
+        );
+    }
+    // A self-link is meaningless and would render as an entity in its own
+    // household — refused here because nothing downstream would notice.
+    if parent == child {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "an entity cannot be linked to itself",
+        );
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "entity links require Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    let _ = pg::set_actor(&client, &principal.actor).await;
+    match er_entities::entity_link::create::upsert(
+        &client,
+        &er_ids::new_v7(),
+        &org_row.id,
+        parent,
+        child,
+        &body.kind,
+        // `manual` is the only origin this route mints. A caller-supplied
+        // origin would let a steward's link claim to be a model's suggestion,
+        // or the reverse — and the whole point of the column is that a surface
+        // can tell a judgement from a guess.
+        "manual",
+        body.note.as_deref(),
+        &principal.actor,
+    )
+    .await
+    {
+        Ok(rows) => {
+            let _ = pg::audit(
+                &client,
+                &principal.actor,
+                Some(&org),
+                "entity.link",
+                &json!({ "parent": parent, "child": child, "kind": body.kind }),
+            )
+            .await;
+            (StatusCode::CREATED, Json(json!(rows.first()))).into_response()
+        }
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Viewer+: every link touching one entity, from either side
+/// (`GET /v1/orgs/{org}/entities/{entity_id}/links`).
+async fn entity_links(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, entity_id)): Path<(String, String)>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "entity links require Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    match er_entities::entity_link::read::for_entity(&client, &org_row.id, &entity_id).await {
+        Ok(rows) => Json(json!({ "items": rows })).into_response(),
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Steward+: remove a link (`DELETE /v1/orgs/{org}/entity-links/{link_id}`).
+///
+/// Scoped by org in the statement itself, so a link id learned elsewhere
+/// cannot delete another tenant's row even if this handler's org check were
+/// ever loosened.
+async fn delete_entity_link(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, link_id)): Path<(String, String)>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "entity links require Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    let _ = pg::set_actor(&client, &principal.actor).await;
+    match er_entities::entity_link::delete::by_id(&client, &org_row.id, &link_id).await {
+        Ok(0) => detail_err(StatusCode::NOT_FOUND, "no such link"),
+        Ok(_) => {
+            let _ = pg::audit(
+                &client,
+                &principal.actor,
+                Some(&org),
+                "entity.unlink",
+                &json!({ "link_id": link_id }),
+            )
+            .await;
+            // A JSON body, not 204: every other DELETE in this router answers
+            // with one, and the BFF's `forward` parses the response — a bare
+            // 204 reaches it as an empty body and throws "Unexpected end of
+            // JSON input", which is a BFF crash rather than a failed delete.
+            Json(json!({ "deleted": link_id })).into_response()
+        }
+        Err(e) => pg_err(e),
+    }
+}
+
 #[derive(Deserialize)]
 struct TagApplyIn {
     subject_type: String,
@@ -7426,6 +7602,15 @@ fn build_routes(state: AppState) -> Router {
         )
         .route("/v1/orgs/{org}/imports/recent", get(imports_recent))
         .route("/v1/orgs/{org}/s3-ingest", get(s3_ingest_state))
+        .route("/v1/orgs/{org}/entity-links", post(create_entity_link))
+        .route(
+            "/v1/orgs/{org}/entity-links/{link_id}",
+            axum::routing::delete(delete_entity_link),
+        )
+        .route(
+            "/v1/orgs/{org}/entities/{entity_id}/links",
+            get(entity_links),
+        )
         .route("/v1/orgs/{org}/runs", get(runs_list))
         .route(
             "/v1/orgs/{org}/runs/{run_id}/entity-events",

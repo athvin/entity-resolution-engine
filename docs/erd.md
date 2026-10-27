@@ -60,6 +60,18 @@ erDiagram
         varchar object_identity
         varchar command_text
     }
+    entity_links {
+        varchar id PK
+        varchar org_id FK
+        varchar parent_entity_id
+        varchar child_entity_id
+        varchar kind "in {company, household, related}"
+        varchar origin "in {llm, manual, rule}"
+        varchar note
+        varchar created_by
+        timestamp created_at
+        timestamp updated_at
+    }
     jobs {
         varchar id PK
         varchar org_id FK
@@ -229,6 +241,7 @@ erDiagram
     }
     api_keys }o--|| orgs : "org_id → id"
     config_versions }o--|| orgs : "org_id → id"
+    entity_links }o--|| orgs : "org_id → id"
     jobs }o--|| orgs : "org_id → id"
     matching_models }o--|| orgs : "org_id → id"
     pair_labels }o--|| orgs : "org_id → id"
@@ -250,6 +263,7 @@ erDiagram
 | `audit_log` | The append-only audit ledger: one row per authenticated mutation (actor, action, optional org scope, and structured detail). |
 | `config_versions` | A versioned config document for a tenant: its YAML, hash and publish state. |
 | `ddl_log` | The DDL ledger: one row per DDL command executed against the control database, captured by the er_ddl_audit event triggers (migrations, operator DDL — boot replays are suppressed). |
+| `entity_links` | A relationship between two resolved entities that is NOT a merge: a household, a corporate hierarchy, a 'these are related but distinct' note. The product has one answer to 'these two records belong together' — merge them — and that answer is wrong for a husband and wife at one address, or a subsidiary and its parent. Merging them loses the distinction and no later run can recover it; refusing to record anything loses the relationship. A link records it without collapsing either side. |
 | `jobs` | A unit of work on the dispatcher's queue: its kind, params, lifecycle state and retry bookkeeping. |
 | `matching_models` | An immutable version of a tenant's matching model: the settings document the engine scores against, its hash, provenance and activation state. |
 | `orgs` | A tenant: its config pointer, lake env, lifecycle state and active config version. |

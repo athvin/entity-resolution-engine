@@ -13,6 +13,7 @@
   "GET /v1/orgs/{org}/config/versions/{version}": { "envelope": "scalar" },
   "GET /v1/orgs/{org}/data-quality": { "envelope": "scalar" },
   "GET /v1/orgs/{org}/duplicates": { "envelope": "record", "keys": ["items", "snapshot", "next_cursor"] },
+  "GET /v1/orgs/{org}/entities/{entity_id}/links": { "envelope": "wrapped", "key": "items" },
   "GET /v1/orgs/{org}/golden-records": { "envelope": "arrow", "cursor_in": "headers" },
   "GET /v1/orgs/{org}/golden-records/{entity_id}": { "envelope": "scalar" },
   "GET /v1/orgs/{org}/imports": { "envelope": "page", "key": "items" },

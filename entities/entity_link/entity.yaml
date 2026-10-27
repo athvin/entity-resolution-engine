@@ -1,0 +1,70 @@
+kind: entity
+version: 1
+name: entity_link
+relation: entity_links
+description: "A relationship between two resolved entities that is NOT a merge: a household, a corporate hierarchy, a 'these are related but distinct' note. The product has one answer to 'these two records belong together' — merge them — and that answer is wrong for a husband and wife at one address, or a subsidiary and its parent. Merging them loses the distinction and no later run can recover it; refusing to record anything loses the relationship. A link records it without collapsing either side."
+key: [id]
+natural_key: [org_id, parent_entity_id, child_entity_id, kind]
+generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+  wire: [json]
+  history: true
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "The link's unique id (UUIDv7, minted by the application)."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant. Every read is scoped by it."
+  - name: parent_entity_id
+    type: varchar
+    nullable: false
+    description: "The entity on the owning side — the household, the parent company. Deliberately NOT a foreign key, for the reason `taggings.subject_id` gives: an entity lives in the LAKE and this table is Postgres, so a database-level reference would point at a row this store does not own. The id is stable across runs because reconcile carries ids forward by membership overlap (INV-PERM) rather than re-deriving them, and an entity that loses that contest records `merged_into` — so a link survives its entity gaining members, and a merged-away side is followable rather than dangling."
+  - name: child_entity_id
+    type: varchar
+    nullable: false
+    description: "The entity on the member side — the person in the household, the subsidiary."
+  - name: kind
+    type: varchar
+    nullable: false
+    accepted_values: [household, company, related]
+    description: "What the relationship is. A closed set rather than free text because the whole value of a link is that something downstream can act on it, and an export or a rule cannot act on a spelling. `related` is the deliberate escape hatch for a real relationship that is neither of the other two — it says 'these are connected, do not merge them' without claiming to know how."
+  - name: origin
+    type: varchar
+    nullable: false
+    default: "'manual'"
+    accepted_values: [manual, rule, llm]
+    description: "Where the link came from. Kept apart for the reason `pair_labels.origin` is: a steward's judgement and a model's suggestion are different evidence, and a surface that cannot tell them apart will present a guess as a decision. `llm` has no producer until an adjudicator can propose a link; it is declared here because the column's accepted values are the contract that producer will be written against."
+  - name: note
+    type: varchar
+    description: "Optional free text — why this link exists, in the words of whoever made it."
+  - name: created_by
+    type: varchar
+    nullable: false
+    description: "The actor that created the link."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    volatile: true
+    default: now()
+    description: "When the link was created."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    volatile: true
+    default: now()
+    description: "When it was last changed."
+indexes:
+  # The natural-key upsert target: re-asserting a link corrects it rather than
+  # stacking a second row saying the same thing.
+  - name: entity_links_org_pair_kind
+    columns: [org_id, parent_entity_id, child_entity_id, kind]
+    unique: true
+  # "what is linked to this entity", from the child's side. The parent's side is
+  # served by the unique index above, which leads with org_id + parent.
+  - name: entity_links_org_child
+    columns: [org_id, child_entity_id]

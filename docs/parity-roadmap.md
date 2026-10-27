@@ -1581,14 +1581,54 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          asserts it rather than trusting it. Observed failing: disabling the label pass fails
          it by name. Training still lands a **draft**, unchanged from E10a — training is not
          consent to re-cluster a tenant's data.
-   - [ ] E10c-4 related-record features (#26), household/link entities (#33). **Deeper than
-         the one-liner suggests, and the reason is worth knowing before starting:** the plan
-         says `features.related:` is "compiled into the concat stage by `er-compile`", but
-         er-compile produces SETTINGS — the concat relation is built by
-         `dedupe_core::predict::materialize_concat_multi`, and at least four golden suites
-         (`golden_batch1/3/4`, `golden_accuracy`) read through it. So this changes
-         execution-oracle-governed engine SQL and carries a determinism obligation, not just a
-         config block. Worth its own session with that in view.
+   - [x] **E11b household / link entities (#33) — the third answer.** The product had exactly
+         one answer to "these two belong together": merge them. That answer is wrong for a
+         husband and wife at one address, or a subsidiary and its parent. Merging loses the
+         distinction and no later run recovers it; recording nothing loses the relationship.
+         A new `entity_links` relation records it without collapsing either side — both keep
+         their own members and their own golden values.
+         **Postgres, not the lake, and the ids are safe there.** A link is an assertion that
+         must survive reconcile, and the lake is rebuilt by every run. Entity ids are safe to
+         reference because INV-PERM carries them FORWARD by membership overlap rather than
+         re-deriving them from membership — so a link survives its entity gaining a member —
+         and an entity that loses that contest records `merged_into`, so a merged-away side is
+         followable rather than dangling. No foreign key, for the reason `taggings.subject_id`
+         gives: a database-level reference would point at a row this store does not own.
+         **The natural key includes the kind.** "These two are a household" and "these two are
+         related" are separate claims about one pair, so re-asserting a kind corrects it while
+         a different kind is a second link. `created_at` survives the correction.
+         **`origin` is minted server-side.** The route writes `manual` and never reads it from
+         the body: the whole value of the column is that a surface can tell a steward's
+         judgement from a model's suggestion, and a caller-supplied origin would let either
+         claim to be the other. `llm` is declared with no producer, because the accepted values
+         are the contract V6's adjudicator will be written against — it is the `link` verdict
+         that entry recorded as inexpressible.
+         **Steward, not admin.** This is the same judgement a steward already makes resolving a
+         review and strictly less destructive than the merge they can already perform. Gating
+         it higher would make the cheapest way to record "these are related" a merge, which is
+         the outcome the feature exists to avoid. The read is viewer: the panel is how anyone
+         finds out a link exists.
+         **The read answers from BOTH sides in one query.** The entity view asks "what is this
+         related to" and does not know which end it is on; two queries would make the caller
+         decide. Sabotage: narrowing it to `parent_entity_id` makes the child side report
+         nothing, which would have made the panel answer "not linked to anything" for every
+         member of every household.
+         Also caught: a bare `204` from the DELETE reached the BFF's `forward` as an empty body
+         and threw `Unexpected end of JSON input` — a BFF crash, not a failed delete. Every
+         other DELETE in the router answers with a JSON body; this one does now too.
+         `pg_entity_links.rs` covers the upsert, both-sides read, the self-link and bad-kind
+         refusals, the viewer boundary, and that the delete statement is org-scoped so another
+         tenant's id deletes nothing. A wrong-org key gets **404**, not 403 — `guard` answers
+         "no org" so a probe cannot confirm which tenants exist.
+   - [ ] E11a related-record features (#26). **The tracker's warning turned out to be
+         avoidable, which is worth recording.** It said `features.related:` "changes
+         execution-oracle-governed engine SQL" because the concat relation is built by
+         `dedupe_core::predict::materialize_concat_multi` and four golden suites read through
+         it. But `concat_sql_single` projects `input.columns` — so widening the standardized
+         table BEFORE it is registered as the engine's input carries the extra columns through
+         with no change to dedupe-core at all. The join belongs in `er-cli`, not the engine, and
+         a config with no `related:` block registers exactly the table it registers today, which
+         is what keeps the goldens byte-identical.
    - [x] **D4 tracker hygiene — the count was wrong in three different ways.**
          Before: 7 open items, of which **3 were duplicates** and ~14 more were invisible.
          After: 18 open, 86 done, and every one countable.

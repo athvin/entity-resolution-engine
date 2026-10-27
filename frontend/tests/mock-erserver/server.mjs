@@ -493,6 +493,10 @@ export function initialState() {
         },
       ],
     },
+    // E11b: links are created and removed by the spec, so this is mutable and
+    // keyed by org — one org per device project, for the reason tags and
+    // webhooks each got one.
+    entityLinks: {},
     receipts: {
       "acme-dev": [
         {
@@ -2439,6 +2443,75 @@ const server = http.createServer((req, res) => {
       target.state = "active";
       target.activated_at = "2026-09-26T13:00:00Z";
       return send(res, 200, target);
+    }
+
+    // ── entity links (E11b) ────────────────────────────────────────────────
+    //
+    // Mutable per org, because the spec creates and removes links. Keyed by
+    // org so the three device projects' orgs cannot race each other, the same
+    // reason tags and webhooks got one org per project.
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/entities\/([^/]+)\/links$/.exec(path)) &&
+      req.method === "GET"
+    ) {
+      const org = match[1];
+      const entityId = decodeURIComponent(match[2]);
+      const all = state.entityLinks[org] ?? [];
+      // BOTH sides, as `for_entity.sql` does: the entity view asks "what is
+      // this related to" and does not know which end it is on.
+      return send(res, 200, {
+        items: all.filter((l) => l.parent_entity_id === entityId || l.child_entity_id === entityId),
+      });
+    }
+    if ((match = /^\/v1\/orgs\/([^/]+)\/entity-links$/.exec(path)) && req.method === "POST") {
+      const org = match[1];
+      const body = await readBody(req);
+      if (!["household", "company", "related"].includes(body.kind)) {
+        return send(res, 422, { detail: "kind must be one of [household, company, related]" });
+      }
+      if (body.parent_entity_id === body.child_entity_id) {
+        return send(res, 422, { detail: "an entity cannot be linked to itself" });
+      }
+      state.entityLinks[org] ??= [];
+      const existing = state.entityLinks[org].find(
+        (l) =>
+          l.parent_entity_id === body.parent_entity_id &&
+          l.child_entity_id === body.child_entity_id &&
+          l.kind === body.kind,
+      );
+      if (existing) {
+        // The upsert corrects rather than stacking, as the natural key does.
+        existing.note = body.note ?? null;
+        existing.updated_at = "2026-10-27T12:00:00.000000Z";
+        return send(res, 201, existing);
+      }
+      const link = {
+        id: `01jmlink${String(state.entityLinks[org].length + 1).padStart(4, "0")}`,
+        org_id: `uuid-${org}`,
+        parent_entity_id: body.parent_entity_id,
+        child_entity_id: body.child_entity_id,
+        kind: body.kind,
+        // `manual` is minted by the server, never taken from the body.
+        origin: "manual",
+        note: body.note ?? null,
+        created_by: "steward@acme.dev",
+        created_at: "2026-10-27T12:00:00.000000Z",
+        updated_at: "2026-10-27T12:00:00.000000Z",
+      };
+      state.entityLinks[org].push(link);
+      return send(res, 201, link);
+    }
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/entity-links\/([^/]+)$/.exec(path)) &&
+      req.method === "DELETE"
+    ) {
+      const org = match[1];
+      const id = decodeURIComponent(match[2]);
+      const all = state.entityLinks[org] ?? [];
+      const index = all.findIndex((l) => l.id === id);
+      if (index < 0) return send(res, 404, { detail: "no such link" });
+      all.splice(index, 1);
+      return send(res, 200, { deleted: id });
     }
 
     // ── auto-ingest state (E9c) ────────────────────────────────────────────

@@ -1,0 +1,14 @@
+kind: statement
+operation: create
+mode: partial
+description: "Record a link between two entities, correcting any previous one of the same kind. An upsert rather than an append because a link is a current belief about a relationship, not an event: two rows saying the same pair are a household would make 'is this a household' ambiguous with no principled way to pick. `created_at` survives the correction so when the relationship was first recorded stays recoverable."
+params:
+  - { name: link_id, type: varchar }
+  - { name: org_id, type: varchar }
+  - { name: parent_entity_id, type: varchar }
+  - { name: child_entity_id, type: varchar }
+  - { name: kind, type: varchar }
+  - { name: origin, type: varchar }
+  - { name: note, type: varchar, nullable: true }
+  - { name: created_by, type: varchar }
+returns: entity
