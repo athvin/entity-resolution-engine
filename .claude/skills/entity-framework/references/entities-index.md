@@ -30,7 +30,7 @@ statements is read or written only through the engine's own stage SQL, not
 through a typed query function.
 
 <!-- BEGIN GENERATED: entities-index -->
-**39 entities, 167 declared statements.**
+**39 entities, 169 declared statements.**
 
 | Entity | Relation | Store | Key | Natural key | History |
 |---|---|---|---|---|---|
@@ -66,7 +66,7 @@ through a typed query function.
 | `s3_ingest_cursor` | `s3_ingest_cursors` | postgres | `id` | `org_id, source` | — |
 | `schedule` | `schedules` | postgres | `id` | — | yes |
 | `schema_migration` | `schema_migrations` | postgres | `id` | — | — |
-| `scored_record` | `scored_records` | duckdb | `id` | `record_key` | — |
+| `scored_record` | `scored_records` | duckdb | `id` | `record_key, model_version, tf_snapshot_id` | — |
 | `staged_steward_action` | `staged_steward_actions` | postgres | `id` | — | — |
 | `tag` | `tags` | postgres | `id` | — | yes |
 | `tagging` | `taggings` | postgres | `id` | — | yes |
@@ -110,7 +110,7 @@ Declared statements per entity and operation:
 | `s3_ingest_cursor` | 1 | 1 | 0 | 0 |
 | `schedule` | 2 | 2 | 3 | 1 |
 | `schema_migration` | 1 | 1 | 0 | 0 |
-| `scored_record` | 0 | 1 | 1 | 1 |
+| `scored_record` | 0 | 2 | 1 | 2 |
 | `staged_steward_action` | 1 | 1 | 1 | 0 |
 | `tag` | 1 | 3 | 1 | 0 |
 | `tagging` | 1 | 1 | 0 | 1 |

@@ -3914,7 +3914,10 @@ fn an_ensembles_incremental_batch_lands_where_a_full_rerun_would() {
     // anything.
     let after_full = ledger_identities(&sa);
     assert_eq!(
-        after_full.iter().map(|(m, _)| m.as_str()).collect::<Vec<_>>(),
+        after_full
+            .iter()
+            .map(|(m, _)| m.as_str())
+            .collect::<Vec<_>>(),
         vec!["v0001", "v0002-strict"],
         "a two-member full pass must leave BOTH members in the ledger; got {after_full:?}"
     );
