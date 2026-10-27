@@ -3377,12 +3377,29 @@ async fn golden_records_list(
     response
 }
 
+/// The optional point in history a golden read is taken at (O12c).
+///
+/// Absent means the latest snapshot, which is what every caller wanted before
+/// field-value rollback existed. A pinned one is how the UI shows what a field
+/// USED to be: DuckLake keeps the old versions, so the history needs no new
+/// table — only the ability to ask for a version other than the newest.
+#[derive(Debug, serde::Deserialize)]
+struct SnapshotQuery {
+    snapshot: Option<i64>,
+}
+
 /// Viewer+: one resolved entity with members/lineage/events
 /// (`GET /v1/orgs/{org}/golden-records/{entity_id}`), 404 if absent.
+///
+/// `?snapshot=N` reads the entity AS IT WAS at lake version N. Out-of-range
+/// versions are refused by the lake itself rather than clamped: silently
+/// serving the newest data for a pinned historical read would show a reader
+/// today's value under yesterday's heading.
 async fn golden_record_detail(
     principal: Principal,
     State(state): State<AppState>,
     Path((org, entity_id)): Path<(String, String)>,
+    Query(query): Query<SnapshotQuery>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
@@ -3391,9 +3408,12 @@ async fn golden_record_detail(
         Ok(s) => s,
         Err(r) => return *r,
     };
-    let snapshot = match read::latest_snapshot(&session) {
-        Ok(s) => s,
-        Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
+    let snapshot = match query.snapshot {
+        Some(pinned) => pinned,
+        None => match read::latest_snapshot(&session) {
+            Ok(s) => s,
+            Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
+        },
     };
     match read::entity_detail(&session, entity_type, snapshot, &entity_id) {
         Ok(Some(detail)) => Json(detail).into_response(),

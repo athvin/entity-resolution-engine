@@ -2764,7 +2764,39 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          `Number(row.units)` look redundant, and deleting it would have left string
          concatenation in the panel's total — postgres.js returns `sum` as a string while
          PGlite returns a number. The type was the bug; it is now `string | number`.
-   - [ ] O12c field-value rollback UI (#12/#13).
+   - [x] O12c field-value rollback UI (#12/#13). **No new table.** DuckLake keeps every
+         version of `golden_records` and `golden_lineage`, and the run ledger already records
+         the snapshot range each run produced — so "what did this field used to be" is a read
+         at an older lake version. The history existed; it was simply never reachable, because
+         `golden_record_detail` hardcoded `latest_snapshot`. It now takes an optional
+         `?snapshot=N`, which is the whole backend change.
+         The alternative would have been a change-log table written on every golden assembly:
+         a second source of truth for something the lake already stores exactly.
+         **Only COMPLETED runs are offered.** A failed or running one may have produced a
+         partial snapshot range, and letting a reader restore "as of" a half-finished run
+         would resurrect a state the product never published. Snapshots are de-duplicated
+         because a run that changed nothing ends where the last one did, and two identical
+         entries in a history picker is a choice with no difference.
+         **Only snapshots where the value CHANGED are listed.** A history showing every run
+         would be mostly rows saying "still Bob", burying the one row that matters — the
+         moment it became something else. Absence and empty string count as the same value,
+         since a field never set and one set to `""` are indistinguishable to a reader.
+         Restoring writes through the existing audited `override_field` path rather than
+         rewriting history: the old value becomes the current one by the same mechanism a
+         human typing it would use, so the audit log records who restored what and the lake
+         keeps both versions.
+         Out-of-range snapshots are refused by the lake rather than clamped — silently serving
+         the newest data for a pinned historical read would show today's value under
+         yesterday's heading. The BFF validates the parameter is a non-negative integer so a
+         junk value does not reach the lake as a type error and surface as a 503 that reads
+         like an outage.
+         12 unit tests; sabotaging the completed-run filter fails the one named for it.
+         *A bug an existing spec caught that neither tsc nor eslint could:* `useFieldHistory`
+         was first placed after the component's pending/error early returns, making it a
+         CONDITIONAL hook — React throws the moment the component takes a different path, so
+         it took down the entire entity view rather than just the history panel. Both static
+         gates were green; only rendering the page found it. Hooks now sit above every early
+         return, with a comment saying why.
 8. **Review-UI depth**
    - [ ] F1 group merge editor (#8) — today's inbox is a PAIR adjudicator; this adds the
          master-editing half. Reuses `field-compare-grid`.
