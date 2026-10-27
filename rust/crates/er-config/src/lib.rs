@@ -226,6 +226,32 @@ pub struct Thresholds {
     pub review_low: f64,
 }
 
+/// How a member's edges combine with the members before it (E5b-2d).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CombineMode {
+    /// Score every candidate pair; the edges union with every other member's.
+    /// The default, and what every member meant before this field existed.
+    #[default]
+    AndRun,
+    /// Score only the pairs no EARLIER member has already matched.
+    ///
+    /// Purely a cost lever, and that is worth stating because it reads like a
+    /// semantic one: the edge set is IDENTICAL either way — a pair this member
+    /// matches that an earlier one already matched adds nothing to a union, and
+    /// that holds with per-member thresholds too. What changes is how many
+    /// pairs reach the scoring stage, which is the expensive half.
+    ThenRun,
+}
+
+impl CombineMode {
+    /// Whether this is the default, for `skip_serializing_if`.
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        matches!(self, Self::AndRun)
+    }
+}
+
 /// One member of the matching ensemble (E5b): a registry model name, the
 /// threshold its own edges auto-merge at, and how it combines with the members
 /// before it.
@@ -271,6 +297,14 @@ pub struct ModelSpec {
     /// `run_correct` could reach; it is back now that the run row carries it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub threshold: Option<f64>,
+    /// How this member's edges combine with the members before it (E5b-2d).
+    ///
+    /// `and_run` is the default and is omitted from the canonical document, so
+    /// an existing config hashes byte-identically. Order is the document's:
+    /// `then_run` means "after the members declared above me", which is why
+    /// `models:` is a list rather than a map.
+    #[serde(default, skip_serializing_if = "CombineMode::is_default")]
+    pub mode: CombineMode,
 }
 
 /// S6 `standardization`, consumed by `email_norm` / `phone_e164`.
@@ -913,6 +947,7 @@ mod tests {
         config.models.push(ModelSpec {
             name: "strict".to_string(),
             threshold: None,
+            mode: CombineMode::default(),
         });
         let doc = canonical_document(&config);
         assert!(
@@ -961,6 +996,7 @@ mod tests {
         with_models.models.push(ModelSpec {
             name: "strict".to_string(),
             threshold: None,
+            mode: CombineMode::default(),
         });
         assert_ne!(
             config_hash(&config),
