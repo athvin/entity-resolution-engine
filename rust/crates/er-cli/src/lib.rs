@@ -18,6 +18,7 @@
 /// shipping three copies of statically-linked DuckDB — see `rust/Dockerfile`
 /// and the multicall dispatch in `er-server`'s `main`.
 pub mod cli;
+pub mod related;
 
 use std::path::Path;
 
@@ -776,11 +777,21 @@ fn score_member_full(
     } else {
         ("acct_int_std_records", ACCT_INT_STD_RECORDS)
     };
+    // E11a: the corpus the engine sees, with any borrowed columns already on
+    // it. `concat_sql_single` projects `input.columns`, so they flow through
+    // without dedupe-core being touched. Here rather than in the caller's loop
+    // because this is the one place a FULL pass registers its input — the
+    // incremental path widens separately, at the source of its projections.
+    let wide = widened_std(session, config, std_qual)?;
     {
         let model = &member.model;
         let mut settings = load_model(model.settings_json)?;
         settings.retain_intermediate = true;
-        let input = session.register_lake_table(std_unqual, std_unqual)?;
+        let input = if wide == std_qual {
+            session.register_lake_table(std_unqual, std_unqual)?
+        } else {
+            session.register_table(&wide, &wide)?
+        };
         let tf_tables = build_frozen_tf_tables(
             session,
             &settings,
@@ -838,6 +849,27 @@ fn score_member_full(
         sync_scored_ledger(session, model, run_id, scored_at, std_qual, std_qual)?;
     }
     Ok(())
+}
+
+/// The standardized relation the engine scores, widened with any declared
+/// related-record features (E11a).
+///
+/// Returns `std_qual` itself when nothing is declared — not a view equal to it,
+/// but the same string. That is what makes the determinism obligation
+/// structural: a config without `features.related:` cannot produce different
+/// SQL, because no SQL is produced.
+///
+/// The widened relation is a temp table rather than a view because the engine
+/// materializes from it repeatedly (concat, then blocking, then comparison),
+/// and re-running the join on each pass would pay for it three times.
+fn widened_std(session: &Session, config: &Config, std_qual: &str) -> Result<String> {
+    let Some(sql) = related::widen_sql(config, std_qual) else {
+        return Ok(std_qual.to_string());
+    };
+    const WIDE: &str = "__related_std";
+    session.execute_batch(&format!("drop table if exists {WIDE}"))?;
+    session.execute_batch(&format!("create temp table {WIDE} as {sql}"))?;
+    Ok(WIDE.to_string())
 }
 
 /// Retire the scores of every model this run is not using, so that activating a
@@ -1342,6 +1374,12 @@ fn run_match_partial(session: &Session, config: &Config, pass: &PartialPass) -> 
 
     let mut settings = load_model(model.settings_json)?;
     settings.retain_intermediate = true;
+
+    // E11a: widen the SOURCE of both projections rather than each projection,
+    // so `select s.*` picks the borrowed columns up for the delta and the kept
+    // side alike. Widening only one would make the two sides of
+    // `predict_between` disagree on their column set.
+    let std_qual = &widened_std(session, config, std_qual)?;
 
     // The delta and its complement, as projections of the standardized corpus.
     // A record is in the delta when the ledger has no row claiming that exact

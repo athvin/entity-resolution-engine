@@ -33,13 +33,14 @@ pub const RESERVED_SOURCE_PREFIX: &str = "_";
 /// length, deliberately not restated in prose (it has read "fourteen" since it
 /// held sixteen). [`Config`]'s S6 block fields MUST equal this set; the `entity_type` discriminator (added for the
 /// Account entity type) is a meta-field, not an S6 block, and is excluded.
-pub const CONFIG_BLOCKS: [&str; 19] = [
+pub const CONFIG_BLOCKS: [&str; 20] = [
     "tenant",
     "thresholds",
     "models",
     "standardization",
     "transforms",
     "sources",
+    "features",
     "blocking",
     "constraints",
     "comparisons",
@@ -636,6 +637,83 @@ impl Approval {
     }
 }
 
+/// Attributes borrowed from a RELATED record, so a comparison can use them
+/// (E11a).
+///
+/// The need is plain: two "J. Smith" records are indistinguishable until you
+/// notice one works at Acme and the other does not. The employer is not on
+/// either record — it is on the record their `employer_id` points at — so no
+/// comparison can reach it, and the pair sits in the gray band forever.
+///
+/// # Why this is a join in `er-cli` and not a change to the engine
+///
+/// The obvious reading is that this belongs in the concat stage, which is what
+/// the roadmap assumed. It does not have to: `concat_sql_single` projects
+/// `input.columns`, so widening the standardized table BEFORE it is registered
+/// as the engine's input carries the borrowed columns through untouched. That
+/// keeps `dedupe-core` — and the four golden suites that read through its
+/// concat SQL — completely out of this change, and it is why a config with no
+/// `related:` block registers byte-identically to what it registers today.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RelatedFeature {
+    /// The prefix the borrowed columns get, e.g. `employer` yields
+    /// `employer_given_name`. Must be a valid identifier fragment: it becomes
+    /// a column name, and a comparison references it by that name.
+    pub prefix: String,
+    /// The column on THIS record holding the related record's id.
+    pub key_column: String,
+    /// The source the key points into. Needed because `record_key` is
+    /// `source:id` while a foreign-key column holds the bare id — without it
+    /// the join would have to guess which source an id belongs to, and two
+    /// sources using the same id space would silently cross-link.
+    pub target_source: String,
+    /// Which of the related record's standardized columns to borrow.
+    ///
+    /// An explicit list rather than "everything": every borrowed column widens
+    /// the concat relation, which is the input to blocking and comparison, and
+    /// a tenant who borrows forty columns to use two has paid for forty on
+    /// every pass.
+    pub attributes: Vec<String>,
+}
+
+/// The derived-feature block (E11a).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Features {
+    /// One entry per related record a comparison needs to see.
+    ///
+    /// **One hop only.** Two hops is the incumbent's own ceiling and was
+    /// considered; it is deferred because each hop multiplies the join against
+    /// the standardized corpus, and a tenant cannot see that cost before
+    /// paying it. One hop covers the case the feature exists for — the
+    /// employer, the household head, the parent account.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub related: Vec<RelatedFeature>,
+}
+
+impl Features {
+    /// Whether nothing is declared.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.related.is_empty()
+    }
+}
+
+impl RelatedFeature {
+    /// The column name this feature contributes for `attribute`.
+    #[must_use]
+    pub fn column_for(&self, attribute: &str) -> String {
+        format!("{}_{attribute}", self.prefix)
+    }
+
+    /// Every column this feature contributes, in declaration order.
+    #[must_use]
+    pub fn columns(&self) -> Vec<String> {
+        self.attributes.iter().map(|a| self.column_for(a)).collect()
+    }
+}
+
 /// The whole S6 document, validated. `config_hash` is NOT a field of it (S6).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -679,6 +757,12 @@ pub struct Config {
     /// existed hashes identically.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub segments: BTreeMap<String, String>,
+    /// Attributes borrowed from related records (E11a). Omitted from the
+    /// canonical document when empty, so every config written before derived
+    /// features existed hashes byte-identically — the rule V1, E3 and E5b each
+    /// followed.
+    #[serde(default, skip_serializing_if = "Features::is_empty")]
+    pub features: Features,
     /// How a per-record quality score is computed. Omitted from the canonical
     /// document when unset, so a config written before quality scoring existed
     /// hashes identically.
@@ -779,9 +863,9 @@ mod tests {
 
     #[test]
     fn blocks_and_constants() {
-        assert_eq!(CONFIG_BLOCKS.len(), 19);
+        assert_eq!(CONFIG_BLOCKS.len(), 20);
         assert_eq!(CONFIG_BLOCKS[0], "tenant");
-        assert_eq!(CONFIG_BLOCKS[18], "correction_pass");
+        assert_eq!(CONFIG_BLOCKS[19], "correction_pass");
         // `models` sits beside `thresholds` because it refines the same
         // decision — what probability merges — one threshold per member
         // instead of one for the corpus.
@@ -794,6 +878,11 @@ mod tests {
         // pair scores nor which pairs are candidates — only how much of the
         // corpus one run re-scores.
         assert!(CONFIG_BLOCKS.contains(&"segments"));
+        // `features` sits after `sources` and before `blocking` because it
+        // widens the RECORD — the borrowed columns have to exist before a
+        // blocking rule or a comparison can name them, and document order is
+        // the order a reader builds the thing up in.
+        assert!(CONFIG_BLOCKS.contains(&"features"));
         assert_eq!(CANONICAL_ATTRIBUTES.len(), 9);
         assert_eq!(TERMINAL_SURVIVORSHIP_RULE, "record_key ASC");
     }

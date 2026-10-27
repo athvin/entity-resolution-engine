@@ -24,12 +24,25 @@ use er_config::{Config, EntityType, canonical_attributes};
 #[must_use]
 pub fn config_reference_problems(config: &Config) -> Vec<String> {
     let account = config.entity_type == EntityType::Account;
-    let valid: BTreeSet<String> = er_schema::model::int_std_record_columns(account)
+    let mut valid: BTreeSet<String> = er_schema::model::int_std_record_columns(account)
         .into_iter()
         .map(|c| c.name)
         .collect();
+    // E11a: a borrowed column is a real column by the time the engine scores,
+    // so a comparison may name it. Added BEFORE the blocking and comparison
+    // checks below, or declaring a feature and then using it would be refused
+    // at publish — which is the whole feature.
+    for feature in &config.features.related {
+        valid.extend(feature.columns());
+    }
 
     let mut problems = Vec::new();
+
+    // The related-record features themselves (E11a): the prefix has to be a
+    // usable column name and the target source has to exist. Checked here so
+    // the refusal is a 422 at publish rather than a SQL error inside a job an
+    // hour later, naming a column the tenant never wrote.
+    problems.extend(er_cli::related::validate(config));
 
     // The ensemble (E5b). Structural only: whether a name resolves to an ACTIVE
     // registry version is a Postgres question, checked by the publish handler so
@@ -380,6 +393,41 @@ mod tests {
             problems
                 .iter()
                 .any(|p| p.contains("comparison column `not_a_column`")),
+            "{problems:?}"
+        );
+    }
+
+    #[test]
+    fn a_comparison_may_name_a_borrowed_column() {
+        // THE point of E11a. Declaring a feature and then being refused for
+        // using it would make the block decorative — and this is the assertion
+        // that fails if the derived columns are added to `valid` after the
+        // comparison check rather than before it.
+        let with_feature = GOOD
+            .replace(
+                "comparisons:",
+                "features:\n  related:\n    - prefix: employer\n      key_column: employer_id\n      target_source: crm\n      attributes: [given_name]\ncomparisons:\n  employer_given_name: { levels: [exact, null] }",
+            );
+        let problems = config_reference_problems(&load(&with_feature));
+        assert!(
+            !problems.iter().any(|p| p.contains("employer_given_name")),
+            "a borrowed column must be nameable by a comparison: {problems:?}"
+        );
+    }
+
+    #[test]
+    fn a_feature_pointing_at_an_unknown_source_is_flagged() {
+        // At publish, naming the alternatives. The run-time alternative is a
+        // join against nothing, which produces NULLs rather than an error —
+        // so the comparison silently never fires and the tenant concludes the
+        // feature does not work.
+        let bad = GOOD.replace(
+            "comparisons:",
+            "features:\n  related:\n    - prefix: employer\n      key_column: employer_id\n      target_source: nowhere\n      attributes: [given_name]\ncomparisons:",
+        );
+        let problems = config_reference_problems(&load(&bad));
+        assert!(
+            problems.iter().any(|p| p.contains("nowhere")),
             "{problems:?}"
         );
     }

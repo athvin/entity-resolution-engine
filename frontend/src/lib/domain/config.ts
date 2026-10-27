@@ -34,6 +34,11 @@ export interface ConfigView {
   blocking: BlockingRule[];
   comparisons: Record<string, ComparisonSpec>;
   sources: string[];
+  /** Columns borrowed from a related record (E11a), by the names a blocking
+   *  expr or comparison would use. Real columns by the time the engine scores,
+   *  so the editor must treat them as such — otherwise declaring a feature and
+   *  then using it warns, which is the whole feature. */
+  derivedColumns: string[];
 }
 
 /** Survivorship rules the engine knows; the pill palette. */
@@ -127,7 +132,10 @@ const SQL_WORDS = new Set([
  * JSON pointer stays authoritative; these exist so the obvious mistakes never
  * leave the editor.
  */
-export function blockingWarnings(rule: BlockingRule): string[] {
+export function blockingWarnings(
+  rule: BlockingRule,
+  derivedColumns: readonly string[] = [],
+): string[] {
   const warnings: string[] = [];
   if (!rule.key_type.trim()) warnings.push("key_type is empty");
   if (!rule.expr.trim()) {
@@ -143,10 +151,11 @@ export function blockingWarnings(rule: BlockingRule): string[] {
   if (depth !== 0) warnings.push("parentheses are unbalanced");
   const identifiers = rule.expr.replaceAll(/'[^']*'/g, " ").match(/[A-Za-z_][A-Za-z0-9_]*/g);
   const columns = (identifiers ?? []).filter((word) => !SQL_WORDS.has(word.toLowerCase()));
-  if (
-    columns.length > 0 &&
-    !columns.some((word) => (MATCHING_COLUMNS as readonly string[]).includes(word))
-  ) {
+  // Borrowed columns count as known: they are real columns by the time the
+  // engine scores, and the publish gate adds them to its valid set for the
+  // same reason. Defaulted to empty so every existing caller is unchanged.
+  const known = [...MATCHING_COLUMNS, ...derivedColumns] as readonly string[];
+  if (columns.length > 0 && !columns.some((word) => known.includes(word))) {
     warnings.push("expr references no known standardized column");
   }
   return warnings;
@@ -206,6 +215,23 @@ export function parseConfig(yamlText: string): ConfigView {
   const sources =
     typeof root.sources === "object" && root.sources !== null ? Object.keys(root.sources) : [];
 
+  // E11a: `features.related[].prefix` + each borrowed attribute, which is the
+  // naming rule the server's `RelatedFeature::column_for` uses. Derived rather
+  // than read from a separate list, so the two cannot disagree about what a
+  // borrowed column is called.
+  const derivedColumns: string[] = [];
+  const features = root.features as { related?: unknown } | null;
+  if (features !== null && typeof features === "object" && Array.isArray(features.related)) {
+    for (const entry of features.related) {
+      if (typeof entry !== "object" || entry === null) continue;
+      const { prefix, attributes } = entry as { prefix?: unknown; attributes?: unknown };
+      if (typeof prefix !== "string" || !Array.isArray(attributes)) continue;
+      for (const attribute of attributes) {
+        derivedColumns.push(`${prefix}_${String(attribute)}`);
+      }
+    }
+  }
+
   return {
     tenant: typeof root.tenant === "string" ? root.tenant : null,
     entityType: root.entity_type === "account" ? "account" : "person",
@@ -214,6 +240,7 @@ export function parseConfig(yamlText: string): ConfigView {
     blocking,
     comparisons,
     sources,
+    derivedColumns,
   };
 }
 
