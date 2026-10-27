@@ -11,6 +11,7 @@ import {
   CircleAlert,
   FileUp,
   Loader2,
+  Sparkles,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,8 @@ import {
   type ColumnProfile,
 } from "@/lib/domain/csv-profile";
 import { useActiveConfig, useCreateDraft, useOrgEntityType, usePublish } from "@/lib/query/config";
+import { useSuggestMapping } from "@/lib/query/schema-ai";
+import { redactProfile } from "@/lib/schema-ai/redact";
 import { useImportFile, useSources } from "@/lib/query/steward";
 import { cn } from "@/lib/utils";
 
@@ -88,6 +91,11 @@ export function NewSourceWizard({ org }: { org: string }) {
   const [rankTouched, setRankTouched] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [draftVersion, setDraftVersion] = useState<number | null>(null);
+  // V8: the model's answers land in `state.mapping` like any other
+  // suggestion; these two only carry what it SAID and why.
+  const suggest = useSuggestMapping(org);
+  const [aiNote, setAiNote] = useState<string | null>(null);
+  const [aiReasons, setAiReasons] = useState<Record<string, string>>({});
   const [activation, setActivation] = useState<Activation | null>(null);
   const [state, setState] = useState<WizardState>({
     fileName: "",
@@ -133,6 +141,56 @@ export function NewSourceWizard({ org }: { org: string }) {
       );
     }
   }, [nextFreeRank, rankTouched]);
+
+  /**
+   * Fill the unmapped attributes from the model (V8).
+   *
+   * Only the REDACTED profile is sent — `redactProfile` turns each sample into
+   * a shape — and only the attributes the heuristic left blank are asked about.
+   * Every answer lands in the same `state.mapping` the selects read, so it is a
+   * suggestion the person confirms exactly like the regex one.
+   */
+  function askForMapping() {
+    setAiNote(null);
+    const taken = Object.entries(state.mapping).filter(([, column]) => Boolean(column));
+    suggest.mutate(
+      {
+        ...redactProfile(state.columns, state.rowCount, entityType),
+        taken_columns: taken.map(([, column]) => column),
+        taken_attributes: taken.map(([attribute]) => attribute),
+      },
+      {
+        onSuccess: ({ mappings }) => {
+          if (mappings.length === 0) {
+            // Distinguished from a failure: the prompt ASKS for omission over a
+            // guess, so "nothing confident to add" is a real answer.
+            setAiNote("nothing it was confident about — map the rest yourself");
+            return;
+          }
+          setState((current) => {
+            const mapping = { ...current.mapping };
+            for (const suggestion of mappings) {
+              // Never overwrite: a person may have mapped something while the
+              // request was in flight, and their choice outranks the model's.
+              if (!mapping[suggestion.attribute]) mapping[suggestion.attribute] = suggestion.column;
+            }
+            return { ...current, mapping };
+          });
+          setAiReasons((current) => {
+            const next = { ...current };
+            for (const suggestion of mappings) next[suggestion.attribute] = suggestion.reason;
+            return next;
+          });
+          setAiNote(`filled ${String(mappings.length)} — check each before continuing`);
+        },
+        onError: (error) => {
+          setAiNote(
+            error instanceof BffRequestError ? error.message : "could not suggest a mapping",
+          );
+        },
+      },
+    );
+  }
 
   async function onFile(file: File) {
     setError(null);
@@ -527,30 +585,69 @@ export function NewSourceWizard({ org }: { org: string }) {
               — nothing in your file is dropped.
             </CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-3 p-4 pt-2 sm:grid-cols-2">
-            {canonical.map((attribute) => (
-              <label key={attribute} className="flex flex-col gap-1 text-sm">
-                <span className="font-medium">{attribute}</span>
-                <select
-                  value={state.mapping[attribute] ?? ""}
-                  data-testid={`map-${attribute}`}
-                  onChange={(event) => {
-                    setState((current) => ({
-                      ...current,
-                      mapping: { ...current.mapping, [attribute]: event.target.value || undefined },
-                    }));
-                  }}
-                  className="border-input bg-background h-9 rounded-md border px-2 text-sm"
+          <CardContent className="flex flex-col gap-3 p-4 pt-2">
+            {/* V8. Offered only when something is actually unmapped — on a file
+                whose headers the regex table already understood, a model call
+                would spend a tenant's tokens to re-derive `email -> email`. */}
+            {canonical.some((attribute) => !state.mapping[attribute]) && (
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={suggest.isPending}
+                  onClick={askForMapping}
+                  data-testid="wizard-ai-map"
                 >
-                  <option value="">— not present —</option>
-                  {columnNames.map((name) => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ))}
+                  <Sparkles className="size-3.5" aria-hidden />
+                  {suggest.isPending ? "Looking…" : "Suggest the rest"}
+                </Button>
+                <span className="text-muted-foreground text-xs" data-testid="wizard-ai-privacy">
+                  Sends column names and value <em>shapes</em> (<code>aaa@aaa.aaa</code>) — never
+                  your data.
+                </span>
+                {aiNote !== null && (
+                  <span className="text-muted-foreground text-xs" data-testid="wizard-ai-note">
+                    {aiNote}
+                  </span>
+                )}
+              </div>
+            )}
+            <div className="grid gap-3 sm:grid-cols-2">
+              {canonical.map((attribute) => (
+                <label key={attribute} className="flex flex-col gap-1 text-sm">
+                  <span className="font-medium">{attribute}</span>
+                  <select
+                    value={state.mapping[attribute] ?? ""}
+                    data-testid={`map-${attribute}`}
+                    onChange={(event) => {
+                      setState((current) => ({
+                        ...current,
+                        mapping: {
+                          ...current.mapping,
+                          [attribute]: event.target.value || undefined,
+                        },
+                      }));
+                    }}
+                    className="border-input bg-background h-9 rounded-md border px-2 text-sm"
+                  >
+                    <option value="">— not present —</option>
+                    {columnNames.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                  {aiReasons[attribute] !== undefined && (
+                    <span
+                      className="text-muted-foreground text-xs"
+                      data-testid={`why-${attribute}`}
+                    >
+                      AI: {aiReasons[attribute]}
+                    </span>
+                  )}
+                </label>
+              ))}
+            </div>
           </CardContent>
         </Card>
       )}
