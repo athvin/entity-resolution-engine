@@ -77,7 +77,11 @@ test.describe("sources & imports", () => {
   });
 
   test("a tenant with no bucket reads as not configured, not as broken", async ({ page }) => {
-    await login(page, USERS.viewer);
+    // The STEWARD, not the viewer: `viewer@acme.dev` is not a member of
+    // `fresh-dev`, and the tenant layout answers a non-member with notFound()
+    // so nobody learns which orgs exist. `run-cost.spec.ts` reaches the same
+    // org the same way.
+    await login(page, USERS.steward);
     // `fresh-dev` has no bucket, which is every tenant until an operator points
     // the poller at one. An empty table here would read as "configured and
     // nothing has ever arrived", which is a different and alarming fact.

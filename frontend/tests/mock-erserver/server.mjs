@@ -2448,11 +2448,9 @@ const server = http.createServer((req, res) => {
     // every tenant until an operator points the poller at one — the panel must
     // read as "not configured", not as "configured and broken".
     //
-    // Field names are the handler's, not the entity's: it projects
-    // `created_at`/`updated_at` as `first_ingested_at`/`last_ingested_at`,
-    // because "when did this source first arrive this way" and "when did it
-    // last" are the two questions, and a column called `updated_at` answers
-    // neither legibly.
+    // Field names are the entity's. The handler projects a subset of the
+    // cursor row — no `id`, no `org_id` — but renames nothing, so this fixture
+    // and the generated `S3IngestCursor` binding cannot drift apart.
     if ((match = /^\/v1\/orgs\/([^/]+)\/s3-ingest$/.exec(path)) && req.method === "GET") {
       if (match[1] === "fresh-dev") {
         return send(res, 200, { bucket: null, prefix: null, sources: [] });
@@ -2466,8 +2464,8 @@ const server = http.createServer((req, res) => {
             object_key: "tenants/acme/crm/2026-10-26.csv",
             size_bytes: 20480,
             delivery_id: "01jm0000000000000000000091",
-            first_ingested_at: "2026-10-01T02:00:00.000000Z",
-            last_ingested_at: "2026-10-26T02:00:00.000000Z",
+            created_at: "2026-10-01T02:00:00.000000Z",
+            updated_at: "2026-10-26T02:00:00.000000Z",
           },
         ],
       });

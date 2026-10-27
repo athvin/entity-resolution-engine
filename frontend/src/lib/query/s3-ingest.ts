@@ -11,8 +11,10 @@ export interface IngestedSource {
   object_key: string;
   size_bytes: number;
   delivery_id: string;
-  first_ingested_at: string;
-  last_ingested_at: string;
+  /** When this source was first auto-ingested. */
+  created_at: string;
+  /** When it was last auto-ingested — the "last read" column. */
+  updated_at: string;
 }
 
 export interface S3IngestState {

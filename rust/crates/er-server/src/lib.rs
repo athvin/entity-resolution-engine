@@ -5211,8 +5211,14 @@ async fn s3_ingest_state(
             "object_key": c.object_key,
             "size_bytes": c.size_bytes,
             "delivery_id": c.delivery_id,
-            "first_ingested_at": pg::ts(&c.created_at),
-            "last_ingested_at": pg::ts(&c.updated_at),
+            // The entity's own names. A wire rename to
+            // `first_ingested_at`/`last_ingested_at` read better in isolation
+            // and was dropped: it is a second vocabulary for one column, the
+            // generated `S3IngestCursor` binding already describes what each
+            // means, and `mock-fabrication.test.ts` is right that a field no
+            // entity declares has to be accounted for rather than assumed.
+            "created_at": pg::ts(&c.created_at),
+            "updated_at": pg::ts(&c.updated_at),
         })).collect::<Vec<_>>(),
     }))
     .into_response()

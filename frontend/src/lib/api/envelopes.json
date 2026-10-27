@@ -37,6 +37,7 @@
   "GET /v1/orgs/{org}/reviews/{review_id}": { "envelope": "scalar" },
   "GET /v1/orgs/{org}/runs": { "envelope": "bare" },
   "GET /v1/orgs/{org}/runs/{run_id}/entity-events": { "envelope": "record", "keys": ["items", "run_id", "snapshot", "next_cursor"] },
+  "GET /v1/orgs/{org}/s3-ingest": { "envelope": "record", "keys": ["bucket", "prefix", "sources"] },
   "GET /v1/orgs/{org}/schedules": { "envelope": "bare" },
   "GET /v1/orgs/{org}/segments": { "envelope": "wrapped", "key": "segments" },
   "GET /v1/orgs/{org}/staged": { "envelope": "wrapped", "key": "pending_count" },

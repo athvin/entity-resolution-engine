@@ -29,8 +29,8 @@ export function AutoIngestPanel({ org, sources }: { org: string; sources: readon
           Auto-ingest — drop a file, no upload
         </CardTitle>
         <CardDescription>
-          The dispatcher checks each source&apos;s folder about once a minute and imports the
-          newest CSV it has not read. Replacing a file in place counts as new.
+          The dispatcher checks each source&apos;s folder about once a minute and imports the newest
+          CSV it has not read. Replacing a file in place counts as new.
         </CardDescription>
       </CardHeader>
       <CardContent className="p-4 pt-2 lg:p-6 lg:pt-2">
@@ -75,7 +75,7 @@ export function AutoIngestPanel({ org, sources }: { org: string; sources: readon
                         {landed?.object_key ?? "— nothing yet"}
                       </td>
                       <td className="text-muted-foreground py-2 text-xs">
-                        {landed?.last_ingested_at ?? "—"}
+                        {landed?.updated_at ?? "—"}
                       </td>
                     </tr>
                   );
