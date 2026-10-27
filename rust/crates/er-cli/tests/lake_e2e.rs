@@ -787,6 +787,94 @@ fn an_incremental_batch_lands_where_a_full_rerun_would() {
     let _ = std::fs::remove_dir_all(&tmp_b);
 }
 
+/// A borrowed column reaches the engine's input, and nothing is dropped doing
+/// it (E11a).
+///
+/// The feature exists because two "J. Smith" records are indistinguishable
+/// until you notice one works at Acme and the other does not — and the employer
+/// is on neither record, it is on the record their key points at.
+///
+/// The property this asserts beyond "the column appears" is the one that could
+/// lose data: the join is LEFT, so a record whose key points at nothing is
+/// still in the corpus. An inner join would drop it, which changes the
+/// PARTITION rather than just a comparison — and would look like the engine
+/// simply never saw those records.
+#[test]
+fn a_borrowed_column_reaches_the_engine_and_drops_no_record() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let (session, config, tmp) = open_seeded_lake("related_widen");
+    run_all_phase(
+        &session,
+        &config,
+        "incremental_batch",
+        "base",
+        "01RELATED0000000000000BASE",
+        "2026-01-01 00:00:00",
+        "full",
+    );
+
+    let rows = |sql: &str| -> i64 { session.query_strings(sql).unwrap()[0][0].parse().unwrap() };
+    let corpus = rows("select count(*) from lake.main.int_std_records");
+    assert!(corpus > 0, "precondition: the corpus has records");
+
+    // Declare a feature pointing at a source whose ids NOTHING references, so
+    // every join misses. That is the hostile case for a LEFT join and the one
+    // an inner join would fail: the widened corpus must still hold every
+    // record.
+    let mut widened_config = config.clone();
+    widened_config
+        .features
+        .related
+        .push(er_config::RelatedFeature {
+            prefix: "employer".to_string(),
+            key_column: "employer_id".to_string(),
+            target_source: "crm".to_string(),
+            attributes: vec!["given_name".to_string(), "addr_city".to_string()],
+        });
+    let sql = er_cli::related::widen_sql(&widened_config, er_cli::INT_STD_RECORDS)
+        .expect("a feature is declared");
+    session
+        .execute_batch(&format!("create or replace temp table __w as {sql}"))
+        .unwrap();
+
+    assert_eq!(
+        rows("select count(*) from __w"),
+        corpus,
+        "the LEFT join must keep every record even when its key matches \
+         nothing; an inner join here would change the partition, not just a \
+         comparison"
+    );
+    // And the borrowed columns exist, by the names a comparison would use.
+    let columns: Vec<String> = session
+        .query_strings(
+            "select column_name from information_schema.columns \
+             where table_name = '__w' order by column_name",
+        )
+        .unwrap()
+        .into_iter()
+        .map(|r| r[0].clone())
+        .collect();
+    for expected in ["employer_given_name", "employer_addr_city"] {
+        assert!(
+            columns.iter().any(|c| c == expected),
+            "borrowed column {expected} missing from {columns:?}"
+        );
+    }
+    // Every standardized column survives: the widening is additive, and a
+    // comparison naming any existing column must keep working.
+    for expected in ["record_key", "given_name", "email", "metadata"] {
+        assert!(
+            columns.iter().any(|c| c == expected),
+            "standardized column {expected} was lost by the widening"
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
 /// Resolving the corpus one segment at a time must land exactly where one full
 /// run would (#54).
 ///

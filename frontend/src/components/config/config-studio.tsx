@@ -497,6 +497,7 @@ export function ConfigStudio({ org }: { org: string }) {
               onChange={setBlocking}
               disabled={!isAdmin}
               errorIndex={blockingErrorIndex}
+              derivedColumns={view.derivedColumns}
             />
           )}
         </CardContent>

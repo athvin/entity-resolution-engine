@@ -19,6 +19,10 @@ interface BlockingEditorProps {
   disabled: boolean;
   /** JSON-pointer row index the server's 422 named, to highlight. */
   errorIndex?: number | null;
+  /** Columns borrowed from a related record (E11a). Real columns by the time
+   *  the engine scores, so an expr naming one must not warn — the publish gate
+   *  adds them to its valid set for the same reason. */
+  derivedColumns?: readonly string[];
 }
 
 /**
@@ -27,7 +31,13 @@ interface BlockingEditorProps {
  * Client warnings are advisory; the server's 422 JSON pointer is authoritative
  * and lands on the row it names.
  */
-export function BlockingEditor({ rules, onChange, disabled, errorIndex }: BlockingEditorProps) {
+export function BlockingEditor({
+  rules,
+  onChange,
+  disabled,
+  errorIndex,
+  derivedColumns = [],
+}: BlockingEditorProps) {
   function update(index: number, patch: Partial<BlockingRule>) {
     onChange(rules.map((rule, at) => (at === index ? { ...rule, ...patch } : rule)));
   }
@@ -48,7 +58,7 @@ export function BlockingEditor({ rules, onChange, disabled, errorIndex }: Blocki
     <div className="flex flex-col gap-2" data-testid="blocking-editor">
       {rules.map((rule, index) => {
         const warnings = [
-          ...blockingWarnings(rule),
+          ...blockingWarnings(rule, derivedColumns),
           ...(keyTypes.indexOf(rule.key_type) !== index ? ["key_type is duplicated"] : []),
         ];
         return (

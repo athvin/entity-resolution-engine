@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   addSourceBlock,
   applyEdits,
+  type BlockingRule,
   blockingWarnings,
   diffLines,
   isComparisonLevel,
@@ -155,5 +156,70 @@ describe("line diff", () => {
       { kind: "added", text: "B" },
       { kind: "same", text: "c" },
     ]);
+  });
+});
+
+describe("related-record features (E11a)", () => {
+  const WITH_FEATURE = `tenant: acme
+thresholds:
+  auto_merge: 0.95
+  review_low: 0.60
+features:
+  related:
+    - prefix: employer
+      key_column: employer_id
+      target_source: crm
+      attributes: [given_name, addr_city]
+blocking:
+  - { key_type: employer_exact, expr: "employer_given_name" }
+comparisons:
+  employer_given_name: { levels: [exact, null] }
+sources:
+  crm: {}
+`;
+
+  it("derives the borrowed column names the way the server does", () => {
+    // `prefix_attribute`, matching `RelatedFeature::column_for`. Derived rather
+    // than read from a separate list so the two cannot disagree about what a
+    // borrowed column is called.
+    const view = parseConfig(WITH_FEATURE);
+    expect(view.derivedColumns).toEqual(["employer_given_name", "employer_addr_city"]);
+  });
+
+  it("a config with no features block derives nothing", () => {
+    expect(parseConfig(CONFIG).derivedColumns).toEqual([]);
+  });
+
+  it("a blocking expr on a borrowed column does not warn", () => {
+    // THE point. A borrowed column is a real column by the time the engine
+    // scores — the publish gate adds it to its valid set for the same reason —
+    // so declaring a feature and then being warned for using it would make the
+    // block decorative.
+    const view = parseConfig(WITH_FEATURE);
+    const rule = view.blocking[0];
+    expect(rule).toBeDefined();
+    expect(blockingWarnings(rule as BlockingRule, view.derivedColumns)).toEqual([]);
+  });
+
+  it("still warns when the expr references nothing known", () => {
+    // The guard has to keep working, or it would pass everything once any
+    // feature is declared.
+    const view = parseConfig(WITH_FEATURE);
+    const warnings = blockingWarnings(
+      { key_type: "bogus", expr: "not_a_column" },
+      view.derivedColumns,
+    );
+    expect(warnings).toContain("expr references no known standardized column");
+  });
+
+  it("without the derived columns the same expr WOULD warn", () => {
+    // Pins why the parameter exists: the default-empty call is the old
+    // behaviour, so this is the before/after in one assertion.
+    const view = parseConfig(WITH_FEATURE);
+    const rule = view.blocking[0];
+    expect(rule).toBeDefined();
+    expect(blockingWarnings(rule as BlockingRule)).toContain(
+      "expr references no known standardized column",
+    );
   });
 });
