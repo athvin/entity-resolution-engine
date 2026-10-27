@@ -28,7 +28,10 @@ export interface PublishResult {
   jobs_enqueued: string[];
 }
 
-const configKey = (org: string) => [...queryKeys.org(org), "config"] as const;
+/** The whole config family: active, the version list, and each version.
+ * Exported so `config-ai.ts` invalidates the SAME key rather than a parallel
+ * one that would leave the version history card stale after an AI draft. */
+export const configKey = (org: string) => [...queryKeys.org(org), "config"] as const;
 
 export function useActiveConfig(org: string) {
   return useQuery({

@@ -49,6 +49,13 @@ export const TRIAGE_ORGS = [
   // second would find the button correctly disabled. Same reason as
   // `palette-dev`.
   "segment-dev",
+  // Drafting a config from a description (V7) APPENDS a version, so it cannot
+  // share an org with the publish journeys that assert "v2 published" and
+  // click `diff-2` — an extra draft shifts both. Membership has to be granted
+  // HERE as well as in the mock's own org list: the mock knowing an org does
+  // not make the BFF's session a member of it, which is a 404 that reads as a
+  // missing page.
+  "configai-dev",
   // The model registry: activating a version ARCHIVES the one it replaces, so
   // a project that activates would flip the state another project is asserting
   // — all three share one mock server.

@@ -771,6 +771,10 @@ export function initialState() {
     // Scoping a run to a segment starts one, which takes the org's single
     // writer slot — it cannot share with the Runs page's Run-now test.
     "segment-dev",
+    // Drafting a config from a description APPENDS a version, so it cannot
+    // share an org with the publish journeys that assert "v2 published" and
+    // click `diff-2` — an extra draft shifts both. Desktop-only, so one org.
+    "configai-dev",
     // Activating a version ARCHIVES the one it replaces, so the registry gets
     // one org per device project: all three share this server, and a project
     // that activates would otherwise flip the state another is asserting.
@@ -1146,6 +1150,61 @@ const server = http.createServer((req, res) => {
       // payload, finds no `verdict`, and the route 502s. The system prompt is
       // the discriminator: it is the one part of the request that names the
       // task, and both callers set it from their own pure module.
+      // V7 authoring: returns a COMPLETE config document. Echoes the one it was
+      // given with the review threshold nudged, because `parseDraft` refuses an
+      // unchanged document — a mock that returned the input verbatim would
+      // exercise only the decline path and never the happy one.
+      if (
+        body.stream !== true &&
+        String(body.system ?? "").includes("You edit the configuration")
+      ) {
+        const given = String(body.messages?.[0]?.content ?? "");
+        const fenced = /```yaml\n([\s\S]*?)```/.exec(given);
+        const current = fenced?.[1] ?? "entity_type: person\nsources: []\n";
+        const edited = current.includes("review_low:")
+          ? current.replace(/review_low:\s*[0-9.]+/, "review_low: 0.72")
+          : `${current.trimEnd()}\nthresholds:\n  review_low: 0.72\n  auto_merge: 0.95\n`;
+        return send(res, 200, {
+          id: "msg_mock_author",
+          type: "message",
+          role: "assistant",
+          model: String(body.model ?? "mock"),
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                yaml: edited,
+                summary: "Raised the review threshold to 0.72.",
+              }),
+            },
+          ],
+          stop_reason: "end_turn",
+          stop_sequence: null,
+          usage: { input_tokens: 200, output_tokens: 300 },
+        });
+      }
+      // V7 explanation: PROSE, not structured output — this call sets no
+      // json_schema, so a JSON body here would be rendered to the reader as-is.
+      if (
+        body.stream !== true &&
+        String(body.system ?? "").includes("You explain one configuration rule")
+      ) {
+        return send(res, 200, {
+          id: "msg_mock_explain",
+          type: "message",
+          role: "assistant",
+          model: String(body.model ?? "mock"),
+          content: [
+            {
+              type: "text",
+              text: "This rule decides which record pairs are even compared. Removing it would compare every record against every other, which is the cost this block exists to bound.",
+            },
+          ],
+          stop_reason: "end_turn",
+          stop_sequence: null,
+          usage: { input_tokens: 60, output_tokens: 40 },
+        });
+      }
       if (body.stream !== true && String(body.system ?? "").includes("adjudicator")) {
         const recommendation = {
           verdict: "match",
