@@ -65,6 +65,53 @@ test.describe("config studio", () => {
     await expect(page.getByTestId("version-diff")).toContainText("+ ");
   });
 
+  /**
+   * V7. The two halves carry DIFFERENT permissions on purpose, so both are
+   * walked: a viewer can ask what a rule does, and only an admin can describe
+   * a change. Getting that backwards would put the rules learning curve behind
+   * the permission that presumes you have already climbed it.
+   */
+  test("a viewer can ask what a rule does but cannot describe a change", async ({ page }) => {
+    await login(page, USERS.viewer);
+    await page.goto(`/${ORG}/settings/config`);
+    await expect(page.getByTestId("config-ai")).toBeVisible();
+
+    // The writing half is ABSENT, not merely disabled.
+    await expect(page.getByTestId("config-ai-instruction")).toHaveCount(0);
+    await expect(page.getByTestId("config-ai-draft")).toHaveCount(0);
+    await expect(page.getByTestId("config-ai-read-only")).toContainText("anyone can ask");
+
+    // The reading half works.
+    await page.getByTestId("config-ai-explain").click();
+    await expect(page.getByTestId("config-ai-explanation")).toContainText("record pairs");
+  });
+
+  test("an admin describes a change and gets a DRAFT, not a publish", async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(isMobile, "the config journey runs once, on desktop");
+    // Its own mutating org. Drafting APPENDS a version, so it cannot share
+    // with the publish journeys that assert "v2 published" and click `diff-2`.
+    const org = "configai-dev";
+    await login(page, USERS.admin);
+    await page.goto(`/${org}/settings/config`);
+    await expect(page.getByTestId("config-ai")).toBeVisible();
+
+    await page.getByTestId("config-ai-instruction").fill("raise the review threshold a little");
+    const [response] = await Promise.all([
+      page.waitForResponse((r) => r.url().includes("/config/draft-from-prose")),
+      page.getByTestId("config-ai-draft").click(),
+    ]);
+    expect(response.status()).toBe(201);
+    await expect(page.getByTestId("config-ai-summary")).toContainText("review threshold");
+
+    // THE POINT: a draft, and the active version has not moved. Nothing the
+    // model wrote takes effect until a human publishes a diff they have read.
+    await expect(page.getByTestId("publish-result")).toHaveCount(0);
+    await expect(page.getByTestId("version-history")).toContainText("draft");
+  });
+
   test("an admin publishes a blocking change as tier B", async ({ page, isMobile }) => {
     test.skip(isMobile, "the publish journey runs once, on desktop");
     // Its own mutating org: the tier-A journey publishes on the triage org in

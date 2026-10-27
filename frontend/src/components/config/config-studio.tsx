@@ -28,9 +28,12 @@ import {
   usePublish,
   useScoreSample,
 } from "@/lib/query/config";
+import { extractBlock, isExplainableBlock } from "@/lib/config-ai/blocks";
+import { useDraftFromProse, useExplainRule } from "@/lib/query/config-ai";
 import { effectiveRole, useSession } from "@/lib/query/hooks";
 import { cn } from "@/lib/utils";
 import { BlockingEditor } from "./blocking-editor";
+import { ConfigAiPanel } from "./config-ai-panel";
 import { ComparisonEditor } from "./comparison-editor";
 import { SurvivorshipEditor } from "./survivorship-editor";
 import { ThresholdEditor } from "./threshold-editor";
@@ -162,6 +165,16 @@ export function ConfigStudio({ org }: { org: string }) {
   const [comparisons, setComparisons] = useState<Record<string, ComparisonSpec> | null>(null);
   const [blockingErrorIndex, setBlockingErrorIndex] = useState<number | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
+  // V7's panel state. Kept here rather than inside the panel so the panel stays
+  // props-only and its render branches are testable without a query client.
+  const draftFromProse = useDraftFromProse(org);
+  const explainRule = useExplainRule(org);
+  const [aiInstruction, setAiInstruction] = useState("");
+  const [aiBlock, setAiBlock] = useState<string>("blocking");
+  const [aiExplanation, setAiExplanation] = useState<string | null>(null);
+  const [aiSummary, setAiSummary] = useState<string | null>(null);
+  const [aiDeclined, setAiDeclined] = useState<string | null>(null);
+  const [aiFailure, setAiFailure] = useState<string | null>(null);
   const [published, setPublished] = useState<{
     version: number;
     tier: string | null;
@@ -280,6 +293,73 @@ export function ConfigStudio({ org }: { org: string }) {
           </CardContent>
         </Card>
       )}
+
+      {/* V7. Above the editors because it is where someone who does not yet
+          know the vocabulary starts — and below the publish control, so it
+          never reads as the thing that applies a change. It does not: a
+          described change becomes a draft in the history card at the bottom. */}
+      <ConfigAiPanel
+        canDraft={isAdmin}
+        instruction={aiInstruction}
+        block={aiBlock}
+        explanation={aiExplanation}
+        draftSummary={aiSummary}
+        declined={aiDeclined}
+        drafting={draftFromProse.isPending}
+        explaining={explainRule.isPending}
+        failure={aiFailure}
+        onInstructionChange={setAiInstruction}
+        onBlockChange={(value) => {
+          setAiBlock(value);
+          // The old explanation described the old block; leaving it on screen
+          // under a new selection is the kind of wrong that looks right.
+          setAiExplanation(null);
+        }}
+        onDraft={() => {
+          setAiFailure(null);
+          setAiSummary(null);
+          setAiDeclined(null);
+          draftFromProse.mutate(aiInstruction, {
+            onSuccess: (result) => {
+              if (result.drafted) setAiSummary(result.summary ?? "see the draft below");
+              else setAiDeclined(result.reason ?? "the request was not clear enough");
+            },
+            onError: (error) => {
+              setAiFailure(
+                error instanceof BffRequestError ? error.message : "could not draft that change",
+              );
+            },
+          });
+        }}
+        onExplain={() => {
+          setAiFailure(null);
+          setAiExplanation(null);
+          // No `active.data` check: the early return above already narrowed it,
+          // and eslint rightly calls the second one dead. The block guard is
+          // real — `aiBlock` is a plain string from a <select>.
+          if (!isExplainableBlock(aiBlock)) return;
+          const rule = extractBlock(active.data.yaml, aiBlock);
+          if (rule === null) {
+            // Distinguished from a model failure: there is genuinely no such
+            // rule, and asking about an absent block would get an answer.
+            setAiFailure(`this config has no ${aiBlock} rules to explain`);
+            return;
+          }
+          explainRule.mutate(
+            { block: aiBlock, rule },
+            {
+              onSuccess: (result) => {
+                setAiExplanation(result.explanation);
+              },
+              onError: (error) => {
+                setAiFailure(
+                  error instanceof BffRequestError ? error.message : "could not explain that rule",
+                );
+              },
+            },
+          );
+        }}
+      />
 
       {thresholds && (
         <Card data-testid="thresholds-card">

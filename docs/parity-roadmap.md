@@ -2475,7 +2475,47 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          `origin = 'llm'`, `m_from_labels` counts only labels actually used, and a
          `pg_train` phase asserts two human labels are used while an `llm` one is not.
          Observed failing first — removing the filter reports `m_from_labels: 3`.
-   - [ ] V7 NL rule authoring + explain-rule (#29). Writes a DRAFT version, never publishes.
+   - [x] V7 NL rule authoring + explain-rule (#29). Writes a DRAFT version, never publishes.
+         **Deliberately NOT a `draft_config` tool on the assistant**, which is what the plan
+         asked for. That toolbox states its own invariant in its header — "read-only wrappers
+         … executed with the org's VIEWER credential, so tenant isolation and read-only-ness
+         are enforced by erserver, never by the prompt" — and a write tool breaks it. The
+         sharper problem is that those tools return *record data*: a value inside a customer
+         record could steer a config edit happening in the same tool loop. On its own
+         admin-gated route there are no record values in context at all, and the
+         authorization is the route's ordinary `requireOrgAccess(org, "admin")` rather than a
+         bespoke in-tool role check. Same capability, much smaller blast radius.
+         **The two halves split on role, which is the design.** Authoring is admin because it
+         writes a version; explaining is **viewer**, because the person who most needs a rule
+         explained is usually the one who cannot edit it — gating the explanation behind the
+         editing permission would put the learning curve behind the permission that presumes
+         you have already climbed it. That complaint (the incumbent's rules learning curve) is
+         the research doc's number one, and this attacks it from both sides.
+         Safety is structural rather than prompt-deep: the model's output becomes a draft
+         through the SAME `POST /config/versions` the studio's own editor uses, and publishing
+         stays a separate act on a diff a human has read. `parseDraft` then rejects what a
+         human reviewing a diff would not reliably catch — YAML that does not parse (a 500 at
+         publish rather than a readable diff), a fragment missing required top-level keys (it
+         parses and means nothing), and an **unchanged** document, which is reported as its own
+         200 outcome rather than an error because the prompt explicitly asks the model to
+         decline that way; rendering it as a failure would train people to rephrase until
+         something lands.
+         Tests: 27 on the two cores, 11 component, two functional specs walking both roles.
+         Two sabotages observed failing first — dropping the unchanged check and neutering the
+         required-key check — caught by four assertions between them.
+         **A real bug my own unit tests could not catch.** I invented `entity_type` as a
+         required top-level config key. It is not one: real configs use `tenant` and
+         `sources`, and `entity_type` is optional. So `parseDraft` would have rejected EVERY
+         genuine config as a fragment and the feature would have 502'd for every tenant — and
+         all 27 unit tests passed, because **I wrote the fixture and the rule it validates at
+         the same time**, so the fixture inherited the same false assumption. The functional
+         spec caught it, because the mock's config is modelled on the real one. A test can
+         only catch an invented constraint when its data comes from somewhere other than the
+         inventor; the keys are now checked against `er-cli/tests/fixtures/test.yaml`.
+         *Also worth knowing:* a new Playwright org must be registered in **two** places — the
+         mock's mutable-org list and the BFF's `TRIAGE_ORGS` fixture. The mock knowing an org
+         does not make the session a member of it, and the symptom is a 404 that reads as a
+         missing page.
    - [ ] V8 AI schema mapping + AI model setup (#48/#35). Sends a profile summary, never rows.
    - [ ] V9 staged agent write-actions (#81), through the existing steward-action path.
 
