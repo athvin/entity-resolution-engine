@@ -2,7 +2,9 @@ import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 
 import { resolveAiConfig } from "@/lib/ai/config";
-import { executeTool, systemPrompt, TOOL_DEFINITIONS } from "@/lib/assistant/tools";
+import { allowedActions, canBeOfferedActions, type Role } from "@/lib/agent-actions/gate";
+import { parseProposals } from "@/lib/agent-actions/propose";
+import { executeTool, PROPOSE_TOOL, systemPrompt, TOOL_DEFINITIONS } from "@/lib/assistant/tools";
 import { BffFailure, requireOrgAccess, respond } from "@/lib/bff/proxy";
 import { NextResponse } from "next/server";
 
@@ -50,6 +52,16 @@ export async function POST(
       throw new BffFailure(422, "validation", "messages[{role, content}] is required");
     }
 
+    // V9. The role comes from the SESSION — `requireOrgAccess` resolved it —
+    // so nothing the model or a record says can widen it. A viewer's request
+    // carries neither the proposal instructions nor the tool, and
+    // `allowedActions` drops anything that appears regardless.
+    // `access.role` is `Membership["role"]` — never null here, because
+    // `requireOrgAccess` already resolved a session. `Role` admits null only
+    // because the CLIENT has a loading state, and the gate must refuse that.
+    const role: Role = access.role;
+    const mayPropose = canBeOfferedActions(role);
+
     const client = new Anthropic({
       apiKey: ai.apiKey,
       ...(ai.baseUrl ? { baseURL: ai.baseUrl } : {}),
@@ -71,8 +83,8 @@ export async function POST(
             const response = client.messages.stream({
               model,
               max_tokens: 1500,
-              system: systemPrompt(org),
-              tools: TOOL_DEFINITIONS,
+              system: systemPrompt(org, mayPropose),
+              tools: mayPropose ? [...TOOL_DEFINITIONS, PROPOSE_TOOL] : TOOL_DEFINITIONS,
               messages: history,
             });
             response.on("text", (delta) => {
@@ -92,6 +104,21 @@ export async function POST(
             const results: Anthropic.ToolResultBlockParam[] = [];
             for (const use of toolUses) {
               emit("tool", { name: use.name, input: use.input });
+              if (use.name === "propose_actions") {
+                // The SECOND gate. `mayPropose` already withheld the tool from
+                // a viewer; this drops anything that arrives regardless, so a
+                // model ignoring its instructions still cannot put a confirm
+                // card in front of someone who may not act.
+                //
+                // Emitted as its own `actions` event rather than inside the
+                // prose stream: a machine-readable action mixed into text is
+                // how a sentence QUOTING a record gets parsed as a command.
+                const proposals = allowedActions(
+                  parseProposals((use.input as { actions?: unknown } | null)?.actions),
+                  role,
+                );
+                if (proposals.length > 0) emit("actions", { actions: proposals });
+              }
               let result: unknown;
               try {
                 result = await executeTool(

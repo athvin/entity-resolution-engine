@@ -3,6 +3,8 @@ import type Anthropic from "@anthropic-ai/sdk";
 
 import { forwardGoldenPage } from "@/lib/bff/golden";
 import { forward, type EffectiveOrgAccess } from "@/lib/bff/proxy";
+import { parseProposals } from "@/lib/agent-actions/propose";
+import { PROPOSAL_SCHEMA, proposalInstructions } from "@/lib/agent-actions/prompt";
 
 /**
  * The assistant's fixed toolbox (design §5.8): read-only wrappers over exactly
@@ -10,6 +12,22 @@ import { forward, type EffectiveOrgAccess } from "@/lib/bff/proxy";
  * with the org's VIEWER credential, so tenant isolation and read-only-ness are
  * enforced by erserver, never by the prompt.
  */
+
+/**
+ * The write-proposal tool (V9), offered ONLY to a session that may perform the
+ * actions. Appended by the route rather than living in `TOOL_DEFINITIONS`, so
+ * a viewer's request carries no trace that proposing is possible.
+ *
+ * It is not a write tool: `executeTool` performs nothing for it. See the
+ * handler.
+ */
+export const PROPOSE_TOOL: Anthropic.Tool = {
+  name: "propose_actions",
+  description:
+    "Propose steward actions for the person to confirm. Performs nothing: each proposal " +
+    "becomes a card they read and press, and the action then runs under their own session.",
+  input_schema: PROPOSAL_SCHEMA as Anthropic.Tool["input_schema"],
+};
 
 export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
   {
@@ -128,19 +146,50 @@ export async function executeTool(
     }
     case "list_config_versions":
       return forward(access, `/v1/orgs/${org}/config/versions`);
+    case "propose_actions": {
+      // **Performs nothing.** This is the one tool with no `forward` call, and
+      // that is the whole V9 design: the model emits a proposal, the ROUTE
+      // turns it into SSE the chat renders as confirm cards, and the person's
+      // own click calls the real BFF route. A handler that acted here would be
+      // a write tool in a loop fed by untrusted record data — exactly what the
+      // proposal shape exists to avoid.
+      const actions = parseProposals(input.actions);
+      return actions.length === 0
+        ? { staged: 0, note: "no valid action was proposed; nothing was staged" }
+        : { staged: actions.length, note: "shown to the person for confirmation; not performed" };
+    }
     default:
       return { error: `unknown tool ${name}` };
   }
 }
 
-export function systemPrompt(org: string): string {
-  return [
+/**
+ * The assistant's system prompt.
+ *
+ * `mayPropose` (V9) decides whether the read-only sentence stands or is
+ * replaced by the proposal instructions. It is driven by the SESSION's role,
+ * never by anything the model or a record can influence — a viewer's prompt
+ * simply never mentions that proposing exists, which is the first of two gates
+ * (`agent-actions/gate.ts` is the second).
+ */
+export function systemPrompt(org: string, mayPropose = false): string {
+  const base = [
     `You are the data assistant inside an entity-resolution workspace (org: ${org}).`,
     "You answer questions about two things only: (1) what has run — jobs, runs, imports,",
     "config versions, review activity — and (2) the golden records themselves.",
     "Ground every claim in a tool result from this conversation; if the tools cannot",
     "answer, say so plainly. Be concise and concrete: counts, names, ids.",
-    "You are read-only: you cannot merge, resolve, import, or change configuration —",
-    "when asked to act, explain where in the app the person can do it.",
-  ].join(" ");
+  ];
+  if (!mayPropose) {
+    base.push(
+      "You are read-only: you cannot merge, resolve, import, or change configuration —",
+      "when asked to act, explain where in the app the person can do it.",
+    );
+    return base.join(" ");
+  }
+  base.push(
+    "You cannot change configuration, import, or run anything — for those, explain where",
+    "in the app the person can do it.",
+  );
+  return base.join(" ") + proposalInstructions();
 }
