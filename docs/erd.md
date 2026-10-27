@@ -332,6 +332,15 @@ erDiagram
         text review_id PK
         text verdict
     }
+    saved_views {
+        timestamptz created_at
+        text created_by
+        jsonb definition
+        text id PK
+        text name
+        text org
+        text surface
+    }
     segments {
         timestamptz created_at
         text created_by

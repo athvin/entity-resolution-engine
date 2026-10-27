@@ -255,6 +255,46 @@ export const usageEvents = erweb.table(
   ],
 );
 
+/**
+ * A saved view over a browsable surface (O12a).
+ *
+ * **Not the same thing as `segments`, and the distinction is load-bearing.** A
+ * segment is a campaign artefact: a named population that an export or a
+ * scheduled job acts ON. A view is a shortcut for a human — "the filter I use
+ * every Monday" — and acting on it is not a thing the product does. Collapsing
+ * them would mean every bookmark a steward saves becomes a target an automated
+ * job might one day run against.
+ *
+ * `surface` scopes a view to the screen it belongs to, because a records filter
+ * is meaningless on the duplicates queue. `definition` is jsonb for the reason
+ * `segments.definition` is: the filter vocabulary differs per surface and will
+ * grow, and a column per filter would be a migration every time.
+ *
+ * Shared across the ORG rather than owned by one person: a view worth saving is
+ * usually worth the next steward seeing, and `created_by` records whose it was
+ * without hiding it. A private-views feature can be added later; starting
+ * private and going public is the harder migration.
+ */
+export const savedViews = erweb.table(
+  "saved_views",
+  {
+    id: text("id").primaryKey(),
+    org: text("org").notNull(),
+    /** `records` | `duplicates` | `reviews` — the screen this filter belongs to. */
+    surface: text("surface").notNull(),
+    name: text("name").notNull(),
+    definition: jsonb("definition").notNull(),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // One name per surface per org: two views called "Needs review" on the same
+    // screen is a picker nobody can use.
+    uniqueIndex("saved_views_org_surface_name_idx").on(table.org, table.surface, table.name),
+    index("saved_views_org_surface_idx").on(table.org, table.surface),
+  ],
+);
+
 /** Saved segments over golden records (design §5.7). The definition is always
  * the inspectable structured filter — never a prompt — and deliberately limited
  * to what the read API can evaluate today (search + client conditions). */

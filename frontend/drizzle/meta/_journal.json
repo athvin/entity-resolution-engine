@@ -43,6 +43,13 @@
       "when": 1793106770395,
       "tag": "0005_material_peter_quill",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793107298299,
+      "tag": "0006_early_molten_man",
+      "breakpoints": true
     }
   ]
 }

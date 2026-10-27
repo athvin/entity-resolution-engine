@@ -2682,7 +2682,29 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          response-ENVELOPE question is already answered without it, by the derived ledger D13
          built (`frontend/src/lib/api/envelopes.json`).
    - [ ] O11 embeddable duplicate widget: a signed-token read-only micro-page (#59).
-   - [ ] O12a saved views / folders (#87).
+   - [x] O12a saved views / folders (#87). **Not the same thing as `segments`, and the
+         distinction is load-bearing.** A segment is a campaign artefact: a named population an
+         export or a scheduled job acts ON. A view is a shortcut for a human — "the filter I
+         use every Monday" — and acting on it is not something the product does. Collapsing
+         them would make every bookmark a steward saves into a target some automated job might
+         one day run against.
+         This does NOT close the gap the frontend-data-ui skill names (filter state still
+         lives in `useState`, so a view still cannot be linked or shared by URL). It makes the
+         filter RE-REACHABLE, which is the part a steward needs: the filter survives a reload
+         and is there for a colleague.
+         Two refusals, both because the failure is a view that looks deliberate to whoever
+         finds it later. **An empty definition** is a bookmark for "everything" — the state the
+         screen already opens in — and is almost always Save pressed before the filter was
+         set; the control itself is disabled, with the reason in its title. **An inverted band**
+         (min above max) matches nothing and renders an empty list rather than an error, so it
+         is refused where the reader can still see what they typed.
+         Shared across the org rather than owned by one person: a view worth saving is usually
+         worth the next steward seeing, and `created_by` records whose it was without hiding
+         it. Starting private and going public is the harder migration.
+         13 unit tests plus a functional spec that proves the ROUND TRIP — saved, reloaded,
+         re-applied, and the band selector back where it started. A view that saves and then
+         restores the wrong filter is the silent-wrongness shape, and only an end-to-end test
+         can catch it.
    - [x] O12b usage metering ledger (#88). **Metering, not billing** — no price column and no
          credit balance, because the pricing story is per-run on cheap compute and a figure
          nobody can reconcile against an invoice is worse than none. The copy on the panel
