@@ -67,7 +67,10 @@ export function useDeleteEntityLink(org: string, entityId: string) {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (linkId: string) =>
-      bffFetch<void>(`/api/orgs/${org}/entity-links/${encodeURIComponent(linkId)}`, {
+      // `{deleted}`, not void: the route answers with a JSON body like every
+      // other DELETE here, and a bare 204 is what made the BFF's `forward`
+      // throw "Unexpected end of JSON input".
+      bffFetch<{ deleted: string }>(`/api/orgs/${org}/entity-links/${encodeURIComponent(linkId)}`, {
         method: "DELETE",
       }),
     onSuccess: () => {
