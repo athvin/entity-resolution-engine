@@ -379,6 +379,38 @@ test.describe("assistant", () => {
     await expect(page.getByTestId("citations")).toContainText("get_metrics({})");
   });
 
+  /**
+   * V9, and this is the test the unit tier structurally cannot write: it proves
+   * the SSE `actions` event reaches the browser, that a confirm card renders
+   * from it, and that pressing Confirm calls the ordinary records route under
+   * the person's own session — not an agent-specific write path.
+   */
+  test("proposes a steward action, and the confirm runs it as the person", async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(isMobile, "the assistant journey runs once, on desktop");
+    await login(page, USERS.steward);
+    await page.goto(`/${triageOrg("desktop-chromium")}/assistant`);
+    await page.getByTestId("assistant-input").fill("Should I suppress the stale CRM duplicate?");
+    await page.getByTestId("assistant-send").click();
+
+    // A card, not an action: nothing has changed yet.
+    const card = page.getByTestId("action-card-suppress_record");
+    await expect(card).toBeVisible();
+    await expect(page.getByTestId("action-effect")).toContainText("stops feeding golden records");
+    await expect(page.getByTestId("action-effect")).toContainText("crm:C-1000");
+    await expect(card).toContainText("the assistant cannot do this itself");
+
+    // Confirming calls the ORDINARY route the records browser calls.
+    const [request] = await Promise.all([
+      page.waitForRequest((r) => r.url().includes("/records/suppress")),
+      page.getByTestId("action-confirm").click(),
+    ]);
+    expect(request.postData() ?? "").toContain("crm:C-1000");
+    await expect(page.getByTestId("action-done")).toContainText("audit log");
+  });
+
   test("assistant visual baseline @visual", async ({ page }) => {
     await login(page, USERS.viewer);
     await page.goto(`/${ORG}/assistant`);

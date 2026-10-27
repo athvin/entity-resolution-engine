@@ -6,6 +6,10 @@ import { ChevronDown, Send, Sparkles, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { ActionCard, type ActionState } from "@/components/assistant/action-card";
+import type { ProposedAction } from "@/lib/agent-actions/propose";
+import { BffRequestError } from "@/lib/api/client";
+import { useRunAction } from "@/lib/query/agent-actions";
 import { cn } from "@/lib/utils";
 
 interface ToolCitation {
@@ -18,6 +22,8 @@ interface ChatTurn {
   content: string;
   citations: ToolCitation[];
   error?: string;
+  /** V9: steward actions the assistant proposed on this turn, awaiting a human. */
+  actions?: ProposedAction[];
 }
 
 const SUGGESTIONS = [
@@ -34,6 +40,28 @@ export function AssistantChat({ org }: { org: string }) {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [openCitations, setOpenCitations] = useState<number | null>(null);
+  // V9. Keyed by turn+action so the same proposal in two turns tracks apart.
+  const run = useRunAction(org);
+  const [actionState, setActionState] = useState<Record<string, ActionState>>({});
+  const [actionFailure, setActionFailure] = useState<Record<string, string>>({});
+
+  function runAction(key: string, action: ProposedAction) {
+    setActionFailure((current) => ({ ...current, [key]: "" }));
+    setActionState((current) => ({ ...current, [key]: "running" }));
+    run.mutate(action, {
+      onSuccess: () => {
+        setActionState((current) => ({ ...current, [key]: "done" }));
+      },
+      onError: (error) => {
+        setActionState((current) => ({ ...current, [key]: "failed" }));
+        setActionFailure((current) => ({
+          ...current,
+          [key]:
+            error instanceof BffRequestError ? error.message : "that action could not be completed",
+        }));
+      },
+    });
+  }
   const scrollRef = useRef<HTMLDivElement>(null);
 
   async function ask(question: string) {
@@ -92,6 +120,12 @@ export function AssistantChat({ org }: { org: string }) {
           } else if (event === "tool") {
             const citation = data as ToolCitation;
             patchLast((turn) => ({ ...turn, citations: [...turn.citations, citation] }));
+          } else if (event === "actions") {
+            // V9. Kept on the TURN rather than in a global list, so a card is
+            // always read beside the question that produced it — a confirm
+            // control floating free of its context is one people press.
+            const proposed = (data as { actions: ProposedAction[] }).actions;
+            patchLast((turn) => ({ ...turn, actions: [...(turn.actions ?? []), ...proposed] }));
           } else if (event === "error") {
             patchLast((turn) => ({ ...turn, error: (data as { message: string }).message }));
           }
@@ -154,6 +188,23 @@ export function AssistantChat({ org }: { org: string }) {
                     {turn.error}
                   </span>
                 )}
+                {(turn.actions ?? []).map((action) => {
+                  const key = `${String(index)}:${action.kind}:${action.subject}`;
+                  return (
+                    <ActionCard
+                      key={key}
+                      action={action}
+                      state={actionState[key] ?? "pending"}
+                      failure={actionFailure[key] ?? null}
+                      onConfirm={() => {
+                        runAction(key, action);
+                      }}
+                      onDecline={() => {
+                        setActionState((current) => ({ ...current, [key]: "declined" }));
+                      }}
+                    />
+                  );
+                })}
                 {turn.citations.length > 0 && (
                   <div className="border-t pt-2">
                     <button

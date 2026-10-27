@@ -1306,16 +1306,43 @@ const server = http.createServer((req, res) => {
           },
         });
       if (!hasToolResult) {
+        // V9: a question about suppressing gets a `propose_actions` tool_use
+        // instead of the metrics one, so the functional tier can drive a real
+        // confirm card. Discriminated on the QUESTION rather than on the tool
+        // list, so the existing "How big is this workspace?" spec is untouched.
+        // The tool is only offered to a steward+, so a viewer's run still gets
+        // metrics here and the gate is exercised from both sides.
+        const asksToSuppress = messages.some(
+          (message) => typeof message.content === "string" && /suppress/i.test(message.content),
+        );
+        const offersPropose = (body.tools ?? []).some((tool) => tool?.name === "propose_actions");
+        const proposing = asksToSuppress && offersPropose;
+        const toolInput = proposing
+          ? {
+              actions: [
+                {
+                  kind: "suppress_record",
+                  subject: "crm:C-1000",
+                  rationale: "duplicate of crm:C-1001 and not updated since 2019",
+                },
+              ],
+            }
+          : {};
         messageStart("msg_mock_tool_turn");
         frame("content_block_start", {
           type: "content_block_start",
           index: 0,
-          content_block: { type: "tool_use", id: "toolu_mock_1", name: "get_metrics", input: {} },
+          content_block: {
+            type: "tool_use",
+            id: "toolu_mock_1",
+            name: proposing ? "propose_actions" : "get_metrics",
+            input: {},
+          },
         });
         frame("content_block_delta", {
           type: "content_block_delta",
           index: 0,
-          delta: { type: "input_json_delta", partial_json: "{}" },
+          delta: { type: "input_json_delta", partial_json: JSON.stringify(toolInput) },
         });
         frame("content_block_stop", { type: "content_block_stop", index: 0 });
         frame("message_delta", {
