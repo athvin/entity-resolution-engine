@@ -1763,28 +1763,6 @@ fn run_member_thresholds(session: &Session, run_id: &str) -> Result<Option<Vec<R
     Ok((!members.is_empty()).then_some(members))
 }
 
-/// Stage `__member_thresholds` for `auto_merge_edges_per_model`.
-fn stage_member_thresholds(session: &Session, members: &[ResolvedMember]) -> Result<()> {
-    session.execute_batch("drop table if exists __member_thresholds")?;
-    let rows: Vec<String> = members
-        .iter()
-        .map(|m| {
-            format!(
-                "('{}', '{}', {})",
-                m.model_version.replace('\'', "''"),
-                m.tf_snapshot_id.replace('\'', "''"),
-                m.threshold
-            )
-        })
-        .collect();
-    session.execute_batch(&format!(
-        "create temp table __member_thresholds as select * from (values {}) \
-         as t(model_version, tf_snapshot_id, threshold)",
-        rows.join(", ")
-    ))?;
-    Ok(())
-}
-
 /// One member of a run's ensemble, resolved: which model scored, and the
 /// threshold its edges had to clear (E5b-2c).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -2909,10 +2887,24 @@ pub fn run_reconcile(session: &Session, config: &Config, run_id: &str, run_at: &
     // applied to them. `None` takes the model-blind read, unchanged.
     let mut edges: Vec<PathEdge> = match run_member_thresholds(session, run_id)? {
         Some(members) => {
-            stage_member_thresholds(session, &members)?;
-            let rows = er_entities::match_score::read::auto_merge_edges_per_model(conn)?;
-            session.execute_batch("drop table if exists __member_thresholds")?;
-            rows.into_iter()
+            // Narrow in SQL by the LOOSEST member's threshold — the smallest
+            // cut the statement can make — then apply each member's own in
+            // Rust, where the mapping from the run row lives. A row whose
+            // identity the ensemble does not name contributes nothing, which
+            // is `retire_other_models`' protection applied at read time.
+            let min = members
+                .iter()
+                .map(|m| m.threshold)
+                .fold(f64::INFINITY, f64::min);
+            er_entities::match_score::read::auto_merge_edges_per_model(conn, min)?
+                .into_iter()
+                .filter(|r| {
+                    members.iter().any(|m| {
+                        m.model_version == r.model_version
+                            && m.tf_snapshot_id == r.tf_snapshot_id
+                            && r.match_probability >= m.threshold
+                    })
+                })
                 .map(|r| (r.rec_a_key, r.rec_b_key, r.match_probability))
                 .collect()
         }

@@ -1,7 +1,4 @@
-SELECT m.rec_a_key, m.rec_b_key, m.match_probability
-FROM lake.main.match_scores m
-JOIN __member_thresholds t
-  ON t.model_version = m.model_version
- AND t.tf_snapshot_id = m.tf_snapshot_id
-WHERE m.is_active AND m.match_probability >= t.threshold
-ORDER BY m.rec_a_key, m.rec_b_key
+SELECT rec_a_key, rec_b_key, match_probability, model_version, tf_snapshot_id
+FROM lake.main.match_scores
+WHERE is_active AND match_probability >= $min_threshold
+ORDER BY rec_a_key, rec_b_key

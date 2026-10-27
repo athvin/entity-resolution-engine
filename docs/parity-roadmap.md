@@ -1157,6 +1157,14 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          because I ran `er-entity verify` and a targeted `cargo test -p er-cli` instead of
          `make check` — which is the thing CLAUDE.md's first section is about. No new gate is
          warranted; the registry was updated and the existing one passes.
+         **The declared-read oracle shaped the SQL.** The first version joined a staged
+         `__member_thresholds` table, which `er-sql-check`'s oracle rejected: it DESCRIBEs every
+         declared READ against the catalog and has no session staging, so a read that joins one
+         cannot be shape-checked at all. (`retire_other_models` gets away with `__live_models`
+         because it is an UPDATE, which the oracle does not describe.) The read now narrows by
+         the LOOSEST member's threshold — the smallest cut SQL can make, strictly fewer rows
+         than reading every active score — and carries the model identity so the per-member
+         decision happens in Rust, where the mapping from the run row already is.
          Sabotage: making reconcile ignore the run row fails the test named for it — a member
          threshold of 1.1, which no probability can clear, must make every record its own
          entity. Plus: rows from an identity the resolved ensemble does not name contribute

@@ -310,12 +310,14 @@ ORDER BY rec_a_key, rec_b_key
         AutoMergeEdgesLiveRow::from_batches(&batches)
     }
 
-    /// One row of `auto_merge_edges_per_model`: Auto-merge edges when each ensemble member has its OWN threshold (E5b-2c), from the session's __member_thresholds staging. A JOIN rather than a predicate because the threshold is a property of the model that produced the row, and `auto_merge_edges_live` has no model_version filter at all — it compares every active row against one number, which is correct for one model and silently wrong for several. The join also drops rows from identities the run is not scoring with, which is the same protection `retire_other_models` gives, applied at read time.
+    /// One row of `auto_merge_edges_per_model`: Candidate auto-merge edges when each ensemble member has its OWN threshold (E5b-2c), carrying the model identity so the caller can apply the right one. `auto_merge_edges_live` compares every active row against one number, which is correct for one model and silently wrong for several. `min_threshold` is the LOOSEST member's, so the read is still bounded by the smallest cut SQL can make — strictly fewer rows than reading every active score — and the per-member decision happens in Rust, where the `model_version -> threshold` mapping from the run row lives. Done this way rather than joining a staged thresholds table because a declared READ is DESCRIBEd against the catalog by `er-sql-check`'s oracle, which has no session staging; a read that joins one cannot be shape-checked at all.
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
     pub struct AutoMergeEdgesPerModelRow {
         pub rec_a_key: String,
         pub rec_b_key: String,
         pub match_probability: f64,
+        pub model_version: String,
+        pub tf_snapshot_id: String,
     }
 
     impl AutoMergeEdgesPerModelRow {
@@ -326,6 +328,8 @@ ORDER BY rec_a_key, rec_b_key
                 ("rec_a_key", ::arrow::datatypes::DataType::Utf8),
                 ("rec_b_key", ::arrow::datatypes::DataType::Utf8),
                 ("match_probability", ::arrow::datatypes::DataType::Float64),
+                ("model_version", ::arrow::datatypes::DataType::Utf8),
+                ("tf_snapshot_id", ::arrow::datatypes::DataType::Utf8),
             ]
         }
 
@@ -342,6 +346,10 @@ ORDER BY rec_a_key, rec_b_key
                 let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "rec_b_key")?;
                 let c2: &::arrow::array::Float64Array =
                     crate::batch::col(batch, 2, "match_probability")?;
+                let c3: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 3, "model_version")?;
+                let c4: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 4, "tf_snapshot_id")?;
                 for i in 0..batch.num_rows() {
                     out.push(Self {
                         rec_a_key: crate::batch::req(crate::batch::opt_str(c0, i), "rec_a_key", i)?,
@@ -351,6 +359,16 @@ ORDER BY rec_a_key, rec_b_key
                             "match_probability",
                             i,
                         )?,
+                        model_version: crate::batch::req(
+                            crate::batch::opt_str(c3, i),
+                            "model_version",
+                            i,
+                        )?,
+                        tf_snapshot_id: crate::batch::req(
+                            crate::batch::opt_str(c4, i),
+                            "tf_snapshot_id",
+                            i,
+                        )?,
                     });
                 }
             }
@@ -358,20 +376,21 @@ ORDER BY rec_a_key, rec_b_key
         }
     }
 
-    /// Auto-merge edges when each ensemble member has its OWN threshold (E5b-2c), from the session's __member_thresholds staging. A JOIN rather than a predicate because the threshold is a property of the model that produced the row, and `auto_merge_edges_live` has no model_version filter at all — it compares every active row against one number, which is correct for one model and silently wrong for several. The join also drops rows from identities the run is not scoring with, which is the same protection `retire_other_models` gives, applied at read time.
+    /// Candidate auto-merge edges when each ensemble member has its OWN threshold (E5b-2c), carrying the model identity so the caller can apply the right one. `auto_merge_edges_live` compares every active row against one number, which is correct for one model and silently wrong for several. `min_threshold` is the LOOSEST member's, so the read is still bounded by the smallest cut SQL can make — strictly fewer rows than reading every active score — and the per-member decision happens in Rust, where the `model_version -> threshold` mapping from the run row lives. Done this way rather than joining a staged thresholds table because a declared READ is DESCRIBEd against the catalog by `er-sql-check`'s oracle, which has no session staging; a read that joins one cannot be shape-checked at all.
     pub fn auto_merge_edges_per_model(
         conn: &::duckdb::Connection,
+        min_threshold: f64,
     ) -> ::duckdb::Result<Vec<AutoMergeEdgesPerModelRow>> {
-        const SQL: &str = "SELECT m.rec_a_key, m.rec_b_key, m.match_probability
-FROM lake.main.match_scores m
-JOIN __member_thresholds t
-  ON t.model_version = m.model_version
- AND t.tf_snapshot_id = m.tf_snapshot_id
-WHERE m.is_active AND m.match_probability >= t.threshold
-ORDER BY m.rec_a_key, m.rec_b_key
+        const SQL: &str =
+            "SELECT rec_a_key, rec_b_key, match_probability, model_version, tf_snapshot_id
+FROM lake.main.match_scores
+WHERE is_active AND match_probability >= $1
+ORDER BY rec_a_key, rec_b_key
 ";
         let mut stmt = conn.prepare(SQL)?;
-        let batches = stmt.query_arrow(::duckdb::params![])?.collect::<Vec<_>>();
+        let batches = stmt
+            .query_arrow(::duckdb::params![min_threshold])?
+            .collect::<Vec<_>>();
         AutoMergeEdgesPerModelRow::from_batches(&batches)
     }
 

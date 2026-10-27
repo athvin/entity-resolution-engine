@@ -1,11 +1,14 @@
 kind: statement
 operation: read
 mode: partial
-description: "Auto-merge edges when each ensemble member has its OWN threshold (E5b-2c), from the session's __member_thresholds staging. A JOIN rather than a predicate because the threshold is a property of the model that produced the row, and `auto_merge_edges_live` has no model_version filter at all — it compares every active row against one number, which is correct for one model and silently wrong for several. The join also drops rows from identities the run is not scoring with, which is the same protection `retire_other_models` gives, applied at read time."
+description: "Candidate auto-merge edges when each ensemble member has its OWN threshold (E5b-2c), carrying the model identity so the caller can apply the right one. `auto_merge_edges_live` compares every active row against one number, which is correct for one model and silently wrong for several. `min_threshold` is the LOOSEST member's, so the read is still bounded by the smallest cut SQL can make — strictly fewer rows than reading every active score — and the per-member decision happens in Rust, where the `model_version -> threshold` mapping from the run row lives. Done this way rather than joining a staged thresholds table because a declared READ is DESCRIBEd against the catalog by `er-sql-check`'s oracle, which has no session staging; a read that joins one cannot be shape-checked at all."
 pin: live
 pin_reason: "reconcile composes this inside the writer's own transaction, like auto_merge_edges_live."
-params: []
+params:
+  - { name: min_threshold, type: double }
 returns:
   - { name: rec_a_key, type: varchar, nullable: false }
   - { name: rec_b_key, type: varchar, nullable: false }
   - { name: match_probability, type: double, nullable: false }
+  - { name: model_version, type: varchar, nullable: false }
+  - { name: tf_snapshot_id, type: varchar, nullable: false }
