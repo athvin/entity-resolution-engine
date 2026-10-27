@@ -2798,8 +2798,34 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          gates were green; only rendering the page found it. Hooks now sit above every early
          return, with a comment saying why.
 8. **Review-UI depth**
-   - [ ] F1 group merge editor (#8) — today's inbox is a PAIR adjudicator; this adds the
-         master-editing half. Reuses `field-compare-grid`.
+   - [x] F1 group merge editor (#8). The inbox is a PAIR adjudicator — it answers "are these
+         the same". This answers what comes after: the group is right, but is the golden
+         record holding the best value from it? Every field is shown across every member, and
+         adopting one writes through the same audited `override_field` path a typed edit
+         uses — so the audit log cannot tell this from a manual edit, which is correct,
+         because it is one.
+         **A member's EMPTY value is never offered as adoptable.** It differs from a populated
+         master, but adopting it would CLEAR the field, and a one-click control that silently
+         deletes a value is the destructive mistake this surface could most easily make. The
+         useful direction still works: a member filling a gap the golden record has is
+         offered, because that creates nothing.
+         Differences compare against the MASTER, not between members: two members disagreeing
+         with each other while both matching the golden value is not something a reader needs
+         flagged. Show-differences-only defaults ON, because a person opening this is looking
+         for disagreements and a full grid where everything agrees is a wall to scroll past.
+         Members are capped at 8 with the rest REPORTED ("comparing 8 of 23"), not hidden — a
+         household can have dozens of source records, past a handful nobody is comparing
+         anything, and a silent truncation would read as the whole group.
+         It reuses the `?key=` read the pair compare grid uses rather than a new one: a group
+         editor built on a different read would drift from the pair adjudicator's idea of what
+         a record's values are. Rendered only for multi-member entities — a one-column table
+         is a worse way to read a single record than the grid above it.
+         9 unit tests; sabotaging the empty-value guard fails two by name, and the guard was
+         also confirmed in the real DOM — `addr_unit` offers adoption from the member that has
+         `4B` and not from the one that is empty.
+         *Six visual baselines regenerated*, three of them the reviews screen from O12a's views
+         bar, which an earlier commit had left stale: `ignoreSnapshots` is true off Linux, so
+         a local `make frontend` reports those specs as passing while comparing nothing.
    - [x] F2 pre-load data integrity check (#46). **Before the upload, not after it.** The plan
          says this rides E9b's staging; it should not. E9b-1 screens how records landed
          *against the corpus* once the dispatcher has them — that answers "did my file do

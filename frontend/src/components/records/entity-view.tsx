@@ -11,6 +11,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BffRequestError } from "@/lib/api/client";
 import { useFieldHistory } from "@/lib/query/history";
+import {
+  compareAcrossMembers,
+  MAX_COMPARED_MEMBERS,
+  useMemberValues,
+} from "@/lib/query/member-values";
+import { GroupMergeEditor } from "./group-merge-editor";
 import { useMassUpdate, type GoldenField } from "@/lib/query/mass-update";
 import { useRuns } from "@/lib/query/hooks";
 import { goldenAttributes, displayName } from "@/lib/domain/attributes";
@@ -63,6 +69,13 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
   // component takes a different path, which is how it broke the entity view
   // entirely rather than just the history panel.
   const history = useFieldHistory(org, entityId, historyAttribute, runs.data ?? []);
+  // F1. Member VALUES, not just keys — `members` from the detail read carries
+  // only record keys. Same `?key=` endpoint the pair compare grid uses.
+  const memberKeys = (query.data?.members ?? []).map((member) => member.record_key);
+  const memberValues = useMemberValues(org, memberKeys);
+  const [differencesOnly, setDifferencesOnly] = useState(true);
+  const [adopting, setAdopting] = useState<string | null>(null);
+  const [adoptFailure, setAdoptFailure] = useState<string | null>(null);
   const [mergeMessage, setMergeMessage] = useState<string | null>(null);
   const role = effectiveRole(session.data, org);
   const isSteward = role !== null && ROLE_RANK[role] >= ROLE_RANK.steward;
@@ -250,6 +263,58 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
           )}
         </CardContent>
       </Card>
+
+      {members.length > 1 && (
+        <Card data-testid="entity-merge-editor">
+          <CardHeader className="p-4 pb-1 lg:p-6 lg:pb-2">
+            <CardTitle className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+              Merge editor
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-4 pt-2 lg:p-6 lg:pt-2">
+            {/* F1. Only for a group: a single-member entity has nothing to
+                compare, and a one-column table is a worse way to read one
+                record than the grid above. */}
+            <GroupMergeEditor
+              fields={compareAcrossMembers(
+                attributes.map(({ key }) => key),
+                golden,
+                memberValues.data?.items ?? [],
+              )}
+              memberKeys={(memberValues.data?.items ?? []).map((item) => item.record_key)}
+              notShown={Math.max(0, members.length - MAX_COMPARED_MEMBERS)}
+              pending={memberValues.isPending}
+              canEdit={isSteward}
+              applying={adopting}
+              failure={adoptFailure}
+              differencesOnly={differencesOnly}
+              onToggleDifferences={setDifferencesOnly}
+              onAdopt={(attribute, value) => {
+                setAdoptFailure(null);
+                setAdopting(attribute);
+                // The SAME audited override path O12c's restore uses — there is
+                // no merge-specific write, so the audit log cannot tell this
+                // from a typed edit, which is correct: it is one.
+                restore.mutate(
+                  [{ entity_id: entityId, attribute: attribute as GoldenField, value }],
+                  {
+                    onSettled: () => {
+                      setAdopting(null);
+                    },
+                    onError: (error) => {
+                      setAdoptFailure(
+                        error instanceof BffRequestError
+                          ? error.message
+                          : "could not adopt that value",
+                      );
+                    },
+                  },
+                );
+              }}
+            />
+          </CardContent>
+        </Card>
+      )}
 
       {isSteward && <EnrichPanel org={org} entityId={entityId} golden={golden} />}
 
