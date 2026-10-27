@@ -1170,10 +1170,43 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          entity. Plus: rows from an identity the resolved ensemble does not name contribute
          nothing even at threshold 0, which is `retire_other_models`' protection applied at
          read time.
-   - [ ] E5b-2d the `then_run` cascade, scoped by E5b-2c's finding: it is a COST optimisation
-         only — `and_run` and `then_run` produce the same edge set — so it has to restrict pair
-         GENERATION inside the engine's blocking to be worth anything, and a post-prediction
-         filter would deliver attribution and no saving.
+   - [x] **E5b-2d the `then_run` cascade — a cost lever, built where the cost is.** E5b-2c
+         worked out that `and_run` and `then_run` produce the SAME edge set: a pair a later
+         member matches that an earlier one already matched adds nothing to a union, and that
+         holds with per-member thresholds too. So the cascade is purely about how many pairs
+         reach scoring, and it is worth nothing unless the cut happens before scoring.
+         **The cut sits between BLOCKING and SCORING.** `dedupe_core`'s predict is three public
+         stages — concat, block, score — that `run_predict_with_tf` fuses. Composing them in
+         `er-cli` instead puts an anti-join between the last two, so pairs an earlier member
+         matched never reach the comparison SQL, the TF lookups or the logistic combination,
+         which is the expensive half. The engine is not edited at all — the same discipline
+         E11a used, and what keeps the four golden suites out of this. `run_predict_chunked`
+         already establishes that scoring a subset of blocked pairs is a supported shape.
+         Measured on base_10: the second member scores **4 of 19** candidate pairs with the
+         cascade on, against 19 with it off, for an identical edge set. The run log says so,
+         because the cascade's only effect IS that number and an operator otherwise has no way
+         to tell whether declaring `then_run` bought anything.
+         Blocked pairs are already canonical (`uid_l < uid_r`) and `rec_a_key`/`rec_b_key` are
+         `least`/`greatest` of the same uid, so the anti-join is direct. The filtered table
+         keeps the ORIGINAL templated name and swaps only the physical one: `predict_pipeline`
+         references the blocked pairs by templated name and rewrites it, so registering under a
+         fresh name leaves the pipeline pointing at a relation that no longer exists.
+         No cascade on an incremental member that falls back to a full pass: it is scoring the
+         whole corpus precisely BECAUSE it has no usable ledger, and the members it would skip
+         past may not have scored in this run at all.
+         **Three versions of this test passed while sabotaged, and the reason is worth more
+         than the test.** The sabotage — cut every pair an earlier member SCORED rather than
+         every pair it MATCHED — is a no-op unless the earlier member has scored-but-unmatched
+         pairs, and unless the later member would have contributed those pairs' edges. v1 put
+         the loose member first, so the strict one could only ever match a subset and
+         contributed no edge of its own. v2 asserted on the PARTITION, which connected
+         components makes too coarse to see it. v3 asserted on the edge set but left both
+         members at the corpus-wide threshold, where every stored row is already above it.
+         Only after cross-tabbing the fixture's actual per-pair probabilities did the shape
+         become clear: the FIRST member needs a threshold above some of its own scores. It now
+         has one (0.9999, against scores spanning 0.9982–1.0), and the sabotage fails naming
+         the two pairs it loses. Guessing at fixture data is the same error as guessing at
+         code, and it costs the same way.
    - [x] **E5b-3 the models page — and `active` stops naming one model.** The registry had no
          surface at all since E1 built it: a tenant could not see which model its data was scored
          against, what it used to be, or the m/u probabilities the engine always carried

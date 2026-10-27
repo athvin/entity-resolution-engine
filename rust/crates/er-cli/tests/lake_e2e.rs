@@ -3959,6 +3959,190 @@ fn a_per_member_threshold_decides_which_edges_cluster() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
+/// A `then_run` cascade scores strictly fewer pairs and produces the SAME
+/// edges (E5b-2d).
+///
+/// Both halves matter, and the second is the one that justifies the first.
+/// E5b-2c worked out on paper that `and_run` and `then_run` cannot differ —
+/// a pair a later member matches that an earlier one already matched adds
+/// nothing to a union — which makes the cascade PURELY a cost lever. A cost
+/// lever that quietly changed the answer would be the worst of both, so the
+/// equivalence is asserted rather than argued.
+///
+/// The saving is real because the cut sits between BLOCKING and SCORING:
+/// scoring is the expensive half, and `run_predict_chunked` already
+/// establishes that scoring a subset of blocked pairs is a supported shape.
+/// Filtering after prediction would give the same edges and no saving at all.
+///
+/// **The STRICT member goes first and the LOOSE one second, and that ordering
+/// is what makes the test mean anything.** With the loose member first, the
+/// strict one can only ever match a SUBSET of what the loose one already
+/// matched — so it contributes no edge of its own, the partition is the loose
+/// member's either way, and "the same edges" holds however much the cascade
+/// over-cuts. That version PASSED with the cut predicate sabotaged. With the
+/// loose member second it contributes edges the strict one missed, so a
+/// cascade that over-cuts loses them and the partition shrinks.
+#[test]
+fn a_cascade_scores_fewer_pairs_for_the_same_edges() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let model_json = std::fs::read_to_string(repo_fixture("model_test_v1.json")).unwrap();
+    let tf_csv = repo_fixture("model_test_v1.tf.csv");
+
+    // Two universes over the same corpus and the same two members; only the
+    // second member's `mode` differs.
+    let run = |tag: &str, mode: er_config::CombineMode| {
+        let (session, mut config, tmp) = open_seeded_lake(tag);
+        config.models = vec![
+            er_config::ModelSpec {
+                name: "strict".to_string(),
+                // ABOVE several of its own scores (which span 0.9982-1.0), so
+                // this member SCORES pairs it does not MATCH. That is what
+                // makes an over-cutting cascade observable at all: a cascade
+                // may only skip pairs an earlier member MATCHED, and with no
+                // scored-but-unmatched pairs the correct predicate and a
+                // broken one select the same rows. Measured from the fixture,
+                // not guessed — two earlier versions of this test passed while
+                // sabotaged because they were guessed.
+                threshold: Some(0.9999),
+                mode: er_config::CombineMode::AndRun,
+            },
+            er_config::ModelSpec {
+                name: "loose".to_string(),
+                // A LOWER threshold, so this member contributes edges the
+                // strict one does not. Without it the two agree above
+                // `auto_merge` on this fixture and the equivalence assertion
+                // is vacuous — both an over-cutting cascade and a correct one
+                // produce the same edge set, which is how the first two
+                // versions of this test passed while sabotaged.
+                threshold: Some(0.70),
+                mode,
+            },
+        ];
+        let mut strict: serde_json::Value = serde_json::from_str(&model_json).unwrap();
+        strict["probability_two_random_records_match"] = serde_json::json!(1.0e-9);
+        let strict_json = strict.to_string();
+        let strict_tf = tmp.join("strict.tf.csv");
+        rekey_tf(
+            &tf_csv,
+            &strict_tf,
+            "v0002-strict",
+            "01JWMDTFSNAP00000000000002",
+        );
+        let deliveries: Vec<(String, String)> = ["crm", "billing", "webforms"]
+            .iter()
+            .filter_map(|src| {
+                std::fs::read_to_string(repo_fixture(&format!("incremental_batch/base/{src}.csv")))
+                    .ok()
+                    .map(|csv| ((*src).to_string(), csv))
+            })
+            .collect();
+        let members = [
+            er_cli::EnsembleMember {
+                model: er_cli::MatchModel {
+                    settings_json: &strict_json,
+                    tf_csv_path: &strict_tf,
+                    model_version: "v0002-strict",
+                    tf_snapshot_id: "01JWMDTFSNAP00000000000002",
+                },
+                name: "strict",
+            },
+            er_cli::EnsembleMember {
+                model: er_cli::MatchModel {
+                    settings_json: &model_json,
+                    tf_csv_path: std::path::Path::new(&tf_csv),
+                    model_version: "v0001",
+                    tf_snapshot_id: "01JWMDTFSNAP00000000000001",
+                },
+                name: "loose",
+            },
+        ];
+        er_cli::run_all_ensemble(
+            &session,
+            &config,
+            &er_cli::PipelineInputs {
+                mode: "full",
+                rebuild_reason: None,
+                segment: None,
+                lexicon: &lexicon_pairs(),
+                deliveries: &deliveries,
+                model: &members[0].model,
+                run_id: "01CASCADE00000000000RUN000",
+                ingested_at: "2026-01-01 00:00:00",
+                scored_at: "2026-01-01 00:00:00",
+                run_at: "2026-01-01 00:00:00",
+            },
+            &members,
+        )
+        .unwrap();
+        // How many pairs the SECOND (loose) member ended up with a score row
+        // for — the observable proxy for how many it scored, since a cascaded
+        // member writes no row for a pair it never looked at.
+        let scored: i64 = session
+            .query_strings(&format!(
+                "select count(*) from {} where model_version = 'v0001'",
+                er_cli::MATCH_SCORES
+            ))
+            .unwrap()[0][0]
+            .parse()
+            .unwrap();
+        // The UNION EDGE SET, which is literally what the claim is about:
+        // every pair any member scored at or above the auto-merge threshold.
+        // Asserting on the PARTITION instead was vacuous on this fixture —
+        // connected components is coarse enough that both members produce the
+        // same grouping, so the sabotaged cut passed. The edge set is the
+        // finest observable the claim is actually made about.
+        let edges: BTreeSet<(String, String)> = session
+            .query_strings(&format!(
+                "select distinct rec_a_key, rec_b_key from {scores} \
+                 where is_active and ( \
+                   (model_version = 'v0002-strict' and match_probability >= 0.9999) \
+                   or (model_version = 'v0001' and match_probability >= 0.70) \
+                 )",
+                scores = er_cli::MATCH_SCORES
+            ))
+            .unwrap()
+            .into_iter()
+            .map(|r| (r[0].clone(), r[1].clone()))
+            .collect();
+        let _ = std::fs::remove_dir_all(&tmp);
+        (scored, edges)
+    };
+
+    let (and_run_scored, and_run_edges) = run("cascade_and", er_config::CombineMode::AndRun);
+    let (then_run_scored, then_run_edges) = run("cascade_then", er_config::CombineMode::ThenRun);
+
+    assert!(
+        and_run_scored > 0,
+        "precondition: the second (loose) member scored something without a cascade"
+    );
+    assert!(
+        then_run_scored < and_run_scored,
+        "a cascade must score STRICTLY fewer pairs, or declaring `then_run` \
+         bought nothing: {then_run_scored} vs {and_run_scored}"
+    );
+    assert!(
+        !and_run_edges.is_empty(),
+        "precondition: the ensemble produced edges at all"
+    );
+    assert_eq!(
+        and_run_edges,
+        then_run_edges,
+        "the cascade is a cost lever, not a semantic one — a pair the second \
+         member matches that the first already matched adds nothing to a \
+         union, so the EDGE SET must be identical; \
+         only-and_run={:?} only-then_run={:?}",
+        and_run_edges
+            .difference(&then_run_edges)
+            .collect::<Vec<_>>(),
+        then_run_edges
+            .difference(&and_run_edges)
+            .collect::<Vec<_>>(),
+    );
+}
+
 /// A two-member ensemble, driven through a scenario phase in the given mode.
 ///
 /// The strict member is the committed model with its prior lowered and its TF

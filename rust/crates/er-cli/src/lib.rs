@@ -682,10 +682,50 @@ pub fn run_match_ensemble(
         .collect();
     retire_other_models(session, &live, run_id, scored_at)?;
 
-    for member in members {
-        score_member_full(session, config, member, review_low, run_id, scored_at)?;
+    // E5b-2d: a `then_run` member skips pairs the members BEFORE it already
+    // matched. Accumulated in declaration order, which is why `models:` is a
+    // list — "after the members declared above me" has no meaning in a map.
+    let thresholds = member_thresholds(config, members);
+    let mut earlier: Vec<(&str, &str, f64)> = Vec::new();
+    for (index, member) in members.iter().enumerate() {
+        let cascade = matches!(
+            config.models.get(index).map(|m| m.mode),
+            Some(er_config::CombineMode::ThenRun)
+        )
+        .then_some(earlier.as_slice());
+        score_member_full(
+            session, config, member, review_low, run_id, scored_at, cascade,
+        )?;
+        earlier.push((
+            member.model.model_version,
+            member.model.tf_snapshot_id,
+            thresholds[index],
+        ));
     }
     Ok(())
+}
+
+/// Each member's auto-merge threshold, defaulting to the corpus-wide one.
+///
+/// Shared with `resolve_ensemble` rather than duplicated: a cascade that cut
+/// pairs at one threshold while clustering used another would skip work on the
+/// strength of a decision nothing else made.
+///
+/// `models` and `members` are parallel by construction — the dispatcher
+/// resolves one member per spec, in order — but a mismatch would silently pair
+/// a threshold with the wrong model, so it falls back to the corpus-wide
+/// threshold rather than zipping a shorter list.
+fn member_thresholds(config: &Config, members: &[EnsembleMember]) -> Vec<f64> {
+    let auto_merge = config.thresholds.auto_merge;
+    if config.models.len() == members.len() {
+        config
+            .models
+            .iter()
+            .map(|spec| spec.threshold.unwrap_or(auto_merge))
+            .collect()
+    } else {
+        vec![auto_merge; members.len()]
+    }
 }
 
 /// S4.3.4 INCREMENTAL match for an ensemble (E5b-2b): every member scores only
@@ -753,6 +793,99 @@ pub fn run_match_ensemble_incremental(
         .collect()
 }
 
+/// How many candidate pairs a member scored, and whether the cascade cut any.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PairsScored {
+    /// Candidate pairs the blocking rules generated.
+    pub blocked: usize,
+    /// Candidate pairs that actually reached scoring. Equal to `blocked` for an
+    /// `and_run` member.
+    pub scored: usize,
+}
+
+/// Predict for one member, skipping pairs an EARLIER member already matched
+/// when the member is `then_run` (E5b-2d).
+///
+/// Composed from `dedupe_core`'s three public stages — concat, block, score —
+/// rather than calling `run_predict_with_tf`, which fuses them. The engine is
+/// not edited: this is the same discipline E11a used, and it is what keeps the
+/// four golden suites out of the change.
+///
+/// **The cut is between blocking and scoring, and that placement is the whole
+/// point.** Filtering after prediction would give the same edges and none of
+/// the saving, because scoring — the comparison SQL, the TF lookups, the
+/// logistic combination — is the expensive half. `run_predict_chunked` already
+/// establishes that scoring a subset of blocked pairs is a supported shape.
+fn predict_member(
+    session: &Session,
+    settings: &dedupe_core::settings::Settings,
+    input: &dedupe_core::session::TableHandle,
+    tf_tables: &[dedupe_core::session::TableHandle],
+    cascade_after: Option<&[(&str, &str, f64)]>,
+) -> Result<(dedupe_core::session::TableHandle, PairsScored)> {
+    let concat = dedupe_core::predict::materialize_concat(session, input)?;
+    let blocked = dedupe_core::predict::materialize_blocked_pairs(session, settings, &concat)?;
+    let blocked_n = count_rows(session, &blocked.physical)?;
+
+    let (blocked, scored_n) = match cascade_after {
+        // Nothing earlier has matched anything, so there is nothing to skip.
+        None | Some([]) => (blocked, blocked_n),
+        Some(earlier) => {
+            let matched = earlier
+                .iter()
+                .map(|(mv, snap, threshold)| {
+                    format!(
+                        "select rec_a_key, rec_b_key from {MATCH_SCORES} \
+                         where is_active and model_version = '{}' \
+                           and tf_snapshot_id = '{}' and match_probability >= {threshold}",
+                        mv.replace('\'', "''"),
+                        snap.replace('\'', "''")
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\nunion\n");
+            // Blocked pairs are already canonical (`uid_l < uid_r`), and
+            // `rec_a_key`/`rec_b_key` are `least`/`greatest` of the same uid —
+            // so the anti-join is direct rather than needing a re-canonicalise.
+            let kept = "__cascade_blocked";
+            session.execute_batch(&format!("drop table if exists {kept}"))?;
+            session.execute_batch(&format!(
+                "create temp table {kept} as
+                 select b.* from {} b
+                 where not exists (
+                     select 1 from ({matched}) m
+                      where m.rec_a_key = b.join_key_l and m.rec_b_key = b.join_key_r
+                 )",
+                blocked.physical
+            ))?;
+            let n = count_rows(session, kept)?;
+            // Keep the ORIGINAL templated name and swap only the physical
+            // table: `predict_pipeline` references the blocked pairs by their
+            // templated name (`__dedupe__blocked_id_pairs`) and the pipeline
+            // rewrites that to a physical one. Registering the filtered table
+            // under a fresh templated name leaves the pipeline pointing at a
+            // relation that no longer exists.
+            let handle = dedupe_core::session::TableHandle {
+                templated: blocked.templated.clone(),
+                physical: kept.to_string(),
+                columns: blocked.columns.clone(),
+            };
+            (handle, n)
+        }
+    };
+
+    let pipeline =
+        dedupe_core::predict::predict_pipeline(settings, &concat, tf_tables, &blocked, None)?;
+    let predictions = session.materialize(&pipeline)?;
+    Ok((
+        predictions,
+        PairsScored {
+            blocked: blocked_n,
+            scored: scored_n,
+        },
+    ))
+}
+
 /// One member's FULL pass: score the whole corpus under its identity and claim
 /// the whole corpus in the ledger.
 ///
@@ -771,6 +904,10 @@ fn score_member_full(
     review_low: f64,
     run_id: &str,
     scored_at: &str,
+    // E5b-2d: the members declared BEFORE this one, with the thresholds their
+    // edges had to clear. `None` for an `and_run` member, which scores every
+    // candidate pair — the default and what every member did before cascades.
+    cascade_after: Option<&[(&str, &str, f64)]>,
 ) -> Result<()> {
     let (std_unqual, std_qual) = if config.entity_type.is_person() {
         ("int_std_records", INT_STD_RECORDS)
@@ -822,7 +959,21 @@ fn score_member_full(
                 model.tf_csv_path.display(),
             );
         }
-        let predictions = run_predict_with_tf(session, &settings, &input, &tf_tables, None)?;
+        let (predictions, pairs) =
+            predict_member(session, &settings, &input, &tf_tables, cascade_after)?;
+        if pairs.scored < pairs.blocked {
+            // Said out loud: the cascade's only effect is this number, so a
+            // run log that does not show it gives an operator no way to tell
+            // whether declaring `then_run` bought anything.
+            eprintln!(
+                "run {run_id}: member '{}' scored {}/{} candidate pairs ({} already \
+                 matched by an earlier member)",
+                member.name,
+                pairs.scored,
+                pairs.blocked,
+                pairs.blocked - pairs.scored
+            );
+        }
 
         // A full pass recomputes every pair, so everything this model previously
         // scored is about to be superseded: deactivate it all, then let the MERGE
@@ -1361,7 +1512,10 @@ fn run_match_partial(session: &Session, config: &Config, pass: &PartialPass) -> 
         // and silent corruption when it happens last: the members already
         // scored in this run are retired and never revisited.
         retire_other_models(session, live, run_id, scored_at)?;
-        score_member_full(session, config, member, review_low, run_id, scored_at)?;
+        // No cascade on a fallback: this member is scoring the whole corpus
+        // precisely BECAUSE it has no usable ledger, and the members it would
+        // skip past may not have scored in this run at all.
+        score_member_full(session, config, member, review_low, run_id, scored_at, None)?;
         return Ok(MatchDelta {
             mode: er_versions::MODE_FULL,
             corpus_records: count_rows(session, std_qual)?,
@@ -1788,19 +1942,10 @@ pub fn resolve_ensemble(
     members: &[EnsembleMember],
 ) -> Option<Vec<ResolvedMember>> {
     let auto_merge = config.thresholds.auto_merge;
-    // `models` and `members` are parallel by construction — the dispatcher
-    // resolves one member per spec, in order — but a mismatch would silently
-    // pair a threshold with the wrong model, so fall back to the corpus-wide
-    // threshold rather than zipping a shorter list.
-    let thresholds: Vec<f64> = if config.models.len() == members.len() {
-        config
-            .models
-            .iter()
-            .map(|spec| spec.threshold.unwrap_or(auto_merge))
-            .collect()
-    } else {
-        vec![auto_merge; members.len()]
-    };
+    // Shared with the cascade rather than duplicated: skipping pairs at one
+    // threshold while clustering used another would skip work on the strength
+    // of a decision nothing else made.
+    let thresholds = member_thresholds(config, members);
     if thresholds
         .iter()
         .all(|t| (*t - auto_merge).abs() < f64::EPSILON)
