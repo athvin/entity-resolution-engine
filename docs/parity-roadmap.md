@@ -1620,15 +1620,49 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          refusals, the viewer boundary, and that the delete statement is org-scoped so another
          tenant's id deletes nothing. A wrong-org key gets **404**, not 403 — `guard` answers
          "no org" so a probe cannot confirm which tenants exist.
-   - [ ] E11a related-record features (#26). **The tracker's warning turned out to be
-         avoidable, which is worth recording.** It said `features.related:` "changes
-         execution-oracle-governed engine SQL" because the concat relation is built by
-         `dedupe_core::predict::materialize_concat_multi` and four golden suites read through
-         it. But `concat_sql_single` projects `input.columns` — so widening the standardized
-         table BEFORE it is registered as the engine's input carries the extra columns through
-         with no change to dedupe-core at all. The join belongs in `er-cli`, not the engine, and
-         a config with no `related:` block registers exactly the table it registers today, which
-         is what keeps the goldens byte-identical.
+   - [x] **E11a related-record features (#26) — and the determinism obligation turned out not
+         to exist.** Two "J. Smith" records are indistinguishable until you notice one works at
+         Acme and the other does not. The employer is on neither record — it is on the record
+         their `employer_id` points at — so no comparison could reach it and the pair sat in the
+         gray band forever.
+         **The warning this entry used to carry was wrong, and the correction IS the finding.**
+         It said `features.related:` "changes execution-oracle-governed engine SQL", because the
+         concat relation is built by `materialize_concat_multi` and four golden suites read
+         through it. But `concat_sql_single` projects `input.columns` — so widening the
+         standardized table BEFORE it is registered as the engine's input carries the borrowed
+         columns through untouched. **`dedupe-core` is not edited at all.** The join belongs in
+         `er-cli`, and the property is obtained STRUCTURALLY rather than asserted: `widen_sql`
+         returns `None` when nothing is declared, so there is no SQL that could differ from
+         today's — not SQL that happens to match. The whole 38-test lake suite is unchanged.
+         **Always a LEFT join.** A record whose key points at nothing is still a record; an
+         inner join would drop it from the CORPUS, which changes the partition rather than just
+         a comparison. Sabotage: switching to `inner` takes the test corpus from 23 records to
+         **0** — and it would have presented as the engine never having seen them.
+         **The join names the target source.** `record_key` is `source:id` while a foreign-key
+         column holds a bare id, so the source is part of the join rather than guessed — two
+         sources sharing an id space would otherwise cross-link silently.
+         **An attribute outside the canonical set is read from `metadata`.** That is where every
+         unmapped source column already lands, and a foreign key almost never IS canonical, so
+         it is the common path rather than the exception. `->>` rather than a cast: every
+         borrowed column is compared as text, and a typed extraction would make a comparison's
+         behaviour depend on how a source happened to encode a number.
+         **Validated at publish, and the derived columns join the valid set BEFORE the
+         comparison check.** Declaring a feature and then being refused for using it would make
+         the block decorative — a sabotage the test catches, with the refusal `comparison column
+         'employer_given_name' is not a standardized column`. The block also refuses an unusable
+         prefix (it comes from a tenant and becomes an identifier), a duplicate prefix (the
+         second would silently overwrite the first's columns), a feature that borrows nothing,
+         and an unknown `target_source` — that last matters most, because the run-time failure
+         is a join against nothing, which produces NULLs rather than an error, so the comparison
+         silently never fires and the tenant concludes the feature does not work.
+         **One hop.** Two is the incumbent's ceiling and was considered; each hop multiplies the
+         join against the standardized corpus and a tenant cannot see that cost before paying
+         it. One hop covers what the feature is for — the employer, the household head, the
+         parent account.
+         `config_hash` is byte-identical for every config that declares nothing, and a declared
+         block does move it, both asserted on the canonical document rather than the field — the
+         rule V1, E3 and E5b each followed. The config studio treats borrowed columns as known
+         for the same reason the publish gate does, or writing a comparison on one would warn.
    - [x] **D4 tracker hygiene — the count was wrong in three different ways.**
          Before: 7 open items, of which **3 were duplicates** and ~14 more were invisible.
          After: 18 open, 86 done, and every one countable.
