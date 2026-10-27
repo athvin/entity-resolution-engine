@@ -191,6 +191,59 @@ async function walkToReview(page: Page, org: string, sourceName: string): Promis
 }
 
 test.describe("new-source wizard", () => {
+  /**
+   * V8. The file this is for is the one with OPAQUE headers — `fnm`, `eml` —
+   * which is exactly where the regex table gives up and a person is left
+   * guessing. The assertions that matter are the privacy ones: the request
+   * body must carry shapes and never a cell value.
+   */
+  test("AI fills the columns the heuristic could not, and sends no data", async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(isMobile, "the wizard journey runs once, on desktop");
+    await login(page, USERS.steward);
+    await page.goto(`/${wizardOrg("desktop-chromium")}/sources/new`);
+
+    await page.getByTestId("wizard-file").setInputFiles({
+      name: "legacy.csv",
+      mimeType: "text/csv",
+      buffer: Buffer.from(
+        "rec_no,fnm,lnm,eml,tel\n" +
+          "1,Ada,Lovelace,ada@example.com,+14155550001\n" +
+          "2,Grace,Hopper,grace@example.com,+14155550002\n",
+      ),
+    });
+    await page.getByTestId("wizard-next").click();
+
+    // The regex table got `lnm`/`tel` wrong too, but `given_name` and `email`
+    // are the ones this asserts, because the mock answers exactly those.
+    await expect(page.getByTestId("map-given_name")).toHaveValue("");
+    await expect(page.getByTestId("map-email")).toHaveValue("");
+    await expect(page.getByTestId("wizard-ai-privacy")).toContainText("never");
+
+    const [request] = await Promise.all([
+      page.waitForRequest((r) => r.url().includes("/sources/suggest-mapping")),
+      page.getByTestId("wizard-ai-map").click(),
+    ]);
+
+    // THE assertion this feature stands on: shapes crossed the wire, values
+    // did not. Asserted on the REQUEST rather than on the module, because a
+    // unit test cannot prove the wizard sent what the unit produced.
+    const body = request.postData() ?? "";
+    expect(body).toContain('"a@a.a"'); // the email column, as a shape
+    expect(body).toContain('"fnm"'); // column NAMES are the question, and do travel
+    for (const value of ["ada@example.com", "grace@example.com", "Ada", "Lovelace", "Hopper"]) {
+      expect(body, value).not.toContain(value);
+    }
+
+    // And the answers land as ordinary suggestions the person can still change.
+    await expect(page.getByTestId("map-given_name")).toHaveValue("fnm");
+    await expect(page.getByTestId("map-email")).toHaveValue("eml");
+    await expect(page.getByTestId("why-email")).toContainText("email-shaped");
+    await expect(page.getByTestId("wizard-ai-note")).toContainText("check each");
+  });
+
   test("activate & run publishes, uploads the sample, and lands on the run", async ({
     page,
   }, testInfo) => {

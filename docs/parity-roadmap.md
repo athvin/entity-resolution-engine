@@ -2516,7 +2516,41 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          mock's mutable-org list and the BFF's `TRIAGE_ORGS` fixture. The mock knowing an org
          does not make the session a member of it, and the symptom is a 404 that reads as a
          missing page.
-   - [ ] V8 AI schema mapping + AI model setup (#48/#35). Sends a profile summary, never rows.
+   - [x] V8 AI schema mapping (#48). **"A profile summary, never rows" needed sharpening before
+         it was safe to build**: `ColumnProfile.samples` IS raw rows — real emails and phone
+         numbers the wizard collected locally — so sending "the profile" would have shipped
+         customer data to answer a question about column NAMES, against the explicit property
+         `csv-profile.ts` states for itself ("the sample file never leaves the machine").
+         So the wire carries **shapes**: `aaa@aaa.aaa`, never `jane@acme.com`. Letters
+         collapse to `a` and digits to `9`, and runs collapse too — so `Li` and
+         `Wolfeschlegelstein` produce the same shape and a rare surname's length cannot leak.
+         Punctuation survives as itself, because the `@` and the dots are precisely what
+         distinguish an email column from a name column. The transform is lossy in one
+         direction only: two values can share a shape, and a shape never reads back to a value.
+         Two decisions worth keeping. **The route re-shapes rather than trusts** — the client
+         must compute shapes (the file is there) but must not be the only guarantee, and
+         `shapeOf` is idempotent so an honest client pays nothing while a hand-built request
+         cannot smuggle values through. And **the regex heuristic stays and runs first**: the
+         model fills only what it left blank, so a file whose headers are already understood
+         costs nothing. The button is not even offered when nothing is unmapped.
+         The prompt asks for OMISSION over a guess, and says why: a wrong mapping is silent
+         and expensive — a column bound to the wrong attribute resolves that tenant's records
+         wrongly for as long as the source exists, and nobody traces the bad matches back to
+         the wizard. `parseMappings` then drops a hallucinated column (it would fail at ingest,
+         far from here), a non-canonical attribute, and anything that would overwrite a
+         mapping the person already confirmed.
+         Tests: 29 unit plus a functional spec that asserts on the **request body** — shapes
+         present, cell values absent — because a unit test cannot prove the wizard sent what
+         the unit produced. Two sabotages observed failing first: sending real samples (the
+         plausible "better accuracy" mistake) and dropping run-collapsing. The leak assertion
+         serializes the whole payload and searches it, so a future field that forwards a value
+         is caught without anyone updating the test.
+         *Self-correction worth recording:* the first draft of that spec asserted
+         `body.toContain("aaa@aaa.aaa".slice(0, 1))` — i.e. that the body contains the letter
+         `a`. Vacuous, and it would have passed against a payload full of raw values.
+   - [ ] V8b AI model setup (#35) — a suggested starter matching config per entity type,
+         landing as a draft. Unbuilt; the mapping half above was the larger and more
+         privacy-sensitive one, and V7's `draft-from-prose` route is the shape it should take.
    - [ ] V9 staged agent write-actions (#81), through the existing steward-action path.
 
    **Blocked on one account-level decision, verified 2026-10-20.** Probed live with the

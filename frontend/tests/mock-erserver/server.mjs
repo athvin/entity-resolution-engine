@@ -1150,6 +1150,38 @@ const server = http.createServer((req, res) => {
       // payload, finds no `verdict`, and the route 502s. The system prompt is
       // the discriminator: it is the one part of the request that names the
       // task, and both callers set it from their own pure module.
+      // V8 schema mapping: structured output, discriminated like the others.
+      // Answers with the two attributes the regex table misses on the fixture
+      // header (`fnm`, `eml`), so the spec proves the model FILLS GAPS rather
+      // than re-deriving what the heuristic already got.
+      if (body.stream !== true && String(body.system ?? "").includes("You map a source file")) {
+        const asked = String(body.messages?.[0]?.content ?? "");
+        const mappings = [];
+        if (asked.includes('"fnm"')) {
+          mappings.push({
+            attribute: "given_name",
+            column: "fnm",
+            reason: "short single-token values under a name-like header",
+          });
+        }
+        if (asked.includes('"eml"')) {
+          mappings.push({
+            attribute: "email",
+            column: "eml",
+            reason: "values are email-shaped (aaa@aaa.aaa)",
+          });
+        }
+        return send(res, 200, {
+          id: "msg_mock_mapping",
+          type: "message",
+          role: "assistant",
+          model: String(body.model ?? "mock"),
+          content: [{ type: "text", text: JSON.stringify({ mappings }) }],
+          stop_reason: "end_turn",
+          stop_sequence: null,
+          usage: { input_tokens: 150, output_tokens: 60 },
+        });
+      }
       // V7 authoring: returns a COMPLETE config document. Echoes the one it was
       // given with the review threshold nudged, because `parseDraft` refuses an
       // unchanged document — a mock that returned the input verbatim would
