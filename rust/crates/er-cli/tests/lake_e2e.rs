@@ -3763,16 +3763,24 @@ fn adding_a_member_does_not_retire_the_one_already_scored() {
 /// rows re-keyed onto its own identity — test-local, so no committed fixture is
 /// rebaselined, and it is what makes the two members genuinely different rather
 /// than the same model under two names.
-fn run_ensemble_phase(
-    session: &Session,
-    config: &Config,
-    tmp: &std::path::Path,
-    scenario: &str,
-    phase: &str,
-    run_id: &str,
-    ts: &str,
-    mode: &str,
-) {
+struct EnsemblePhase<'a> {
+    tmp: &'a std::path::Path,
+    scenario: &'a str,
+    phase: &'a str,
+    run_id: &'a str,
+    ts: &'a str,
+    mode: &'a str,
+}
+
+fn run_ensemble_phase(session: &Session, config: &Config, p: &EnsemblePhase) {
+    let EnsemblePhase {
+        tmp,
+        scenario,
+        phase,
+        run_id,
+        ts,
+        mode,
+    } = *p;
     let deliveries: Vec<(String, String)> = ["crm", "billing", "webforms"]
         .iter()
         .filter_map(|s| {
@@ -3900,12 +3908,14 @@ fn an_ensembles_incremental_batch_lands_where_a_full_rerun_would() {
     run_ensemble_phase(
         &sa,
         &config,
-        &tmp_a,
-        "incremental_batch",
-        "base",
-        "01ENSINCA00000000000BASE00",
-        "2026-01-01 00:00:00",
-        "full",
+        &EnsemblePhase {
+            tmp: &tmp_a,
+            scenario: "incremental_batch",
+            phase: "base",
+            run_id: "01ENSINCA00000000000BASE00",
+            ts: "2026-01-01 00:00:00",
+            mode: "full",
+        },
     );
 
     // After a FULL two-member pass both identities must be in the ledger, with
@@ -3931,12 +3941,14 @@ fn an_ensembles_incremental_batch_lands_where_a_full_rerun_would() {
     run_ensemble_phase(
         &sa,
         &config,
-        &tmp_a,
-        "incremental_batch",
-        "batch",
-        "01ENSINCA0000000000BATCH00",
-        "2026-06-01 00:00:00",
-        "incremental",
+        &EnsemblePhase {
+            tmp: &tmp_a,
+            scenario: "incremental_batch",
+            phase: "batch",
+            run_id: "01ENSINCA0000000000BATCH00",
+            ts: "2026-06-01 00:00:00",
+            mode: "incremental",
+        },
     );
     let scores_a = active_scores_by_model(&sa);
     let partition_a = partition(&membership_rows(&sa));
@@ -4011,22 +4023,26 @@ fn an_ensembles_incremental_batch_lands_where_a_full_rerun_would() {
     run_ensemble_phase(
         &sb,
         &config,
-        &tmp_b,
-        "incremental_batch",
-        "base",
-        "01ENSINCB00000000000BASE00",
-        "2026-01-01 00:00:00",
-        "full",
+        &EnsemblePhase {
+            tmp: &tmp_b,
+            scenario: "incremental_batch",
+            phase: "base",
+            run_id: "01ENSINCB00000000000BASE00",
+            ts: "2026-01-01 00:00:00",
+            mode: "full",
+        },
     );
     run_ensemble_phase(
         &sb,
         &config,
-        &tmp_b,
-        "incremental_batch",
-        "batch",
-        "01ENSINCB0000000000BATCH00",
-        "2026-06-01 00:00:00",
-        "full",
+        &EnsemblePhase {
+            tmp: &tmp_b,
+            scenario: "incremental_batch",
+            phase: "batch",
+            run_id: "01ENSINCB0000000000BATCH00",
+            ts: "2026-06-01 00:00:00",
+            mode: "full",
+        },
     );
     let scores_b = active_scores_by_model(&sb);
     let partition_b = partition(&membership_rows(&sb));
