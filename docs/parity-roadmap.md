@@ -2650,7 +2650,32 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
    against the existing `ANTHROPIC_BASE_URL` seam and the Playwright mock's scripted
    `/anthropic/v1/messages`, so this blocks live verification, not progress.
 7. **Governance + platform**
-   - [ ] O9 config promotion: export/import/diff across orgs (#76).
+   - [x] O9 config promotion: export/import/diff across orgs (#76). The dev→prod story — a
+         config was already versioned and diffable WITHIN an org; this adds the
+         cross-environment half.
+         **The authorization rule is the whole feature.** A promotion names two orgs and the
+         obvious mistake is checking the one in the URL: that would let someone who
+         administers staging read production's configuration, which names its sources,
+         thresholds and business rules. Both sides are checked at ADMIN, independently, with
+         two `requireOrgAccess` calls rather than one taking a list — that is the shape the
+         authz gate recognises and every other route uses. The URL's org is checked first, so
+         a caller with no access to it gets the ordinary 404 and learns nothing about whether
+         the other org exists.
+         `POST` rather than `GET` for the compare, because the other org arrives in a body:
+         an org name in a query string is a referrer-logged, cache-keyed value, and this one
+         is an authorization input.
+         **Import is gated behind compare in the UI**, and that asymmetry is the point.
+         Copying a config between tenants unread is the mistake this surface prevents — the
+         two may map different sources, and `er-sql-check` does not say so until publish, by
+         which point a draft has been approved by someone who never saw the diff. The copy
+         lands as a DRAFT like every other write in this program.
+         Diffed server-side with the same `diffLines` the version history uses, so an in-org
+         and a cross-org diff cannot disagree about what changed.
+         23 tests (10 on the request shapes and the self-promotion refusal, 13 on the panel).
+         Sabotaging the compare-before-import gate fails one by name.
+         *A real bug the component test caught:* `DiffLine.kind` is `added`/`removed` and my
+         panel matched `add`/`remove`, so every line would have rendered as unchanged — a
+         diff silently claiming two configs are identical, which is worse than no diff.
    - [ ] O10 MCP server over the generated OpenAPI + org service identity (#79/#78). **Wants
          `#[utoipa::path]` on the handlers first** — `openapi.json` documents zero paths by a
          recorded decision, so there is nothing for an MCP server to generate tools from. The

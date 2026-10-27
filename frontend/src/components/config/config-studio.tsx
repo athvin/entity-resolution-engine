@@ -19,6 +19,7 @@ import {
   type StudioEdits,
   type Thresholds,
 } from "@/lib/domain/config";
+import type { DiffLine } from "@/lib/domain/config";
 import { CONFIG_TEMPLATES } from "@/lib/domain/config-templates";
 import {
   useActiveConfig,
@@ -30,6 +31,8 @@ import {
 } from "@/lib/query/config";
 import { extractBlock, isExplainableBlock } from "@/lib/config-ai/blocks";
 import { useDraftFromProse, useExplainRule, useStarterConfig } from "@/lib/query/config-ai";
+import { promotableOrgs, useCompareConfigs, useImportConfig } from "@/lib/query/promote";
+import { PromotePanel } from "./promote-panel";
 import { effectiveRole, useSession } from "@/lib/query/hooks";
 import { cn } from "@/lib/utils";
 import { BlockingEditor } from "./blocking-editor";
@@ -170,6 +173,16 @@ export function ConfigStudio({ org }: { org: string }) {
   const draftFromProse = useDraftFromProse(org);
   const explainRule = useExplainRule(org);
   const starterConfig = useStarterConfig(org);
+  // O9. The candidate list comes from the SESSION's memberships, so it offers
+  // only orgs this person administers; the server checks both sides anyway.
+  const compareConfigs = useCompareConfigs(org);
+  const importConfig = useImportConfig(org);
+  const candidates = promotableOrgs(session.data?.memberships ?? [], org);
+  const [promoteTarget, setPromoteTarget] = useState("");
+  const [promoteDiff, setPromoteDiff] = useState<DiffLine[] | null>(null);
+  const [promoteTheirVersion, setPromoteTheirVersion] = useState<number | null>(null);
+  const [promoteNote, setPromoteNote] = useState<string | null>(null);
+  const [promoteFailure, setPromoteFailure] = useState<string | null>(null);
   const [aiInstruction, setAiInstruction] = useState("");
   const [aiBlock, setAiBlock] = useState<string>("blocking");
   const [aiExplanation, setAiExplanation] = useState<string | null>(null);
@@ -379,6 +392,67 @@ export function ConfigStudio({ org }: { org: string }) {
           );
         }}
       />
+
+      {isAdmin && (
+        <PromotePanel
+          candidates={candidates}
+          target={promoteTarget || (candidates[0] ?? "")}
+          diff={promoteDiff}
+          theirVersion={promoteTheirVersion}
+          comparing={compareConfigs.isPending}
+          importing={importConfig.isPending}
+          note={promoteNote}
+          failure={promoteFailure}
+          onTargetChange={(value) => {
+            setPromoteTarget(value);
+            // The old diff described the old target; leaving it on screen under
+            // a new selection is the kind of wrong that looks right.
+            setPromoteDiff(null);
+            setPromoteNote(null);
+          }}
+          onCompare={() => {
+            setPromoteFailure(null);
+            setPromoteNote(null);
+            const against = promoteTarget || candidates[0];
+            if (!against) return;
+            compareConfigs.mutate(
+              { against },
+              {
+                onSuccess: (result) => {
+                  setPromoteDiff(result.diff);
+                  setPromoteTheirVersion(result.their_version);
+                },
+                onError: (error) => {
+                  setPromoteFailure(
+                    error instanceof BffRequestError ? error.message : "could not compare",
+                  );
+                },
+              },
+            );
+          }}
+          onImport={() => {
+            setPromoteFailure(null);
+            setPromoteNote(null);
+            const from = promoteTarget || candidates[0];
+            if (!from) return;
+            importConfig.mutate(
+              { from },
+              {
+                onSuccess: (result) => {
+                  setPromoteNote(
+                    `Copied ${result.imported_from}'s config in as a draft — review it below before publishing.`,
+                  );
+                },
+                onError: (error) => {
+                  setPromoteFailure(
+                    error instanceof BffRequestError ? error.message : "could not copy that config",
+                  );
+                },
+              },
+            );
+          }}
+        />
+      )}
 
       {thresholds && (
         <Card data-testid="thresholds-card">
