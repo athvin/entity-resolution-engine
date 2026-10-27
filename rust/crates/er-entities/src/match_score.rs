@@ -310,6 +310,71 @@ ORDER BY rec_a_key, rec_b_key
         AutoMergeEdgesLiveRow::from_batches(&batches)
     }
 
+    /// One row of `auto_merge_edges_per_model`: Auto-merge edges when each ensemble member has its OWN threshold (E5b-2c), from the session's __member_thresholds staging. A JOIN rather than a predicate because the threshold is a property of the model that produced the row, and `auto_merge_edges_live` has no model_version filter at all — it compares every active row against one number, which is correct for one model and silently wrong for several. The join also drops rows from identities the run is not scoring with, which is the same protection `retire_other_models` gives, applied at read time.
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct AutoMergeEdgesPerModelRow {
+        pub rec_a_key: String,
+        pub rec_b_key: String,
+        pub match_probability: f64,
+    }
+
+    impl AutoMergeEdgesPerModelRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("rec_a_key", ::arrow::datatypes::DataType::Utf8),
+                ("rec_b_key", ::arrow::datatypes::DataType::Utf8),
+                ("match_probability", ::arrow::datatypes::DataType::Float64),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "rec_a_key")?;
+                let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "rec_b_key")?;
+                let c2: &::arrow::array::Float64Array =
+                    crate::batch::col(batch, 2, "match_probability")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        rec_a_key: crate::batch::req(crate::batch::opt_str(c0, i), "rec_a_key", i)?,
+                        rec_b_key: crate::batch::req(crate::batch::opt_str(c1, i), "rec_b_key", i)?,
+                        match_probability: crate::batch::req(
+                            crate::batch::opt_f64(c2, i),
+                            "match_probability",
+                            i,
+                        )?,
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// Auto-merge edges when each ensemble member has its OWN threshold (E5b-2c), from the session's __member_thresholds staging. A JOIN rather than a predicate because the threshold is a property of the model that produced the row, and `auto_merge_edges_live` has no model_version filter at all — it compares every active row against one number, which is correct for one model and silently wrong for several. The join also drops rows from identities the run is not scoring with, which is the same protection `retire_other_models` gives, applied at read time.
+    pub fn auto_merge_edges_per_model(
+        conn: &::duckdb::Connection,
+    ) -> ::duckdb::Result<Vec<AutoMergeEdgesPerModelRow>> {
+        const SQL: &str = "SELECT m.rec_a_key, m.rec_b_key, m.match_probability
+FROM lake.main.match_scores m
+JOIN __member_thresholds t
+  ON t.model_version = m.model_version
+ AND t.tf_snapshot_id = m.tf_snapshot_id
+WHERE m.is_active AND m.match_probability >= t.threshold
+ORDER BY m.rec_a_key, m.rec_b_key
+";
+        let mut stmt = conn.prepare(SQL)?;
+        let batches = stmt.query_arrow(::duckdb::params![])?.collect::<Vec<_>>();
+        AutoMergeEdgesPerModelRow::from_batches(&batches)
+    }
+
     /// One row of `uncertain_page`: Active pairs ordered by how UNSURE the model is about them — nearest the decision threshold first. This is uncertainty sampling, and it is the difference between a labelling session that teaches the model something and one that does not: pairs it already scores at 0.99 or 0.01 confirm what it knows, while the pairs either side of the threshold are where its m/u estimates are actually wrong. Tie-broken by the pair so the order is deterministic and a second request returns the same page.
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
     pub struct UncertainPageRow {

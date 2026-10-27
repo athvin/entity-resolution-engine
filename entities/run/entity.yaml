@@ -41,6 +41,9 @@ columns:
   - name: tf_snapshot_id
     type: varchar
     description: "The frozen term-frequency snapshot the score used."
+  - name: resolved_ensemble
+    type: json
+    description: "The ensemble this run scored with, resolved to concrete identities and thresholds: `[{name, model_version, tf_snapshot_id, threshold}]`. NULL for a single-model run, which is every run before E5b-2c and every run whose config declares no `models:` — so the existing clustering path is untouched rather than equal-by-coincidence. It is on the RUN rather than looked up from the registry because `run_correct` re-clusters from the lake alone, with no Postgres in scope: the thresholds that decided an edge have to travel with the run that applied them, or a correction pass would re-cluster the same scores under whatever the registry happens to say later."
   - name: std_version
     type: varchar
     nullable: false

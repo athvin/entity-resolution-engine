@@ -1,0 +1,11 @@
+kind: statement
+operation: read
+mode: partial
+description: "Auto-merge edges when each ensemble member has its OWN threshold (E5b-2c), from the session's __member_thresholds staging. A JOIN rather than a predicate because the threshold is a property of the model that produced the row, and `auto_merge_edges_live` has no model_version filter at all — it compares every active row against one number, which is correct for one model and silently wrong for several. The join also drops rows from identities the run is not scoring with, which is the same protection `retire_other_models` gives, applied at read time."
+pin: live
+pin_reason: "reconcile composes this inside the writer's own transaction, like auto_merge_edges_live."
+params: []
+returns:
+  - { name: rec_a_key, type: varchar, nullable: false }
+  - { name: rec_b_key, type: varchar, nullable: false }
+  - { name: match_probability, type: double, nullable: false }

@@ -1,0 +1,13 @@
+kind: statement
+operation: read
+mode: partial
+description: "One run's model identity and resolved ensemble, by id (E5b-2c). Reconcile needs the thresholds THIS run recorded, not the latest run's: a correction pass writes its own row first and then re-clusters, so `latest_live` would answer with the row the pass itself just wrote — correct only because that row copies the prior one forward, which is a coincidence a later change could remove."
+pin: live
+pin_reason: "reconcile composes this inside the writer's own transaction, before any snapshot for the run exists."
+params:
+  - { name: run_id, type: varchar }
+returns:
+  - { name: id, type: varchar, nullable: false }
+  - { name: model_version, type: varchar }
+  - { name: tf_snapshot_id, type: varchar }
+  - { name: resolved_ensemble, type: json }

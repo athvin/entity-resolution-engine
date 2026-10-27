@@ -1116,11 +1116,56 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          so the map kept whichever row the scan reached last — and since the ORDER BY did not
          mention the model, which member won varied between two runs over the same data. The
          ensemble tests use `active_scores_by_model`.
-   - [ ] E5b-2c the `then_run` cascade + per-member thresholds, which want the resolved ensemble
-         persisted on the run row (DDL): `auto_merge_edges_live` has no `model_version` filter, so
-         a per-member threshold needs the resolved `model_version -> threshold` mapping wherever
-         clustering happens, and `run_correct` re-clusters from the lake alone. Split out of E5b-2b
-         because the incremental half needed no new column and this half is a schema change.
+   - [x] **E5b-2c per-member thresholds — and `then_run` turns out to be a cost optimisation,
+         not a semantic one.** `auto_merge_edges_live` compares every active row against ONE
+         number, which is correct for one model and silently wrong for several: a strict model
+         built for precision and a loose one built for recall cannot share a threshold without
+         one of them being wrong. `ModelSpec.threshold` is back — E5b-2 wrote it and then
+         REMOVED it rather than ship it inert, because the resolved mapping had nowhere to live
+         that `run_correct` could reach.
+         **It lives on the RUN ROW, and that is the whole design.** A correction pass
+         re-clusters scores a PREVIOUS run produced, with only the lake in scope — no registry,
+         no Postgres. So the thresholds have to travel with the run that applied them, or the
+         pass re-clusters yesterday's scores under a number that was never applied to them.
+         `runs.resolved_ensemble` is `[{name, model_version, tf_snapshot_id, threshold}]`, and
+         `run_correct` copies the prior run's forward. The new `by_id` read is used rather than
+         `latest_live` because a correction pass writes its own row FIRST and then re-clusters —
+         `latest_live` would answer with the row the pass just wrote, correct only because that
+         row copies the prior one forward, which is a coincidence a later change could remove.
+         **NULL is not "no ensemble".** A two-member ensemble whose members both use
+         `thresholds.auto_merge` resolves to NULL too, because the per-model read would then
+         answer exactly what the model-blind one already answers — and a clustering path that
+         depends on a column whose value cannot change the outcome is a second path to keep
+         correct for nothing. So the existing path is untouched rather than equal by
+         coincidence, and all 38 lake tests are unchanged.
+         **`then_run` was NOT built, and the reason is the finding.** Working through it:
+         `and_run` unions every member's above-threshold edges; `then_run` has later members
+         score only pairs earlier ones left unmatched. Those produce the **same edge set** — a
+         pair B matches that A already matched adds nothing to a union, and that holds with
+         per-member thresholds too. So the cascade's entire value is COST (B scores fewer
+         pairs), and delivering it means restricting pair generation inside the engine's
+         blocking, not filtering after the fact. Filtering after prediction would give the
+         attribution and none of the saving, which is the dead-config shape this program has
+         already removed twice. Re-filed as E5b-2d with that scope.
+         **The two-schema-source hazard bit, and the gate for it already existed.** The lake
+         DDL `create_ddl_table` emits comes from a hand-maintained S5 registry in
+         `er-schema::model`, not from the generated `er-entities/ddl/lake/*.sql` — so adding
+         `resolved_ensemble` through `entities/` passed `er-entity verify` ("111 generated files
+         are current") and then failed 29 lake tests with `Table "runs" does not have a column
+         with name …`. `registry_matches_entities.rs` exists precisely for this and names a
+         prior instance (E9b's `matched_count`); it would have said so in one line. It did not,
+         because I ran `er-entity verify` and a targeted `cargo test -p er-cli` instead of
+         `make check` — which is the thing CLAUDE.md's first section is about. No new gate is
+         warranted; the registry was updated and the existing one passes.
+         Sabotage: making reconcile ignore the run row fails the test named for it — a member
+         threshold of 1.1, which no probability can clear, must make every record its own
+         entity. Plus: rows from an identity the resolved ensemble does not name contribute
+         nothing even at threshold 0, which is `retire_other_models`' protection applied at
+         read time.
+   - [ ] E5b-2d the `then_run` cascade, scoped by E5b-2c's finding: it is a COST optimisation
+         only — `and_run` and `then_run` produce the same edge set — so it has to restrict pair
+         GENERATION inside the engine's blocking to be worth anything, and a post-prediction
+         filter would deliver attribution and no saving.
    - [x] **E5b-3 the models page — and `active` stops naming one model.** The registry had no
          surface at all since E1 built it: a tenant could not see which model its data was scored
          against, what it used to be, or the m/u probabilities the engine always carried
