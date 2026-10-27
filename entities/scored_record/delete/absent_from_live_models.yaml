@@ -1,0 +1,6 @@
+kind: statement
+operation: delete
+mode: partial
+description: "Drop the ledger rows of every model identity this run does not score with, from the session's __live_models staging. The companion to retiring those models' scores, and run in the same place so the two cannot drift: once a model's scores are retired they will have to be recomputed if it ever comes back, so a ledger row claiming it already scored a record is a claim that will be acted on and is false. Leaving them also breaks the reuse gate in the other direction — an ensemble narrowed from two members to one would find the ledger holding an identity it is not scoring with, forever."
+params: []
+returns: none

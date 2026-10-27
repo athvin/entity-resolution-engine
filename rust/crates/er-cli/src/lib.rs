@@ -668,20 +668,13 @@ pub fn run_match_ensemble(
         !members.is_empty(),
         "a run always scores with at least one member"
     );
-    // The matched corpus is the person or Account standardized table, by
-    // entity_type. MATCH_SCORES (the merge target below) is shared + entity-agnostic.
-    let (std_unqual, std_qual) = if config.entity_type.is_person() {
-        ("int_std_records", INT_STD_RECORDS)
-    } else {
-        ("acct_int_std_records", ACCT_INT_STD_RECORDS)
-    };
-
     // Retire the non-members ONCE, with the whole live set. Doing it per member
     // would retire the members scored earlier in this very loop — which is
     // precisely the bug E5a fixed for the single-model case, reappearing inside
-    // the ensemble. Disjoint from the per-member invalidation below (that one
-    // only ever touches its own model identity's rows), so the order between
-    // the two does not matter.
+    // the ensemble. That is why `score_member_full` does no retirement of its
+    // own. Disjoint from the per-member invalidation inside it (that one only
+    // ever touches its own model identity's rows), so the order between the two
+    // does not matter.
     let live: Vec<(&str, &str)> = members
         .iter()
         .map(|m| (m.model.model_version, m.model.tf_snapshot_id))
@@ -689,6 +682,101 @@ pub fn run_match_ensemble(
     retire_other_models(session, &live, run_id, scored_at)?;
 
     for member in members {
+        score_member_full(session, config, member, review_low, run_id, scored_at)?;
+    }
+    Ok(())
+}
+
+/// S4.3.4 INCREMENTAL match for an ensemble (E5b-2b): every member scores only
+/// what it has not already scored, and returns what each one did.
+///
+/// Returned per member rather than aggregated because the members can land in
+/// different modes — a newly added member has no ledger and falls back to a
+/// full pass while its siblings reuse — and an aggregate would have to pick one
+/// word for two different things.
+///
+/// This used to be refused for `members.len() > 1`, and three things had to
+/// change before it could be true:
+///
+/// 1. **The ledger is keyed per (record, model identity).** It was keyed on
+///    `record_key` alone, and `sync_scored_ledger` runs once per member, so the
+///    second member's sync rewrote the first member's rows to its own identity
+///    — a two-member pass left a ledger claiming only the last member had
+///    scored anything, and "member B has not scored record X" had nowhere to be
+///    true.
+/// 2. **The delta filters by the member's identity.** Without it a record
+///    scored by member A counts as scored for member B, so B never sees it and
+///    the pair stays unscored under B forever.
+/// 3. **The reuse gate asks whether THIS member has scored**, not whether the
+///    ledger holds exactly one identity — which for an ensemble is never true,
+///    so the old gate would have fallen back to a full pass every time.
+///
+/// Retirement happens inside each member's pass with the WHOLE live set, which
+/// is idempotent, so the members cannot retire each other.
+///
+/// # Errors
+/// Propagates model-load / predict / lake DDL+MERGE errors.
+pub fn run_match_ensemble_incremental(
+    session: &Session,
+    config: &Config,
+    members: &[EnsembleMember],
+    review_low: f64,
+    run_id: &str,
+    scored_at: &str,
+    segment: Option<&str>,
+) -> Result<Vec<MatchDelta>> {
+    assert!(
+        !members.is_empty(),
+        "a run always scores with at least one member"
+    );
+    let live: Vec<(&str, &str)> = members
+        .iter()
+        .map(|m| (m.model.model_version, m.model.tf_snapshot_id))
+        .collect();
+    members
+        .iter()
+        .map(|member| {
+            run_match_partial(
+                session,
+                config,
+                &PartialPass {
+                    member,
+                    live: &live,
+                    review_low,
+                    run_id,
+                    scored_at,
+                    segment,
+                },
+            )
+        })
+        .collect()
+}
+
+/// One member's FULL pass: score the whole corpus under its identity and claim
+/// the whole corpus in the ledger.
+///
+/// Deliberately does NOT retire other models. Retirement takes the whole live
+/// set and must happen exactly once per run, which is why it sits in the
+/// callers: doing it here would retire the members scored earlier in the very
+/// loop above — E5a's bug one level down — and it would do the same to a member
+/// that already ran incrementally when a later member falls back to full.
+///
+/// # Errors
+/// Propagates model-load / predict / lake DDL+MERGE errors.
+fn score_member_full(
+    session: &Session,
+    config: &Config,
+    member: &EnsembleMember,
+    review_low: f64,
+    run_id: &str,
+    scored_at: &str,
+) -> Result<()> {
+    let (std_unqual, std_qual) = if config.entity_type.is_person() {
+        ("int_std_records", INT_STD_RECORDS)
+    } else {
+        ("acct_int_std_records", ACCT_INT_STD_RECORDS)
+    };
+    {
         let model = &member.model;
         let mut settings = load_model(model.settings_json)?;
         settings.retain_intermediate = true;
@@ -774,6 +862,8 @@ fn retire_other_models(
     scored_at: &str,
 ) -> Result<usize> {
     create_ddl_table(session, "match_scores")?;
+    // Also the ledger's, because this function now prunes it as well.
+    create_ddl_table(session, "scored_records")?;
     assert!(
         !live.is_empty(),
         "a run always scores with at least one model; an empty live set would \
@@ -804,6 +894,14 @@ fn retire_other_models(
          select '{run_id}' as run_id, cast('{scored_at}' as timestamp) as invalidated_at"
     ))?;
     let n = er_entities::match_score::update::retire_other_models(session.connection())?;
+    // The scored-record ledger follows the scores (E5b-2b), and it happens HERE
+    // rather than in a caller so the two cannot drift: once a model's scores are
+    // retired they must be recomputed if it ever returns, so a ledger row saying
+    // it already scored a record is a claim the incremental path would act on
+    // and is false. It also keeps the reuse gate working in the other direction
+    // — an ensemble narrowed from two members to one would otherwise find the
+    // ledger holding an identity it is not scoring with, forever.
+    er_entities::scored_record::delete::absent_from_live_models(session.connection())?;
     for t in ["__live_models", "__retire_stamp"] {
         session.execute_batch(&format!("drop table {t}"))?;
     }
@@ -1072,7 +1170,23 @@ pub fn run_match_incremental(
     run_id: &str,
     scored_at: &str,
 ) -> Result<MatchDelta> {
-    run_match_partial(session, config, model, review_low, run_id, scored_at, None)
+    let live = [(model.model_version, model.tf_snapshot_id)];
+    let member = EnsembleMember {
+        model: MatchModel { ..*model },
+        name: SOLE_MEMBER_NAME,
+    };
+    run_match_partial(
+        session,
+        config,
+        &PartialPass {
+            member: &member,
+            live: &live,
+            review_low,
+            run_id,
+            scored_at,
+            segment: None,
+        },
+    )
 }
 
 /// S4.3.4 match restricted to a named segment (#54): score `segment × corpus`
@@ -1108,47 +1222,93 @@ pub fn run_match_segment(
     scored_at: &str,
     predicate: &str,
 ) -> Result<MatchDelta> {
+    let live = [(model.model_version, model.tf_snapshot_id)];
+    let member = EnsembleMember {
+        model: MatchModel { ..*model },
+        name: SOLE_MEMBER_NAME,
+    };
     run_match_partial(
         session,
         config,
-        model,
-        review_low,
-        run_id,
-        scored_at,
-        Some(predicate),
+        &PartialPass {
+            member: &member,
+            live: &live,
+            review_low,
+            run_id,
+            scored_at,
+            segment: Some(predicate),
+        },
     )
 }
 
-fn run_match_partial(
-    session: &Session,
-    config: &Config,
-    model: &MatchModel,
+/// One member's incremental pass.
+///
+/// `model` is the member being scored; `live` is EVERY identity this run scores
+/// with. The two are different for an ensemble and that difference is the whole
+/// reason `live` is a parameter: retiring "everything but the model I am
+/// scoring" inside a per-member loop retires the members scored earlier in that
+/// same loop, which is E5a's bug reappearing one level down. Retirement is
+/// idempotent, so passing the full set on every member's call is correct as
+/// well as simple — the second call finds nothing left to retire.
+/// One incremental pass's inputs, bundled the way [`ScorePass`] is.
+struct PartialPass<'a> {
+    /// The member being scored.
+    member: &'a EnsembleMember<'a>,
+    /// EVERY identity this run scores with. Different from `member` for an
+    /// ensemble, and that difference is the whole reason this is carried
+    /// separately: retiring "everything but the model I am scoring" inside a
+    /// per-member loop retires the members scored earlier in that same loop,
+    /// which is E5a's bug one level down. Retirement is idempotent, so passing
+    /// the full set on every member's call is correct as well as simple.
+    live: &'a [(&'a str, &'a str)],
     review_low: f64,
-    run_id: &str,
-    scored_at: &str,
-    segment: Option<&str>,
-) -> Result<MatchDelta> {
+    run_id: &'a str,
+    scored_at: &'a str,
+    /// A SQL boolean over the standardized columns, from the published config's
+    /// `segments` block — never from a request.
+    segment: Option<&'a str>,
+}
+
+fn run_match_partial(session: &Session, config: &Config, pass: &PartialPass) -> Result<MatchDelta> {
+    let PartialPass {
+        member,
+        live,
+        review_low,
+        run_id,
+        scored_at,
+        segment,
+    } = *pass;
+    let model = &member.model;
+    debug_assert!(
+        live.iter()
+            .any(|(mv, snap)| *mv == model.model_version && *snap == model.tf_snapshot_id),
+        "the member being scored must be in the live set, or this pass would \
+         retire its own scores"
+    );
     let std_qual = if config.entity_type.is_person() {
         INT_STD_RECORDS
     } else {
         ACCT_INT_STD_RECORDS
     };
     create_ddl_table(session, "scored_records")?;
-    let state = er_entities::scored_record::read::state(session.connection())?;
-    let ledger = state.first();
-    let scored_rows = ledger.and_then(|s| s.n).unwrap_or(0);
-    let identities = ledger.and_then(|s| s.identities).unwrap_or(0);
-    let same_model = ledger.is_some_and(|s| {
-        identities == 1
-            && s.model_version.as_deref() == Some(model.model_version)
-            && s.tf_snapshot_id.as_deref() == Some(model.tf_snapshot_id)
-    });
+    // Per-member coverage, not "the ledger holds exactly one identity" (E5b-2b).
+    // The old gate was right while a pass scored with one model: a ledger
+    // spanning identities meant something unaccounted-for had written it. An
+    // ensemble makes a spanning ledger the NORMAL state, so the question
+    // narrows to the one that was always being asked — has THIS member already
+    // scored this corpus — and the delta below asks it per member too.
+    let scored_rows: i64 = er_entities::scored_record::read::identities(session.connection())?
+        .iter()
+        .filter(|row| {
+            row.model_version.as_deref() == Some(model.model_version)
+                && row.tf_snapshot_id.as_deref() == Some(model.tf_snapshot_id)
+        })
+        .filter_map(|row| row.n)
+        .sum();
 
     let full_reason = if scored_rows == 0 {
-        Some("nothing has been scored yet".to_string())
-    } else if !same_model {
         Some(format!(
-            "the corpus was scored under a different model identity than {}/{}",
+            "nothing has been scored yet under {}/{}",
             model.model_version, model.tf_snapshot_id
         ))
     } else {
@@ -1159,7 +1319,17 @@ fn run_match_partial(
         // has to be scored either way, so scope it to everything rather than
         // leave the records outside the slice unscored with a ledger that says
         // otherwise.
-        run_match(session, config, model, review_low, run_id, scored_at)?;
+        //
+        // Retire first with the WHOLE live set, then score this one member.
+        // Calling `run_match` here instead — which is what this did — routes
+        // through a one-member `run_match_ensemble` whose retirement sweep
+        // takes only this member's identity, so a member that falls back to
+        // full would retire every OTHER member of the same ensemble. Harmless
+        // when the fallback happens first (the later members rescore anyway)
+        // and silent corruption when it happens last: the members already
+        // scored in this run are retired and never revisited.
+        retire_other_models(session, live, run_id, scored_at)?;
+        score_member_full(session, config, member, review_low, run_id, scored_at)?;
         return Ok(MatchDelta {
             mode: er_versions::MODE_FULL,
             corpus_records: count_rows(session, std_qual)?,
@@ -1182,9 +1352,18 @@ fn run_match_partial(
     for t in [delta_std, kept_std] {
         session.execute_batch(&format!("drop table if exists {t}"))?;
     }
+    // The identity filter is what makes an ensemble's incremental pass correct
+    // (E5b-2b). Without it a record scored by member A counts as scored for
+    // member B, so B never sees it and the pair stays unscored under B forever
+    // — the kind of gap that only shows up as a duplicate nobody caught.
+    let (mv, snap) = (
+        model.model_version.replace('\'', "''"),
+        model.tf_snapshot_id.replace('\'', "''"),
+    );
     let matched = format!(
         "select 1 from {SCORED_RECORDS} l
-          where l.record_key = s.record_key and l.content_hash = s.content_hash"
+          where l.record_key = s.record_key and l.content_hash = s.content_hash
+            and l.model_version = '{mv}' and l.tf_snapshot_id = '{snap}'"
     );
     // `in scope` and `not in scope` are written as negations of one expression so
     // the two sides cannot drift into overlapping or leaving a gap. A predicate
@@ -1223,12 +1402,7 @@ fn run_match_partial(
     )?;
     // Other models' scores go whether or not this pass touches their pairs: they
     // are not from a model this run uses, so they must not keep clustering.
-    invalidated += retire_other_models(
-        session,
-        &[(model.model_version, model.tf_snapshot_id)],
-        run_id,
-        scored_at,
-    )?;
+    invalidated += retire_other_models(session, live, run_id, scored_at)?;
 
     if delta_records > 0 {
         let tf_tables = build_frozen_tf_tables(
@@ -3231,53 +3405,39 @@ pub fn run_all_ensemble(
         )?;
     }
     run_standardize(session, config, inputs.run_at)?;
-    // An ensemble scores in FULL mode only, and declines the incremental path
-    // out loud rather than tripping over it. Two things in `run_match_partial`
-    // are single-model by construction: it requires the scored-records ledger to
-    // hold exactly ONE identity before it will reuse anything, and its delta is
-    // "records with no ledger row for this (record_key, content_hash)" with no
-    // model filter — so a record scored by member A but not member B counts as
-    // scored, and B would never see it. Per-member deltas are the fix and they
-    // are their own change; a full pass is meanwhile always CORRECT, just more
-    // expensive, so the honest move is to say so in the ledger.
-    let ensemble_forces_full = members.len() > 1;
-    if !ensemble_forces_full
-        && (inputs.mode == er_versions::MODE_INCREMENTAL || inputs.segment.is_some())
-    {
-        let delta = run_match_partial(
+    // Incremental now covers ensembles too (E5b-2b); see
+    // `run_match_ensemble_incremental` for what had to change.
+    if inputs.mode == er_versions::MODE_INCREMENTAL || inputs.segment.is_some() {
+        let deltas = run_match_ensemble_incremental(
             session,
             config,
-            inputs.model,
+            members,
             config.thresholds.review_low,
             inputs.run_id,
             inputs.scored_at,
             inputs.segment.map(|(_, predicate)| predicate),
         )?;
-        eprintln!(
-            "run {}: {} match over {}/{} records, {} scores invalidated{}{}",
-            inputs.run_id,
-            delta.mode,
-            delta.delta_records,
-            delta.corpus_records,
-            delta.invalidated_scores,
-            inputs
-                .segment
-                .map(|(name, _)| format!(", segment {name}"))
-                .unwrap_or_default(),
-            delta
-                .full_reason
-                .map(|r| format!(" ({r})"))
-                .unwrap_or_default(),
-        );
-    } else {
-        if ensemble_forces_full && inputs.mode == er_versions::MODE_INCREMENTAL {
+        for (member, delta) in members.iter().zip(&deltas) {
             eprintln!(
-                "run {}: full match over the whole corpus — an ensemble of {} models \
-                 has no incremental pass yet (per-member deltas)",
+                "run {}: {} match for member '{}' over {}/{} records, {} scores invalidated{}{}",
                 inputs.run_id,
-                members.len()
+                delta.mode,
+                member.name,
+                delta.delta_records,
+                delta.corpus_records,
+                delta.invalidated_scores,
+                inputs
+                    .segment
+                    .map(|(name, _)| format!(", segment {name}"))
+                    .unwrap_or_default(),
+                delta
+                    .full_reason
+                    .as_ref()
+                    .map(|r| format!(" ({r})"))
+                    .unwrap_or_default(),
             );
         }
+    } else {
         run_match_ensemble(
             session,
             config,

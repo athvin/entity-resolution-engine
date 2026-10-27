@@ -1067,11 +1067,60 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          — reproduces E5a's bug exactly, leaving only `v0002-strict` active with the loose member
          silently retired. Plus the structural config rules (distinct, non-empty, exact names) and
          the publish 422 / tier-B classification over real Postgres.
-   - [ ] E5b-2b incremental ensembles (per-member deltas in `run_match_partial`: the ledger must
-         match the ensemble's identity SET rather than hold exactly one, and the delta must be
-         computed per member or a record scored by one member is never scored by another) and the
-         `then_run` cascade + per-member thresholds, which want the resolved ensemble persisted on
-         the run row.
+   - [x] **E5b-2b incremental ensembles — and the ledger could not hold two members at all.**
+         E5b-2 scoped itself to full mode and named two single-model assumptions in
+         `run_match_partial`. Probing found a third, underneath both: `scored_records` had
+         `natural_key: [record_key]` and an id of `sha256('scored_records:' || record_key)`, while
+         `sync_scored_ledger` runs **once per member** — so the second member's MERGE rewrote the
+         first member's rows to its own identity. A two-member full pass left a ledger claiming
+         only the last member had scored anything, and "member B has not scored record X" had
+         nowhere to be true. No amount of filtering fixes that; the key had to change.
+         So three changes, and the test fails without any one of them:
+         1. **The ledger is keyed per (record, model identity)** — natural key, id derivation and
+            the MERGE's ON clause. `model_version`/`tf_snapshot_id` leave the UPDATE list at the
+            same time: they are now matched on, so updating them would move a row to a different
+            identity.
+         2. **The delta filters by the member's identity.** Without it a record scored by member A
+            counts as scored for member B, so B never sees it and the pair stays unscored under B
+            forever — a gap that surfaces only as a duplicate nobody caught.
+         3. **The reuse gate asks whether THIS member has scored**, not whether the ledger holds
+            exactly one identity. The old gate was right while a pass scored with one model — a
+            spanning ledger meant something unaccounted-for had written it — and an ensemble makes
+            spanning the normal state, so it would have fallen back to a full pass every time.
+         **A bug found by reading, not by a failing test.** A member that falls back to a full pass
+         used to route through `run_match`, which is a one-member `run_match_ensemble` whose
+         retirement sweep takes only that member's identity — so a member falling back to full
+         **retired every other member of the same ensemble**. Harmless when the fallback happened
+         first (the later members rescore anyway) and silent corruption when it happened last: the
+         members already scored in that run were retired and never revisited. Reachable by the most
+         ordinary route there is — adding a second model to `models:`, where the new member has no
+         ledger. `run_match_ensemble`'s loop body is now `score_member_full`, which deliberately
+         does **no** retirement, and both callers retire once with the whole live set.
+         **The ledger follows the scores.** `retire_other_models` now also drops the ledger rows of
+         every identity it retired, in the same function so the two cannot drift: once a model's
+         scores are retired they must be recomputed if it returns, so a ledger row saying it
+         already scored a record is a claim the incremental path would act on and is false. It also
+         keeps the gate working in the other direction — an ensemble narrowed from two members to
+         one would otherwise find the ledger holding an identity it is not scoring with, forever.
+         **Tests.** `an_ensembles_incremental_batch_lands_where_a_full_rerun_would` mirrors the
+         single-model INV-EQ test so the two read as one property with and without an ensemble, and
+         it asserts the cheap path actually RAN — equivalence alone would be satisfied by a gate
+         that fell back to full every time, comparing full against full. Plus
+         `adding_a_member_does_not_retire_the_one_already_scored` for the bug above. Four sabotages
+         observed failing first: removing the identity filter (ten pairs missing, all under
+         `v0002-strict`), narrowing the ledger key back to `record_key` (`got [("v0001", 23)]` —
+         one member, not two), restoring the one-identity gate (both members take the full path),
+         and restoring the old fallback (the established member's edges go 19 → 0).
+         **A test-harness bug fell out of this too.** `active_scores` keys by pair alone, which is
+         unambiguous only while one model scores; an ensemble writes one row per member per pair,
+         so the map kept whichever row the scan reached last — and since the ORDER BY did not
+         mention the model, which member won varied between two runs over the same data. The
+         ensemble tests use `active_scores_by_model`.
+   - [ ] E5b-2c the `then_run` cascade + per-member thresholds, which want the resolved ensemble
+         persisted on the run row (DDL): `auto_merge_edges_live` has no `model_version` filter, so
+         a per-member threshold needs the resolved `model_version -> threshold` mapping wherever
+         clustering happens, and `run_correct` re-clusters from the lake alone. Split out of E5b-2b
+         because the incremental half needed no new column and this half is a schema change.
    - [x] **E5b-3 the models page — and `active` stops naming one model.** The registry had no
          surface at all since E1 built it: a tenant could not see which model its data was scored
          against, what it used to be, or the m/u probabilities the engine always carried

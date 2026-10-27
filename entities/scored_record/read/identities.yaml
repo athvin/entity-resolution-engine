@@ -1,0 +1,10 @@
+kind: statement
+operation: read
+description: "Which model identities the ledger holds, and how many records each has scored. Replaces the judgement `state` was making: that read answers `min(model_version)` alongside a count of DISTINCT identities, which is usable only when there is exactly one — for an ensemble `min` names an arbitrary member, and the caller cannot tell whether the ledger covers the set it is about to score with. Unbounded on purpose: the row count is the number of model identities in the lake, bounded by the registry rather than by the corpus."
+pin: live
+pin_reason: "er-cli reads this at match time inside the writer's own transaction, before any snapshot for this run exists."
+params: []
+returns:
+  - { name: model_version, type: varchar }
+  - { name: tf_snapshot_id, type: varchar }
+  - { name: n, type: bigint }

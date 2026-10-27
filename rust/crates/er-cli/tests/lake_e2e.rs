@@ -3636,6 +3636,436 @@ fn a_one_member_ensemble_is_the_single_model_path() {
 /// the loop — would have each member retire the ones scored before it, which is
 /// E5a's original bug reappearing inside the ensemble. That failure mode is
 /// invisible in a score count and obvious here.
+/// Adding a member to a live ensemble must not retire the existing member.
+///
+/// The scenario is ordinary — a tenant adds a second model to `models:` — and
+/// it is the one that exposes the retirement hazard, because the NEW member has
+/// no ledger and falls back to a full pass while its sibling reuses.
+///
+/// A full fallback used to route through `run_match`, which is a one-member
+/// `run_match_ensemble` whose retirement sweep takes only that member's
+/// identity. So a member falling back to full retired every OTHER member of the
+/// same ensemble. Harmless when it happened first (the later members rescore
+/// anyway) and silent corruption when it happened last: the members already
+/// scored in that run were retired and never revisited. The fallback now
+/// retires once with the whole live set and then scores the one member.
+#[test]
+fn adding_a_member_does_not_retire_the_one_already_scored() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let (session, config, tmp) = open_seeded_lake("ens_add_member");
+
+    // One member, scored whole.
+    run_all_phase(
+        &session,
+        &config,
+        "incremental_batch",
+        "base",
+        "01ENSADD0000000000000BASE0",
+        "2026-01-01 00:00:00",
+        "full",
+    );
+    let loose_before = active_scores_by_model(&session)
+        .into_keys()
+        .filter(|(_, _, m)| m == "v0001")
+        .count();
+    assert!(loose_before > 0, "precondition: the first member scored");
+
+    // Now a second member joins. It is LAST in the list on purpose: that is the
+    // position where the old behaviour corrupted rather than merely churned.
+    let model_json = std::fs::read_to_string(repo_fixture("model_test_v1.json")).unwrap();
+    let tf_csv = repo_fixture("model_test_v1.tf.csv");
+    let mut strict: serde_json::Value = serde_json::from_str(&model_json).unwrap();
+    strict["probability_two_random_records_match"] = serde_json::json!(1.0e-9);
+    let strict_json = strict.to_string();
+    let strict_tf = tmp.join("strict.tf.csv");
+    rekey_tf(
+        &tf_csv,
+        &strict_tf,
+        "v0002-strict",
+        "01JWMDTFSNAP00000000000002",
+    );
+    let members = [
+        er_cli::EnsembleMember {
+            model: er_cli::MatchModel {
+                settings_json: &model_json,
+                tf_csv_path: std::path::Path::new(&tf_csv),
+                model_version: "v0001",
+                tf_snapshot_id: "01JWMDTFSNAP00000000000001",
+            },
+            name: "loose",
+        },
+        er_cli::EnsembleMember {
+            model: er_cli::MatchModel {
+                settings_json: &strict_json,
+                tf_csv_path: &strict_tf,
+                model_version: "v0002-strict",
+                tf_snapshot_id: "01JWMDTFSNAP00000000000002",
+            },
+            name: "strict",
+        },
+    ];
+    let deltas = er_cli::run_match_ensemble_incremental(
+        &session,
+        &config,
+        &members,
+        config.thresholds.review_low,
+        "01ENSADD00000000000000ADD0",
+        "2026-06-01 00:00:00",
+        None,
+    )
+    .unwrap();
+
+    // The established member reuses; the new one has no ledger and says so.
+    assert_eq!(
+        deltas[0].mode,
+        er_versions::MODE_INCREMENTAL,
+        "the established member had a ledger and should have reused it ({:?})",
+        deltas[0].full_reason
+    );
+    assert_eq!(
+        deltas[1].mode,
+        er_versions::MODE_FULL,
+        "a member with no ledger must score the whole corpus"
+    );
+
+    let after = active_scores_by_model(&session);
+    let loose_after = after.keys().filter(|(_, _, m)| m == "v0001").count();
+    let strict_after = after.keys().filter(|(_, _, m)| m == "v0002-strict").count();
+    assert_eq!(
+        loose_after, loose_before,
+        "adding a member retired the existing member's scores: {loose_before} -> {loose_after}"
+    );
+    assert!(
+        strict_after > 0,
+        "the new member scored nothing, so this test is not exercising a \
+         two-member ensemble"
+    );
+
+    // And the ledger holds both, which is what lets the NEXT pass be
+    // incremental for both.
+    assert_eq!(
+        ledger_identities(&session)
+            .iter()
+            .map(|(m, _)| m.as_str())
+            .collect::<Vec<_>>(),
+        vec!["v0001", "v0002-strict"],
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// A two-member ensemble, driven through a scenario phase in the given mode.
+///
+/// The strict member is the committed model with its prior lowered and its TF
+/// rows re-keyed onto its own identity — test-local, so no committed fixture is
+/// rebaselined, and it is what makes the two members genuinely different rather
+/// than the same model under two names.
+fn run_ensemble_phase(
+    session: &Session,
+    config: &Config,
+    tmp: &std::path::Path,
+    scenario: &str,
+    phase: &str,
+    run_id: &str,
+    ts: &str,
+    mode: &str,
+) {
+    let deliveries: Vec<(String, String)> = ["crm", "billing", "webforms"]
+        .iter()
+        .filter_map(|s| {
+            std::fs::read_to_string(repo_fixture(&format!("{scenario}/{phase}/{s}.csv")))
+                .ok()
+                .map(|csv| ((*s).to_string(), csv))
+        })
+        .collect();
+    let model_json = std::fs::read_to_string(repo_fixture("model_test_v1.json")).unwrap();
+    let tf_csv = repo_fixture("model_test_v1.tf.csv");
+    let mut strict: serde_json::Value = serde_json::from_str(&model_json).unwrap();
+    strict["probability_two_random_records_match"] = serde_json::json!(1.0e-9);
+    let strict_json = strict.to_string();
+    let strict_tf = tmp.join("strict.tf.csv");
+    rekey_tf(
+        &tf_csv,
+        &strict_tf,
+        "v0002-strict",
+        "01JWMDTFSNAP00000000000002",
+    );
+    let members = [
+        er_cli::EnsembleMember {
+            model: er_cli::MatchModel {
+                settings_json: &model_json,
+                tf_csv_path: std::path::Path::new(&tf_csv),
+                model_version: "v0001",
+                tf_snapshot_id: "01JWMDTFSNAP00000000000001",
+            },
+            name: "loose",
+        },
+        er_cli::EnsembleMember {
+            model: er_cli::MatchModel {
+                settings_json: &strict_json,
+                tf_csv_path: &strict_tf,
+                model_version: "v0002-strict",
+                tf_snapshot_id: "01JWMDTFSNAP00000000000002",
+            },
+            name: "strict",
+        },
+    ];
+    er_cli::run_all_ensemble(
+        session,
+        config,
+        &er_cli::PipelineInputs {
+            mode,
+            rebuild_reason: None,
+            segment: None,
+            lexicon: &lexicon_pairs(),
+            deliveries: &deliveries,
+            model: &members[0].model,
+            run_id,
+            ingested_at: ts,
+            scored_at: ts,
+            run_at: ts,
+        },
+        &members,
+    )
+    .unwrap();
+}
+
+/// Active scores keyed by (pair, MODEL), for comparing ensemble universes.
+///
+/// `active_scores` keys by the pair alone, which is unambiguous only while one
+/// model scores. An ensemble writes one row per member per pair, so that map
+/// keeps whichever row the scan happened to reach last — and since the ORDER BY
+/// does not mention the model, which member wins varies between two runs over
+/// the same data. A comparison built on it reports a difference whenever the
+/// two universes happened to order their members differently, which is a
+/// property of the scan rather than of the scores.
+fn active_scores_by_model(session: &Session) -> BTreeMap<(String, String, String), String> {
+    session
+        .query_strings(&format!(
+            "select rec_a_key, rec_b_key, model_version, cast(match_probability as varchar)
+             from {} where is_active order by rec_a_key, rec_b_key, model_version",
+            er_cli::MATCH_SCORES
+        ))
+        .unwrap()
+        .into_iter()
+        .map(|r| ((r[0].clone(), r[1].clone(), r[2].clone()), r[3].clone()))
+        .collect()
+}
+
+/// Every model identity in the scored-record ledger, with its row count.
+fn ledger_identities(session: &Session) -> Vec<(String, i64)> {
+    session
+        .query_strings(
+            "select model_version, cast(count(*) as varchar) from lake.main.scored_records \
+             group by model_version order by model_version",
+        )
+        .unwrap()
+        .into_iter()
+        .map(|r| (r[0].clone(), r[1].parse().unwrap()))
+        .collect()
+}
+
+/// An ensemble's INCREMENTAL pass must land exactly where a full rerun would
+/// (E5b-2b).
+///
+/// This is the obligation E5b-2 could not discharge, and it deliberately
+/// mirrors `an_incremental_batch_lands_where_a_full_rerun_would` so the two
+/// read as one property with and without an ensemble.
+///
+/// Three things had to change for it to be true, each of which this test fails
+/// without:
+///
+/// 1. The ledger is keyed per (record, model identity). It was keyed on
+///    `record_key` alone, and `sync_scored_ledger` runs once per member — so
+///    the second member's sync rewrote the first member's rows to its own
+///    identity, and a two-member pass ended with a ledger claiming only the
+///    last member had scored anything.
+/// 2. The delta filters by the member's identity. Without it a record scored
+///    by `loose` counts as scored for `strict`, so `strict` never sees it and
+///    the pair stays unscored under `strict` forever.
+/// 3. The reuse gate asks whether THIS member has scored, not whether the
+///    ledger holds exactly one identity — which for an ensemble is never true.
+#[test]
+fn an_ensembles_incremental_batch_lands_where_a_full_rerun_would() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+
+    // Universe A — base, then the batch INCREMENTALLY, both members.
+    let (sa, config, tmp_a) = open_seeded_lake("ens_inc_eq_a");
+    run_ensemble_phase(
+        &sa,
+        &config,
+        &tmp_a,
+        "incremental_batch",
+        "base",
+        "01ENSINCA00000000000BASE00",
+        "2026-01-01 00:00:00",
+        "full",
+    );
+
+    // After a FULL two-member pass both identities must be in the ledger, with
+    // the same record count: this is the assertion a record-keyed ledger fails
+    // outright, and it has to hold before the incremental pass can mean
+    // anything.
+    let after_full = ledger_identities(&sa);
+    assert_eq!(
+        after_full.iter().map(|(m, _)| m.as_str()).collect::<Vec<_>>(),
+        vec!["v0001", "v0002-strict"],
+        "a two-member full pass must leave BOTH members in the ledger; got {after_full:?}"
+    );
+    assert_eq!(
+        after_full[0].1, after_full[1].1,
+        "both members scored the same corpus, so both must claim the same \
+         number of records; got {after_full:?}"
+    );
+    assert!(after_full[0].1 > 0, "precondition: something was scored");
+
+    run_ensemble_phase(
+        &sa,
+        &config,
+        &tmp_a,
+        "incremental_batch",
+        "batch",
+        "01ENSINCA0000000000BATCH00",
+        "2026-06-01 00:00:00",
+        "incremental",
+    );
+    let scores_a = active_scores_by_model(&sa);
+    let partition_a = partition(&membership_rows(&sa));
+    let after_batch = ledger_identities(&sa);
+
+    // Equivalence alone does not prove the cheap path RAN: a reuse gate that
+    // fell back to a full pass every time would satisfy every assertion below
+    // while comparing full against full. So drive one more incremental pass
+    // over the unchanged corpus and read what each member actually did.
+    let deltas = {
+        let model_json = std::fs::read_to_string(repo_fixture("model_test_v1.json")).unwrap();
+        let tf_csv = repo_fixture("model_test_v1.tf.csv");
+        let mut strict: serde_json::Value = serde_json::from_str(&model_json).unwrap();
+        strict["probability_two_random_records_match"] = serde_json::json!(1.0e-9);
+        let strict_json = strict.to_string();
+        let strict_tf = tmp_a.join("strict.tf.csv");
+        let members = [
+            er_cli::EnsembleMember {
+                model: er_cli::MatchModel {
+                    settings_json: &model_json,
+                    tf_csv_path: std::path::Path::new(&tf_csv),
+                    model_version: "v0001",
+                    tf_snapshot_id: "01JWMDTFSNAP00000000000001",
+                },
+                name: "loose",
+            },
+            er_cli::EnsembleMember {
+                model: er_cli::MatchModel {
+                    settings_json: &strict_json,
+                    tf_csv_path: &strict_tf,
+                    model_version: "v0002-strict",
+                    tf_snapshot_id: "01JWMDTFSNAP00000000000002",
+                },
+                name: "strict",
+            },
+        ];
+        er_cli::run_match_ensemble_incremental(
+            &sa,
+            &config,
+            &members,
+            config.thresholds.review_low,
+            "01ENSINCA000000000000NOOP0",
+            "2026-07-01 00:00:00",
+            None,
+        )
+        .unwrap()
+    };
+    assert_eq!(deltas.len(), 2, "one delta per member");
+    for (member, delta) in ["loose", "strict"].iter().zip(&deltas) {
+        assert_eq!(
+            delta.mode,
+            er_versions::MODE_INCREMENTAL,
+            "member '{member}' took the FULL path, so the equivalence above \
+             compared full against full and proves nothing about reuse \
+             ({:?})",
+            delta.full_reason
+        );
+        assert_eq!(
+            delta.delta_records, 0,
+            "nothing changed since the last pass, so member '{member}' had \
+             nothing to rescore; a non-zero delta means its ledger does not \
+             cover what it scored"
+        );
+        assert!(
+            delta.corpus_records > 0,
+            "precondition: member '{member}' sees a corpus"
+        );
+    }
+
+    // Universe B — the same corpus, scored whole, both members.
+    let (sb, _, tmp_b) = open_seeded_lake("ens_inc_eq_b");
+    run_ensemble_phase(
+        &sb,
+        &config,
+        &tmp_b,
+        "incremental_batch",
+        "base",
+        "01ENSINCB00000000000BASE00",
+        "2026-01-01 00:00:00",
+        "full",
+    );
+    run_ensemble_phase(
+        &sb,
+        &config,
+        &tmp_b,
+        "incremental_batch",
+        "batch",
+        "01ENSINCB0000000000BATCH00",
+        "2026-06-01 00:00:00",
+        "full",
+    );
+    let scores_b = active_scores_by_model(&sb);
+    let partition_b = partition(&membership_rows(&sb));
+
+    assert!(
+        !scores_b.is_empty(),
+        "precondition: the full ensemble run scored something"
+    );
+    // The pair SETS first: a pair missing under one member and a pair scored
+    // differently are different bugs, and the key diff names which happened.
+    // A missing-identity-filter delta shows up here as pairs present only in
+    // the full universe, under `v0002-strict`.
+    let keys_a: BTreeSet<_> = scores_a.keys().collect();
+    let keys_b: BTreeSet<_> = scores_b.keys().collect();
+    assert_eq!(
+        keys_a,
+        keys_b,
+        "an ensemble's incremental and full passes disagree on WHICH pairs are \
+         scored; only-incremental={:?} only-full={:?}",
+        keys_a.difference(&keys_b).collect::<Vec<_>>(),
+        keys_b.difference(&keys_a).collect::<Vec<_>>(),
+    );
+    assert_eq!(
+        scores_a, scores_b,
+        "an ensemble's incremental and full passes agree on the pairs but not \
+         their probabilities"
+    );
+    assert_eq!(
+        partition_a, partition_b,
+        "an ensemble's incremental and full passes produce different entities"
+    );
+    assert_eq!(
+        after_batch,
+        ledger_identities(&sb),
+        "the ledger after an incremental batch must describe the same coverage \
+         a full rerun leaves"
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp_a);
+    let _ = std::fs::remove_dir_all(&tmp_b);
+}
+
 #[test]
 fn an_ensemble_scores_every_member_and_retires_none_of_them() {
     if !enabled() {

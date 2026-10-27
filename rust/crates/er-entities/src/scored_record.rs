@@ -3,16 +3,16 @@
 
 use serde::{Deserialize, Serialize};
 
-/// What the last successful match pass actually scored: one row per record in the corpus at the moment it was scored, with the content hash and model identity it was scored under. This is what makes an incremental run safe — a record is new or changed precisely when the standardized corpus disagrees with this ledger.
+/// What the last successful match pass actually scored: one row per (record, model identity) at the moment it was scored, with the content hash it was scored under. This is what makes an incremental run safe — a record is new or changed, FOR A GIVEN MODEL, precisely when the standardized corpus disagrees with that model's rows here. Keyed per identity rather than per record because an ensemble scores one record with several models (E5b-2b): a record-keyed ledger let the second member's sync overwrite the first's, so a two-member pass left a ledger claiming only the last member had scored anything — and 'member B has not scored record X' then had nowhere to be true.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
 pub struct ScoredRecord {
-    /// Content-derived row id: sha256('scored_records:' || record_key).
+    /// Content-derived row id: sha256('scored_records:' || record_key || ':' || model_version || ':' || tf_snapshot_id). The model identity is IN the id because it is in the natural key — an id over record_key alone would collide the moment two ensemble members scored the same record.
     pub id: String,
     /// The standardized record this row accounts for.
     pub record_key: String,
     /// The record's content hash at scoring time. A differing hash in int_std_records is what identifies a changed record.
     pub content_hash: String,
-    /// The trained model the record was scored under. An incremental pass over a different model cannot reuse these scores.
+    /// The trained model the record was scored under. An incremental pass over a different model cannot reuse these scores — which is why the delta is computed per member rather than once for the ensemble.
     pub model_version: String,
     /// The frozen term-frequency snapshot the scoring used; frozen TF is what makes a reused score equal to a re-computed one.
     pub tf_snapshot_id: String,
@@ -55,6 +55,18 @@ impl ScoredRecord {
 
 pub mod delete {
     //! @generated query functions for this entity + operation.
+    /// Drop the ledger rows of every model identity this run does not score with, from the session's __live_models staging. The companion to retiring those models' scores, and run in the same place so the two cannot drift: once a model's scores are retired they will have to be recomputed if it ever comes back, so a ledger row claiming it already scored a record is a claim that will be acted on and is false. Leaving them also breaks the reuse gate in the other direction — an ensemble narrowed from two members to one would find the ledger holding an identity it is not scoring with, forever.
+    pub fn absent_from_live_models(conn: &::duckdb::Connection) -> ::duckdb::Result<usize> {
+        const SQL: &str = "DELETE FROM lake.main.scored_records
+WHERE NOT EXISTS (
+  SELECT 1 FROM __live_models m
+   WHERE m.model_version = lake.main.scored_records.model_version
+     AND m.tf_snapshot_id = lake.main.scored_records.tf_snapshot_id
+)
+";
+        conn.execute(SQL, ::duckdb::params![])
+    }
+
     /// Retire ledger rows for records the corpus no longer has (a tombstoned or withdrawn record), so the next pass does not keep treating them as scored. Reads __scored_live — the whole current corpus — which is deliberately a DIFFERENT staging table from the upsert's __scored_src: a partial pass scores only part of the corpus, so what it may claim to have scored and what still exists are two different sets.
     pub fn absent_from_std(conn: &::duckdb::Connection) -> ::duckdb::Result<usize> {
         const SQL: &str = "DELETE FROM lake.main.scored_records
@@ -66,6 +78,65 @@ WHERE record_key NOT IN (SELECT record_key FROM __scored_live)
 
 pub mod read {
     //! @generated query functions for this entity + operation.
+    /// One row of `identities`: Which model identities the ledger holds, and how many records each has scored. Replaces the judgement `state` was making: that read answers `min(model_version)` alongside a count of DISTINCT identities, which is usable only when there is exactly one — for an ensemble `min` names an arbitrary member, and the caller cannot tell whether the ledger covers the set it is about to score with. Unbounded on purpose: the row count is the number of model identities in the lake, bounded by the registry rather than by the corpus.
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct IdentitiesRow {
+        pub model_version: Option<String>,
+        pub tf_snapshot_id: Option<String>,
+        pub n: Option<i64>,
+    }
+
+    impl IdentitiesRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("model_version", ::arrow::datatypes::DataType::Utf8),
+                ("tf_snapshot_id", ::arrow::datatypes::DataType::Utf8),
+                ("n", ::arrow::datatypes::DataType::Int64),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 0, "model_version")?;
+                let c1: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 1, "tf_snapshot_id")?;
+                let c2: &::arrow::array::Int64Array = crate::batch::col(batch, 2, "n")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        model_version: crate::batch::opt_str(c0, i),
+                        tf_snapshot_id: crate::batch::opt_str(c1, i),
+                        n: crate::batch::opt_i64(c2, i),
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// Which model identities the ledger holds, and how many records each has scored. Replaces the judgement `state` was making: that read answers `min(model_version)` alongside a count of DISTINCT identities, which is usable only when there is exactly one — for an ensemble `min` names an arbitrary member, and the caller cannot tell whether the ledger covers the set it is about to score with. Unbounded on purpose: the row count is the number of model identities in the lake, bounded by the registry rather than by the corpus.
+    pub fn identities(conn: &::duckdb::Connection) -> ::duckdb::Result<Vec<IdentitiesRow>> {
+        const SQL: &str = "SELECT model_version,
+       tf_snapshot_id,
+       count(*) AS n
+FROM lake.main.scored_records
+GROUP BY model_version, tf_snapshot_id
+ORDER BY model_version, tf_snapshot_id
+";
+        let mut stmt = conn.prepare(SQL)?;
+        let batches = stmt.query_arrow(::duckdb::params![])?.collect::<Vec<_>>();
+        IdentitiesRow::from_batches(&batches)
+    }
+
     /// One row of `state`: The ledger's size and model identity, which together decide whether an incremental pass may reuse the existing scores. `identities > 1` means the ledger spans models and cannot be trusted as a whole.
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
     pub struct StateRow {
@@ -131,15 +202,15 @@ FROM lake.main.scored_records
 
 pub mod update {
     //! @generated query functions for this entity + operation.
-    /// Bring the scored-record ledger up to the corpus the match pass just scored, from the session's __scored_src staging (one row per standardized record). Keyed on record_key, so a changed record's hash is rewritten in place rather than duplicated.
+    /// Bring the scored-record ledger up to the corpus the match pass just scored, from the session's __scored_src staging (one row per standardized record, per model identity). Keyed on (record_key, model_version, tf_snapshot_id), so a changed record's hash is rewritten in place rather than duplicated AND two ensemble members scoring the same record each keep their own row. Keying on record_key alone was the E5b-2b bug: `sync_scored_ledger` runs once per member, so the second member's sync rewrote the first member's rows to its own identity, and the ledger ended a two-member pass claiming only the last member had scored anything. `model_version` and `tf_snapshot_id` leave the UPDATE list for the same reason — they are now part of what is matched on, so updating them would move a row to a different identity.
     pub fn upsert_from_std(conn: &::duckdb::Connection) -> ::duckdb::Result<usize> {
         const SQL: &str =
             "MERGE INTO lake.main.scored_records AS target USING __scored_src AS source
   ON target.record_key = source.record_key
+ AND target.model_version = source.model_version
+ AND target.tf_snapshot_id = source.tf_snapshot_id
 WHEN MATCHED THEN UPDATE SET
     content_hash = source.content_hash,
-    model_version = source.model_version,
-    tf_snapshot_id = source.tf_snapshot_id,
     run_id = source.run_id,
     scored_at = source.scored_at,
     updated_at = source.scored_at
@@ -147,7 +218,8 @@ WHEN NOT MATCHED THEN INSERT
     (id, record_key, content_hash, model_version, tf_snapshot_id,
      run_id, scored_at, created_at, updated_at)
     VALUES
-    (sha256('scored_records:' || source.record_key),
+    (sha256('scored_records:' || source.record_key || ':' ||
+            source.model_version || ':' || source.tf_snapshot_id),
      source.record_key, source.content_hash, source.model_version,
      source.tf_snapshot_id, source.run_id, source.scored_at,
      source.scored_at, source.scored_at)

@@ -1,6 +1,6 @@
 kind: statement
 operation: update
 mode: partial
-description: "Bring the scored-record ledger up to the corpus the match pass just scored, from the session's __scored_src staging (one row per standardized record). Keyed on record_key, so a changed record's hash is rewritten in place rather than duplicated."
+description: "Bring the scored-record ledger up to the corpus the match pass just scored, from the session's __scored_src staging (one row per standardized record, per model identity). Keyed on (record_key, model_version, tf_snapshot_id), so a changed record's hash is rewritten in place rather than duplicated AND two ensemble members scoring the same record each keep their own row. Keying on record_key alone was the E5b-2b bug: `sync_scored_ledger` runs once per member, so the second member's sync rewrote the first member's rows to its own identity, and the ledger ended a two-member pass claiming only the last member had scored anything. `model_version` and `tf_snapshot_id` leave the UPDATE list for the same reason — they are now part of what is matched on, so updating them would move a row to a different identity."
 params: []
 returns: none
