@@ -6,6 +6,7 @@ import { allowedActions, canBeOfferedActions, type Role } from "@/lib/agent-acti
 import { parseProposals } from "@/lib/agent-actions/propose";
 import { executeTool, PROPOSE_TOOL, systemPrompt, TOOL_DEFINITIONS } from "@/lib/assistant/tools";
 import { BffFailure, requireOrgAccess, respond } from "@/lib/bff/proxy";
+import { meter, tokensFrom } from "@/lib/usage/record";
 import { NextResponse } from "next/server";
 
 const requestSchema = z.object({
@@ -91,6 +92,11 @@ export async function POST(
               emit("text", { delta });
             });
             const message = await response.finalMessage();
+            // O12b. Metered PER ROUND, not per conversation: a tool loop can
+            // make eight model calls for one question, and charging the tenant
+            // one "assistant call" would under-report by the factor that
+            // actually drives their bill.
+            void meter(org, "ai_assistant", tokensFrom(message.usage), model);
             history.push({ role: "assistant", content: message.content });
 
             const toolUses = message.content.filter(

@@ -39,6 +39,7 @@ export const queryKeys = {
   blockingEstimate: (org: string) => ["org", org, "blocking-estimate"] as const,
   configSegments: (org: string) => ["org", org, "config-segments"] as const,
   aiSettings: (org: string) => ["org", org, "ai-settings"] as const,
+  usage: (org: string, days: number) => ["org", org, "usage", days] as const,
   // The per-page key nests under the family so one new recommendation can
   // invalidate every page at once — the row alone does not say which page's
   // cache entry it belongs to.

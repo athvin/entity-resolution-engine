@@ -218,6 +218,43 @@ export const reviewRecommendations = erweb.table(
   ],
 );
 
+/**
+ * Metered usage, one row per billable act (O12b).
+ *
+ * **Metering, not billing.** There is no price here and no credit balance: the
+ * pricing story is per-run on cheap compute, and a `cost` column would be a
+ * number nobody could reconcile against an invoice. What a tenant needs is "how
+ * much of this am I doing", which is a count.
+ *
+ * Append-only and never updated — a usage ledger that can be rewritten cannot
+ * answer the question it exists for. Rows are summed on read rather than kept
+ * as a running total, because a total is a cache and this is the source.
+ *
+ * `units` is deliberately generic: AI calls meter in TOKENS, verification in
+ * lookups, jobs in runs. One table with a `kind` beats three tables whose
+ * queries all have to be unioned to answer "what did this org do last month".
+ */
+export const usageEvents = erweb.table(
+  "usage_events",
+  {
+    id: text("id").primaryKey(),
+    org: text("org").notNull(),
+    /** `ai_assistant`, `ai_enrich`, `ai_adjudicate`, … — see lib/usage/kinds. */
+    kind: text("kind").notNull(),
+    units: doublePrecision("units").notNull(),
+    /** What `units` counts, so a reader never has to guess: "tokens", "calls". */
+    unit: text("unit").notNull(),
+    /** Which model or service, when there is one. Null for a plain job. */
+    detail: text("detail"),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // Org first, then time: every read is "this org, this window", and a
+    // time-leading index would scan every tenant's rows to answer it.
+    index("usage_events_org_at_idx").on(table.org, table.at),
+  ],
+);
+
 /** Saved segments over golden records (design §5.7). The definition is always
  * the inspectable structured filter — never a prompt — and deliberately limited
  * to what the read API can evaluate today (search + client conditions). */

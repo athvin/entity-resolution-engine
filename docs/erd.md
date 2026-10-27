@@ -352,6 +352,15 @@ erDiagram
         text token_hash UK
         text user_id FK
     }
+    usage_events {
+        timestamptz at
+        text detail
+        text id PK
+        text kind
+        text org
+        text unit
+        double units
+    }
     users {
         timestamptz created_at
         timestamptz disabled_at

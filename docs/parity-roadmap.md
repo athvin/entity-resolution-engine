@@ -2683,7 +2683,35 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          built (`frontend/src/lib/api/envelopes.json`).
    - [ ] O11 embeddable duplicate widget: a signed-token read-only micro-page (#59).
    - [ ] O12a saved views / folders (#87).
-   - [ ] O12b usage metering ledger (#88).
+   - [x] O12b usage metering ledger (#88). **Metering, not billing** — no price column and no
+         credit balance, because the pricing story is per-run on cheap compute and a figure
+         nobody can reconcile against an invoice is worse than none. The copy on the panel
+         says so rather than leaving a reader to wonder.
+         Wave 6 is what made this worth building: six AI surfaces now call a model on a
+         tenant's behalf and **nothing recorded it anywhere**. A tenant on its own BYO key
+         needs it most, since that bill arrives from Anthropic rather than from us.
+         Two properties make it safe on six hot paths. **`meter` never throws** — a ledger
+         write that fails must not fail the feature it measures, so failures are logged and
+         dropped, which makes the ledger a FLOOR on usage rather than an authoritative count;
+         stated in the code so nobody later treats it as invoice-grade. And **`tokensFrom`
+         tolerates whatever the SDK returns**, because it parses a third party's field on a
+         path that must not break.
+         Metered per TOOL ROUND for the assistant, not per conversation: a tool loop can make
+         eight model calls for one question, and charging one "assistant call" would
+         under-report by the factor that actually drives the bill. Enrichment meters BEFORE
+         the refusal branch, because a refusal consumed tokens and is billed as one —
+         metering only the happy path would under-report exactly the calls a tenant is most
+         surprised by.
+         The read is viewer-level: the person who most needs to see "the assistant is burning
+         tokens" is often a steward who cannot change the AI settings, and telling them to ask
+         an admin for a number is how a surprising bill becomes a surprising argument. The
+         panel sits on the AI settings page because that is where the lever is.
+         13 tests against real Postgres. Two sabotages observed failing: dropping the org
+         predicate (the cross-tenant leak shape V6 had) and letting `meter` throw.
+         *A lint that was right about the types and wrong about reality:* `sql<number>` made
+         `Number(row.units)` look redundant, and deleting it would have left string
+         concatenation in the panel's total — postgres.js returns `sum` as a string while
+         PGlite returns a number. The type was the bug; it is now `string | number`.
    - [ ] O12c field-value rollback UI (#12/#13).
 8. **Review-UI depth**
    - [ ] F1 group merge editor (#8) — today's inbox is a PAIR adjudicator; this adds the

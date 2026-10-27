@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { resolveAiConfig } from "@/lib/ai/config";
+import { meter, tokensFrom } from "@/lib/usage/record";
 import { BffFailure, forward, requireOrgAccess, respond } from "@/lib/bff/proxy";
 import {
   ENRICH_SCHEMA,
@@ -79,6 +80,13 @@ export async function POST(
     } catch {
       throw new BffFailure(502, "internal", "the enrichment model is unavailable");
     }
+
+    // O12b: metered as soon as the call RETURNS, before the refusal branch —
+    // a refusal consumed tokens and is billed as one, so metering it only on
+    // the happy path would under-report exactly the calls a tenant is most
+    // surprised to be charged for. `meter` never throws, so a ledger outage
+    // cannot fail the feature it measures.
+    void meter(org, "ai_enrich", tokensFrom(message.usage), ai.model);
 
     // Opus 5 can decline via a 200 with stop_reason "refusal": surface a clean
     // empty result, never a crash, and never read content[0] before this check.

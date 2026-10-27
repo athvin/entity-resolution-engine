@@ -9,6 +9,7 @@ import {
   parseStarter,
   starterSystemPrompt,
 } from "@/lib/config-ai/starter";
+import { meter, tokensFrom } from "@/lib/usage/record";
 import { BffFailure, forward, requireOrgAccess, respond } from "@/lib/bff/proxy";
 
 /**
@@ -75,6 +76,10 @@ export async function POST(
       throw new BffFailure(502, "internal", "the model could not be reached");
     }
 
+    // O12b: metered after the call succeeds, never before — a request that
+    // failed upstream consumed nothing. `meter` never throws, so a ledger
+    // outage cannot fail the feature it measures.
+    void meter(org, "ai_config_author", tokensFrom(message.usage), ai.model);
     const text = message.content
       .filter((block): block is Anthropic.TextBlock => block.type === "text")
       .map((block) => block.text)
