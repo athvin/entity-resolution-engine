@@ -216,6 +216,39 @@ async function walkToReview(page: Page, org: string, sourceName: string): Promis
 
 test.describe("new-source wizard", () => {
   /**
+   * F2. The check that matters is the duplicate record id: two source rows
+   * collapse into one and data is lost with no error anywhere. The wizard must
+   * REFUSE rather than warn, which is what this proves.
+   */
+  test("refuses to continue past a file whose record id repeats", async ({ page, isMobile }) => {
+    test.skip(isMobile, "the wizard journey runs once, on desktop");
+    await login(page, USERS.steward);
+    await page.goto(`/${wizardOrg("desktop-chromium")}/sources/new`);
+
+    await page.getByTestId("wizard-file").setInputFiles({
+      name: "dupes.csv",
+      mimeType: "text/csv",
+      // The SAME headers `walkToReview` uses, so the regex maps every canonical
+      // attribute and step 2's own gate is satisfied — the only thing stopping
+      // this file is the repeated record id, which is what the test is about.
+      buffer: Buffer.from(
+        "erp_id,fname,lname,email_address,phone,street_address,city,state,zip,dob,last_modified\n" +
+          "1,Ada,Lovelace,ada@example.com,+14155550001,10 Main St,SF,CA,94103,1970-01-01,2026-01-01\n" +
+          "1,Grace,Hopper,grace@example.com,+14155550002,11 Main St,SF,CA,94104,1971-02-02,2026-01-02\n",
+      ),
+    });
+    await page.getByTestId("wizard-next").click(); // profile -> map
+    await page.getByTestId("wizard-next").click(); // map -> identity
+
+    // The panel says what is wrong, before anything has uploaded.
+    await expect(page.getByTestId("wizard-integrity")).toBeVisible();
+    await expect(page.getByTestId("integrity-block")).toContainText("repeats in the sampled rows");
+
+    // And Next is refused: a blocker is not a warning.
+    await expect(page.getByTestId("wizard-next")).toBeDisabled();
+  });
+
+  /**
    * V8. The file this is for is the one with OPAQUE headers — `fnm`, `eml` —
    * which is exactly where the regex table gives up and a person is left
    * guessing. The assertions that matter are the privacy ones: the request

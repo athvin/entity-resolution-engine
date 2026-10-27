@@ -2800,7 +2800,29 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
 8. **Review-UI depth**
    - [ ] F1 group merge editor (#8) — today's inbox is a PAIR adjudicator; this adds the
          master-editing half. Reuses `field-compare-grid`.
-   - [ ] F2 pre-load data integrity check (#46), riding E9b's staging.
+   - [x] F2 pre-load data integrity check (#46). **Before the upload, not after it.** The plan
+         says this rides E9b's staging; it should not. E9b-1 screens how records landed
+         *against the corpus* once the dispatcher has them — that answers "did my file do
+         anything". This answers the earlier question, "will my file work at all", at the one
+         moment the answer is still cheap: the file is in the browser and nothing has been
+         written. So it needs no backend and costs no upload.
+         Three severities, and the boundary between them is the design. **block** means
+         ingestion will fail or silently corrupt, and the wizard refuses to continue;
+         **warn** means it will load but probably not as expected; **info** is worth knowing.
+         A check that cannot decide belongs at warn — blocking a file that would have worked
+         teaches people to distrust the gate, and a gate nobody trusts is worse than none.
+         The blocker that matters is a **repeated record id**: two source rows collapse into
+         one and data is lost with no error anywhere. A blank id is the same family — a record
+         with no id cannot be addressed by an update, a suppression, or anything else.
+         **The row-level checks say they are a SAMPLE.** `profileCsv` parses the first 200
+         rows, so a duplicate beyond that is not seen; the finding reads "repeats in the
+         sampled rows" because reporting a clean result as a guarantee over a million-row file
+         would be exactly the false assurance this panel exists to avoid.
+         Severity reads from the glyph and from a heading saying what it MEANS ("must be fixed
+         before this file can load"), not from hue — the palette is unavailable, and a
+         sentence beats a coloured dot a reader has to decode.
+         16 unit tests plus a functional spec proving the wizard refuses rather than warns.
+         Sabotaging the duplicate-id blocker to a warn fails the test named for it.
    - [x] F4 verify-before-export (#86, de-Salesforced). The need is plain: do not send a
          campaign to records you cannot reach. An export of 10,000 rows where 3,000 have no
          email is not a segment, it is a 30% bounce rate someone discovers later.
