@@ -571,7 +571,8 @@ fn operator_only(p: &Principal) -> Result<(), (StatusCode, Json<Value>)> {
     }
 }
 
-/// The anonymous liveness surface (§4.1): the only route that never authenticates.
+/// Public: liveness (`GET /healthz`) — the only route that never
+/// authenticates (§4.1).
 async fn healthz() -> Json<Value> {
     Json(json!({ "status": "ok" }))
 }
@@ -1901,7 +1902,8 @@ fn config_registry_unavailable() -> axum::response::Response {
         .into_response()
 }
 
-/// Viewer+: list an org's config versions, newest first (no `yaml` body).
+/// Viewer+: list an org's config versions, newest first
+/// (`GET /v1/orgs/{org}/config/versions`), with no `yaml` body.
 async fn list_config_versions(
     principal: Principal,
     State(state): State<AppState>,
@@ -1948,7 +1950,8 @@ fn parse_version(s: &str) -> Option<i64> {
     s.parse::<i64>().ok()
 }
 
-/// Viewer+: one config version with its `yaml` (404 if absent).
+/// Viewer+: one config version with its `yaml`
+/// (`GET /v1/orgs/{org}/config/versions/{version}`), 404 if absent.
 async fn get_config_version(
     principal: Principal,
     State(state): State<AppState>,
@@ -2623,7 +2626,7 @@ struct EnqueueJob {
     segment: Option<String>,
 }
 
-/// Enqueue a job for an org (S-queue enqueue). Requires steward+ in the org.
+/// Steward+: enqueue a job for an org (`POST /v1/orgs/{org}/jobs`).
 async fn create_job(
     principal: Principal,
     State(state): State<AppState>,
@@ -2836,7 +2839,7 @@ where
     Ok(Some(completed))
 }
 
-/// List an org's jobs, newest first. Requires viewer+ in the org.
+/// Viewer+: list an org's jobs, newest first (`GET /v1/orgs/{org}/jobs`).
 async fn list_jobs(
     principal: Principal,
     State(state): State<AppState>,
@@ -2894,7 +2897,8 @@ async fn list_jobs(
     Json(json!({ "jobs": jobs })).into_response()
 }
 
-/// One job by id (404 if absent / not this org's). Requires viewer+ in the org.
+/// Viewer+: one job by id (`GET /v1/orgs/{org}/jobs/{job_id}`), 404 if absent
+/// or not this org's.
 async fn get_job(
     principal: Principal,
     State(state): State<AppState>,
@@ -2937,7 +2941,8 @@ async fn get_job(
     }
 }
 
-/// Cancel a job (idempotent-ish: queued/running -> canceled). Requires steward+.
+/// Steward+: cancel a job (`POST /v1/orgs/{org}/jobs/{job_id}/cancel`),
+/// idempotent-ish: queued/running -> canceled.
 async fn cancel_job(
     principal: Principal,
     State(state): State<AppState>,
@@ -3000,9 +3005,14 @@ async fn cancel_job(
     }
 }
 
-/// Steward+: requeue a failed/canceled job (`POST /v1/orgs/{org}/jobs/{job_id}/
-/// resume`; the Python `{job_id}:resume` action). 409 if the job isn't in a
-/// resumable state. Postgres-only (the in-memory store has no resume path).
+/// Steward+: requeue a failed/canceled job
+/// (`POST /v1/orgs/{org}/jobs/{job_id}/resume`; the Python `{job_id}:resume`
+/// action). 409 if the job isn't in a resumable state. Postgres-only (the
+/// in-memory store has no resume path).
+///
+/// The method and path are kept on ONE doc line deliberately: the MCP tool
+/// manifest derives them from these comments, and a path wrapped across two
+/// lines parses as a path with a space in it.
 async fn resume_job(
     principal: Principal,
     State(state): State<AppState>,
@@ -5512,7 +5522,8 @@ async fn schedules_index(
     }
 }
 
-/// Admin+: enable/disable a schedule (`PATCH /v1/orgs/{org}/schedules/{id}`).
+/// Admin+: enable/disable a schedule
+/// (`PATCH /v1/orgs/{org}/schedules/{schedule_id}`).
 /// Config/system-owned rows refuse (409).
 async fn update_schedule(
     principal: Principal,
@@ -5546,7 +5557,7 @@ async fn update_schedule(
     }
 }
 
-/// Admin+: delete a schedule (`DELETE /v1/orgs/{org}/schedules/{id}`).
+/// Admin+: delete a schedule (`DELETE /v1/orgs/{org}/schedules/{schedule_id}`).
 async fn delete_schedule(
     principal: Principal,
     State(state): State<AppState>,
@@ -6198,6 +6209,8 @@ async fn apply_tag(
     tag_application(principal, state, org, tag_id, body, true).await
 }
 
+/// Steward+: remove a tag from a subject
+/// (`POST /v1/orgs/{org}/tags/{tag_id}/unapply`).
 async fn unapply_tag(
     principal: Principal,
     State(state): State<AppState>,
@@ -6713,7 +6726,8 @@ async fn record_overlay_action(
     }
 }
 
-/// `POST /v1/orgs/{org}/records/suppress` — exclude a record from assembly.
+/// Steward+: exclude a record from golden assembly
+/// (`POST /v1/orgs/{org}/records/suppress`).
 async fn suppress_record_route(
     principal: Principal,
     State(state): State<AppState>,
@@ -6723,7 +6737,8 @@ async fn suppress_record_route(
     record_overlay_action(principal, state, org, body, "suppress", false).await
 }
 
-/// `POST /v1/orgs/{org}/records/unsuppress` — retract a record suppression.
+/// Steward+: retract a record suppression
+/// (`POST /v1/orgs/{org}/records/unsuppress`).
 async fn unsuppress_record_route(
     principal: Principal,
     State(state): State<AppState>,
@@ -6733,7 +6748,8 @@ async fn unsuppress_record_route(
     record_overlay_action(principal, state, org, body, "suppress", true).await
 }
 
-/// `POST /v1/orgs/{org}/records/protect` — pin a record master for its entity.
+/// Steward+: pin a record master for its entity
+/// (`POST /v1/orgs/{org}/records/protect`).
 async fn protect_record_route(
     principal: Principal,
     State(state): State<AppState>,
@@ -6743,7 +6759,8 @@ async fn protect_record_route(
     record_overlay_action(principal, state, org, body, "protect", false).await
 }
 
-/// `POST /v1/orgs/{org}/records/unprotect` — retract a record protection.
+/// Steward+: retract a record protection
+/// (`POST /v1/orgs/{org}/records/unprotect`).
 async fn unprotect_record_route(
     principal: Principal,
     State(state): State<AppState>,

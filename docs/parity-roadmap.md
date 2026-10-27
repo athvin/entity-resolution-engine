@@ -2975,11 +2975,60 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          *A real bug the component test caught:* `DiffLine.kind` is `added`/`removed` and my
          panel matched `add`/`remove`, so every line would have rendered as unchanged — a
          diff silently claiming two configs are identical, which is worse than no diff.
-   - [ ] O10 MCP server over the generated OpenAPI + org service identity (#79/#78). **Wants
-         `#[utoipa::path]` on the handlers first** — `openapi.json` documents zero paths by a
-         recorded decision, so there is nothing for an MCP server to generate tools from. The
-         response-ENVELOPE question is already answered without it, by the derived ledger D13
-         built (`frontend/src/lib/api/envelopes.json`).
+   - [x] **O10 the MCP server — and its stated prerequisite was the wrong answer.** This was
+         filed as wanting `#[utoipa::path]` on every handler first, because `openapi.json`
+         documents zero paths and "there is nothing for an MCP server to generate tools from".
+         That reading was wrong twice.
+         **There already was something.** Every routed handler carries a doc comment shaped
+         `Role: what it does (`METHOD /path`)` — written for humans, and incidentally exactly
+         what an MCP tool needs: a name, a one-line description, the method and path, and the
+         role. 89 tools derive from them.
+         **And the repo had already decided against the alternative**, in
+         `response_envelopes.rs`'s own words: "a `#[utoipa::path]` response body, or any
+         hand-maintained table, is one more claim that can drift from the code — the same shape
+         as the defect it would be built to prevent." Annotating 89 handlers would have created
+         89 claims nothing checks. Deriving from the source means the manifest cannot disagree
+         with the server without the gate failing — the same discipline, applied to the same
+         problem, reached by reading what the repo already said rather than the roadmap.
+         **The gate closed a real documentation gap.** `every_routed_handler_is_described`
+         demands a convention doc comment for every `.route(...)` the router registers, using
+         `mock_contract.rs`'s brace-matching walk rather than a regex (a regex drops every
+         registration chaining two methods onto one path, and a route the gate cannot see is one
+         it reports as covered). It found **16** handlers outside the convention — the whole
+         jobs family, `/healthz`, the record suppress/protect quartet, two config-version reads,
+         the schedule pair under a different parameter name, and tag-unapply — each now
+         documented. Sabotage: de-conventionalising one doc comment fails the gate naming it.
+         **What the server offers, and what it refuses to.** 51 of the 89: every GET, plus
+         body-less mutations whose entire input is their path (suspend, resume, cancel, retry,
+         activate). Excluded are routes needing a request body — the manifest knows method, path
+         and role but not the shape of a `Json<CreateOrgIn>`, and a tool whose schema is "an
+         object, good luck" is worse than no tool because the model cannot call it and the
+         failures land as 422s a human reads — and every operator route, because they are
+         fleet-wide and this server holds one org's key. That is the real prerequisite for write
+         tools, unlike the one this item was filed with.
+         **The security surface is one sentence: an argument from a model becomes a path segment
+         in a URL sent with the tenant's API key.** So a value containing `/`, `\`, `?`, `#`, or
+         equal to `.`/`..` is REFUSED rather than escaped — percent-encoding produces a path that
+         is valid and addresses something nobody intended, while a refusal is a sentence the
+         caller can act on. An unknown argument is refused too, because the published schema says
+         `additionalProperties: false` and accepting one would make the server contradict its own
+         contract. Sabotaging the segment guard fails three tests.
+         **Protocol details that are bugs if wrong.** A request with no `id` is a notification
+         and is never answered — `notifications/initialized` arrives from every client right
+         after the handshake, and replying is a violation clients report as a hard error. A
+         refused argument comes back as `isError` CONTENT, not a JSON-RPC error: a protocol error
+         never reaches the model, so it cannot correct from it. `initialize` declares only
+         `tools`, because advertising `resources` would make a client call a method answered with
+         -32601 that it cannot tell from a bug. A mutating tool's description opens with
+         `[MUTATES — …]`, first rather than appended, because a client truncating the description
+         would otherwise drop the warning.
+         **Org service identity (#78) is the credential model, not a separate feature.** The
+         server authenticates with one org-scoped key from `ER_MCP_API_KEY` and has no operator
+         mode at all; the manifest filters operator routes out so an agent is not even told they
+         exist. 19 unit tests in `er-mcp`, 5 in the manifest gate.
+   - [ ] O10b write tools for routes that take a request body, which wants request schemas —
+         the real prerequisite O10 was filed with the wrong version of. Until then an MCP caller
+         gets 51 of 89 routes.
    - [x] O11 embeddable duplicate widget: a signed-token read-only micro-page (#59). A tenant
          drops an iframe into their own CRM and sees "possible duplicates for record X". It is
          the product's ONLY surface served without a session, so the token in the URL is the
