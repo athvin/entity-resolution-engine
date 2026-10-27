@@ -30,7 +30,7 @@ statements is read or written only through the engine's own stage SQL, not
 through a typed query function.
 
 <!-- BEGIN GENERATED: entities-index -->
-**38 entities, 164 declared statements.**
+**39 entities, 167 declared statements.**
 
 | Entity | Relation | Store | Key | Natural key | History |
 |---|---|---|---|---|---|
@@ -63,6 +63,7 @@ through a typed query function.
 | `resolved_entity` | `entities` | duckdb | `id` | — | — |
 | `review` | `review_queue` | duckdb | `id` | `rec_a_key, rec_b_key, reason` | — |
 | `run` | `runs` | duckdb | `id` | — | — |
+| `s3_ingest_cursor` | `s3_ingest_cursors` | postgres | `id` | `org_id, source` | — |
 | `schedule` | `schedules` | postgres | `id` | — | yes |
 | `schema_migration` | `schema_migrations` | postgres | `id` | — | — |
 | `scored_record` | `scored_records` | duckdb | `id` | `record_key` | — |
@@ -98,7 +99,7 @@ Declared statements per entity and operation:
 | `matching_model` | 1 | 4 | 1 | 0 |
 | `metric_snapshot` | 1 | 1 | 0 | 0 |
 | `metric_snapshot_source` | 1 | 1 | 0 | 0 |
-| `org` | 2 | 3 | 3 | 0 |
+| `org` | 2 | 4 | 3 | 0 |
 | `pair_label` | 1 | 2 | 0 | 0 |
 | `raw_record` | 0 | 2 | 0 | 0 |
 | `record_overlay` | 1 | 2 | 1 | 1 |
@@ -106,6 +107,7 @@ Declared statements per entity and operation:
 | `resolved_entity` | 0 | 2 | 1 | 0 |
 | `review` | 0 | 5 | 3 | 0 |
 | `run` | 1 | 3 | 1 | 0 |
+| `s3_ingest_cursor` | 1 | 1 | 0 | 0 |
 | `schedule` | 2 | 2 | 3 | 1 |
 | `schema_migration` | 1 | 1 | 0 | 0 |
 | `scored_record` | 0 | 1 | 1 | 1 |

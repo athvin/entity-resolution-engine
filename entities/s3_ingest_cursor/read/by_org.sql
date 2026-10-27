@@ -1,0 +1,13 @@
+SELECT
+  id,
+  org_id,
+  source,
+  object_key,
+  etag,
+  size_bytes,
+  delivery_id,
+  created_at,
+  updated_at
+FROM public.s3_ingest_cursors
+WHERE org_id = $org_id
+ORDER BY source

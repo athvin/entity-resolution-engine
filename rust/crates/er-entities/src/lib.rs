@@ -34,6 +34,7 @@ pub mod record_quality;
 pub mod resolved_entity;
 pub mod review;
 pub mod run;
+pub mod s3_ingest_cursor;
 pub mod schedule;
 pub mod schema;
 pub mod schema_migration;

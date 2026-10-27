@@ -37,6 +37,15 @@ const SCHEDULE_TICK_EVERY: Duration = Duration::from_secs(20);
 /// loop for minutes.
 const DELIVERY_BUDGET: usize = 8;
 
+/// How often the S3 auto-ingest poller sweeps (E9c).
+///
+/// Slower than the scheduler tick on purpose. The sweep costs one listing per
+/// configured source per tenant with auto-ingest on, which is a billed S3
+/// request, and the thing it is waiting for — a human or a nightly export
+/// dropping a file — does not happen on a twenty-second cadence. A minute of
+/// latency on an import nobody is watching is free; the requests are not.
+const S3_POLL_EVERY: Duration = Duration::from_secs(60);
+
 /// Poll + run jobs until `term` is set or a Postgres failure occurs. Returns
 /// `Ok(())` on a clean (term-requested) exit; `Err` on a control-plane failure
 /// (the caller decides whether that's fatal — the standalone binary exits
@@ -53,6 +62,9 @@ pub async fn run_loop(
     eprintln!("dispatcher up");
     let mut idle = IDLE_MIN;
     let mut next_schedule_tick = tokio::time::Instant::now();
+    let mut next_s3_poll = tokio::time::Instant::now();
+    // Built lazily: see the poll tick below.
+    let mut s3: Option<crate::s3_ingest::Watcher> = None;
     while !term.load(Ordering::SeqCst) {
         // Schedules fire from here. Cheap (one query when nothing is due) and
         // rate-limited, so it rides the job loop rather than owning a task: one
@@ -67,6 +79,24 @@ pub async fn run_loop(
                 Err(e) => eprintln!("scheduler tick failed: {e}"),
             }
         }
+        // Auto-ingest (E9c) rides the loop for the reason the scheduler tick
+        // does: one loop means one thing to stop on SIGTERM. The client is
+        // built on the first tick that finds a tenant with a bucket, so a
+        // deployment where nobody has turned auto-ingest on — which is every
+        // deployment until someone does — never constructs an AWS client and
+        // never resolves a credential.
+        if tokio::time::Instant::now() >= next_s3_poll {
+            next_s3_poll = tokio::time::Instant::now() + S3_POLL_EVERY;
+            match s3_poll_tick(client, &mut s3).await {
+                Ok(0) => {}
+                Ok(n) => eprintln!("s3 auto-ingest: {n} object(s) landed"),
+                // Same rule as the scheduler tick and the webhook drain: a
+                // failure here must not take the job loop down, or one
+                // tenant's misconfigured bucket stops every tenant's jobs.
+                Err(e) => eprintln!("s3 auto-ingest tick failed: {e}"),
+            }
+        }
+
         // Deliver what the emit sites recorded. The outbox is drained here
         // rather than at emit time so a subscriber that is briefly unreachable
         // gets the event late instead of never — before this, every emit site
@@ -91,6 +121,196 @@ pub async fn run_loop(
     }
     eprintln!("dispatcher draining -> exit");
     Ok(())
+}
+
+/// The actor every auto-ingested delivery is attributed to.
+///
+/// Named for the mechanism rather than borrowed from a person or an operator
+/// key, the same way W0.2 stamps `created_by = 'scheduler'`: nobody authorised
+/// this particular import, and attributing it to whoever last configured the
+/// bucket would make the audit log read as though they had.
+const S3_ACTOR: &str = "s3-ingest";
+
+/// Sweep every tenant with auto-ingest configured, landing at most one object
+/// per source (E9c). Returns how many landed.
+///
+/// # The order of the last two steps is the whole correctness argument
+///
+/// The delivery is published and *then* the cursor advances. The other order
+/// is tempting — it would make a re-ingest impossible — and it is wrong: a
+/// cursor advanced before a download that then fails would skip that object
+/// permanently, and the tenant's file would be silently never read. This order
+/// can at worst land the same bytes twice, which shows up as a duplicate run
+/// in the job list and is recoverable. One failure mode is visible and
+/// survivable; the other is silent data loss.
+///
+/// # Errors
+/// Propagates a Postgres read failure. Per-tenant and per-source problems are
+/// logged and stepped over — one tenant's misconfigured bucket must not stop
+/// another tenant's imports.
+pub async fn s3_poll_tick(
+    client: &tokio_postgres::Client,
+    watcher: &mut Option<crate::s3_ingest::Watcher>,
+) -> Result<usize, tokio_postgres::Error> {
+    let orgs = er_entities::org::read::with_s3_ingest(client).await?;
+    if orgs.is_empty() {
+        return Ok(0);
+    }
+    let watcher = match watcher {
+        Some(w) => &*w,
+        slot @ None => slot.insert(crate::s3_ingest::Watcher::from_env().await),
+    };
+
+    let mut landed = 0usize;
+    for org in orgs {
+        let Some(bucket) = org.s3_ingest_bucket.clone() else {
+            continue;
+        };
+        // No prefix means the bucket root, which is a legitimate setup.
+        let prefix = org.s3_ingest_prefix.clone().unwrap_or_default();
+        let org_name = org.name.clone();
+        let org_id = org.id.clone();
+
+        // One read for every source's cursor, rather than a query per source.
+        let cursors: std::collections::HashMap<String, (String, Option<String>)> =
+            er_entities::s3_ingest_cursor::read::by_org(client, &org_id)
+                .await?
+                .into_iter()
+                .map(|c| (c.source, (c.object_key, c.etag)))
+                .collect();
+
+        // The sources to sweep come from the ACTIVE config, not from listing
+        // the bucket's directories: a tenant who drops a folder nobody
+        // configured has not declared what its columns mean, and guessing
+        // would attribute their records to a source that does not exist.
+        let detail = pg::OrgDetail::from(org);
+        let Ok(config) = crate::org_active_config(client, &detail).await else {
+            eprintln!(
+                "s3 auto-ingest: skipping '{org_name}' — no readable active config to say which \
+                 sources its prefix holds"
+            );
+            continue;
+        };
+
+        for source in config.sources.keys() {
+            let mut skipped = Vec::new();
+            let newest = watcher.newest(&bucket, &prefix, source, &mut skipped).await;
+            for why in &skipped {
+                eprintln!("s3 auto-ingest: {org_name}/{source} passed over an object: {why:?}");
+            }
+            let found = match newest {
+                Ok(Some(found)) => found,
+                Ok(None) => continue,
+                Err(e) => {
+                    eprintln!(
+                        "s3 auto-ingest: {org_name}/{source}: {}",
+                        crate::errfmt::chain(&e)
+                    );
+                    continue;
+                }
+            };
+            let (drop, etag) = found;
+            let seen = cursors
+                .get(source)
+                .map(|(key, tag)| (key.as_str(), tag.as_deref()));
+            if !crate::s3_ingest::is_new(&drop, etag.as_deref(), seen) {
+                continue;
+            }
+
+            // The same gate both hand-driven delivery paths go through, so an
+            // auto-ingest cannot land on a suspended tenant that the API would
+            // have refused. This is the check whose refusal needed a reason
+            // rather than a status code, because this log line is its only
+            // reader.
+            let (_, _, drop_root) =
+                match crate::delivery_preconditions(client, &org_name, source).await {
+                    Ok(t) => t,
+                    Err(refusal) => {
+                        eprintln!(
+                            "s3 auto-ingest: {org_name}/{source} not landed ({}): {}",
+                            drop.key,
+                            refusal.reason()
+                        );
+                        continue;
+                    }
+                };
+
+            let delivery_id = er_ids::new_v7();
+            let Some(part) =
+                crate::s3_ingest::staging_path(Path::new(&drop_root), source, &delivery_id)
+            else {
+                eprintln!(
+                    "s3 auto-ingest: {org_name} refused source '{source}' — it would not stay \
+                     inside the drop root"
+                );
+                continue;
+            };
+            let bytes = match watcher.download(&bucket, &drop.key, &part).await {
+                Ok(n) => n,
+                Err(e) => {
+                    // A `.part` left behind would accumulate every tick.
+                    let _ = tokio::fs::remove_file(&part).await;
+                    eprintln!(
+                        "s3 auto-ingest: {org_name}/{source}: {}",
+                        crate::errfmt::chain(&e)
+                    );
+                    continue;
+                }
+            };
+
+            let response = crate::finish_delivery(
+                client,
+                S3_ACTOR,
+                &crate::StagedDelivery {
+                    org: &org_name,
+                    org_id: &org_id,
+                    source,
+                    delivery_id: &delivery_id,
+                    temp_path: &part.to_string_lossy(),
+                    bytes,
+                    action: "import.s3",
+                },
+            )
+            .await;
+            if !response.status().is_success() {
+                // The commonest case is the one-active-job-per-org index: a run
+                // is already in flight. Leaving the cursor alone is the whole
+                // retry mechanism — the next tick finds the same object still
+                // new and lands it once the queue is free.
+                eprintln!(
+                    "s3 auto-ingest: {org_name}/{source} could not be published ({}); the \
+                     cursor stays put so the next tick retries",
+                    response.status()
+                );
+                continue;
+            }
+
+            if let Err(e) = er_entities::s3_ingest_cursor::create::advance(
+                client,
+                &er_ids::new_v7(),
+                &org_id,
+                source,
+                &drop.key,
+                etag.as_deref(),
+                drop.size,
+                &delivery_id,
+            )
+            .await
+            {
+                // The delivery is already published and its run queued, so this
+                // is not a failure of the import — it is a failure to remember
+                // it, and the next tick will land the same object again. Loud,
+                // because a cursor that never advances is an ingest loop.
+                eprintln!(
+                    "s3 auto-ingest: {org_name}/{source} landed but its cursor did not advance, \
+                     so it will be re-ingested: {e}"
+                );
+                continue;
+            }
+            landed += 1;
+        }
+    }
+    Ok(landed)
 }
 
 /// Enqueue a job for every enabled schedule whose cron matches `now`'s minute.

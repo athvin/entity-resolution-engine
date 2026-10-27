@@ -46,6 +46,8 @@ $fn$;"#,
   config_path text NOT NULL,
   env jsonb NOT NULL DEFAULT '{}'::jsonb,
   drop_root text,
+  s3_ingest_bucket text,
+  s3_ingest_prefix text,
   active_config_version bigint,
   state text NOT NULL DEFAULT 'active' CHECK (state IN ('provisioning', 'active', 'suspended', 'purging')),
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -229,6 +231,20 @@ CREATE OR REPLACE TRIGGER er_history_matching_models
 );
 CREATE UNIQUE INDEX IF NOT EXISTS pair_labels_org_pair ON public.pair_labels (org_id, rec_a_key, rec_b_key);
 CREATE INDEX IF NOT EXISTS pair_labels_org_recent ON public.pair_labels (org_id, created_at);"#,
+    r#"CREATE TABLE IF NOT EXISTS public.s3_ingest_cursors (
+  id text NOT NULL,
+  org_id text NOT NULL REFERENCES orgs(id),
+  source text NOT NULL,
+  object_key text NOT NULL,
+  etag text,
+  size_bytes bigint NOT NULL,
+  delivery_id text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (id),
+  UNIQUE (org_id, source)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS s3_ingest_cursors_org_source ON public.s3_ingest_cursors (org_id, source);"#,
     r#"CREATE TABLE IF NOT EXISTS public.schedules (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),

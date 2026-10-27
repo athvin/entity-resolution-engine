@@ -1,0 +1,6 @@
+kind: statement
+operation: read
+mode: full
+description: "The tenants the auto-ingest poller should sweep: active, with a bucket configured. Filtered in SQL rather than by listing every org and checking in Rust, because this runs on every dispatcher tick and a deployment's org table is the one table that grows with the business — the poll must cost nothing on a deployment where nobody has turned auto-ingest on, which is all of them until someone does."
+params: []
+returns: entity

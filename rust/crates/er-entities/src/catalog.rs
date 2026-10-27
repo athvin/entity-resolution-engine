@@ -1457,6 +1457,12 @@ columns:
   - name: drop_root
     type: varchar
     description: "Optional object-store root for tenant purge."
+  - name: s3_ingest_bucket
+    type: varchar
+    description: "Bucket the auto-ingest poller watches for this tenant. Null means auto-ingest is off, which is every existing tenant — the feature has to be opted into, because a poller that starts reading a bucket nobody pointed at it would be ingesting data on its own initiative."
+  - name: s3_ingest_prefix
+    type: varchar
+    description: "Key prefix under `s3_ingest_bucket`, with one directory per config source beneath it. A column rather than a key in `env` deliberately: `env` is handed to the engine subprocess, while this is read by the control plane itself, and D5 is what happens when the two stores of per-tenant settings disagree."
   - name: active_config_version
     type: bigint
     description: "The currently published config version, if any."
@@ -1904,6 +1910,67 @@ columns:
     type: timestamp
     nullable: false
     description: "Run-logical last-write time (advanced when the run finishes)."
+"#,
+    ),
+    (
+        "s3_ingest_cursor",
+        r#"kind: entity
+version: 1
+name: s3_ingest_cursor
+relation: s3_ingest_cursors
+description: "What the auto-ingest poller has already read, one row per (org, source). The poller runs on every dispatcher tick and the newest object under a prefix stays the newest until a new one arrives, so without this row the same CSV would be re-ingested every few seconds forever — an unbounded run loop over the tenant's own lake. An upsert rather than a log: the question it answers is 'what is already in', not 'what has ever been in', and the audit log already answers the second."
+key: [id]
+natural_key: [org_id, source]
+generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+  wire: [json]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "UUIDv7, minted by the application."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant whose prefix was polled; every read is scoped by it."
+  - name: source
+    type: varchar
+    nullable: false
+    description: "The config source this object landed as — the first path segment under the tenant's prefix."
+  - name: object_key
+    type: varchar
+    nullable: false
+    description: "The full S3 key of the object last ingested, kept whole so a tenant asking 'which file produced this run' gets the answer rather than a reconstruction."
+  - name: etag
+    type: varchar
+    description: "The object's ETag when it was read. The reason this column exists: a tenant who overwrites `crm/daily.csv` with new content leaves the key identical, so a key-only cursor would never read the new rows. Nullable because a listing can omit it."
+  - name: size_bytes
+    type: bigint
+    nullable: false
+    description: "The object's size at ingest, so a later shrink is visible as one."
+  - name: delivery_id
+    type: varchar
+    nullable: false
+    description: "The delivery this object became, tying the cursor to the audit row and the run it enqueued."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    volatile: true
+    default: now()
+    description: "When this source was first auto-ingested."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    volatile: true
+    default: now()
+    description: "When it was last auto-ingested."
+indexes:
+  # The poller's read, and the natural-key upsert target.
+  - name: s3_ingest_cursors_org_source
+    columns: [org_id, source]
+    unique: true
 "#,
     ),
     (

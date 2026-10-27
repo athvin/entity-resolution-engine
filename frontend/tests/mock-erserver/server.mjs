@@ -2441,6 +2441,36 @@ const server = http.createServer((req, res) => {
       return send(res, 200, target);
     }
 
+    // ── auto-ingest state (E9c) ────────────────────────────────────────────
+    //
+    // Two tenants, two designed states. `acme-dev` has a prefix configured and
+    // one source that has landed; `fresh-dev` has no bucket at all, which is
+    // every tenant until an operator points the poller at one — the panel must
+    // read as "not configured", not as "configured and broken".
+    //
+    // Field names are the entity's. The handler projects a subset of the
+    // cursor row — no `id`, no `org_id` — but renames nothing, so this fixture
+    // and the generated `S3IngestCursor` binding cannot drift apart.
+    if ((match = /^\/v1\/orgs\/([^/]+)\/s3-ingest$/.exec(path)) && req.method === "GET") {
+      if (match[1] === "fresh-dev") {
+        return send(res, 200, { bucket: null, prefix: null, sources: [] });
+      }
+      return send(res, 200, {
+        bucket: "acme-tenant-drops",
+        prefix: "tenants/acme",
+        sources: [
+          {
+            source: "crm",
+            object_key: "tenants/acme/crm/2026-10-26.csv",
+            size_bytes: 20480,
+            delivery_id: "01jm0000000000000000000091",
+            created_at: "2026-10-01T02:00:00.000000Z",
+            updated_at: "2026-10-26T02:00:00.000000Z",
+          },
+        ],
+      });
+    }
+
     if ((match = /^\/v1\/orgs\/([^/]+)\/imports\/recent$/.exec(path)) && req.method === "GET") {
       const source = url.searchParams.get("source");
       const limit = Number(url.searchParams.get("limit") ?? 20);

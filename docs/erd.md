@@ -106,6 +106,8 @@ erDiagram
         varchar config_path
         json env
         varchar drop_root
+        varchar s3_ingest_bucket
+        varchar s3_ingest_prefix
         bigint active_config_version
         varchar state "in {active, provisioning, purging, suspended}"
         timestamp created_at
@@ -122,6 +124,17 @@ erDiagram
         varchar model_version
         double score_at_label
         varchar note
+        timestamp created_at
+        timestamp updated_at
+    }
+    s3_ingest_cursors {
+        varchar id PK
+        varchar org_id FK
+        varchar source
+        varchar object_key
+        varchar etag
+        bigint size_bytes
+        varchar delivery_id
         timestamp created_at
         timestamp updated_at
     }
@@ -219,6 +232,7 @@ erDiagram
     jobs }o--|| orgs : "org_id → id"
     matching_models }o--|| orgs : "org_id → id"
     pair_labels }o--|| orgs : "org_id → id"
+    s3_ingest_cursors }o--|| orgs : "org_id → id"
     schedules }o--|| orgs : "org_id → id"
     staged_steward_actions }o--|| orgs : "org_id → id"
     tags }o--|| orgs : "org_id → id"
@@ -240,6 +254,7 @@ erDiagram
 | `matching_models` | An immutable version of a tenant's matching model: the settings document the engine scores against, its hash, provenance and activation state. |
 | `orgs` | A tenant: its config pointer, lake env, lifecycle state and active config version. |
 | `pair_labels` | A human (or model) verdict on one candidate pair — the training signal the engine has always been able to learn from and never had. One row per (org, pair): a re-label corrects the previous verdict rather than stacking another. |
+| `s3_ingest_cursors` | What the auto-ingest poller has already read, one row per (org, source). The poller runs on every dispatcher tick and the newest object under a prefix stays the newest until a new one arrives, so without this row the same CSV would be re-ingested every few seconds forever — an unbounded run loop over the tenant's own lake. An upsert rather than a log: the question it answers is 'what is already in', not 'what has ever been in', and the audit log already answers the second. |
 | `schedules` | A recurring job schedule for a tenant: its kind, cron and source. |
 | `schema_migrations` | The control-plane schema ledger: one row per DDL statement the reconciler applied to public.*, plus one `verified` row each time a new catalog version found the live schema already current. The latest row's catalog_hash is the version the database is at. |
 | `staged_steward_actions` | A steward action staged for review/apply: its payload, state and outcome. |

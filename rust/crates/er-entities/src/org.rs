@@ -16,6 +16,10 @@ pub struct Org {
     pub env: ::serde_json::Value,
     /// Optional object-store root for tenant purge.
     pub drop_root: Option<String>,
+    /// Bucket the auto-ingest poller watches for this tenant. Null means auto-ingest is off, which is every existing tenant — the feature has to be opted into, because a poller that starts reading a bucket nobody pointed at it would be ingesting data on its own initiative.
+    pub s3_ingest_bucket: Option<String>,
+    /// Key prefix under `s3_ingest_bucket`, with one directory per config source beneath it. A column rather than a key in `env` deliberately: `env` is handed to the engine subprocess, while this is read by the control plane itself, and D5 is what happens when the two stores of per-tenant settings disagree.
+    pub s3_ingest_prefix: Option<String>,
     /// The currently published config version, if any.
     pub active_config_version: Option<i64>,
     /// Tenant lifecycle state.
@@ -45,6 +49,8 @@ impl Org {
             "config_path",
             "env",
             "drop_root",
+            "s3_ingest_bucket",
+            "s3_ingest_prefix",
             "active_config_version",
             "state",
             "created_at",
@@ -69,7 +75,7 @@ ON CONFLICT (name) DO NOTHING
         client.execute(SQL, &[&id, &name, &config_path]).await
     }
 
-    /// Upsert a bring-your-own-config org: insert active, or on replay refresh config_path/env/drop_root while leaving state intact.
+    /// Upsert a bring-your-own-config org: insert active, or on replay refresh config_path/env/drop_root and the auto-ingest prefix while leaving state intact.
     pub async fn upsert_byo(
         client: &::tokio_postgres::Client,
         id: &str,
@@ -77,14 +83,32 @@ ON CONFLICT (name) DO NOTHING
         config_path: &str,
         env: &::serde_json::Value,
         drop_root: Option<&str>,
+        s3_ingest_bucket: Option<&str>,
+        s3_ingest_prefix: Option<&str>,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
-        const SQL: &str = "INSERT INTO public.orgs (id, name, config_path, env, drop_root, state)
-VALUES ($1, $2, $3, $4, $5, 'active')
+        const SQL: &str = "INSERT INTO public.orgs
+  (id, name, config_path, env, drop_root, s3_ingest_bucket, s3_ingest_prefix, state)
+VALUES
+  ($1, $2, $3, $4, $5, $6,
+   $7, 'active')
 ON CONFLICT (name) DO UPDATE SET config_path = EXCLUDED.config_path,
-  env = EXCLUDED.env, drop_root = EXCLUDED.drop_root, updated_at = now()
+  env = EXCLUDED.env, drop_root = EXCLUDED.drop_root,
+  s3_ingest_bucket = EXCLUDED.s3_ingest_bucket,
+  s3_ingest_prefix = EXCLUDED.s3_ingest_prefix, updated_at = now()
 ";
         client
-            .execute(SQL, &[&id, &name, &config_path, &env, &drop_root])
+            .execute(
+                SQL,
+                &[
+                    &id,
+                    &name,
+                    &config_path,
+                    &env,
+                    &drop_root,
+                    &s3_ingest_bucket,
+                    &s3_ingest_prefix,
+                ],
+            )
             .await
     }
 }
@@ -102,6 +126,8 @@ pub mod read {
   config_path,
   env,
   drop_root,
+  s3_ingest_bucket,
+  s3_ingest_prefix,
   active_config_version,
   state,
   created_at,
@@ -118,6 +144,8 @@ WHERE id = $1
                 config_path: row.get("config_path"),
                 env: row.get("env"),
                 drop_root: row.get("drop_root"),
+                s3_ingest_bucket: row.get("s3_ingest_bucket"),
+                s3_ingest_prefix: row.get("s3_ingest_prefix"),
                 active_config_version: row.get("active_config_version"),
                 state: row.get("state"),
                 created_at: row.get("created_at"),
@@ -137,6 +165,8 @@ WHERE id = $1
   config_path,
   env,
   drop_root,
+  s3_ingest_bucket,
+  s3_ingest_prefix,
   active_config_version,
   state,
   created_at,
@@ -153,6 +183,8 @@ WHERE name = $1
                 config_path: row.get("config_path"),
                 env: row.get("env"),
                 drop_root: row.get("drop_root"),
+                s3_ingest_bucket: row.get("s3_ingest_bucket"),
+                s3_ingest_prefix: row.get("s3_ingest_prefix"),
                 active_config_version: row.get("active_config_version"),
                 state: row.get("state"),
                 created_at: row.get("created_at"),
@@ -171,6 +203,8 @@ WHERE name = $1
   config_path,
   env,
   drop_root,
+  s3_ingest_bucket,
+  s3_ingest_prefix,
   active_config_version,
   state,
   created_at,
@@ -187,6 +221,48 @@ ORDER BY name
                 config_path: row.get("config_path"),
                 env: row.get("env"),
                 drop_root: row.get("drop_root"),
+                s3_ingest_bucket: row.get("s3_ingest_bucket"),
+                s3_ingest_prefix: row.get("s3_ingest_prefix"),
+                active_config_version: row.get("active_config_version"),
+                state: row.get("state"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+            })
+            .collect())
+    }
+
+    /// The tenants the auto-ingest poller should sweep: active, with a bucket configured. Filtered in SQL rather than by listing every org and checking in Rust, because this runs on every dispatcher tick and a deployment's org table is the one table that grows with the business — the poll must cost nothing on a deployment where nobody has turned auto-ingest on, which is all of them until someone does.
+    pub async fn with_s3_ingest(
+        client: &::tokio_postgres::Client,
+    ) -> ::std::result::Result<Vec<super::Org>, ::tokio_postgres::Error> {
+        const SQL: &str = "SELECT
+  id,
+  name,
+  config_path,
+  env,
+  drop_root,
+  s3_ingest_bucket,
+  s3_ingest_prefix,
+  active_config_version,
+  state,
+  created_at,
+  updated_at
+FROM public.orgs
+WHERE s3_ingest_bucket IS NOT NULL
+  AND state = 'active'
+ORDER BY name
+";
+        let rows = client.query(SQL, &[]).await?;
+        Ok(rows
+            .iter()
+            .map(|row| super::Org {
+                id: row.get("id"),
+                name: row.get("name"),
+                config_path: row.get("config_path"),
+                env: row.get("env"),
+                drop_root: row.get("drop_root"),
+                s3_ingest_bucket: row.get("s3_ingest_bucket"),
+                s3_ingest_prefix: row.get("s3_ingest_prefix"),
                 active_config_version: row.get("active_config_version"),
                 state: row.get("state"),
                 created_at: row.get("created_at"),
