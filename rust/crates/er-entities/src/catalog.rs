@@ -2103,9 +2103,9 @@ indexes:
 version: 1
 name: scored_record
 relation: scored_records
-description: "What the last successful match pass actually scored: one row per record in the corpus at the moment it was scored, with the content hash and model identity it was scored under. This is what makes an incremental run safe — a record is new or changed precisely when the standardized corpus disagrees with this ledger."
+description: "What the last successful match pass actually scored: one row per (record, model identity) at the moment it was scored, with the content hash it was scored under. This is what makes an incremental run safe — a record is new or changed, FOR A GIVEN MODEL, precisely when the standardized corpus disagrees with that model's rows here. Keyed per identity rather than per record because an ensemble scores one record with several models (E5b-2b): a record-keyed ledger let the second member's sync overwrite the first's, so a two-member pass left a ledger claiming only the last member had scored anything — and 'member B has not scored record X' then had nowhere to be true."
 key: [id]
-natural_key: [record_key]
+natural_key: [record_key, model_version, tf_snapshot_id]
 generate:
   stores: [duckdb]
   languages: [rust]
@@ -2113,7 +2113,7 @@ columns:
   - name: id
     type: varchar
     nullable: false
-    description: "Content-derived row id: sha256('scored_records:' || record_key)."
+    description: "Content-derived row id: sha256('scored_records:' || record_key || ':' || model_version || ':' || tf_snapshot_id). The model identity is IN the id because it is in the natural key — an id over record_key alone would collide the moment two ensemble members scored the same record."
   - name: record_key
     type: varchar
     nullable: false
@@ -2125,7 +2125,7 @@ columns:
   - name: model_version
     type: varchar
     nullable: false
-    description: "The trained model the record was scored under. An incremental pass over a different model cannot reuse these scores."
+    description: "The trained model the record was scored under. An incremental pass over a different model cannot reuse these scores — which is why the delta is computed per member rather than once for the ensemble."
   - name: tf_snapshot_id
     type: varchar
     nullable: false
