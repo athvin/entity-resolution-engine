@@ -1,0 +1,13 @@
+kind: statement
+operation: create
+mode: partial
+description: "Record that an object has been ingested for this source, replacing whatever was there. Written AFTER the delivery is published, never before: a cursor advanced first and a download that then failed would skip the object permanently, and the tenant's file would be silently never read. The reverse order can at worst re-ingest once, which is visible and recoverable; this order cannot."
+params:
+  - { name: cursor_id, type: varchar }
+  - { name: org_id, type: varchar }
+  - { name: source, type: varchar }
+  - { name: object_key, type: varchar }
+  - { name: etag, type: varchar, nullable: true }
+  - { name: size_bytes, type: bigint }
+  - { name: delivery_id, type: varchar }
+returns: entity

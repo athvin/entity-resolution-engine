@@ -485,6 +485,26 @@ pub struct OrgDetail {
     pub active_config_version: Option<i64>,
     pub drop_root: Option<String>,
     pub env: serde_json::Value,
+    /// The auto-ingest bucket, when the tenant has opted in (E9c). `None` on
+    /// every tenant that has not, which is the default: the poller reads
+    /// nothing from a tenant who never pointed it at a bucket.
+    pub s3_ingest_bucket: Option<String>,
+    pub s3_ingest_prefix: Option<String>,
+}
+
+impl From<er_entities::org::Org> for OrgDetail {
+    fn from(o: er_entities::org::Org) -> Self {
+        Self {
+            id: o.id,
+            name: o.name,
+            state: o.state,
+            active_config_version: o.active_config_version,
+            drop_root: o.drop_root,
+            env: o.env,
+            s3_ingest_bucket: o.s3_ingest_bucket,
+            s3_ingest_prefix: o.s3_ingest_prefix,
+        }
+    }
 }
 
 /// Upsert a bring-your-own-config org (`queue.py` `ensure_org`, the create-org
@@ -500,6 +520,8 @@ pub async fn upsert_org_byo(
     config_path: &str,
     env: &serde_json::Value,
     drop_root: Option<&str>,
+    s3_ingest_bucket: Option<&str>,
+    s3_ingest_prefix: Option<&str>,
 ) -> Result<(), PgError> {
     er_entities::org::create::upsert_byo(
         client,
@@ -508,6 +530,8 @@ pub async fn upsert_org_byo(
         config_path,
         env,
         drop_root,
+        s3_ingest_bucket,
+        s3_ingest_prefix,
     )
     .await?;
     Ok(())
@@ -551,14 +575,7 @@ pub async fn get_org(client: &Client, name: &str) -> Result<Option<OrgDetail>, P
         .await?
         .into_iter()
         .next()
-        .map(|o| OrgDetail {
-            id: o.id,
-            name: o.name,
-            state: o.state,
-            active_config_version: o.active_config_version,
-            drop_root: o.drop_root,
-            env: o.env,
-        }))
+        .map(OrgDetail::from))
 }
 
 /// An org's id by its unique name (the routing handle) — the one-expression
@@ -585,14 +602,7 @@ pub async fn get_org_by_id(client: &Client, org_id: &str) -> Result<Option<OrgDe
         .await?
         .into_iter()
         .next()
-        .map(|o| OrgDetail {
-            id: o.id,
-            name: o.name,
-            state: o.state,
-            active_config_version: o.active_config_version,
-            drop_root: o.drop_root,
-            env: o.env,
-        }))
+        .map(OrgDetail::from))
 }
 
 /// Transition an org's `state` only from `expected` (`queue.py` `set_org_state`):

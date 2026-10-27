@@ -130,6 +130,7 @@ Every `aws-*` dependency, with the crate that declares it. All must stay
 | Crate | Declared by |
 |---|---|
 | `aws-config` | `er-server` |
+| `aws-sdk-s3` | `er-server` |
 | `aws-sdk-sesv2` | `er-server` |
 | `aws-smithy-http-client` | `er-server` |
 

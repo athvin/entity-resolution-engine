@@ -106,6 +106,16 @@ er-compile = { version = "0.1.0", path = "../er-compile" }
 regex-lite = "0.1.9"
 er-entity-diff = { version = "0.1.0", path = "../er-entity-diff" }
 er-entity-spec = { version = "0.1.0", path = "../er-entity-spec" }
+# S3 (E9c): the auto-ingestion poller downloads a dropped object into the
+# tenant's `drop_root`, so the engine keeps reading the local filesystem and
+# `delivery_preconditions`/`finish_delivery` stay the single landing path.
+# Same `default-features = false` discipline as the two above, for the same
+# reasons — `aws-lc-sys` needs a cmake the build image lacks, and the SSO
+# providers are unreachable under Pod Identity.
+aws-sdk-s3 = { version = "1", default-features = false, features = [
+  "rt-tokio",
+  "behavior-version-latest",
+] }
 
 [lints]
 workspace = true

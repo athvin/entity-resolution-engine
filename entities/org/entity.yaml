@@ -31,6 +31,12 @@ columns:
   - name: drop_root
     type: varchar
     description: "Optional object-store root for tenant purge."
+  - name: s3_ingest_bucket
+    type: varchar
+    description: "Bucket the auto-ingest poller watches for this tenant. Null means auto-ingest is off, which is every existing tenant — the feature has to be opted into, because a poller that starts reading a bucket nobody pointed at it would be ingesting data on its own initiative."
+  - name: s3_ingest_prefix
+    type: varchar
+    description: "Key prefix under `s3_ingest_bucket`, with one directory per config source beneath it. A column rather than a key in `env` deliberately: `env` is handed to the engine subprocess, while this is read by the control plane itself, and D5 is what happens when the two stores of per-tenant settings disagree."
   - name: active_config_version
     type: bigint
     description: "The currently published config version, if any."

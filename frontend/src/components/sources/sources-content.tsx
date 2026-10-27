@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { Database, Loader2, Upload } from "lucide-react";
 
+import { AutoIngestPanel } from "@/components/sources/auto-ingest-panel";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -250,6 +251,10 @@ export function SourcesContent({ org }: { org: string }) {
           ))}
         </div>
       )}
+
+      {/* Auto-ingest sits ABOVE receipts: it answers "where do I put the
+          file", which comes before "did the file do anything". */}
+      <AutoIngestPanel org={org} sources={sources.data?.sources.map((s) => s.name) ?? []} />
 
       <ReceiptsPanel org={org} />
 

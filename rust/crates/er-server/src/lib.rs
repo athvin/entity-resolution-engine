@@ -40,6 +40,7 @@ pub mod openapi;
 pub mod pg;
 pub mod provision;
 pub mod read;
+pub mod s3_ingest;
 pub mod schema;
 pub mod urlguard;
 pub mod webhook;
@@ -224,6 +225,59 @@ fn pg_err(e: tokio_postgres::Error) -> axum::response::Response {
 /// (`proxy.ts` reads `detail`, and keys its user-facing mapping on the status).
 fn detail_err(code: StatusCode, msg: impl Into<String>) -> axum::response::Response {
     (code, Json(json!({ "detail": msg.into() }))).into_response()
+}
+
+/// A landing gate's refusal: the response to send, plus the reason in words
+/// when the gate itself raised it.
+///
+/// `delivery_preconditions` has two kinds of caller now. The HTTP handlers want
+/// the response, byte for byte as before. E9c's poller wants the *reason*,
+/// because a skipped auto-ingest has no reader but a log line, and "the gate
+/// refused with 422" tells a tenant nothing about which of their files was
+/// ignored or why.
+///
+/// `detail` is `Option` rather than always-present on purpose, and the
+/// alternative is why: carrying a reason for every refusal would mean giving
+/// `org_or_404` and `org_active_config` this type too, and those have 43 and 10
+/// callers. A refusal passed through from one of them arrives already rendered
+/// and keeps its exact body — the poller falls back to the status for those,
+/// and they are the refusals it cannot reach anyway (the org was listed
+/// moments earlier).
+pub(crate) struct Refusal {
+    response: axum::response::Response,
+    detail: Option<String>,
+}
+
+impl Refusal {
+    fn new(code: StatusCode, detail: impl Into<String>) -> Box<Self> {
+        let detail = detail.into();
+        Box::new(Self {
+            response: detail_err(code, detail.clone()),
+            detail: Some(detail),
+        })
+    }
+
+    /// The reason in words, for a caller with nowhere to send a response.
+    pub(crate) fn reason(&self) -> String {
+        self.detail
+            .clone()
+            .unwrap_or_else(|| format!("refused with {}", self.response.status()))
+    }
+}
+
+impl From<Box<axum::response::Response>> for Box<Refusal> {
+    fn from(response: Box<axum::response::Response>) -> Self {
+        Box::new(Refusal {
+            response: *response,
+            detail: None,
+        })
+    }
+}
+
+impl IntoResponse for Refusal {
+    fn into_response(self) -> axum::response::Response {
+        self.response
+    }
 }
 
 /// Refuse an operation on a tenant that is not `active`, as a 409 naming the
@@ -595,6 +649,11 @@ async fn provision_org(
         &plan.config_path.to_string_lossy(),
         &env,
         Some(&plan.drop_root.to_string_lossy()),
+        // Auto-provisioning never turns auto-ingest on: a tenant provisioned
+        // from a template has pointed us at no bucket, and inventing one would
+        // have the poller reading object storage on its own initiative.
+        None,
+        None,
     )
     .await
     {
@@ -701,6 +760,13 @@ struct OrgIn {
     env: std::collections::BTreeMap<String, String>,
     #[serde(default)]
     drop_root: Option<String>,
+    /// Auto-ingest (E9c): the bucket the dispatcher's poller watches. Absent
+    /// leaves auto-ingest off, which is the behaviour every existing caller
+    /// already has.
+    #[serde(default)]
+    s3_ingest_bucket: Option<String>,
+    #[serde(default)]
+    s3_ingest_prefix: Option<String>,
 }
 
 /// Operator: create an org (`POST /v1/orgs`). The bring-your-own-config path
@@ -792,6 +858,8 @@ async fn create_org(
         config_path,
         &env,
         body.drop_root.as_deref(),
+        body.s3_ingest_bucket.as_deref(),
+        body.s3_ingest_prefix.as_deref(),
     )
     .await
     {
@@ -4536,7 +4604,7 @@ pub const DEFAULT_MAX_IMPORT_BYTES: usize = 256 * 1024 * 1024;
 /// `pg::get_config_version` keys on the org **id** while `pg::org_publish_context`
 /// keys on the **name** — a footgun that reaching through the row avoids, and
 /// that `org_source_ranks` tripped over before this existed.
-async fn org_active_config(
+pub(crate) async fn org_active_config(
     client: &tokio_postgres::Client,
     org_row: &pg::OrgDetail,
 ) -> Result<er_config::Config, Box<axum::response::Response>> {
@@ -4569,38 +4637,38 @@ async fn org_active_config(
 /// Shared by the file upload and the JSON push so the two cannot drift: a
 /// delivery accepted one way and refused the other would be a surprise, and the
 /// `source` value becomes a path segment in both.
-async fn delivery_preconditions(
+pub(crate) async fn delivery_preconditions(
     client: &tokio_postgres::Client,
     org: &str,
     source: &str,
-) -> Result<(pg::OrgDetail, er_config::Config, String), Box<axum::response::Response>> {
+) -> Result<(pg::OrgDetail, er_config::Config, String), Box<Refusal>> {
     let org_row = org_or_404(client, org).await?;
     if org_row.state != "active" {
-        return Err(Box::new(detail_err(
+        return Err(Refusal::new(
             StatusCode::CONFLICT,
             format!(
                 "org '{org}' is {}; imports are accepted only when active",
                 org_row.state
             ),
-        )));
+        ));
     }
     let config = org_active_config(client, &org_row).await?;
     if !config.sources.contains_key(source) {
         let known: Vec<&str> = config.sources.keys().map(String::as_str).collect();
-        return Err(Box::new(detail_err(
+        return Err(Refusal::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             format!(
                 "source '{source}' is not in the active config (known: {}); \
                  publish a config version containing sources.{source} first",
                 known.join(", ")
             ),
-        )));
+        ));
     }
     let Some(drop_root) = org_row.drop_root.clone() else {
-        return Err(Box::new(detail_err(
+        return Err(Refusal::new(
             StatusCode::SERVICE_UNAVAILABLE,
             format!("org '{org}' has no drop_root to land a delivery into"),
-        )));
+        ));
     };
     // The source is a key of the active config, so it cannot traverse; assert it
     // anyway, because this value becomes a path segment.
@@ -4608,16 +4676,16 @@ async fn delivery_preconditions(
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
     {
-        return Err(Box::new(detail_err(
+        return Err(Refusal::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             format!("source '{source}' is not a valid path segment"),
-        )));
+        ));
     }
     if let Err(e) = tokio::fs::create_dir_all(&drop_root).await {
-        return Err(Box::new(detail_err(
+        return Err(Refusal::new(
             StatusCode::SERVICE_UNAVAILABLE,
             format!("drop_root {drop_root} is not writable: {e}"),
-        )));
+        ));
     }
     Ok((org_row, config, drop_root))
 }
@@ -4628,19 +4696,20 @@ async fn delivery_preconditions(
 /// dispatcher reads `<drop_root>/<source>.csv` directly, so a run claimed
 /// mid-write must never see a half-written file. Until the rename succeeds there
 /// is no delivery at all.
-struct StagedDelivery<'a> {
-    org: &'a str,
-    org_id: &'a str,
-    source: &'a str,
-    delivery_id: &'a str,
+pub(crate) struct StagedDelivery<'a> {
+    pub(crate) org: &'a str,
+    pub(crate) org_id: &'a str,
+    pub(crate) source: &'a str,
+    pub(crate) delivery_id: &'a str,
     /// Where the bytes are now. Renamed into place by `finish_delivery`.
-    temp_path: &'a str,
-    bytes: u64,
-    /// The audit action naming how it arrived (`import.upload` / `import.push`).
-    action: &'a str,
+    pub(crate) temp_path: &'a str,
+    pub(crate) bytes: u64,
+    /// The audit action naming how it arrived (`import.upload` / `import.push`
+    /// / `import.s3`).
+    pub(crate) action: &'a str,
 }
 
-async fn finish_delivery(
+pub(crate) async fn finish_delivery(
     client: &tokio_postgres::Client,
     actor: &str,
     d: &StagedDelivery<'_>,
@@ -4787,7 +4856,7 @@ async fn push_records(
     let (org_row, config, drop_root) =
         match delivery_preconditions(&client, &org, &body.source).await {
             Ok(t) => t,
-            Err(r) => return *r,
+            Err(r) => return r.into_response(),
         };
     let spec = &config.sources[&body.source];
 
@@ -4925,7 +4994,7 @@ async fn upload_import(
     };
     let (org_row, _config, drop_root) = match delivery_preconditions(&client, &org, source).await {
         Ok(t) => t,
-        Err(r) => return *r,
+        Err(r) => return r.into_response(),
     };
     let delivery_id = er_ids::new_v7();
     let temp_path = format!("{drop_root}/.{source}.{delivery_id}.csv.part");
@@ -5092,6 +5161,61 @@ async fn imports_recent(
         Ok(items) => Json(json!(items)).into_response(),
         Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
     }
+}
+
+/// Viewer+: this tenant's auto-ingest state
+/// (`GET /v1/orgs/{org}/s3-ingest`) — the watched prefix, and per source what
+/// was last read from it.
+///
+/// Exists because auto-ingest is the one delivery path with no request to look
+/// at. An upload has an HTTP response and a push has a status code; a dropped
+/// object has only whatever the dispatcher logged, which a tenant cannot read.
+/// Without this, "I put the file in the bucket" and "nothing happened" are
+/// indistinguishable from the outside — the same gap the delivery-receipts
+/// panel closed for uploads.
+///
+/// A Postgres read, not a lake read: the cursor is control-plane state. So this
+/// answers even for a tenant whose lake will not open, which is exactly when
+/// someone is asking.
+async fn s3_ingest_state(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(
+            StatusCode::NOT_IMPLEMENTED,
+            "auto-ingest state requires Postgres",
+        );
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(o) => o,
+        Err(r) => return *r,
+    };
+    let sources = match er_entities::s3_ingest_cursor::read::by_org(&client, &org_row.id).await {
+        Ok(rows) => rows,
+        Err(e) => return pg_err(e),
+    };
+    Json(json!({
+        "bucket": org_row.s3_ingest_bucket,
+        "prefix": org_row.s3_ingest_prefix,
+        "sources": sources.iter().map(|c| json!({
+            "source": c.source,
+            "object_key": c.object_key,
+            "size_bytes": c.size_bytes,
+            "delivery_id": c.delivery_id,
+            "first_ingested_at": pg::ts(&c.created_at),
+            "last_ingested_at": pg::ts(&c.updated_at),
+        })).collect::<Vec<_>>(),
+    }))
+    .into_response()
 }
 
 /// Viewer+: the 20 most recent runs (`GET /v1/orgs/{org}/runs`), a bare array.
@@ -7295,6 +7419,7 @@ fn build_routes(state: AppState) -> Router {
                 .layer(axum::extract::DefaultBodyLimit::max(max_import_bytes)),
         )
         .route("/v1/orgs/{org}/imports/recent", get(imports_recent))
+        .route("/v1/orgs/{org}/s3-ingest", get(s3_ingest_state))
         .route("/v1/orgs/{org}/runs", get(runs_list))
         .route(
             "/v1/orgs/{org}/runs/{run_id}/entity-events",

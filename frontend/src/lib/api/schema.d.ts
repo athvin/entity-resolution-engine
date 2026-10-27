@@ -332,6 +332,10 @@ export interface components {
             id: string;
             /** @description The tenant's unique name (the routing handle; URLs stay name-based). */
             name: string;
+            /** @description Bucket the auto-ingest poller watches for this tenant. Null means auto-ingest is off, which is every existing tenant — the feature has to be opted into, because a poller that starts reading a bucket nobody pointed at it would be ingesting data on its own initiative. */
+            s3_ingest_bucket?: string | null;
+            /** @description Key prefix under `s3_ingest_bucket`, with one directory per config source beneath it. A column rather than a key in `env` deliberately: `env` is handed to the engine subprocess, while this is read by the control plane itself, and D5 is what happens when the two stores of per-tenant settings disagree. */
+            s3_ingest_prefix?: string | null;
             /** @description Tenant lifecycle state. */
             state: string;
             /**

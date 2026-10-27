@@ -47,6 +47,45 @@ test.describe("sources & imports", () => {
     await expect(receipts.locator("tbody tr").nth(1)).toContainText("—");
   });
 
+  test("auto-ingest names the exact drop path per source (E9c)", async ({ page }) => {
+    await login(page, USERS.viewer);
+    await page.goto(`/${ORG}/sources`);
+    const panel = page.getByTestId("auto-ingest");
+    // The path is the one thing a tenant has to get exactly right, and getting
+    // it wrong is silent: the source comes from the DIRECTORY, so a file
+    // dropped one level up classifies as having no source and is passed over
+    // with nothing to show for it. Hence a literal path per source, not a
+    // description of the convention.
+    await expect(panel.getByTestId("auto-ingest-row-crm")).toContainText(
+      "s3://acme-tenant-drops/tenants/acme/crm/",
+    );
+    await expect(panel.getByTestId("auto-ingest-row-billing")).toContainText(
+      "s3://acme-tenant-drops/tenants/acme/billing/",
+    );
+    // A source that has landed shows WHAT was read, by key.
+    await expect(panel.getByTestId("auto-ingest-row-crm")).toContainText(
+      "tenants/acme/crm/2026-10-26.csv",
+    );
+    // One that has not shows that it has not — distinct from "read and empty",
+    // which is the receipts panel's answer, not this one's.
+    await expect(panel.getByTestId("auto-ingest-row-billing")).toContainText("nothing yet");
+
+    // Viewer, deliberately: the person who dropped the file is usually not an
+    // admin, and making them ask someone else whether it arrived defeats the
+    // point of the panel.
+    await expect(panel.getByTestId("auto-ingest-table")).toBeVisible();
+  });
+
+  test("a tenant with no bucket reads as not configured, not as broken", async ({ page }) => {
+    await login(page, USERS.viewer);
+    // `fresh-dev` has no bucket, which is every tenant until an operator points
+    // the poller at one. An empty table here would read as "configured and
+    // nothing has ever arrived", which is a different and alarming fact.
+    await page.goto(`/fresh-dev/sources`);
+    await expect(page.getByTestId("auto-ingest-off")).toContainText("Not configured");
+    await expect(page.getByTestId("auto-ingest-table")).toHaveCount(0);
+  });
+
   test("a steward uploads a file and the import queues", async ({ page }) => {
     await login(page, USERS.steward);
     await page.goto(`/${ORG_MUTABLE}/sources`);

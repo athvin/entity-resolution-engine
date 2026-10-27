@@ -108,6 +108,8 @@ async fn entity_events_are_aggregated_per_kind_and_expand_through_the_detail_end
         config_path.to_str().unwrap(),
         &env,
         Some(&drop_root),
+        None,
+        None,
     )
     .await
     .unwrap();
@@ -118,6 +120,8 @@ async fn entity_events_are_aggregated_per_kind_and_expand_through_the_detail_end
         "other",
         "/configs/other.yaml",
         &serde_json::json!({}),
+        None,
+        None,
         None,
     )
     .await

@@ -13,6 +13,10 @@ export interface Org {
   env: unknown;
   /** Optional object-store root for tenant purge. */
   drop_root: string | null;
+  /** Bucket the auto-ingest poller watches for this tenant. Null means auto-ingest is off, which is every existing tenant — the feature has to be opted into, because a poller that starts reading a bucket nobody pointed at it would be ingesting data on its own initiative. */
+  s3_ingest_bucket: string | null;
+  /** Key prefix under `s3_ingest_bucket`, with one directory per config source beneath it. A column rather than a key in `env` deliberately: `env` is handed to the engine subprocess, while this is read by the control plane itself, and D5 is what happens when the two stores of per-tenant settings disagree. */
+  s3_ingest_prefix: string | null;
   /** The currently published config version, if any. */
   active_config_version: number | null;
   /** Tenant lifecycle state. */

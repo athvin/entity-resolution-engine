@@ -1187,7 +1187,97 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          one question — the shape this program has twice removed (`ModelSpec.threshold`,
          `CombineMode`). A doc that maps the incumbent's three modes onto the existing config is
          probably the whole deliverable.
-   - [ ] E9c S3 auto-ingestion (#47).
+   - [x] **E9c S3 auto-ingestion (#47) — a dropped object becomes a delivery.** A tenant points a
+         prefix at us, drops a CSV, and the dispatcher imports it on its next tick. No webhook to
+         configure, no push credential to issue. The poller rides `run_loop` for the reason
+         `schedule_tick` and the webhook drain already do: one loop means one thing to stop on
+         SIGTERM.
+         **It is not a job kind, and that was the design decision.** The plan expected this to add
+         an ingest kind to `SCHEDULABLE_KINDS`, which would make `dispatch_coverage.rs` (E10a's
+         gate) demand a dispatcher arm. It needs neither, because an S3 drop *is* a delivery: the
+         poller lands the file and `finish_delivery` enqueues the `run_all_incremental` that
+         already has an arm. A second kind would have been a second way to ingest one thing.
+         **It downloads rather than teaching the engine to read S3.** `run_job` reads
+         `<drop_root>/<source>.csv` off the local filesystem, and `delivery_preconditions` /
+         `finish_delivery` are the single landing path the CSV upload and the JSON push both go
+         through. Downloading into `drop_root` keeps that true — S3 becomes another way a file
+         ARRIVES, not a second way it is ingested. The staging name is the upload path's own
+         (`.{source}.{delivery_id}.csv.part`) rather than a new convention, because
+         `finish_delivery` derives the final name from that path's directory, the leading dot
+         keeps a half-written file from looking like a source, and the delivery id keeps two
+         concurrent deliveries of one source off each other's bytes.
+         **The source comes from the PATH, not the filename.** A tenant dropping `2026-01-05.csv`
+         into `crm/` means the crm source; requiring the source in every filename is a rule they
+         would discover by having a file silently ignored. `<prefix>/file.csv` names no source and
+         is refused rather than guessed at — attributing records to a source nobody declared is
+         worse than not importing them.
+         **The cursor is why this needed an entity.** `s3_ingest_cursors`, one row per
+         (org, source), upserted. The poller runs every tick and the newest object under a prefix
+         stays the newest until a new one arrives, so without this row the same CSV would be
+         re-ingested every minute forever — an unbounded run loop over the tenant's own lake. It
+         stores the key **and the ETag**: a tenant who overwrites `crm/daily.csv` nightly leaves
+         the key identical, and a key-only cursor would read the first night's file and never look
+         again, presenting as "our export stopped working" with nothing in any log.
+         **The order of the last two steps is the correctness argument.** The delivery publishes
+         and *then* the cursor advances. The other order is tempting — it makes a re-ingest
+         impossible — and it is wrong: a cursor advanced before a download that then fails skips
+         that object permanently and the tenant's file is silently never read. This order can at
+         worst land the same bytes twice, which shows up as a duplicate run and is recoverable.
+         One failure mode is visible and survivable; the other is silent data loss. The same
+         reasoning covers the one-active-job-per-org index: when `finish_delivery` cannot enqueue,
+         the cursor stays put and the next tick retries, so that index is the backpressure rather
+         than an error.
+         **A truncated listing REFUSES rather than working with what it saw.** S3 lists keys
+         lexicographically, so a cap drops the *highest* keys — exactly the newest files under
+         date-naming. A cap that kept going would ingest a stale file and report success, so past
+         `MAX_LIST_PAGES` (10, i.e. 10,000 objects) the source is refused with a message naming
+         the prefix. Ties on `last_modified` — which S3 reports to the second, so a batch upload
+         produces them — break on the key, because without a tie-break the chosen object depends
+         on listing order and the same prefix could ingest a different file every tick with
+         nothing having changed in the bucket.
+         **Two new org columns, not two keys in `env`.** `env` is handed to the engine
+         subprocess; this is read by the control plane itself, and D5 is what happens when the two
+         stores of per-tenant settings disagree. Null bucket means auto-ingest is off, which is
+         every existing tenant — the feature is opted into, because a poller that starts reading a
+         bucket nobody pointed at it is ingesting data on its own initiative. Auto-provisioning
+         passes `None` for the same reason. The sweep read filters in SQL (`bucket IS NOT NULL AND
+         state = 'active'`) so the poll costs nothing on a deployment where nobody has turned it
+         on, and a suspended tenant is not billed S3 requests for imports `delivery_preconditions`
+         would refuse anyway.
+         **`delivery_preconditions` learned to return a reason, not just a response.** It now
+         answers `Box<Refusal>` carrying both. The HTTP handlers send the response byte for byte
+         as before; the poller needs the *words*, because a skipped auto-ingest has no reader but
+         a log line and "the gate refused with 422" tells a tenant nothing about which of their
+         files was ignored. `Refusal.detail` is `Option` on purpose: always-present would mean
+         giving `org_or_404` and `org_active_config` the same type, and those have 43 and 10
+         callers.
+         **Surface.** `GET /v1/orgs/{org}/s3-ingest` (viewer) and an auto-ingest panel above the
+         delivery-receipts panel on Sources, answering the half receipts cannot: an upload gets an
+         HTTP response and a push gets a status code, but a dropped object gets a dispatcher log
+         nobody outside the cluster can read. It names the **literal drop path per source** rather
+         than describing the convention, because that string is the one thing a tenant has to get
+         exactly right and getting it wrong is silent. Viewer, not admin: the person who dropped
+         the file usually is not an admin, and making them ask someone else whether it arrived
+         defeats the panel. A tenant with no bucket reads as "not configured", which is a
+         different and less alarming fact than an empty table.
+         **Tests.** 13 unit tests over the pure core — classification, the newest-with-tie-break
+         choice, the path-escape refusal, the key-plus-ETag freshness test — deliberately not
+         hostage to a credential. `pg_s3_ingest.rs` covers the state: the columns round-trip, the
+         sweep predicate, the cursor correcting rather than stacking (and preserving `created_at`),
+         tenant scoping, and the operator role boundary on the call that points the poller at a
+         bucket. Four sabotages were observed failing first: weakening the path-escape guard,
+         removing the tie-break, turning the cursor's upsert into `DO NOTHING`, and removing the
+         route from the router (which `mock_contract.rs` caught by name). The file states what it
+         does **not** cover — `Watcher`'s listing and download need a bucket, so a green run here
+         is not evidence an object can be ingested end to end.
+         **`aws-sdk-s3` is the workspace's first S3 client**, `default-features = false` with an
+         explicit ring-backed TLS client, because the SDK's default resolves TLS to `aws-lc-rs`
+         whose `-sys` crate needs a cmake the build image lacks — the same pin `mail.rs` carries
+         and for the same reason. `cargo deny check advisories licenses bans` passes, and the
+         crate lands in the generated AWS footprint reference. Credentials come from the default
+         chain, so in-cluster the Pod Identity role wins over `lake.tf`'s interim static keys with
+         nothing to plumb. **Not yet applied:** the bucket policy granting the shared
+         `er-dev-api-pod` role read on a tenant drop prefix is terraform a human runs.
 3. **Learning loop**
    - [x] **E10a the `train` job, which the dispatcher had no arm for.** `train` has been in
          `SCHEDULABLE_KINDS` since the queue shipped — so the schedule API accepted it, and every

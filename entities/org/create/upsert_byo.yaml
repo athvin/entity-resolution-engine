@@ -1,11 +1,13 @@
 kind: statement
 operation: create
 mode: partial
-description: "Upsert a bring-your-own-config org: insert active, or on replay refresh config_path/env/drop_root while leaving state intact."
+description: "Upsert a bring-your-own-config org: insert active, or on replay refresh config_path/env/drop_root and the auto-ingest prefix while leaving state intact."
 params:
   - { name: id, type: varchar }
   - { name: name, type: varchar }
   - { name: config_path, type: varchar }
   - { name: env, type: json }
   - { name: drop_root, type: varchar, nullable: true }
+  - { name: s3_ingest_bucket, type: varchar, nullable: true }
+  - { name: s3_ingest_prefix, type: varchar, nullable: true }
 returns: none
