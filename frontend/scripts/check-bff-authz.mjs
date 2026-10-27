@@ -45,7 +45,36 @@ export const RULES = [
       "Call requireSuperAdmin() first. It throws 404 rather than 403 on purpose — a " +
       "non-operator must not learn the route exists (src/lib/bff/admin.ts).",
   },
+  {
+    dir: path.join("src", "app", "api", "impersonation"),
+    // EITHER guard. Starting an impersonation is a super-admin act; ENDING one
+    // needs only that you are the person inside it, so a plain identity check
+    // is correct there and demanding super admin would strand a session whose
+    // operator rights were revoked mid-impersonation.
+    required: ["requireSuperAdmin", "requireIdentity"],
+    hint:
+      "Starting an impersonation needs requireSuperAdmin(); ending one needs " +
+      "requireIdentity(). This directory was invisible to the gate until the " +
+      "uncovered-directory check was added.",
+  },
 ];
+
+/**
+ * API directories that deliberately do NOT authorize through a session, each
+ * with the reason it is safe.
+ *
+ * This list exists because the gate used to scan only `orgs` and `admin`: a new
+ * top-level API directory was simply never examined, and the gate reported
+ * success having not looked at it. That is the false-green shape this repo has
+ * been bitten by repeatedly, so an UNKNOWN directory is now a failure and
+ * adding one is a deliberate entry here rather than a silent omission.
+ */
+const UNAUTHENTICATED_DIRS = {
+  auth: "login, logout and password reset — how a session is obtained in the first place",
+  invites: "the token in the URL is the credential; a session does not exist yet",
+  "csp-report": "the browser posts these with no credentials, and the pre-login ones matter most",
+  widget: "O11's embeddable widget: a signed, record-scoped, expiring token is the credential",
+};
 
 function walk(dir) {
   const out = [];
@@ -74,16 +103,38 @@ export function findUnauthorizedRoutes(root) {
       const source = readFileSync(file, "utf8");
       const methods = [...source.matchAll(new RegExp(METHOD_EXPORT, "g"))].map((m) => m[1]);
       if (!methods.length) continue; // a route file exporting no handler serves nothing
-      if (source.includes(rule.required)) continue;
+      const accepted = Array.isArray(rule.required) ? rule.required : [rule.required];
+      if (accepted.some((guard) => source.includes(guard))) continue;
       violations.push({
         file: path.relative(root, file),
-        required: rule.required,
+        required: Array.isArray(rule.required) ? rule.required.join(" or ") : rule.required,
         hint: rule.hint,
         methods: [...new Set(methods)],
       });
     }
   }
   return violations;
+}
+
+/**
+ * API directories the gate neither checks nor knowingly exempts.
+ *
+ * A non-empty result is a gate hole, not a style issue: the directory serves
+ * HTTP and nothing has asked whether it authorizes.
+ */
+export function findUncoveredApiDirs(root) {
+  const apiRoot = path.join(root, "src", "app", "api");
+  const ruled = new Set(RULES.map((rule) => path.basename(rule.dir)));
+  let entries;
+  try {
+    entries = readdirSync(apiRoot, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  return entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .filter((name) => !ruled.has(name) && !(name in UNAUTHENTICATED_DIRS));
 }
 
 /** Count of handler files the gate examined — reported so a glob that silently
@@ -97,6 +148,21 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
   const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
   const examined = countRoutes(root);
   const violations = findUnauthorizedRoutes(root);
+  const uncovered = findUncoveredApiDirs(root);
+
+  if (uncovered.length) {
+    console.error(
+      `\nauthz gate FAILED — ${uncovered.length} api director(ies) this gate does not cover:\n`,
+    );
+    for (const name of uncovered) console.error(`  src/app/api/${name}`);
+    console.error(
+      "\nEither add a RULE (if it serves tenant or admin data through a session) or an\n" +
+        "UNAUTHENTICATED_DIRS entry with the reason it is safe. A directory the gate has\n" +
+        "never looked at reports green while serving HTTP, which is how this check\n" +
+        "silently stops covering new surface.\n",
+    );
+    process.exit(1);
+  }
 
   if (!examined) {
     console.error(

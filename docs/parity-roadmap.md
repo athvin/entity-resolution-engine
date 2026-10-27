@@ -2681,7 +2681,37 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          recorded decision, so there is nothing for an MCP server to generate tools from. The
          response-ENVELOPE question is already answered without it, by the derived ledger D13
          built (`frontend/src/lib/api/envelopes.json`).
-   - [ ] O11 embeddable duplicate widget: a signed-token read-only micro-page (#59).
+   - [x] O11 embeddable duplicate widget: a signed-token read-only micro-page (#59). A tenant
+         drops an iframe into their own CRM and sees "possible duplicates for record X". It is
+         the product's ONLY surface served without a session, so the token in the URL is the
+         entire credential and every decision follows from that.
+         **Scoped to one RECORD, not to an org** — an org-scoped token that leaked from a
+         single embed would read the whole corpus. **It expires**, because an embed lives in a
+         page the tenant controls and we do not, so a token in a browser history or a referrer
+         header has to stop working. **The signature is checked BEFORE the expiry**: answering
+         "expired" for a forged token tells a forger their signature verified. Every failure —
+         forged, expired, malformed, unknown — answers the same 404, and the route never leaks
+         upstream detail, because an error body is a fingerprint of the backend behind it.
+         The upstream call uses a new `viewerCredentialFor(org)` that takes no role parameter
+         and **cannot fall back to the operator token** the way `credentialForAccess` does for
+         a super admin without membership. That fallback must not be reachable from an
+         unauthenticated path, where it would turn a leaked widget token into fleet-wide
+         access. The signing key is derived from `ERWEB_SESSION_SECRET` with a distinct label
+         so a widget token and a session cookie are never interchangeable.
+         11 token tests; sabotaging the check order fails the one named for it.
+         **It also found a hole in the BFF authz gate, which is the more valuable half.**
+         Adding `src/app/api/widget/` made the gate report "all authorize" while never having
+         looked at it: the gate scanned only `api/orgs` and `api/admin`, so any new top-level
+         API directory was invisible — the false-green shape this repo has been bitten by
+         repeatedly, silently covering less surface over time. An unknown directory is now a
+         FAILURE, with an `UNAUTHENTICATED_DIRS` allowlist carrying the reason each is safe.
+         Running it immediately found a pre-existing one: **`src/app/api/impersonation`**,
+         serving HTTP unexamined since it was written. It authorizes correctly
+         (`requireSuperAdmin` to start, `requireIdentity` to end — a session whose operator
+         rights were revoked mid-impersonation must still be able to leave), so no
+         vulnerability; but nothing was checking. It is now a rule rather than an exemption,
+         and the gate was observed failing on both an uncovered directory and an unauthorized
+         route inside a covered one.
    - [x] O12a saved views / folders (#87). **Not the same thing as `segments`, and the
          distinction is load-bearing.** A segment is a campaign artefact: a named population an
          export or a scheduled job acts ON. A view is a shortcut for a human — "the filter I

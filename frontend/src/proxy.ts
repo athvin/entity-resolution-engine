@@ -16,6 +16,11 @@ const PUBLIC_PATHS = [
   // CSP violation reports: the browser posts these with no credentials, and the
   // ones from the login page — before any session exists — are the most useful.
   "/api/csp-report",
+  // O11's embeddable widget. Both halves are public because the signed,
+  // record-scoped, expiring token in the path IS the credential — a redirect to
+  // /login would break the iframe for the tenant who embedded it deliberately.
+  "/widget",
+  "/api/widget",
   // The public marketing surface, plus /robots.txt and /sitemap.xml. Spread
   // from one list so the pages, the sitemap and this gate cannot disagree about
   // what is public; see src/lib/site/routes.ts for why the two metadata routes
