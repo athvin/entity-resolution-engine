@@ -24,6 +24,8 @@ pub struct Run {
     pub model_version: Option<String>,
     /// The frozen term-frequency snapshot the score used.
     pub tf_snapshot_id: Option<String>,
+    /// The ensemble this run scored with, resolved to concrete identities and thresholds: `[{name, model_version, tf_snapshot_id, threshold}]`. NULL for a single-model run, which is every run before E5b-2c and every run whose config declares no `models:` — so the existing clustering path is untouched rather than equal-by-coincidence. It is on the RUN rather than looked up from the registry because `run_correct` re-clusters from the lake alone, with no Postgres in scope: the thresholds that decided an edge have to travel with the run that applied them, or a correction pass would re-cluster the same scores under whatever the registry happens to say later.
+    pub resolved_ensemble: Option<::serde_json::Value>,
     /// The standardization code version.
     pub std_version: String,
     /// The survivorship policy version.
@@ -67,6 +69,7 @@ impl Run {
             "config_hash",
             "model_version",
             "tf_snapshot_id",
+            "resolved_ensemble",
             "std_version",
             "survivorship_version",
             "lexicon_hash",
@@ -92,6 +95,7 @@ pub mod create {
         config_hash: &str,
         model_version: &str,
         tf_snapshot_id: &str,
+        resolved_ensemble: Option<&str>,
         std_version: &str,
         survivorship_version: &str,
         lexicon_hash: Option<&str>,
@@ -100,11 +104,11 @@ pub mod create {
     ) -> ::duckdb::Result<usize> {
         const SQL: &str =
             "INSERT INTO lake.main.runs (id, tenant, mode, status, started_at, config_hash,
-  model_version, tf_snapshot_id, std_version, survivorship_version, lexicon_hash,
+  model_version, tf_snapshot_id, resolved_ensemble, std_version, survivorship_version, lexicon_hash,
   code_version, rebuild_reason, created_at, updated_at)
 VALUES ($1, $2, $3, 'running', $4::timestamp, $5,
-  $6, $7, $8, $9, $10,
-  $11, $12, $4::timestamp, $4::timestamp)
+  $6, $7, $8::json, $9, $10, $11,
+  $12, $13, $4::timestamp, $4::timestamp)
 ";
         conn.execute(
             SQL,
@@ -116,6 +120,7 @@ VALUES ($1, $2, $3, 'running', $4::timestamp, $5,
                 config_hash,
                 model_version,
                 tf_snapshot_id,
+                resolved_ensemble,
                 std_version,
                 survivorship_version,
                 lexicon_hash,
@@ -128,6 +133,69 @@ VALUES ($1, $2, $3, 'running', $4::timestamp, $5,
 
 pub mod read {
     //! @generated query functions for this entity + operation.
+    /// One row of `by_id`: One run's model identity and resolved ensemble, by id (E5b-2c). Reconcile needs the thresholds THIS run recorded, not the latest run's: a correction pass writes its own row first and then re-clusters, so `latest_live` would answer with the row the pass itself just wrote — correct only because that row copies the prior one forward, which is a coincidence a later change could remove.
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct ByIdRow {
+        pub id: String,
+        pub model_version: Option<String>,
+        pub tf_snapshot_id: Option<String>,
+        pub resolved_ensemble: Option<::serde_json::Value>,
+    }
+
+    impl ByIdRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("id", ::arrow::datatypes::DataType::Utf8),
+                ("model_version", ::arrow::datatypes::DataType::Utf8),
+                ("tf_snapshot_id", ::arrow::datatypes::DataType::Utf8),
+                ("resolved_ensemble", ::arrow::datatypes::DataType::Utf8),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "id")?;
+                let c1: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 1, "model_version")?;
+                let c2: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 2, "tf_snapshot_id")?;
+                let c3: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 3, "resolved_ensemble")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        id: crate::batch::req(crate::batch::opt_str(c0, i), "id", i)?,
+                        model_version: crate::batch::opt_str(c1, i),
+                        tf_snapshot_id: crate::batch::opt_str(c2, i),
+                        resolved_ensemble: crate::batch::opt_json(c3, i, "resolved_ensemble")?,
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// One run's model identity and resolved ensemble, by id (E5b-2c). Reconcile needs the thresholds THIS run recorded, not the latest run's: a correction pass writes its own row first and then re-clusters, so `latest_live` would answer with the row the pass itself just wrote — correct only because that row copies the prior one forward, which is a coincidence a later change could remove.
+    pub fn by_id(conn: &::duckdb::Connection, run_id: &str) -> ::duckdb::Result<Vec<ByIdRow>> {
+        const SQL: &str = "SELECT id, model_version, tf_snapshot_id, resolved_ensemble
+FROM lake.main.runs
+WHERE id = $1
+";
+        let mut stmt = conn.prepare(SQL)?;
+        let batches = stmt
+            .query_arrow(::duckdb::params![run_id])?
+            .collect::<Vec<_>>();
+        ByIdRow::from_batches(&batches)
+    }
+
     /// One row of `latest_fingerprint`: The last SUCCEEDED run's drift fingerprint. An incremental run is only valid against a corpus scored under the same five values, which is what er-versions::check_mode_preconditions compares.
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
     pub struct LatestFingerprintRow {
@@ -221,6 +289,7 @@ LIMIT 1
         pub mode: String,
         pub model_version: Option<String>,
         pub tf_snapshot_id: Option<String>,
+        pub resolved_ensemble: Option<::serde_json::Value>,
     }
 
     impl LatestLiveRow {
@@ -233,6 +302,7 @@ LIMIT 1
                 ("mode", ::arrow::datatypes::DataType::Utf8),
                 ("model_version", ::arrow::datatypes::DataType::Utf8),
                 ("tf_snapshot_id", ::arrow::datatypes::DataType::Utf8),
+                ("resolved_ensemble", ::arrow::datatypes::DataType::Utf8),
             ]
         }
 
@@ -252,6 +322,8 @@ LIMIT 1
                     crate::batch::col(batch, 3, "model_version")?;
                 let c4: &::arrow::array::StringArray =
                     crate::batch::col(batch, 4, "tf_snapshot_id")?;
+                let c5: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 5, "resolved_ensemble")?;
                 for i in 0..batch.num_rows() {
                     out.push(Self {
                         id: crate::batch::req(crate::batch::opt_str(c0, i), "id", i)?,
@@ -259,6 +331,7 @@ LIMIT 1
                         mode: crate::batch::req(crate::batch::opt_str(c2, i), "mode", i)?,
                         model_version: crate::batch::opt_str(c3, i),
                         tf_snapshot_id: crate::batch::opt_str(c4, i),
+                        resolved_ensemble: crate::batch::opt_json(c5, i, "resolved_ensemble")?,
                     });
                 }
             }
@@ -268,7 +341,8 @@ LIMIT 1
 
     /// The latest run's identity, read live (doctor's status line and the correction pass's model identity), with the run_id tiebreak for same-timestamp runs.
     pub fn latest_live(conn: &::duckdb::Connection) -> ::duckdb::Result<Vec<LatestLiveRow>> {
-        const SQL: &str = "SELECT id, status, mode, model_version, tf_snapshot_id
+        const SQL: &str =
+            "SELECT id, status, mode, model_version, tf_snapshot_id, resolved_ensemble
 FROM lake.main.runs
 ORDER BY started_at DESC, id DESC
 LIMIT 1

@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS lake.main.runs (
   config_hash VARCHAR NOT NULL,
   model_version VARCHAR,
   tf_snapshot_id VARCHAR,
+  resolved_ensemble JSON,
   std_version VARCHAR NOT NULL,
   survivorship_version VARCHAR NOT NULL,
   lexicon_hash VARCHAR,

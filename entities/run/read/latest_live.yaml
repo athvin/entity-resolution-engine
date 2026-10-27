@@ -10,3 +10,4 @@ returns:
   - { name: mode, type: varchar, nullable: false }
   - { name: model_version, type: varchar }
   - { name: tf_snapshot_id, type: varchar }
+  - { name: resolved_ensemble, type: json }

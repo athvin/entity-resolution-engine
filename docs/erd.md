@@ -589,6 +589,7 @@ erDiagram
         varchar config_hash
         varchar model_version
         varchar tf_snapshot_id
+        json resolved_ensemble
         varchar std_version
         varchar survivorship_version
         varchar lexicon_hash

@@ -10,6 +10,7 @@ params:
   - { name: config_hash, type: varchar }
   - { name: model_version, type: varchar }
   - { name: tf_snapshot_id, type: varchar }
+  - { name: resolved_ensemble, type: varchar, nullable: true }
   - { name: std_version, type: varchar }
   - { name: survivorship_version, type: varchar }
   - { name: lexicon_hash, type: varchar, nullable: true }

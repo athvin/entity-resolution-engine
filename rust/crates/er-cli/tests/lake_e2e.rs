@@ -3845,6 +3845,120 @@ fn adding_a_member_does_not_retire_the_one_already_scored() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
+/// A per-member threshold changes which edges cluster, and the correction pass
+/// uses the thresholds the SCORING run applied (E5b-2c).
+///
+/// `auto_merge_edges_live` compares every active row against one number, which
+/// is correct for one model and silently wrong for several: a strict model
+/// built for precision and a loose one built for recall cannot share a
+/// threshold without one of them being wrong.
+///
+/// The second half is the reason the resolved ensemble lives on the RUN ROW
+/// rather than being looked up from the config. A correction pass re-clusters
+/// scores a PREVIOUS run produced, and it has only the lake in scope — so the
+/// thresholds have to travel with the run that applied them, or the pass
+/// re-clusters yesterday's scores under a number that was never applied to
+/// them.
+#[test]
+fn a_per_member_threshold_decides_which_edges_cluster() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let (session, config, tmp) = open_seeded_lake("per_member_threshold");
+    run_all_phase(
+        &session,
+        &config,
+        "incremental_batch",
+        "base",
+        "01PERMEMBER000000000BASE00",
+        "2026-01-01 00:00:00",
+        "full",
+    );
+    let baseline = partition(&membership_rows(&session));
+    let scored: i64 = session
+        .query_strings(&format!(
+            "select count(*) from {} where is_active",
+            er_cli::MATCH_SCORES
+        ))
+        .unwrap()[0][0]
+        .parse()
+        .unwrap();
+    assert!(scored > 0, "precondition: the run scored something");
+
+    // Re-cluster the SAME scores under a member threshold of 1.1 — above every
+    // possible probability, so no edge can clear it. Every record must become
+    // its own entity. This is the assertion that fails if reconcile ignores the
+    // run row and falls back to `config.thresholds.auto_merge`.
+    let strict = er_cli::ResolvedMember {
+        name: "default".to_string(),
+        model_version: "v0001".to_string(),
+        tf_snapshot_id: "01JWMDTFSNAP00000000000001".to_string(),
+        threshold: 1.1,
+    };
+    session
+        .execute_batch(&format!(
+            "update lake.main.runs set resolved_ensemble = '{}' \
+             where id = '01PERMEMBER000000000BASE00'",
+            serde_json::to_string(&vec![strict]).unwrap()
+        ))
+        .unwrap();
+    er_cli::run_reconcile(
+        &session,
+        &config,
+        "01PERMEMBER000000000BASE00",
+        "2026-02-01 00:00:00",
+    )
+    .unwrap();
+
+    let singletons = partition(&membership_rows(&session));
+    assert_ne!(
+        baseline, singletons,
+        "a threshold no edge can clear must change the partition; reconcile is \
+         still reading the corpus-wide number"
+    );
+    assert!(
+        singletons.iter().all(|group| group.len() == 1),
+        "no edge clears 1.1, so every record is its own entity; got {} groups \
+         with sizes {:?}",
+        singletons.len(),
+        singletons.iter().map(BTreeSet::len).collect::<Vec<_>>()
+    );
+
+    // And an identity the resolved ensemble does NOT name contributes nothing:
+    // the join drops it, which is `retire_other_models`' protection applied at
+    // read time.
+    let other = er_cli::ResolvedMember {
+        name: "default".to_string(),
+        model_version: "not-the-model".to_string(),
+        tf_snapshot_id: "not-the-snapshot".to_string(),
+        threshold: 0.0,
+    };
+    session
+        .execute_batch(&format!(
+            "update lake.main.runs set resolved_ensemble = '{}' \
+             where id = '01PERMEMBER000000000BASE00'",
+            serde_json::to_string(&vec![other]).unwrap()
+        ))
+        .unwrap();
+    er_cli::run_reconcile(
+        &session,
+        &config,
+        "01PERMEMBER000000000BASE00",
+        "2026-03-01 00:00:00",
+    )
+    .unwrap();
+    assert!(
+        partition(&membership_rows(&session))
+            .iter()
+            .all(|group| group.len() == 1),
+        "rows from an identity the run is not scoring with must not cluster, \
+         even at threshold 0"
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
 /// A two-member ensemble, driven through a scenario phase in the given mode.
 ///
 /// The strict member is the committed model with its prior lowered and its TF

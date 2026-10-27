@@ -616,6 +616,7 @@ fn ddl_specs() -> Vec<TableSpec> {
                 nn("config_hash", VARCHAR),
                 col("model_version", VARCHAR),
                 col("tf_snapshot_id", VARCHAR),
+                col("resolved_ensemble", JSON),
                 nn("std_version", VARCHAR),
                 nn("survivorship_version", VARCHAR),
                 col("lexicon_hash", VARCHAR),

@@ -1669,6 +1669,17 @@ pub fn write_run_start(session: &Session, config: &Config, inputs: &PipelineInpu
         model: MatchModel { ..*inputs.model },
         name: SOLE_MEMBER_NAME,
     }]);
+    // A single-model run resolves to `None` unless its one `models:` entry
+    // carries a threshold of its own, which is the only way a one-member
+    // ensemble differs from the corpus-wide number.
+    let resolved = resolve_ensemble(
+        config,
+        &[EnsembleMember {
+            model: MatchModel { ..*inputs.model },
+            name: SOLE_MEMBER_NAME,
+        }],
+    );
+    let resolved_json = resolved.map(|r| serde_json::to_string(&r).unwrap_or_default());
     write_run_row(
         session,
         config,
@@ -1679,6 +1690,7 @@ pub fn write_run_start(session: &Session, config: &Config, inputs: &PipelineInpu
         &tf_snapshot_id,
         Some(&lexicon_fingerprint(inputs.lexicon)),
         inputs.rebuild_reason,
+        resolved_json.as_deref(),
     )
 }
 
@@ -1730,6 +1742,85 @@ pub fn current_fingerprint(
     }
 }
 
+/// This run's resolved ensemble, if it recorded one.
+///
+/// Read from the RUN rather than the config, because the thresholds that
+/// decided an edge have to be the ones that were applied when it was scored —
+/// a correction pass re-clusters a previous run's scores, and today's config
+/// may say something else entirely.
+fn run_member_thresholds(session: &Session, run_id: &str) -> Result<Option<Vec<ResolvedMember>>> {
+    // `run_reconcile` is called directly by tests and by the correction pass in
+    // sessions where no run row has been written, so the ledger may not exist
+    // yet. Create-if-absent rather than tolerate-the-error, which is the idiom
+    // every other read here uses: an error swallowed as "no ensemble" would
+    // silently take the model-blind path.
+    create_ddl_table(session, "runs")?;
+    let rows = er_entities::run::read::by_id(session.connection(), run_id)?;
+    let Some(raw) = rows.into_iter().next().and_then(|r| r.resolved_ensemble) else {
+        return Ok(None);
+    };
+    let members: Vec<ResolvedMember> = serde_json::from_value(raw)?;
+    Ok((!members.is_empty()).then_some(members))
+}
+
+/// One member of a run's ensemble, resolved: which model scored, and the
+/// threshold its edges had to clear (E5b-2c).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ResolvedMember {
+    pub name: String,
+    pub model_version: String,
+    pub tf_snapshot_id: String,
+    pub threshold: f64,
+}
+
+/// The ensemble a run scored with, resolved against the config, or `None` when
+/// every member uses the corpus-wide threshold.
+///
+/// `None` is not "no ensemble" — a two-member ensemble whose members both use
+/// `thresholds.auto_merge` resolves to `None` too, because then the per-model
+/// read would answer exactly what the model-blind one already answers. Writing
+/// a row anyway would make the clustering path depend on a column whose value
+/// could not change the outcome, which is a second code path to keep correct
+/// for nothing.
+#[must_use]
+pub fn resolve_ensemble(
+    config: &Config,
+    members: &[EnsembleMember],
+) -> Option<Vec<ResolvedMember>> {
+    let auto_merge = config.thresholds.auto_merge;
+    // `models` and `members` are parallel by construction — the dispatcher
+    // resolves one member per spec, in order — but a mismatch would silently
+    // pair a threshold with the wrong model, so fall back to the corpus-wide
+    // threshold rather than zipping a shorter list.
+    let thresholds: Vec<f64> = if config.models.len() == members.len() {
+        config
+            .models
+            .iter()
+            .map(|spec| spec.threshold.unwrap_or(auto_merge))
+            .collect()
+    } else {
+        vec![auto_merge; members.len()]
+    };
+    if thresholds
+        .iter()
+        .all(|t| (*t - auto_merge).abs() < f64::EPSILON)
+    {
+        return None;
+    }
+    Some(
+        members
+            .iter()
+            .zip(thresholds)
+            .map(|(member, threshold)| ResolvedMember {
+                name: member.name.to_string(),
+                model_version: member.model.model_version.to_string(),
+                tf_snapshot_id: member.model.tf_snapshot_id.to_string(),
+                threshold,
+            })
+            .collect(),
+    )
+}
+
 /// Insert one `running` row into the `runs` ledger with the given `mode` and the
 /// model identity the run scored against. `code_version` is this crate's version.
 #[allow(clippy::too_many_arguments)]
@@ -1743,6 +1834,11 @@ fn write_run_row(
     tf_snapshot_id: &str,
     lexicon_hash: Option<&str>,
     rebuild_reason: Option<&str>,
+    // The ensemble this run scored with, resolved to concrete identities and
+    // thresholds (E5b-2c). `None` for a single-model run, which is every run
+    // whose config declares no `models:` — so the existing clustering path is
+    // untouched rather than equal by coincidence.
+    resolved_ensemble: Option<&str>,
 ) -> Result<()> {
     create_ddl_table(session, "runs")?;
     er_entities::run::create::start(
@@ -1754,6 +1850,7 @@ fn write_run_row(
         &er_config::config_hash(config),
         model_version,
         tf_snapshot_id,
+        resolved_ensemble,
         &config.versions.std_version,
         &config.versions.survivorship_version,
         lexicon_hash,
@@ -2782,11 +2879,40 @@ pub fn run_reconcile(session: &Session, config: &Config, run_id: &str, run_at: &
     let conn = session.connection();
     // Auto-merge edges carry their probability: never-cut severs the
     // lowest-probability edge on a path, so the weight is load-bearing.
-    let mut edges: Vec<PathEdge> =
-        er_entities::match_score::read::auto_merge_edges_live(conn, auto_merge)?
+    //
+    // E5b-2c: when THIS run recorded a resolved ensemble, each member's edges
+    // clear that member's own threshold. The run row is the source, not the
+    // config, because a correction pass re-clusters scores a previous run
+    // produced — reading today's config would apply a threshold that was never
+    // applied to them. `None` takes the model-blind read, unchanged.
+    let mut edges: Vec<PathEdge> = match run_member_thresholds(session, run_id)? {
+        Some(members) => {
+            // Narrow in SQL by the LOOSEST member's threshold — the smallest
+            // cut the statement can make — then apply each member's own in
+            // Rust, where the mapping from the run row lives. A row whose
+            // identity the ensemble does not name contributes nothing, which
+            // is `retire_other_models`' protection applied at read time.
+            let min = members
+                .iter()
+                .map(|m| m.threshold)
+                .fold(f64::INFINITY, f64::min);
+            er_entities::match_score::read::auto_merge_edges_per_model(conn, min)?
+                .into_iter()
+                .filter(|r| {
+                    members.iter().any(|m| {
+                        m.model_version == r.model_version
+                            && m.tf_snapshot_id == r.tf_snapshot_id
+                            && r.match_probability >= m.threshold
+                    })
+                })
+                .map(|r| (r.rec_a_key, r.rec_b_key, r.match_probability))
+                .collect()
+        }
+        None => er_entities::match_score::read::auto_merge_edges_live(conn, auto_merge)?
             .into_iter()
             .map(|r| (r.rec_a_key, r.rec_b_key, r.match_probability))
-            .collect();
+            .collect(),
+    };
     // The node universe is the person or Account standardized corpus, by
     // entity_type; everything else in reconcile (match_scores edges, assertions,
     // membership/entities/events) is shared + entity-agnostic.
@@ -3411,6 +3537,8 @@ pub fn run_all_ensemble(
     // that string is what the drift guard compares across runs — see
     // `ensemble_identity`.
     let (model_version, tf_snapshot_id) = ensemble_identity(members);
+    let resolved = resolve_ensemble(config, members);
+    let resolved_json = resolved.map(|r| serde_json::to_string(&r).unwrap_or_default());
     write_run_row(
         session,
         config,
@@ -3421,6 +3549,7 @@ pub fn run_all_ensemble(
         &tf_snapshot_id,
         Some(&lexicon_fingerprint(inputs.lexicon)),
         inputs.rebuild_reason,
+        resolved_json.as_deref(),
     )?;
     seed_lexicon(session, inputs.lexicon)?;
     for (source, csv) in inputs.deliveries {
@@ -3536,13 +3665,20 @@ pub fn run_correct(session: &Session, config: &Config, run_id: &str, run_at: &st
     })?;
     // A trained run always stamps both; an untrained prior run corrects with
     // empty identity rather than the old stringified-NULL literal.
-    let (model_version, tf_snapshot_id) = latest
+    let (model_version, tf_snapshot_id, resolved) = latest
         .into_iter()
         .next()
         .map(|r| {
             (
                 r.model_version.unwrap_or_default(),
                 r.tf_snapshot_id.unwrap_or_default(),
+                // E5b-2c: the thresholds travel with the run that applied them.
+                // THIS is why the resolved ensemble is on the run row rather
+                // than looked up from the registry — a correction pass has only
+                // the lake in scope, so a registry lookup is not available to
+                // it, and re-reading today's config would re-cluster yesterday's
+                // scores under a threshold that was never applied to them.
+                r.resolved_ensemble.map(|v| v.to_string()),
             )
         })
         .ok_or_else(|| anyhow::anyhow!("no prior run to correct; run a full run first"))?;
@@ -3557,6 +3693,7 @@ pub fn run_correct(session: &Session, config: &Config, run_id: &str, run_at: &st
         &tf_snapshot_id,
         None,
         Some(er_versions::REBUILD_CORRECTION_PASS),
+        resolved.as_deref(),
     )?;
     run_reconcile(session, config, run_id, run_at)?;
     run_golden(session, config, run_at)?;

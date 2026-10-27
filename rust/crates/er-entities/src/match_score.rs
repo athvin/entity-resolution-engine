@@ -310,6 +310,90 @@ ORDER BY rec_a_key, rec_b_key
         AutoMergeEdgesLiveRow::from_batches(&batches)
     }
 
+    /// One row of `auto_merge_edges_per_model`: Candidate auto-merge edges when each ensemble member has its OWN threshold (E5b-2c), carrying the model identity so the caller can apply the right one. `auto_merge_edges_live` compares every active row against one number, which is correct for one model and silently wrong for several. `min_threshold` is the LOOSEST member's, so the read is still bounded by the smallest cut SQL can make — strictly fewer rows than reading every active score — and the per-member decision happens in Rust, where the `model_version -> threshold` mapping from the run row lives. Done this way rather than joining a staged thresholds table because a declared READ is DESCRIBEd against the catalog by `er-sql-check`'s oracle, which has no session staging; a read that joins one cannot be shape-checked at all.
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct AutoMergeEdgesPerModelRow {
+        pub rec_a_key: String,
+        pub rec_b_key: String,
+        pub match_probability: f64,
+        pub model_version: String,
+        pub tf_snapshot_id: String,
+    }
+
+    impl AutoMergeEdgesPerModelRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("rec_a_key", ::arrow::datatypes::DataType::Utf8),
+                ("rec_b_key", ::arrow::datatypes::DataType::Utf8),
+                ("match_probability", ::arrow::datatypes::DataType::Float64),
+                ("model_version", ::arrow::datatypes::DataType::Utf8),
+                ("tf_snapshot_id", ::arrow::datatypes::DataType::Utf8),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "rec_a_key")?;
+                let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "rec_b_key")?;
+                let c2: &::arrow::array::Float64Array =
+                    crate::batch::col(batch, 2, "match_probability")?;
+                let c3: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 3, "model_version")?;
+                let c4: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 4, "tf_snapshot_id")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        rec_a_key: crate::batch::req(crate::batch::opt_str(c0, i), "rec_a_key", i)?,
+                        rec_b_key: crate::batch::req(crate::batch::opt_str(c1, i), "rec_b_key", i)?,
+                        match_probability: crate::batch::req(
+                            crate::batch::opt_f64(c2, i),
+                            "match_probability",
+                            i,
+                        )?,
+                        model_version: crate::batch::req(
+                            crate::batch::opt_str(c3, i),
+                            "model_version",
+                            i,
+                        )?,
+                        tf_snapshot_id: crate::batch::req(
+                            crate::batch::opt_str(c4, i),
+                            "tf_snapshot_id",
+                            i,
+                        )?,
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// Candidate auto-merge edges when each ensemble member has its OWN threshold (E5b-2c), carrying the model identity so the caller can apply the right one. `auto_merge_edges_live` compares every active row against one number, which is correct for one model and silently wrong for several. `min_threshold` is the LOOSEST member's, so the read is still bounded by the smallest cut SQL can make — strictly fewer rows than reading every active score — and the per-member decision happens in Rust, where the `model_version -> threshold` mapping from the run row lives. Done this way rather than joining a staged thresholds table because a declared READ is DESCRIBEd against the catalog by `er-sql-check`'s oracle, which has no session staging; a read that joins one cannot be shape-checked at all.
+    pub fn auto_merge_edges_per_model(
+        conn: &::duckdb::Connection,
+        min_threshold: f64,
+    ) -> ::duckdb::Result<Vec<AutoMergeEdgesPerModelRow>> {
+        const SQL: &str =
+            "SELECT rec_a_key, rec_b_key, match_probability, model_version, tf_snapshot_id
+FROM lake.main.match_scores
+WHERE is_active AND match_probability >= $1
+ORDER BY rec_a_key, rec_b_key
+";
+        let mut stmt = conn.prepare(SQL)?;
+        let batches = stmt
+            .query_arrow(::duckdb::params![min_threshold])?
+            .collect::<Vec<_>>();
+        AutoMergeEdgesPerModelRow::from_batches(&batches)
+    }
+
     /// One row of `uncertain_page`: Active pairs ordered by how UNSURE the model is about them — nearest the decision threshold first. This is uncertainty sampling, and it is the difference between a labelling session that teaches the model something and one that does not: pairs it already scores at 0.99 or 0.01 confirm what it knows, while the pairs either side of the threshold are where its m/u estimates are actually wrong. Tie-broken by the pair so the order is deterministic and a second request returns the same page.
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
     pub struct UncertainPageRow {

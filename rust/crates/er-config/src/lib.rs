@@ -257,6 +257,20 @@ pub struct Thresholds {
 pub struct ModelSpec {
     /// The registry name whose active version this member scores with.
     pub name: String,
+    /// The probability this member's edges must clear to auto-merge (E5b-2c).
+    ///
+    /// Absent means `thresholds.auto_merge` — the corpus-wide number — which is
+    /// what every member meant before this field existed, so an existing config
+    /// hashes byte-identically and clusters identically.
+    ///
+    /// Per MEMBER rather than per corpus because an ensemble's whole point is
+    /// that its members disagree: a strict model built for precision and a
+    /// loose one built for recall cannot share one number without one of them
+    /// being wrong. E5b-2 wrote this field and then REMOVED it rather than ship
+    /// it inert, because the resolved mapping had nowhere to live that
+    /// `run_correct` could reach; it is back now that the run row carries it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub threshold: Option<f64>,
 }
 
 /// S6 `standardization`, consumed by `email_norm` / `phone_e164`.
@@ -888,6 +902,31 @@ mod tests {
     }
 
     #[test]
+    fn an_absent_member_threshold_hashes_identically() {
+        // E5b-2c's `config_hash` obligation. A member with no threshold means
+        // `thresholds.auto_merge`, which is what every member meant before the
+        // field existed — so adding it must not promote an existing config's
+        // publish to a re-score. Asserted on the canonical document, which is
+        // what the hash is taken over, rather than on the field.
+        let mut config = load_config_str(DEFAULT_YAML).unwrap();
+        let before = config_hash(&config);
+        config.models.push(ModelSpec {
+            name: "strict".to_string(),
+            threshold: None,
+        });
+        let doc = canonical_document(&config);
+        assert!(
+            !doc.contains("\"threshold\""),
+            "an absent member threshold must not appear in the canonical document"
+        );
+        // A DECLARED threshold does move it, or the field would be unhashed
+        // config — the shape this program has already removed twice.
+        config.models[0].threshold = Some(0.99);
+        assert_ne!(before, config_hash(&config));
+        assert!(canonical_document(&config).contains("\"threshold\""));
+    }
+
+    #[test]
     fn account_attribute_set() {
         assert_eq!(ACCOUNT_CANONICAL_ATTRIBUTES.len(), 7);
         assert_eq!(
@@ -921,6 +960,7 @@ mod tests {
         let mut with_models = config.clone();
         with_models.models.push(ModelSpec {
             name: "strict".to_string(),
+            threshold: None,
         });
         assert_ne!(
             config_hash(&config),

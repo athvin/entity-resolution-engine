@@ -1968,6 +1968,11 @@
      "type": "VARCHAR"
     },
     {
+     "name": "resolved_ensemble",
+     "nullable": true,
+     "type": "JSON"
+    },
+    {
      "name": "std_version",
      "nullable": false,
      "type": "VARCHAR"
@@ -2013,7 +2018,7 @@
      "type": "TIMESTAMP"
     }
    ],
-   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.runs (\n  id VARCHAR NOT NULL,\n  tenant VARCHAR NOT NULL,\n  mode VARCHAR NOT NULL,\n  status VARCHAR NOT NULL,\n  started_at TIMESTAMP NOT NULL,\n  ended_at TIMESTAMP,\n  config_hash VARCHAR NOT NULL,\n  model_version VARCHAR,\n  tf_snapshot_id VARCHAR,\n  std_version VARCHAR NOT NULL,\n  survivorship_version VARCHAR NOT NULL,\n  lexicon_hash VARCHAR,\n  code_version VARCHAR NOT NULL,\n  rebuild_reason VARCHAR,\n  snapshot_start BIGINT,\n  snapshot_end BIGINT,\n  created_at TIMESTAMP NOT NULL,\n  updated_at TIMESTAMP NOT NULL\n);",
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.runs (\n  id VARCHAR NOT NULL,\n  tenant VARCHAR NOT NULL,\n  mode VARCHAR NOT NULL,\n  status VARCHAR NOT NULL,\n  started_at TIMESTAMP NOT NULL,\n  ended_at TIMESTAMP,\n  config_hash VARCHAR NOT NULL,\n  model_version VARCHAR,\n  tf_snapshot_id VARCHAR,\n  resolved_ensemble JSON,\n  std_version VARCHAR NOT NULL,\n  survivorship_version VARCHAR NOT NULL,\n  lexicon_hash VARCHAR,\n  code_version VARCHAR NOT NULL,\n  rebuild_reason VARCHAR,\n  snapshot_start BIGINT,\n  snapshot_end BIGINT,\n  created_at TIMESTAMP NOT NULL,\n  updated_at TIMESTAMP NOT NULL\n);",
    "enums": {
     "mode": [
      "correction_pass",
