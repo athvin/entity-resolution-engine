@@ -59,6 +59,8 @@ exists instead of a workflow-level `paths:` filter.
 | Job | Status-check context | Timeout | Condition |
 |---|---|---|---|
 | `validate` | fmt + validate (credential-free) | 10 | `always` |
+| `plan` | plan (${{ matrix.env }}) | 20 | `github.event.pull_request.head.repo.full_name == github.repository \|\| github.event_name  …` |
+| `apply` | apply (${{ matrix.env }}) | 60 | `github.event_name == 'push' && github.ref == 'refs/heads/main'` |
 
 ### `rust.yml`
 

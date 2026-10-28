@@ -1,14 +1,37 @@
-# The terraform gate. On every change under infra/terraform/** (and on merge to
-# main), prove the config stays valid + formatted: `terraform fmt -check` and a
-# per-env `terraform validate`. This is the infra half of "merge to main and it
-# works" — a config-validity gate, not a state diff.
+# The terraform gate, in three tiers (infrastructure.md §14.2 — "plan on every
+# PR under a read-only role; apply on `main` under the apply role"):
 #
-# Credential-free: `validate` configures the aws provider but makes no AWS API
-# calls, so dummy creds + a disabled metadata probe keep it fully offline (no
-# OIDC role, no secrets). The heavier state-diff `terraform plan` gate (which
-# needs a read-only OIDC plan role + state access) is a deliberate follow-up
-# (roadmap 0.5b) — this gate catches the common breakage (syntax, type, module,
-# unknown-field) on every infra PR at zero cost/risk.
+#   1. fmt + validate   — credential-free, every PR. Catches syntax, type,
+#                         module and unknown-field breakage at zero cost or
+#                         risk, and still runs for a fork PR that can reach no
+#                         AWS at all.
+#   2. plan             — per env, read-only role, posts the diff. This is the
+#                         state-diff gate that used to be roadmap item 0.5b.
+#   3. apply            — per env, on `main` only, behind a required-reviewer
+#                         GitHub environment.
+#
+# NO REPOSITORY SECRETS, by design and not by omission. Every AWS identity here
+# is a federated OIDC role whose credentials last an hour; §11 records that CI
+# "consumes zero repository secrets" and the account has never held a static CI
+# key. A long-lived AWS key in a PUBLIC repository's secrets would be strictly
+# worse than this.
+#
+# WHY APPLY IS GATED ON AN ENVIRONMENT, not just on `main`. The apply role holds
+# AdministratorAccess: §8.2's two prod deny statements ride the *permission
+# sets*, so they constrain humans and not this role, which is why that section
+# says the apply role "walks through the guardrail legitimately" and its trust
+# policy "is part of this claim". The trust policy pins it to `refs/heads/main`.
+# The environment adds the second gate — a merge QUEUES an apply, a human
+# releases it — and that matters most for `prod`, which is not provisioned: its
+# first apply creates EKS, Aurora and NAT gateways.
+#
+# One env per environment-name on purpose, rather than one gate for the whole
+# run: a scary `prod` diff should be holdable while `core` goes through.
+#
+# BOOTSTRAP: the two roles cannot create themselves. The first
+# `terraform -chdir=infra/terraform/envs/core apply` has to come from a human
+# identity (`AWS_PROFILE=er-mgmt`); CI owns every apply after that. See
+# infra/terraform/envs/core/ci-terraform.tf.
 name: infra
 
 on:
@@ -29,6 +52,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+env:
+  TF_IN_AUTOMATION: "1"
+  AWS_REGION: us-east-2
+
 jobs:
   validate:
     name: fmt + validate (credential-free)
@@ -37,7 +64,6 @@ jobs:
     env:
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
-      AWS_REGION: us-east-2
       AWS_EC2_METADATA_DISABLED: "true"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -47,9 +73,108 @@ jobs:
       - name: fmt -check
         run: terraform fmt -check -recursive infra/terraform
       - name: validate each env
+        # `validate` configures the aws provider but makes no AWS API call, so
+        # dummy creds + a disabled metadata probe keep it fully offline.
         run: |
           for e in core dev prod; do
             echo "== validate envs/$e =="
             terraform -chdir="infra/terraform/envs/$e" init -backend=false -input=false
             terraform -chdir="infra/terraform/envs/$e" validate -no-color
           done
+
+  plan:
+    name: plan (${{ matrix.env }})
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # A fork PR is issued no `id-token`, so it could not assume the plan role
+    # and would fail on role assumption rather than on anything real. Skip it
+    # instead: `validate` above still covers a fork, which is the tier that
+    # needs no credentials.
+    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push'
+    permissions:
+      contents: read
+      id-token: write # OIDC exchange for er-ci-tf-plan
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [core, dev, prod]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_wrapper: false
+      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          aws-region: us-east-2
+          role-to-assume: arn:aws:iam::797781631727:role/er-ci-tf-plan
+      - name: terraform plan
+        id: plan
+        # `-lock=false` because the plan role holds no S3 write and acquiring
+        # the lockfile IS a write. A plan that cannot lock can race a concurrent
+        # apply; the apply job's concurrency group is what serialises writes.
+        #
+        # `-detailed-exitcode`: 0 = no changes, 2 = changes, 1 = error. Without
+        # it a plan that errors and a plan that is empty are the same exit code,
+        # which is how a broken plan gets read as "nothing to do".
+        run: |
+          set +e
+          terraform -chdir="infra/terraform/envs/${{ matrix.env }}" init -input=false
+          terraform -chdir="infra/terraform/envs/${{ matrix.env }}" plan \
+            -no-color -lock=false -input=false -detailed-exitcode \
+            > "plan-${{ matrix.env }}.txt" 2>&1
+          code=$?
+          set -e
+          tail -c 60000 "plan-${{ matrix.env }}.txt"
+          if [ "$code" = "1" ]; then
+            echo "::error::terraform plan failed for envs/${{ matrix.env }}"
+            exit 1
+          fi
+          echo "changes=$([ "$code" = "2" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      - name: summary
+        if: always()
+        run: |
+          {
+            echo "### terraform plan — envs/${{ matrix.env }}"
+            echo ""
+            echo "changes: \`${{ steps.plan.outputs.changes }}\`"
+            echo ""
+            echo '```terraform'
+            tail -c 40000 "plan-${{ matrix.env }}.txt" || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  apply:
+    name: apply (${{ matrix.env }})
+    needs: plan
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # The required-reviewer gate. Merging queues the apply; a human releases it.
+    # Created per env so a held `prod` does not block `core`.
+    environment: infra-apply-${{ matrix.env }}
+    permissions:
+      contents: read
+      id-token: write # OIDC exchange for er-ci-tf-apply
+    strategy:
+      # Never parallel and never fail-fast: these share one state bucket, and a
+      # half-applied account is worse than a slow one.
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        env: [core, dev, prod]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_wrapper: false
+      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          aws-region: us-east-2
+          role-to-assume: arn:aws:iam::797781631727:role/er-ci-tf-apply
+      - name: terraform apply
+        # Locking ON here, unlike plan: this one writes.
+        run: |
+          terraform -chdir="infra/terraform/envs/${{ matrix.env }}" init -input=false
+          terraform -chdir="infra/terraform/envs/${{ matrix.env }}" apply \
+            -no-color -input=false -auto-approve
