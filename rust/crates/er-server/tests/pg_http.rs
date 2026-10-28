@@ -10,7 +10,7 @@ use axum::http::{Request, StatusCode, header};
 use er_server::{AppState, app, pg};
 use tower::ServiceExt;
 
-mod common;
+use crate::common;
 
 fn op_request(method: &str, uri: &str, body: Body) -> Request<Body> {
     Request::builder()

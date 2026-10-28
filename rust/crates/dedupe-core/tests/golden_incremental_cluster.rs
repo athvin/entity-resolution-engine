@@ -6,7 +6,7 @@
 //! re-cluster (`cluster_at_threshold`) is itself golden-verified (see
 //! golden_cluster.rs), so it is a sound oracle here.
 
-mod common;
+use crate::common;
 
 use common::{FAKE_1000_SCHEMA, fake_1000_csv_path, golden_dir, load_golden_text};
 use dedupe_core::Settings;

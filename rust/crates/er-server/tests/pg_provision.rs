@@ -21,7 +21,7 @@ use er_server::provision::{Mode, Profile, ProfileError};
 use er_server::{AppState, app, pg};
 use tower::ServiceExt;
 
-mod common;
+use crate::common;
 
 const TEST_YAML: &str = include_str!("../../er-cli/tests/fixtures/test.yaml");
 

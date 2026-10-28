@@ -33,7 +33,7 @@ use std::path::PathBuf;
 
 use er_server::{dispatcher, pg};
 
-mod common;
+use crate::common;
 
 const TEST_YAML: &str = include_str!("../../er-cli/tests/fixtures/test.yaml");
 const NICKNAMES: &str = include_str!("../../er-cli/tests/fixtures/nickname_variants.csv");

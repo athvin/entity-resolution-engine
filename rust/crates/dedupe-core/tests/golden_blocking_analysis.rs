@@ -1,7 +1,7 @@
 //! Blocking-analysis golden gate: per-rule comparison counts (full sample,
 //! marginal + cumulative) must match the committed goldens.
 
-mod common;
+use crate::common;
 
 use common::{FAKE_1000_SCHEMA, fake_1000_csv_path, load_golden_json, load_golden_text};
 use dedupe_core::Settings;

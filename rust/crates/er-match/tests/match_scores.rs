@@ -10,7 +10,7 @@
 //! probability comparison runs in SQL (DOUBLE vs DOUBLE) so no string round-trip
 //! erodes the 1e-10 margin.
 
-mod common;
+use crate::common;
 
 use dedupe_core::predict::run_predict_with_tf;
 use dedupe_core::session::{Session, SessionOptions};

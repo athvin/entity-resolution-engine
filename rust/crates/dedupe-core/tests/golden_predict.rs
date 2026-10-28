@@ -2,7 +2,7 @@
 //! reproduce the golden predictions — gammas exact, match weights within 1e-8,
 //! match probabilities within 1e-10.
 
-mod common;
+use crate::common;
 
 use common::{
     FAKE_1000_SCHEMA, assert_table_matches_parquet, fake_1000_csv_path, load_golden_text,

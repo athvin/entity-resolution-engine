@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+# Every file in tests/ is a module of tests/main.rs, not a target of its own
+# (sccache cannot cache a final link). See tests/main.rs.
+autotests = false
 [dependencies]
 thiserror.workspace = true
 
@@ -15,3 +18,7 @@ serde_json.workspace = true
 
 [lints]
 workspace = true
+
+[[test]]
+name = "main"
+path = "tests/main.rs"

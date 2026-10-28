@@ -2,7 +2,7 @@
 //! 50,578 records, richer schema, high null rates). Full pipeline — train
 //! (prior + u + EM), predict, cluster — vs the committed goldens.
 
-mod common;
+use crate::common;
 
 use std::path::{Path, PathBuf};
 

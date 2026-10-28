@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 description = "CLI for dedupe-core: train/predict/cluster against a DuckLake catalog"
 
+# Every file in tests/ is a module of tests/main.rs, not a target of its own
+# (sccache cannot cache a final link). See tests/main.rs.
+autotests = false
 [lints]
 workspace = true
 
@@ -24,3 +27,7 @@ serde_json = { workspace = true }
 [dev-dependencies]
 assert_cmd = "2"
 duckdb = { workspace = true }
+
+[[test]]
+name = "main"
+path = "tests/main.rs"

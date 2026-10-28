@@ -5,6 +5,15 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+# Every file in tests/ is a module of tests/main.rs, not a target of its own:
+# sccache cannot cache a final link, so each target was compiled and linked
+# uncached on every CI run while statically linking bundled DuckDB. See
+# tests/main.rs.
+autotests = false
+
+[[test]]
+name = "main"
+path = "tests/main.rs"
 
 [dependencies]
 dedupe-core = { path = "../dedupe-core" }

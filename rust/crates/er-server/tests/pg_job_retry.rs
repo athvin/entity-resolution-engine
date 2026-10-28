@@ -19,7 +19,7 @@
 
 use er_server::pg::{self, FailureClass};
 
-mod common;
+use crate::common;
 
 #[test]
 fn failures_are_classified_from_the_messages_this_codebase_produces() {

@@ -2,7 +2,7 @@
 //! and predict_within (within the new batch) must match the committed goldens
 //! on the same split of fake_1000.
 
-mod common;
+use crate::common;
 
 use common::{assert_table_matches_parquet, golden_dir, load_golden_text};
 use dedupe_core::Settings;

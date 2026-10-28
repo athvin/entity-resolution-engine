@@ -4,7 +4,7 @@
 //! `common/mod.rs`, because that file is `mod common;`-ed into every `pg_*.rs`
 //! binary and a test inside it would run — and be reported — once per binary.
 
-mod common;
+use crate::common;
 
 #[test]
 fn repoints_the_database_and_keeps_every_other_parameter() {

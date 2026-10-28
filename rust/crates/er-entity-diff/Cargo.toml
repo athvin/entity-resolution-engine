@@ -6,6 +6,20 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+# DELIBERATELY NOT `autotests = false`. Every other multi-file test crate in this
+# workspace collapses its `tests/*.rs` into one binary, because sccache cannot
+# cache a final link. This one cannot yet: `pg_diff.rs` and `pg_reconcile.rs`
+# both connect to the single database named by `ER_TEST_PG_DSN`, so as modules of
+# one binary they run as concurrent threads against shared tables. That is not
+# theoretical — it was tried, and Postgres returned
+# `E40P01 deadlock detected` (one test waiting on AccessShareLock on the schema
+# while the other held AccessExclusiveLock on a relation it was retyping).
+#
+# er-server solved this with a database per test (`tests/common/fresh_db`), which
+# is what would have to come here first. It is only two links, so it was not
+# worth duplicating that helper or extracting it into a shared dev-dependency
+# crate for; revisit together if a third Postgres test lands here.
+
 # The schema differ: reads a live store's actual columns (Postgres via
 # information_schema, DuckLake via duckdb_columns) and compares them to the entity
 # catalog, classifying each difference safe vs breaking. The migration-plan writer

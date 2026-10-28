@@ -11,7 +11,7 @@
 //! the identical corpus. Regenerate with:
 //!   cargo test -p er-match --test dump_corpus -- --ignored
 
-mod common;
+use crate::common;
 
 use dedupe_core::session::{Session, SessionOptions};
 

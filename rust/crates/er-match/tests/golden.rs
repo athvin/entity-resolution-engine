@@ -10,7 +10,7 @@
 //! in SQL (ID dropped) so the `\N` null (E9's email) and JSON metadata compare
 //! with DuckDB's own semantics.
 
-mod common;
+use crate::common;
 
 use std::collections::{BTreeMap, BTreeSet};
 

@@ -2,7 +2,7 @@
 //! the golden cluster membership exactly — first from the golden predictions
 //! (isolating clustering), then end-to-end from our own predictions.
 
-mod common;
+use crate::common;
 
 use common::{
     FAKE_1000_SCHEMA, assert_table_matches_parquet, fake_1000_csv_path, golden_dir,

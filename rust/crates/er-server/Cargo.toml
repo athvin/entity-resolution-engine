@@ -5,6 +5,16 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+# Every file in tests/ is a module of tests/main.rs, not a target of its own.
+# sccache cannot cache a final link, so each test target is compiled and linked
+# uncached on every CI run — and each statically links bundled DuckDB. Without
+# this, this crate alone contributed 49 of the workspace's ~147 such links.
+# See tests/main.rs for the full reasoning, including the parallelism it buys.
+autotests = false
+
+[[test]]
+name = "main"
+path = "tests/main.rs"
 
 [[bin]]
 name = "er-server"

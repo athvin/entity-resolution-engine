@@ -1,7 +1,7 @@
 //! Batch-2 golden gates: graph metrics (nodes + clusters), multi-threshold
 //! cluster summary, and single-best-links — all vs the committed goldens.
 
-mod common;
+use crate::common;
 
 use common::{
     FAKE_1000_SCHEMA, assert_table_matches_parquet, fake_1000_csv_path, golden_dir,

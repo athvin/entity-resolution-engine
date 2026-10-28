@@ -599,7 +599,10 @@ jobs:
         # answer. Measured A/B on this job: 15.5m cargo vs 15.2m nextest.
         run: cargo test -p dedupe-cli -p er-cli -p er-server -p er-entity-diff
       - name: Extension loading (splink_udfs) and the engine version label
-        run: cargo test -p dedupe-core --test extensions
+        # `--test main <filter>`: every file in dedupe-core/tests is a module of
+        # one binary now (autotests = false), so the target is `main` and the old
+        # file name is a name filter. See that crate's tests/main.rs.
+        run: cargo test -p dedupe-core --test main extensions
       - name: Build cost (sccache stats, target size)
         # See the `lint` job's copy for why.
         if: always()
@@ -705,7 +708,8 @@ jobs:
           # comment there for why five writers on a 10 GB capped cache is what
           # kept producing cold runs.
           save-if: false
-      - run: cargo test -p dedupe-core --test golden_historical_50k
+      # `--test main <filter>` — see the e2e job's copy for why.
+      - run: cargo test -p dedupe-core --test main golden_historical_50k
       - name: Build cost (sccache stats, target size)
         # See the `lint` job's copy for why.
         if: always()

@@ -6,7 +6,7 @@
 
 use er_server::pg;
 
-mod common;
+use crate::common;
 
 /// The org's id for a test org name (child wrappers key on org_id).
 async fn oid(client: &tokio_postgres::Client, name: &str) -> String {

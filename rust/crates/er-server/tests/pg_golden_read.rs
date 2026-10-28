@@ -17,7 +17,7 @@ use axum::http::{Request, StatusCode, header};
 use er_server::{AppState, app, pg};
 use tower::ServiceExt;
 
-mod common;
+use crate::common;
 
 /// A decoded golden-records Arrow page: the IPC schema, the batches, and the
 /// snapshot / next-cursor that travel in response headers.

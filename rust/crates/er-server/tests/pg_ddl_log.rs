@@ -7,7 +7,7 @@
 
 use er_server::pg;
 
-mod common;
+use crate::common;
 
 async fn ledger_count(client: &tokio_postgres::Client) -> i64 {
     client

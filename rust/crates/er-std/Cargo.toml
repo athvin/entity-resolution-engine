@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+# Every file in tests/ is a module of tests/main.rs, not a target of its own
+# (sccache cannot cache a final link). See tests/main.rs.
+autotests = false
 [dependencies]
 regex.workspace = true
 unicode-normalization = "0.1"
@@ -21,3 +24,7 @@ dedupe-core = { path = "../dedupe-core" }
 
 [lints]
 workspace = true
+
+[[test]]
+name = "main"
+path = "tests/main.rs"

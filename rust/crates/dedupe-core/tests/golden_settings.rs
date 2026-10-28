@@ -3,7 +3,7 @@
 //! columns, exact-match detection, TF flags), and saved-model JSON must
 //! round-trip.
 
-mod common;
+use crate::common;
 
 use std::collections::BTreeSet;
 
