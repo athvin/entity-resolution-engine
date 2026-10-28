@@ -98,7 +98,11 @@ pub struct UlidFactory;
 
 impl IdFactory for UlidFactory {
     fn new_id(&self) -> String {
-        Ulid::new().to_string()
+        // `generate`, not `new`: ulid 3.0 renamed the random constructor. Same
+        // semantics — current time plus random entropy, no monotonic guarantee
+        // across calls (that is `ulid::Generator`, which this type deliberately
+        // is not; see the module header).
+        Ulid::generate().to_string()
     }
 }
 
