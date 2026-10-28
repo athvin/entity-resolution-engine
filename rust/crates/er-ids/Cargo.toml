@@ -9,7 +9,7 @@ repository.workspace = true
 [dependencies]
 sha2.workspace = true
 thiserror.workspace = true
-ulid = "1"
+ulid = "3"
 uuid.workspace = true
 
 [lints]
