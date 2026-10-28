@@ -83,7 +83,12 @@ async fn main() -> std::process::ExitCode {
         let reply = match rpc::dispatch(&request, &tools) {
             rpc::Action::Silent => continue,
             rpc::Action::Reply(value) => value,
-            rpc::Action::Fetch { id, path } => fetch(&http, &base, &key, &id, &path).await,
+            rpc::Action::Fetch {
+                id,
+                method,
+                path,
+                body,
+            } => call(&http, &base, &key, &id, &method, &path, body).await,
         };
         if writeln!(stdout, "{reply}").is_err() || stdout.flush().is_err() {
             break;
@@ -92,24 +97,45 @@ async fn main() -> std::process::ExitCode {
     std::process::ExitCode::SUCCESS
 }
 
-/// Call er-server and wrap the body as MCP tool content.
+/// Call er-server and wrap the response as MCP tool content.
 ///
 /// An upstream failure comes back as `isError` content rather than a JSON-RPC
 /// error, so the model can read "403 requires steward role" and change what it
 /// is doing. The status is included for the same reason — "it failed" is not
 /// something a model can act on.
-async fn fetch(
+///
+/// The body is forwarded verbatim. This server does not re-validate it against
+/// the derived schema: er-server is the authority, and two validators that can
+/// disagree is worse than one, because the one a tenant relies on is the
+/// server's.
+#[allow(clippy::too_many_arguments)]
+async fn call(
     http: &reqwest::Client,
     base: &str,
     key: &str,
     id: &serde_json::Value,
+    method: &str,
     path: &str,
+    body: Option<serde_json::Value>,
 ) -> serde_json::Value {
-    let response = http
-        .get(format!("{base}{path}"))
-        .bearer_auth(key)
-        .send()
-        .await;
+    let url = format!("{base}{path}");
+    let mut request = match method {
+        "POST" => http.post(&url),
+        "PUT" => http.put(&url),
+        "PATCH" => http.patch(&url),
+        "DELETE" => http.delete(&url),
+        _ => http.get(&url),
+    }
+    .bearer_auth(key);
+    if let Some(body) = body {
+        // Serialized here rather than through `.json()`, which needs reqwest's
+        // `json` feature: this crate should not widen a workspace dependency
+        // to save one line, and the explicit form shows exactly what is sent.
+        request = request
+            .header("content-type", "application/json")
+            .body(serde_json::to_string(&body).unwrap_or_else(|_| "null".to_string()));
+    }
+    let response = request.send().await;
     let (text, failed) = match response {
         Ok(r) => {
             let status = r.status();

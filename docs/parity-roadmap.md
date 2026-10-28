@@ -3026,9 +3026,38 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          server authenticates with one org-scoped key from `ER_MCP_API_KEY` and has no operator
          mode at all; the manifest filters operator routes out so an agent is not even told they
          exist. 19 unit tests in `er-mcp`, 5 in the manifest gate.
-   - [ ] O10b write tools for routes that take a request body, which wants request schemas —
-         the real prerequisite O10 was filed with the wrong version of. Until then an MCP caller
-         gets 51 of 89 routes.
+   - [x] **O10b write tools — the request schemas were derivable from the same source.** O10
+         left 51 of 89 routes tooled and named the real prerequisite: a body schema, because
+         the manifest knew method, path and role but not the shape of a `Json<CreateOrgIn>`.
+         It turns out the shape is right there — `Json<T>` in the handler signature, `T` a
+         local `#[derive(Deserialize)]` struct — so the schema derives from the server source
+         exactly as everything else in the manifest does. **78 of 89 offered now**, 27 with a
+         derived body schema.
+         The field-type vocabulary across all 22 body structs is small and bounded (`String`,
+         `Option<T>`, `bool`, `Vec<T>`, `i64`, `f64`, `Value`, one `BTreeMap`), and nesting goes
+         one level — `Vec<BulkResolveItem>` recurses rather than degrading to "an array of
+         something", which is a schema a model cannot fill in. **A type the mapping does not
+         know is a hard failure, never a permissive `{}`**: a schema claiming "anything" for a
+         field the server will reject is worse than no tool, because the model calls it
+         confidently and reads a 422 it cannot act on.
+         **The hand-kept `BODYLESS_MUTATIONS` list is gone**, and it had been wrong. Whether a
+         route takes a body is a property of its SIGNATURE, so it is read from there — and the
+         list had been withholding four routes (publish, resume, activate, compile) for a body
+         they never had. One exclusion remains and it is honest: the CSV upload takes
+         `Multipart`, and a file is not something an MCP client can put in a tool call. The
+         JSON push is the route an agent should use, and it IS offered.
+         **The body rides under its own `body` key rather than flattened beside the path
+         parameters.** Flattening reads better and is wrong: `OrgIn` has a field named `org`,
+         which would collide with the path parameter, and whichever won would silently not be
+         what the caller meant. `body` is accepted ONLY where the manifest says the route has
+         one — sabotaging that to accept it everywhere fails the test named for it, because it
+         would let a caller attach a payload to a GET the published schema forbids.
+         The body is forwarded verbatim; this server does not re-validate it against the
+         derived schema. er-server is the authority, and two validators that can disagree is
+         worse than one when the one a tenant relies on is the server's.
+         Found while doing it: the forward scan for `Json<T>` wandered into the next handler's
+         signature and gave `GET /healthz` a request body it cannot have. Body detection is now
+         method-aware.
    - [x] O11 embeddable duplicate widget: a signed-token read-only micro-page (#59). A tenant
          drops an iframe into their own CRM and sees "possible duplicates for record X". It is
          the product's ONLY surface served without a session, so the token in the URL is the
