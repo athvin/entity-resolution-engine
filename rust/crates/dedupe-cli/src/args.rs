@@ -75,8 +75,8 @@ pub struct InputSource {
     #[arg(long)]
     pub temp_dir: Option<String>,
     /// DuckDB extension to LOAD so its functions are usable in comparison /
-    /// blocking SQL, e.g. `rapidfuzz` or `splink_udfs` (repeatable). Core
-    /// metrics (jaro_winkler, levenshtein, jaccard) need no extension.
+    /// blocking SQL, e.g. `splink_udfs` (repeatable). Core metrics
+    /// (jaro_winkler, levenshtein, jaccard) need no extension.
     #[arg(long = "extension")]
     pub extensions: Vec<String>,
     /// Directory holding pre-installed extension binaries (bake into the image

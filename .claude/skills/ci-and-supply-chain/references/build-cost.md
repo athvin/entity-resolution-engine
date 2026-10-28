@@ -103,7 +103,7 @@ and the workspace's own 28 crates are cheap.** `cargo clippy` builds the tree's
 metadata; the first `cargo run` pays its codegen; everything after that in the
 same job is nearly free. The earlier reasoning here — that clippy's `.rmeta`
 cannot help a `cargo run`, and that `er-entity-cli` (datafusion 52 / arrow 57)
-and `er-server` (duckdb / arrow 58 / aws) share too little to matter — is
+and `er-server` (duckdb / arrow 60 / aws) share too little to matter — is
 **contradicted by that 0m42**, and was the justification for giving the OpenAPI
 gate its own job. It does not have one; it is a step on `entities`, where it
 costs 0m42 instead of re-paying a tree build.

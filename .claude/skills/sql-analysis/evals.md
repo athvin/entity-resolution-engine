@@ -49,7 +49,7 @@ Must:
   `ff_analysis::sqlparser`, which is **DataFusion 52's bundled 0.59**.
 - Say the workspace's 0.63 has exactly one consumer, `dedupe-core`.
 
-Credit for mentioning that arrow 57 (ff-analysis) and arrow 58 (duckdb) coexist
+Credit for mentioning that arrow 57 (ff-analysis) and arrow 60 (duckdb) coexist
 deliberately, and why that is contained.
 
 ## 4. The aggregate type mismatch

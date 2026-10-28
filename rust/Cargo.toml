@@ -55,42 +55,56 @@ unreadable_literal = "allow"
 needless_pass_by_value = "allow"
 
 [workspace.dependencies]
-# Bundles DuckDB 1.5.6 — the exact engine version the golden fixtures were
-# generated on, so the engine and the baselines execute on identical builds.
+# Bundles DuckDB 2.0.0. The crate version encodes the engine in its middle
+# component as `major * 10000 + minor * 100 + patch`, so `=1.20000.0` is v2.0.0
+# and the previous pin, `1.10506.1`, was v1.5.6.
 #
-# The version is load-bearing beyond the goldens: extension binaries are keyed
-# by it on disk (`<extension_directory>/v1.5.6/<platform>/<name>.duckdb_extension`),
-# so bumping this pin invalidates the directory the image bakes and the bake
-# step has to rebuild it. `er-server install-extensions` runs through this same
+# The version is load-bearing. Extension binaries are keyed by it both in the
+# repository the engine fetches from and on disk
+# (`<extension_directory>/v2.0.0/<platform>/<name>.duckdb_extension`), so
+# moving this pin invalidates the directory the image bakes and the bake step
+# has to rebuild it. `er-server install-extensions` runs through this same
 # linked DuckDB precisely so the two cannot disagree.
 #
-# This comment said 1.5.5 until the bake step printed the real path. Plain
-# `bundled`, note — not `bundled-cmake`, and without the `parquet`/`json`
+# Plain `bundled`, note — not `bundled-cmake`, and without the `parquet`/`json`
 # features, so only `core_functions` is statically linked and everything else
 # is an extension (see dedupe_core::session::BAKED_EXTENSIONS).
 #
-# MOVING THIS PIN IS A MIGRATION, NOT A BUMP. The crate version encodes the
-# bundled engine — `1.10506.1` is DuckDB 1.5.6, and the next release,
-# `1.20000.0`, is DuckDB 2.0.0. Dependabot groups it as minor/patch because the
-# *crate* version stays `1.x`, so the PR arrives looking like a routine bump
-# (that is PR #320, deliberately left open). Four things have to move together:
+# MOVING THIS PIN IS A MIGRATION, NOT A BUMP. Dependabot groups it as
+# minor/patch because the *crate* version stays `1.x`, so the PR arrives looking
+# like a routine bump. Five things have to move together, and the 1.5.6 -> 2.0.0
+# move (PRs #320, #338 and the follow-up that made it green) is the worked
+# example of every one:
 #
-#   1. `arrow` below, 58 -> 60. duckdb 1.20000.0 pulls arrow 60, and with the
-#      workspace still on 58 `er-entities` fails to compile with 56 x E0308 —
-#      `RecordBatch` exists twice in the graph. `arrow`'s major is ignored in
-#      .github/dependabot.yml precisely because it must equal duckdb's, and that
-#      comment names this release as the unblocker. er-sql-check is NOT a
-#      blocker: it already tolerates a separate arrow major via datafusion 52
-#      because it compares type-name strings (see its Cargo.toml).
-#   2. duckdb-rs API churn. 1.20000.0 merged the C-API-V2 branch: callers must
-#      now validate Arrow FFI imports, `next_chunk`'s signature inverted,
-#      `libduckdb-sys` no longer re-exports arrow-array, and the libduckdb
-#      download client moved behind a `download-lib` feature.
-#   3. Regenerate the golden fixtures on the new engine. The first paragraph
-#      above is the reason: the baselines were produced by DuckDB 1.5.6, so they
-#      are only an oracle for 1.5.6.
-#   4. Rebake the extension directory. `v1.5.6/` in the path above becomes the
-#      new engine version, and every baked extension must exist for it.
+#   1. `arrow` below, which must equal the major duckdb pulls. duckdb
+#      1.20000.0 pulls arrow 60, and with the workspace left on 58
+#      `er-entities` failed to compile with 56 x E0308 — `RecordBatch` existed
+#      twice in the graph. `arrow`'s major is ignored in
+#      .github/dependabot.yml precisely because it must track duckdb's.
+#      er-sql-check is NOT a blocker: it already tolerates a separate arrow
+#      major via datafusion 52 because it compares type-name strings (see its
+#      Cargo.toml).
+#   2. duckdb-rs API churn. 1.20000.0 merged the C-API-V2 branch: Arrow FFI
+#      import validation, `next_chunk`'s signature inverted, `libduckdb-sys` no
+#      longer re-exporting arrow-array, the libduckdb download client moved
+#      behind a `download-lib` feature. None of it reached this repo, whose only
+#      Arrow surface is `Statement::query_arrow` — but check rather than assume.
+#   3. The release label in rust/.cargo/config.toml. libduckdb-sys vendors the
+#      released engine source but its `bundled` build never stamps the version,
+#      so without that file the engine reports a `-dev` label, DuckDB routes
+#      extension URLs through `source_id` instead of the version tag, and every
+#      fetch 404s. That file explains the mechanism; the gate is dedupe-core's
+#      `the_engine_reports_a_released_version`, which fails on a pin moved
+#      without it.
+#   4. Rebake the extension directory. `v2.0.0/` in the path above becomes the
+#      new engine version, and every baked extension must exist for it. Check
+#      extensions.duckdb.org/<version>/<platform>/ before starting — community
+#      extensions (rapidfuzz, splink_udfs, from community-extensions.duckdb.org)
+#      included, for every platform the image targets.
+#   5. Re-run the goldens and read the result. The baselines are a Splink 5.0.0
+#      parity oracle — each MANIFEST.json's `generated_with` records the Python
+#      duckdb that produced it — not a snapshot of this engine, so a drift is a
+#      finding to explain, not a file to regenerate.
 duckdb = { version = "=1.20000.0", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
@@ -131,7 +145,7 @@ base64 = "0.23"
 # Parse repeated query params (e.g. ?key=a&key=b) the typed Query extractor can't.
 serde_urlencoded = "0.7"
 # Entity framework generated crate (`er-entities`): Arrow schemas, chrono date/time
-# types, and the OpenAPI component derive. `arrow` is pinned to the same 58 line
+# types, and the OpenAPI component derive. `arrow` is pinned to the same 60 line
 # the `duckdb` crate pulls so Arrow types unify across the read path.
 arrow = "60"
 chrono = { version = "0.4", features = ["serde"] }
