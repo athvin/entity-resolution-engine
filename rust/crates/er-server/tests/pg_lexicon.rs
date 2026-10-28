@@ -10,6 +10,8 @@ use axum::http::{Request, StatusCode, header};
 use er_server::{AppState, app, pg};
 use tower::ServiceExt;
 
+mod common;
+
 fn op(method: &str, uri: &str, body: Body) -> Request<Body> {
     Request::builder()
         .method(method)
@@ -29,10 +31,10 @@ async fn json_body(resp: axum::response::Response) -> serde_json::Value {
 
 #[tokio::test]
 async fn lexicon_round_trip_canonicalises_and_enqueues_rebuild() {
-    let Ok(dsn) = std::env::var("ER_TEST_PG_DSN") else {
-        eprintln!("skipping lexicon e2e (set ER_TEST_PG_DSN to run)");
+    let Some(db) = common::fresh_db("lexicon").await else {
         return;
     };
+    let dsn = db.dsn().to_string();
 
     let tmp = std::env::temp_dir().join(format!("er_lexicon_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
@@ -40,13 +42,6 @@ async fn lexicon_round_trip_canonicalises_and_enqueues_rebuild() {
     let lex_path = tmp.join("lexicon.csv").to_string_lossy().into_owned();
 
     let mut client = pg::connect(&dsn).await.unwrap();
-    client
-        .batch_execute(
-            "DROP TABLE IF EXISTS staged_steward_actions, audit_log, schedules, config_versions, \
-             api_keys, jobs, orgs CASCADE;",
-        )
-        .await
-        .unwrap();
     pg::ensure_schema(&mut client).await.unwrap();
     let app = app(AppState::with_pg("op-secret".to_string(), dsn.clone()));
 

@@ -462,7 +462,24 @@ jobs:
           # comment there for why five writers on a 10 GB capped cache is what
           # kept producing cold runs.
           save-if: false
-      - run: cargo test --workspace
+      - name: Install cargo-nextest
+        # Version-pinned download rather than `cargo install` (which would
+        # compile it on every cold run) and rather than a third-party action
+        # (every `uses:` in this workflow is SHA-pinned; see the disk-reclaim
+        # step's note). Bump the version here and in `ducklake-e2e` together.
+        run: |
+          curl -LsSf https://get.nexte.st/0.9.138/linux \
+            | tar zxf - -C "${CARGO_HOME:-$HOME/.cargo}/bin"
+          cargo nextest --version
+      - name: Run the test suite
+        # nextest, not `cargo test`: cargo runs one test BINARY at a time and
+        # this workspace has ~147 of them, so the suite was serialised by
+        # construction. See the Makefile's `test` target for the measurement.
+        run: cargo nextest run --workspace
+      - name: Doctests
+        # nextest does not run doctests, so they are a separate step. Cheap
+        # (under a second here) but silently lost if this is dropped.
+        run: cargo test --workspace --doc
       - name: Build cost (sccache stats, target size)
         # See the `lint` job's copy for why. This job is also where the disk wall
         # shows up, so the `target` size is the number to watch here.
@@ -581,9 +598,21 @@ jobs:
           key: duckdb-extensions-${{ hashFiles('rust/Cargo.lock') }}
           restore-keys: |
             duckdb-extensions-
-      - run: cargo test -p dedupe-cli -p er-cli -p er-server -p er-entity-diff
+      - name: Install cargo-nextest
+        # See the `test` job's copy. Keep the pinned version in step with it.
+        run: |
+          curl -LsSf https://get.nexte.st/0.9.138/linux \
+            | tar zxf - -C "${CARGO_HOME:-$HOME/.cargo}/bin"
+          cargo nextest --version
+      - name: DuckLake + Postgres e2e
+        # nextest is load-bearing in this job, not a nicety. The 41 `pg_*`
+        # binaries used to run strictly in series — cargo runs one binary at a
+        # time and each file is one test — which was 170s of this job spent
+        # waiting. They now own a database each
+        # (er-server/tests/common/mod.rs), so they can overlap.
+        run: cargo nextest run -p dedupe-cli -p er-cli -p er-server -p er-entity-diff
       - name: Extension loading (splink_udfs) and the engine version label
-        run: cargo test -p dedupe-core --test extensions
+        run: cargo nextest run -p dedupe-core --test extensions
       - name: Build cost (sccache stats, target size)
         # See the `lint` job's copy for why.
         if: always()

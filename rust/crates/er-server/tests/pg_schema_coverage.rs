@@ -9,6 +9,8 @@ use std::collections::BTreeSet;
 
 use er_server::pg;
 
+mod common;
+
 /// The table names the generated baseline creates, parsed from its own DDL.
 /// Every occurrence per entry counts — a baseline entry may carry companion
 /// tables (e.g. a `<relation>_history`) beside the entity's own.
@@ -27,10 +29,10 @@ fn baseline_tables() -> BTreeSet<String> {
 
 #[tokio::test]
 async fn public_schema_contains_only_declared_tables() {
-    let Ok(dsn) = std::env::var("ER_TEST_PG_DSN") else {
-        eprintln!("skipping Postgres schema-coverage gate (set ER_TEST_PG_DSN to run)");
+    let Some(db) = common::fresh_db("schema_coverage").await else {
         return;
     };
+    let dsn = db.dsn().to_string();
 
     let mut client = pg::connect(&dsn).await.unwrap();
     pg::ensure_schema(&mut client).await.unwrap();

@@ -7,6 +7,8 @@
 
 use er_server::pg;
 
+mod common;
+
 async fn ledger_count(client: &tokio_postgres::Client) -> i64 {
     client
         .query_one("SELECT count(*) FROM public.ddl_log", &[])
@@ -17,10 +19,10 @@ async fn ledger_count(client: &tokio_postgres::Client) -> i64 {
 
 #[tokio::test]
 async fn the_ddl_ledger_captures_operator_ddl_but_not_boot_replays() {
-    let Ok(dsn) = std::env::var("ER_TEST_PG_DSN") else {
-        eprintln!("skipping DDL-ledger test (set ER_TEST_PG_DSN to run)");
+    let Some(db) = common::fresh_db("ddl_log").await else {
         return;
     };
+    let dsn = db.dsn().to_string();
 
     let mut client = pg::connect(&dsn).await.expect("connect");
     pg::ensure_schema(&mut client).await.expect("ensure schema");

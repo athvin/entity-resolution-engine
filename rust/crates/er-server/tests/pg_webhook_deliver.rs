@@ -33,6 +33,8 @@ use axum::routing::post;
 use er_server::urlguard::Egress;
 use er_server::{dispatch_pg, pg, webhook};
 
+mod common;
+
 /// The org's id for a test org name (child wrappers key on org_id).
 async fn oid(client: &tokio_postgres::Client, name: &str) -> String {
     er_server::pg::org_id_by_name(client, name)
@@ -93,10 +95,10 @@ async fn always_bad_request() -> StatusCode {
 ///    pushed into the same shape by the same property of `schedule_tick`.
 #[tokio::test]
 async fn webhook_delivery_fires_signed_and_the_guard_refuses_a_blocked_address() {
-    let Ok(dsn) = std::env::var("ER_TEST_PG_DSN") else {
-        eprintln!("skipping webhook delivery e2e (set ER_TEST_PG_DSN to run)");
+    let Some(db) = common::fresh_db("webhook_deliver").await else {
         return;
     };
+    let dsn = db.dsn().to_string();
 
     // A local server recording every delivery it receives on /hook.
     let captured: Captured = Arc::new(Mutex::new(Vec::new()));
@@ -111,20 +113,15 @@ async fn webhook_delivery_fires_signed_and_the_guard_refuses_a_blocked_address()
     let hook_url = format!("http://{addr}/hook");
     let other_url = format!("http://{addr}/hook-other");
 
+    // This used to drop `webhook_deliveries` explicitly, because
+    // `DROP TABLE webhooks CASCADE` drops the dependent FK *constraint* rather
+    // than the referencing table, leaving an outbox full of rows pointing at
+    // webhooks that no longer existed — and since `claim` is global and
+    // oldest-first, the drain below would pick up a previous run's orphan
+    // instead of this test's event. `common::fresh_db` removes the shared
+    // outbox that made that possible; `claim` is still global, but now only
+    // within this test's own database.
     let mut client = pg::connect(&dsn).await.unwrap();
-    client
-        .batch_execute(
-            // webhook_deliveries explicitly: `DROP TABLE webhooks CASCADE`
-            // drops the dependent FK CONSTRAINT, not the referencing table, so
-            // without this the outbox keeps rows pointing at webhooks that no
-            // longer exist — and because `claim` is global and oldest-first,
-            // the drain picks up another run's orphan instead of this test's
-            // event.
-            "DROP TABLE IF EXISTS webhook_deliveries, staged_steward_actions, audit_log, \
-             webhooks, schedules, config_versions, api_keys, jobs, orgs CASCADE;",
-        )
-        .await
-        .unwrap();
     pg::ensure_schema(&mut client).await.unwrap();
     pg::ensure_org(&client, "acme", "/configs/acme.yaml")
         .await

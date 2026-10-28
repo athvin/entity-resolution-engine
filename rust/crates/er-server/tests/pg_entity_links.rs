@@ -18,6 +18,8 @@ use axum::http::{Request, StatusCode, header};
 use er_server::{AppState, app, pg};
 use tower::ServiceExt;
 
+mod common;
+
 fn req(method: &str, uri: &str, bearer: &str, body: Body) -> Request<Body> {
     Request::builder()
         .method(method)
@@ -40,19 +42,12 @@ async fn json_body(resp: axum::response::Response) -> serde_json::Value {
 /// (`pg_serial.rs` enforces this).
 #[tokio::test]
 async fn entity_links_upsert_read_and_role_boundary() {
-    let Ok(dsn) = std::env::var("ER_TEST_PG_DSN") else {
-        eprintln!("skipping Postgres entity-links e2e (set ER_TEST_PG_DSN to run)");
+    let Some(db) = common::fresh_db("entity_links").await else {
         return;
     };
+    let dsn = db.dsn().to_string();
 
     let mut client = pg::connect(&dsn).await.unwrap();
-    client
-        .batch_execute(
-            "DROP TABLE IF EXISTS entity_links, staged_steward_actions, audit_log, schedules, \
-             config_versions, api_keys, jobs, orgs CASCADE;",
-        )
-        .await
-        .unwrap();
     pg::ensure_schema(&mut client).await.unwrap();
 
     let app = app(AppState::with_pg("op-secret".to_string(), dsn.clone()));

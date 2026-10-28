@@ -23,6 +23,8 @@ use axum::http::{Request, StatusCode, header};
 use er_server::{AppState, app, pg};
 use tower::ServiceExt;
 
+mod common;
+
 const DEFAULT_YAML: &str = include_str!("../../er-config/tests/fixtures/default.yaml");
 
 fn req(method: &str, uri: &str, bearer: &str, body: Body) -> Request<Body> {
@@ -44,17 +46,11 @@ async fn json_body(resp: axum::response::Response) -> serde_json::Value {
 
 #[tokio::test]
 async fn a_run_names_a_segment_and_an_unknown_name_is_refused_at_submit() {
-    let Ok(dsn) = std::env::var("ER_TEST_PG_DSN") else {
-        eprintln!("skipping Postgres segment tests (set ER_TEST_PG_DSN to run)");
+    let Some(db) = common::fresh_db("segments").await else {
         return;
     };
+    let dsn = db.dsn().to_string();
     let mut client = pg::connect(&dsn).await.unwrap();
-    client
-        .batch_execute(
-            "DROP TABLE IF EXISTS webhook_deliveries, webhooks, staged_steward_actions, audit_log, schedules, config_versions, api_keys, jobs, orgs CASCADE;",
-        )
-        .await
-        .unwrap();
     pg::ensure_schema(&mut client).await.unwrap();
 
     let app = app(AppState::with_pg("op-secret".to_string(), dsn.clone()));

@@ -29,6 +29,8 @@ use axum::http::{Request, StatusCode, header};
 use er_server::{AppState, app, pg};
 use tower::ServiceExt;
 
+mod common;
+
 const TEST_YAML: &str = include_str!("../../er-cli/tests/fixtures/test.yaml");
 
 fn repo_fixture(rel: &str) -> String {
@@ -58,20 +60,13 @@ async fn json_body(resp: axum::response::Response) -> serde_json::Value {
 
 #[tokio::test]
 async fn entity_events_are_aggregated_per_kind_and_expand_through_the_detail_endpoint() {
-    let Ok(dsn) = std::env::var("ER_TEST_PG_DSN") else {
-        eprintln!("skipping entity-event webhooks (set ER_TEST_PG_DSN to run)");
+    let Some(db) = common::fresh_db("entity_events").await else {
         return;
     };
+    let dsn = db.dsn().to_string();
 
     // ---- setup: a clean control plane, two orgs, keys ----------------------
     let mut client = pg::connect(&dsn).await.unwrap();
-    client
-        .batch_execute(
-            "DROP TABLE IF EXISTS webhook_deliveries, matching_models, staged_steward_actions, \
-             audit_log, webhooks, schedules, config_versions, api_keys, jobs, orgs CASCADE;",
-        )
-        .await
-        .unwrap();
     pg::ensure_schema(&mut client).await.unwrap();
 
     let tmp = std::env::temp_dir().join(format!("er_entity_events_{}", std::process::id()));

@@ -8,6 +8,8 @@
 
 use er_server::pg;
 
+mod common;
+
 async fn history_rows(
     client: &tokio_postgres::Client,
     row_id: &str,
@@ -32,10 +34,10 @@ async fn history_rows(
 
 #[tokio::test]
 async fn history_companions_capture_row_images_with_the_actor() {
-    let Ok(dsn) = std::env::var("ER_TEST_PG_DSN") else {
-        eprintln!("skipping history test (set ER_TEST_PG_DSN to run)");
+    let Some(db) = common::fresh_db("history").await else {
         return;
     };
+    let dsn = db.dsn().to_string();
 
     let mut client = pg::connect(&dsn).await.expect("connect");
     pg::ensure_schema(&mut client).await.expect("ensure schema");

@@ -33,6 +33,8 @@ use std::path::PathBuf;
 
 use er_server::{dispatcher, pg};
 
+mod common;
+
 const TEST_YAML: &str = include_str!("../../er-cli/tests/fixtures/test.yaml");
 const NICKNAMES: &str = include_str!("../../er-cli/tests/fixtures/nickname_variants.csv");
 
@@ -78,10 +80,10 @@ fn standardize_lake(catalog: &str, data_path: &str) {
 
 #[tokio::test]
 async fn training_registers_a_draft_and_leaves_the_active_model_alone() {
-    let Ok(dsn) = std::env::var("ER_TEST_PG_DSN") else {
-        eprintln!("skipping train e2e (set ER_TEST_PG_DSN to run)");
+    let Some(db) = common::fresh_db("train").await else {
         return;
     };
+    let dsn = db.dsn().to_string();
 
     let tmp = std::env::temp_dir().join(format!("er_train_e2e_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
@@ -101,22 +103,14 @@ async fn training_registers_a_draft_and_leaves_the_active_model_alone() {
     std::fs::copy(repo_fixture("model_test_v1.tf.csv"), &tf_path).unwrap();
     let tf_before = std::fs::read_to_string(&tf_path).unwrap();
 
+    // This used to drop `pair_labels` by hand, because the phase at the bottom
+    // writes some and they outlived the run: the natural-key upsert in
+    // `create::record` does not save you, since the conflict target is
+    // `(org_id, rec_a_key, rec_b_key)` while the PRIMARY KEY is `id`, so a
+    // fresh org with a new natural key collides on the id — a hard pkey error
+    // rather than an upsert. `common::fresh_db` makes the point moot: there are
+    // no prior labels in a database this test just created.
     let mut client = pg::connect(&dsn).await.unwrap();
-    client
-        .batch_execute(
-            // `pair_labels` is in this list because the phase at the bottom
-            // writes some, and without it the labels outlive the run: the
-            // natural-key upsert in `create::record` does not save you, because
-            // the conflict target is `(org_id, rec_a_key, rec_b_key)` while the
-            // PRIMARY KEY is `id` — a fresh org each run means a new natural key
-            // and a colliding id, which is a hard pkey error rather than an
-            // upsert. `pg_approval.rs` already drops it for the same reason.
-            "DROP TABLE IF EXISTS pair_labels, webhook_deliveries, matching_models, \
-             staged_steward_actions, audit_log, webhooks, schedules, config_versions, \
-             api_keys, jobs, orgs CASCADE;",
-        )
-        .await
-        .unwrap();
     pg::ensure_schema(&mut client).await.unwrap();
     pg::ensure_org(&client, "acme", config_path.to_str().unwrap())
         .await

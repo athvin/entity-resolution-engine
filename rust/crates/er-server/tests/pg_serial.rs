@@ -1,24 +1,25 @@
 //! Every `pg_*.rs` integration test must be ONE `#[tokio::test]`.
 //!
-//! Cargo runs the tests inside one binary concurrently, and every Postgres test
-//! in this crate shares a single schema which it drops and recreates on the way
-//! in. Two tests in one file are therefore two tests racing on the same tables:
-//! one truncates the world out from under the other, or — worse, because it
-//! looks like a product bug — leaves state behind that the other asserts
-//! against.
+//! **The reason changed, the rule did not.** These files no longer share a
+//! schema — `common::fresh_db` gives each one its own database. But it is
+//! keyed on one slug per *file*, so two tests in a file would both ask for the
+//! same database, and the second `DROP DATABASE ... WITH (FORCE)` would
+//! disconnect the first mid-test. The race moved from the tables to the
+//! database itself; it did not go away.
 //!
-//! That is not hypothetical. `pg_segments.rs` had two, and the second one
-//! asserted that a *refused* config version never became active. It read the
-//! *first* test's deliberately-valid published config instead and failed with
-//! `left: 200, right: 422`, pointing at the publish gate, which was working
-//! perfectly. It surfaced only in the DuckLake tier — the one CI job with a
-//! Postgres — while the `test` job self-skipped and stayed green, so the file
-//! looked fine locally for as long as nobody set the DSN.
+//! The original failure is worth keeping on record, because it is what a race
+//! here looks like from the outside. `pg_segments.rs` had two tests, and the
+//! second asserted that a *refused* config version never became active. It
+//! read the *first* test's deliberately-valid published config instead and
+//! failed with `left: 200, right: 422`, pointing at the publish gate, which was
+//! working perfectly. It surfaced only in the DuckLake tier — the one CI job
+//! with a Postgres — while the `test` job self-skipped and stayed green, so the
+//! file looked fine locally for as long as nobody set the DSN.
 //!
 //! The convention that avoids it is sequential phases in one test, which is
-//! what the other twenty-odd files in this directory already do. This gate
-//! keeps the next one from drifting, because the failure it produces does not
-//! look like a test-isolation problem.
+//! what every other file in this directory already does. If a file ever
+//! genuinely needs two concurrent tests, the fix is a per-test slug rather than
+//! a per-file one — change `fresh_db`'s contract, then this gate.
 //!
 //! Needs no database: it reads source.
 
@@ -71,9 +72,11 @@ fn every_postgres_test_file_is_a_single_test() {
     assert!(
         offenders.is_empty(),
         "these Postgres test files declare more than one #[tokio::test], and the tests in \
-         one binary run concurrently against one shared schema: {}\n\nMake the extra ones \
-         plain `async fn` phases called in sequence from the single test, each with its own \
-         org name. See the module docs here for the failure this produces.",
+         one binary run concurrently while `common::fresh_db` keys the database on one slug \
+         per FILE — so they would race on the database itself, the second one dropping it \
+         under the first: {}\n\nMake the extra ones plain `async fn` phases called in \
+         sequence from the single test, each with its own org name. See the module docs \
+         here for the failure this produces.",
         offenders.join(", ")
     );
 }

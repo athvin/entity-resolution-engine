@@ -24,6 +24,8 @@ use axum::http::{Request, StatusCode, header};
 use er_server::{AppState, app, pg};
 use tower::ServiceExt;
 
+mod common;
+
 const DEFAULT_YAML: &str = include_str!("../../er-config/tests/fixtures/default.yaml");
 
 fn req(method: &str, uri: &str, bearer: &str, body: Body) -> Request<Body> {
@@ -66,19 +68,11 @@ async fn staged_and_queued(client: &tokio_postgres::Client, org_id: &str) -> (i6
 
 #[tokio::test]
 async fn only_approved_reviews_are_staged_and_only_while_the_tag_lives() {
-    let Ok(dsn) = std::env::var("ER_TEST_PG_DSN") else {
-        eprintln!("skipping Postgres approval tests (set ER_TEST_PG_DSN to run)");
+    let Some(db) = common::fresh_db("approval").await else {
         return;
     };
+    let dsn = db.dsn().to_string();
     let mut client = pg::connect(&dsn).await.unwrap();
-    client
-        .batch_execute(
-            "DROP TABLE IF EXISTS taggings, tags, pair_labels, webhook_deliveries, \
-             matching_models, staged_steward_actions, audit_log, webhooks, schedules, \
-             config_versions, api_keys, jobs, orgs CASCADE;",
-        )
-        .await
-        .unwrap();
     pg::ensure_schema(&mut client).await.unwrap();
 
     let app = app(AppState::with_pg("op-secret".to_string(), dsn.clone()));
@@ -184,6 +178,9 @@ async fn only_approved_reviews_are_staged_and_only_while_the_tag_lives() {
     let run = || {
         let app = app.clone();
         let admin_key = admin_key.clone();
+        // Cloned per call like the two above, so the closure stays `Fn`: the
+        // phases below call it repeatedly.
+        let dsn = dsn.clone();
         async move {
             let resp = app
                 .clone()
@@ -201,9 +198,11 @@ async fn only_approved_reviews_are_staged_and_only_while_the_tag_lives() {
                 "the kind is schedulable"
             );
             er_server::dispatcher::dispatch_once_with(
-                &pg::connect(&std::env::var("ER_TEST_PG_DSN").unwrap())
-                    .await
-                    .unwrap(),
+                // `dsn`, not the env var: that names the admin database, while
+                // this test owns its own. A dispatcher pointed at the wrong
+                // database finds no job and the assertion below fails for a
+                // reason that has nothing to do with approvals.
+                &pg::connect(&dsn).await.unwrap(),
                 &Ok(None),
                 &er_server::mail::Mailer::off(),
             )

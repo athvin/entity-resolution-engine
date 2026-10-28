@@ -22,6 +22,8 @@ use axum::http::{Request, StatusCode, header};
 use er_server::{AppState, app, pg};
 use tower::ServiceExt;
 
+mod common;
+
 fn req(method: &str, uri: &str, bearer: &str, body: Body) -> Request<Body> {
     Request::builder()
         .method(method)
@@ -37,19 +39,12 @@ fn req(method: &str, uri: &str, bearer: &str, body: Body) -> Request<Body> {
 /// (`pg_serial.rs` enforces this).
 #[tokio::test]
 async fn s3_ingest_columns_sweep_and_cursor() {
-    let Ok(dsn) = std::env::var("ER_TEST_PG_DSN") else {
-        eprintln!("skipping Postgres s3-ingest e2e (set ER_TEST_PG_DSN to run)");
+    let Some(db) = common::fresh_db("s3_ingest").await else {
         return;
     };
+    let dsn = db.dsn().to_string();
 
     let mut client = pg::connect(&dsn).await.unwrap();
-    client
-        .batch_execute(
-            "DROP TABLE IF EXISTS s3_ingest_cursors, staged_steward_actions, audit_log, \
-             schedules, config_versions, api_keys, jobs, orgs CASCADE;",
-        )
-        .await
-        .unwrap();
     pg::ensure_schema(&mut client).await.unwrap();
 
     let app = app(AppState::with_pg("op-secret".to_string(), dsn.clone()));

@@ -14,6 +14,8 @@ use std::time::Duration;
 
 use er_server::{dispatcher, pg, schema};
 
+mod common;
+
 async fn oid(client: &tokio_postgres::Client, name: &str) -> String {
     pg::org_id_by_name(client, name)
         .await
@@ -23,21 +25,15 @@ async fn oid(client: &tokio_postgres::Client, name: &str) -> String {
 
 #[tokio::test]
 async fn the_sweep_reconciles_every_active_tenant_and_reports_it() {
-    let Ok(dsn) = std::env::var("ER_TEST_PG_DSN") else {
-        eprintln!("skipping the tenant sweep test (set ER_TEST_PG_DSN to run)");
+    let Some(db) = common::fresh_db("migrate_tenants").await else {
         return;
     };
+    let dsn = db.dsn().to_string();
     if std::env::var("DEDUPE_E2E_DUCKLAKE").as_deref() != Ok("1") {
         eprintln!("skipping the tenant sweep test (set DEDUPE_E2E_DUCKLAKE=1 to run)");
         return;
     }
     let mut client = pg::connect(&dsn).await.unwrap();
-    client
-        .batch_execute(
-            "DROP TABLE IF EXISTS tenant_schema_states, staged_steward_actions, audit_log, schedules, config_versions, api_keys, jobs, orgs CASCADE;",
-        )
-        .await
-        .unwrap();
     pg::ensure_schema(&mut client).await.unwrap();
 
     // Two orgs: one active with a fresh local lake, one suspended (skipped).

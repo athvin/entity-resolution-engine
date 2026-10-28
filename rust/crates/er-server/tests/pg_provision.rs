@@ -21,6 +21,8 @@ use er_server::provision::{Mode, Profile, ProfileError};
 use er_server::{AppState, app, pg};
 use tower::ServiceExt;
 
+mod common;
+
 const TEST_YAML: &str = include_str!("../../er-cli/tests/fixtures/test.yaml");
 
 fn op(method: &str, uri: &str, body: Body) -> Request<Body> {
@@ -42,18 +44,12 @@ async fn json_body(resp: axum::response::Response) -> serde_json::Value {
 
 #[tokio::test]
 async fn provisioning_a_tenant_end_to_end() {
-    let Ok(dsn) = std::env::var("ER_TEST_PG_DSN") else {
-        eprintln!("skipping provisioning e2e (set ER_TEST_PG_DSN to run)");
+    let Some(db) = common::fresh_db("provision").await else {
         return;
     };
+    let dsn = db.dsn().to_string();
 
     let mut client = pg::connect(&dsn).await.unwrap();
-    client
-        .batch_execute(
-            "DROP TABLE IF EXISTS staged_steward_actions, audit_log, schedules, config_versions, api_keys, jobs, orgs CASCADE;",
-        )
-        .await
-        .unwrap();
     pg::ensure_schema(&mut client).await.unwrap();
 
     let root = std::env::temp_dir().join(format!("er_provision_{}", std::process::id()));

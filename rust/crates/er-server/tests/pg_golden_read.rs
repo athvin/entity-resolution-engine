@@ -17,6 +17,8 @@ use axum::http::{Request, StatusCode, header};
 use er_server::{AppState, app, pg};
 use tower::ServiceExt;
 
+mod common;
+
 /// A decoded golden-records Arrow page: the IPC schema, the batches, and the
 /// snapshot / next-cursor that travel in response headers.
 struct ArrowPage {
@@ -169,10 +171,10 @@ fn populate_lake(catalog: &str, data_path: &str) {
 
 #[tokio::test]
 async fn golden_records_read_over_ducklake() {
-    let Ok(dsn) = std::env::var("ER_TEST_PG_DSN") else {
-        eprintln!("skipping golden-read e2e (set ER_TEST_PG_DSN to run)");
+    let Some(db) = common::fresh_db("golden_read").await else {
         return;
     };
+    let dsn = db.dsn().to_string();
     if std::env::var("DEDUPE_E2E_DUCKLAKE").as_deref() != Ok("1") {
         eprintln!("skipping golden-read e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
         return;
@@ -193,12 +195,6 @@ async fn golden_records_read_over_ducklake() {
 
     // An org whose env points the read API at that lake.
     let mut client = pg::connect(&dsn).await.unwrap();
-    client
-        .batch_execute(
-            "DROP TABLE IF EXISTS staged_steward_actions, audit_log, schedules, config_versions, api_keys, jobs, orgs CASCADE;",
-        )
-        .await
-        .unwrap();
     pg::ensure_schema(&mut client).await.unwrap();
     let app = app(AppState::with_pg("op-secret".to_string(), dsn.clone()));
 

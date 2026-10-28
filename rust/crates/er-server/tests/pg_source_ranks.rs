@@ -23,6 +23,8 @@ use axum::http::{Request, StatusCode, header};
 use er_server::{AppState, app, pg};
 use tower::ServiceExt;
 
+mod common;
+
 const DEFAULT_YAML: &str = include_str!("../../er-config/tests/fixtures/default.yaml");
 
 fn req(method: &str, uri: &str, bearer: &str, body: Body) -> Request<Body> {
@@ -44,18 +46,12 @@ async fn json_body(resp: axum::response::Response) -> serde_json::Value {
 
 #[tokio::test]
 async fn source_priority_loads_its_ranks_from_the_active_config() {
-    let Ok(dsn) = std::env::var("ER_TEST_PG_DSN") else {
-        eprintln!("skipping Postgres source-ranks regression (set ER_TEST_PG_DSN to run)");
+    let Some(db) = common::fresh_db("source_ranks").await else {
         return;
     };
+    let dsn = db.dsn().to_string();
 
     let mut client = pg::connect(&dsn).await.unwrap();
-    client
-        .batch_execute(
-            "DROP TABLE IF EXISTS staged_steward_actions, audit_log, schedules, config_versions, api_keys, jobs, orgs CASCADE;",
-        )
-        .await
-        .unwrap();
     pg::ensure_schema(&mut client).await.unwrap();
 
     let app = app(AppState::with_pg("op-secret".to_string(), dsn.clone()));
