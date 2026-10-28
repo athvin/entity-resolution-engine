@@ -48,21 +48,21 @@ creating two sets of real resources.
 Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
 
 ```
-   9  aws_iam_role
-   6  aws_iam_role_policy
-   5  aws_s3_bucket
+  11  aws_iam_role
+   8  aws_iam_role_policy
+   6  aws_s3_bucket
+   6  aws_s3_bucket_public_access_block
    5  aws_s3_bucket_policy
-   5  aws_s3_bucket_public_access_block
    4  aws_eks_addon
    4  aws_eks_pod_identity_association
    4  aws_iam_role_policy_attachment
    4  aws_kms_alias
    4  aws_kms_key
+   4  aws_s3_bucket_server_side_encryption_configuration
    4  aws_secretsmanager_secret
    4  aws_secretsmanager_secret_version
    4  aws_ssoadmin_account_assignment
    4  aws_ssoadmin_permission_set
-   3  aws_s3_bucket_server_side_encryption_configuration
    3  aws_s3_bucket_versioning
    3  aws_security_group
    3  aws_ssoadmin_managed_policy_attachment
@@ -79,6 +79,7 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
    2  aws_route
    2  aws_route_table
    2  aws_route_table_association
+   2  aws_s3_bucket_lifecycle_configuration
    2  aws_ssoadmin_permission_set_inline_policy
    2  aws_subnet
    1  aws_bcmdataexports_export
@@ -104,7 +105,6 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
    1  aws_nat_gateway
    1  aws_organizations_account
    1  aws_organizations_organization
-   1  aws_s3_bucket_lifecycle_configuration
    1  aws_s3_bucket_object_lock_configuration
    1  aws_sesv2_configuration_set
    1  aws_sesv2_email_identity

@@ -115,3 +115,11 @@ resource "aws_iam_role_policy" "push" {
 output "role_arn" {
   value = aws_iam_role.ecr_push.arn
 }
+
+# An account may hold only ONE OIDC provider per issuer URL, and this module
+# owns it. Anything else that needs to trust GitHub Actions — the sccache cache
+# roles in envs/core/sccache.tf — federates against this ARN rather than
+# declaring a second provider, which would fail with EntityAlreadyExists.
+output "oidc_provider_arn" {
+  value = aws_iam_openid_connect_provider.github.arn
+}
