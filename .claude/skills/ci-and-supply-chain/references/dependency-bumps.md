@@ -45,12 +45,15 @@ types have to be the same types across the boundary. See the sql-analysis
 skill.
 
 Both are excluded from major updates in `.github/dependabot.yml`, and each
-exclusion carries the error that proved it — arrow 60 gave
-`expected &[RecordBatch], found &Vec<RecordBatch>` (two `RecordBatch` types,
-one per arrow major), and DataFusion 55 said "there are multiple different
-versions of crate `arrow_schema` in the dependency graph". The unblocker is a
-`duckdb` release and a new `ff-analysis` tag respectively; when one lands, the
-pair moves together by hand.
+exclusion carries the error that proved it — arrow 60 against the then-current
+duckdb gave `expected &[RecordBatch], found &Vec<RecordBatch>` (two
+`RecordBatch` types, one per arrow major), and DataFusion 55 said "there are
+multiple different versions of crate `arrow_schema` in the dependency graph".
+The unblocker is a `duckdb` release and a new `ff-analysis` tag respectively;
+when one lands, the pair moves together by hand. That is what #338 did for
+arrow, taking the pair to duckdb 1.20000.0 / arrow 60 — so the exclusions remain
+because the constraint is permanent, not because the current majors are
+ceilings.
 
 `duckdb` itself is an **`=` pin**, so it never moves by accident. A DuckDB
 change can alter emitted SQL and floating-point output, which the goldens
@@ -58,6 +61,18 @@ compare byte-for-byte — so bumping it is a deliberate task that includes
 checking the goldens, not a routine update. It also invalidates the sccache
 cache and forces a near-cold rebuild, which is why the compile jobs carry
 generous timeouts.
+
+Two traps the 1.5.6 -> 2.0.0 move surfaced, both worth knowing before the next
+one. First, the crate version hides the engine: it encodes it as
+`major * 10000 + minor * 100 + patch`, so `1.10506.1` -> `1.20000.0` is
+DuckDB 1.5.6 -> 2.0.0 while looking like a patch bump, and dependabot groups it
+into `rust-minor-patch` accordingly. Second, `libduckdb-sys`'s `bundled` build
+does not stamp a release version onto the engine it vendors, so the engine
+reports a `-dev` label, DuckDB resolves extension URLs through `source_id`
+rather than the version tag, and **every** extension fetch 404s — which took
+out four jobs at once, including the two that only run post-merge. The fix and
+the full mechanism are in `rust/.cargo/config.toml`; the migration checklist is
+in the `duckdb` pin comment in `rust/Cargo.toml`.
 
 ## The Playwright pin moves by hand
 

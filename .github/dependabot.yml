@@ -65,11 +65,12 @@ updates:
       # two crate versions and stops being the same type.
       #
       # `arrow` must match whatever `duckdb` pulls, because Arrow values cross
-      # that boundary. duckdb 1.10506.1 — the newest release — still requires
-      # `arrow ^58`, so arrow 60 produced `expected &[RecordBatch], found
-      # &Vec<RecordBatch>`: two RecordBatch types, one per arrow major. The
-      # unblocker is a duckdb release, not a bot PR, and when it lands the two
-      # move together by hand (closed PR #195).
+      # that boundary. Held at 58 while duckdb was on 1.10506.1, because arrow
+      # 60 against that pin produced `expected &[RecordBatch], found
+      # &Vec<RecordBatch>`: two RecordBatch types, one per arrow major (closed
+      # PR #195). duckdb 1.20000.0 pulls arrow 60, and #338 moved both together
+      # by hand — which is still how this one moves. The ignore stays because
+      # the constraint is permanent, not because 60 is the ceiling.
       - dependency-name: "arrow"
         update-types: ["version-update:semver-major"]
       # `datafusion-common` / `datafusion-expr` must match the major that

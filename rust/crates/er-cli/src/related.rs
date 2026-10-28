@@ -60,11 +60,20 @@ fn lit(value: &str) -> String {
 /// what every borrowed column is compared as, and a typed extraction would make
 /// the comparison's behaviour depend on how a source happened to encode a
 /// number.
+///
+/// **Parenthesised deliberately.** The result is interpolated into a larger
+/// expression — notably concatenated into the join predicate below — and DuckDB
+/// 2.0 reordered `->>` relative to `||`. Unparenthesised,
+/// `'crm' || ':' || s.metadata ->> 'employer_id'` re-associated to
+/// `('crm' || ':' || s.metadata) ->> 'employer_id'`, which asks DuckDB to parse
+/// the string `crm:{}` as JSON. It failed loudly here, but a predicate that
+/// merely stopped matching would not have, so the parentheses stay regardless
+/// of what any engine's precedence table says.
 fn read_column(alias: &str, name: &str) -> String {
     if is_standard_column(name) {
         format!("{alias}.\"{name}\"")
     } else {
-        format!("{alias}.metadata ->> '{}'", lit(name))
+        format!("({alias}.metadata ->> '{}')", lit(name))
     }
 }
 
@@ -291,10 +300,16 @@ mod tests {
         // source column already lands. A foreign key almost never IS canonical,
         // so this is the common path rather than the exception.
         assert!(
-            sql.contains("r0.metadata ->> 'industry' as \"employer_industry\""),
+            sql.contains("(r0.metadata ->> 'industry') as \"employer_industry\""),
             "{sql}"
         );
-        assert!(sql.contains("s.metadata ->> 'employer_id'"), "{sql}");
+        // Parenthesised, and asserted together with the concatenation it sits
+        // inside: that is the shape DuckDB 2.0's `->>`/`||` reordering broke,
+        // turning the key lookup into a JSON parse of `crm:{}`.
+        assert!(
+            sql.contains("'crm' || ':' || (s.metadata ->> 'employer_id')"),
+            "{sql}"
+        );
     }
 
     #[test]

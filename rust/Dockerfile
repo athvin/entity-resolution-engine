@@ -41,6 +41,12 @@ RUN strip target/release/er-server || true
 # the fetch would quietly come back. See `install_extensions` in
 # crates/er-server/src/main.rs. This step needs egress to the extension repo —
 # at build time, which is the point.
+#
+# This step also depends on `.cargo/config.toml` being in the build context: it
+# carries the release version label `libduckdb-sys`'s bundled build omits, and
+# without it the engine reports a `-dev` version for which no extension binary
+# exists, so every INSTALL here 404s and the image build fails. `.dockerignore`
+# must keep allowing it.
 RUN ./target/release/er-server install-extensions --dir /opt/duckdb/extensions
 
 FROM debian:bookworm-slim AS runtime

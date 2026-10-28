@@ -582,7 +582,7 @@ jobs:
           restore-keys: |
             duckdb-extensions-
       - run: cargo test -p dedupe-cli -p er-cli -p er-server -p er-entity-diff
-      - name: Extension loading (rapidfuzz)
+      - name: Extension loading (splink_udfs) and the engine version label
         run: cargo test -p dedupe-core --test extensions
       - name: Build cost (sccache stats, target size)
         # See the `lint` job's copy for why.

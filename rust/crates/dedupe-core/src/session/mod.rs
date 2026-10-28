@@ -37,9 +37,17 @@ pub struct TableHandle {
 ///
 /// All five are **core** (signed, from `extensions.duckdb.org`), so they install
 /// without `FROM community`. The optional comparison extensions —
-/// `rapidfuzz`, `splink_udfs`, `lsh` — are deliberately absent: they are
-/// per-config opt-ins through [`SessionOptions::extensions`], community-sourced,
-/// and no deployed config loads one.
+/// `splink_udfs`, `lsh` — are deliberately absent: they are per-config opt-ins
+/// through [`SessionOptions::extensions`], community-sourced, and no deployed
+/// config loads one.
+///
+/// `rapidfuzz` used to head that list and no longer does. From DuckDB 2.0 the
+/// community-repository build is a stub that throws at init, directing callers
+/// to a third-party repository (Query.Farm) instead; reaching it would mean
+/// registering a new extension repository. Nothing here depends on it, and
+/// PERFORMANCE.md measured it as the same speed as DuckDB's built-ins for the
+/// functions this engine would use, so it stays unsupported until something
+/// actually needs it.
 ///
 /// Why each is here, given that `duckdb` is pinned with the plain `bundled`
 /// feature and therefore statically links only `core_functions`. The first four
@@ -105,10 +113,11 @@ pub struct SessionOptions {
     /// `None` = DuckDB default (`true`).
     pub preserve_insertion_order: Option<bool>,
     /// DuckDB extensions to `LOAD` at open, so their functions are usable in
-    /// comparison/blocking SQL — e.g. `"rapidfuzz"` (token_sort/token_set/
-    /// partial ratios) or `"splink_udfs"` (soundex, double_metaphone). The core
-    /// string metrics (`jaro_winkler_similarity`, `levenshtein`,
-    /// `damerau_levenshtein`, `jaccard`) are built in and need no extension.
+    /// comparison/blocking SQL — e.g. `"splink_udfs"` (soundex,
+    /// double_metaphone). The core string metrics
+    /// (`jaro_winkler_similarity`, `levenshtein`, `damerau_levenshtein`,
+    /// `jaccard`) are built in and need no extension. `"rapidfuzz"` is no
+    /// longer loadable from the community repository — see [`BAKED_EXTENSIONS`].
     pub extensions: Vec<String>,
     /// DuckDB `extension_directory` — where pre-installed extension binaries
     /// live. Bake these into the container image so loading needs no network

@@ -1,5 +1,14 @@
 # DuckDB extensions
 
+## Contents
+
+- What is built in, and needs nothing
+- What the named extensions add
+- Two loading rules
+- The engine version *is* the extension mechanism
+- Testing
+- Adding an extension-dependent comparison level
+
 ## What is built in, and needs nothing
 
 The core string metrics ship with DuckDB and need no extension:
@@ -16,11 +25,20 @@ extension only when a level genuinely needs something outside this set.
 
 | Extension | Adds |
 |---|---|
-| `rapidfuzz` | token-based ratios — `token_sort`, `token_set`, `partial` — for comparisons where word order or substring containment matters |
 | `splink_udfs` | phonetic functions: `soundex`, `double_metaphone` |
 
 `splink_udfs` is one of the deliberate pieces of Splink provenance in the repo.
 It is not a leftover to remove.
+
+**`rapidfuzz` is no longer available** and was removed from this table at the
+DuckDB 2.0 move. Its community-repository build for 2.0+ is a stub that throws
+at init, pointing callers at a third-party repository (Query.Farm) instead — so
+using it again would mean registering a new extension repository, which is a
+supply-chain decision rather than a configuration one. Nothing in the repo
+depended on it, and `rust/PERFORMANCE.md` measured its functions as the *same
+speed* as DuckDB's built-ins, so there is no capability to recover. Note the
+trap: the binary still returns HTTP 200, so checking availability proves
+nothing — only loading it does.
 
 ## Two loading rules
 
@@ -54,6 +72,37 @@ A container that installs from the community registry at startup needs egress
 to it and fails closed when the registry is unreachable or slow — turning a
 registry outage into an application outage. Baking them in also pins the
 version, which matters for anything that feeds a score.
+
+## The engine version *is* the extension mechanism
+
+Every extension binary is published per engine version and cached per engine
+version, at `<repository>/<version>/<platform>/<name>.duckdb_extension` and
+`<extension_directory>/<version>/<platform>/…`. There is no compatibility
+range: the version DuckDB reports for itself selects the binary, and a binary
+built for another version is refused.
+
+Two consequences that have each cost real time here:
+
+- **A directory baked by a different DuckDB is silently ignored**, not an
+  error — DuckDB just autoinstalls over the network again and the bake looks
+  like it worked. This is why `er-server install-extensions` runs through the
+  same statically linked engine that will later read the directory, rather than
+  through a `duckdb` CLI.
+- **If the engine reports a `-dev` version, nothing resolves at all.** DuckDB
+  routes the URL through `source_id` instead of the version tag for any such
+  label, and no binary is published under a source hash. `libduckdb-sys`'s
+  `bundled` build does not stamp a release version onto the engine source it
+  vendors, so the label has to be supplied by hand — see
+  `rust/.cargo/config.toml`, and the `the_engine_reports_a_released_version`
+  test that keeps it honest. Getting this wrong fails every extension fetch at
+  once, which reads like an outage rather than a version problem.
+
+So before moving the `duckdb` pin, check that every extension in
+`BAKED_EXTENSIONS` — plus the community ones a config can ask for — actually
+exists for the new version, on every platform the image targets. The core
+repository is `extensions.duckdb.org`; community extensions live at
+`community-extensions.duckdb.org` and are rebuilt per core version, so they can
+lag a fresh DuckDB release.
 
 ## Testing
 

@@ -186,6 +186,14 @@ built-ins for the functions we use — `jaro_winkler_similarity` 0.095s built-in
 vs 0.097s rapidfuzz; `levenshtein` 0.376s vs 0.344s. DuckDB's built-ins are
 already rapidfuzz-grade native C++, so there is no speedup to be had there.
 
+That measurement decided a question it was not taken for. From DuckDB 2.0
+`rapidfuzz` is no longer published to the community repository — the binary
+there is a stub that throws at init and points at a third-party repository —
+so continuing to support it would have meant registering a new extension
+repository. Because the numbers above say it buys nothing, the extension was
+dropped instead of followed. See the ducklake-lakehouse skill's extension
+reference.
+
 **What the extensions do add is capability**, not speed — functions DuckDB
 lacks natively, usable directly in comparison/blocking SQL so new logic stays
 in-engine:

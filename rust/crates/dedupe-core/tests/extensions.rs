@@ -1,7 +1,11 @@
-//! DuckDB extension loading via `SessionOptions`. The name-validation guard and
-//! the baked-directory behaviour are checked offline; actually loading
-//! `rapidfuzz` needs a network INSTALL, so that test is gated behind
-//! `DEDUPE_E2E_EXTENSIONS=1`.
+//! DuckDB extension loading via `SessionOptions`. The name-validation guard,
+//! the baked-directory behaviour and the engine's reported version are checked
+//! offline; actually loading a community extension needs a network INSTALL, so
+//! that test is gated behind `DEDUPE_E2E_EXTENSIONS=1`.
+//!
+//! The version guard belongs here because the version *is* the extension
+//! mechanism: DuckDB keys every extension binary, and the directory it caches
+//! them in, by the engine version it reports. See `rust/.cargo/config.toml`.
 
 use dedupe_core::session::{BAKED_EXTENSIONS, Session, SessionOptions};
 
@@ -81,26 +85,127 @@ fn the_baked_list_is_installable_identifiers() {
     assert!(BAKED_EXTENSIONS.contains(&"icu"));
 }
 
+/// The engine version the bundled build reports, decoded from the pinned
+/// `duckdb` crate version in `rust/Cargo.lock`.
+///
+/// The crate encodes the engine in its middle component as
+/// `major * 10000 + minor * 100 + patch`, so `1.20000.0` is DuckDB `v2.0.0` and
+/// `1.10506.1` was `v1.5.6`. Returns `None` for the legacy `1.4.x` scheme,
+/// which predates the encoding and is not reachable from this pin.
+fn engine_version_from_lockfile() -> Option<String> {
+    // CARGO_MANIFEST_DIR is rust/crates/dedupe-core; the workspace root is rust/.
+    let lock = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.lock");
+    let text = std::fs::read_to_string(&lock)
+        .unwrap_or_else(|e| panic!("reading {}: {e}", lock.display()));
+
+    let encoded = text
+        .split("[[package]]")
+        .find_map(|block| {
+            let mut lines = block.lines().map(str::trim).filter(|l| !l.is_empty());
+            if lines.next()? != "name = \"duckdb\"" {
+                return None;
+            }
+            lines
+                .next()?
+                .strip_prefix("version = \"")?
+                .split('.')
+                .nth(1)?
+                .parse::<u32>()
+                .ok()
+        })
+        .expect("rust/Cargo.lock pins the duckdb crate");
+
+    if encoded < 10_000 {
+        return None;
+    }
+    Some(format!(
+        "v{}.{}.{}",
+        encoded / 10_000,
+        (encoded % 10_000) / 100,
+        encoded % 100
+    ))
+}
+
 #[test]
-fn loads_rapidfuzz_and_exposes_its_functions() {
+fn the_engine_reports_a_released_version() {
+    // Why this is a test and not a comment: the release label is hand-supplied
+    // by CXXFLAGS in rust/.cargo/config.toml, because libduckdb-sys's `bundled`
+    // build never passes one and the vendored source therefore reports the
+    // in-tree development string. Both ways that can go wrong are silent at
+    // compile time and expensive at run time, so both are asserted here.
+    //
+    // Needs no network: version() is a core function.
+    let conn = duckdb::Connection::open_in_memory().expect("an in-memory DuckDB opens");
+    let version: String = conn
+        .query_row("SELECT version()", [], |r| r.get(0))
+        .expect("version() is a core function");
+
+    // (1) A `-dev` label is routed through `source_id` rather than the version
+    // tag when DuckDB builds an extension URL, and nothing is published under a
+    // source hash — so every BAKED_EXTENSIONS install 404s.
+    assert!(
+        !version.contains("-dev"),
+        "the linked DuckDB reports {version:?}, a development label. DuckDB \
+         resolves extension URLs through source_id instead of the version tag \
+         for any -dev version, and no extension binary is published under a \
+         source hash, so installing {} would 404. The release label comes from \
+         CXXFLAGS in rust/.cargo/config.toml — check it still reaches the \
+         bundled C++ build (cc prefers CXXFLAGS_<target>, and cargo's [env] \
+         will not override a variable the environment already set).",
+        BAKED_EXTENSIONS.join(", "),
+    );
+
+    // (2) A label that disagrees with the pin is worse than a -dev one: the
+    // fetch succeeds and loads extensions built for a *different* engine. This
+    // is what a `duckdb` bump without a matching config.toml edit produces.
+    if let Some(expected) = engine_version_from_lockfile() {
+        assert_eq!(
+            version, expected,
+            "the linked DuckDB reports {version:?} but the pinned duckdb crate \
+             bundles {expected}. Extension binaries are published per engine \
+             version, so this mismatch silently loads extensions built against \
+             another engine. Update CXXFLAGS in rust/.cargo/config.toml to \
+             match the pin in rust/Cargo.toml."
+        );
+    }
+}
+
+#[test]
+fn loads_a_community_extension_and_exposes_its_functions() {
     if !ext_enabled() {
         eprintln!("skipping extension-load test (set DEDUPE_E2E_EXTENSIONS=1 to run)");
         return;
     }
+    // `splink_udfs` rather than `rapidfuzz`, which this test used until DuckDB
+    // 2.0. The community-repository build of rapidfuzz is now a stub that
+    // throws at init: "The rapidfuzz extension for DuckDB 2.0 and later is
+    // distributed from the Query.Farm extension repository, not the DuckDB
+    // community repository." Reaching it would mean registering a third-party
+    // extension repository, which is a supply-chain decision of its own and
+    // buys nothing measurable — PERFORMANCE.md records rapidfuzz as the *same
+    // speed* as DuckDB's built-ins for the functions this repo would use. Note
+    // that the binary is still served with HTTP 200, so availability says
+    // nothing here; only loading it does.
+    //
+    // splink_udfs is the better subject anyway: it still installs from the
+    // community repository, it is deliberate Splink provenance rather than an
+    // optional nicety, and `soundex`/`double_metaphone` are genuinely absent
+    // from DuckDB, which is the property this test is really about.
     let session = Session::open_in_memory(SessionOptions {
-        extensions: vec!["rapidfuzz".into()],
+        extensions: vec!["splink_udfs".into()],
         install_extensions: true,
         ..SessionOptions::deterministic()
     })
     .unwrap();
 
-    // token_set_ratio ignores token order, so reordered names score ~100 — a
-    // function DuckDB lacks natively, now usable directly in comparison SQL.
-    let score = session
-        .query_scalar_f64("SELECT rapidfuzz_token_set_ratio('john smith', 'smith john')")
+    // soundex collapses spelling variants to one code — a function DuckDB
+    // lacks natively, now usable directly in comparison SQL.
+    let codes = session
+        .query_strings("SELECT soundex('Robert'), soundex('Rupert')")
         .unwrap();
-    assert!(
-        score > 99.0,
-        "token_set_ratio of reordered tokens should be ~100, got {score}"
+    let row = codes.first().expect("one row");
+    assert_eq!(
+        row[0], row[1],
+        "soundex should collapse Robert/Rupert to one code, got {row:?}"
     );
 }

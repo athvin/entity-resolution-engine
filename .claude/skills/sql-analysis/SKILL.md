@@ -101,7 +101,7 @@ parses and plans only through
 `sqlparser = "0.63"` has exactly one consumer, and it is `dedupe-core`.
 
 So: *"the repo uses sqlparser 0.63 for SQL static analysis"* is wrong, and the
-arrow major here (57) deliberately differs from the duckdb-pulled 58 the rest of
+arrow major here (57) deliberately differs from the duckdb-pulled 60 the rest of
 the workspace uses. The split never unifies and is contained to this crate,
 because the analyser works in `ff_analysis::SqlType` and the oracle compares
 type-name strings.

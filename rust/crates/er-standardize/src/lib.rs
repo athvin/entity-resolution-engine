@@ -8,6 +8,7 @@
 //! as DuckDB SQL and run through a dedupe-core session; `stg_records` exists only
 //! as a CTE inside the `int_std_records` statement, never as a lake relation.
 
+use anyhow::Context as _;
 use dedupe_core::session::Session;
 use er_config::{Config, SourceSpec};
 use er_std::sql::{
@@ -197,7 +198,11 @@ pub fn build_int_std_records(
     let sql = int_std_records_sql(config, raw_table, lexicon, run_at);
     session
         .execute_batch(&format!("create table {out_table} as\n{sql}"))
-        .map_err(|e| anyhow::anyhow!("build {out_table}: {e}"))?;
+        // `{e}` would print only DedupeError::Db's "database error" and drop the
+        // duckdb::Error it carries as a source (that variant deliberately does not
+        // interpolate it). Wrap instead of interpolate, so the chain survives.
+        .map_err(anyhow::Error::new)
+        .with_context(|| format!("build {out_table}"))?;
     Ok(())
 }
 
@@ -314,6 +319,10 @@ pub fn build_acct_int_std_records(
     let sql = acct_int_std_records_sql(config, raw_table, run_at);
     session
         .execute_batch(&format!("create table {out_table} as\n{sql}"))
-        .map_err(|e| anyhow::anyhow!("build {out_table}: {e}"))?;
+        // `{e}` would print only DedupeError::Db's "database error" and drop the
+        // duckdb::Error it carries as a source (that variant deliberately does not
+        // interpolate it). Wrap instead of interpolate, so the chain survives.
+        .map_err(anyhow::Error::new)
+        .with_context(|| format!("build {out_table}"))?;
     Ok(())
 }

@@ -154,10 +154,17 @@ pub fn source_metadata(payload: &str, excluded: &[&str]) -> String {
         .collect::<Vec<_>>()
         .join("', '");
     format!(
+        // `lambda k:`, not the older `k ->`. DuckDB 2.0 turned the single-arrow
+        // lambda form into a binder ERROR ("Deprecated lambda arrow (->)
+        // detected"), recoverable only by setting
+        // `lambda_syntax='ENABLE_SINGLE_ARROW'`, which the same release says is
+        // going away next. These two lambdas are the only ones in the governed
+        // generator surface, and `er_sql_check::rewrite` strips them by regex
+        // before planning — so that pair of patterns must change with this one.
         "to_json(map_from_entries(list_transform(\
          list_sort(list_filter(coalesce(json_keys({payload}), []::varchar[]), \
-         k -> not list_contains(['{literals}'], k))), \
-         k -> struct_pack(key := k, value := json_extract({payload}, \
+         lambda k: not list_contains(['{literals}'], k))), \
+         lambda k: struct_pack(key := k, value := json_extract({payload}, \
          '/' || replace(replace(k, '~', '~0'), '/', '~1'))))))"
     )
 }

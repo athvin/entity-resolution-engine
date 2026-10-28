@@ -57,11 +57,17 @@ pub fn rewrite_map_subscript(sql: &str) -> String {
 /// cannot plan a lambda, so each is dropped for planning (the enclosing
 /// `list_filter`/`list_transform` stubs are variadic and type-preserving); the
 /// runtime SQL is untouched.
+///
+/// These patterns are coupled to the exact text `er_std::sql::source_metadata`
+/// emits: they moved from `k ->` to `lambda k:` when DuckDB 2.0 made the
+/// single-arrow form a binder error. A mismatch here does not fail loudly — the
+/// lambda simply survives into the planner and the statement stops planning, so
+/// change both together.
 static METADATA_FILTER_LAMBDA: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r", k -> not list_contains\(\[[^\]]*\], k\)").unwrap());
+    LazyLock::new(|| Regex::new(r", lambda k: not list_contains\(\[[^\]]*\], k\)").unwrap());
 static METADATA_TRANSFORM_LAMBDA: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r", k -> struct_pack\(key := k, value := json_extract\(\w+, '/' \|\| replace\(replace\(k, '~', '~0'\), '/', '~1'\)\)\)",
+        r", lambda k: struct_pack\(key := k, value := json_extract\(\w+, '/' \|\| replace\(replace\(k, '~', '~0'\), '/', '~1'\)\)\)",
     )
     .unwrap()
 });

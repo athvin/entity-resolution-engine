@@ -1,0 +1,48 @@
+# Supplies the release version label that `libduckdb-sys`'s `bundled` build
+# omits. Without this, every DuckDB extension fetch 404s.
+#
+# The crate vendors released DuckDB 2.0.0 verbatim: its `.duckdb-release` pins
+# `DUCKDB_RELEASE_COMMIT=d54cbbe3df17e8e5ce68312f483b4155836112aa`, which is the
+# `v2.0.0` tag's own commit (`git compare d54cbbe3df...v2.0.0` → identical), and
+# `DUCKDB_RELEASE_VERSION=v2.0.0`. What it does not do is pass that label to the
+# compiler. DuckDB's own release build supplies it as `DUCKDB_EXPLICIT_VERSION`
+# (cmake) and `libduckdb-sys` only wires that up on the `bundled-cmake` path, so
+# a plain `bundled` build falls through to the dev string left in
+# `src/function/table/version/pragma_version.cpp` and reports
+# `v2.0.0-dev88614`.
+#
+# That string is load-bearing, not cosmetic. DuckDB routes any version
+# containing `-dev` through `source_id` rather than the version tag when it
+# builds an extension URL, so the engine asks
+# `extensions.duckdb.org/d54cbbe3df/<platform>/…` — which does not exist, while
+# `/v2.0.0/` carries every extension `BAKED_EXTENSIONS` names. That is the whole
+# of the breakage #338 merged red: 18 dedupe-core tests, the DuckLake e2e, the
+# 50k scale goldens and the `er-api` image bake, all `HTTP 404`, none a logic
+# failure.
+#
+# All four version macros in `pragma_version.cpp` are `#ifndef`-guarded, so
+# defining two of them here supplies the missing label without patching the
+# vendored source. `DUCKDB_SOURCE_ID` is already `d54cbbe3df` and correct —
+# that *is* the release commit — and MAJOR/MINOR are already 2 and 0.
+#
+# `CXXFLAGS` is the hook because the bundled sources go through `cc::Build` with
+# `cpp(true)` (`libduckdb-sys/build_bundled_cc.rs`), and `cc` appends this
+# variable to the compiler invocation. Two sharp edges, both of which
+# `dedupe_core`'s `the_engine_reports_a_released_version` test catches:
+#
+#   * `cc` prefers `CXXFLAGS_<target>` / `TARGET_CXXFLAGS` over the plain name,
+#     and cargo's `[env]` does not override a variable the environment already
+#     set (no `force = true` here, deliberately — clobbering a developer's own
+#     flags is worse than failing a test).
+#   * `cc` splits this on whitespace and spawns without a shell, so the inner
+#     quotes reach the compiler literally and each macro expands to a string
+#     literal, which is what the source expects. Keep both values free of
+#     whitespace.
+#
+# This belongs here rather than in the Makefile because it has to reach every
+# build path: `make check`, a bare `cargo` run from `rust/`, `rust/Dockerfile`,
+# CI, and rust-analyzer. Remove it only when `libduckdb-sys` stamps the version
+# itself (duckdb-rs has since added a `DUCKDB_VERSION` env hook on `main`, but
+# only for `bundled-cmake`, which needs a cmake this repo's build image lacks).
+[env]
+CXXFLAGS = "-DDUCKDB_VERSION=\"v2.0.0\" -DDUCKDB_PATCH_VERSION=\"0\""
