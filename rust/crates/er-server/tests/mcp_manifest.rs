@@ -39,6 +39,9 @@ struct Tool {
     params: Vec<String>,
     /// Whether a call needs a request body this manifest cannot describe.
     needs_body: bool,
+    /// The request body's JSON Schema, derived from the handler's `Json<T>`
+    /// extractor (O10b). Empty when the route takes no body.
+    body: String,
 }
 
 /// The role a doc comment's prefix names.
@@ -137,11 +140,32 @@ fn derive() -> Vec<Tool> {
             .to_string();
 
         let params = path_params(&path);
-        // A body is needed when the route takes one and the manifest cannot
-        // say what shape it is. GET and DELETE never do; a body-less POST
-        // (suspend, resume, retry) is fully described by its path.
-        let needs_body = matches!(method.as_str(), "POST" | "PUT" | "PATCH")
-            && !BODYLESS_MUTATIONS.contains(&path.as_str());
+        // O10b: a body is DESCRIBED when the handler's `Json<T>` resolves to a
+        // schema. `needs_body` now means "takes a body this manifest could not
+        // describe" — which, with the derivation below, is only a type the
+        // mapping does not know, and that is a hard failure rather than a
+        // silently untooled route.
+        // Only a method that CAN carry a body gets one looked for. Without
+        // this the forward scan wanders into the next handler's signature and
+        // hands a GET a request body it cannot have — which `GET /healthz`
+        // demonstrated.
+        let can_have_body = matches!(method.as_str(), "POST" | "PUT" | "PATCH");
+        let body = if can_have_body {
+            body_type_after(&lines, i)
+                .and_then(|t| body_schema(&t))
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+        // Whether a route takes a body is a property of its SIGNATURE, not a
+        // list someone maintains: `body_type_after` finds the `Json<T>`
+        // extractor or does not. The hand-kept list this replaced was already
+        // wrong about four routes — publish, resume, activate and compile all
+        // take their whole input from the path, and were being withheld from
+        // the tool list for a body they never had.
+        let non_json = can_have_body && NON_JSON_BODIES.contains(&path.as_str());
+        let takes_body = !body.is_empty() || non_json;
+        let needs_body = non_json;
 
         out.push(Tool {
             name: tool_name(&method, &path),
@@ -151,6 +175,7 @@ fn derive() -> Vec<Tool> {
             summary,
             params,
             needs_body,
+            body: if takes_body { body } else { String::new() },
         });
     }
     out.sort_by(|a, b| (&a.method, &a.path).cmp(&(&b.method, &b.path)));
@@ -158,16 +183,143 @@ fn derive() -> Vec<Tool> {
     out
 }
 
-/// Mutations whose whole input is their path — no body to describe, so they
-/// are fully derivable and ship as callable tools.
-const BODYLESS_MUTATIONS: [&str; 6] = [
-    "/v1/orgs/{org}/suspend",
-    "/v1/orgs/{org}/resume",
-    "/v1/orgs/{org}/jobs/{job_id}/cancel",
-    "/v1/orgs/{org}/jobs/{job_id}/retry",
-    "/v1/orgs/{org}/config/versions/{version}/activate",
-    "/v1/orgs/{org}/staged/apply",
-];
+/// One field of a request-body struct.
+struct Field {
+    name: String,
+    ty: String,
+    /// `#[serde(default)]` — absent is legal, so the field is not required.
+    optional: bool,
+}
+
+/// Parse `struct <name> { … }` out of the server source.
+///
+/// Returns `None` for a type that is not a local struct — `serde_json::Value`
+/// is the real case, a passthrough body with no shape to describe.
+fn struct_fields(name: &str) -> Option<Vec<Field>> {
+    let header = format!("\nstruct {name} {{\n");
+    let start = SERVER_SRC.find(&header)? + header.len();
+    let end = start + SERVER_SRC[start..].find("\n}\n")?;
+    let mut fields = Vec::new();
+    let mut defaulted = false;
+    for raw in SERVER_SRC[start..end].lines() {
+        let line = raw.trim();
+        if line.starts_with("///") || line.starts_with("//") || line.is_empty() {
+            continue;
+        }
+        if line.starts_with("#[") {
+            // `#[serde(default)]` and `#[serde(default, …)]` both mean the
+            // field may be absent. Anything else on the attribute is about
+            // serialisation, not presence.
+            defaulted |= line.contains("default");
+            continue;
+        }
+        let (field, ty) = line.trim_end_matches(',').split_once(": ")?;
+        fields.push(Field {
+            name: field.trim().trim_start_matches("pub ").to_string(),
+            ty: ty.trim().to_string(),
+            optional: defaulted || ty.trim().starts_with("Option<"),
+        });
+        defaulted = false;
+    }
+    Some(fields)
+}
+
+/// A Rust field type as JSON Schema.
+///
+/// Returns `None` for a type this mapping does not know. That is a HARD
+/// FAILURE at the call site rather than a permissive `{}`: a schema that says
+/// "anything" for a field the server will reject is worse than no tool, since
+/// the model calls it confidently and reads a 422 it cannot act on.
+fn type_schema(ty: &str) -> Option<String> {
+    let inner = ty
+        .strip_prefix("Option<")
+        .and_then(|t| t.strip_suffix('>'))
+        .unwrap_or(ty);
+    Some(match inner {
+        "String" => "{\"type\":\"string\"}".to_string(),
+        "bool" => "{\"type\":\"boolean\"}".to_string(),
+        "i64" | "usize" | "u32" | "u64" => "{\"type\":\"integer\"}".to_string(),
+        "f64" => "{\"type\":\"number\"}".to_string(),
+        // A passthrough body or free-form map: no shape to assert, and
+        // asserting one would be a guess.
+        "Value" | "serde_json::Value" => "{}".to_string(),
+        "std::collections::BTreeMap<String, String>" => {
+            "{\"type\":\"object\",\"additionalProperties\":{\"type\":\"string\"}}".to_string()
+        }
+        other => {
+            let item = other
+                .strip_prefix("Vec<")
+                .and_then(|t| t.strip_suffix('>'))?;
+            format!("{{\"type\":\"array\",\"items\":{}}}", type_schema(item)?)
+        }
+    })
+}
+
+/// The JSON Schema for a `Json<T>` request body.
+///
+/// Recurses one level into nested structs (`Vec<BulkResolveItem>`), because a
+/// tool that says "an array of something" is one the model cannot fill in.
+fn body_schema(type_name: &str) -> Option<String> {
+    let Some(fields) = struct_fields(type_name) else {
+        // Not a local struct — `Json<Value>`, a passthrough. Describable as
+        // "an object", which is honest rather than a guess.
+        return Some("{\"type\":\"object\"}".to_string());
+    };
+    let mut props: Vec<String> = Vec::new();
+    let mut required: Vec<String> = Vec::new();
+    for f in &fields {
+        // A nested local struct recurses rather than giving up: a tool that
+        // says "an array of something" is one the model cannot fill in.
+        let schema = if let Some(s) = type_schema(&f.ty) {
+            s
+        } else {
+            let item =
+                f.ty.trim_start_matches("Option<")
+                    .trim_end_matches('>')
+                    .strip_prefix("Vec<")
+                    .map(|t| t.trim_end_matches('>'))?;
+            format!("{{\"type\":\"array\",\"items\":{}}}", body_schema(item)?)
+        };
+        props.push(format!("\"{}\":{schema}", f.name));
+        if !f.optional {
+            required.push(format!("\"{}\"", f.name));
+        }
+    }
+    Some(format!(
+        "{{\"type\":\"object\",\"properties\":{{{}}},\"required\":[{}],\"additionalProperties\":false}}",
+        props.join(","),
+        required.join(",")
+    ))
+}
+
+/// The `Json<T>` body type a handler takes, if any.
+///
+/// Found by walking forward from the doc comment to the handler's signature —
+/// the same adjacency the summary relies on.
+fn body_type_after(lines: &[&str], doc_index: usize) -> Option<String> {
+    let mut seen_fn = false;
+    for line in lines.iter().skip(doc_index).take(40) {
+        if line.starts_with("async fn ") || line.starts_with("fn ") {
+            seen_fn = true;
+        }
+        if seen_fn && line.contains("Json<") {
+            let after = line.split("Json<").nth(1)?;
+            return Some(after.split('>').next()?.trim().to_string());
+        }
+        // The signature ends at its return type.
+        if seen_fn && line.contains("-> ") {
+            return None;
+        }
+    }
+    None
+}
+
+/// Routes whose body is not JSON and so cannot become tool arguments.
+///
+/// One entry, and it is honest rather than an oversight: the CSV upload takes
+/// `Multipart`, and a file is not something an MCP client can put in a tool
+/// call. The JSON push (`records:ingest`) is the route an agent should use.
+const NON_JSON_BODIES: [&str; 1] = ["/v1/orgs/{org}/imports"];
 
 /// `(`GET /v1/orgs/{org}/jobs`)` → `("GET", "/v1/orgs/{org}/jobs")`.
 fn method_and_path(block: &str) -> Option<(String, String)> {
@@ -203,12 +355,17 @@ fn manifest_json(tools: &[Tool]) -> String {
             out,
             "    {{ \"name\": \"{}\", \"method\": \"{}\", \"path\": \"{}\", \
              \"role\": \"{}\", \"params\": [{params}], \"needs_body\": {}, \
-             \"summary\": {} }}{}",
+             \"body\": {}, \"summary\": {} }}{}",
             t.name,
             t.method,
             t.path,
             t.role,
             t.needs_body,
+            if t.body.is_empty() {
+                "null".to_string()
+            } else {
+                t.body.clone()
+            },
             serde_json::to_string(&t.summary).expect("summary serialises"),
             if i + 1 == tools.len() { "" } else { "," }
         );

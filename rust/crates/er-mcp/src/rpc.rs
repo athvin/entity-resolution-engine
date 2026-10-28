@@ -4,7 +4,7 @@
 //! be tested without a socket in either direction — the dispatch below is a
 //! pure function of a request and a tool list.
 
-use crate::call::build_path;
+use crate::call::build_request;
 use crate::manifest::{self, Tool};
 
 /// The MCP revision this server speaks.
@@ -15,8 +15,14 @@ pub const PROTOCOL_VERSION: &str = "2024-11-05";
 pub enum Action {
     /// Answer with this JSON-RPC result.
     Reply(serde_json::Value),
-    /// Fetch `path` from er-server, then reply with the body.
-    Fetch { id: serde_json::Value, path: String },
+    /// Call er-server, then reply with the response body.
+    Fetch {
+        id: serde_json::Value,
+        method: String,
+        path: String,
+        /// The request body, for a route that takes one.
+        body: Option<serde_json::Value>,
+    },
     /// A notification: there is nothing to answer.
     Silent,
 }
@@ -105,8 +111,13 @@ pub fn dispatch(request: &serde_json::Value, tools: &[Tool]) -> Action {
                 .and_then(|p| p.get("arguments"))
                 .and_then(serde_json::Value::as_object)
                 .unwrap_or(&empty);
-            match build_path(tool, args) {
-                Ok(path) => Action::Fetch { id, path },
+            match build_request(tool, args) {
+                Ok(request) => Action::Fetch {
+                    id,
+                    method: tool.method.clone(),
+                    path: request.path,
+                    body: request.body,
+                },
                 Err(refused) => tool_error(&id, refused.to_string()),
             }
         }
@@ -128,6 +139,7 @@ mod tests {
                 role: "viewer".into(),
                 params: vec!["org".into()],
                 needs_body: false,
+                body: None,
                 summary: "the org's jobs".into(),
             },
             Tool {
@@ -137,6 +149,7 @@ mod tests {
                 role: "operator".into(),
                 params: vec!["org".into()],
                 needs_body: false,
+                body: None,
                 summary: "suspend the tenant".into(),
             },
         ]
@@ -201,7 +214,9 @@ mod tests {
             dispatch(&request, &tools()),
             Action::Fetch {
                 id: serde_json::json!(1),
-                path: "/v1/orgs/acme/jobs".into()
+                method: "GET".into(),
+                path: "/v1/orgs/acme/jobs".into(),
+                body: None,
             }
         );
     }

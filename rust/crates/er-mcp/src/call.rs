@@ -47,22 +47,39 @@ fn is_single_segment(value: &str) -> bool {
         && value != ".."
 }
 
-/// The path to request, with every `{param}` substituted.
+/// What a validated tool call becomes: a path, and a body when the route
+/// takes one.
+#[derive(Debug, PartialEq)]
+pub struct Request {
+    pub path: String,
+    /// Forwarded verbatim. This server does NOT validate the body against the
+    /// derived schema — er-server does, and it is the authority. Re-checking
+    /// here would mean two validators that can disagree, and the one a tenant
+    /// relies on is the server's.
+    pub body: Option<serde_json::Value>,
+}
+
+/// The request to make, with every `{param}` substituted.
 ///
 /// # Errors
 /// [`Refused`] when an argument is missing, unknown, or cannot be a segment.
-pub fn build_path(
+pub fn build_request(
     tool: &Tool,
     args: &serde_json::Map<String, serde_json::Value>,
-) -> Result<String, Refused> {
+) -> Result<Request, Refused> {
     // Unknown arguments are refused rather than ignored. Ignoring them would
-    // let a caller believe a filter was applied that never was — and the
-    // schema already says `additionalProperties: false`, so accepting one here
-    // would make this server disagree with the contract it published.
+    // let a caller believe a field was applied that never was — and the schema
+    // says `additionalProperties: false`, so accepting one here would make
+    // this server disagree with the contract it published.
+    let takes_body = tool.body.is_some();
     for key in args.keys() {
-        if !tool.params.contains(key) {
-            return Err(Refused::Unknown(key.clone()));
+        if tool.params.contains(key) {
+            continue;
         }
+        if takes_body && key == "body" {
+            continue;
+        }
+        return Err(Refused::Unknown(key.clone()));
     }
 
     let mut path = tool.path.clone();
@@ -79,7 +96,17 @@ pub fn build_path(
         }
         path = path.replace(&format!("{{{param}}}"), value);
     }
-    Ok(path)
+
+    let body = if takes_body {
+        Some(
+            args.get("body")
+                .ok_or_else(|| Refused::Missing("body".to_string()))?
+                .clone(),
+        )
+    } else {
+        None
+    };
+    Ok(Request { path, body })
 }
 
 #[cfg(test)]
@@ -94,6 +121,7 @@ mod tests {
             role: "viewer".into(),
             params: vec!["org".into(), "job_id".into()],
             needs_body: false,
+            body: None,
             summary: "one job".into(),
         }
     }
@@ -108,7 +136,9 @@ mod tests {
     #[test]
     fn substitutes_every_parameter() {
         assert_eq!(
-            build_path(&tool(), &args(&[("org", "acme"), ("job_id", "01jm")])).unwrap(),
+            build_request(&tool(), &args(&[("org", "acme"), ("job_id", "01jm")]))
+                .unwrap()
+                .path,
             "/v1/orgs/acme/jobs/01jm"
         );
     }
@@ -118,7 +148,7 @@ mod tests {
         // THE one that matters. The argument comes from an MCP client and the
         // request is sent with the tenant's API key, so a `/` is a way to
         // address a route the tool never named.
-        let err = build_path(
+        let err = build_request(
             &tool(),
             &args(&[("org", "acme/jobs/../../orgs"), ("job_id", "x")]),
         )
@@ -133,7 +163,7 @@ mod tests {
     fn refuses_traversal_segments() {
         for bad in ["..", ".", "", "a?b", "a#b", "a\\b"] {
             assert!(
-                build_path(&tool(), &args(&[("org", bad), ("job_id", "x")])).is_err(),
+                build_request(&tool(), &args(&[("org", bad), ("job_id", "x")])).is_err(),
                 "{bad:?} was accepted as a path segment"
             );
         }
@@ -141,7 +171,7 @@ mod tests {
 
     #[test]
     fn refuses_a_missing_parameter() {
-        let err = build_path(&tool(), &args(&[("org", "acme")])).unwrap_err();
+        let err = build_request(&tool(), &args(&[("org", "acme")])).unwrap_err();
         assert_eq!(err, Refused::Missing("job_id".into()));
     }
 
@@ -150,12 +180,79 @@ mod tests {
         // Ignoring it would let a caller believe a filter applied that never
         // did — and the published schema says `additionalProperties: false`,
         // so accepting one would make this server contradict its own contract.
-        let err = build_path(
+        let err = build_request(
             &tool(),
             &args(&[("org", "acme"), ("job_id", "x"), ("limit", "5")]),
         )
         .unwrap_err();
         assert_eq!(err, Refused::Unknown("limit".into()));
+    }
+
+    fn with_body() -> Tool {
+        Tool {
+            name: "post_orgs_by_org_tags".into(),
+            method: "POST".into(),
+            path: "/v1/orgs/{org}/tags".into(),
+            role: "steward".into(),
+            params: vec!["org".into()],
+            needs_body: false,
+            body: Some(serde_json::json!({
+                "type": "object",
+                "properties": { "name": { "type": "string" } },
+                "required": ["name"],
+            })),
+            summary: "add a label to the vocabulary".into(),
+        }
+    }
+
+    #[test]
+    fn a_body_rides_under_its_own_key() {
+        // Under `body`, not flattened alongside the path parameters. A body
+        // field named `org` — and `OrgIn` has one — would otherwise collide
+        // with the path parameter, and whichever won would silently not be
+        // what the caller meant.
+        let mut args = args(&[("org", "acme")]);
+        args.insert(
+            "body".to_string(),
+            serde_json::json!({ "name": "needs-review" }),
+        );
+        let request = build_request(&with_body(), &args).unwrap();
+        assert_eq!(request.path, "/v1/orgs/acme/tags");
+        assert_eq!(
+            request.body,
+            Some(serde_json::json!({ "name": "needs-review" }))
+        );
+    }
+
+    #[test]
+    fn a_route_that_takes_a_body_refuses_a_call_without_one() {
+        let err = build_request(&with_body(), &args(&[("org", "acme")])).unwrap_err();
+        assert_eq!(err, Refused::Missing("body".into()));
+    }
+
+    #[test]
+    fn a_route_that_takes_no_body_refuses_one() {
+        // `body` is only a legal argument where the manifest says the route
+        // has one. Accepting it elsewhere would let a caller attach a payload
+        // to a GET, which the published schema forbids.
+        let mut args = args(&[("org", "acme"), ("job_id", "x")]);
+        args.insert("body".to_string(), serde_json::json!({}));
+        assert_eq!(
+            build_request(&tool(), &args).unwrap_err(),
+            Refused::Unknown("body".into())
+        );
+    }
+
+    #[test]
+    fn a_path_parameter_is_still_guarded_when_a_body_is_present() {
+        // The body must not distract from the segment check — that guard is
+        // what stops an argument reaching a route the tool never named.
+        let mut args = args(&[("org", "a/b")]);
+        args.insert("body".to_string(), serde_json::json!({ "name": "x" }));
+        assert!(matches!(
+            build_request(&with_body(), &args).unwrap_err(),
+            Refused::NotASegment { .. }
+        ));
     }
 
     #[test]
@@ -167,8 +264,12 @@ mod tests {
             role: "public".into(),
             params: vec![],
             needs_body: false,
+            body: None,
             summary: "liveness".into(),
         };
-        assert_eq!(build_path(&listing, &args(&[])).unwrap(), "/healthz");
+        assert_eq!(
+            build_request(&listing, &args(&[])).unwrap().path,
+            "/healthz"
+        );
     }
 }

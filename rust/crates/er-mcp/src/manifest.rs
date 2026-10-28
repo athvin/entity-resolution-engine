@@ -24,6 +24,10 @@ pub struct Tool {
     pub params: Vec<String>,
     /// A request body this manifest cannot describe. See [`offered`].
     pub needs_body: bool,
+    /// The request body's JSON Schema, derived from the handler's `Json<T>`
+    /// (O10b). `None` when the route takes no body.
+    #[serde(default)]
+    pub body: Option<serde_json::Value>,
     pub summary: String,
 }
 
@@ -39,13 +43,15 @@ const TOOLS_JSON: &str = include_str!("../tools.json");
 ///
 /// # What is deliberately left out, and why
 ///
-/// **Routes that need a request body.** The manifest knows a handler's method,
-/// path and role because the doc comments say so; it does not know the shape
-/// of a `Json<CreateOrgIn>`. A tool whose input schema is "an object, good
-/// luck" is worse than no tool: an agent cannot call it correctly, and the
-/// failures land as 422s a human has to read. Those arrive when request
-/// schemas do — which is a real prerequisite, unlike the one O10 was filed
-/// with.
+/// **Routes whose body is not JSON.** Exactly one: the CSV upload takes
+/// `Multipart`, and a file is not something an MCP client can put in a tool
+/// call. The JSON push (`records:ingest`) is the route an agent should use,
+/// and it IS offered.
+///
+/// Every other body is described (O10b). The schema comes from the handler's
+/// `Json<T>` struct — field names, types, and which are optional — derived
+/// from the same source as everything else here, so it cannot claim a shape
+/// the server will reject.
 ///
 /// **Operator-role routes.** They are fleet-wide — create an org, list every
 /// org, send mail — and this server authenticates with a single org's API key.
@@ -81,8 +87,14 @@ pub fn is_read_only(tool: &Tool) -> bool {
 ///
 /// Every path parameter is required — a URL cannot be built without one — and
 /// nothing else is accepted. `additionalProperties: false` is load-bearing: it
-/// is what stops a caller smuggling a query parameter this server has not
-/// checked into a request it then signs with the org's credential.
+/// is what stops a caller smuggling a field this server has not checked into a
+/// request it then signs with the org's credential.
+///
+/// A route with a request body takes it under one `body` property carrying the
+/// derived schema, rather than flattening its fields alongside the path
+/// parameters. Flattening would be friendlier to read and wrong: a body field
+/// named `org` — and `OrgIn` has one — would collide with the path parameter,
+/// and whichever won would be silently not what the caller meant.
 #[must_use]
 pub fn input_schema(tool: &Tool) -> serde_json::Value {
     let mut properties = serde_json::Map::new();
@@ -95,10 +107,15 @@ pub fn input_schema(tool: &Tool) -> serde_json::Value {
             }),
         );
     }
+    let mut required: Vec<String> = tool.params.clone();
+    if let Some(body) = &tool.body {
+        properties.insert("body".to_string(), body.clone());
+        required.push("body".to_string());
+    }
     serde_json::json!({
         "type": "object",
         "properties": properties,
-        "required": tool.params,
+        "required": required,
         "additionalProperties": false,
     })
 }
@@ -154,6 +171,7 @@ mod tests {
             role: "steward".into(),
             params: vec!["org".into(), "job_id".into()],
             needs_body: false,
+            body: None,
             summary: "cancel a queued job".into(),
         };
         let text = description(&mutating);
@@ -174,6 +192,7 @@ mod tests {
             role: "viewer".into(),
             params: vec!["org".into()],
             needs_body: false,
+            body: None,
             summary: "the org's jobs".into(),
         };
         assert_eq!(description(&read), "the org's jobs");
@@ -189,6 +208,7 @@ mod tests {
             role: "viewer".into(),
             params: vec!["org".into(), "job_id".into()],
             needs_body: false,
+            body: None,
             summary: "one job".into(),
         };
         let schema = input_schema(&tool);
