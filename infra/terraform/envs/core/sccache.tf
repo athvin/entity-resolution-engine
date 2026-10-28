@@ -96,11 +96,24 @@ resource "aws_s3_bucket_lifecycle_configuration" "sccache" {
 # safe failure, and not a regression, since the Actions backend was equally
 # unavailable to them.
 #
-# UNVERIFIED, and worth checking before relying on it: sccache is expected to
-# treat a denied `PutObject` as a non-fatal cache-write miss and keep
-# compiling. If instead it fails the build, the read-only role is unusable and
-# the choice becomes one read+write role (accepting the poisoning surface) or
-# no cache on PRs at all. Probe this on one PR before deleting `cache-prune`.
+# The read-only half rests on sccache treating a denied cache write as a
+# non-fatal miss, so that was MEASURED rather than assumed: sccache 0.19.0
+# against a chmod-ed read-only cache directory, compiling a source change the
+# cache could not satisfy, exits 0 and reports
+#
+#   Cache write errors                    1
+#   Cache errors                          0
+#   Compilation failures                  0
+#
+# — the write failure is counted, not raised. One caveat kept deliberately: the
+# probe used the local-disk backend, not S3. sccache handles the failure at the
+# same backend-agnostic `storage.put()` boundary, so this is strong evidence
+# rather than proof that an S3 403 behaves identically. Watch
+# `Cache write errors` on the first PR run after the switch; a 0 there together
+# with a collapsed hit rate would mean the denial lands somewhere else.
+#
+# If that ever stops holding, the choice becomes one read+write role (accepting
+# the poisoning surface above) or no cache on PRs at all.
 
 locals {
   sccache_repo = "repo:athvin@273880343/entity-resolution-engine@1334344510"
