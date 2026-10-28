@@ -462,22 +462,16 @@ jobs:
           # comment there for why five writers on a 10 GB capped cache is what
           # kept producing cold runs.
           save-if: false
-      # Same SHA-pinned action the `coverage` job already uses for
-      # cargo-llvm-cov, rather than a hand-rolled download: it is vetted here
-      # already, dependabot tracks it, and it fetches a prebuilt binary instead
-      # of compiling one on every cold run.
-      - uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
-        with:
-          tool: cargo-nextest
       - name: Run the test suite
-        # nextest, not `cargo test`: cargo runs one test BINARY at a time and
-        # this workspace has ~147 of them, so the suite was serialised by
-        # construction. See the Makefile's `test` target for the measurement.
-        run: cargo nextest run --workspace
-      - name: Doctests
-        # nextest does not run doctests, so they are a separate step. Cheap
-        # (under a second here) but silently lost if this is dropped.
-        run: cargo test --workspace --doc
+        # `cargo test`, not nextest, and that is a measured choice. nextest runs
+        # each test in its own PROCESS; with 586 tests across ~147 binaries that
+        # each statically link bundled DuckDB, the spawn-and-load cost dominates
+        # whatever the extra overlap buys. A/B on this job, same cache state:
+        # cargo 357s vs nextest 453s. nextest wins where tests are few and slow
+        # (the Postgres tier), and loses where they are many and fast — which is
+        # this job. The way to parallelise here is FEWER, larger test binaries,
+        # so cargo's own in-binary threads do the overlapping.
+        run: cargo test --workspace
       - name: Build cost (sccache stats, target size)
         # See the `lint` job's copy for why. This job is also where the disk wall
         # shows up, so the `target` size is the number to watch here.
@@ -596,18 +590,16 @@ jobs:
           key: duckdb-extensions-${{ hashFiles('rust/Cargo.lock') }}
           restore-keys: |
             duckdb-extensions-
-      - uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
-        with:
-          tool: cargo-nextest
       - name: DuckLake + Postgres e2e
-        # nextest is load-bearing in this job, not a nicety. The 41 `pg_*`
-        # binaries used to run strictly in series — cargo runs one binary at a
-        # time and each file is one test — which was 170s of this job spent
-        # waiting. They now own a database each
-        # (er-server/tests/common/mod.rs), so they can overlap.
-        run: cargo nextest run -p dedupe-cli -p er-cli -p er-server -p er-entity-diff
+        # The 41 `pg_*` binaries still run one at a time here, because cargo
+        # runs one test binary at a time and each file holds one test. They now
+        # own a database each (er-server/tests/common/mod.rs), so the overlap is
+        # finally *safe* — but collecting it needs them in one binary, not a
+        # different runner. See the `test` job for why nextest is not that
+        # answer. Measured A/B on this job: 15.5m cargo vs 15.2m nextest.
+        run: cargo test -p dedupe-cli -p er-cli -p er-server -p er-entity-diff
       - name: Extension loading (splink_udfs) and the engine version label
-        run: cargo nextest run -p dedupe-core --test extensions
+        run: cargo test -p dedupe-core --test extensions
       - name: Build cost (sccache stats, target size)
         # See the `lint` job's copy for why.
         if: always()

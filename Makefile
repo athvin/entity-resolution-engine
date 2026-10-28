@@ -22,19 +22,15 @@ lint:
 doc:
 	cd rust && RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items
 
-# `cargo nextest`, not `cargo test`, because cargo runs one test BINARY at a
-# time and this workspace has ~147 of them. nextest runs every test in its own
-# process out of one global pool, which is what lets the Postgres tier overlap
-# (measured on er-server: 259s -> 34s, same 153 tests). It does NOT run
-# doctests, so those are a second step — cheap, under a second here, but
-# silently lost if the step is dropped.
-#
-# Install with: cargo install cargo-nextest --locked
+# Plain `cargo test`, matching CI. `cargo nextest` was measured here and is
+# SLOWER for this workspace: it runs each test in its own process, and with 586
+# tests across ~147 binaries that each statically link bundled DuckDB, the
+# spawn-and-load cost beats the extra overlap (A/B on CI's `test` job, same
+# cache state: cargo 357s vs nextest 453s). It does win on the Postgres tier,
+# where tests are few and slow — but the way to collect that here is fewer,
+# larger test binaries, not a different runner. See rust.yml's `test` job.
 test:
-	@command -v cargo-nextest >/dev/null || { \
-	  echo "cargo-nextest is required: cargo install cargo-nextest --locked"; exit 1; }
-	cd rust && cargo nextest run --workspace
-	cd rust && cargo test --workspace --doc
+	cd rust && cargo test --workspace
 
 # The entity-framework gate: regenerate every artifact from entities/*.yaml and
 # fail if any committed file is stale (run `er-entity gen` to fix), then plan every
@@ -61,14 +57,9 @@ check: fmt lint doc entities-check skills-check test
 # Postgres (see rust.yml's ducklake-e2e job for the service definition).
 # Point ER_TEST_PG_DSN at your Postgres, e.g.
 #   make check-e2e ER_TEST_PG_DSN='host=localhost port=5433 user=er password=er dbname=er'
-# nextest here is load-bearing rather than a nicety: the Postgres tests own a
-# database each (tests/common/mod.rs), and overlapping them is the whole reason
-# that isolation exists.
 check-e2e:
-	@command -v cargo-nextest >/dev/null || { \
-	  echo "cargo-nextest is required: cargo install cargo-nextest --locked"; exit 1; }
 	cd rust && DEDUPE_E2E_DUCKLAKE=1 DEDUPE_E2E_EXTENSIONS=1 ER_TEST_PG_DSN="$(ER_TEST_PG_DSN)" \
-	  cargo nextest run -p dedupe-cli -p er-cli -p er-server -p er-entity-diff
+	  cargo test -p dedupe-cli -p er-cli -p er-server -p er-entity-diff
 
 # --- agent tooling: repo-local Symposium (part of the local dev install) ---
 #
