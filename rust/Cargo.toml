@@ -68,6 +68,29 @@ needless_pass_by_value = "allow"
 # `bundled`, note — not `bundled-cmake`, and without the `parquet`/`json`
 # features, so only `core_functions` is statically linked and everything else
 # is an extension (see dedupe_core::session::BAKED_EXTENSIONS).
+#
+# MOVING THIS PIN IS A MIGRATION, NOT A BUMP. The crate version encodes the
+# bundled engine — `1.10506.1` is DuckDB 1.5.6, and the next release,
+# `1.20000.0`, is DuckDB 2.0.0. Dependabot groups it as minor/patch because the
+# *crate* version stays `1.x`, so the PR arrives looking like a routine bump
+# (that is PR #320, deliberately left open). Four things have to move together:
+#
+#   1. `arrow` below, 58 -> 60. duckdb 1.20000.0 pulls arrow 60, and with the
+#      workspace still on 58 `er-entities` fails to compile with 56 x E0308 —
+#      `RecordBatch` exists twice in the graph. `arrow`'s major is ignored in
+#      .github/dependabot.yml precisely because it must equal duckdb's, and that
+#      comment names this release as the unblocker. er-sql-check is NOT a
+#      blocker: it already tolerates a separate arrow major via datafusion 52
+#      because it compares type-name strings (see its Cargo.toml).
+#   2. duckdb-rs API churn. 1.20000.0 merged the C-API-V2 branch: callers must
+#      now validate Arrow FFI imports, `next_chunk`'s signature inverted,
+#      `libduckdb-sys` no longer re-exports arrow-array, and the libduckdb
+#      download client moved behind a `download-lib` feature.
+#   3. Regenerate the golden fixtures on the new engine. The first paragraph
+#      above is the reason: the baselines were produced by DuckDB 1.5.6, so they
+#      are only an oracle for 1.5.6.
+#   4. Rebake the extension directory. `v1.5.6/` in the path above becomes the
+#      new engine version, and every baked extension must exist for it.
 duckdb = { version = "=1.10506.1", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
