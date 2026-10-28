@@ -462,15 +462,13 @@ jobs:
           # comment there for why five writers on a 10 GB capped cache is what
           # kept producing cold runs.
           save-if: false
-      - name: Install cargo-nextest
-        # Version-pinned download rather than `cargo install` (which would
-        # compile it on every cold run) and rather than a third-party action
-        # (every `uses:` in this workflow is SHA-pinned; see the disk-reclaim
-        # step's note). Bump the version here and in `ducklake-e2e` together.
-        run: |
-          curl -LsSf https://get.nexte.st/0.9.138/linux \
-            | tar zxf - -C "${CARGO_HOME:-$HOME/.cargo}/bin"
-          cargo nextest --version
+      # Same SHA-pinned action the `coverage` job already uses for
+      # cargo-llvm-cov, rather than a hand-rolled download: it is vetted here
+      # already, dependabot tracks it, and it fetches a prebuilt binary instead
+      # of compiling one on every cold run.
+      - uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
+        with:
+          tool: cargo-nextest
       - name: Run the test suite
         # nextest, not `cargo test`: cargo runs one test BINARY at a time and
         # this workspace has ~147 of them, so the suite was serialised by
@@ -598,12 +596,9 @@ jobs:
           key: duckdb-extensions-${{ hashFiles('rust/Cargo.lock') }}
           restore-keys: |
             duckdb-extensions-
-      - name: Install cargo-nextest
-        # See the `test` job's copy. Keep the pinned version in step with it.
-        run: |
-          curl -LsSf https://get.nexte.st/0.9.138/linux \
-            | tar zxf - -C "${CARGO_HOME:-$HOME/.cargo}/bin"
-          cargo nextest --version
+      - uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
+        with:
+          tool: cargo-nextest
       - name: DuckLake + Postgres e2e
         # nextest is load-bearing in this job, not a nicety. The 41 `pg_*`
         # binaries used to run strictly in series — cargo runs one binary at a
