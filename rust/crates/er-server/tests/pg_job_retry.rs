@@ -19,6 +19,8 @@
 
 use er_server::pg::{self, FailureClass};
 
+mod common;
+
 #[test]
 fn failures_are_classified_from_the_messages_this_codebase_produces() {
     // No database needed: this is the taxonomy, and it is matched against the
@@ -95,17 +97,11 @@ fn failures_are_classified_from_the_messages_this_codebase_produces() {
 
 #[tokio::test]
 async fn a_transient_failure_retries_with_backoff_and_a_permanent_one_does_not() {
-    let Ok(dsn) = std::env::var("ER_TEST_PG_DSN") else {
-        eprintln!("skipping Postgres job retry (set ER_TEST_PG_DSN to run)");
+    let Some(db) = common::fresh_db("job_retry").await else {
         return;
     };
+    let dsn = db.dsn().to_string();
     let mut client = pg::connect(&dsn).await.unwrap();
-    client
-        .batch_execute(
-            "DROP TABLE IF EXISTS staged_steward_actions, audit_log, schedules, config_versions, api_keys, jobs, orgs CASCADE;",
-        )
-        .await
-        .unwrap();
     pg::ensure_schema(&mut client).await.unwrap();
     pg::ensure_org(&client, "acme", "/tmp/acme.yaml")
         .await

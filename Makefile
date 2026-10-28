@@ -22,6 +22,13 @@ lint:
 doc:
 	cd rust && RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items
 
+# Plain `cargo test`, matching CI. `cargo nextest` was measured here and is
+# SLOWER for this workspace: it runs each test in its own process, and with 586
+# tests across ~147 binaries that each statically link bundled DuckDB, the
+# spawn-and-load cost beats the extra overlap (A/B on CI's `test` job, same
+# cache state: cargo 357s vs nextest 453s). It does win on the Postgres tier,
+# where tests are few and slow — but the way to collect that here is fewer,
+# larger test binaries, not a different runner. See rust.yml's `test` job.
 test:
 	cd rust && cargo test --workspace
 

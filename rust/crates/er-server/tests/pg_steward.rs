@@ -11,6 +11,8 @@ use axum::http::{Request, StatusCode, header};
 use er_server::{AppState, app, pg};
 use tower::ServiceExt;
 
+mod common;
+
 fn req(method: &str, uri: &str, bearer: &str, body: Body) -> Request<Body> {
     Request::builder()
         .method(method)
@@ -45,18 +47,11 @@ async fn pending(app: &axum::Router) -> i64 {
 
 #[tokio::test]
 async fn steward_actions_stage_and_guard() {
-    let Ok(dsn) = std::env::var("ER_TEST_PG_DSN") else {
-        eprintln!("skipping steward e2e (set ER_TEST_PG_DSN to run)");
+    let Some(db) = common::fresh_db("steward").await else {
         return;
     };
+    let dsn = db.dsn().to_string();
     let mut client = pg::connect(&dsn).await.unwrap();
-    client
-        .batch_execute(
-            "DROP TABLE IF EXISTS staged_steward_actions, audit_log, schedules, config_versions, \
-             api_keys, jobs, orgs CASCADE;",
-        )
-        .await
-        .unwrap();
     pg::ensure_schema(&mut client).await.unwrap();
     pg::ensure_org(&client, "acme", "/configs/acme.yaml")
         .await

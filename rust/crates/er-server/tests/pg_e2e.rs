@@ -6,6 +6,8 @@
 
 use er_server::pg;
 
+mod common;
+
 /// The org's id for a test org name (child wrappers key on org_id).
 async fn oid(client: &tokio_postgres::Client, name: &str) -> String {
     er_server::pg::org_id_by_name(client, name)
@@ -16,19 +18,13 @@ async fn oid(client: &tokio_postgres::Client, name: &str) -> String {
 
 #[tokio::test]
 async fn queue_lifecycle_over_postgres() {
-    let Ok(dsn) = std::env::var("ER_TEST_PG_DSN") else {
-        eprintln!("skipping Postgres queue e2e (set ER_TEST_PG_DSN to run)");
+    let Some(db) = common::fresh_db("e2e").await else {
         return;
     };
+    let dsn = db.dsn().to_string();
     let mut client = pg::connect(&dsn).await.unwrap();
 
     // Clean slate (api_keys + jobs both reference orgs), then apply the schema.
-    client
-        .batch_execute(
-            "DROP TABLE IF EXISTS staged_steward_actions, audit_log, schedules, config_versions, api_keys, jobs, orgs CASCADE;",
-        )
-        .await
-        .unwrap();
     pg::ensure_schema(&mut client).await.unwrap();
     pg::ensure_org(&client, "acme", "/configs/acme.yaml")
         .await

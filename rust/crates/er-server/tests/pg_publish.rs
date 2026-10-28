@@ -11,6 +11,8 @@ use axum::http::{Request, StatusCode, header};
 use er_server::{AppState, app, pg};
 use tower::ServiceExt;
 
+mod common;
+
 const DEFAULT_YAML: &str = include_str!("../../er-config/tests/fixtures/default.yaml");
 
 fn req(method: &str, uri: &str, bearer: &str, body: Body) -> Request<Body> {
@@ -64,18 +66,12 @@ async fn publish(app: &axum::Router, bearer: &str, version: i64) -> axum::respon
 
 #[tokio::test]
 async fn config_publish_tiers_and_authz() {
-    let Ok(dsn) = std::env::var("ER_TEST_PG_DSN") else {
-        eprintln!("skipping Postgres publish e2e (set ER_TEST_PG_DSN to run)");
+    let Some(db) = common::fresh_db("publish").await else {
         return;
     };
+    let dsn = db.dsn().to_string();
 
     let mut client = pg::connect(&dsn).await.unwrap();
-    client
-        .batch_execute(
-            "DROP TABLE IF EXISTS staged_steward_actions, audit_log, schedules, config_versions, api_keys, jobs, orgs CASCADE;",
-        )
-        .await
-        .unwrap();
     pg::ensure_schema(&mut client).await.unwrap();
 
     let app = app(AppState::with_pg("op-secret".to_string(), dsn.clone()));

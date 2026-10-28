@@ -27,6 +27,8 @@ use axum::http::{Request, StatusCode, header};
 use er_server::{AppState, app, pg, webhook};
 use tower::ServiceExt;
 
+mod common;
+
 /// The server's own source, so the catalog can be checked against the code that
 /// emits rather than against a comment about it.
 const SERVER_SRC: &str = include_str!("../src/lib.rs");
@@ -121,17 +123,11 @@ fn every_catalogued_event_has_a_state_that_reaches_the_emitter() {
 
 #[tokio::test]
 async fn registration_refuses_an_event_nothing_emits() {
-    let Ok(dsn) = std::env::var("ER_TEST_PG_DSN") else {
-        eprintln!("skipping Postgres webhook catalog (set ER_TEST_PG_DSN to run)");
+    let Some(db) = common::fresh_db("webhook_catalog").await else {
         return;
     };
+    let dsn = db.dsn().to_string();
     let mut client = pg::connect(&dsn).await.unwrap();
-    client
-        .batch_execute(
-            "DROP TABLE IF EXISTS webhook_deliveries, webhooks, staged_steward_actions, audit_log, schedules, config_versions, api_keys, jobs, orgs CASCADE;",
-        )
-        .await
-        .unwrap();
     pg::ensure_schema(&mut client).await.unwrap();
 
     let app = app(AppState::with_pg("op-secret".to_string(), dsn.clone()));

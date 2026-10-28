@@ -462,7 +462,16 @@ jobs:
           # comment there for why five writers on a 10 GB capped cache is what
           # kept producing cold runs.
           save-if: false
-      - run: cargo test --workspace
+      - name: Run the test suite
+        # `cargo test`, not nextest, and that is a measured choice. nextest runs
+        # each test in its own PROCESS; with 586 tests across ~147 binaries that
+        # each statically link bundled DuckDB, the spawn-and-load cost dominates
+        # whatever the extra overlap buys. A/B on this job, same cache state:
+        # cargo 357s vs nextest 453s. nextest wins where tests are few and slow
+        # (the Postgres tier), and loses where they are many and fast — which is
+        # this job. The way to parallelise here is FEWER, larger test binaries,
+        # so cargo's own in-binary threads do the overlapping.
+        run: cargo test --workspace
       - name: Build cost (sccache stats, target size)
         # See the `lint` job's copy for why. This job is also where the disk wall
         # shows up, so the `target` size is the number to watch here.
@@ -581,7 +590,14 @@ jobs:
           key: duckdb-extensions-${{ hashFiles('rust/Cargo.lock') }}
           restore-keys: |
             duckdb-extensions-
-      - run: cargo test -p dedupe-cli -p er-cli -p er-server -p er-entity-diff
+      - name: DuckLake + Postgres e2e
+        # The 41 `pg_*` binaries still run one at a time here, because cargo
+        # runs one test binary at a time and each file holds one test. They now
+        # own a database each (er-server/tests/common/mod.rs), so the overlap is
+        # finally *safe* — but collecting it needs them in one binary, not a
+        # different runner. See the `test` job for why nextest is not that
+        # answer. Measured A/B on this job: 15.5m cargo vs 15.2m nextest.
+        run: cargo test -p dedupe-cli -p er-cli -p er-server -p er-entity-diff
       - name: Extension loading (splink_udfs) and the engine version label
         run: cargo test -p dedupe-core --test extensions
       - name: Build cost (sccache stats, target size)

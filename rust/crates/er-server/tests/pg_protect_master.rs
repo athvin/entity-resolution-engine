@@ -15,6 +15,8 @@ use axum::http::{Request, StatusCode, header};
 use er_server::{AppState, app, dispatcher, pg};
 use tower::ServiceExt;
 
+mod common;
+
 /// The org's id for a test org name (child wrappers key on org_id).
 async fn oid(client: &tokio_postgres::Client, name: &str) -> String {
     er_server::pg::org_id_by_name(client, name)
@@ -193,10 +195,10 @@ async fn plan_master(app: &axum::Router, entity_id: &str) -> Option<String> {
 
 #[tokio::test]
 async fn protect_pins_master_and_retract_restores_policy() {
-    let Ok(dsn) = std::env::var("ER_TEST_PG_DSN") else {
-        eprintln!("skipping protect e2e (set ER_TEST_PG_DSN to run)");
+    let Some(db) = common::fresh_db("protect_master").await else {
         return;
     };
+    let dsn = db.dsn().to_string();
     if std::env::var("DEDUPE_E2E_DUCKLAKE").as_deref() != Ok("1") {
         eprintln!("skipping protect e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
         return;
@@ -212,13 +214,6 @@ async fn protect_pins_master_and_retract_restores_policy() {
     populate_lake(&catalog, &data_path);
 
     let mut client = pg::connect(&dsn).await.unwrap();
-    client
-        .batch_execute(
-            "DROP TABLE IF EXISTS staged_steward_actions, audit_log, schedules, config_versions, \
-             api_keys, jobs, orgs CASCADE;",
-        )
-        .await
-        .unwrap();
     pg::ensure_schema(&mut client).await.unwrap();
     let app = app(AppState::with_pg("op-secret".to_string(), dsn.clone()));
     let env = serde_json::json!({

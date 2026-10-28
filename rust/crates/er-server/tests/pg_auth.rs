@@ -10,6 +10,8 @@ use axum::http::{Request, StatusCode, header};
 use er_server::{AppState, app, pg};
 use tower::ServiceExt;
 
+mod common;
+
 fn req(method: &str, uri: &str, bearer: &str, body: Body) -> Request<Body> {
     Request::builder()
         .method(method)
@@ -29,19 +31,13 @@ async fn json_body(resp: axum::response::Response) -> serde_json::Value {
 
 #[tokio::test]
 async fn api_key_auth_role_scope_and_revocation() {
-    let Ok(dsn) = std::env::var("ER_TEST_PG_DSN") else {
-        eprintln!("skipping Postgres auth e2e (set ER_TEST_PG_DSN to run)");
+    let Some(db) = common::fresh_db("auth").await else {
         return;
     };
+    let dsn = db.dsn().to_string();
 
     // Clean slate (api_keys/jobs reference orgs) + schema + the FK org.
     let mut client = pg::connect(&dsn).await.unwrap();
-    client
-        .batch_execute(
-            "DROP TABLE IF EXISTS staged_steward_actions, audit_log, schedules, config_versions, api_keys, jobs, orgs CASCADE;",
-        )
-        .await
-        .unwrap();
     pg::ensure_schema(&mut client).await.unwrap();
     pg::ensure_org(&client, "acme", "/configs/acme.yaml")
         .await
