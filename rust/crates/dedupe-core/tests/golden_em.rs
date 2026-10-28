@@ -2,7 +2,7 @@
 //! per-iteration m/lambda history, the deactivated-comparison set, and the
 //! final median-combined model after two sessions.
 
-mod common;
+use crate::common;
 
 use std::collections::BTreeMap;
 

@@ -18,7 +18,7 @@ use axum::http::{Request, StatusCode, header};
 use er_server::{AppState, app, pg};
 use tower::ServiceExt;
 
-mod common;
+use crate::common;
 
 fn req(method: &str, uri: &str, bearer: &str, body: Body) -> Request<Body> {
     Request::builder()

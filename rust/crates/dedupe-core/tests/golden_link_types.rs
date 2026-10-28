@@ -3,7 +3,7 @@
 //! cluster) from the trained golden model, and full training-from-scratch
 //! (prior + u + EM) reproducing the golden trained parameters.
 
-mod common;
+use crate::common;
 
 use common::{assert_table_matches_parquet, golden_dir, load_golden_json, load_golden_text};
 use dedupe_core::Settings;

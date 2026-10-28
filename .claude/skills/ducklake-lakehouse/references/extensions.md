@@ -109,7 +109,7 @@ lag a fresh DuckDB release.
 Loading a real extension needs a network `INSTALL`, so those tests are gated:
 
 ```sh
-DEDUPE_E2E_EXTENSIONS=1 cargo test -p dedupe-core --test extensions
+DEDUPE_E2E_EXTENSIONS=1 cargo test -p dedupe-core --test main extensions
 ```
 
 CI runs this tier in the DuckLake e2e job, not in the default `test` job. The

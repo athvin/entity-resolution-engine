@@ -3,7 +3,7 @@
 //! as the multiset of per-entity `{event_type: count}` profiles, so Rust's
 //! minted ids and the golden's `E*` labels drop out.
 
-mod common;
+use crate::common;
 
 use std::collections::BTreeMap;
 

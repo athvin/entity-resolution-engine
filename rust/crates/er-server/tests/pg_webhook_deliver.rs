@@ -33,7 +33,7 @@ use axum::routing::post;
 use er_server::urlguard::Egress;
 use er_server::{dispatch_pg, pg, webhook};
 
-mod common;
+use crate::common;
 
 /// The org's id for a test org name (child wrappers key on org_id).
 async fn oid(client: &tokio_postgres::Client, name: &str) -> String {

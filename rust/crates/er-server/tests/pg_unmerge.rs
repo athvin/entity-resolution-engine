@@ -17,7 +17,7 @@ use axum::http::{Request, StatusCode, header};
 use er_server::{AppState, app, pg};
 use tower::ServiceExt;
 
-mod common;
+use crate::common;
 
 /// The org's id for a test org name (child wrappers key on org_id).
 async fn oid(client: &tokio_postgres::Client, name: &str) -> String {

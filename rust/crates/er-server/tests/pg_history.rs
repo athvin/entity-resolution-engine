@@ -8,7 +8,7 @@
 
 use er_server::pg;
 
-mod common;
+use crate::common;
 
 async fn history_rows(
     client: &tokio_postgres::Client,

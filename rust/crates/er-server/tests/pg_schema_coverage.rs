@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 
 use er_server::pg;
 
-mod common;
+use crate::common;
 
 /// The table names the generated baseline creates, parsed from its own DDL.
 /// Every occurrence per entry counts — a baseline entry may carry companion

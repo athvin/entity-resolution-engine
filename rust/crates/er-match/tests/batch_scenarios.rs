@@ -16,7 +16,7 @@
 //! `always`-assertion merges + assertion retraction (assertions_scenario) and
 //! tombstone deletion (deletion_scenario) are the remaining assertion chunk.
 
-mod common;
+use crate::common;
 
 use std::collections::{BTreeMap, BTreeSet};
 

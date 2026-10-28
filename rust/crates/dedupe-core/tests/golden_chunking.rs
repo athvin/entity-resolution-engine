@@ -3,7 +3,7 @@
 //! unchunked path already matches), so chunked == unchunked == golden — proving
 //! `num_chunks` is a pure memory/scaling lever with no effect on the result.
 
-mod common;
+use crate::common;
 
 use std::path::{Path, PathBuf};
 

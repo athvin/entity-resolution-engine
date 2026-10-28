@@ -27,7 +27,7 @@ use axum::http::{Request, StatusCode, header};
 use er_server::{AppState, app, pg, webhook};
 use tower::ServiceExt;
 
-mod common;
+use crate::common;
 
 /// The server's own source, so the catalog can be checked against the code that
 /// emits rather than against a comment about it.

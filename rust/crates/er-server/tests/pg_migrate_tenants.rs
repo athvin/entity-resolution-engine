@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use er_server::{dispatcher, pg, schema};
 
-mod common;
+use crate::common;
 
 async fn oid(client: &tokio_postgres::Client, name: &str) -> String {
     pg::org_id_by_name(client, name)

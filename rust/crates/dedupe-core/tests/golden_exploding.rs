@@ -6,7 +6,7 @@
 //! the `min(match_key)` two-stage dedup that collapses cross-rule duplicate
 //! pairs.
 
-mod common;
+use crate::common;
 
 use std::path::{Path, PathBuf};
 

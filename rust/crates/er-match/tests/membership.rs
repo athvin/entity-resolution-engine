@@ -9,7 +9,7 @@
 //! NOT to webforms:W006, because crm:C006-webforms:W006 is the single gray-band
 //! pair (0.857 < auto_merge), so the shared household stays two entities.
 
-mod common;
+use crate::common;
 
 use std::collections::{BTreeMap, BTreeSet};
 

@@ -11,7 +11,7 @@ use axum::http::{Request, StatusCode, header};
 use er_server::{AppState, app, pg};
 use tower::ServiceExt;
 
-mod common;
+use crate::common;
 
 /// A full, structurally-valid engine config (the er-config reference fixture).
 const DEFAULT_YAML: &str = include_str!("../../er-config/tests/fixtures/default.yaml");
