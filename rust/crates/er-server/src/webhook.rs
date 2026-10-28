@@ -5,7 +5,9 @@
 //! after a job settles — a standalone outbox-draining daemon (retries,
 //! backoff) is the infra-bound piece and is not built here.
 
-use hmac::{Hmac, Mac};
+// `KeyInit` is explicit since hmac 0.13 (the digest-0.11 line): `new_from_slice`
+// moved out of what `Mac` alone brings into scope.
+use hmac::{Hmac, KeyInit, Mac};
 use serde_json::{Value, json};
 use sha2::Sha256;
 
