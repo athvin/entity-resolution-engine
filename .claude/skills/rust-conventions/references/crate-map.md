@@ -65,7 +65,7 @@ Pinned versions that carry a reason (from `rust/Cargo.toml`):
 ```toml
 edition = "2024"
 rust-version = "1.88"
-duckdb = { version = "=1.10506.1", features = ["bundled"] }
+duckdb = { version = "=1.20000.0", features = ["bundled"] }
 sqlparser = { version = "0.63", features = ["visitor"] }
 thiserror = "2"
 anyhow = "1"
@@ -75,7 +75,7 @@ tower = "0.5"
 tokio-postgres = { version = "0.7", features = ["with-serde_json-1"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 tokio-postgres-rustls = "0.14"
-arrow = "58"
+arrow = "60"
 utoipa = { version = "6", features = ["chrono"] }
 ```
 <!-- END GENERATED: crate-map -->
