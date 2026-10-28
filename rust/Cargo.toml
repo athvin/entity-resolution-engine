@@ -117,9 +117,17 @@ thiserror = "2"
 regex = "1"
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
-sha2 = "0.10"
+# sha2 and hmac MOVE TOGETHER, and dependabot will keep proposing them
+# separately. Both are RustCrypto crates built on `digest`: sha2 0.11 and
+# hmac 0.13 are the digest-0.11 line, sha2 0.10 and hmac 0.12 were digest-0.10.
+# Mismatch them and the failure is a trait bound, not a version conflict —
+# `Sha256: hmac::digest::core_api::CoreProxy is not satisfied`, because the
+# `Sha256` hmac wants is the one from *its* digest. That is what closed PRs #341
+# (hmac alone) and #342 (sha2 alone); the pair is listed in
+# .github/dependabot.yml's ignore block for the same reason `arrow` is.
+sha2 = "0.11"
 # Webhook payload signatures (HMAC-SHA256 over the delivered body).
-hmac = "0.12"
+hmac = "0.13"
 hex = "0.4"
 # Outbound HTTP for webhook delivery (rustls, no OpenSSL). json feature off —
 # bodies are pre-serialized so the raw-byte signature matches what's sent.

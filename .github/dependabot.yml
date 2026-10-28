@@ -60,9 +60,11 @@ updates:
         patterns: ["*"]
         update-types: ["minor", "patch"]
     ignore:
-      # Three crates whose major is not ours to choose: each must equal the major
-      # an EXTERNAL dependency already resolved, or the same type arrives under
-      # two crate versions and stops being the same type.
+      # Five crates whose major is not ours to choose alone. Three must equal the
+      # major an EXTERNAL dependency already resolved; two must equal EACH OTHER.
+      # Either way the failure is a trait or type mismatch rather than a version
+      # conflict, because the same name arrives under two crate versions and
+      # stops being the same thing.
       #
       # `arrow` must match whatever `duckdb` pulls, because Arrow values cross
       # that boundary. Held at 58 while duckdb was on 1.10506.1, because arrow
@@ -85,4 +87,18 @@ updates:
       - dependency-name: "datafusion-common"
         update-types: ["version-update:semver-major"]
       - dependency-name: "datafusion-expr"
+        update-types: ["version-update:semver-major"]
+      # `sha2` and `hmac` must equal EACH OTHER, not an external: both are
+      # RustCrypto crates over `digest`, and hmac's `Sha256` is the one from
+      # *its* digest. sha2 0.11 + hmac 0.13 are the digest-0.11 line; sha2 0.10
+      # + hmac 0.12 were digest-0.10. Dependabot proposed them one at a time and
+      # each failed alone with
+      # `Sha256: hmac::digest::core_api::CoreProxy is not satisfied`
+      # (closed PRs #341, #342). Moved together by hand instead; the pair also
+      # needed `use hmac::KeyInit` added, since `new_from_slice` no longer comes
+      # in via `Mac`. Minor/patch still flow — only the major is held, because
+      # that is where the digest line moves.
+      - dependency-name: "sha2"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "hmac"
         update-types: ["version-update:semver-major"]
