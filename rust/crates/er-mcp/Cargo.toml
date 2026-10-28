@@ -1,0 +1,24 @@
+[package]
+name = "er-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "er-mcp"
+path = "src/main.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+# The same guarded client er-server's egress paths use. Not a bare reqwest:
+# `tests/egress_guard.rs` fails the build if any file under er-server builds a
+# default one, and an MCP server reaching an operator-supplied base URL has the
+# same SSRF surface a webhook does.
+reqwest = { workspace = true }
+tokio = { workspace = true }
+
+[lints]
+workspace = true

@@ -26,7 +26,7 @@ Bumping `arrow` or `datafusion` alone can never go green; dependabot is
 configured to leave them alone and the unblocker is upstream.
 
 <!-- BEGIN GENERATED: crate-map -->
-**28 crates.** The cargo workspace root is `rust/`, not the repo root.
+**29 crates.** The cargo workspace root is `rust/`, not the repo root.
 
 | Crate | Purpose |
 |---|---|
@@ -49,6 +49,7 @@ configured to leave them alone and the unblocker is upstream.
 | `er-ids` | Identity primitives — record keys, pair canonicalisation, ULID minting, redirect resolution (Rust port of `src/er/entities/ids.py`) |
 | `er-ingest` | The ingest stage (port of `src/er/ingest/*`, DesignDoc.md S4.1) |
 | `er-match` | The matching stage (port of `src/er/matching/*`, DesignDoc.md S4.3) |
+| `er-mcp` | `er-mcp` — an MCP server over the control API, for one tenant (O10) |
 | `er-obs` | Observability: the S5.2 counter vocabulary and structured stage log line (ports of `src/er/obs/counters.py` and `src/er/obs/logging.py`) |
 | `er-pg-tls` | `er-pg-tls` — the TLS connector for every Postgres client in the workspace |
 | `er-reconcile` | The reconcile / entity-resolution stage (port of `src/er/entities/*` + `src/er/review/*`, DesignDoc.md S4.5) |
