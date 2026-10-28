@@ -119,7 +119,7 @@ clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 sha2 = "0.10"
 # Webhook payload signatures (HMAC-SHA256 over the delivered body).
-hmac = "0.12"
+hmac = "0.13"
 hex = "0.4"
 # Outbound HTTP for webhook delivery (rustls, no OpenSSL). json feature off —
 # bodies are pre-serialized so the raw-byte signature matches what's sent.
