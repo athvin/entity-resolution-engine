@@ -17,6 +17,9 @@ repository.workspace = true
 # catalog, never a database, a planner or the generator. (The statement-level
 # E0xx passes are a separate family and live in er-sql-check, which needs a
 # planner.)
+# Every file in tests/ is a module of tests/main.rs, not a target of its own
+# (sccache cannot cache a final link). See tests/main.rs.
+autotests = false
 [dependencies]
 er-entity-spec = { version = "0.1.0", path = "../er-entity-spec" }
 thiserror = { workspace = true }
@@ -27,3 +30,7 @@ serde_norway = { workspace = true }
 
 [lints]
 workspace = true
+
+[[test]]
+name = "main"
+path = "tests/main.rs"

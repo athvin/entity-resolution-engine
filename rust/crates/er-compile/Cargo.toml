@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+# Every file in tests/ is a module of tests/main.rs, not a target of its own
+# (sccache cannot cache a final link). See tests/main.rs.
+autotests = false
 [dependencies]
 # The tenant config is the input; the engine's settings document is the output.
 # Those two crates are the whole dependency surface on purpose: compiling is a
@@ -22,3 +25,7 @@ workspace = true
 [dev-dependencies]
 er-config = { path = "../er-config" }
 serde_json.workspace = true
+
+[[test]]
+name = "main"
+path = "tests/main.rs"

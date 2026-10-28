@@ -11,6 +11,9 @@ repository.workspace = true
 # DuckLake/Postgres DDL (lake DDL via er-schema's renderer), and the TypeScript
 # binding + reader. It emits source, so it links neither `arrow` nor `ts-rs`; the
 # one shared type map lives here and nowhere else.
+# Every file in tests/ is a module of tests/main.rs, not a target of its own
+# (sccache cannot cache a final link). See tests/main.rs.
+autotests = false
 [dependencies]
 er-entity-spec = { path = "../er-entity-spec" }
 er-schema = { path = "../er-schema" }
@@ -23,3 +26,7 @@ serde_norway = { workspace = true }
 
 [lints]
 workspace = true
+
+[[test]]
+name = "main"
+path = "tests/main.rs"
