@@ -52,10 +52,22 @@ assistant. Tenant username/password auth is fully built (argon2id). M6 (PR #56) 
 - [x] **0.5 Infra gate (fmt + validate) on merge to main** — per the prod-apply decision (prod stays plan-only until a
       tenant), 0.5 is a **credential-free** `terraform fmt -check` + per-env `terraform validate` gate on every
       infra change (`.github/workflows/infra.yml`), proving the config stays valid + apply-ready without an IAM role.
-      The heavier state-diff `terraform plan` gate (needs a read-only OIDC plan role + state access) → **0.5b**, to do
-      when prod is actually applied. Also cleaned the pre-existing `envs/dev/rds.tf` fmt debt so the gate is green.
-      *Blocked on the prod apply decision: prod EKS isn't applied (cost-deferred), so a real rollout has no target.
-      Needs the deploy-mechanism pass + a go-ahead to apply prod (or a plan-gate-only interim). Revisit with user.*
+      The heavier state-diff `terraform plan` gate (needs a read-only OIDC plan role + state access) → **0.5b**, now
+      DONE (below). Also cleaned the pre-existing `envs/dev/rds.tf` fmt debt so the gate is green.
+- [x] **0.5b Infra plan-on-PR + apply-on-main** — `infra.yml` grows two tiers over the credential-free one:
+      per-env `terraform plan` on every PR under a new read-only `er-ci-tf-plan` role, and per-env
+      `terraform apply` on `main` under `er-ci-tf-apply`. Both federate through §11's existing GitHub OIDC
+      provider, so this adds **no repository secrets** — the account still holds no static CI key.
+      Roles are in `infra/terraform/envs/core/ci-terraform.tf`.
+      **This supersedes "prod stays plan-only until a tenant"** (0.5 above), by operator decision. prod apply IS
+      wired, but every apply job sits behind a required-reviewer GitHub environment
+      (`infra-apply-{core,dev,prod}`, protected-branches-only), so a merge QUEUES an apply and a human releases
+      it. prod's first apply still creates EKS + Aurora + NAT, so the cost decision is now a click rather than a
+      code change — deliberately, and that click is the gate.
+      *Two things NOT built: §14.2's chained prod-scoped apply role (whose trust names the CI apply role plus
+      `ProdAdmin` as break-glass) — `er-ci-tf-apply` reaches prod directly for now, covered by the reviewer gate;
+      and the bootstrap is irreducible, since the roles cannot create themselves, so the FIRST
+      `envs/core` apply must come from a human `AWS_PROFILE=er-mgmt`.*
 - [x] **0.6 Password-reset page** — added `(auth)/reset` (request) + `(auth)/reset/[token]` (confirm), fixed the
       `PUBLIC_PATHS` gap (`/reset` was missing → pages would have redirected to /login), and added a "Forgot your
       password?" link on login. Functional tests (5) + regenerated login visual baselines. Completes the self-serve
