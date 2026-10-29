@@ -48,8 +48,8 @@ creating two sets of real resources.
 Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
 
 ```
-  13  aws_iam_role
-   9  aws_iam_role_policy
+  14  aws_iam_role
+  10  aws_iam_role_policy
    6  aws_iam_role_policy_attachment
    6  aws_s3_bucket
    6  aws_s3_bucket_public_access_block

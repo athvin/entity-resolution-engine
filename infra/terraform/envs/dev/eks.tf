@@ -11,6 +11,15 @@ module "eks" {
     # bootstrap creator (er-mgmt AdministratorAccess) is covered by
     # bootstrap_cluster_creator_admin_permissions.
     platform_admin = "arn:aws:iam::797781631727:role/aws-reserved/sso.amazonaws.com/us-east-2/AWSReservedSSO_PlatformAdmin_a9350569d9b23f7f"
+
+    # The CI deploy role (§14.2's dev platform release). Cluster-admin is more
+    # than a helm upgrade strictly needs, and it is what this module grants —
+    # the access entry it creates associates AmazonEKSClusterAdminPolicy. The
+    # narrower shape would be an access entry scoped to the `ci` namespace, and
+    # it is worth doing if this role ever grows a second caller; for one
+    # namespace-scoped release whose trust policy is pinned to pushes on `main`,
+    # the extra moving part buys little. See ci-deploy.tf.
+    ci_deploy = aws_iam_role.ci_deploy_dev.arn
   }
 }
 

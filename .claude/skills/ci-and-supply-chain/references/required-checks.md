@@ -53,6 +53,7 @@ exists instead of a workflow-level `paths:` filter.
 | `detect` | detect changes | 5 | `always` |
 | `er-api` | er-api | — | `needs.detect.outputs.rust == 'true'` |
 | `er-web` | er-web | — | `needs.detect.outputs.frontend == 'true'` |
+| `deploy-dev` | deploy dev (ci namespace) | 30 | `always() && !cancelled() && github.ref == 'refs/heads/main'` |
 
 ### `infra.yml`
 
