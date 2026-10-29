@@ -147,6 +147,12 @@ output "cluster_name" {
   value = aws_eks_cluster.this.name
 }
 
+# Needed to scope an `eks:DescribeCluster` grant to this cluster rather than to
+# `*` — the CI deploy role in envs/dev/ci-deploy.tf is the first caller.
+output "cluster_arn" {
+  value = aws_eks_cluster.this.arn
+}
+
 output "cluster_endpoint" {
   value = aws_eks_cluster.this.endpoint
 }
