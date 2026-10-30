@@ -60,14 +60,17 @@ assistant. Tenant username/password auth is fully built (argon2id). M6 (PR #56) 
       provider, so this adds **no repository secrets** — the account still holds no static CI key.
       Roles are in `infra/terraform/envs/core/ci-terraform.tf`.
       **This supersedes "prod stays plan-only until a tenant"** (0.5 above), by operator decision. prod apply IS
-      wired, but every apply job sits behind a required-reviewer GitHub environment
-      (`infra-apply-{core,dev,prod}`, protected-branches-only), so a merge QUEUES an apply and a human releases
-      it. prod's first apply still creates EKS + Aurora + NAT, so the cost decision is now a click rather than a
-      code change — deliberately, and that click is the gate.
-      *Two things NOT built: §14.2's chained prod-scoped apply role (whose trust names the CI apply role plus
-      `ProdAdmin` as break-glass) — `er-ci-tf-apply` reaches prod directly for now, covered by the reviewer gate;
-      and the bootstrap is irreducible, since the roles cannot create themselves, so the FIRST
-      `envs/core` apply must come from a human `AWS_PROFILE=er-mgmt`.*
+      wired, and applies are **UNATTENDED** — merge to `main` is the trigger and the only trigger. A
+      required-reviewer gate was built first and then removed on operator decision; the `infra-apply-*`
+      environments are kept without reviewers for per-env deployment history and `protected_branches: true`.
+      So the apply role's `sub`-pinned-to-`main` trust plus branch protection and PR review is the whole
+      control, and the `plan` tier is where a human sees a diff — including prod's, currently **61 resources**
+      (RDS cluster + 2 instances, EFS, security groups). A merged PR under `envs/prod` provisions production.
+      *Two things NOT built: §14.2's chained prod-scoped apply role (trust naming the CI apply role plus
+      `ProdAdmin` as break-glass) — previously described as covered by the reviewer gate, which no longer
+      exists, so this is now the only remaining defence-in-depth for prod and should land before prod carries
+      data; and the bootstrap was irreducible — the roles could not create themselves, so the first
+      `envs/core` apply came from a human `AWS_PROFILE=er-mgmt` (done 2026-10-30, 13 resources).*
 - [x] **0.6 Password-reset page** — added `(auth)/reset` (request) + `(auth)/reset/[token]` (confirm), fixed the
       `PUBLIC_PATHS` gap (`/reset` was missing → pages would have redirected to /login), and added a "Forgot your
       password?" link on login. Functional tests (5) + regenerated login visual baselines. Completes the self-serve
