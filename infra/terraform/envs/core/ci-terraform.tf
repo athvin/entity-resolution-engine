@@ -22,10 +22,10 @@
 # §14.2 also specifies a **prod-scoped** apply role whose trust policy names
 # exactly two principals — the CI apply role and `ProdAdmin` as break-glass —
 # so a prod write is a distinct, separately auditable hop. That second hop is
-# NOT built here: `er-ci-tf-apply` applies all three envs directly. The gap is
-# covered for now by the required-reviewer GitHub environment on every apply
-# job, and prod is not provisioned yet. Build the chained role before prod
-# carries data.
+# NOT built here: `er-ci-tf-apply` applies all three envs directly. It was
+# briefly covered by a required-reviewer environment on every apply; applies are
+# now UNATTENDED by operator decision, so nothing covers it. This is the
+# remaining defence-in-depth for prod and should land before prod carries data.
 
 locals {
   # Same immutable-subject form the github-oidc module pins: owner and repo
@@ -173,8 +173,8 @@ resource "aws_iam_role" "ci_tf_apply" {
 # can write IAM can grant itself the rest.
 #
 # What makes this safe is not the policy, it is who can reach it: pushes on a
-# branch-protected `main`, and a required-reviewer GitHub environment in front
-# of every apply job.
+# branch-protected `main` only. Applies are unattended, so that trust condition
+# plus PR review is the entire control — there is no approval step behind it.
 resource "aws_iam_role_policy_attachment" "ci_tf_apply_admin" {
   role       = aws_iam_role.ci_tf_apply.name
   policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
