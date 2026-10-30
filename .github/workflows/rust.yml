@@ -39,8 +39,12 @@
 #      the other four compile jobs are restore-only (`save-if: false`).
 #      `coverage` keeps the writer on its own key — see the note there for why
 #      dropping it would buy 1.8 GiB and a timeout.
-#   2. sccache is pruned to a budget nightly (`cache-prune`), because its backend
-#      writes one entry per compilation object and nothing else caps it.
+#   2. The Actions cache is pruned to a budget nightly (`cache-prune`). Its
+#      original reason — sccache writing one entry per compilation object with
+#      nothing capping it — is GONE now that sccache is on S3. The job stays
+#      because sccache was never the only unbounded producer: `images.yml`'s
+#      `type=gha,mode=max` buildkit layer cache measured ~5,000 MiB, half the
+#      budget, and was evicting the entries that make CI fast. See the job.
 #   3. Every compile job reports `sccache --show-stats`, so the hit rate is
 #      observable rather than assumed.
 #
@@ -79,7 +83,17 @@ defaults:
 env:
   CARGO_INCREMENTAL: "0"
   RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
-  SCCACHE_GHA_ENABLED: "true"
+  # S3, not the Actions cache backend. The Actions one shares a 10 GB
+  # per-repository budget, LRU-evicted past it, which is why this workflow used
+  # to carry a nightly `cache-prune` job — a cap on the thing doing most of the
+  # work. When the repository sat at the ceiling GitHub evicted its largest LRU
+  # victim (the rust-cache entry every compile job restores from) and produced
+  # cold runs with nothing in the diff to explain them. S3 has no such budget,
+  # so both the prune and that eviction class are gone.
+  #
+  # Bucket + roles are infra/terraform/envs/core/sccache.tf.
+  SCCACHE_BUCKET: er-ci-sccache-797781631727
+  SCCACHE_REGION: us-east-2
 
 jobs:
   # Did anything outside `.claude/**` change? The required compile jobs below
@@ -176,6 +190,9 @@ jobs:
     # it measured 30+ min — the timeout cancelled it mid-run even though every
     # gate had passed. Any duckdb bump invalidates the cache and hits this.
     timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write # OIDC exchange for the sccache S3 role
     env:
       RUSTC_WRAPPER: sccache
     steps:
@@ -200,6 +217,16 @@ jobs:
             sleep 5
           done
           exit 1
+      # Pushes on main assume the WRITE role; everything else (PRs) the READ
+      # role. The repository is public, so a PR that could write the cache would
+      # be a path for a contributor branch to plant object code a later main
+      # build consumes. The read role still gives PRs the dependency tree, which
+      # is nearly all the value. See sccache.tf for the full reasoning and for
+      # the measurement showing a denied write is a counted miss, not a failure.
+      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          aws-region: us-east-2
+          role-to-assume: ${{ github.ref == 'refs/heads/main' && 'arn:aws:iam::797781631727:role/er-ci-sccache-write' || 'arn:aws:iam::797781631727:role/er-ci-sccache-read' }}
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
@@ -315,6 +342,9 @@ jobs:
     # 45 for the same reason as `lint`: on a cold cache this builds the bundled
     # duckdb C++ tree plus a second full arrow before it can verify anything.
     timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write # OIDC exchange for the sccache S3 role
     env:
       RUSTC_WRAPPER: sccache
     steps:
@@ -343,6 +373,16 @@ jobs:
             sleep 5
           done
           exit 1
+      # Pushes on main assume the WRITE role; everything else (PRs) the READ
+      # role. The repository is public, so a PR that could write the cache would
+      # be a path for a contributor branch to plant object code a later main
+      # build consumes. The read role still gives PRs the dependency tree, which
+      # is nearly all the value. See sccache.tf for the full reasoning and for
+      # the measurement showing a denied write is a counted miss, not a failure.
+      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          aws-region: us-east-2
+          role-to-assume: ${{ github.ref == 'refs/heads/main' && 'arn:aws:iam::797781631727:role/er-ci-sccache-write' || 'arn:aws:iam::797781631727:role/er-ci-sccache-read' }}
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
@@ -396,6 +436,9 @@ jobs:
     if: needs.detect.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write # OIDC exchange for the sccache S3 role
     env:
       RUSTC_WRAPPER: sccache
       # The debug-info settings that used to live here are now
@@ -448,6 +491,16 @@ jobs:
             sleep 5
           done
           exit 1
+      # Pushes on main assume the WRITE role; everything else (PRs) the READ
+      # role. The repository is public, so a PR that could write the cache would
+      # be a path for a contributor branch to plant object code a later main
+      # build consumes. The read role still gives PRs the dependency tree, which
+      # is nearly all the value. See sccache.tf for the full reasoning and for
+      # the measurement showing a denied write is a counted miss, not a failure.
+      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          aws-region: us-east-2
+          role-to-assume: ${{ github.ref == 'refs/heads/main' && 'arn:aws:iam::797781631727:role/er-ci-sccache-write' || 'arn:aws:iam::797781631727:role/er-ci-sccache-read' }}
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
@@ -523,6 +576,9 @@ jobs:
     # 45 for the same reason as `lint`: this measured 29 min on a cold cache,
     # one minute inside the old limit. It passed by luck, not by margin.
     timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write # OIDC exchange for the sccache S3 role
     env:
       RUSTC_WRAPPER: sccache
       DEDUPE_E2E_DUCKLAKE: "1"
@@ -565,6 +621,16 @@ jobs:
             sleep 5
           done
           exit 1
+      # Pushes on main assume the WRITE role; everything else (PRs) the READ
+      # role. The repository is public, so a PR that could write the cache would
+      # be a path for a contributor branch to plant object code a later main
+      # build consumes. The read role still gives PRs the dependency tree, which
+      # is nearly all the value. See sccache.tf for the full reasoning and for
+      # the measurement showing a denied write is a counted miss, not a failure.
+      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          aws-region: us-east-2
+          role-to-assume: ${{ github.ref == 'refs/heads/main' && 'arn:aws:iam::797781631727:role/er-ci-sccache-write' || 'arn:aws:iam::797781631727:role/er-ci-sccache-read' }}
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
@@ -617,6 +683,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      id-token: write # OIDC exchange for the sccache S3 role
     env:
       RUSTC_WRAPPER: sccache
     steps:
@@ -641,6 +710,16 @@ jobs:
             sleep 5
           done
           exit 1
+      # Pushes on main assume the WRITE role; everything else (PRs) the READ
+      # role. The repository is public, so a PR that could write the cache would
+      # be a path for a contributor branch to plant object code a later main
+      # build consumes. The read role still gives PRs the dependency tree, which
+      # is nearly all the value. See sccache.tf for the full reasoning and for
+      # the measurement showing a denied write is a counted miss, not a failure.
+      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          aws-region: us-east-2
+          role-to-assume: ${{ github.ref == 'refs/heads/main' && 'arn:aws:iam::797781631727:role/er-ci-sccache-write' || 'arn:aws:iam::797781631727:role/er-ci-sccache-read' }}
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
@@ -669,6 +748,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      id-token: write # OIDC exchange for the sccache S3 role
     env:
       RUSTC_WRAPPER: sccache
       DEDUPE_SCALE_TESTS: "1"
@@ -694,6 +776,16 @@ jobs:
             sleep 5
           done
           exit 1
+      # Pushes on main assume the WRITE role; everything else (PRs) the READ
+      # role. The repository is public, so a PR that could write the cache would
+      # be a path for a contributor branch to plant object code a later main
+      # build consumes. The read role still gives PRs the dependency tree, which
+      # is nearly all the value. See sccache.tf for the full reasoning and for
+      # the measurement showing a denied write is a counted miss, not a failure.
+      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          aws-region: us-east-2
+          role-to-assume: ${{ github.ref == 'refs/heads/main' && 'arn:aws:iam::797781631727:role/er-ci-sccache-write' || 'arn:aws:iam::797781631727:role/er-ci-sccache-read' }}
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
@@ -862,6 +954,12 @@ jobs:
       # the entries that make CI fast. BUDGETS below is therefore a list, not a
       # single number: each prefix is capped independently, oldest-accessed
       # first.
+      #
+      # That measurement is also why this job SURVIVED the sccache move to S3.
+      # sccache no longer writes here at all, so its 3,341 MiB line is now
+      # always zero and its budget is vestigial — kept only so a rollback to the
+      # GHA backend does not silently uncap it. buildkit is the live reason, and
+      # it is the producer that was doing the damage all along.
       #
       # What is deliberately NOT capped: `v1-rust*` (two ~364 MiB entries,
       # the thing all of this protects), `pnpm-store`, `next-build` and
