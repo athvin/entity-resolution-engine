@@ -31,7 +31,31 @@
 # links appear in the server log. er-server degrades to 503 on every send with
 # no backend, which is what the BFF's relay already treats as `false`.
 
+# --- opt-in, so the other 101 resources in this env stay plannable ----------
+#
+# This file is the only thing in `envs/dev` that needs a credential the repo
+# does not hold: line 28 above says so — "running a plan over this needs
+# `CLOUDFLARE_API_TOKEN` exported". That was fine while every apply was a human
+# with the token in their shell. It stopped being fine when `terraform plan`
+# became a CI gate (§14.2, PR #352): without the token the Cloudflare provider
+# cannot authenticate, so the whole env fails to plan and the 101 resources
+# that DO plan cleanly are never checked.
+#
+# So SES is opt-in. Both variables default to null, and with either unset this
+# file contributes nothing — which is also its current real state: nothing here
+# has ever been applied (`terraform state list` matched no ses/cloudflare/mail
+# resource before this change, so switching to `count` destroys nothing).
+#
+# Supply both variables plus `CLOUDFLARE_API_TOKEN` and it comes back in full.
+# The alternative was putting that token in repository secrets, which would
+# trade a planning gap for a long-lived credential in a PUBLIC repo's secrets —
+# the thing §11's zero-secrets property exists to avoid.
+locals {
+  ses_enabled = var.ses_domain != null && var.cloudflare_zone_id != null
+}
+
 module "ses" {
+  count  = local.ses_enabled ? 1 : 0
   source = "../../modules/ses"
 
   name   = "er-dev"
@@ -51,12 +75,12 @@ module "ses" {
 # returns exactly three tokens, so a fixed count is both correct and plannable;
 # indexing a computed list is fine because only the values are unknown.
 resource "cloudflare_dns_record" "ses_dkim" {
-  count = 3
+  count = local.ses_enabled ? 3 : 0
 
   zone_id = var.cloudflare_zone_id
-  name    = module.ses.verification_dns[count.index].name
+  name    = module.ses[0].verification_dns[count.index].name
   type    = "CNAME"
-  content = module.ses.verification_dns[count.index].value
+  content = module.ses[0].verification_dns[count.index].value
   ttl     = 600
   # DNS-only, never proxied. §18.8 is explicit about this for dev hostnames —
   # they resolve to an internal, tailnet-reached ALB Cloudflare's proxy could
@@ -68,12 +92,14 @@ resource "cloudflare_dns_record" "ses_dkim" {
 # sending stays broken until this resolves — the intended trade: a visible
 # failure rather than silent SPF misalignment.
 resource "cloudflare_dns_record" "ses_mail_from_mx" {
+  count = local.ses_enabled ? 1 : 0
+
   zone_id = var.cloudflare_zone_id
-  name    = module.ses.mail_from_domain
+  name    = module.ses[0].mail_from_domain
   type    = "MX"
   # Cloudflare takes priority as its own field, which is why the module exposes
   # the host separately from `mail_from_dns`'s combined "10 feedback-smtp…".
-  content  = module.ses.mail_from_mx_host
+  content  = module.ses[0].mail_from_mx_host
   priority = 10
   ttl      = 600
 }
@@ -81,10 +107,12 @@ resource "cloudflare_dns_record" "ses_mail_from_mx" {
 # SPF for the MAIL FROM domain, which is what aligns SPF with the visible From
 # address. Without it receivers check SES's own domain instead.
 resource "cloudflare_dns_record" "ses_mail_from_spf" {
+  count = local.ses_enabled ? 1 : 0
+
   zone_id = var.cloudflare_zone_id
-  name    = module.ses.mail_from_domain
+  name    = module.ses[0].mail_from_domain
   type    = "TXT"
-  content = module.ses.mail_from_spf_value
+  content = module.ses[0].mail_from_spf_value
   ttl     = 600
 }
 
@@ -93,9 +121,11 @@ resource "cloudflare_dns_record" "ses_mail_from_spf" {
 # binds one role per (cluster, namespace, service account) — so mail and
 # Bedrock have to be two policies on one role, not two roles.
 resource "aws_iam_role_policy" "mail" {
+  count = local.ses_enabled ? 1 : 0
+
   name   = "send-transactional-mail"
   role   = aws_iam_role.er_api_pod.id
-  policy = module.ses.send_policy_json
+  policy = module.ses[0].send_policy_json
 }
 
 variable "ses_domain" {
@@ -103,8 +133,11 @@ variable "ses_domain" {
     The domain dev sends from, e.g. `dev.dupezero.com`. Must sit inside the
     Cloudflare zone named by `cloudflare_zone_id`, since that is where the
     verification and MAIL FROM records are written.
+
+    NULL (the default) disables this whole file — see `local.ses_enabled`.
   EOT
   type        = string
+  default     = null
 }
 
 variable "cloudflare_zone_id" {
@@ -112,13 +145,16 @@ variable "cloudflare_zone_id" {
     The Cloudflare zone holding `ses_domain` — `dupezero.com`'s zone id
     (§18.8). Not a secret: it is an opaque identifier, and the credential that
     can act on it is `CLOUDFLARE_API_TOKEN` in the environment.
+
+    NULL (the default) disables this whole file — see `local.ses_enabled`.
   EOT
   type        = string
+  default     = null
 }
 
 output "ses_configuration_set_name" {
   description = "er-server's ER_MAIL_CONFIGURATION_SET."
-  value       = module.ses.configuration_set_name
+  value       = one(module.ses[*].configuration_set_name)
 }
 
 output "ses_verification_dns" {
@@ -127,7 +163,7 @@ output "ses_verification_dns" {
     publishes them. Kept for reading a plan and for debugging a verification
     that has not completed.
   EOT
-  value       = module.ses.verification_dns
+  value       = one(module.ses[*].verification_dns)
 }
 
 output "ses_mail_from_dns" {
@@ -136,5 +172,5 @@ output "ses_mail_from_dns" {
     `ses_mail_from_mx` and `ses_mail_from_spf` resources publish them, using the
     module's split outputs because Cloudflare takes MX priority separately.
   EOT
-  value       = module.ses.mail_from_dns
+  value       = one(module.ses[*].mail_from_dns)
 }

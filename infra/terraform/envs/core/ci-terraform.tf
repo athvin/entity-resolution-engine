@@ -112,6 +112,7 @@ data "aws_iam_policy_document" "ci_tf_plan_state" {
       values   = ["alias/er-terraform-state"]
     }
   }
+
 }
 
 resource "aws_iam_role_policy" "ci_tf_plan_state" {
