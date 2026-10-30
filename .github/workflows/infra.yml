@@ -114,6 +114,27 @@ jobs:
         # the lockfile IS a write. A plan that cannot lock can race a concurrent
         # apply; the apply job's concurrency group is what serialises writes.
         #
+        # `-refresh=false` is a SECURITY choice, not a speed one. A refreshing
+        # plan re-reads every resource, and two of those reads are privileged:
+        # `aws_secretsmanager_secret_version` needs
+        # `secretsmanager:GetSecretValue` — AWS deliberately leaves it out of
+        # ReadOnlyAccess, because reading a secret's VALUE is the sensitive
+        # action — and the CUR 2.0 export needs `bcm-data-exports:GetExport`.
+        # The first real run of this gate failed on both.
+        #
+        # This role is assumable from ANY ref, because a plan has to run on the
+        # pull request. Granting it secret-read would let any same-repo PR —
+        # which can also edit this very workflow, since `pull_request` runs the
+        # PR's own copy of it — print dev's Postgres and S3 credentials into a
+        # public build log. That is a bad price for drift detection.
+        #
+        # So the role stays genuinely read-only and the plan does not refresh.
+        # What is lost is out-of-band drift. What is kept is the
+        # config-versus-state diff, which is the thing a reviewer is reading.
+        # Drift is still caught at APPLY time, where the apply role refreshes
+        # fully and the result is visible before the environment gate is
+        # released.
+        #
         # `-detailed-exitcode`: 0 = no changes, 2 = changes, 1 = error. Without
         # it a plan that errors and a plan that is empty are the same exit code,
         # which is how a broken plan gets read as "nothing to do".
@@ -121,7 +142,7 @@ jobs:
           set +e
           terraform -chdir="infra/terraform/envs/${{ matrix.env }}" init -input=false
           terraform -chdir="infra/terraform/envs/${{ matrix.env }}" plan \
-            -no-color -lock=false -input=false -detailed-exitcode \
+            -no-color -lock=false -refresh=false -input=false -detailed-exitcode \
             > "plan-${{ matrix.env }}.txt" 2>&1
           code=$?
           set -e
