@@ -112,6 +112,25 @@ data "aws_iam_policy_document" "ci_deploy_dev" {
     resources = ["arn:aws:secretsmanager:us-east-2:${data.aws_caller_identity.current.account_id}:secret:er/dev/${local.ci_namespace}/*"]
   }
 
+  # ONE shared secret, named exactly, and NOT `er/dev/shared/*`.
+  #
+  # `dev_env.sh up` reads `er/dev/shared/postgres` (its line 116) to derive the
+  # namespace's database credentials; everything else it touches lives under
+  # `er/dev/<namespace>/`, covered above. The first real deploy run failed here,
+  # reporting the secret "missing" — it exists, but DescribeSecret was denied by
+  # the narrower pattern, and the script cannot tell those apart.
+  #
+  # The tempting fix is `er/dev/shared/*`. That would also grant read of
+  # `er/dev/shared/builder`, which holds the TEMPORARY never-expiring
+  # AdministratorAccess key (builder.tf) — turning a namespace deploy role into
+  # a path to account admin for anything that can run on `main`. Naming the one
+  # secret keeps that closed.
+  statement {
+    effect    = "Allow"
+    actions   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
+    resources = ["arn:aws:secretsmanager:us-east-2:${data.aws_caller_identity.current.account_id}:secret:er/dev/shared/postgres-*"]
+  }
+
   # Resolve an image digest from a tag. §14.2 requires the deploy to pass a
   # DIGEST and to gate on that digest being present, which is a read.
   statement {
