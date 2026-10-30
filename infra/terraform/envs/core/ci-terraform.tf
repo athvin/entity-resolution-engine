@@ -142,14 +142,31 @@ data "aws_iam_policy_document" "ci_tf_apply_trust" {
     # THIS CONDITION IS THE SECURITY CONTROL. §8.2: the Terraform apply role
     # walks through the prod guardrail legitimately — the two deny statements
     # ride the *permission sets*, so they constrain humans, not this role — and
-    # so "its trust policy is part of this claim". Pinned to pushes on `main`,
-    # which is branch-protected and therefore reviewed, exactly as the ECR push
-    # role is. Pull requests are excluded deliberately: a PR from a fork runs
-    # attacker-authored workflow code (§11).
+    # so "its trust policy is part of this claim".
+    #
+    # ENVIRONMENT subjects, not a ref subject. A job that references a GitHub
+    # Environment gets a DIFFERENT `sub` claim: `…:environment:<name>` replaces
+    # `…:ref:refs/heads/main`. The apply jobs each set
+    # `environment: infra-apply-<env>`, so a ref-pinned condition can never
+    # match them — the first real apply failed with exactly that, while `plan`
+    # (which sets no environment) succeeded against the same provider from the
+    # same branch. That contrast is the diagnosis.
+    #
+    # This is not weaker than the ref form. Each `infra-apply-*` environment
+    # carries `deployment_branch_policy.protected_branches = true`, so only a
+    # protected branch — `main` — can deploy to it, and GitHub enforces that
+    # before the token is minted. The main-only property moves from the claim
+    # to the environment rather than disappearing. Listing the three names
+    # explicitly rather than globbing `:environment:*` keeps a new environment
+    # from silently inheriting apply rights.
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["${local.ci_tf_repo}:ref:refs/heads/main"]
+      values = [
+        "${local.ci_tf_repo}:environment:infra-apply-core",
+        "${local.ci_tf_repo}:environment:infra-apply-dev",
+        "${local.ci_tf_repo}:environment:infra-apply-prod",
+      ]
     }
   }
 }
