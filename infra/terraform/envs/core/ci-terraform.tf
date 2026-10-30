@@ -112,6 +112,26 @@ data "aws_iam_policy_document" "ci_tf_plan_state" {
       values   = ["alias/er-terraform-state"]
     }
   }
+
+  # ReadOnlyAccess does not cover `bcm-data-exports` either, and the first real
+  # `plan (core)` run found it the hard way:
+  #
+  #   AccessDeniedException: User: …assumed-role/er-ci-tf-plan/GitHubActions is
+  #   not authorized to perform: bcm-data-exports:GetExport … because no
+  #   identity-based policy allows the bcm-data-exports:GetExport action
+  #
+  # `aws_bcmdataexports_export.cur2` (cur.tf) cannot refresh without it, which
+  # fails the whole env's plan. Read-only actions only — a plan never writes.
+  statement {
+    effect = "Allow"
+    actions = [
+      "bcm-data-exports:GetExport",
+      "bcm-data-exports:ListExports",
+      "bcm-data-exports:GetTable",
+      "bcm-data-exports:ListTables",
+    ]
+    resources = ["*"]
+  }
 }
 
 resource "aws_iam_role_policy" "ci_tf_plan_state" {
