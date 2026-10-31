@@ -459,7 +459,7 @@ export interface components {
             input?: unknown;
             /** @description The run (jobs.id == run_id). */
             job_id: string;
-            /** @description batch/v1 Job name, er-t-<20 hex of id>-l<launches>, of the Job that ran this try; for a fused non-head member, the segment head's Job (advance_segment copies it). */
+            /** @description batch/v1 Job name, `er-t-{20 hex of id}-l{launches}`, of the Job that ran this try; for a fused non-head member, the segment head's Job (advance_segment copies it). */
             k8s_job_name?: string | null;
             /** @description Where the body runs: a Kubernetes Job, or a dispatcher-local body under the control-task contract (§3.6). */
             kind: string;

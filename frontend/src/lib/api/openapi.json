@@ -986,7 +986,7 @@
               "string",
               "null"
             ],
-            "description": "batch/v1 Job name, er-t-<20 hex of id>-l<launches>, of the Job that ran this try; for a fused non-head member, the segment head's Job (advance_segment copies it)."
+            "description": "batch/v1 Job name, `er-t-{20 hex of id}-l{launches}`, of the Job that ran this try; for a fused non-head member, the segment head's Job (advance_segment copies it)."
           },
           "kind": {
             "type": "string",
