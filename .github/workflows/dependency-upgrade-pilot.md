@@ -61,6 +61,14 @@ checkout:
   fetch-depth: 0
 
 safe-outputs:
+  # STAGED FOR ITS FIRST WAVES. Every output below is previewed in the run
+  # summary instead of applied: no comment is posted and no branch is pushed.
+  # A `workflow_run` workflow only fires once it is on the default branch, so
+  # merging this is also its first real execution — and this repo's standard is
+  # that a gate is not trusted until it has been watched. Read two real
+  # Dependabot waves, confirm the verdict and the coupled-pin table are right,
+  # then delete this one line.
+  staged: true
   add-comment:
     max: 1
     target: "*"

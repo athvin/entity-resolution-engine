@@ -119,12 +119,17 @@ required checks** — a required check that waits on a model would gate every
 merge on a non-deterministic run, which is also why these are the only
 workflows in this repo permitted a `paths:` filter.
 
-| Workflow | Triggers | Safe outputs |
-|---|---|---|
-| `ci-triage.md` | `workflow_run`, `workflow_dispatch` | `add-comment`, `create-issue`, `noop` |
-| `dependency-upgrade-pilot.md` | `workflow_run`, `workflow_dispatch` | `add-comment`, `push-to-pull-request-branch`, `noop` |
-| `generated-artifact-healer.md` | `workflow_run`, `workflow_dispatch` | `push-to-pull-request-branch`, `add-comment`, `noop` |
-| `skill-freshness-auditor.md` | `schedule`, `workflow_dispatch` | `create-pull-request`, `noop` |
+**Mode** is `staged` when the workflow sets `safe-outputs.staged`, meaning
+every output below is previewed in the run summary rather than applied: no
+comment posted, no branch pushed, no issue opened. That is how an agent is
+watched before it is trusted — remove the key to make it act.
+
+| Workflow | Mode | Triggers | Safe outputs |
+|---|---|---|---|
+| `ci-triage.md` | live | `workflow_run`, `workflow_dispatch` | `add-comment`, `create-issue`, `noop` |
+| `dependency-upgrade-pilot.md` | **staged** | `workflow_run`, `workflow_dispatch` | `add-comment`, `push-to-pull-request-branch`, `noop` |
+| `generated-artifact-healer.md` | **staged** | `workflow_run`, `workflow_dispatch` | `push-to-pull-request-branch`, `add-comment`, `noop` |
+| `skill-freshness-auditor.md` | live | `schedule`, `workflow_dispatch` | `create-pull-request`, `noop` |
 
 ### Advisory ignores in `rust/deny.toml`
 

@@ -513,8 +513,13 @@ gen_required_checks() {
 		echo "merge on a non-deterministic run, which is also why these are the only"
 		echo "workflows in this repo permitted a \`paths:\` filter."
 		echo
-		echo "| Workflow | Triggers | Safe outputs |"
-		echo "|---|---|---|"
+		echo "**Mode** is \`staged\` when the workflow sets \`safe-outputs.staged\`, meaning"
+		echo "every output below is previewed in the run summary rather than applied: no"
+		echo "comment posted, no branch pushed, no issue opened. That is how an agent is"
+		echo "watched before it is trusted — remove the key to make it act."
+		echo
+		echo "| Workflow | Mode | Triggers | Safe outputs |"
+		echo "|---|---|---|---|"
 		local awf
 		for awf in .github/workflows/*.md; do
 			awk -v file="$(basename "$awf")" '
@@ -540,12 +545,25 @@ gen_required_checks() {
 					add(section, k)
 				}
 				END {
-					printf "| `%s` | %s | %s |\n", file,
+					printf "| `%s` | %s | %s | %s |\n", file,
+						(staged ? "**staged**" : "live"),
 						(trig == "" ? "—" : trig), (out == "" ? "—" : out)
 				}
 				function add(sec, v) {
-					if (sec == "on") trig = trig (trig == "" ? "" : ", ") "`" v "`"
-					else out = out (out == "" ? "" : ", ") "`" v "`"
+					if (sec == "on") {
+						trig = trig (trig == "" ? "" : ", ") "`" v "`"
+						return
+					}
+					# `staged` previews every output instead of applying it, so
+					# it belongs in the Mode column — it is the difference
+					# between an agent that acts and one that rehearses.
+					if (v == "staged") { staged = 1; return }
+					# Config keys that can appear under `safe-outputs:` but are
+					# not outputs. Not exhaustive by design: if a new one shows
+					# up in the Safe outputs column of the generated table, that
+					# is the signal to add it here.
+					if (v ~ /^(github-token|github-app|target-repo|allowed-repos|allowed-domains|env|messages|jobs|scripts|steps|threat-detection|environment|max-bot-mentions|failure-issue-repo|report-failure-as-issue|report-failed-jobs)$/) return
+					out = out (out == "" ? "" : ", ") "`" v "`"
 				}
 			' "$awf"
 		done

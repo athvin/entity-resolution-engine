@@ -39,6 +39,12 @@ checkout:
   fetch-depth: 0
 
 safe-outputs:
+  # STAGED FOR ITS FIRST RUNS, for the same reason as dependency-upgrade-pilot:
+  # merging a `workflow_run` workflow is also its first real execution, and this
+  # one pushes commits. Outputs are previewed in the run summary. Confirm once
+  # that it picks the right regen command and refuses a diff it cannot explain,
+  # then delete this one line.
+  staged: true
   push-to-pull-request-branch:
     max: 1
     # `target: "*"` is unconstrained on purpose, and the compiler warns about
