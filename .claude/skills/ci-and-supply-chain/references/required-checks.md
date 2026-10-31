@@ -59,9 +59,11 @@ exists instead of a workflow-level `paths:` filter.
 
 | Job | Status-check context | Timeout | Condition |
 |---|---|---|---|
-| `validate` | fmt + validate (credential-free) | 10 | `always` |
-| `plan` | plan (${{ matrix.env }}) | 20 | `github.event.pull_request.head.repo.full_name == github.repository \|\| github.event_name  …` |
-| `apply` | apply (${{ matrix.env }}) | 60 | `github.event_name == 'push' && github.ref == 'refs/heads/main'` |
+| `detect` | detect infra changes | 5 | `always` |
+| `validate` | fmt + validate (credential-free) | 10 | `needs.detect.outputs.infra == 'true'` |
+| `plan` | plan (${{ matrix.key }}) | 20 | `needs.detect.outputs.infra == 'true' && (github.event_name == 'push' \|\| github.event.pul …` |
+| `comment` | plan comment | 10 | `${{ !cancelled() && github.event_name == 'pull_request' && needs.detect.outputs.infra == ' …` |
+| `apply` | apply (${{ matrix.key }}) | 60 | `github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.detect.outputs.inf …` |
 
 ### `rust.yml`
 

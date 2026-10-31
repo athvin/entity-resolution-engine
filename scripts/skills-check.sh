@@ -436,6 +436,21 @@ gen_required_checks() {
 		awk '
 			/^[a-z][a-z0-9_-]*:/ { injobs = ($0 ~ /^jobs:/) ? 1 : 0 }
 			!injobs { next }
+			# A folded or literal `if:` carries its value on the FOLLOWING
+			# lines, so it has to be collected rather than read off the key.
+			# Without this the table reported the block indicator `>-` as the
+			# condition — a generated reference stating something false, which
+			# is the one thing a generated reference exists to prevent.
+			incond {
+				if ($0 ~ /^[[:space:]]*$/) next
+				if ($0 ~ /^      /) {
+					line = $0
+					sub(/^[[:space:]]+/, "", line)
+					cond = (cond == "") ? line : cond " " line
+					next
+				}
+				incond = 0
+			}
 			/^  [a-z][a-z0-9_-]*:[[:space:]]*$/ {
 				if (job != "") emit()
 				job = $1; sub(/:$/, "", job)
@@ -445,13 +460,16 @@ gen_required_checks() {
 			/^    timeout-minutes:/ { sub(/^    timeout-minutes: */, ""); tmo = $0 }
 			/^    if:/ {
 				sub(/^    if: */, "")
+				if ($0 ~ /^[|>][-+0-9]*[[:space:]]*$/) { cond = ""; incond = 1; next }
 				cond = $0
-				gsub(/\|/, "\\|", cond)
-				if (length(cond) > 90) cond = substr(cond, 1, 90) " …"
 			}
 			END { if (job != "") emit() }
 			function emit() {
 				if (name == "") name = job
+				# Escape and truncate at emit time: a collected block scalar is
+				# not complete until the next key is reached.
+				gsub(/\|/, "\\|", cond)
+				if (length(cond) > 90) cond = substr(cond, 1, 90) " …"
 				printf "| `%s` | %s | %s | `%s` |\n", job, name, tmo, cond
 			}
 		' "$wf"
