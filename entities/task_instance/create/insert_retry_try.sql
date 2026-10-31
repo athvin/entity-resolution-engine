@@ -9,9 +9,9 @@ SELECT encode(sha256(convert_to('task_instances:' || job_id || ':' || task_id ||
        CASE WHEN $escalate THEN resource_class ELSE NULL END,
        max_tries, max_launches,
        now() + make_interval(secs =>
-         least($backoff_cap, $backoff_base * power(2, try_number - 1))::int
+         least($backoff_cap::bigint, $backoff_base::bigint * power(2, try_number - 1))::int
          + mod(abs(hashtext(job_id || '#' || task_id || '#' || try_number::text)::bigint),
-               least($backoff_cap, $backoff_base * power(2, try_number - 1))::int)),
+               least($backoff_cap::bigint, $backoff_base::bigint * power(2, try_number - 1))::int)),
        input, image_digest, trace_context
 FROM public.task_instances
 WHERE id = $task_instance_id AND live IS NULL AND archived_reason = 'retry'

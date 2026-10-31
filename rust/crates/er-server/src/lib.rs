@@ -32,6 +32,7 @@
 
 pub mod config_check;
 pub mod cron;
+pub mod dags;
 pub mod dispatcher;
 pub mod dispatcher_bin;
 pub mod errfmt;
@@ -42,6 +43,7 @@ pub mod provision;
 pub mod read;
 pub mod s3_ingest;
 pub mod schema;
+pub mod taskpg;
 pub mod urlguard;
 pub mod webhook;
 
@@ -3058,6 +3060,356 @@ async fn resume_job(
             "job is not resumable (not failed or canceled)",
         ),
         Err(e) => pg_err(e),
+    }
+}
+
+/// Viewer: every try of every task of one job, in topological then try order,
+/// archived tries included (`GET /v1/orgs/{org}/jobs/{job_id}/tasks`). The
+/// task ledger of batch-orchestration-design §4.2; rows exist once the DAG
+/// planner runs (Phase 1 ships the ledger and this read before any executor).
+async fn list_job_tasks(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, job_id)): Path<(String, String)>,
+) -> axum::response::Response {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "the task ledger requires Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    match er_entities::task_instance::read::by_job(&client, &org_row.id, &job_id).await {
+        Ok(tasks) => Json(json!({ "tasks": tasks })).into_response(),
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Authenticate an attempt-channel call (§6.4, the fallback-token flavour):
+/// the bearer credential is the per-attempt token `claim_launch` minted,
+/// hashed and compared constant-time against the row; the projected
+/// ServiceAccount token replaces it in Phase 2. Returns the retry lineage,
+/// current try first (`task_instance/read/retry_lineage.sql`).
+async fn attempt_authorized(
+    client: &tokio_postgres::Client,
+    attempt_id: &str,
+    headers: &axum::http::HeaderMap,
+) -> Result<Vec<er_entities::task_instance::TaskInstance>, Box<axum::response::Response>> {
+    let token = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(str::trim)
+        .filter(|t| !t.is_empty());
+    let Some(token) = token else {
+        return Err(Box::new(unauthorized("missing attempt token").into_response()));
+    };
+    let lineage = er_entities::task_instance::read::retry_lineage(client, attempt_id)
+        .await
+        .map_err(|e| Box::new(pg_err(e)))?;
+    if lineage.is_empty() {
+        return Err(Box::new(detail_err(StatusCode::NOT_FOUND, "no such attempt")));
+    }
+    let presented = pg::hash_secret(token);
+    let authorized = lineage[0]
+        .token_hash
+        .as_deref()
+        .is_some_and(|stored| ct_eq(stored.as_bytes(), presented.as_bytes()));
+    if !authorized {
+        return Err(Box::new(
+            unauthorized("the attempt token does not match this attempt").into_response(),
+        ));
+    }
+    Ok(lineage)
+}
+
+/// The work order for one claimed attempt
+/// (`GET /v1/internal/attempts/{attempt_id}`): identity, the pinned input, the
+/// job's params, the retry lineage the ledger probe matches on, and the
+/// tenant's lake env (§6.3 step 1). Machine-to-machine: per-attempt token, not
+/// a principal; the BFF never forwards `/v1/internal/*`.
+async fn attempt_work_order(
+    State(state): State<AppState>,
+    Path(attempt_id): Path<String>,
+    headers: axum::http::HeaderMap,
+) -> axum::response::Response {
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "the attempt channel requires Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let lineage = match attempt_authorized(&client, &attempt_id, &headers).await {
+        Ok(l) => l,
+        Err(r) => return *r,
+    };
+    let current = &lineage[0];
+    let job = match pg::get_job(&client, &current.org_id, &current.job_id).await {
+        Ok(Some(j)) => j,
+        Ok(None) => return detail_err(StatusCode::NOT_FOUND, "no job behind this attempt"),
+        Err(e) => return pg_err(e),
+    };
+    let lake_env = match pg::get_org_by_id(&client, &current.org_id).await {
+        Ok(Some(org)) => org.env,
+        Ok(None) => serde_json::Value::Null,
+        Err(e) => return pg_err(e),
+    };
+    let order = json!({
+        "org_id": current.org_id,
+        "job_id": current.job_id,
+        // jobs.id == run_id is load-bearing (§4.1); planning writes it.
+        "run_id": job.run_id.clone().unwrap_or_else(|| job.id.clone()),
+        "kind": job.kind,
+        "task_id": current.task_id,
+        "try_number": current.try_number,
+        "state": current.state,
+        "resource_class": current.resource_class,
+        "segment": current.segment,
+        "trigger_rule": current.trigger_rule,
+        "max_tries": current.max_tries,
+        "input": current.input,
+        "params": job.params,
+        "structural_fingerprint": job.structural_fingerprint,
+        "lineage": lineage.iter().map(|t| t.id.clone()).collect::<Vec<_>>(),
+        "lake_env": lake_env,
+    });
+    (StatusCode::OK, Json(json!(order))).into_response()
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AttemptStart {
+    k8s_job_name: String,
+    pod_uid: String,
+    #[serde(default)]
+    pod_name: Option<String>,
+    #[serde(default)]
+    node_name: Option<String>,
+    #[serde(default)]
+    image_digest: Option<String>,
+}
+
+/// The pod's first report
+/// (`POST /v1/internal/attempts/{attempt_id}/start`): `queued → running`,
+/// recording the pod identity. Zero rows means a stale pod — a different
+/// launch, a finished attempt — and the caller exits 3 (§6.3 step 3).
+async fn attempt_start(
+    State(state): State<AppState>,
+    Path(attempt_id): Path<String>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<AttemptStart>,
+) -> axum::response::Response {
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "the attempt channel requires Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    if let Err(r) = attempt_authorized(&client, &attempt_id, &headers).await {
+        return *r;
+    }
+    match er_entities::task_instance::update::start(
+        &client,
+        body.pod_name.as_deref(),
+        &body.pod_uid,
+        body.node_name.as_deref(),
+        body.image_digest.as_deref(),
+        &attempt_id,
+        &body.k8s_job_name,
+    )
+    .await
+    {
+        Ok(rows) => rows.into_iter().next().map_or_else(
+            || detail_err(StatusCode::CONFLICT, "stale start: the attempt is not queued under this launch"),
+            |row| (StatusCode::OK, Json(json!(row))).into_response(),
+        ),
+        Err(e) => pg_err(e),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AttemptHeartbeat {
+    pod_uid: String,
+    #[serde(default)]
+    counters: Option<serde_json::Value>,
+}
+
+/// The 30 s liveness report
+/// (`POST /v1/internal/attempts/{attempt_id}/heartbeat`). Zero rows is the
+/// FENCE: the pod rolls back its last write-back instead of committing (§6.3
+/// step 6).
+async fn attempt_heartbeat(
+    State(state): State<AppState>,
+    Path(attempt_id): Path<String>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<AttemptHeartbeat>,
+) -> axum::response::Response {
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "the attempt channel requires Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    if let Err(r) = attempt_authorized(&client, &attempt_id, &headers).await {
+        return *r;
+    }
+    match er_entities::task_instance::update::heartbeat(
+        &client,
+        body.counters.as_ref(),
+        &attempt_id,
+        &body.pod_uid,
+    )
+    .await
+    {
+        Ok(rows) => rows.into_iter().next().map_or_else(
+            || detail_err(StatusCode::CONFLICT, "fenced: the attempt is no longer running as this pod"),
+            |row| (StatusCode::OK, Json(json!(row))).into_response(),
+        ),
+        Err(e) => pg_err(e),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AttemptFinish {
+    /// `succeeded | skipped | failed | interrupted` — the terminal-record
+    /// states of §6.3 step 7.
+    state: String,
+    pod_uid: String,
+    #[serde(default)]
+    outcome: Option<String>,
+    #[serde(default)]
+    output: Option<serde_json::Value>,
+    #[serde(default)]
+    snapshot_start: Option<i64>,
+    #[serde(default)]
+    snapshot_end: Option<i64>,
+    #[serde(default)]
+    counters: Option<serde_json::Value>,
+    #[serde(default)]
+    exit_code: Option<i64>,
+    #[serde(default)]
+    error_class: Option<String>,
+    #[serde(default)]
+    error_detail: Option<String>,
+    #[serde(default)]
+    termination_reason: Option<String>,
+}
+
+/// The pod's terminal report
+/// (`POST /v1/internal/attempts/{attempt_id}/finish`): success and skip run
+/// `finish.sql`; a failure runs the `fail_or_retry` pair (archive + budgeted
+/// successor); `interrupted` records evidence and no verdict — the watch rules
+/// once the pod is terminal (§4.5, §5.6). The fused-segment `next` hand-off
+/// arrives with the executor in Phase 2.
+async fn attempt_finish(
+    State(state): State<AppState>,
+    Path(attempt_id): Path<String>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<AttemptFinish>,
+) -> axum::response::Response {
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "the attempt channel requires Postgres");
+    };
+    let mut client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let lineage = match attempt_authorized(&client, &attempt_id, &headers).await {
+        Ok(l) => l,
+        Err(r) => return *r,
+    };
+    let current = lineage.into_iter().next().expect("lineage is non-empty");
+    match body.state.as_str() {
+        "succeeded" | "skipped" => {
+            match er_entities::task_instance::update::finish(
+                &client,
+                body.state == "skipped",
+                body.outcome.as_deref().unwrap_or("done"),
+                body.output.as_ref(),
+                body.snapshot_start,
+                body.snapshot_end,
+                body.counters.as_ref(),
+                body.exit_code,
+                &attempt_id,
+                &body.pod_uid,
+            )
+            .await
+            {
+                Ok(rows) => rows.into_iter().next().map_or_else(
+                    || detail_err(StatusCode::CONFLICT, "stale finish: the attempt is no longer running as this pod"),
+                    |row| (StatusCode::OK, Json(json!(row))).into_response(),
+                ),
+                Err(e) => pg_err(e),
+            }
+        }
+        "failed" => {
+            let class = body.error_class.as_deref().unwrap_or("internal");
+            let retryable = matches!(
+                class,
+                "transient_io" | "lock_conflict" | "infrastructure" | "resources"
+            );
+            let backoff = if current.kind == "control" {
+                taskpg::CONTROL_BACKOFF
+            } else {
+                taskpg::POD_BACKOFF
+            };
+            let failure = taskpg::TaskFailure {
+                terminal_state: if class == "timeout" { "timed_out" } else { "failed" },
+                retryable,
+                escalate: class == "resources",
+                exit_code: body.exit_code,
+                termination_reason: body.termination_reason.as_deref(),
+                error_class: Some(class),
+                error_detail: body.error_detail.as_deref(),
+                k8s_job_name: current.k8s_job_name.as_deref(),
+                backoff,
+            };
+            match taskpg::fail_or_retry_task(&mut client, &attempt_id, &failure).await {
+                Ok((Some(archived), successor)) => (
+                    StatusCode::OK,
+                    Json(json!({ "archived": archived, "retry": successor })),
+                )
+                    .into_response(),
+                Ok((None, _)) => detail_err(
+                    StatusCode::CONFLICT,
+                    "stale failure report: the attempt is not live under this launch",
+                ),
+                Err(e) => pg_err(e),
+            }
+        }
+        "interrupted" => {
+            match er_entities::task_instance::update::note_interruption(
+                &client,
+                body.termination_reason.as_deref().unwrap_or("sigterm"),
+                body.counters.as_ref(),
+                &attempt_id,
+                &body.pod_uid,
+            )
+            .await
+            {
+                Ok(rows) => rows.into_iter().next().map_or_else(
+                    || detail_err(StatusCode::CONFLICT, "stale interruption: the attempt is not live as this pod"),
+                    |row| (StatusCode::OK, Json(json!(row))).into_response(),
+                ),
+                Err(e) => pg_err(e),
+            }
+        }
+        other => detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("unknown terminal state '{other}'"),
+        ),
     }
 }
 
@@ -7518,6 +7870,24 @@ fn build_routes(state: AppState) -> Router {
         // `{job_id}:cancel` action becomes a `/cancel` sub-path here.
         .route("/v1/orgs/{org}/jobs/{job_id}/cancel", post(cancel_job))
         .route("/v1/orgs/{org}/jobs/{job_id}/resume", post(resume_job))
+        .route("/v1/orgs/{org}/jobs/{job_id}/tasks", get(list_job_tasks))
+        // The §6.4 attempt channel (fallback-token flavour): machine-to-machine,
+        // authenticated by the per-attempt token rather than a bearer
+        // principal; in-namespace only once deployed (the BFF never forwards
+        // /v1/internal/*, and tests/mcp_manifest.rs exempts the prefix).
+        .route("/v1/internal/attempts/{attempt_id}", get(attempt_work_order))
+        .route(
+            "/v1/internal/attempts/{attempt_id}/start",
+            post(attempt_start),
+        )
+        .route(
+            "/v1/internal/attempts/{attempt_id}/heartbeat",
+            post(attempt_heartbeat),
+        )
+        .route(
+            "/v1/internal/attempts/{attempt_id}/finish",
+            post(attempt_finish),
+        )
         .route("/v1/orgs/{org}/api-keys", post(create_key))
         .route(
             "/v1/orgs/{org}/api-keys/{key_id}",

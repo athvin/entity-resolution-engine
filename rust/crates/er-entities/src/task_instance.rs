@@ -311,9 +311,9 @@ SELECT encode(sha256(convert_to('task_instances:' || job_id || ':' || task_id ||
        CASE WHEN $1 THEN resource_class ELSE NULL END,
        max_tries, max_launches,
        now() + make_interval(secs =>
-         least($2, $3 * power(2, try_number - 1))::int
+         least($2::bigint, $3::bigint * power(2, try_number - 1))::int
          + mod(abs(hashtext(job_id || '#' || task_id || '#' || try_number::text)::bigint),
-               least($2, $3 * power(2, try_number - 1))::int)),
+               least($2::bigint, $3::bigint * power(2, try_number - 1))::int)),
        input, image_digest, trace_context
 FROM public.task_instances
 WHERE id = $4 AND live IS NULL AND archived_reason = 'retry'

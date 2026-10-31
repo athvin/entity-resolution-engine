@@ -31,6 +31,7 @@ use utoipa::OpenApi;
         er_entities::webhook::Webhook,
         er_entities::staged_steward_action::StagedStewardAction,
         er_entities::audit_log::AuditLog,
+        er_entities::task_instance::TaskInstance,
     ))
 )]
 pub struct ApiDoc;
@@ -143,8 +144,8 @@ mod tests {
 
     #[test]
     fn every_generated_entity_schema_is_registered() {
-        // The document carries one component schema per generated entity (12:
-        // 8 control entities + the 4 produced golden marts).
+        // The document carries one component schema per generated entity (13:
+        // 9 control entities + the 4 produced golden marts).
         let doc = ApiDoc::openapi();
         let schemas = doc
             .components
@@ -152,7 +153,7 @@ mod tests {
             .expect("components present")
             .schemas
             .len();
-        assert_eq!(schemas, 12, "expected one schema per generated entity");
+        assert_eq!(schemas, 13, "expected one schema per generated entity");
     }
 
     fn doc(schemas: &str) -> String {

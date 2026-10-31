@@ -440,6 +440,13 @@ fn every_routed_handler_is_described() {
 
     let mut missing: Vec<String> = Vec::new();
     for (path, verbs) in router_paths() {
+        // The §6.4 attempt channel is machine-to-machine: authenticated by the
+        // per-attempt credential rather than a bearer principal, never
+        // forwarded by the BFF, and not a tool an MCP caller could invoke —
+        // describing it here would advertise a surface no principal can use.
+        if path.starts_with("/v1/internal/") {
+            continue;
+        }
         let key = normalise(&path);
         for verb in verbs {
             let covered = described.get(&key).is_some_and(|m| m.contains(&verb));

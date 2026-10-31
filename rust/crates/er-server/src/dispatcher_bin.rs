@@ -27,6 +27,9 @@ use crate::{dispatcher, pg};
 /// Missing `ER_PG_DSN`, a Postgres connect/schema failure, or a control-plane
 /// error from the loop itself.
 pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    // Assemble every kind's DAG before touching the queue: a graph problem is
+    // a refusal to start (batch-orchestration-design §3.3).
+    crate::dags::verify_all();
     let dsn = std::env::var("ER_PG_DSN").map_err(|_| "ER_PG_DSN is required for the dispatcher")?;
     let mut client = pg::connect(&dsn).await?;
     // Advisory-locked, so it's safe alongside the API's own ensure_schema.
