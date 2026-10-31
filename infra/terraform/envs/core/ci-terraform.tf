@@ -86,10 +86,25 @@ data "aws_iam_policy_document" "ci_tf_plan_state" {
   # plan job must pass `-lock=false`: acquiring the S3 lockfile is a write.
   # A plan that cannot lock is correct-but-racy against a concurrent apply, and
   # the apply job's concurrency group is what actually serialises writes.
+  #
+  # Both state prefixes, because the plan tier covers more than `envs/`:
+  # `bootstrap/state-backend` is PLANNED in CI and never applied there (it owns
+  # the bucket its own backend lives in, so applying it from CI is the circular
+  # case — but a plan still catches drift in the bucket's configuration).
+  # `bootstrap/organization` is deliberately not planned at all: its one
+  # required variable is a root account email kept out of a public repository,
+  # and supplying it would mean introducing the first repository secret into a
+  # pipeline whose stated property is that it has none.
+  #
+  # Enumerated rather than `/*`: the point of this statement is that the role
+  # reads Terraform state and nothing else in the bucket.
   statement {
-    effect    = "Allow"
-    actions   = ["s3:GetObject"]
-    resources = ["${local.tf_state_arn}/envs/*.tfstate"]
+    effect  = "Allow"
+    actions = ["s3:GetObject"]
+    resources = [
+      "${local.tf_state_arn}/envs/*.tfstate",
+      "${local.tf_state_arn}/bootstrap/*.tfstate",
+    ]
   }
 
   statement {
