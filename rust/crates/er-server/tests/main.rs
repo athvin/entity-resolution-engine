@@ -24,9 +24,9 @@
 mod common;
 
 mod acct_read;
-mod db_per_test;
 mod control_tasks_no_engine;
 mod dag_assembly;
+mod db_per_test;
 mod dispatch;
 mod dispatch_coverage;
 mod egress_guard;

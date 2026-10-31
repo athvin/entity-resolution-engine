@@ -133,7 +133,7 @@ columns:
     description: "The dispatcher process epoch (UUIDv7 minted at start) that claimed the launch; adoption rewrites it."
   - name: k8s_job_name
     type: varchar
-    description: "batch/v1 Job name, er-t-<20 hex of id>-l<launches>, of the Job that ran this try; for a fused non-head member, the segment head's Job (advance_segment copies it)."
+    description: "batch/v1 Job name, `er-t-{20 hex of id}-l{launches}`, of the Job that ran this try; for a fused non-head member, the segment head's Job (advance_segment copies it)."
   - name: pod_name
     type: varchar
     description: "Pod that ran this try, from the pod's bound token on first contact; cross-checked by the watch."

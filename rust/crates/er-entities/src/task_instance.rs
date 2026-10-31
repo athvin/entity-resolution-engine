@@ -64,7 +64,7 @@ pub struct TaskInstance {
     pub error_detail: Option<String>,
     /// The dispatcher process epoch (UUIDv7 minted at start) that claimed the launch; adoption rewrites it.
     pub owner_epoch: Option<String>,
-    /// batch/v1 Job name, er-t-<20 hex of id>-l<launches>, of the Job that ran this try; for a fused non-head member, the segment head's Job (advance_segment copies it).
+    /// batch/v1 Job name, `er-t-{20 hex of id}-l{launches}`, of the Job that ran this try; for a fused non-head member, the segment head's Job (advance_segment copies it).
     pub k8s_job_name: Option<String>,
     /// Pod that ran this try, from the pod's bound token on first contact; cross-checked by the watch.
     pub pod_name: Option<String>,

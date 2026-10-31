@@ -17,8 +17,8 @@ use er_dag::{Dag, DagBuilder, TriggerRule};
 
 use control::{Activate, CreateCatalog, DrainActions, RegisterModel, SettleActions, StageApproved};
 use tasks::{
-    ApplyStaged, Assemble, CorrectReconcile, CorrectionsInit, CorrectionsReconcile, Finish, Init,
-    Ingest, LakeInit, Maintain, Match, Reconcile, ReconcileSchema, Standardize, Train,
+    ApplyStaged, Assemble, CorrectReconcile, CorrectionsInit, CorrectionsReconcile, Finish, Ingest,
+    Init, LakeInit, Maintain, Match, Reconcile, ReconcileSchema, Standardize, Train,
 };
 
 /// The lake session type every pod task body takes; fixed here so `er-dag`

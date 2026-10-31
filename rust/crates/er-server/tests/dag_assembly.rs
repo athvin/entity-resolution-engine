@@ -76,7 +76,15 @@ fn the_run_all_graph_matches_the_design() {
     let names: Vec<&str> = dag.nodes.iter().map(|n| n.task_id).collect();
     assert_eq!(
         names,
-        vec!["init", "ingest", "standardize", "match", "reconcile", "assemble", "finish"]
+        vec![
+            "init",
+            "ingest",
+            "standardize",
+            "match",
+            "reconcile",
+            "assemble",
+            "finish"
+        ]
     );
     let finish = &dag.nodes[6];
     assert!(finish.teardown);

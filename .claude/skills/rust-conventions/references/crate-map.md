@@ -26,7 +26,7 @@ Bumping `arrow` or `datafusion` alone can never go green; dependabot is
 configured to leave them alone and the unblocker is upstream.
 
 <!-- BEGIN GENERATED: crate-map -->
-**29 crates.** The cargo workspace root is `rust/`, not the repo root.
+**30 crates.** The cargo workspace root is `rust/`, not the repo root.
 
 | Crate | Purpose |
 |---|---|
@@ -35,6 +35,7 @@ configured to leave them alone and the unblocker is upstream.
 | `er-cli` | `er-cli` — orchestrate the ER pipeline stages over a real DuckLake lake (P2) |
 | `er-compile` | Compile a tenant's declared `comparisons:` / `blocking:` into the settings document the engine loads |
 | `er-config` | The S6 configuration document and its `config_hash` (port of `src/er/config/{schema,hashing,loader}.py`, DesignDoc.md S6/S6.1/S5.2) |
+| `er-dag` | The compiled-DAG library of `docs/batch-orchestration-design.md` |
 | `er-entities` | The generated entity crate: one module per entity, each with its struct, `arrow_schema()` and (in later phases) its typed query functions |
 | `er-entity-cli` | `er-entity` — the entity-framework CLI |
 | `er-entity-diff` | `er-entity-diff` — does the live store match the entity catalog? |

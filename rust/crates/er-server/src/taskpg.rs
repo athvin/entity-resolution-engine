@@ -29,7 +29,10 @@ pub const CONTROL_BACKOFF: (i64, i64) = (5, 60);
 /// too (§4.2).
 #[must_use]
 pub fn attempt_id(job_id: &str, task_id: &str, try_number: i64) -> String {
-    er_ids::natural_id("task_instances", &[job_id, task_id, &try_number.to_string()])
+    er_ids::natural_id(
+        "task_instances",
+        &[job_id, task_id, &try_number.to_string()],
+    )
 }
 
 /// Planning is one transaction (§4.5): one `plan.sql` row per compiled node
@@ -63,10 +66,11 @@ pub async fn plan(
             NodeKind::Control => None,
             NodeKind::Pod => Some(match node.policy.class {
                 ClassRule::Fixed(c) => c.as_str(),
-                ClassRule::FromRun => match job.resource_class.as_deref() {
-                    Some(c @ ("S" | "M" | "L")) => c,
-                    _ => "M",
-                },
+                ClassRule::FromRun => job
+                    .resource_class
+                    .as_deref()
+                    .filter(|c| matches!(*c, "S" | "M" | "L"))
+                    .unwrap_or("M"),
             }),
         };
         er_entities::task_instance::create::plan(
@@ -158,9 +162,7 @@ pub async fn fail_or_retry_task(
     task_instance_id: &str,
     failure: &TaskFailure<'_>,
 ) -> Result<(Option<TaskInstance>, Option<TaskInstance>), PgError> {
-    let truncated: Option<String> = failure
-        .error_detail
-        .map(|d| d.chars().take(2000).collect());
+    let truncated: Option<String> = failure.error_detail.map(|d| d.chars().take(2000).collect());
     let tx = client.transaction().await?;
     let archived = er_entities::task_instance::update::archive_try(
         &tx,
@@ -245,9 +247,14 @@ pub async fn clear(
     if job.state == "canceling" {
         return Err(ClearError::Canceling);
     }
-    let restarting =
-        er_entities::task_instance::update::restart_cleared(&tx, resource_class, org_id, job_id, &ids)
-            .await?;
+    let restarting = er_entities::task_instance::update::restart_cleared(
+        &tx,
+        resource_class,
+        org_id,
+        job_id,
+        &ids,
+    )
+    .await?;
     let archived =
         er_entities::task_instance::update::archive_cleared(&tx, org_id, job_id, &ids).await?;
     let mut rotated = Vec::new();

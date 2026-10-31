@@ -61,7 +61,7 @@ export interface TaskInstance {
   error_detail: string | null;
   /** The dispatcher process epoch (UUIDv7 minted at start) that claimed the launch; adoption rewrites it. */
   owner_epoch: string | null;
-  /** batch/v1 Job name, er-t-<20 hex of id>-l<launches>, of the Job that ran this try; for a fused non-head member, the segment head's Job (advance_segment copies it). */
+  /** batch/v1 Job name, `er-t-{20 hex of id}-l{launches}`, of the Job that ran this try; for a fused non-head member, the segment head's Job (advance_segment copies it). */
   k8s_job_name: string | null;
   /** Pod that ran this try, from the pod's bound token on first contact; cross-checked by the watch. */
   pod_name: string | null;

@@ -50,7 +50,9 @@ fn bearer(req: axum::http::request::Builder, token: &str) -> axum::http::request
 }
 
 async fn body_json(resp: axum::response::Response) -> Value {
-    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .unwrap();
     serde_json::from_slice(&bytes).unwrap()
 }
 
@@ -62,7 +64,9 @@ async fn the_task_ledger_statements_hold_their_contracts() {
     let dsn = db.dsn().to_string();
     let mut client = pg::connect(&dsn).await.unwrap();
     pg::ensure_schema(&mut client).await.unwrap();
-    pg::ensure_org(&client, "acme", "/tmp/acme.yaml").await.unwrap();
+    pg::ensure_org(&client, "acme", "/tmp/acme.yaml")
+        .await
+        .unwrap();
     let org_id: String = client
         .query_one("SELECT id FROM orgs WHERE name = 'acme'", &[])
         .await
@@ -157,10 +161,11 @@ async fn the_task_ledger_statements_hold_their_contracts() {
     assert_eq!(scheduled.len(), 1);
     let token = "tok-init-1";
     let job_name = format!("er-t-{}-l1", &init_id[..20]);
-    let launched = taskpg::claim_launch(&client, EPOCH, &job_name, Some(&pg::hash_secret(token)), 1)
-        .await
-        .unwrap()
-        .expect("the scheduled init is claimable");
+    let launched =
+        taskpg::claim_launch(&client, EPOCH, &job_name, Some(&pg::hash_secret(token)), 1)
+            .await
+            .unwrap()
+            .expect("the scheduled init is claimable");
     assert_eq!(launched.id, init_id);
     assert_eq!(launched.state, "queued");
     assert_eq!(launched.launches, 1);
@@ -179,7 +184,9 @@ async fn the_task_ledger_statements_hold_their_contracts() {
         .clone()
         .oneshot(
             bearer(
-                Request::builder().method("GET").uri(format!("/v1/internal/attempts/{init_id}")),
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/v1/internal/attempts/{init_id}")),
                 "not-the-token",
             )
             .body(Body::empty())
@@ -192,7 +199,9 @@ async fn the_task_ledger_statements_hold_their_contracts() {
         .clone()
         .oneshot(
             bearer(
-                Request::builder().method("GET").uri(format!("/v1/internal/attempts/{init_id}")),
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/v1/internal/attempts/{init_id}")),
                 token,
             )
             .body(Body::empty())
@@ -285,13 +294,19 @@ async fn the_task_ledger_statements_hold_their_contracts() {
     assert_eq!(resp.status(), StatusCode::OK);
     let finished = body_json(resp).await;
     assert_eq!(finished["state"], "succeeded");
-    assert_eq!(finished["token_hash"], Value::Null, "the token is nulled at finish");
+    assert_eq!(
+        finished["token_hash"],
+        Value::Null,
+        "the token is nulled at finish"
+    );
     // With the token nulled, the channel is closed for this attempt.
     let resp = app
         .clone()
         .oneshot(
             bearer(
-                Request::builder().method("GET").uri(format!("/v1/internal/attempts/{init_id}")),
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/v1/internal/attempts/{init_id}")),
                 token,
             )
             .body(Body::empty())
@@ -329,7 +344,13 @@ async fn the_task_ledger_statements_hold_their_contracts() {
         .unwrap()
         .expect("ingest try 1 claims");
     er_entities::task_instance::update::start(
-        &client, None, "pod-i1", None, None, &ingest1, &ingest_job1,
+        &client,
+        None,
+        "pod-i1",
+        None,
+        None,
+        &ingest1,
+        &ingest_job1,
     )
     .await
     .unwrap();
@@ -399,7 +420,11 @@ async fn the_task_ledger_statements_hold_their_contracts() {
         .await
         .unwrap()
         .get(0);
-    assert_eq!(delay, 30 + jitter, "base 30 s plus the deterministic jitter");
+    assert_eq!(
+        delay,
+        30 + jitter,
+        "base 30 s plus the deterministic jitter"
+    );
 
     // Try 2: an OOM that never committed escalates M → L (§5.5).
     client
@@ -434,9 +459,16 @@ async fn the_task_ledger_statements_hold_their_contracts() {
     assert!(archived2.expect("archives").live.is_none());
     let retry3 = retry3.expect("try 2 <= max_tries 2");
     assert_eq!(retry3.try_number, 3);
-    assert_eq!(retry3.resource_class.as_deref(), Some("L"), "M escalates to L");
+    assert_eq!(
+        retry3.resource_class.as_deref(),
+        Some("L"),
+        "M escalates to L"
+    );
     assert_eq!(retry3.escalated_from.as_deref(), Some("M"));
-    assert!(retry3.segment.is_none(), "a class change invalidates the segment");
+    assert!(
+        retry3.segment.is_none(),
+        "a class change invalidates the segment"
+    );
 
     // Try 3 fails terminally: try_number 3 > max_tries 2 — the row stays live
     // in its terminal state and no successor appears.
@@ -470,7 +502,11 @@ async fn the_task_ledger_statements_hold_their_contracts() {
     .await
     .unwrap();
     let terminal = archived3.expect("the exhausted try records");
-    assert_eq!(terminal.live, Some(true), "the terminal row stays the live row");
+    assert_eq!(
+        terminal.live,
+        Some(true),
+        "the terminal row stays the live row"
+    );
     assert_eq!(terminal.state, "failed");
     assert!(retry4.is_none(), "the budget is spent");
 
@@ -479,7 +515,10 @@ async fn the_task_ledger_statements_hold_their_contracts() {
         .await
         .unwrap();
     let lineage_ids: Vec<&str> = lineage.iter().map(|r| r.id.as_str()).collect();
-    assert_eq!(lineage_ids, vec![retry3.id.as_str(), retry.id.as_str(), ingest1.as_str()]);
+    assert_eq!(
+        lineage_ids,
+        vec![retry3.id.as_str(), retry.id.as_str(), ingest1.as_str()]
+    );
 
     // ---- Phase D: propagation deadens the chain; the job settles failed ----
     let states = states_for(&client, &dag, &org_id, &job.id).await;
@@ -489,17 +528,17 @@ async fn the_task_ledger_statements_hold_their_contracts() {
     for (idx, action) in &actions[..4] {
         assert_eq!(*action, PassAction::Propagate(TaskState::UpstreamFailed));
         let target = taskpg::attempt_id(&job.id, dag.nodes[*idx].task_id, 1);
-        let done = er_entities::task_instance::update::propagate(
-            &client,
-            "upstream_failed",
-            &target,
-            0,
-        )
-        .await
-        .unwrap();
+        let done =
+            er_entities::task_instance::update::propagate(&client, "upstream_failed", &target, 0)
+                .await
+                .unwrap();
         assert_eq!(done.len(), 1, "{}", dag.nodes[*idx].task_id);
     }
-    assert_eq!(actions[4], (6, PassAction::Schedule), "finish fires all_terminal");
+    assert_eq!(
+        actions[4],
+        (6, PassAction::Schedule),
+        "finish fires all_terminal"
+    );
 
     // finish runs (teardown) and the job settles failed from the leaves.
     let finish1 = id_of("finish");
@@ -512,7 +551,13 @@ async fn the_task_ledger_statements_hold_their_contracts() {
         .unwrap()
         .expect("the teardown row claims under a running job");
     er_entities::task_instance::update::start(
-        &client, None, "pod-f1", None, None, &finish1, &finish_job1,
+        &client,
+        None,
+        "pod-f1",
+        None,
+        None,
+        &finish1,
+        &finish_job1,
     )
     .await
     .unwrap();
@@ -532,7 +577,10 @@ async fn the_task_ledger_statements_hold_their_contracts() {
     .unwrap();
 
     let states = states_for(&client, &dag, &org_id, &job.id).await;
-    assert_eq!(settle(&dag, &states), SettleVerdict::Settled(TaskState::Failed));
+    assert_eq!(
+        settle(&dag, &states),
+        SettleVerdict::Settled(TaskState::Failed)
+    );
     let settled = er_entities::job::update::settle(
         &client,
         "failed",
@@ -554,11 +602,26 @@ async fn the_task_ledger_statements_hold_their_contracts() {
         .collect();
     assert_eq!(
         task_ids,
-        vec!["ingest", "standardize", "match", "reconcile", "assemble", "finish"]
+        vec![
+            "ingest",
+            "standardize",
+            "match",
+            "reconcile",
+            "assemble",
+            "finish"
+        ]
     );
-    let cleared = taskpg::clear(&mut client, &org_id, &job.id, &task_ids, 2, None, Some("sha256:v2"))
-        .await
-        .unwrap();
+    let cleared = taskpg::clear(
+        &mut client,
+        &org_id,
+        &job.id,
+        &task_ids,
+        2,
+        None,
+        Some("sha256:v2"),
+    )
+    .await
+    .unwrap();
     assert!(cleared.restarting.is_empty(), "nothing was live");
     // ingest try 3 rotates to try 4 with max_tries = 3 + 2; the four
     // propagated rows and finish rotate to try 2 with max_tries = 1 + 2.
@@ -571,7 +634,11 @@ async fn the_task_ledger_statements_hold_their_contracts() {
     assert_eq!(ingest4.try_number, 4);
     assert_eq!(ingest4.max_tries, 5);
     assert_eq!(ingest4.state, "none");
-    assert_eq!(ingest4.resource_class.as_deref(), Some("L"), "the escalated class carries");
+    assert_eq!(
+        ingest4.resource_class.as_deref(),
+        Some("L"),
+        "the escalated class carries"
+    );
     let finish2 = cleared
         .rotated
         .iter()
@@ -585,13 +652,17 @@ async fn the_task_ledger_statements_hold_their_contracts() {
 
     // The fence: a verdict composed before the clear (clear_number 0) matches
     // zero rows; the current fence value lands.
-    let fenced = er_entities::task_instance::update::mark_scheduled(&client, &json!({}), &ingest4.id, 0)
-        .await
-        .unwrap();
+    let fenced =
+        er_entities::task_instance::update::mark_scheduled(&client, &json!({}), &ingest4.id, 0)
+            .await
+            .unwrap();
     assert!(fenced.is_empty(), "the stale verdict is fenced");
     // The reopened job re-claims through the existing index and re-plans
     // idempotently.
-    let reclaimed = pg::claim(&client).await.unwrap().expect("the reopened job claims");
+    let reclaimed = pg::claim(&client)
+        .await
+        .unwrap()
+        .expect("the reopened job claims");
     assert_eq!(reclaimed.id, job.id);
     assert_eq!(reclaimed.attempt, 2, "claim.sql keeps counting claims");
     taskpg::plan(&mut client, &reclaimed, &dag, EPOCH, Some("sha256:v2"))
@@ -605,11 +676,15 @@ async fn the_task_ledger_statements_hold_their_contracts() {
         .await
         .unwrap()
         .get(0);
-    assert_eq!(count, 15, "re-planning inserted nothing (9 archived + 6 live)");
+    assert_eq!(
+        count, 15,
+        "re-planning inserted nothing (9 archived + 6 live)"
+    );
 
-    let scheduled = er_entities::task_instance::update::mark_scheduled(&client, &json!({}), &ingest4.id, 1)
-        .await
-        .unwrap();
+    let scheduled =
+        er_entities::task_instance::update::mark_scheduled(&client, &json!({}), &ingest4.id, 1)
+            .await
+            .unwrap();
     assert_eq!(scheduled.len(), 1, "the post-clear verdict lands");
 
     // ---- Phase F: clear-while-live → restarting → complete_restart; cancel -
@@ -630,9 +705,16 @@ async fn the_task_ledger_statements_hold_their_contracts() {
     .await
     .unwrap();
     assert_eq!(cleared.rotated.len(), 0);
-    assert_eq!(cleared.restarting.len(), 1, "the live row goes to restarting");
+    assert_eq!(
+        cleared.restarting.len(),
+        1,
+        "the live row goes to restarting"
+    );
     assert_eq!(cleared.restarting[0].state, "restarting");
-    assert_eq!(cleared.restarting[0].next_resource_class.as_deref(), Some("M"));
+    assert_eq!(
+        cleared.restarting[0].next_resource_class.as_deref(),
+        Some("M")
+    );
 
     // complete_restart once the watch reports the pod gone: rotate with the
     // class override, no try charged as a failure.
@@ -646,16 +728,14 @@ async fn the_task_ledger_statements_hold_their_contracts() {
     .await
     .unwrap();
     assert_eq!(rotated[0].archived_reason.as_deref(), Some("restarted"));
-    assert!(rotated[0].error_class.is_none(), "a restart is evidence, not an error");
-    let ingest5 = er_entities::task_instance::create::insert_cleared_try(
-        &client,
-        None,
-        2,
-        None,
-        &ingest4.id,
-    )
-    .await
-    .unwrap();
+    assert!(
+        rotated[0].error_class.is_none(),
+        "a restart is evidence, not an error"
+    );
+    let ingest5 =
+        er_entities::task_instance::create::insert_cleared_try(&client, None, 2, None, &ingest4.id)
+            .await
+            .unwrap();
     assert_eq!(ingest5[0].try_number, 5);
     assert_eq!(
         ingest5[0].resource_class.as_deref(),
@@ -678,7 +758,10 @@ async fn the_task_ledger_statements_hold_their_contracts() {
     let canceling = er_entities::job::update::cancel(&client, &job.id, &org_id)
         .await
         .unwrap();
-    assert_eq!(canceling[0].state, "canceling", "a running job holds the slot");
+    assert_eq!(
+        canceling[0].state, "canceling",
+        "a running job holds the slot"
+    );
     let pending = er_entities::task_instance::update::cancel_pending(&client, &org_id, &job.id)
         .await
         .unwrap();
@@ -714,11 +797,28 @@ async fn the_task_ledger_statements_hold_their_contracts() {
         .unwrap()
         .expect("the teardown row is claimable under canceling");
     assert_eq!(td.id, finish2_id);
-    er_entities::task_instance::update::start(&client, None, "pod-f2", None, None, &finish2_id, &finish2_job)
-        .await
-        .unwrap();
+    er_entities::task_instance::update::start(
+        &client,
+        None,
+        "pod-f2",
+        None,
+        None,
+        &finish2_id,
+        &finish2_job,
+    )
+    .await
+    .unwrap();
     er_entities::task_instance::update::finish(
-        &client, false, "done", None, None, None, None, Some(0), &finish2_id, "pod-f2",
+        &client,
+        false,
+        "done",
+        None,
+        None,
+        None,
+        None,
+        Some(0),
+        &finish2_id,
+        "pod-f2",
     )
     .await
     .unwrap();
@@ -732,7 +832,10 @@ async fn the_task_ledger_statements_hold_their_contracts() {
     pg::enqueue(&client, &org_id, "train", 0, None, None, None)
         .await
         .unwrap();
-    let train_job = pg::claim(&client).await.unwrap().expect("the slot freed at cancel");
+    let train_job = pg::claim(&client)
+        .await
+        .unwrap()
+        .expect("the slot freed at cancel");
     taskpg::plan(&mut client, &train_job, &train_dag, EPOCH, None)
         .await
         .unwrap();
@@ -746,7 +849,10 @@ async fn the_task_ledger_statements_hold_their_contracts() {
     assert_eq!(control.len(), 1);
     assert_eq!(control[0].id, register1);
     assert_eq!(control[0].state, "running");
-    assert!(control[0].resource_class.is_none(), "a control row has no class");
+    assert!(
+        control[0].resource_class.is_none(),
+        "a control row has no class"
+    );
     // A control row holds no org slot: a pod row of the same org still claims.
     let schema1 = taskpg::attempt_id(&train_job.id, "reconcile_schema", 1);
     er_entities::task_instance::update::mark_scheduled(&client, &json!({}), &schema1, 0)
@@ -795,9 +901,17 @@ async fn the_task_ledger_statements_hold_their_contracts() {
         )
         .await
         .unwrap();
-    er_entities::task_instance::update::start(&client, None, "pod-seg", None, None, &schema1, &schema_job)
-        .await
-        .unwrap();
+    er_entities::task_instance::update::start(
+        &client,
+        None,
+        "pod-seg",
+        None,
+        None,
+        &schema1,
+        &schema_job,
+    )
+    .await
+    .unwrap();
     let advance = taskpg::AdvanceArgs {
         next_task_instance_id: &train1,
         job_id: &train_job.id,

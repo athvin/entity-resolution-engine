@@ -3076,7 +3076,10 @@ async fn list_job_tasks(
         return e.into_response();
     }
     let Some(dsn) = &state.dsn else {
-        return detail_err(StatusCode::NOT_IMPLEMENTED, "the task ledger requires Postgres");
+        return detail_err(
+            StatusCode::NOT_IMPLEMENTED,
+            "the task ledger requires Postgres",
+        );
     };
     let client = match connect_pg(dsn).await {
         Ok(c) => c,
@@ -3109,13 +3112,18 @@ async fn attempt_authorized(
         .map(str::trim)
         .filter(|t| !t.is_empty());
     let Some(token) = token else {
-        return Err(Box::new(unauthorized("missing attempt token").into_response()));
+        return Err(Box::new(
+            unauthorized("missing attempt token").into_response(),
+        ));
     };
     let lineage = er_entities::task_instance::read::retry_lineage(client, attempt_id)
         .await
         .map_err(|e| Box::new(pg_err(e)))?;
     if lineage.is_empty() {
-        return Err(Box::new(detail_err(StatusCode::NOT_FOUND, "no such attempt")));
+        return Err(Box::new(detail_err(
+            StatusCode::NOT_FOUND,
+            "no such attempt",
+        )));
     }
     let presented = pg::hash_secret(token);
     let authorized = lineage[0]
@@ -3141,7 +3149,10 @@ async fn attempt_work_order(
     headers: axum::http::HeaderMap,
 ) -> axum::response::Response {
     let Some(dsn) = &state.dsn else {
-        return detail_err(StatusCode::NOT_IMPLEMENTED, "the attempt channel requires Postgres");
+        return detail_err(
+            StatusCode::NOT_IMPLEMENTED,
+            "the attempt channel requires Postgres",
+        );
     };
     let client = match connect_pg(dsn).await {
         Ok(c) => c,
@@ -3208,7 +3219,10 @@ async fn attempt_start(
     Json(body): Json<AttemptStart>,
 ) -> axum::response::Response {
     let Some(dsn) = &state.dsn else {
-        return detail_err(StatusCode::NOT_IMPLEMENTED, "the attempt channel requires Postgres");
+        return detail_err(
+            StatusCode::NOT_IMPLEMENTED,
+            "the attempt channel requires Postgres",
+        );
     };
     let client = match connect_pg(dsn).await {
         Ok(c) => c,
@@ -3229,7 +3243,12 @@ async fn attempt_start(
     .await
     {
         Ok(rows) => rows.into_iter().next().map_or_else(
-            || detail_err(StatusCode::CONFLICT, "stale start: the attempt is not queued under this launch"),
+            || {
+                detail_err(
+                    StatusCode::CONFLICT,
+                    "stale start: the attempt is not queued under this launch",
+                )
+            },
             |row| (StatusCode::OK, Json(json!(row))).into_response(),
         ),
         Err(e) => pg_err(e),
@@ -3255,7 +3274,10 @@ async fn attempt_heartbeat(
     Json(body): Json<AttemptHeartbeat>,
 ) -> axum::response::Response {
     let Some(dsn) = &state.dsn else {
-        return detail_err(StatusCode::NOT_IMPLEMENTED, "the attempt channel requires Postgres");
+        return detail_err(
+            StatusCode::NOT_IMPLEMENTED,
+            "the attempt channel requires Postgres",
+        );
     };
     let client = match connect_pg(dsn).await {
         Ok(c) => c,
@@ -3273,7 +3295,12 @@ async fn attempt_heartbeat(
     .await
     {
         Ok(rows) => rows.into_iter().next().map_or_else(
-            || detail_err(StatusCode::CONFLICT, "fenced: the attempt is no longer running as this pod"),
+            || {
+                detail_err(
+                    StatusCode::CONFLICT,
+                    "fenced: the attempt is no longer running as this pod",
+                )
+            },
             |row| (StatusCode::OK, Json(json!(row))).into_response(),
         ),
         Err(e) => pg_err(e),
@@ -3320,7 +3347,10 @@ async fn attempt_finish(
     Json(body): Json<AttemptFinish>,
 ) -> axum::response::Response {
     let Some(dsn) = &state.dsn else {
-        return detail_err(StatusCode::NOT_IMPLEMENTED, "the attempt channel requires Postgres");
+        return detail_err(
+            StatusCode::NOT_IMPLEMENTED,
+            "the attempt channel requires Postgres",
+        );
     };
     let mut client = match connect_pg(dsn).await {
         Ok(c) => c,
@@ -3348,7 +3378,12 @@ async fn attempt_finish(
             .await
             {
                 Ok(rows) => rows.into_iter().next().map_or_else(
-                    || detail_err(StatusCode::CONFLICT, "stale finish: the attempt is no longer running as this pod"),
+                    || {
+                        detail_err(
+                            StatusCode::CONFLICT,
+                            "stale finish: the attempt is no longer running as this pod",
+                        )
+                    },
                     |row| (StatusCode::OK, Json(json!(row))).into_response(),
                 ),
                 Err(e) => pg_err(e),
@@ -3366,7 +3401,11 @@ async fn attempt_finish(
                 taskpg::POD_BACKOFF
             };
             let failure = taskpg::TaskFailure {
-                terminal_state: if class == "timeout" { "timed_out" } else { "failed" },
+                terminal_state: if class == "timeout" {
+                    "timed_out"
+                } else {
+                    "failed"
+                },
                 retryable,
                 escalate: class == "resources",
                 exit_code: body.exit_code,
@@ -3400,7 +3439,12 @@ async fn attempt_finish(
             .await
             {
                 Ok(rows) => rows.into_iter().next().map_or_else(
-                    || detail_err(StatusCode::CONFLICT, "stale interruption: the attempt is not live as this pod"),
+                    || {
+                        detail_err(
+                            StatusCode::CONFLICT,
+                            "stale interruption: the attempt is not live as this pod",
+                        )
+                    },
                     |row| (StatusCode::OK, Json(json!(row))).into_response(),
                 ),
                 Err(e) => pg_err(e),
@@ -7875,7 +7919,10 @@ fn build_routes(state: AppState) -> Router {
         // authenticated by the per-attempt token rather than a bearer
         // principal; in-namespace only once deployed (the BFF never forwards
         // /v1/internal/*, and tests/mcp_manifest.rs exempts the prefix).
-        .route("/v1/internal/attempts/{attempt_id}", get(attempt_work_order))
+        .route(
+            "/v1/internal/attempts/{attempt_id}",
+            get(attempt_work_order),
+        )
         .route(
             "/v1/internal/attempts/{attempt_id}/start",
             post(attempt_start),
