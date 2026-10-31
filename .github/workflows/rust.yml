@@ -2,16 +2,28 @@
 # `rust/`); the Python/dbt implementation has been removed, so this is the whole
 # backend gate — effectively unfiltered (the frontend keeps its own pnpm gate).
 #
-# The one exception: a PR that only touches `.claude/**` (agent/skill prose, no
-# code and nothing the generators read) runs none of the compile jobs. Because
-# the required jobs below are REQUIRED status checks, a workflow-level path
-# filter would leave them "pending" forever and block the PR; instead a `detect`
-# job computes whether any non-`.claude` file changed and the required jobs gate
-# on it with `if:`. A job skipped by `if:` reports a "skipped" conclusion, which
+# Two exceptions: a PR that touches nothing but `.claude/**` (agent/skill prose)
+# and/or `infra/terraform/**` runs none of the compile jobs. Because the required
+# jobs below are REQUIRED status checks, a workflow-level path filter would leave
+# them "pending" forever and block the PR; instead a `detect` job computes
+# whether any file outside those two trees changed and the required jobs gate on
+# it with `if:`. A job skipped by `if:` reports a "skipped" conclusion, which
 # branch protection accepts as satisfied — so the PR stays mergeable with zero
-# compute. The skip is deliberately `.claude`-only: the `entities` job runs
-# `er-entity verify` (docs/erd.md staleness) and `lint` verifies the generated
-# skill references, so docs/ changes must still run the gate.
+# compute.
+#
+# Why `infra/terraform/**` is safe to skip, which is not obvious: nothing in the
+# Rust gate reads it. No crate or manifest references it (the two mentions under
+# `rust/` are prose in comments), and `make check` touches `infra/` nowhere.
+# `scripts/skills-check.sh` DOES derive generated skill references from it — it
+# counts `resource "aws_*"` blocks, IAM users, Pod Identity associations and the
+# pinned provider versions — so a terraform-only PR can make a reference stale.
+# That is covered, and by design: the `skills` job below runs the same drift
+# check and is deliberately NOT gated on `detect`, which is the whole reason it
+# exists as a separate job. The terraform gate itself lives in `infra.yml`.
+#
+# The skip stops there. `docs/**` must still run the gate, because `entities`
+# runs `er-entity verify` (docs/erd.md staleness) and `lint` verifies the
+# generated skill references.
 #
 # A JOB'S `name:` IS ITS BRANCH-PROTECTION CONTEXT. Renaming one silently
 # un-protects it, and adding a required context for a job that does not yet
@@ -96,10 +108,11 @@ env:
   SCCACHE_REGION: us-east-2
 
 jobs:
-  # Did anything outside `.claude/**` change? The required compile jobs below
-  # gate on this so a skills-only PR skips them (a skipped required check still
-  # satisfies branch protection). Non-PR events (push to main, nightly) always
-  # report `true` — the gate never self-skips on the branch it protects.
+  # Did anything outside `.claude/**` and `infra/terraform/**` change? The
+  # required compile jobs below gate on this so a skills-only or terraform-only
+  # PR skips them (a skipped required check still satisfies branch protection).
+  # Non-PR events (push to main, nightly) always report `true` — the gate never
+  # self-skips on the branch it protects.
   detect:
     name: detect changes
     runs-on: ubuntu-latest
@@ -122,12 +135,17 @@ jobs:
             exit 0
           fi
           # `base...head` = what the PR introduces. Count changed paths NOT under
-          # `.claude/`; any such file means the backend gate must run. `grep -c`
-          # reads all input (unlike `grep -q`, which closes the pipe early and can
-          # SIGPIPE `git diff` under `pipefail` → a flaky false skip); `|| true`
-          # absorbs grep's exit-1-on-zero-matches under `set -e`.
+          # `.claude/` or `infra/terraform/`; any such file means the backend gate
+          # must run. This is a DENYLIST, so a tree added here is one the Rust
+          # gate stops seeing — only add one that nothing in `make check` reads
+          # (the header explains why these two qualify, and why `docs/` does not).
+          # `grep -c` reads all input (unlike `grep -q`, which closes the pipe
+          # early and can SIGPIPE `git diff` under `pipefail` → a flaky false
+          # skip); `|| true` absorbs grep's exit-1-on-zero-matches under `set -e`.
           changed="$(git diff --name-only "$BASE_SHA...$HEAD_SHA")"
-          noncode="$(printf '%s\n' "$changed" | grep -cvE '^\.claude/' || true)"
+          printf 'changed paths:\n%s\n' "$changed"
+          noncode="$(printf '%s\n' "$changed" \
+                      | grep -cvE '^(\.claude/|infra/terraform/)' || true)"
           if [ "${noncode:-0}" -gt 0 ]; then
             echo "code=true" >> "$GITHUB_OUTPUT"
           else
