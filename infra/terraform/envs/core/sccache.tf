@@ -29,8 +29,8 @@ resource "aws_s3_bucket" "sccache" {
 }
 
 # Private, and belt-and-braces about it: the bucket holds compiled object code
-# for this repository, and while the repository is public its build artifacts
-# are not something to serve anonymously.
+# for this repository, which is not something to serve anonymously whatever the
+# repository's own visibility happens to be.
 resource "aws_s3_bucket_public_access_block" "sccache" {
   bucket                  = aws_s3_bucket.sccache.id
   block_public_acls       = true
@@ -81,10 +81,15 @@ resource "aws_s3_bucket_lifecycle_configuration" "sccache" {
 
 # TWO roles, and the split is the security decision in this file.
 #
-# This repository is PUBLIC. A role that let any PR-triggered job write to the
-# cache would be a path for a contributor-supplied branch to place compiled
-# object code that a later `main` build consumes — cache poisoning straight into
-# the build. So writes are restricted to pushes on `main`, exactly as the
+# A role that let any PR-triggered job write to the cache would be a path for a
+# branch to place compiled object code that a later `main` build consumes —
+# cache poisoning straight into the build. The repository is PRIVATE, so the
+# branch has to come from a collaborator rather than from anyone at all, which
+# narrows who can attempt it without closing the path: a compromised
+# contributor account, or a workflow edit on a PR branch, still reaches it.
+# Cache poisoning also survives the credential it was planted with, which is
+# what makes it worth a second role rather than a trust condition.
+# So writes are restricted to pushes on `main`, exactly as the
 # `er-ci-ecr-push` role already restricts image pushes, and exactly as
 # rust.yml's rust-cache configuration already restricts its single writer
 # ("`lint` is the SINGLE WRITER of `shared-key: rust`, and only from `main`").

@@ -17,10 +17,12 @@
 # NO REPOSITORY SECRETS, by design and not by omission. Every AWS identity here
 # is a federated OIDC role whose credentials last an hour; §11 records that CI
 # "consumes zero repository secrets" and the account has never held a static CI
-# key. A long-lived AWS key in a PUBLIC repository's secrets would be strictly
-# worse than this. (`GITHUB_TOKEN` in the comment job is not a repository
-# secret — it is minted per run, and that job's `pull-requests: write` is the
-# only write scope anywhere in this file.)
+# key. A long-lived AWS key in repository secrets would be strictly worse: it
+# does not expire, it is reachable by every workflow in the repository rather
+# than by one job, and rotating it is a manual act nobody is prompted to
+# perform. (`GITHUB_TOKEN` in the comment job is not a repository secret — it is
+# minted per run, and that job's `pull-requests: write` is the only write scope
+# anywhere in this file.)
 #
 # WHAT GUARDS THE APPLY. The apply role holds AdministratorAccess, and §8.2's
 # two prod deny statements ride the *permission sets* — so they constrain
@@ -147,6 +149,29 @@ jobs:
             echo "infra=false" >> "$GITHUB_OUTPUT"
           fi
 
+  # The three shell helpers this workflow calls, asserted against fixtures.
+  #
+  # `apply` gates on this job, which is the point of it existing rather than
+  # being a local convenience. `tf-destroy-guard.sh` is the only thing between a
+  # merge and an unattended apply that destroys production, and every real apply
+  # so far has planned `0 to destroy` — so its refusal path has never actually
+  # run in CI. A guard whose failure path is unexercised is indistinguishable
+  # from a guard that cannot fail, which is this repository's recurring bug
+  # class. Now the refusal, the `ALLOW-DESTROY` override and the fail-closed
+  # branch are proven on every run, before anything is applied.
+  #
+  # Pure shell: no toolchain, no credentials, no network, no terraform binary.
+  helpers:
+    name: terraform ci helpers (self-test)
+    needs: detect
+    if: needs.detect.outputs.infra == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: fixture tests for the plan comment, metadata and destroy guard
+        run: bash scripts/ci/tf-helpers-test.sh
+
   validate:
     name: fmt + validate (credential-free)
     needs: detect
@@ -171,8 +196,8 @@ jobs:
         # ALL FIVE stacks, including both bootstrap ones — this is the only tier
         # that covers `bootstrap/organization` at all. It needs no variable
         # value to do so: `terraform validate` does not evaluate variables, so
-        # the gitignored `terraform.tfvars` that stack depends on (a root
-        # account email, deliberately absent from a public repository) is not
+        # the gitignored `terraform.tfvars` that stack depends on (a member
+        # account's root email, deliberately kept out of version control) is not
         # required here. That is also why it cannot join the plan tier, which
         # would need the value.
         run: |
@@ -250,7 +275,10 @@ jobs:
         # pull request. Granting it secret-read would let any same-repo PR —
         # which can also edit this very workflow, since `pull_request` runs the
         # PR's own copy of it — print dev's Postgres and S3 credentials into a
-        # public build log. That is a bad price for drift detection.
+        # build log. The repository is private, so that log is not world-visible;
+        # it is still readable by every collaborator, persists in the run
+        # history, and needs no AWS access at all to read. That is a bad price
+        # for drift detection.
         #
         # So the role stays genuinely read-only and the plan does not refresh.
         # What is lost is out-of-band drift. What is kept is the
@@ -386,7 +414,9 @@ jobs:
 
   apply:
     name: apply (${{ matrix.key }})
-    needs: [detect, plan]
+    # `helpers` is in here deliberately: a broken `tf-destroy-guard.sh` must
+    # stop the apply rather than be discovered by it.
+    needs: [detect, helpers, plan]
     if: >-
       github.event_name == 'push'
       && github.ref == 'refs/heads/main'

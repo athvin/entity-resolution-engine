@@ -48,8 +48,8 @@
 #
 # Supply both variables plus `CLOUDFLARE_API_TOKEN` and it comes back in full.
 # The alternative was putting that token in repository secrets, which would
-# trade a planning gap for a long-lived credential in a PUBLIC repo's secrets —
-# the thing §11's zero-secrets property exists to avoid.
+# trade a planning gap for a long-lived credential reachable by every workflow
+# in the repository — the thing §11's zero-secrets property exists to avoid.
 locals {
   ses_enabled = var.ses_domain != null && var.cloudflare_zone_id != null
 }

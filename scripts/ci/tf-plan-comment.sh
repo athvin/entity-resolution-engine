@@ -145,8 +145,9 @@ done
 
 printf '\n> Planned with `-refresh=false`, so this is the **config-versus-state** diff and\n'
 printf '> not out-of-band drift. That is a security choice, not a speed one: a refreshing\n'
-printf '> plan reads secret *values*, and this role is reachable from any PR on a public\n'
-printf '> repository. Drift is caught at apply time, which refreshes fully.\n'
+printf '> plan reads secret *values*, and the plan role is assumable from any PR branch —\n'
+printf '> which can edit the workflow it runs under. Drift is caught at apply time, which\n'
+printf '> refreshes fully.\n'
 
 # Only stacks the apply tier actually carries belong in this warning: its whole
 # claim is "merging applies this", which is false for a plan-only stack. Their

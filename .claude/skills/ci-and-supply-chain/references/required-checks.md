@@ -60,6 +60,7 @@ exists instead of a workflow-level `paths:` filter.
 | Job | Status-check context | Timeout | Condition |
 |---|---|---|---|
 | `detect` | detect infra changes | 5 | `always` |
+| `helpers` | terraform ci helpers (self-test) | 5 | `needs.detect.outputs.infra == 'true'` |
 | `validate` | fmt + validate (credential-free) | 10 | `needs.detect.outputs.infra == 'true'` |
 | `plan` | plan (${{ matrix.key }}) | 20 | `needs.detect.outputs.infra == 'true' && (github.event_name == 'push' \|\| github.event.pul …` |
 | `comment` | plan comment | 10 | `${{ !cancelled() && github.event_name == 'pull_request' && needs.detect.outputs.infra == ' …` |

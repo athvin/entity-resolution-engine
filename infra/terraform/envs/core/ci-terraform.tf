@@ -6,9 +6,16 @@
 # NO REPOSITORY SECRETS. The account has never held a static CI key and this
 # does not introduce one: `gh secret list` is empty, §11 records that CI
 # "currently consumes zero repository secrets", and the SES work deliberately
-# avoided minting a second static key (§9.3). A long-lived AWS access key in a
-# PUBLIC repository's secrets is strictly worse than a federated role whose
-# credentials last an hour and whose trust names one branch.
+# avoided minting a second static key (§9.3). A long-lived AWS access key in
+# repository secrets is strictly worse than a federated role whose credentials
+# last an hour and whose trust names one branch: it does not expire, every
+# workflow in the repository can reach it rather than one job, and rotating it
+# is a manual act nobody is prompted to perform.
+#
+# (The repository is PRIVATE — `gh repo view --json visibility`. Earlier
+# comments here argued this from the repository being public, which it is not;
+# the argument never depended on visibility, because repository secrets are not
+# readable by anonymous visitors on a public repo either.)
 #
 # --- the bootstrap, stated plainly -------------------------------------------
 #
@@ -92,8 +99,8 @@ data "aws_iam_policy_document" "ci_tf_plan_state" {
   # the bucket its own backend lives in, so applying it from CI is the circular
   # case — but a plan still catches drift in the bucket's configuration).
   # `bootstrap/organization` is deliberately not planned at all: its one
-  # required variable is a root account email kept out of a public repository,
-  # and supplying it would mean introducing the first repository secret into a
+  # required variable is a root account email kept out of version control, and
+  # supplying it would mean introducing the first repository secret into a
   # pipeline whose stated property is that it has none.
   #
   # Enumerated rather than `/*`: the point of this statement is that the role
