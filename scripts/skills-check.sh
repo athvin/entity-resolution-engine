@@ -433,14 +433,21 @@ gen_required_checks() {
 	echo
 	local wf
 	for wf in .github/workflows/*.yml; do
-		# `*.lock.yml` is compiler output from `gh aw compile`, not a
-		# hand-written workflow. It matches this glob, carries a dozen
-		# machine-generated jobs, and is rewritten by every gh-aw version
-		# bump — so enumerating it here would churn this file and fail both
-		# the `skills` job and `lint`'s drift step for no reader's benefit.
-		# The agentic workflows are summarised from their `.md` sources
-		# below instead, which is the file a human actually edits.
-		case "$wf" in *.lock.yml) continue ;; esac
+		# Skip COMPILER OUTPUT. `gh aw compile` writes `*.lock.yml` plus
+		# `agentics-maintenance.yml`, all of which match this glob, carry a
+		# dozen machine-generated jobs each, and are rewritten by every gh-aw
+		# version bump — so enumerating them would churn this file and fail
+		# both the `skills` job and `lint`'s drift step for no reader's
+		# benefit. The agentic workflows are summarised from their `.md`
+		# sources below instead, which is the file a human actually edits.
+		#
+		# Detected by the generated-file marker rather than by filename:
+		# `*.lock.yml` alone missed `agentics-maintenance.yml`, and a
+		# filename list would miss whatever the next gh-aw release adds.
+		# Both markers are checked because the two files word it differently.
+		if head -3 "$wf" | grep -qiE 'DO NOT EDIT|automatically generated'; then
+			continue
+		fi
 		echo "### \`$(basename "$wf")\`"
 		echo
 		echo "| Job | Status-check context | Timeout | Condition |"

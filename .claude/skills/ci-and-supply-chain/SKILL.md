@@ -187,13 +187,27 @@ also the one thing they have that `rust.yml` and `frontend.yml` do not: because
 they are not required, they *are* allowed `paths:` and `if:` filters. The rule
 in CLAUDE.md is about required workflows specifically.
 
-They also hold the repo's only write scopes. `pull-requests: write` and
-`contents: write` appear nowhere else — the four hand-written workflows are
-`contents: read` plus `id-token: write` for OIDC. The agent process itself still
-never writes: gh-aw's **safe outputs** are declared, capped operations
-(`add-comment`, `push-to-pull-request-branch`, …) run by separate jobs after the
-agent exits, so the model's output is data those jobs validate rather than
-commands they obey.
+They also hold the repo's only GitHub write scopes. `contents: write`,
+`pull-requests: write` and `issues: write` appear nowhere else — the four
+hand-written workflows are `contents: read` plus `id-token: write` for OIDC.
+
+**The model's own job holds none of them.** gh-aw compiles each workflow into
+five or six jobs, and the `agent` job that runs the model gets only read scopes;
+`contents: write` and friends live in the separate `safe_outputs` and
+`conclusion` jobs that run after it exits. gh-aw's **safe outputs** are declared,
+capped operations (`add-comment`, `push-to-pull-request-branch`, …) which those
+jobs validate — so the model's output is data they check rather than commands
+they obey. Worth verifying rather than trusting, and easy to: extract the
+per-job `permissions:` blocks from a `.lock.yml`.
+
+One exception, stated because "the agent never writes" is otherwise an
+over-claim: the two agents that compile Rust carry `id-token: write` *on the
+agent job*, because `shared/rust-gate.md` exchanges it for the sccache role.
+That mints an AWS credential, not a GitHub one, and the role is
+`er-ci-sccache-read` — `s3:GetObject` and `s3:ListBucket` on one bucket, with no
+`DeleteObject` in the policy at all. Read access to compiler output is the whole
+blast radius, and it is read, so an agent cannot plant object code a later
+`main` build consumes.
 
 The zero-repository-secrets invariant survives them. `engine: copilot` draws on
 `copilot-requests: write` against the job token, so there is still no
