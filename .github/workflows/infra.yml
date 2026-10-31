@@ -1,44 +1,57 @@
-# The terraform gate, in three tiers (infrastructure.md §14.2 — "plan on every
+# The terraform gate, in four tiers (infrastructure.md §14.2 — "plan on every
 # PR under a read-only role; apply on `main` under the apply role"):
 #
-#   1. fmt + validate   — credential-free, every PR. Catches syntax, type,
-#                         module and unknown-field breakage at zero cost or
-#                         risk, and still runs for a fork PR that can reach no
-#                         AWS at all.
-#   2. plan             — per env, read-only role, posts the diff. This is the
-#                         state-diff gate that used to be roadmap item 0.5b.
-#   3. apply            — per env, on `main` only, UNATTENDED. Merge is the
+#   1. fmt + validate   — credential-free. Catches syntax, type, module and
+#                         unknown-field breakage at zero cost or risk, and still
+#                         runs for a fork PR that can reach no AWS at all.
+#   2. plan             — per stack, read-only role, writes the diff to an
+#                         artifact. This is the state-diff gate that used to be
+#                         roadmap item 0.5b.
+#   3. plan comment     — ONE sticky comment per PR, upserted in place, carrying
+#                         a per-stack add/change/destroy table and the diffs.
+#                         The plan used to land only in the run summary, so
+#                         reviewing an infra PR meant leaving the PR.
+#   4. apply            — per env, on `main` only, UNATTENDED. Merge is the
 #                         trigger and the only trigger.
 #
 # NO REPOSITORY SECRETS, by design and not by omission. Every AWS identity here
 # is a federated OIDC role whose credentials last an hour; §11 records that CI
 # "consumes zero repository secrets" and the account has never held a static CI
 # key. A long-lived AWS key in a PUBLIC repository's secrets would be strictly
-# worse than this.
+# worse than this. (`GITHUB_TOKEN` in the comment job is not a repository
+# secret — it is minted per run, and that job's `pull-requests: write` is the
+# only write scope anywhere in this file.)
 #
-# WHAT GUARDS THE APPLY, now that nothing else does. The apply role holds
-# AdministratorAccess, and §8.2's two prod deny statements ride the *permission
-# sets* — so they constrain humans, not this role. That section is explicit that
-# the apply role "walks through the guardrail legitimately" and therefore that
-# "its trust policy is part of this claim".
+# WHAT GUARDS THE APPLY. The apply role holds AdministratorAccess, and §8.2's
+# two prod deny statements ride the *permission sets* — so they constrain
+# humans, not this role. That section is explicit that the apply role "walks
+# through the guardrail legitimately" and therefore that "its trust policy is
+# part of this claim".
 #
 # With applies unattended (operator decision), that trust policy — `sub` pinned
-# to `refs/heads/main` — plus `main`'s branch protection and PR review IS the
-# whole control. There is no second gate. A merged PR touching
-# `infra/terraform/envs/prod` provisions production: the plan for it is
-# currently 61 resources including an RDS cluster, two instances and EFS. The
-# `plan` tier above is what makes that visible BEFORE the merge, which is now
-# the only place a human sees it.
+# to the three `infra-apply-*` environments — plus `main`'s branch protection and
+# PR review IS the control. §14.2's chained prod-scoped apply role is still
+# unbuilt, so there is no second privileged hop. What tier 4 adds below is a
+# DESTROY GUARD: a speed bump, not a substitute. A merged PR touching
+# `infra/terraform/envs/prod` provisions production — 61 resources including an
+# RDS cluster, two instances and EFS — and tiers 2 and 3 are what make that
+# visible BEFORE the merge, which is the only place a human sees it.
+#
+# NO `paths:` FILTER, and it must never come back. The plan tiers are REQUIRED
+# status checks, and a workflow a path filter skips never reports, so a required
+# check that never reports blocks every non-infra PR forever. This is the same
+# `detect`-job pattern `rust.yml` and `frontend.yml` use for the same reason: a
+# job skipped by `if:` reports a "skipped" conclusion, which branch protection
+# accepts as satisfied, while a job skipped by `paths:` reports nothing at all.
+#
+# A JOB'S `name:` IS ITS BRANCH-PROTECTION CONTEXT. The matrix is a list of
+# `{key, dir}` objects so the bootstrap stacks can join it, and every matrix job
+# therefore sets `name:` explicitly — left to itself GitHub would name the job
+# `plan (core, infra/terraform/envs/core)` and silently un-protect `plan (core)`.
 #
 # The per-env `environment:` keys are kept even without reviewers: they give
 # each env its own deployment history, and `protected_branches: true` on each
 # means only `main` can deploy to them regardless of what a workflow says.
-#
-# Consequence worth tracking: §14.2's chained prod-scoped apply role (trust
-# naming the CI apply role plus `ProdAdmin` as break-glass) was previously
-# described as "covered by the reviewer gate". It no longer is. It is the
-# remaining defence-in-depth for prod and should land before prod carries
-# data — see infra/terraform/envs/core/ci-terraform.tf.
 #
 # BOOTSTRAP: the two roles cannot create themselves. The first
 # `terraform -chdir=infra/terraform/envs/core apply` has to come from a human
@@ -48,14 +61,8 @@ name: infra
 
 on:
   pull_request:
-    paths:
-      - "infra/terraform/**"
-      - ".github/workflows/infra.yml"
   push:
     branches: [main]
-    paths:
-      - "infra/terraform/**"
-      - ".github/workflows/infra.yml"
 
 permissions:
   contents: read
@@ -69,8 +76,81 @@ env:
   AWS_REGION: us-east-2
 
 jobs:
+  # Did this change touch Terraform, this workflow, or the scripts it calls?
+  # Everything below gates on the answer with `if:`, which is what lets the plan
+  # tiers be required without a `paths:` filter (see the header).
+  #
+  # Named `detect infra changes` rather than `detect changes`, which `rust.yml`
+  # and `images.yml` both already use: three identically-named contexts in one
+  # PR's check list is unreadable.
+  detect:
+    name: detect infra changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      infra: ${{ steps.filter.outputs.infra }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.sha }}
+        # THE PUSH PATH FAILS SAFE, and the asymmetry is deliberate. A
+        # wrongly-skipped *plan* is cosmetic — the PR simply shows nothing. A
+        # wrongly-skipped *apply* silently diverges the account from its
+        # configuration until the next infra PR happens to notice. So only a
+        # confidently-computed empty diff may skip: an absent, all-zero or
+        # unreachable before-SHA (a force-push, a freshly-created branch) means
+        # "assume infra changed" rather than "assume it did not".
+        run: |
+          case "$EVENT" in
+            pull_request)
+              range="$PR_BASE...$PR_HEAD"
+              ;;
+            push)
+              if [ -z "$PUSH_BEFORE" ] \
+                 || [ "$PUSH_BEFORE" = "0000000000000000000000000000000000000000" ] \
+                 || ! git cat-file -e "${PUSH_BEFORE}^{commit}" 2>/dev/null; then
+                echo "cannot compute the pushed range (before='$PUSH_BEFORE') — assuming infra changed"
+                echo "infra=true" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              range="$PUSH_BEFORE...$PUSH_AFTER"
+              ;;
+            *)
+              echo "event '$EVENT' carries no diff — assuming infra changed"
+              echo "infra=true" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
+
+          # `grep -c` reads all its input, unlike `grep -q`, which closes the
+          # pipe early and can SIGPIPE `git diff` under `pipefail` into a flaky
+          # false skip; `|| true` absorbs grep's exit-1-on-zero-matches under
+          # `set -e`. Same idiom and same reason as rust.yml's detect job.
+          #
+          # `scripts/ci/tf-*` is in the pattern on purpose: the apply guard and
+          # the comment assembler live there, and a fix to one of them that did
+          # not run this workflow would ship untested.
+          changed="$(git diff --name-only "$range")"
+          printf 'changed paths in %s:\n%s\n' "$range" "$changed"
+          n="$(printf '%s\n' "$changed" \
+                | grep -cE '^(infra/terraform/|scripts/ci/tf-|\.github/workflows/infra\.yml$)' || true)"
+          if [ "${n:-0}" -gt 0 ]; then
+            echo "infra=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "infra=false" >> "$GITHUB_OUTPUT"
+          fi
+
   validate:
     name: fmt + validate (credential-free)
+    needs: detect
+    if: needs.detect.outputs.infra == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -84,33 +164,63 @@ jobs:
           terraform_wrapper: false
       - name: fmt -check
         run: terraform fmt -check -recursive infra/terraform
-      - name: validate each env
+      - name: validate every stack
         # `validate` configures the aws provider but makes no AWS API call, so
         # dummy creds + a disabled metadata probe keep it fully offline.
+        #
+        # ALL FIVE stacks, including both bootstrap ones — this is the only tier
+        # that covers `bootstrap/organization` at all. It needs no variable
+        # value to do so: `terraform validate` does not evaluate variables, so
+        # the gitignored `terraform.tfvars` that stack depends on (a root
+        # account email, deliberately absent from a public repository) is not
+        # required here. That is also why it cannot join the plan tier, which
+        # would need the value.
         run: |
-          for e in core dev prod; do
-            echo "== validate envs/$e =="
-            terraform -chdir="infra/terraform/envs/$e" init -backend=false -input=false
-            terraform -chdir="infra/terraform/envs/$e" validate -no-color
+          for d in bootstrap/state-backend bootstrap/organization envs/core envs/dev envs/prod; do
+            echo "== validate $d =="
+            terraform -chdir="infra/terraform/$d" init -backend=false -input=false
+            terraform -chdir="infra/terraform/$d" validate -no-color
           done
 
   plan:
-    name: plan (${{ matrix.env }})
-    needs: validate
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    name: plan (${{ matrix.key }})
+    needs: [detect, validate]
     # A fork PR is issued no `id-token`, so it could not assume the plan role
     # and would fail on role assumption rather than on anything real. Skip it
     # instead: `validate` above still covers a fork, which is the tier that
     # needs no credentials.
-    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push'
+    #
+    # Every continuation line here sits at the SAME indent as the first. A
+    # more-indented line in a YAML folded scalar is kept literally, newline and
+    # all, which silently embeds a newline in the expression — actionlint
+    # tolerates it, GitHub's expression parser is a different implementation,
+    # and this is the condition that gates the apply.
+    if: >-
+      needs.detect.outputs.infra == 'true'
+      && (github.event_name == 'push'
+      || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
       id-token: write # OIDC exchange for er-ci-tf-plan
     strategy:
       fail-fast: false
       matrix:
-        env: [core, dev, prod]
+        include:
+          # Planned and NEVER applied: this stack owns the bucket its own
+          # backend lives in, so applying it from CI is the circular case. A
+          # plan still catches drift in the bucket's configuration, which is the
+          # value. Reading its state needs the `bootstrap/*.tfstate` grant added
+          # to the plan role in #358.
+          - key: state-backend
+            dir: infra/terraform/bootstrap/state-backend
+          - key: core
+            dir: infra/terraform/envs/core
+          - key: dev
+            dir: infra/terraform/envs/dev
+          - key: prod
+            dir: infra/terraform/envs/prod
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
@@ -122,6 +232,8 @@ jobs:
           role-to-assume: arn:aws:iam::797781631727:role/er-ci-tf-plan
       - name: terraform plan
         id: plan
+        env:
+          DIR: ${{ matrix.dir }}
         # `-lock=false` because the plan role holds no S3 write and acquiring
         # the lockfile IS a write. A plan that cannot lock can race a concurrent
         # apply; the apply job's concurrency group is what serialises writes.
@@ -142,50 +254,151 @@ jobs:
         #
         # So the role stays genuinely read-only and the plan does not refresh.
         # What is lost is out-of-band drift. What is kept is the
-        # config-versus-state diff, which is the thing a reviewer is reading.
+        # config-versus-state diff, which is the thing a reviewer is reading —
+        # and the comment below says so, so nobody mistakes one for the other.
         # Drift is still caught at APPLY time, where the apply role refreshes
-        # fully and the result is visible before the environment gate is
-        # released.
+        # fully and the result lands in the run summary.
         #
         # `-detailed-exitcode`: 0 = no changes, 2 = changes, 1 = error. Without
         # it a plan that errors and a plan that is empty are the same exit code,
         # which is how a broken plan gets read as "nothing to do".
         run: |
+          mkdir -p planout
           set +e
-          terraform -chdir="infra/terraform/envs/${{ matrix.env }}" init -input=false
-          terraform -chdir="infra/terraform/envs/${{ matrix.env }}" plan \
-            -no-color -lock=false -refresh=false -input=false -detailed-exitcode \
-            > "plan-${{ matrix.env }}.txt" 2>&1
+          terraform -chdir="$DIR" init -input=false > planout/plan.txt 2>&1
           code=$?
+          if [ "$code" -eq 0 ]; then
+            terraform -chdir="$DIR" plan \
+              -no-color -lock=false -refresh=false -input=false -detailed-exitcode \
+              > planout/plan.txt 2>&1
+            code=$?
+          else
+            # An init failure leaves its own log in plan.txt, so the comment
+            # shows why rather than an empty diff. Normalised to 1 = error.
+            code=1
+          fi
           set -e
-          tail -c 60000 "plan-${{ matrix.env }}.txt"
-          if [ "$code" = "1" ]; then
-            echo "::error::terraform plan failed for envs/${{ matrix.env }}"
+
+          tail -c 60000 planout/plan.txt
+          bash scripts/ci/tf-plan-meta.sh planout/plan.txt "$code" > planout/meta.txt
+          cat planout/meta.txt
+          if [ "$code" -eq 1 ]; then
+            echo "::error::terraform plan failed for $DIR"
             exit 1
           fi
-          echo "changes=$([ "$code" = "2" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      - name: upload the plan for the comment job
+        # `always()`: a FAILED plan is exactly the one a reviewer needs to see,
+        # and the comment job reads these artifacts.
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: plan-${{ matrix.key }}
+          path: planout
+          retention-days: 7
+          if-no-files-found: warn
       - name: summary
         if: always()
+        # Kept alongside the comment: this is the UNTRUNCATED copy, and the
+        # comment links here when a plan is too large to inline.
         run: |
           {
-            echo "### terraform plan — envs/${{ matrix.env }}"
+            echo "### terraform plan — ${{ matrix.key }}"
             echo ""
-            echo "changes: \`${{ steps.plan.outputs.changes }}\`"
+            sed 's/^/    /' planout/meta.txt 2>/dev/null || true
             echo ""
             echo '```terraform'
-            tail -c 40000 "plan-${{ matrix.env }}.txt" || true
+            tail -c 40000 planout/plan.txt 2>/dev/null || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+  comment:
+    name: plan comment
+    needs: [detect, plan]
+    # `!cancelled()` rather than `always()`: a failed plan must still be
+    # reported — that is when the comment matters most — but a cancelled run
+    # should leave the previous comment alone rather than overwrite it with
+    # half a story.
+    #
+    # Fork condition mirrors the plan job's. A fork `pull_request` also gets a
+    # read-only `GITHUB_TOKEN`, so the upsert would 403 even if there were
+    # artifacts to post.
+    if: >-
+      ${{ !cancelled()
+      && github.event_name == 'pull_request'
+      && needs.detect.outputs.infra == 'true'
+      && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write # the ONE write scope in this workflow
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: plan-*
+          path: tfplans
+      - name: assemble and upsert the comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          MARKER: "<!-- terraform-plan -->"
+        # Upserted by MARKER, not by `gh pr comment --edit-last`: that flag keys
+        # on the authoring actor, so any other `github-actions[bot]` comment
+        # arriving later would be the one it edited.
+        #
+        # The payload goes through `jq -Rs` rather than `gh api -F body=@file`
+        # so no part of a plan's text can be read as a field type or a flag.
+        #
+        # THE LOOKUP IS TWO STATEMENTS, NOT A PIPELINE, and that is the whole
+        # point. GitHub's default shell here is `bash -e {0}` — `pipefail` is
+        # added only by an explicit `shell: bash`, which nothing in this
+        # repository sets. So in `gh api … | jq …` a FAILING `gh` is invisible:
+        # jq succeeds on empty input, `id` comes back empty, and the job posts a
+        # brand-new comment on every push instead of updating the one that is
+        # already there. Silent duplicates, not a red job.
+        #
+        # Assigning `gh`'s output to a variable first makes its failure fatal,
+        # because the assignment carries the command substitution's exit status
+        # and `-e` aborts on it. `--slurp` collects every page into one array so
+        # the filter emits exactly one line (and nothing closes the stream
+        # early); `--arg` keeps the marker out of the jq program text.
+        run: |
+          if ! bash scripts/ci/tf-plan-comment.sh tfplans > body.md; then
+            echo "no plan artifacts to report — leaving any existing comment alone"
+            exit 0
+          fi
+          echo "comment body: $(wc -c < body.md) bytes"
+          jq -Rs '{body: .}' < body.md > payload.json
+
+          comments="$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/issues/$PR/comments")"
+          id="$(printf '%s' "$comments" | jq -r --arg m "$MARKER" \
+                  '[.[][] | select(.body | contains($m))] | .[0].id // empty')"
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" \
+              --input payload.json > /dev/null
+            echo "updated comment $id"
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
+              --input payload.json > /dev/null
+            echo "created the plan comment"
+          fi
+
   apply:
-    name: apply (${{ matrix.env }})
-    needs: plan
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    name: apply (${{ matrix.key }})
+    needs: [detect, plan]
+    if: >-
+      github.event_name == 'push'
+      && github.ref == 'refs/heads/main'
+      && needs.detect.outputs.infra == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     # Kept without reviewers: per-env deployment history, and
-    # `protected_branches: true` so only `main` can deploy here.
-    environment: infra-apply-${{ matrix.env }}
+    # `protected_branches: true` so only `main` can deploy here. The name is
+    # also what the apply role's trust policy matches on — a job that references
+    # an Environment gets a `…:environment:<name>` subject claim instead of a
+    # ref claim, so these three names are load-bearing, not decoration.
+    environment: infra-apply-${{ matrix.key }}
     permissions:
       contents: read
       id-token: write # OIDC exchange for er-ci-tf-apply
@@ -195,7 +408,14 @@ jobs:
       max-parallel: 1
       fail-fast: false
       matrix:
-        env: [core, dev, prod]
+        include:
+          # `state-backend` is deliberately absent — see the plan matrix.
+          - key: core
+            dir: infra/terraform/envs/core
+          - key: dev
+            dir: infra/terraform/envs/dev
+          - key: prod
+            dir: infra/terraform/envs/prod
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
@@ -205,9 +425,40 @@ jobs:
         with:
           aws-region: us-east-2
           role-to-assume: arn:aws:iam::797781631727:role/er-ci-tf-apply
-      - name: terraform apply
-        # Locking ON here, unlike plan: this one writes.
+      - name: terraform plan (to a file)
+        env:
+          DIR: ${{ matrix.dir }}
+        # Plan to a file and apply THAT file, rather than `apply -auto-approve`
+        # letting Terraform re-plan inside the apply. Same work, but what lands
+        # becomes a thing that can be shown, counted and refused first.
+        #
+        # Locking ON here, unlike the plan tier: this one writes. Refreshing
+        # too — the apply role can read what the plan role deliberately cannot,
+        # which is where out-of-band drift is actually caught.
+        #
+        # `tfplan` MUST NOT be uploaded as an artifact and `show -json` MUST NOT
+        # be printed: a saved plan file carries sensitive values in cleartext,
+        # while the `show -no-color` human form below redacts them to
+        # `(sensitive value)`. Only the redacted form may leave this job.
         run: |
-          terraform -chdir="infra/terraform/envs/${{ matrix.env }}" init -input=false
-          terraform -chdir="infra/terraform/envs/${{ matrix.env }}" apply \
-            -no-color -input=false -auto-approve
+          terraform -chdir="$DIR" init -input=false
+          terraform -chdir="$DIR" plan -out=tfplan \
+            -no-color -input=false -lock-timeout=5m
+          terraform -chdir="$DIR" show -no-color tfplan > applyplan.txt
+      - name: destroy guard
+        # Fails closed on anything it cannot classify. See the script.
+        run: bash scripts/ci/tf-destroy-guard.sh applyplan.txt
+      - name: terraform apply
+        env:
+          DIR: ${{ matrix.dir }}
+        run: terraform -chdir="$DIR" apply -no-color -input=false -lock-timeout=5m tfplan
+      - name: summary
+        if: always()
+        run: |
+          {
+            echo "### terraform apply — ${{ matrix.key }}"
+            echo ""
+            echo '```terraform'
+            tail -c 40000 applyplan.txt 2>/dev/null || echo "(no plan was produced)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

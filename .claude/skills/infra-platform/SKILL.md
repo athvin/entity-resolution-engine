@@ -84,10 +84,45 @@ DynamoDB lock table; it is not how this is configured.
 Each env has its own state key, so a dev apply cannot touch prod state. Prod
 also has no builder credential and no secrets stack, which is deliberate.
 
-`terraform plan` in CI is **not built yet** (it is a known roadmap gap). The
-infra workflow only does `fmt -check` and a credential-free `validate`, and it
-is *not* a required check — which is why a real `paths:` filter is fine there,
-unlike the frontend workflow.
+## How Terraform reaches the account
+
+`infra.yml` runs four tiers and **CI owns every apply**: `fmt + validate`
+(credential-free, all five stacks) → `plan` per stack under the read-only
+`er-ci-tf-plan` role → one sticky PR comment carrying the add/change/destroy
+table and the diffs → `apply` on `main` only, unattended, under
+`er-ci-tf-apply`. There are no repository secrets; both roles are federated
+OIDC. Do not run a recurring `terraform apply` by hand — merge is the trigger.
+
+Five rules that are easy to break:
+
+- **Never add a `paths:` filter to `infra.yml`.** The plan tiers are required
+  status checks, and a workflow a path filter skips never reports, so the PR
+  would block forever. The `detect` job plus an `if:` is how a non-infra PR
+  skips — a job skipped by `if:` reports "skipped", which protection accepts.
+- **Every matrix job sets `name:` explicitly.** The matrix is a list of
+  `{key, dir}` objects, and left to itself GitHub names the job
+  `plan (core, infra/terraform/envs/core)`, silently un-protecting `plan (core)`.
+- **A new stack needs the plan role's state read first, in its own PR.** The
+  role's policy enumerates `envs/*.tfstate` and `bootstrap/*.tfstate`; a PR
+  adding both a grant and the matrix leg that needs it fails its own new leg,
+  because the grant is only live after the merge applies it (#358, and #350
+  before it).
+- **`bootstrap/state-backend` is planned and never applied from CI** — it owns
+  the bucket its own backend lives in. **`bootstrap/organization` is validated
+  only**: its one required variable is a root account email deliberately absent
+  from this public repository. `terraform validate` needs no variable value,
+  which is exactly why it can sit in that tier and not in the plan tier.
+- **A saved plan file is sensitive.** The apply tier plans to `tfplan`, shows
+  it, guards it and applies that file. `tfplan` must never become an artifact
+  and `terraform show -json` must never be printed — both carry sensitive values
+  in cleartext, while `show -no-color` redacts them to `(sensitive value)`.
+
+The apply is unattended and §14.2's prod-scoped apply role is still unbuilt, so
+the only thing between a merge and a production teardown is
+`scripts/ci/tf-destroy-guard.sh`: it refuses any apply with a non-zero destroy
+count unless the commit message carries `ALLOW-DESTROY` (the repo squash-merges,
+so that means the PR title). It is a speed bump, not a policy engine — it cannot
+tell a benign replace from losing Aurora, and a *replace* trips it too.
 
 ## The two Helm charts
 

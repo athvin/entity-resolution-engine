@@ -5,9 +5,11 @@ description: Explains this repo's CI topology and dependency gates — the `dete
 
 # CI and the supply chain
 
-Four workflows: `rust`, `frontend`, `infra`, `images`. Eight jobs across the
-first two are required status checks, so a change is not mergeable until they
-pass. The per-job contexts, timeouts and conditions are generated:
+Four workflows: `rust`, `frontend`, `infra`, `images`. Jobs across the first
+three are required status checks, so a change is not mergeable until they pass.
+Branch protection is repository configuration rather than a file in the tree, so
+`gh api repos/:owner/:repo/branches/main/protection` is the only authority on
+which; the per-job contexts, timeouts and conditions are generated:
 [references/required-checks.md](references/required-checks.md).
 
 **A job's `name:` is its branch-protection context.** Two failure modes follow,
@@ -33,11 +35,19 @@ The working pattern instead:
 3. A job skipped by `if:` reports **`skipped`**, which branch protection accepts
    as satisfied.
 
-So the PR stays mergeable at near-zero compute. `infra.yml` *does* carry a real
-`paths:` filter — and that is fine precisely because it is **not** a required
-check.
+So the PR stays mergeable at near-zero compute. **`infra.yml` used to carry a
+real `paths:` filter**, which was fine only while its jobs were not required;
+making the terraform plan a required check meant removing the filter and adding
+a `detect` job in the same change, because the two cannot coexist.
 
-Both `detect` jobs use `grep -c`, not `grep -q`. `-q` closes the pipe as soon
+`infra.yml`'s detect carries one wrinkle the other two do not: it answers for
+`push` as well as `pull_request`, because a merge to `main` triggers an
+unattended `terraform apply`. There it **fails safe** — an absent, all-zero or
+unreachable before-SHA (force-push, new branch) reports `true` rather than
+`false`. A wrongly-skipped plan is cosmetic; a wrongly-skipped apply silently
+diverges the account from its configuration until someone notices.
+
+Every `detect` job uses `grep -c`, not `grep -q`. `-q` closes the pipe as soon
 as it matches, which can SIGPIPE the `git diff` feeding it under `pipefail`, and
 the result is a flaky **false skip** — the worst failure mode available, because
 it skips the gate rather than failing it.
@@ -55,14 +65,15 @@ associations, pinned provider versions — so a terraform-only PR can make a
 reference stale. That is covered by the ungated `skills` job rather than by the
 compile jobs, which is precisely why that job exists separately.
 
-Note the asymmetry between the two implementations, because it decides what a
+Note the asymmetry between the three implementations, because it decides what a
 new entry does. `rust.yml`'s detect is a **denylist** (count paths *not* under
 these trees), so adding a tree there makes the Rust gate stop seeing it — only
 safe for a tree nothing in `make check` reads. `frontend.yml`'s and
 `infra.yml`'s are **allowlists** (count paths *under* `frontend/`, under
-`infra/terraform/`), so a tree they do not name is already skipped. A terraform
-PR skips the frontend gate for free and never reaches `images.yml`, which runs
-on `push` only.
+`infra/terraform/`), so a tree they do not name is already skipped, and the
+risk runs the other way: a tree that *should* gate them has to be added by
+hand. A terraform PR skips the frontend gate for free and never reaches
+`images.yml`, which runs on `push` only.
 
 ## Why a job fails when your diff is innocent
 
