@@ -134,6 +134,19 @@ not to obey.
 **Confirm the pull request author is `dependabot[bot]` before you change
 anything.** If it is not, emit `noop`.
 
+**And check whether you have already acted on this branch.** Your companion push
+retriggers `rust.yml`, whose completion retriggers you, so read the recent
+commits (`git log`) before doing anything else:
+
+- the head commit is **yours** and CI is now **green** → the companion change
+  worked. Comment `safe-to-merge` with the table and what you changed, and push
+  nothing further.
+- the head commit is **yours** and CI is still **red** → your companion change
+  was not sufficient. That makes this a `schedule-as-migration`, not a second
+  attempt. Report what you tried and the error it left. **Do not push again.**
+
+One push per branch, ever. A second attempt at the same bump is a human's call.
+
 ## Step 1 — read the authorities, do not re-derive them
 
 This repository already writes down which pins cannot move alone, and why, with

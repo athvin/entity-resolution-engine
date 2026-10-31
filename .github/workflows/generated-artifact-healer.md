@@ -100,7 +100,18 @@ You have no general shell. You can run the regen commands below and nothing
 else, because the value of this agent is that its output is determined by a
 command rather than by you.
 
-## First: decide whether this is yours at all
+## Before anything: have you already tried this branch?
+
+Your push retriggers `rust.yml`, whose failure retriggers you. Terminating by
+luck is not good enough — each lap costs a model run.
+
+So **first**, read the recent commits on the head branch (`git log`). **If the
+most recent commit is one you made** — identifiable by the regen command named
+in its message — then your previous fix did not make the run green, and running
+again will not change that. Emit `noop` saying which regen you already applied
+and that the remaining failure is something else. Do not push a second time.
+
+## Then: decide whether this is yours at all
 
 - Run id: `${{ github.event.workflow_run.id }}`
 - Run URL: `${{ github.event.workflow_run.html_url }}`
