@@ -286,7 +286,11 @@ fn er_run_all_reproduces_base_10_relations() {
             "assertions",
             "golden_overrides",
             "record_overlays",
-            "record_qualities"
+            "record_qualities",
+            // The per-stage ledger (batch-orchestration-design §4.3): its
+            // writer is the Phase 2 pod verb, so the legacy run_all path
+            // leaves it empty.
+            "run_stages"
         ],
         "only the relations base_10 never writes may be fileless: {after:?}"
     );
