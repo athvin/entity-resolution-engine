@@ -31,6 +31,12 @@ set -uo pipefail
 # than an ugly one.
 ORDER="state-backend core dev prod"
 
+# Stacks the apply tier deliberately does not carry. Marked in the table because
+# without it a row reads as "merging applies this", which for `state-backend` is
+# exactly wrong — it is planned for drift detection and never applied, since it
+# owns the bucket its own backend lives in. Keep in step with the apply matrix.
+PLAN_ONLY="state-backend"
+
 # 65536 is the hard cap on a comment body. The rest of the body — table, header,
 # notes, the `<details>` scaffolding — measures a few hundred characters per
 # env, so reserving ~7k for it leaves this for the plan text itself, split
@@ -51,6 +57,13 @@ meta_get() {
     # $1 file, $2 key. Read rather than source: this is generated data, and
     # sourcing it would execute whatever ended up in a plan-derived value.
     sed -nE "s/^$2=(.*)$/\1/p" "$1" | tail -1
+}
+
+env_label() {
+    case " $PLAN_ONLY " in
+    *" $1 "*) printf '`%s` _(plan only)_' "$1" ;;
+    *) printf '`%s`' "$1" ;;
+    esac
 }
 
 # --- which envs do we have, in which order ----------------------------------
@@ -107,13 +120,14 @@ printf '| env | add | change | destroy |\n'
 printf '|---|---|---|---|\n'
 for key in "$@"; do
     meta="$dir/plan-$key/meta.txt"
+    label="$(env_label "$key")"
     if [ ! -f "$meta" ]; then
-        printf '| `%s` (no metadata) | ? | ? | ? |\n' "$key"
+        printf '| %s (no metadata) | ? | ? | ? |\n' "$label"
         continue
     fi
     status="$(meta_get "$meta" status)"
     if [ "$status" != "ok" ]; then
-        printf '| `%s` — **plan failed** | – | – | – |\n' "$key"
+        printf '| %s — **plan failed** | – | – | – |\n' "$label"
         continue
     fi
     add="$(meta_get "$meta" add)"
@@ -123,9 +137,9 @@ for key in "$@"; do
     # unattended apply it is the only place a teardown is visible while it is
     # still reversible.
     if [ "${destroy:-0}" != "0" ]; then
-        printf '| `%s` | %s | %s | **%s** |\n' "$key" "${add:-0}" "${change:-0}" "$destroy"
+        printf '| %s | %s | %s | **%s** |\n' "$label" "${add:-0}" "${change:-0}" "$destroy"
     else
-        printf '| `%s` | %s | %s | %s |\n' "$key" "${add:-0}" "${change:-0}" "${destroy:-0}"
+        printf '| %s | %s | %s | %s |\n' "$label" "${add:-0}" "${change:-0}" "${destroy:-0}"
     fi
 done
 
@@ -134,11 +148,16 @@ printf '> not out-of-band drift. That is a security choice, not a speed one: a r
 printf '> plan reads secret *values*, and this role is reachable from any PR on a public\n'
 printf '> repository. Drift is caught at apply time, which refreshes fully.\n'
 
+# Only stacks the apply tier actually carries belong in this warning: its whole
+# claim is "merging applies this", which is false for a plan-only stack. Their
+# destroy count is still bolded in the table above, because config and state
+# disagreeing is worth seeing either way — it just is not about to happen.
 destroying=""
 for key in "$@"; do
     meta="$dir/plan-$key/meta.txt"
     [ -f "$meta" ] || continue
     [ "$(meta_get "$meta" status)" = "ok" ] || continue
+    case " $PLAN_ONLY " in *" $key "*) continue ;; esac
     [ "$(meta_get "$meta" destroy)" != "0" ] && destroying="$destroying $key"
 done
 if [ -n "$destroying" ]; then
