@@ -1,0 +1,12 @@
+kind: statement
+operation: update
+mode: partial
+description: "The control-task success report, fenced by kind and the dispatcher epoch (the control analogue of the pod fence), so finish.sql and heartbeat.sql can never match a control row (§4.5)."
+params:
+  - { name: skipped, type: boolean }
+  - { name: outcome, type: varchar }
+  - { name: output, type: json, nullable: true }
+  - { name: counters, type: json, nullable: true }
+  - { name: task_instance_id, type: varchar }
+  - { name: owner_epoch, type: varchar }
+returns: entity

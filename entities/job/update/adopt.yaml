@@ -1,0 +1,7 @@
+kind: statement
+operation: update
+mode: partial
+description: "A new dispatcher epoch takes ownership of every live run at start-up (replicas: 1, Recreate: the old process finished or died), enumerating jobs before their task rows (§6.6)."
+params:
+  - { name: owner_epoch, type: varchar }
+returns: entity

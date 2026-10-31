@@ -57,7 +57,7 @@ pub mod create {
     //! @generated query functions for this entity + operation.
     /// Stage a steward action for the dispatcher to drain when the org's writer lock goes quiet.
     pub async fn stage(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         action_id: &str,
         org_id: &str,
         action: &::serde_json::Value,
@@ -77,7 +77,7 @@ pub mod read {
     //! @generated query functions for this entity + operation.
     /// An org's pending steward actions, oldest first (the dispatcher drain read; its count is the pending gauge).
     pub async fn pending(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         org_id: &str,
     ) -> ::std::result::Result<Vec<super::StagedStewardAction>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT
@@ -116,7 +116,7 @@ pub mod update {
     //! @generated query functions for this entity + operation.
     /// Mark a staged action applied after the dispatcher drains it to the lake.
     pub async fn mark_applied(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         action_id: &str,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
         const SQL: &str =

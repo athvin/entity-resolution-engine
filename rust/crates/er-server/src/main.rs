@@ -62,6 +62,9 @@ async fn async_main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
         Some("install-extensions") => return install_extensions(&args[2..]),
         _ => {}
     }
+    // Assemble every kind's DAG: a graph problem is a refusal to start, not a
+    // log line (batch-orchestration-design §3.3).
+    er_server::dags::verify_all();
     // Ensure the control-plane schema at boot (it "rides the API boot", as the
     // deploy chart documents, and the init container ran it first). ensure_schema
     // is advisory-locked, so the API and the dispatcher can both ensure it

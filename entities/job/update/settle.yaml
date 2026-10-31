@@ -1,0 +1,10 @@
+kind: statement
+operation: update
+mode: partial
+description: "Settle a run from its leaf verdicts once no live task row is non-terminal; carries the state guard mark.sql lacks, so a late settle after a cancel matches zero rows."
+params:
+  - { name: state, type: varchar }
+  - { name: error_class, type: varchar, nullable: true }
+  - { name: error_detail, type: varchar, nullable: true }
+  - { name: job_id, type: varchar }
+returns: entity

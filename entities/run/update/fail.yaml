@@ -1,0 +1,9 @@
+kind: statement
+operation: update
+mode: partial
+description: "Close the run ledger row on a terminal non-success ($status: failed | canceled), so a run that dies mid-chain stops reading as running forever."
+params:
+  - { name: status, type: varchar }
+  - { name: ended_at, type: varchar }
+  - { name: run_id, type: varchar }
+returns: none

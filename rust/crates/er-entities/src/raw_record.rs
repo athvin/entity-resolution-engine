@@ -127,6 +127,16 @@ pub fn append_rows(conn: &::duckdb::Connection, rows: &[AppendRow]) -> ::duckdb:
     Ok(rows.len())
 }
 
+pub mod delete {
+    //! @generated query functions for this entity + operation.
+    /// Pre-image the whole run's landed rows before re-ingesting (the batch id is the run id): raw_records carries no per-source key beyond source_system, so a per-source skip has nothing to key on (§9.1).
+    pub fn by_batch(conn: &::duckdb::Connection, ingest_batch_id: &str) -> ::duckdb::Result<usize> {
+        const SQL: &str = "DELETE FROM lake.main.raw_records WHERE ingest_batch_id = $1
+";
+        conn.execute(SQL, ::duckdb::params![ingest_batch_id])
+    }
+}
+
 pub mod read {
     //! @generated query functions for this entity + operation.
     /// One row of `batch_receipt_live`: The delivery receipt: this batch's landed keys classified against the source's prior latest state (new / resurrected / unchanged / changed / tombstoned). The tombstone sentinel crosses as a parameter.

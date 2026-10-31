@@ -1,0 +1,14 @@
+kind: statement
+operation: create
+mode: partial
+description: "Open a stage-try ledger row (status running) before the stage's first lake commit; the id is the natural_id of (run_id, stage, try_number)."
+params:
+  - { name: id, type: varchar }
+  - { name: run_id, type: varchar }
+  - { name: stage, type: varchar }
+  - { name: seq, type: bigint }
+  - { name: started_at, type: varchar }
+  - { name: snapshot_start, type: bigint, nullable: true }
+  - { name: try_number, type: bigint }
+  - { name: task_instance_id, type: varchar, nullable: true }
+returns: none

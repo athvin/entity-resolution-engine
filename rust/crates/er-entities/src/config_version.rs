@@ -63,7 +63,7 @@ pub mod create {
     //! @generated query functions for this entity + operation.
     /// Insert a new draft config version, allocating max(version)+1 atomically in the insert; the (org, version) PK rejects a concurrent duplicate.
     pub async fn draft(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         id: &str,
         org_id: &str,
         yaml: &str,
@@ -112,7 +112,7 @@ pub mod read {
     //! @generated query functions for this entity + operation.
     /// One config version with its yaml body.
     pub async fn by_version(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         org_id: &str,
         version: i64,
     ) -> ::std::result::Result<Vec<super::ConfigVersion>, ::tokio_postgres::Error> {
@@ -152,7 +152,7 @@ WHERE org_id = $1 AND version = $2
 
     /// An org's config versions, newest first.
     pub async fn list(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         org_id: &str,
     ) -> ::std::result::Result<Vec<super::ConfigVersion>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT
@@ -195,7 +195,7 @@ pub mod update {
     //! @generated query functions for this entity + operation.
     /// Mark a version published with its rollout tier (the config_versions half of publish).
     pub async fn publish(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         tier: Option<&str>,
         org_id: &str,
         version: i64,

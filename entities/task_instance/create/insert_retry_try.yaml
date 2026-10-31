@@ -1,0 +1,10 @@
+kind: statement
+operation: create
+mode: partial
+description: "fail_or_retry's second half, run in the same transaction when the archive came back live IS NULL: insert the next try with Airflow's budget arithmetic, deterministic hash jitter in [min, 2*min), and the OOM class escalation. The id is the SQL mirror of er_ids::natural_id — a class change invalidates the segment, which the launcher re-derives (§4.5)."
+params:
+  - { name: escalate, type: boolean }
+  - { name: backoff_cap, type: bigint }
+  - { name: backoff_base, type: bigint }
+  - { name: task_instance_id, type: varchar }
+returns: entity

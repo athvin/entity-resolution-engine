@@ -57,7 +57,7 @@ pub mod create {
     //! @generated query functions for this entity + operation.
     /// Record that an object has been ingested for this source, replacing whatever was there. Written AFTER the delivery is published, never before: a cursor advanced first and a download that then failed would skip the object permanently, and the tenant's file would be silently never read. The reverse order can at worst re-ingest once, which is visible and recoverable; this order cannot.
     pub async fn advance(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         cursor_id: &str,
         org_id: &str,
         source: &str,
@@ -114,7 +114,7 @@ pub mod read {
     //! @generated query functions for this entity + operation.
     /// Everything this tenant has already auto-ingested, so one poll can decide what is new without a query per source. Unbounded on purpose: the row count is the number of configured sources, which is small and bounded by the config rather than by the corpus.
     pub async fn by_org(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         org_id: &str,
     ) -> ::std::result::Result<Vec<super::S3IngestCursor>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT

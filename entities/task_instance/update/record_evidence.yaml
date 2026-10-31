@@ -1,0 +1,11 @@
+kind: statement
+operation: update
+mode: partial
+description: "What the watch writes on a row that already has its verdict: the observed exit code and termination reason of a pod that reached a terminal phase after finish landed. Evidence, never a verdict (§6.5)."
+params:
+  - { name: exit_code, type: bigint, nullable: true }
+  - { name: termination_reason, type: varchar, nullable: true }
+  - { name: task_instance_id, type: varchar }
+  - { name: pod_uid, type: varchar }
+  - { name: k8s_job_name, type: varchar }
+returns: entity

@@ -1,0 +1,7 @@
+kind: statement
+operation: read
+description: "Every try of every task of one job, live and archived, in topological then try order (the job page's task list and its archived-tries disclosure)."
+params:
+  - { name: org_id, type: varchar }
+  - { name: job_id, type: varchar }
+returns: entity

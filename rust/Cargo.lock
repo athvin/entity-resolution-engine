@@ -1862,6 +1862,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "er-dag"
+version = "0.1.0"
+dependencies = [
+ "er-errors",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "thiserror",
+]
+
+[[package]]
 name = "er-entities"
 version = "0.1.0"
 dependencies = [
@@ -2092,9 +2103,11 @@ dependencies = [
  "er-cli",
  "er-compile",
  "er-config",
+ "er-dag",
  "er-entities",
  "er-entity-diff",
  "er-entity-spec",
+ "er-errors",
  "er-golden",
  "er-ids",
  "er-pg-tls",

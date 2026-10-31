@@ -1,0 +1,11 @@
+kind: statement
+operation: update
+mode: partial
+description: "The launcher's SKIP LOCKED hand-out (write-ahead: the launch is counted and the Job name written before any Kubernetes call). Honours the one-pod-per-tenant slot and the in-flight cap; locks only the task row so a concurrent heartbeat holding the job row neither blocks nor skips it (§4.5)."
+params:
+  - { name: owner_epoch, type: varchar }
+  - { name: k8s_job_name, type: varchar }
+  - { name: token_hash, type: varchar, nullable: true }
+  - { name: in_flight_cap, type: bigint }
+reads: [job]
+returns: entity

@@ -403,7 +403,10 @@ fn emit_control_fn(entity: &Entity, stmt: &LoadedStatement) -> String {
     let template = build_sql_template(&stmt.sql, None, &bound);
     let escaped = rust_string_escape(&template);
 
-    let mut args = String::from("    client: &::tokio_postgres::Client,\n");
+    // `GenericClient` rather than `Client`: it is implemented by both `Client`
+    // and `Transaction`, so a composed decision (archive one row, insert its
+    // successor) can run two generated statements in one transaction.
+    let mut args = String::from("    client: &impl ::tokio_postgres::GenericClient,\n");
     for param in &stmt.params {
         args.push_str(&format!("    {}: {},\n", param.name, param_arg_type(param)));
     }
@@ -539,7 +542,7 @@ mod tests {
         assert!(module.contains("pub mod read {"));
         assert!(module.contains("pub async fn by_id("));
         assert!(module.contains("pub async fn list("));
-        assert!(module.contains("client: &::tokio_postgres::Client"));
+        assert!(module.contains("client: &impl ::tokio_postgres::GenericClient"));
         assert!(
             module.contains("-> ::std::result::Result<Vec<super::Job>, ::tokio_postgres::Error>")
         );

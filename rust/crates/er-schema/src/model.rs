@@ -243,18 +243,20 @@ pub const RUN_MODES: [&str; 8] = [
     "correction_pass",
     "stage",
 ];
-pub const RUN_STAGES: [&str; 9] = [
+pub const RUN_STAGES: [&str; 11] = [
     "init",
     "ingest",
     "standardize",
     "train",
+    "apply_staged",
     "match",
     "reconcile",
     "assemble",
+    "finish",
     "maintain",
     "reset",
 ];
-pub const RUN_STATUSES: [&str; 3] = ["running", "succeeded", "failed"];
+pub const RUN_STATUSES: [&str; 4] = ["running", "succeeded", "failed", "canceled"];
 pub const REBUILD_REASONS: [&str; 5] = [
     "std_version_bump",
     "survivorship_version_bump",
@@ -328,6 +330,7 @@ fn tspec(
 
 fn ddl_specs() -> Vec<TableSpec> {
     let mut run_stages_cols = vec![
+        nn("id", VARCHAR),
         nn("run_id", VARCHAR),
         nn("stage", VARCHAR),
         nn("seq", BIGINT),
@@ -342,6 +345,10 @@ fn ddl_specs() -> Vec<TableSpec> {
         col("counters", JSON),
         col("error_class", VARCHAR),
         col("error_detail", VARCHAR),
+        nn("try_number", BIGINT),
+        col("task_instance_id", VARCHAR),
+        nn("created_at", TIMESTAMP),
+        nn("updated_at", TIMESTAMP),
     ]);
 
     vec![
@@ -634,14 +641,14 @@ fn ddl_specs() -> Vec<TableSpec> {
                 ("rebuild_reason", &REBUILD_REASONS[..]),
             ]),
         ),
-        // RESERVED (parity-roadmap PR 1.5b): no writer exists yet — stage-level
-        // reporting is derived at read time from `runs` + the lake. The per-stage
-        // ledger (and er-obs's counter vocabulary, its designed producer) is held
-        // for the stage-persistence feature the runs UI's stage card anticipates.
+        // The per-stage ledger (batch-orchestration-design §4.3): one row per try
+        // of one stage of one run, written by the pod before its first lake commit
+        // and finished as its last dedicated commit. Mirrors entities/run_stage —
+        // `registry_matches_entities` byte-compares the rendered DDL of the two.
         tspec(
             "run_stages",
             run_stages_cols,
-            vec![key(&["run_id", "seq"]), key(&["run_id", "stage"])],
+            vec![key(&["id"]), key(&["run_id", "stage", "try_number"])],
             enum_map(&[("stage", &RUN_STAGES[..]), ("status", &RUN_STATUSES[..])]),
         ),
         tspec(
@@ -1097,8 +1104,8 @@ mod tests {
         assert_eq!(REVIEW_REASONS.len(), 3);
         assert_eq!(REVIEW_STATUSES.len(), 4);
         assert_eq!(RUN_MODES.len(), 8);
-        assert_eq!(RUN_STAGES.len(), 9);
-        assert_eq!(RUN_STATUSES.len(), 3);
+        assert_eq!(RUN_STAGES.len(), 11);
+        assert_eq!(RUN_STATUSES.len(), 4);
         assert_eq!(REBUILD_REASONS.len(), 5);
         assert!(EVENT_TYPES.contains(&"edge_cut"));
         assert!(RUN_STAGES.contains(&"reconcile"));

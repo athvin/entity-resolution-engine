@@ -1,0 +1,7 @@
+kind: statement
+operation: delete
+mode: partial
+description: "Pre-image the whole run's landed rows before re-ingesting (the batch id is the run id): raw_records carries no per-source key beyond source_system, so a per-source skip has nothing to key on (§9.1)."
+params:
+  - { name: ingest_batch_id, type: varchar }
+returns: none

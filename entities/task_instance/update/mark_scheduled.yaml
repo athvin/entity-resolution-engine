@@ -1,0 +1,10 @@
+kind: statement
+operation: update
+mode: partial
+description: "The readiness evaluator's verdict: the trigger rule fired, the whole work order (pins, plan, params) is written whole — never merged. The clear_number predicate is belt and braces under the job-row lock (§4.5)."
+params:
+  - { name: input, type: json }
+  - { name: task_instance_id, type: varchar }
+  - { name: clear_number, type: bigint }
+reads: [job]
+returns: entity

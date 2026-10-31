@@ -1,0 +1,8 @@
+kind: statement
+operation: update
+mode: partial
+description: "The clear's job half: bump clear_number (the fence every pre-clear readiness verdict fails against) and send a finished job back through the existing claim path; planning then inserts nothing (ON CONFLICT) and the cleared rows are found in none."
+params:
+  - { name: job_id, type: varchar }
+  - { name: org_id, type: varchar }
+returns: entity

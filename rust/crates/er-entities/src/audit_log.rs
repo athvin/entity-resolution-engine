@@ -54,7 +54,7 @@ pub mod create {
     //! @generated query functions for this entity + operation.
     /// Append one audit-ledger row: one per authenticated mutation.
     pub async fn append(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         actor: &str,
         org: Option<&str>,
         action: &str,
@@ -71,7 +71,7 @@ pub mod read {
     //! @generated query functions for this entity + operation.
     /// A keyset page of the audit ledger, newest first, with optional org/action filters.
     pub async fn page(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         org: Option<&str>,
         action: Option<&str>,
         before_id: Option<i64>,

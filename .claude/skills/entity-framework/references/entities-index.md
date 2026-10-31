@@ -30,7 +30,7 @@ statements is read or written only through the engine's own stage SQL, not
 through a typed query function.
 
 <!-- BEGIN GENERATED: entities-index -->
-**40 entities, 174 declared statements.**
+**42 entities, 216 declared statements.**
 
 | Entity | Relation | Store | Key | Natural key | History |
 |---|---|---|---|---|---|
@@ -64,6 +64,7 @@ through a typed query function.
 | `resolved_entity` | `entities` | duckdb | `id` | — | — |
 | `review` | `review_queue` | duckdb | `id` | `rec_a_key, rec_b_key, reason` | — |
 | `run` | `runs` | duckdb | `id` | — | — |
+| `run_stage` | `run_stages` | duckdb | `id` | `run_id, stage, try_number` | — |
 | `s3_ingest_cursor` | `s3_ingest_cursors` | postgres | `id` | `org_id, source` | — |
 | `schedule` | `schedules` | postgres | `id` | — | yes |
 | `schema_migration` | `schema_migrations` | postgres | `id` | — | — |
@@ -71,6 +72,7 @@ through a typed query function.
 | `staged_steward_action` | `staged_steward_actions` | postgres | `id` | — | — |
 | `tag` | `tags` | postgres | `id` | — | yes |
 | `tagging` | `taggings` | postgres | `id` | — | yes |
+| `task_instance` | `task_instances` | postgres | `id` | `job_id, task_id, try_number` | — |
 | `tenant_schema_state` | `tenant_schema_states` | postgres | `id` | `org_id` | — |
 | `webhook` | `webhooks` | postgres | `id` | — | yes |
 | `webhook_delivery` | `webhook_deliveries` | postgres | `id` | — | — |
@@ -87,15 +89,15 @@ Declared statements per entity and operation:
 | `audit_log` | 1 | 1 | 0 | 0 |
 | `config_version` | 1 | 2 | 1 | 0 |
 | `ddl_log` | 0 | 1 | 0 | 0 |
-| `entity_event` | 1 | 3 | 0 | 0 |
+| `entity_event` | 1 | 3 | 0 | 1 |
 | `entity_link` | 1 | 1 | 0 | 1 |
 | `entity_membership` | 0 | 7 | 1 | 1 |
 | `golden_lineage` | 0 | 1 | 0 | 0 |
 | `golden_override` | 1 | 0 | 0 | 1 |
 | `golden_record` | 0 | 5 | 11 | 0 |
-| `ingest_batch` | 1 | 2 | 1 | 0 |
+| `ingest_batch` | 1 | 2 | 1 | 1 |
 | `int_std_record` | 0 | 5 | 0 | 0 |
-| `job` | 2 | 3 | 4 | 0 |
+| `job` | 2 | 4 | 10 | 0 |
 | `lake_schema_migration` | 1 | 1 | 0 | 0 |
 | `match_score` | 0 | 5 | 3 | 0 |
 | `matching_model` | 1 | 4 | 1 | 0 |
@@ -103,12 +105,13 @@ Declared statements per entity and operation:
 | `metric_snapshot_source` | 1 | 1 | 0 | 0 |
 | `org` | 2 | 4 | 3 | 0 |
 | `pair_label` | 1 | 2 | 0 | 0 |
-| `raw_record` | 0 | 2 | 0 | 0 |
+| `raw_record` | 0 | 2 | 0 | 1 |
 | `record_overlay` | 1 | 2 | 1 | 1 |
 | `record_quality` | 1 | 2 | 0 | 1 |
 | `resolved_entity` | 0 | 2 | 1 | 0 |
 | `review` | 0 | 5 | 3 | 0 |
-| `run` | 1 | 4 | 1 | 0 |
+| `run` | 1 | 4 | 2 | 1 |
+| `run_stage` | 1 | 1 | 1 | 0 |
 | `s3_ingest_cursor` | 1 | 1 | 0 | 0 |
 | `schedule` | 2 | 2 | 3 | 1 |
 | `schema_migration` | 1 | 1 | 0 | 0 |
@@ -116,6 +119,7 @@ Declared statements per entity and operation:
 | `staged_steward_action` | 1 | 1 | 1 | 0 |
 | `tag` | 1 | 3 | 1 | 0 |
 | `tagging` | 1 | 1 | 0 | 1 |
+| `task_instance` | 3 | 2 | 22 | 0 |
 | `tenant_schema_state` | 1 | 1 | 0 | 0 |
 | `webhook` | 1 | 3 | 1 | 0 |
 | `webhook_delivery` | 1 | 1 | 2 | 0 |

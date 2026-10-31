@@ -1,0 +1,19 @@
+kind: statement
+operation: update
+mode: partial
+description: "The fused pod's hand-off from member k to k+1, run by the finish handler in the same transaction immediately after finish.sql for k — finish first, advance second, so the one-pod index sees k leave its predicate before k+1 enters it (§3.7)."
+params:
+  - { name: k8s_job_name, type: varchar }
+  - { name: owner_epoch, type: varchar }
+  - { name: pod_name, type: varchar, nullable: true }
+  - { name: pod_uid, type: varchar }
+  - { name: node_name, type: varchar, nullable: true }
+  - { name: image_digest, type: varchar, nullable: true }
+  - { name: input, type: json }
+  - { name: next_task_instance_id, type: varchar }
+  - { name: job_id, type: varchar }
+  - { name: segment, type: varchar }
+  - { name: resource_class, type: varchar }
+  - { name: clear_number, type: bigint }
+reads: [job]
+returns: entity

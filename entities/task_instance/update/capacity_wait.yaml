@@ -1,0 +1,10 @@
+kind: statement
+operation: update
+mode: partial
+description: "Capacity is never a tenant's failure and spends no budget: a quota refusal or a long Unschedulable returns the row to scheduled with launches refunded, so the next claim re-derives the same Job name (§4.5)."
+params:
+  - { name: wait_secs, type: bigint }
+  - { name: termination_reason, type: varchar, nullable: true }
+  - { name: task_instance_id, type: varchar }
+  - { name: k8s_job_name, type: varchar }
+returns: entity

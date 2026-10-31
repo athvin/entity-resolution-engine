@@ -1,6 +1,7 @@
 {
   "GET /healthz": { "envelope": "wrapped", "key": "status" },
   "GET /v1/audit": { "envelope": "bare" },
+  "GET /v1/internal/attempts/{attempt_id}": { "envelope": "bare" },
   "GET /v1/jobs": { "envelope": "bare" },
   "GET /v1/orgs": { "envelope": "bare" },
   "GET /v1/orgs/{org}": { "envelope": "record", "keys": ["id", "name", "state", "active_config_version", "drop_root", "resources"] },
@@ -22,6 +23,7 @@
   "GET /v1/orgs/{org}/insights/sources": { "envelope": "record", "keys": ["snapshot", "run_id", "sources"] },
   "GET /v1/orgs/{org}/jobs": { "envelope": "wrapped", "key": "jobs" },
   "GET /v1/orgs/{org}/jobs/{job_id}": { "envelope": "bare" },
+  "GET /v1/orgs/{org}/jobs/{job_id}/tasks": { "envelope": "wrapped", "key": "tasks" },
   "GET /v1/orgs/{org}/labeling/next": { "envelope": "record", "keys": ["items", "snapshot", "threshold", "band", "coverage"] },
   "GET /v1/orgs/{org}/labels": { "envelope": "wrapped", "key": "labels" },
   "GET /v1/orgs/{org}/lexicon": { "envelope": "wrapped", "key": "pairs" },

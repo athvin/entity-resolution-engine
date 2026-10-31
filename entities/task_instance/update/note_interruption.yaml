@@ -1,0 +1,10 @@
+kind: statement
+operation: update
+mode: partial
+description: "The pod's interrupted record (SIGTERM, fence): the counters and the reason, no state change — the row keeps its state until the watch rules on the platform's evidence (§4.5)."
+params:
+  - { name: termination_reason, type: varchar }
+  - { name: counters, type: json, nullable: true }
+  - { name: task_instance_id, type: varchar }
+  - { name: pod_uid, type: varchar }
+returns: entity

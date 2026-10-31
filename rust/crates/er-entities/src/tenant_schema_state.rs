@@ -54,7 +54,7 @@ pub mod create {
     //! @generated query functions for this entity + operation.
     /// Record a tenant lake's schema position after a reconciliation or check: insert the row, or on a repeat for the same tenant replace its catalog version, status, detail and check time.
     pub async fn upsert(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         id: &str,
         org_id: &str,
         catalog_hash: &str,
@@ -81,7 +81,7 @@ pub mod read {
     //! @generated query functions for this entity + operation.
     /// Every tenant's recorded schema position, for the deploy report and the drift check (`er-server migrate-tenants`); the caller joins org names from the org list.
     pub async fn list(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
     ) -> ::std::result::Result<Vec<super::TenantSchemaState>, ::tokio_postgres::Error> {
         const SQL: &str =
             "SELECT id, org_id, catalog_hash, status, detail, checked_at, created_at, updated_at

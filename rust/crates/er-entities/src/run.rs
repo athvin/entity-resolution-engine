@@ -131,6 +131,16 @@ VALUES ($1, $2, $3, 'running', $4::timestamp, $5,
     }
 }
 
+pub mod delete {
+    //! @generated query functions for this entity + operation.
+    /// Pre-image delete for init's delete-then-insert of the run row: DuckLake enforces no keys, so a re-executed init would otherwise append a second row under the same run id (§9.1).
+    pub fn by_id(conn: &::duckdb::Connection, run_id: &str) -> ::duckdb::Result<usize> {
+        const SQL: &str = "DELETE FROM lake.main.runs WHERE id = $1
+";
+        conn.execute(SQL, ::duckdb::params![run_id])
+    }
+}
+
 pub mod read {
     //! @generated query functions for this entity + operation.
     /// One row of `by_id`: One run's model identity and resolved ensemble, by id (E5b-2c). Reconcile needs the thresholds THIS run recorded, not the latest run's: a correction pass writes its own row first and then re-clusters, so `latest_live` would answer with the row the pass itself just wrote — correct only because that row copies the prior one forward, which is a coincidence a later change could remove.
@@ -464,6 +474,20 @@ LIMIT 20
 
 pub mod update {
     //! @generated query functions for this entity + operation.
+    /// Close the run ledger row on a terminal non-success ($status: failed | canceled), so a run that dies mid-chain stops reading as running forever.
+    pub fn fail(
+        conn: &::duckdb::Connection,
+        status: &str,
+        ended_at: &str,
+        run_id: &str,
+    ) -> ::duckdb::Result<usize> {
+        const SQL: &str = "UPDATE lake.main.runs SET status = $1, ended_at = $2::timestamp,
+    updated_at = $2::timestamp
+WHERE id = $3
+";
+        conn.execute(SQL, ::duckdb::params![status, ended_at, run_id])
+    }
+
     /// Close the run ledger row on success, stamping ended_at.
     pub fn finish(
         conn: &::duckdb::Connection,

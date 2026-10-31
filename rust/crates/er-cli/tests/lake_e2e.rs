@@ -4864,3 +4864,82 @@ fn labels_estimate_m_and_only_m() {
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+/// The §9.3 determinism gate (batch-orchestration-design) at the lake tier:
+/// `match_scores` written at six DuckDB threads must render byte-identically
+/// to one thread over the same corpus and model, or `match` keeps `threads =
+/// 1` by policy. Two isolated lakes, identical seeding, probabilities
+/// compared in their VARCHAR rendering — the same oracle `active_scores`
+/// gives every other scoring assertion here.
+#[test]
+fn match_scores_are_byte_identical_at_one_and_six_threads() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let one = scores_at_threads("thr1", 1);
+    let six = scores_at_threads("thr6", 6);
+    assert!(
+        !one.is_empty(),
+        "the corpus scored nothing — the probe is vacuous"
+    );
+    assert_eq!(
+        one, six,
+        "six-thread match diverged from one thread: the stage is not \
+         order-stable and must keep threads = 1 (batch-orchestration-design \
+         §9.3)"
+    );
+}
+
+fn scores_at_threads(tag: &str, threads: u32) -> BTreeMap<(String, String), String> {
+    let tmp = std::env::temp_dir().join(format!("er_cli_{tag}_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(tmp.join("data")).unwrap();
+    let catalog = tmp.join("catalog.ducklake").to_string_lossy().into_owned();
+    let data_path = tmp.join("data").to_string_lossy().into_owned();
+
+    // er_cli::open_lake pins one thread (SessionOptions::deterministic); this
+    // is the experiment's seam, built the same way with the thread knob.
+    let mut session = Session::open_in_memory(
+        dedupe_core::session::SessionOptions::deterministic()
+            .with_threads(threads)
+            .with_baked_extensions(),
+    )
+    .unwrap();
+    session
+        .attach_ducklake(&dedupe_core::session::ducklake::DuckLakeConfig {
+            metadata: catalog,
+            data_path: Some(data_path),
+            ..dedupe_core::session::ducklake::DuckLakeConfig::default()
+        })
+        .unwrap();
+
+    let config = load_config_str(include_str!("fixtures/test.yaml")).unwrap();
+    let lexicon: Vec<(String, String)> = include_str!("fixtures/nickname_variants.csv")
+        .lines()
+        .skip(1)
+        .filter(|l| !l.is_empty())
+        .map(|l| {
+            let (a, b) = l.split_once(',').unwrap();
+            (a.to_string(), b.to_string())
+        })
+        .collect();
+    er_cli::seed_lexicon(&session, &lexicon).unwrap();
+    for source in ["crm", "billing", "webforms"] {
+        let csv =
+            std::fs::read_to_string(repo_fixture(&format!("base_10/base/{source}.csv"))).unwrap();
+        er_cli::run_ingest(
+            &session,
+            &config,
+            source,
+            &csv,
+            "01BATCH0000000000000000BASE",
+            "2026-01-01 00:00:00",
+            false,
+        )
+        .unwrap();
+    }
+    er_cli::run_standardize(&session, &config, "2026-01-01 00:00:00").unwrap();
+    match_model(&session);
+    active_scores(&session)
+}

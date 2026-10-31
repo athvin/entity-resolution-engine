@@ -92,6 +92,16 @@ VALUES ($1, $2, $3, $4, $5, $6::json, $7, $8::timestamp,
     }
 }
 
+pub mod delete {
+    //! @generated query functions for this entity + operation.
+    /// Pre-image the run's own events before reconcile re-appends them, so a re-executed reconcile cannot double the counts the webhook aggregates read (§9.1).
+    pub fn by_run(conn: &::duckdb::Connection, run_id: &str) -> ::duckdb::Result<usize> {
+        const SQL: &str = "DELETE FROM lake.main.entity_events WHERE run_id = $1
+";
+        conn.execute(SQL, ::duckdb::params![run_id])
+    }
+}
+
 pub mod read {
     //! @generated query functions for this entity + operation.
     /// One row of `by_entity`: One entity's lifecycle events at a pinned snapshot, in occurrence order (the detail event feed).

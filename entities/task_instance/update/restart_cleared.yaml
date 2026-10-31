@@ -1,0 +1,10 @@
+kind: statement
+operation: update
+mode: partial
+description: "The clear's live arm: a cleared queued or running row goes to restarting (the write-ahead marker); its Job is revoked and deleted, and the watch rotates the row once the pod is gone (§4.5)."
+params:
+  - { name: resource_class, type: varchar, nullable: true }
+  - { name: org_id, type: varchar }
+  - { name: job_id, type: varchar }
+  - { name: task_ids, type: json }
+returns: entity

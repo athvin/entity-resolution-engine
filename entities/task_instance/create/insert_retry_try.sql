@@ -1,0 +1,66 @@
+INSERT INTO public.task_instances
+  (id, org_id, job_id, task_id, seq, try_number, live, kind, state, trigger_rule, upstream, teardown, segment,
+   resource_class, escalated_from, max_tries, max_launches, not_before, input, image_digest, trace_context)
+SELECT encode(sha256(convert_to('task_instances:' || job_id || ':' || task_id || ':' || (try_number + 1)::text, 'UTF8')), 'hex'),
+       org_id, job_id, task_id, seq, try_number + 1, TRUE, kind, 'up_for_retry', trigger_rule, upstream, teardown,
+       CASE WHEN $escalate THEN NULL ELSE segment END,
+       CASE WHEN $escalate AND resource_class = 'S' THEN 'M'
+            WHEN $escalate AND resource_class = 'M' THEN 'L' ELSE resource_class END,
+       CASE WHEN $escalate THEN resource_class ELSE NULL END,
+       max_tries, max_launches,
+       now() + make_interval(secs =>
+         least($backoff_cap::bigint, $backoff_base::bigint * power(2, try_number - 1))::int
+         + mod(abs(hashtext(job_id || '#' || task_id || '#' || try_number::text)::bigint),
+               least($backoff_cap::bigint, $backoff_base::bigint * power(2, try_number - 1))::int)),
+       input, image_digest, trace_context
+FROM public.task_instances
+WHERE id = $task_instance_id AND live IS NULL AND archived_reason = 'retry'
+  AND NOT EXISTS (SELECT 1 FROM public.task_instances l
+                  WHERE l.job_id = task_instances.job_id AND l.task_id = task_instances.task_id AND l.live IS TRUE)
+RETURNING
+  id,
+  org_id,
+  job_id,
+  task_id,
+  seq,
+  try_number,
+  live,
+  archived_reason,
+  kind,
+  state,
+  trigger_rule,
+  upstream,
+  teardown,
+  segment,
+  resource_class,
+  next_resource_class,
+  escalated_from,
+  max_tries,
+  launches,
+  max_launches,
+  not_before,
+  input,
+  output,
+  outcome,
+  exit_code,
+  termination_reason,
+  error_class,
+  error_detail,
+  owner_epoch,
+  k8s_job_name,
+  pod_name,
+  pod_uid,
+  node_name,
+  image_digest,
+  snapshot_start,
+  snapshot_end,
+  counters,
+  trace_context,
+  token_hash,
+  scheduled_at,
+  queued_at,
+  started_at,
+  heartbeat_at,
+  finished_at,
+  created_at,
+  updated_at

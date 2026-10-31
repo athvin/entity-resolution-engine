@@ -1,0 +1,15 @@
+kind: statement
+operation: update
+mode: partial
+description: "fail_or_retry's first half: archive the live row forced to a failure-like terminal state ($terminal_state: failed | timed_out) whether or not a successor is inserted, so history reads correctly; a retryable failure within budget archives with reason retry (§4.5)."
+params:
+  - { name: terminal_state, type: varchar }
+  - { name: retryable, type: boolean }
+  - { name: exit_code, type: bigint, nullable: true }
+  - { name: termination_reason, type: varchar, nullable: true }
+  - { name: error_class, type: varchar, nullable: true }
+  - { name: error_detail, type: varchar, nullable: true }
+  - { name: task_instance_id, type: varchar }
+  - { name: k8s_job_name, type: varchar, nullable: true }
+reads: [job]
+returns: entity

@@ -1,0 +1,8 @@
+kind: statement
+operation: update
+mode: partial
+description: "The control-task claim: claim_launch without the org-slot and cap predicates (a control task holds no org slot and never leaves the dispatcher), committed before the body runs so a crash mid-body is recoverable (§3.6)."
+params:
+  - { name: owner_epoch, type: varchar }
+reads: [job]
+returns: entity

@@ -90,6 +90,11 @@ erDiagram
         varchar schedule_id
         varchar resource_class
         varchar trace_context
+        varchar structural_fingerprint
+        varchar policy_hash
+        varchar image_digest
+        bigint clear_number
+        varchar owner_epoch
         timestamp created_at
         timestamp updated_at
         timestamp started_at
@@ -203,6 +208,54 @@ erDiagram
         timestamp created_at
         timestamp updated_at
     }
+    task_instances {
+        varchar id PK
+        varchar org_id FK
+        varchar job_id FK
+        varchar task_id
+        bigint seq
+        bigint try_number
+        boolean live
+        varchar archived_reason "in {cleared, restarted, retry}"
+        varchar kind "in {control, pod}"
+        varchar state "in {canceled, canceling, failed, none, queued, restarting, running, scheduled, skipped, succeeded, timed_out, up_for_retry, upstream_failed, upstream_skipped}"
+        varchar trigger_rule "in {all_succeeded, all_terminal, any_failed}"
+        json upstream
+        boolean teardown
+        varchar segment
+        varchar resource_class "in {L, M, S}"
+        varchar next_resource_class "in {L, M, S}"
+        varchar escalated_from "in {M, S}"
+        bigint max_tries
+        bigint launches
+        bigint max_launches
+        timestamp not_before
+        json input
+        json output
+        varchar outcome "in {done, no_op}"
+        bigint exit_code
+        varchar termination_reason
+        varchar error_class "in {config, contradiction, data, infrastructure, internal, lock_conflict, non_convergence, precondition, resources, timeout, transient_io}"
+        varchar error_detail
+        varchar owner_epoch
+        varchar k8s_job_name
+        varchar pod_name
+        varchar pod_uid
+        varchar node_name
+        varchar image_digest
+        bigint snapshot_start
+        bigint snapshot_end
+        json counters
+        varchar trace_context
+        varchar token_hash
+        timestamp scheduled_at
+        timestamp queued_at
+        timestamp started_at
+        timestamp heartbeat_at
+        timestamp finished_at
+        timestamp created_at
+        timestamp updated_at
+    }
     tenant_schema_states {
         varchar id PK
         varchar org_id FK
@@ -251,6 +304,8 @@ erDiagram
     tags }o--|| orgs : "org_id → id"
     taggings }o--|| orgs : "org_id → id"
     taggings }o--|| tags : "tag_id → id"
+    task_instances }o--|| orgs : "org_id → id"
+    task_instances }o--|| jobs : "job_id → id"
     tenant_schema_states }o--|| orgs : "org_id → id"
     webhooks }o--|| orgs : "org_id → id"
     webhook_deliveries }o--|| orgs : "org_id → id"
@@ -274,6 +329,7 @@ erDiagram
 | `staged_steward_actions` | A steward action staged for review/apply: its payload, state and outcome. |
 | `tags` | A tenant's own label for entities and review groups: the vocabulary a steward sorts work by. |
 | `taggings` | One tag applied to one subject: the attachment, kept apart from the tag so retiring a tag does not rewrite what it was applied to. |
+| `task_instances` | One try of one task of one job (Airflow's task_instance shape): the live try has live = TRUE, archived tries have live NULL and stay in the table as history (batch-orchestration-design §4.2). |
 | `tenant_schema_states` | The control plane's cache of each tenant lake's schema position: the catalog version the lake was last reconciled or checked against and how that went. The lake's own schema_migrations ledger is authoritative; this row is what the deploy report and the drift check read without opening every lake. |
 | `webhooks` | A tenant webhook endpoint: its URL, subscribed events and signing secret. |
 | `webhook_deliveries` | One attempt-tracked delivery of one event to one subscriber. The event is recorded here BEFORE any network call, so a subscriber that is briefly unreachable gets the event late instead of never. |
@@ -583,7 +639,7 @@ erDiagram
         varchar id PK
         varchar tenant
         varchar mode "in {correction_pass, full, incremental, init, maintain, reset, stage, train}"
-        varchar status "in {failed, running, succeeded}"
+        varchar status "in {canceled, failed, running, succeeded}"
         timestamp started_at
         timestamp ended_at
         varchar config_hash
@@ -601,10 +657,11 @@ erDiagram
         timestamp updated_at
     }
     run_stages {
-        varchar run_id PK
-        varchar stage "in {assemble, ingest, init, maintain, match, reconcile, reset, standardize, train}"
-        bigint seq PK
-        varchar status "in {failed, running, succeeded}"
+        varchar id PK
+        varchar run_id
+        varchar stage "in {apply_staged, assemble, finish, ingest, init, maintain, match, reconcile, reset, standardize, train}"
+        bigint seq
+        varchar status "in {canceled, failed, running, succeeded}"
         timestamp started_at
         timestamp ended_at
         bigint snapshot_start
@@ -623,6 +680,10 @@ erDiagram
         json counters
         varchar error_class
         varchar error_detail
+        bigint try_number
+        varchar task_instance_id
+        timestamp created_at
+        timestamp updated_at
     }
     ingest_batches {
         varchar id PK
@@ -793,7 +854,6 @@ erDiagram
     entity_membership }o..|| metric_snapshots : "run_id"
     entity_membership }o..|| metric_snapshot_sources : "run_id, source_system"
     entity_events }o..|| metric_snapshots : "run_id"
-    entity_events }o..|| run_stages : "run_id, seq"
     cut_edges }o..|| match_scores : "rec_a_key, rec_b_key, model_version, tf_snapshot_id"
     run_stages }o..|| metric_snapshots : "run_id"
     ingest_batches }o..|| metric_snapshots : "run_id"
@@ -842,7 +902,7 @@ erDiagram
 | `review_queue` | ddl | One open question for a steward (S4.4.3): a gray-band pair, an unsatisfiable never, or a coherence flag, with its resolution. |
 | `cut_edges` | ddl | — |
 | `runs` | ddl | The run ledger (S5.2): one row per pipeline run — mode, status, versions and the snapshot range it produced. |
-| `run_stages` | ddl | — |
+| `run_stages` | ddl | The lake-side stage ledger (S5.2): one row per try of one stage of one run; the durable reference a pod probes before it executes (batch-orchestration-design §4.3). |
 | `ingest_batches` | ddl | One delivery receipt (S4.1): per-source landing counts for a batch, including tombstones and resurrections. |
 | `golden_overrides` | ddl | One steward golden-field override (latest-wins per entity and attribute); a NULL value means the steward cleared the field. |
 | `record_overlays` | ddl | One steward record overlay (protect/suppress): a flag on a record key, retractable, applied at assembly. |

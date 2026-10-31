@@ -54,7 +54,7 @@ pub mod create {
     //! @generated query functions for this entity + operation.
     /// Apply a tag to a subject, idempotently. Applying the same tag twice is the same fact, so DO NOTHING rather than DO UPDATE: there is nothing to change, and the original created_by/created_at record who first claimed the work. Idempotent at the schema rather than by a read-then-write, which two stewards clicking at once would race.
     pub async fn apply(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         tagging_id: &str,
         org_id: &str,
         tag_id: &str,
@@ -87,7 +87,7 @@ pub mod delete {
     //! @generated query functions for this entity + operation.
     /// Remove one application. A real DELETE, unlike retiring a tag: nothing references a tagging, so there is no foreign key to fail on — the distinction D11's sweep made explicit. The history companion keeps the row image, so who removed it is still answerable.
     pub async fn unapply(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         org_id: &str,
         tag_id: &str,
         subject_type: &str,
@@ -109,7 +109,7 @@ pub mod read {
     //! @generated query functions for this entity + operation.
     /// What carries a tag — the filter, and the scope every bulk action by tag will read. Optionally narrowed to one subject kind. The explicit ::varchar casts are needed because Postgres cannot infer a parameter's type from `$x IS NULL` alone and resolves left to right.
     pub async fn subjects_by_tag(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         org_id: &str,
         tag_id: &str,
         subject_type: Option<&str>,

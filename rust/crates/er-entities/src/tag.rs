@@ -54,7 +54,7 @@ pub mod create {
     //! @generated query functions for this entity + operation.
     /// Add a label to the tenant's vocabulary. The partial unique index on (org_id, name) WHERE active rejects a duplicate at the schema, so two tags with one name cannot exist to make a filter ambiguous.
     pub async fn create(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         tag_id: &str,
         org_id: &str,
         name: &str,
@@ -88,7 +88,7 @@ pub mod read {
     //! @generated query functions for this entity + operation.
     /// One live tag, for validating an application before it is written. Filters `active` so applying a retired tag is a 404 rather than resurrecting it by reference.
     pub async fn by_id(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         org_id: &str,
         tag_id: &str,
     ) -> ::std::result::Result<Vec<super::Tag>, ::tokio_postgres::Error> {
@@ -115,7 +115,7 @@ WHERE org_id = $1 AND id = $2 AND active
 
     /// The live tags on one subject — the chips shown on an entity or a review. Declared on `tag` rather than `tagging` because it returns TAG rows, and a control-plane statement's `returns: entity` means its own entity's shape: a read belongs to the entity it returns, not the one it joins through. Joins rather than denormalising the name onto the tagging, so renaming a tag needs no backfill.
     pub async fn for_subject(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         org_id: &str,
         subject_type: &str,
         subject_id: &str,
@@ -149,7 +149,7 @@ ORDER BY t.name
 
     /// The tenant's live vocabulary, alphabetical. Retired tags are excluded here and everywhere else a tag is offered, so a soft delete is indistinguishable from a delete to every reader — the pattern `webhook/read/list_active` established.
     pub async fn list_active(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         org_id: &str,
     ) -> ::std::result::Result<Vec<super::Tag>, ::tokio_postgres::Error> {
         const SQL: &str =
@@ -179,7 +179,7 @@ pub mod update {
     //! @generated query functions for this entity + operation.
     /// Retire a tag. A soft delete rather than a DELETE, decided before the first one was written: `taggings.tag_id` references this row and every foreign key in this schema is NO ACTION, so a hard delete would fail for exactly the tags that had been used — the bug D11 found in webhooks, where the delete worked until the subscription had delivered something. Retiring also keeps the history readable, since what a group was marked as is part of why it was handled that way.
     pub async fn retire(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         org_id: &str,
         tag_id: &str,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {

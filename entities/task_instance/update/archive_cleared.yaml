@@ -1,0 +1,9 @@
+kind: statement
+operation: update
+mode: partial
+description: "The clear's terminal arm: archive the terminal row (reason cleared); insert_cleared_try then mints the successor with a re-based budget (§4.5)."
+params:
+  - { name: org_id, type: varchar }
+  - { name: job_id, type: varchar }
+  - { name: task_ids, type: json }
+returns: entity

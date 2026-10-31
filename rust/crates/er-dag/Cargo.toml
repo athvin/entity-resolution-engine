@@ -1,0 +1,22 @@
+[package]
+name = "er-dag"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The compiled-DAG library of batch-orchestration-design: typed tasks and durable edges, assembly checks, the two fingerprints, the readiness evaluator and the clear-closure algorithm. No kube, no Postgres, no engine — the leaf binary supplies the session and client types."
+
+[dependencies]
+# Deliberately tiny (batch-orchestration-design §3.2): the error taxonomy,
+# serde for the durable references, sha2 for the two fingerprints, thiserror
+# for the crate's own error types. Never kube, tokio-postgres, duckdb or any
+# engine crate — the two session parameters are how that stays true.
+er-errors = { version = "0.1.0", path = "../er-errors" }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

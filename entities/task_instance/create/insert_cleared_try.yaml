@@ -1,0 +1,10 @@
+kind: statement
+operation: create
+mode: partial
+description: "The successor of a cleared or restarted row, in none with input NULL (mark_scheduled pins it) and Airflow's cumulative budget: max_tries = try_number + retries (§4.5)."
+params:
+  - { name: resource_class, type: varchar, nullable: true }
+  - { name: retries, type: bigint }
+  - { name: image_digest, type: varchar, nullable: true }
+  - { name: task_instance_id, type: varchar }
+returns: entity

@@ -1,0 +1,8 @@
+kind: statement
+operation: update
+mode: partial
+description: "The cancel sweep's live arm: the write-ahead marker before a row's Job is revoked and deleted; settled to canceled only when the watch reports the pod gone (§5.6)."
+params:
+  - { name: org_id, type: varchar }
+  - { name: job_id, type: varchar }
+returns: entity

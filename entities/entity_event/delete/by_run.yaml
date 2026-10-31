@@ -1,0 +1,7 @@
+kind: statement
+operation: delete
+mode: partial
+description: "Pre-image the run's own events before reconcile re-appends them, so a re-executed reconcile cannot double the counts the webhook aggregates read (§9.1)."
+params:
+  - { name: run_id, type: varchar }
+returns: none

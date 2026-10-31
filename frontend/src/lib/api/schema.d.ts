@@ -249,6 +249,11 @@ export interface components {
              */
             attempt: number;
             /**
+             * Format: int64
+             * @description Incremented by every clear; fences readiness verdicts composed before the clear. Read as COALESCE(clear_number, 0).
+             */
+            clear_number?: number | null;
+            /**
              * Format: date-time
              * @description When the job was enqueued.
              */
@@ -268,6 +273,8 @@ export interface components {
             id: string;
             /** @description Optional dedup key, unique per org. */
             idempotency_key?: string | null;
+            /** @description Image digest the planning dispatcher ran, so a deploy mid-run is legible. */
+            image_digest?: string | null;
             /** @description The job kind (run_all, correct, maintain, train, ...). */
             kind: string;
             /**
@@ -282,8 +289,12 @@ export interface components {
             not_before?: string | null;
             /** @description The tenant this job runs for. */
             org_id: string;
+            /** @description The dispatcher process epoch that planned or adopted the run. */
+            owner_epoch?: string | null;
             /** @description Kind-specific parameters. */
             params: unknown;
+            /** @description sha256 over the compiled DAG's per-node policy (retries, backoff, timeout, class, segment); a divergence proceeds with the diff logged. */
+            policy_hash?: string | null;
             /**
              * Format: int64
              * @description Claim priority; higher runs first.
@@ -302,6 +313,8 @@ export interface components {
             started_at?: string | null;
             /** @description Lifecycle state (queued, dispatching, running, succeeded, failed, canceling, canceled). */
             state: string;
+            /** @description sha256 over the compiled DAG's shape (names, versions, edges, trigger rules), written at planning; a clear or adoption refuses on mismatch (batch-orchestration-design §3.4). */
+            structural_fingerprint?: string | null;
             /** @description Propagated trace context. */
             trace_context?: string | null;
             /**
@@ -405,6 +418,149 @@ export interface components {
              * @description Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
              */
             updated_at: string;
+        };
+        /** @description One try of one task of one job (Airflow's task_instance shape): the live try has live = TRUE, archived tries have live NULL and stay in the table as history (batch-orchestration-design §4.2). */
+        TaskInstance: {
+            /** @description Why the row stopped being live; NULL while live. retry = archive_try, cleared = a terminal row rotated by clear, restarted = a clear-while-live rotation (complete_restart). Pending rows reset by a clear are not archived (no try was consumed). */
+            archived_reason?: string | null;
+            /** @description Progress counters, replaced on every heartbeat and at finish. */
+            counters?: unknown;
+            /**
+             * Format: date-time
+             * @description Row created.
+             */
+            created_at: string;
+            /** @description er-errors' seven classes plus the executor's four. */
+            error_class?: string | null;
+            /** @description Chain-flattened text (errfmt::chain), truncated to 2000 chars. */
+            error_detail?: string | null;
+            /** @description Class of the OOMKilled predecessor try, so a mixed-class run is legible. */
+            escalated_from?: string | null;
+            /**
+             * Format: int64
+             * @description Container exit code: the pod's own on finish, the watch's observation on record_evidence. Evidence for the row, never a classifier input (§6.5).
+             */
+            exit_code?: number | null;
+            /**
+             * Format: date-time
+             * @description Terminal state recorded.
+             */
+            finished_at?: string | null;
+            /**
+             * Format: date-time
+             * @description Last heartbeat.
+             */
+            heartbeat_at?: string | null;
+            /** @description er_ids::natural_id('task_instances', [job_id, task_id, try_number]): a pure function of the attempt key, so the Job name is one too. */
+            id: string;
+            /** @description Image digest this try ran, so a deploy mid-run is legible. */
+            image_digest?: string | null;
+            /** @description The work order: pinned upstream references, the RunPlan, params. Written whole by mark_scheduled at every readiness verdict (never merged), by advance_segment for a fused member, and copied by the retry insert; NULL on a none row. */
+            input?: unknown;
+            /** @description The run (jobs.id == run_id). */
+            job_id: string;
+            /** @description batch/v1 Job name, `er-t-{20 hex of id}-l{launches}`, of the Job that ran this try; for a fused non-head member, the segment head's Job (advance_segment copies it). */
+            k8s_job_name?: string | null;
+            /** @description Where the body runs: a Kubernetes Job, or a dispatcher-local body under the control-task contract (§3.6). */
+            kind: string;
+            /**
+             * Format: int64
+             * @description Infrastructure budget consumed by this try: Job creates whose pod never ran user code, plus disruptions while running; 1 for a member advanced inside a running segment pod.
+             */
+            launches: number;
+            /** @description TRUE on the live try, NULL once archived (NULLs are distinct, so the partial unique index admits one live row per coordinate). */
+            live?: boolean | null;
+            /**
+             * Format: int64
+             * @description Infrastructure budget per try.
+             */
+            max_launches: number;
+            /**
+             * Format: int64
+             * @description Cumulative try budget (Airflow max_tries): retries at planning; previous_try_number + retries after a clear. Eligible to retry while try_number <= max_tries.
+             */
+            max_tries: number;
+            /** @description Operator override recorded by clear on a restarting row; complete_restart applies it to the successor. */
+            next_resource_class?: string | null;
+            /** @description Node the pod landed on. */
+            node_name?: string | null;
+            /**
+             * Format: date-time
+             * @description Backoff deadline for up_for_retry; a short capacity wait for scheduled.
+             */
+            not_before?: string | null;
+            /** @description Tenant. */
+            org_id: string;
+            /** @description Success flavour; no_op is exit 10. */
+            outcome?: string | null;
+            /** @description The serialized DurableOutput (a LakeRef or Plan), written at finish. */
+            output?: unknown;
+            /** @description The dispatcher process epoch (UUIDv7 minted at start) that claimed the launch; adoption rewrites it. */
+            owner_epoch?: string | null;
+            /** @description Pod that ran this try, from the pod's bound token on first contact; cross-checked by the watch. */
+            pod_name?: string | null;
+            /** @description Pod UID, recorded from the token's claim; the watch confirms it. */
+            pod_uid?: string | null;
+            /**
+             * Format: date-time
+             * @description Launch claimed (write-ahead, before the create).
+             */
+            queued_at?: string | null;
+            /** @description Class this try runs at; NULL for a control task. OOM escalation writes a larger class on the next try. */
+            resource_class?: string | null;
+            /**
+             * Format: date-time
+             * @description Readiness fired.
+             */
+            scheduled_at?: string | null;
+            /** @description Fusion segment id resolved at planning; NULL for a task that runs alone. */
+            segment?: string | null;
+            /**
+             * Format: int64
+             * @description Topological position from assembly; display and claim order.
+             */
+            seq: number;
+            /**
+             * Format: int64
+             * @description Lake snapshot of the task's last commit: the durable reference downstream pins to.
+             */
+            snapshot_end?: number | null;
+            /**
+             * Format: int64
+             * @description Lake snapshot before the task's first commit.
+             */
+            snapshot_start?: number | null;
+            /**
+             * Format: date-time
+             * @description Pod reported start.
+             */
+            started_at?: string | null;
+            /** @description Closed state set (§5). restarting and canceling are the write-ahead markers for clear and cancel of a live row. */
+            state: string;
+            /** @description Task::NAME, stable across renames. */
+            task_id: string;
+            /** @description Claimable while the job is canceling (finish). */
+            teardown: boolean;
+            /** @description Platform evidence, distinct from error_class, free text: OOMKilled, Evicted, DeadlineExceeded, Unschedulable, no_pod_created, vanished, quota, sigterm, sigkill, fenced, stale_start, structural_mismatch, build_skew, control_plane_unreachable, no_terminal_record, heartbeat_timeout, dispatcher_restart, revoked, and kin. */
+            termination_reason?: string | null;
+            /** @description The fallback credential only (§6.4): SHA-256 of the per-attempt token, compared with ct_eq; NULL under the projected-token path; nulled at finish. */
+            token_hash?: string | null;
+            /** @description traceparent of this try's span, a child of jobs.trace_context. */
+            trace_context?: string | null;
+            /** @description Copied from the compiled graph at planning so the UI can explain propagation; the graph is the authority. */
+            trigger_rule: string;
+            /**
+             * Format: int64
+             * @description 1-based try. A new row per try.
+             */
+            try_number: number;
+            /**
+             * Format: date-time
+             * @description Row updated.
+             */
+            updated_at: string;
+            /** @description Upstream task_ids, a UI projection of the compiled edges. */
+            upstream: unknown;
         };
         /** @description A tenant webhook endpoint: its URL, subscribed events and signing secret. */
         Webhook: {

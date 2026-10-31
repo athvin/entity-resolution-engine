@@ -37,6 +37,16 @@ export interface Job {
   resource_class: string | null;
   /** Propagated trace context. */
   trace_context: string | null;
+  /** sha256 over the compiled DAG's shape (names, versions, edges, trigger rules), written at planning; a clear or adoption refuses on mismatch (batch-orchestration-design §3.4). */
+  structural_fingerprint: string | null;
+  /** sha256 over the compiled DAG's per-node policy (retries, backoff, timeout, class, segment); a divergence proceeds with the diff logged. */
+  policy_hash: string | null;
+  /** Image digest the planning dispatcher ran, so a deploy mid-run is legible. */
+  image_digest: string | null;
+  /** Incremented by every clear; fences readiness verdicts composed before the clear. Read as COALESCE(clear_number, 0). */
+  clear_number: number | null;
+  /** The dispatcher process epoch that planned or adopted the run. */
+  owner_epoch: string | null;
   /** When the job was enqueued. */
   created_at: string;
   /** When the job row was last updated. */

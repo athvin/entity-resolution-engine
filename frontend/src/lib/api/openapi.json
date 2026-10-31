@@ -530,6 +530,14 @@
             "format": "int64",
             "description": "Attempts made so far."
           },
+          "clear_number": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Incremented by every clear; fences readiness verdicts composed before the clear. Read as COALESCE(clear_number, 0)."
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -575,6 +583,13 @@
             ],
             "description": "Optional dedup key, unique per org."
           },
+          "image_digest": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Image digest the planning dispatcher ran, so a deploy mid-run is legible."
+          },
           "kind": {
             "type": "string",
             "description": "The job kind (run_all, correct, maintain, train, ...)."
@@ -596,8 +611,22 @@
             "type": "string",
             "description": "The tenant this job runs for."
           },
+          "owner_epoch": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The dispatcher process epoch that planned or adopted the run."
+          },
           "params": {
             "description": "Kind-specific parameters."
+          },
+          "policy_hash": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "sha256 over the compiled DAG's per-node policy (retries, backoff, timeout, class, segment); a divergence proceeds with the diff logged."
           },
           "priority": {
             "type": "integer",
@@ -636,6 +665,13 @@
           "state": {
             "type": "string",
             "description": "Lifecycle state (queued, dispatching, running, succeeded, failed, canceling, canceled)."
+          },
+          "structural_fingerprint": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "sha256 over the compiled DAG's shape (names, versions, edges, trigger rules), written at planning; a clear or adoption refuses on mismatch (batch-orchestration-design §3.4)."
           },
           "trace_context": {
             "type": [
@@ -842,6 +878,307 @@
             "type": "string",
             "format": "date-time",
             "description": "Wall-clock last-write time (database default; advanced by mutations once the entity migrates)."
+          }
+        }
+      },
+      "TaskInstance": {
+        "type": "object",
+        "description": "One try of one task of one job (Airflow's task_instance shape): the live try has live = TRUE, archived tries have live NULL and stay in the table as history (batch-orchestration-design §4.2).",
+        "required": [
+          "id",
+          "org_id",
+          "job_id",
+          "task_id",
+          "seq",
+          "try_number",
+          "kind",
+          "state",
+          "trigger_rule",
+          "upstream",
+          "teardown",
+          "max_tries",
+          "launches",
+          "max_launches",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "archived_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the row stopped being live; NULL while live. retry = archive_try, cleared = a terminal row rotated by clear, restarted = a clear-while-live rotation (complete_restart). Pending rows reset by a clear are not archived (no try was consumed)."
+          },
+          "counters": {
+            "description": "Progress counters, replaced on every heartbeat and at finish."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Row created."
+          },
+          "error_class": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "er-errors' seven classes plus the executor's four."
+          },
+          "error_detail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Chain-flattened text (errfmt::chain), truncated to 2000 chars."
+          },
+          "escalated_from": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Class of the OOMKilled predecessor try, so a mixed-class run is legible."
+          },
+          "exit_code": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Container exit code: the pod's own on finish, the watch's observation on record_evidence. Evidence for the row, never a classifier input (§6.5)."
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Terminal state recorded."
+          },
+          "heartbeat_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Last heartbeat."
+          },
+          "id": {
+            "type": "string",
+            "description": "er_ids::natural_id('task_instances', [job_id, task_id, try_number]): a pure function of the attempt key, so the Job name is one too."
+          },
+          "image_digest": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Image digest this try ran, so a deploy mid-run is legible."
+          },
+          "input": {
+            "description": "The work order: pinned upstream references, the RunPlan, params. Written whole by mark_scheduled at every readiness verdict (never merged), by advance_segment for a fused member, and copied by the retry insert; NULL on a none row."
+          },
+          "job_id": {
+            "type": "string",
+            "description": "The run (jobs.id == run_id)."
+          },
+          "k8s_job_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "batch/v1 Job name, `er-t-{20 hex of id}-l{launches}`, of the Job that ran this try; for a fused non-head member, the segment head's Job (advance_segment copies it)."
+          },
+          "kind": {
+            "type": "string",
+            "description": "Where the body runs: a Kubernetes Job, or a dispatcher-local body under the control-task contract (§3.6)."
+          },
+          "launches": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Infrastructure budget consumed by this try: Job creates whose pod never ran user code, plus disruptions while running; 1 for a member advanced inside a running segment pod."
+          },
+          "live": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "TRUE on the live try, NULL once archived (NULLs are distinct, so the partial unique index admits one live row per coordinate)."
+          },
+          "max_launches": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Infrastructure budget per try."
+          },
+          "max_tries": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Cumulative try budget (Airflow max_tries): retries at planning; previous_try_number + retries after a clear. Eligible to retry while try_number <= max_tries."
+          },
+          "next_resource_class": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Operator override recorded by clear on a restarting row; complete_restart applies it to the successor."
+          },
+          "node_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Node the pod landed on."
+          },
+          "not_before": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Backoff deadline for up_for_retry; a short capacity wait for scheduled."
+          },
+          "org_id": {
+            "type": "string",
+            "description": "Tenant."
+          },
+          "outcome": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Success flavour; no_op is exit 10."
+          },
+          "output": {
+            "description": "The serialized DurableOutput (a LakeRef or Plan), written at finish."
+          },
+          "owner_epoch": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The dispatcher process epoch (UUIDv7 minted at start) that claimed the launch; adoption rewrites it."
+          },
+          "pod_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pod that ran this try, from the pod's bound token on first contact; cross-checked by the watch."
+          },
+          "pod_uid": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pod UID, recorded from the token's claim; the watch confirms it."
+          },
+          "queued_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Launch claimed (write-ahead, before the create)."
+          },
+          "resource_class": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Class this try runs at; NULL for a control task. OOM escalation writes a larger class on the next try."
+          },
+          "scheduled_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Readiness fired."
+          },
+          "segment": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Fusion segment id resolved at planning; NULL for a task that runs alone."
+          },
+          "seq": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Topological position from assembly; display and claim order."
+          },
+          "snapshot_end": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Lake snapshot of the task's last commit: the durable reference downstream pins to."
+          },
+          "snapshot_start": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Lake snapshot before the task's first commit."
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Pod reported start."
+          },
+          "state": {
+            "type": "string",
+            "description": "Closed state set (§5). restarting and canceling are the write-ahead markers for clear and cancel of a live row."
+          },
+          "task_id": {
+            "type": "string",
+            "description": "Task::NAME, stable across renames."
+          },
+          "teardown": {
+            "type": "boolean",
+            "description": "Claimable while the job is canceling (finish)."
+          },
+          "termination_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Platform evidence, distinct from error_class, free text: OOMKilled, Evicted, DeadlineExceeded, Unschedulable, no_pod_created, vanished, quota, sigterm, sigkill, fenced, stale_start, structural_mismatch, build_skew, control_plane_unreachable, no_terminal_record, heartbeat_timeout, dispatcher_restart, revoked, and kin."
+          },
+          "token_hash": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The fallback credential only (§6.4): SHA-256 of the per-attempt token, compared with ct_eq; NULL under the projected-token path; nulled at finish."
+          },
+          "trace_context": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "traceparent of this try's span, a child of jobs.trace_context."
+          },
+          "trigger_rule": {
+            "type": "string",
+            "description": "Copied from the compiled graph at planning so the UI can explain propagation; the graph is the authority."
+          },
+          "try_number": {
+            "type": "integer",
+            "format": "int64",
+            "description": "1-based try. A new row per try."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Row updated."
+          },
+          "upstream": {
+            "description": "Upstream task_ids, a UI projection of the compiled edges."
           }
         }
       },

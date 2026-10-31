@@ -24,6 +24,8 @@
 mod common;
 
 mod acct_read;
+mod control_tasks_no_engine;
+mod dag_assembly;
 mod db_per_test;
 mod dispatch;
 mod dispatch_coverage;
@@ -66,6 +68,7 @@ mod pg_serial;
 mod pg_source_ranks;
 mod pg_steward;
 mod pg_tags;
+mod pg_task_instances;
 mod pg_train;
 mod pg_unmerge;
 mod pg_webhook_catalog;

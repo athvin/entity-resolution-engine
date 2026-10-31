@@ -1,0 +1,7 @@
+kind: statement
+operation: delete
+mode: partial
+description: "Pre-image delete for init's delete-then-insert of the run row: DuckLake enforces no keys, so a re-executed init would otherwise append a second row under the same run id (§9.1)."
+params:
+  - { name: run_id, type: varchar }
+returns: none

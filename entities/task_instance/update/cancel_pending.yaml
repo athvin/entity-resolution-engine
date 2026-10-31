@@ -1,0 +1,8 @@
+kind: statement
+operation: update
+mode: partial
+description: "The cancel sweep's pending arm: every pending non-teardown row dies directly; the teardown finish stays, becomes ready once every upstream is terminal, and is claimable under canceling (§5.6)."
+params:
+  - { name: org_id, type: varchar }
+  - { name: job_id, type: varchar }
+returns: entity
