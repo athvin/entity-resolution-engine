@@ -72,7 +72,7 @@ pub mod create {
     //! @generated query functions for this entity + operation.
     /// Record an event for one subscriber, before anything is sent. This is the whole point of the outbox: the emit sites used to POST inline and discard the result with `let _ =`, so a subscriber that was down for a moment missed the event permanently and nobody — tenant or operator — could tell.
     pub async fn enqueue(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         id: &str,
         org_id: &str,
         webhook_id: &str,
@@ -125,7 +125,7 @@ pub mod read {
     //! @generated query functions for this entity + operation.
     /// The tenant's delivery log, newest first, optionally narrowed to one subscription or one state. Answers the question the old inline-and-discard path could not: did my endpoint actually receive it, and if not, why.
     pub async fn page(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         org_id: &str,
         webhook_id: Option<&str>,
         state: Option<&str>,
@@ -175,7 +175,7 @@ pub mod update {
     //! @generated query functions for this entity + operation.
     /// Take the oldest due pending delivery, counting the attempt as it is handed out (a drainer that dies without reporting has still used one, which is what stops an infinite retry). FOR UPDATE SKIP LOCKED so several dispatcher replicas drain the same outbox without delivering twice.
     pub async fn claim(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
     ) -> ::std::result::Result<Vec<super::WebhookDelivery>, ::tokio_postgres::Error> {
         const SQL: &str = "UPDATE public.webhook_deliveries
 SET attempt = webhook_deliveries.attempt + 1,
@@ -214,7 +214,7 @@ RETURNING id, org_id, webhook_id, event_type, payload, state, attempt, max_attem
 
     /// Record what one attempt did. A 2xx is terminal-delivered; a transport error or 5xx goes back to pending behind a backoff until max_attempts; anything not retryable (a 4xx the subscriber will reject again, or the outbound-URL guard refusing the destination) fails immediately rather than burning five more attempts.
     pub async fn settle(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         delivered: bool,
         retryable: bool,
         response_code: Option<i64>,

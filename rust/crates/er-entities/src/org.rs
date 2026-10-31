@@ -63,7 +63,7 @@ pub mod create {
     //! @generated query functions for this entity + operation.
     /// Register an org idempotently: a replayed registration is a no-op.
     pub async fn ensure(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         id: &str,
         name: &str,
         config_path: &str,
@@ -77,7 +77,7 @@ ON CONFLICT (name) DO NOTHING
 
     /// Upsert a bring-your-own-config org: insert active, or on replay refresh config_path/env/drop_root and the auto-ingest prefix while leaving state intact.
     pub async fn upsert_byo(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         id: &str,
         name: &str,
         config_path: &str,
@@ -117,7 +117,7 @@ pub mod read {
     //! @generated query functions for this entity + operation.
     /// One tenant by its id — the dispatcher's lookup once a child row carries only org_id.
     pub async fn by_id(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         id: &str,
     ) -> ::std::result::Result<Vec<super::Org>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT
@@ -156,7 +156,7 @@ WHERE id = $1
 
     /// One org by name: the detail view, the exists precheck and the publish context.
     pub async fn by_name(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         name: &str,
     ) -> ::std::result::Result<Vec<super::Org>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT
@@ -195,7 +195,7 @@ WHERE name = $1
 
     /// Every org, name-ordered (the operator org listing).
     pub async fn list(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
     ) -> ::std::result::Result<Vec<super::Org>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT
   id,
@@ -233,7 +233,7 @@ ORDER BY name
 
     /// The tenants the auto-ingest poller should sweep: active, with a bucket configured. Filtered in SQL rather than by listing every org and checking in Rust, because this runs on every dispatcher tick and a deployment's org table is the one table that grows with the business — the poll must cost nothing on a deployment where nobody has turned auto-ingest on, which is all of them until someone does.
     pub async fn with_s3_ingest(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
     ) -> ::std::result::Result<Vec<super::Org>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT
   id,
@@ -276,7 +276,7 @@ pub mod update {
     //! @generated query functions for this entity + operation.
     /// Merge resource knobs into an org's env map (jsonb concatenation).
     pub async fn merge_env(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         updates: &::serde_json::Value,
         name: &str,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
@@ -288,7 +288,7 @@ pub mod update {
 
     /// Point the org at a published config version (the orgs half of publish).
     pub async fn set_active_config(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         version: i64,
         name: &str,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
@@ -300,7 +300,7 @@ pub mod update {
 
     /// Transition an org's state only from the expected current state; zero rows changed means a lost race (409).
     pub async fn set_state(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         new_state: &str,
         name: &str,
         expected: &str,

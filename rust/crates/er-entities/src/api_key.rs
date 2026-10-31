@@ -51,7 +51,7 @@ pub mod create {
     //! @generated query functions for this entity + operation.
     /// Store a freshly minted API key: only the SHA-256 hash of the secret is persisted.
     pub async fn issue(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         key_id: &str,
         org_id: &str,
         role: &str,
@@ -70,7 +70,7 @@ pub mod read {
     //! @generated query functions for this entity + operation.
     /// Resolve a live (non-revoked) key by id for authentication; the caller constant-time-compares the presented secret's hash.
     pub async fn live_by_id(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         key_id: &str,
     ) -> ::std::result::Result<Vec<super::ApiKey>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT
@@ -104,7 +104,7 @@ pub mod update {
     //! @generated query functions for this entity + operation.
     /// Revoke a live key, scoped to its org and idempotent: zero rows changed means already revoked or another org's key.
     pub async fn revoke(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         key_id: &str,
         org_id: &str,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {

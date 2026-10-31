@@ -1,0 +1,11 @@
+kind: statement
+operation: update
+mode: partial
+description: "Commit the planning decision (dispatching -> running) in the same transaction as the claim and the task rows: writes run_id = id and both DAG hashes, so dispatching is never a committed state on the DAG path (§4.5)."
+params:
+  - { name: structural_fingerprint, type: varchar }
+  - { name: policy_hash, type: varchar }
+  - { name: image_digest, type: varchar, nullable: true }
+  - { name: owner_epoch, type: varchar }
+  - { name: job_id, type: varchar }
+returns: entity

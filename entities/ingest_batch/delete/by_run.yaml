@@ -1,0 +1,7 @@
+kind: statement
+operation: delete
+mode: partial
+description: "Pre-image the run's ingest receipts before re-ingesting, paired with raw_record/delete/by_batch (§9.1)."
+params:
+  - { name: run_id, type: varchar }
+returns: none

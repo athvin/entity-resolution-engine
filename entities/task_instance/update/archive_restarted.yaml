@@ -1,0 +1,10 @@
+kind: statement
+operation: update
+mode: partial
+description: "complete_restart's first half, run by the watch once the pod of a restarting row is terminal: the operator's clear wins whatever the old pod reported — evidence kept, error_class stays NULL, no try charged (§4.5)."
+params:
+  - { name: exit_code, type: bigint, nullable: true }
+  - { name: termination_reason, type: varchar, nullable: true }
+  - { name: task_instance_id, type: varchar }
+  - { name: k8s_job_name, type: varchar, nullable: true }
+returns: entity

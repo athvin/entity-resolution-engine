@@ -1,0 +1,9 @@
+kind: statement
+operation: update
+mode: partial
+description: "The 30 s liveness report from the pod's side thread. Zero rows sets the pod's fence flag: the task checks it before its last write-back and rolls back instead of committing (§4.5)."
+params:
+  - { name: counters, type: json, nullable: true }
+  - { name: task_instance_id, type: varchar }
+  - { name: pod_uid, type: varchar }
+returns: entity

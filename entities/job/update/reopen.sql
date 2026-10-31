@@ -1,0 +1,32 @@
+UPDATE public.jobs
+SET clear_number = COALESCE(clear_number, 0) + 1,
+    state = CASE WHEN state IN ('succeeded', 'failed', 'canceled') THEN 'queued' ELSE state END,
+    finished_at = NULL, error_class = NULL, error_detail = NULL, not_before = now(), updated_at = now()
+WHERE id = $job_id AND org_id = $org_id
+RETURNING
+  id,
+  org_id,
+  kind,
+  params,
+  state,
+  priority,
+  idempotency_key,
+  run_id,
+  attempt,
+  max_attempts,
+  error_class,
+  error_detail,
+  not_before,
+  created_by,
+  schedule_id,
+  resource_class,
+  trace_context,
+  structural_fingerprint,
+  policy_hash,
+  image_digest,
+  clear_number,
+  owner_epoch,
+  created_at,
+  updated_at,
+  started_at,
+  finished_at

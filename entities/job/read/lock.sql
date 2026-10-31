@@ -1,0 +1,30 @@
+SELECT
+  id,
+  org_id,
+  kind,
+  params,
+  state,
+  priority,
+  idempotency_key,
+  run_id,
+  attempt,
+  max_attempts,
+  error_class,
+  error_detail,
+  not_before,
+  created_by,
+  schedule_id,
+  resource_class,
+  trace_context,
+  structural_fingerprint,
+  policy_hash,
+  image_digest,
+  clear_number,
+  owner_epoch,
+  created_at,
+  updated_at,
+  started_at,
+  finished_at
+FROM public.jobs
+WHERE id = $job_id
+FOR UPDATE

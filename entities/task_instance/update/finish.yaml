@@ -1,0 +1,15 @@
+kind: statement
+operation: update
+mode: partial
+description: "The pod's terminal success report, after its last lake commit, guarded so a late report never overwrites a cancel, a clear or a timeout; the fallback token is nulled here (§4.5)."
+params:
+  - { name: skipped, type: boolean }
+  - { name: outcome, type: varchar }
+  - { name: output, type: json, nullable: true }
+  - { name: snapshot_start, type: bigint, nullable: true }
+  - { name: snapshot_end, type: bigint, nullable: true }
+  - { name: counters, type: json, nullable: true }
+  - { name: exit_code, type: bigint, nullable: true }
+  - { name: task_instance_id, type: varchar }
+  - { name: pod_uid, type: varchar }
+returns: entity

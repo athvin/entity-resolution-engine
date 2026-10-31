@@ -1,0 +1,7 @@
+kind: statement
+operation: update
+mode: partial
+description: "A new dispatcher epoch takes ownership of every live claimed row at start-up, after the job half (§6.6)."
+params:
+  - { name: owner_epoch, type: varchar }
+returns: entity

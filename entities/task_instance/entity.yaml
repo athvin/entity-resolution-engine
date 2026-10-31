@@ -1,0 +1,216 @@
+kind: entity
+version: 1
+name: task_instance
+relation: task_instances
+description: "One try of one task of one job (Airflow's task_instance shape): the live try has live = TRUE, archived tries have live NULL and stay in the table as history (batch-orchestration-design §4.2)."
+key: [id]
+natural_key: [job_id, task_id, try_number]
+generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+  wire: [json]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "er_ids::natural_id('task_instances', [job_id, task_id, try_number]): a pure function of the attempt key, so the Job name is one too."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "Tenant."
+  - name: job_id
+    type: varchar
+    nullable: false
+    references: { relation: jobs, column: id }
+    description: "The run (jobs.id == run_id)."
+  - name: task_id
+    type: varchar
+    nullable: false
+    description: "Task::NAME, stable across renames."
+  - name: seq
+    type: bigint
+    nullable: false
+    description: "Topological position from assembly; display and claim order."
+  - name: try_number
+    type: bigint
+    nullable: false
+    default: "1"
+    description: "1-based try. A new row per try."
+  - name: live
+    type: boolean
+    description: "TRUE on the live try, NULL once archived (NULLs are distinct, so the partial unique index admits one live row per coordinate)."
+  - name: archived_reason
+    type: varchar
+    accepted_values: [retry, cleared, restarted]
+    description: "Why the row stopped being live; NULL while live. retry = archive_try, cleared = a terminal row rotated by clear, restarted = a clear-while-live rotation (complete_restart). Pending rows reset by a clear are not archived (no try was consumed)."
+  - name: kind
+    type: varchar
+    nullable: false
+    default: "'pod'"
+    accepted_values: [pod, control]
+    description: "Where the body runs: a Kubernetes Job, or a dispatcher-local body under the control-task contract (§3.6)."
+  - name: state
+    type: varchar
+    nullable: false
+    default: "'none'"
+    accepted_values: [none, scheduled, queued, running, up_for_retry, restarting, canceling, succeeded, skipped, failed, timed_out, upstream_failed, upstream_skipped, canceled]
+    description: "Closed state set (§5). restarting and canceling are the write-ahead markers for clear and cancel of a live row."
+  - name: trigger_rule
+    type: varchar
+    nullable: false
+    default: "'all_succeeded'"
+    accepted_values: [all_succeeded, all_terminal, any_failed]
+    description: "Copied from the compiled graph at planning so the UI can explain propagation; the graph is the authority."
+  - name: upstream
+    type: json
+    nullable: false
+    default: "'[]'::jsonb"
+    description: "Upstream task_ids, a UI projection of the compiled edges."
+  - name: teardown
+    type: boolean
+    nullable: false
+    default: "false"
+    description: "Claimable while the job is canceling (finish)."
+  - name: segment
+    type: varchar
+    description: "Fusion segment id resolved at planning; NULL for a task that runs alone."
+  - name: resource_class
+    type: varchar
+    accepted_values: [S, M, L]
+    description: "Class this try runs at; NULL for a control task. OOM escalation writes a larger class on the next try."
+  - name: next_resource_class
+    type: varchar
+    accepted_values: [S, M, L]
+    description: "Operator override recorded by clear on a restarting row; complete_restart applies it to the successor."
+  - name: escalated_from
+    type: varchar
+    accepted_values: [S, M]
+    description: "Class of the OOMKilled predecessor try, so a mixed-class run is legible."
+  - name: max_tries
+    type: bigint
+    nullable: false
+    default: "0"
+    description: "Cumulative try budget (Airflow max_tries): retries at planning; previous_try_number + retries after a clear. Eligible to retry while try_number <= max_tries."
+  - name: launches
+    type: bigint
+    nullable: false
+    default: "0"
+    description: "Infrastructure budget consumed by this try: Job creates whose pod never ran user code, plus disruptions while running; 1 for a member advanced inside a running segment pod."
+  - name: max_launches
+    type: bigint
+    nullable: false
+    default: "3"
+    description: "Infrastructure budget per try."
+  - name: not_before
+    type: timestamp
+    description: "Backoff deadline for up_for_retry; a short capacity wait for scheduled."
+  - name: input
+    type: json
+    description: "The work order: pinned upstream references, the RunPlan, params. Written whole by mark_scheduled at every readiness verdict (never merged), by advance_segment for a fused member, and copied by the retry insert; NULL on a none row."
+  - name: output
+    type: json
+    description: "The serialized DurableOutput (a LakeRef or Plan), written at finish."
+  - name: outcome
+    type: varchar
+    accepted_values: [done, no_op]
+    description: "Success flavour; no_op is exit 10."
+  - name: exit_code
+    type: bigint
+    description: "Container exit code: the pod's own on finish, the watch's observation on record_evidence. Evidence for the row, never a classifier input (§6.5)."
+  - name: termination_reason
+    type: varchar
+    description: "Platform evidence, distinct from error_class, free text: OOMKilled, Evicted, DeadlineExceeded, Unschedulable, no_pod_created, vanished, quota, sigterm, sigkill, fenced, stale_start, structural_mismatch, build_skew, control_plane_unreachable, no_terminal_record, heartbeat_timeout, dispatcher_restart, revoked, and kin."
+  - name: error_class
+    type: varchar
+    accepted_values: [transient_io, lock_conflict, precondition, config, contradiction, non_convergence, data, internal, infrastructure, resources, timeout]
+    description: "er-errors' seven classes plus the executor's four."
+  - name: error_detail
+    type: varchar
+    description: "Chain-flattened text (errfmt::chain), truncated to 2000 chars."
+  - name: owner_epoch
+    type: varchar
+    description: "The dispatcher process epoch (UUIDv7 minted at start) that claimed the launch; adoption rewrites it."
+  - name: k8s_job_name
+    type: varchar
+    description: "batch/v1 Job name, er-t-<20 hex of id>-l<launches>, of the Job that ran this try; for a fused non-head member, the segment head's Job (advance_segment copies it)."
+  - name: pod_name
+    type: varchar
+    description: "Pod that ran this try, from the pod's bound token on first contact; cross-checked by the watch."
+  - name: pod_uid
+    type: varchar
+    description: "Pod UID, recorded from the token's claim; the watch confirms it."
+  - name: node_name
+    type: varchar
+    description: "Node the pod landed on."
+  - name: image_digest
+    type: varchar
+    description: "Image digest this try ran, so a deploy mid-run is legible."
+  - name: snapshot_start
+    type: bigint
+    description: "Lake snapshot before the task's first commit."
+  - name: snapshot_end
+    type: bigint
+    description: "Lake snapshot of the task's last commit: the durable reference downstream pins to."
+  - name: counters
+    type: json
+    description: "Progress counters, replaced on every heartbeat and at finish."
+  - name: trace_context
+    type: varchar
+    description: "traceparent of this try's span, a child of jobs.trace_context."
+  - name: token_hash
+    type: varchar
+    description: "The fallback credential only (§6.4): SHA-256 of the per-attempt token, compared with ct_eq; NULL under the projected-token path; nulled at finish."
+  - name: scheduled_at
+    type: timestamp
+    volatile: true
+    description: "Readiness fired."
+  - name: queued_at
+    type: timestamp
+    volatile: true
+    description: "Launch claimed (write-ahead, before the create)."
+  - name: started_at
+    type: timestamp
+    volatile: true
+    description: "Pod reported start."
+  - name: heartbeat_at
+    type: timestamp
+    volatile: true
+    description: "Last heartbeat."
+  - name: finished_at
+    type: timestamp
+    volatile: true
+    description: "Terminal state recorded."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Row created."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Row updated."
+indexes:
+  # Non-partial, leads with org_id: V15 holds.
+  - name: task_instances_org_job
+    columns: [org_id, job_id]
+  # Airflow's task_instance_current_key: one live try per (job, task).
+  - name: task_instances_live
+    columns: [job_id, task_id]
+    unique: true
+    where: "live IS TRUE"
+  # One live pod per tenant — the DB-level image of the assembly single-writer
+  # check; control rows are exempt (they hold no org slot).
+  - name: task_instances_one_pod_per_org
+    columns: [org_id]
+    unique: true
+    where: "live IS TRUE AND kind = 'pod' AND state IN ('queued','running','restarting','canceling')"
+  - name: task_instances_claimable
+    columns: [state, not_before, job_id, seq]
+    where: "live IS TRUE"
+  - name: task_instances_heartbeat
+    columns: [heartbeat_at]
+    where: "live IS TRUE AND state = 'running'"

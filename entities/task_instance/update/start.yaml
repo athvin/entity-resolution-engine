@@ -1,0 +1,12 @@
+kind: statement
+operation: update
+mode: partial
+description: "The pod's first report (queued -> running). Zero rows means the pod is stale — a different launch, a finished attempt, a canceled one — and it exits 3 after logging why (§4.5)."
+params:
+  - { name: pod_name, type: varchar, nullable: true }
+  - { name: pod_uid, type: varchar }
+  - { name: node_name, type: varchar, nullable: true }
+  - { name: image_digest, type: varchar, nullable: true }
+  - { name: task_instance_id, type: varchar }
+  - { name: k8s_job_name, type: varchar }
+returns: entity

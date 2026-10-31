@@ -1,0 +1,101 @@
+kind: entity
+version: 1
+name: run_stage
+relation: run_stages
+description: "The lake-side stage ledger (S5.2): one row per try of one stage of one run; the durable reference a pod probes before it executes (batch-orchestration-design §4.3)."
+key: [id]
+natural_key: [run_id, stage, try_number]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "er_ids::natural_id('run_stages', [run_id, stage, try_number])."
+  - name: run_id
+    type: varchar
+    nullable: false
+    description: "The run (jobs.id)."
+  - name: stage
+    type: varchar
+    nullable: false
+    description: "A RUN_STAGES member; the domain stays in the registry's enum_map (V11)."
+  - name: seq
+    type: bigint
+    nullable: false
+    description: "Position in the run."
+  - name: status
+    type: varchar
+    nullable: false
+    description: "running | succeeded | failed (RUN_STATUSES; the domain stays in the registry's enum_map)."
+  - name: started_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical start stamp."
+  - name: ended_at
+    type: timestamp
+    description: "Run-logical end stamp; NULL while running."
+  - name: snapshot_start
+    type: bigint
+    description: "Lake snapshot before the stage's first commit."
+  - name: snapshot_end
+    type: bigint
+    description: "Lake snapshot of the stage's last data commit."
+  - name: rows_in
+    type: bigint
+    description: "Promoted counter (S5.2)."
+  - name: rows_out
+    type: bigint
+    description: "Promoted counter (S5.2)."
+  - name: candidate_pairs
+    type: bigint
+    description: "Promoted counter (S5.2)."
+  - name: pairs_above_auto_merge
+    type: bigint
+    description: "Promoted counter (S5.2)."
+  - name: entities_created
+    type: bigint
+    description: "Promoted counter (S5.2)."
+  - name: entities_merged
+    type: bigint
+    description: "Promoted counter (S5.2)."
+  - name: entities_split
+    type: bigint
+    description: "Promoted counter (S5.2)."
+  - name: entities_retired
+    type: bigint
+    description: "Promoted counter (S5.2)."
+  - name: edges_cut
+    type: bigint
+    description: "Promoted counter (S5.2)."
+  - name: review_queue_added
+    type: bigint
+    description: "Promoted counter (S5.2)."
+  - name: duration_ms
+    type: bigint
+    description: "Promoted counter (S5.2)."
+  - name: counters
+    type: json
+    description: "The full counter set."
+  - name: error_class
+    type: varchar
+    description: "er-errors class on failure."
+  - name: error_detail
+    type: varchar
+    description: "Chain-flattened text."
+  - name: try_number
+    type: bigint
+    nullable: false
+    description: "The task try that wrote the row (display); the writer supplies 1 outside the DAG path. No default — V11 forbids defaults on a DuckLake entity."
+  - name: task_instance_id
+    type: varchar
+    description: "The task_instances.id that wrote the row: the probe's join key. No references — cross-store."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "The stage's start on the run's logical clock."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Advanced by finish.sql."

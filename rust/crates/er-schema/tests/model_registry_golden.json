@@ -1333,13 +1333,15 @@
     {
      "columns": [
       "id"
-     ]
+     ],
+     "where": null
     },
     {
      "columns": [
       "run_id",
       "source_system"
-     ]
+     ],
+     "where": null
     }
    ],
    "owner": "ddl"
@@ -1773,6 +1775,11 @@
   "run_stages": {
    "columns": [
     {
+     "name": "id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
      "name": "run_id",
      "nullable": false,
      "type": "VARCHAR"
@@ -1881,12 +1888,34 @@
      "name": "error_detail",
      "nullable": true,
      "type": "VARCHAR"
+    },
+    {
+     "name": "try_number",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "task_instance_id",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "created_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "updated_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
     }
    ],
-   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.run_stages (\n  run_id VARCHAR NOT NULL,\n  stage VARCHAR NOT NULL,\n  seq BIGINT NOT NULL,\n  status VARCHAR NOT NULL,\n  started_at TIMESTAMP NOT NULL,\n  ended_at TIMESTAMP,\n  snapshot_start BIGINT,\n  snapshot_end BIGINT,\n  rows_in BIGINT,\n  rows_out BIGINT,\n  candidate_pairs BIGINT,\n  pairs_above_auto_merge BIGINT,\n  entities_created BIGINT,\n  entities_merged BIGINT,\n  entities_split BIGINT,\n  entities_retired BIGINT,\n  edges_cut BIGINT,\n  review_queue_added BIGINT,\n  duration_ms BIGINT,\n  counters JSON,\n  error_class VARCHAR,\n  error_detail VARCHAR\n);",
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.run_stages (\n  id VARCHAR NOT NULL,\n  run_id VARCHAR NOT NULL,\n  stage VARCHAR NOT NULL,\n  seq BIGINT NOT NULL,\n  status VARCHAR NOT NULL,\n  started_at TIMESTAMP NOT NULL,\n  ended_at TIMESTAMP,\n  snapshot_start BIGINT,\n  snapshot_end BIGINT,\n  rows_in BIGINT,\n  rows_out BIGINT,\n  candidate_pairs BIGINT,\n  pairs_above_auto_merge BIGINT,\n  entities_created BIGINT,\n  entities_merged BIGINT,\n  entities_split BIGINT,\n  entities_retired BIGINT,\n  edges_cut BIGINT,\n  review_queue_added BIGINT,\n  duration_ms BIGINT,\n  counters JSON,\n  error_class VARCHAR,\n  error_detail VARCHAR,\n  try_number BIGINT NOT NULL,\n  task_instance_id VARCHAR,\n  created_at TIMESTAMP NOT NULL,\n  updated_at TIMESTAMP NOT NULL\n);",
    "enums": {
     "stage": [
+     "apply_staged",
      "assemble",
+     "finish",
      "ingest",
      "init",
      "maintain",
@@ -1897,6 +1926,7 @@
      "train"
     ],
     "status": [
+     "canceled",
      "failed",
      "running",
      "succeeded"
@@ -1905,15 +1935,15 @@
    "keys": [
     {
      "columns": [
-      "run_id",
-      "seq"
+      "id"
      ],
      "where": null
     },
     {
      "columns": [
       "run_id",
-      "stage"
+      "stage",
+      "try_number"
      ],
      "where": null
     }
@@ -2038,6 +2068,7 @@
      "survivorship_version_bump"
     ],
     "status": [
+     "canceled",
      "failed",
      "running",
      "succeeded"

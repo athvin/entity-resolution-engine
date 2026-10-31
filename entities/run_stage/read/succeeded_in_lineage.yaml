@@ -1,0 +1,16 @@
+kind: statement
+operation: read
+mode: partial
+description: "The succeeded ledger row for (run, stage) written by any try in the current try's retry lineage: a hit means a disrupted or zombie predecessor committed before reporting, and the new pod reports from this row instead of re-executing (batch-orchestration-design §6.3 step 4). The ids cross as one chr(31)-joined varchar (the lake IN-list idiom, E002)."
+pin: live
+pin_reason: "the writer reading its own ledger before it writes; the probe must see the predecessor's last commit, which may be the lake head itself."
+params:
+  - { name: run_id, type: varchar }
+  - { name: stage, type: varchar }
+  - { name: task_instance_ids, type: varchar }
+returns:
+  - { name: id, type: varchar }
+  - { name: task_instance_id, type: varchar }
+  - { name: snapshot_start, type: bigint }
+  - { name: snapshot_end, type: bigint }
+  - { name: counters, type: json }

@@ -1,0 +1,12 @@
+kind: statement
+operation: update
+mode: partial
+description: "The clear's pending arm: reset in place with no pin and a re-based budget — no try was consumed, so no row rotates. This is what stops a scheduled downstream, pinned to a snapshot the operator just discarded, from launching first (§4.5)."
+params:
+  - { name: retries, type: bigint }
+  - { name: resource_class, type: varchar, nullable: true }
+  - { name: image_digest, type: varchar, nullable: true }
+  - { name: org_id, type: varchar }
+  - { name: job_id, type: varchar }
+  - { name: task_ids, type: json }
+returns: entity

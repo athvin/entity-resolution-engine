@@ -57,7 +57,7 @@ pub mod read {
     //! @generated query functions for this entity + operation.
     /// A keyset page of the DDL ledger, newest first, with optional command-tag and object filters (the ops surface for schema-change forensics).
     pub async fn page(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         ddl_tag: Option<&str>,
         object_identity: Option<&str>,
         before_id: Option<i64>,

@@ -1,0 +1,8 @@
+kind: statement
+operation: update
+mode: partial
+description: "Cancel with the org slot held: a queued job dies directly; a dispatching or running one becomes canceling — still inside the one-active-per-org predicate — until every pod is provably gone (§5.6)."
+params:
+  - { name: job_id, type: varchar }
+  - { name: org_id, type: varchar }
+returns: entity

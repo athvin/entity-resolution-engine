@@ -1,0 +1,13 @@
+kind: statement
+operation: update
+mode: partial
+description: "Close a stage-try ledger row as the stage's last dedicated commit: a succeeded row is the durable proof that the stage's data commits happened (the retry probe's anchor)."
+params:
+  - { name: status, type: varchar }
+  - { name: ended_at, type: varchar }
+  - { name: snapshot_end, type: bigint, nullable: true }
+  - { name: counters, type: varchar, nullable: true }
+  - { name: error_class, type: varchar, nullable: true }
+  - { name: error_detail, type: varchar, nullable: true }
+  - { name: id, type: varchar }
+returns: none

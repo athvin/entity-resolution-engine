@@ -40,6 +40,16 @@ pub struct Job {
     pub resource_class: Option<String>,
     /// Propagated trace context.
     pub trace_context: Option<String>,
+    /// sha256 over the compiled DAG's shape (names, versions, edges, trigger rules), written at planning; a clear or adoption refuses on mismatch (batch-orchestration-design §3.4).
+    pub structural_fingerprint: Option<String>,
+    /// sha256 over the compiled DAG's per-node policy (retries, backoff, timeout, class, segment); a divergence proceeds with the diff logged.
+    pub policy_hash: Option<String>,
+    /// Image digest the planning dispatcher ran, so a deploy mid-run is legible.
+    pub image_digest: Option<String>,
+    /// Incremented by every clear; fences readiness verdicts composed before the clear. Read as COALESCE(clear_number, 0).
+    pub clear_number: Option<i64>,
+    /// The dispatcher process epoch that planned or adopted the run.
+    pub owner_epoch: Option<String>,
     /// When the job was enqueued.
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
     /// When the job row was last updated.
@@ -81,6 +91,11 @@ impl Job {
             "schedule_id",
             "resource_class",
             "trace_context",
+            "structural_fingerprint",
+            "policy_hash",
+            "image_digest",
+            "clear_number",
+            "owner_epoch",
             "created_at",
             "updated_at",
             "started_at",
@@ -93,7 +108,7 @@ pub mod create {
     //! @generated query functions for this entity + operation.
     /// Queue a job, idempotent on the org idempotency key (a repeat key returns the original row via a no-op upsert). `created_by` is the acting principal, so a job can say who asked for it; the column existed and only `enqueue_scheduled` ever wrote it.
     pub async fn enqueue(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         job_id: &str,
         org_id: &str,
         kind: &str,
@@ -125,6 +140,11 @@ RETURNING
   schedule_id,
   resource_class,
   trace_context,
+  structural_fingerprint,
+  policy_hash,
+  image_digest,
+  clear_number,
+  owner_epoch,
   created_at,
   updated_at,
   started_at,
@@ -164,6 +184,11 @@ RETURNING
                 schedule_id: row.get("schedule_id"),
                 resource_class: row.get("resource_class"),
                 trace_context: row.get("trace_context"),
+                structural_fingerprint: row.get("structural_fingerprint"),
+                policy_hash: row.get("policy_hash"),
+                image_digest: row.get("image_digest"),
+                clear_number: row.get("clear_number"),
+                owner_epoch: row.get("owner_epoch"),
                 created_at: row.get("created_at"),
                 updated_at: row.get("updated_at"),
                 started_at: row.get("started_at"),
@@ -174,7 +199,7 @@ RETURNING
 
     /// Queue a job on behalf of a schedule: same idempotent upsert as enqueue, but it records the originating schedule_id and a 'scheduler' principal so a scheduled run is attributable to the rule that caused it.
     pub async fn enqueue_scheduled(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         job_id: &str,
         org_id: &str,
         kind: &str,
@@ -208,6 +233,11 @@ RETURNING
   schedule_id,
   resource_class,
   trace_context,
+  structural_fingerprint,
+  policy_hash,
+  image_digest,
+  clear_number,
+  owner_epoch,
   created_at,
   updated_at,
   started_at,
@@ -247,6 +277,11 @@ RETURNING
                 schedule_id: row.get("schedule_id"),
                 resource_class: row.get("resource_class"),
                 trace_context: row.get("trace_context"),
+                structural_fingerprint: row.get("structural_fingerprint"),
+                policy_hash: row.get("policy_hash"),
+                image_digest: row.get("image_digest"),
+                clear_number: row.get("clear_number"),
+                owner_epoch: row.get("owner_epoch"),
                 created_at: row.get("created_at"),
                 updated_at: row.get("updated_at"),
                 started_at: row.get("started_at"),
@@ -260,7 +295,7 @@ pub mod read {
     //! @generated query functions for this entity + operation.
     /// One job by id, scoped to its org (the job detail view).
     pub async fn by_id(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         org_id: &str,
         job_id: &str,
     ) -> ::std::result::Result<Vec<super::Job>, ::tokio_postgres::Error> {
@@ -282,6 +317,11 @@ pub mod read {
   schedule_id,
   resource_class,
   trace_context,
+  structural_fingerprint,
+  policy_hash,
+  image_digest,
+  clear_number,
+  owner_epoch,
   created_at,
   updated_at,
   started_at,
@@ -310,6 +350,11 @@ WHERE org_id = $1 AND id = $2
                 schedule_id: row.get("schedule_id"),
                 resource_class: row.get("resource_class"),
                 trace_context: row.get("trace_context"),
+                structural_fingerprint: row.get("structural_fingerprint"),
+                policy_hash: row.get("policy_hash"),
+                image_digest: row.get("image_digest"),
+                clear_number: row.get("clear_number"),
+                owner_epoch: row.get("owner_epoch"),
                 created_at: row.get("created_at"),
                 updated_at: row.get("updated_at"),
                 started_at: row.get("started_at"),
@@ -320,7 +365,7 @@ WHERE org_id = $1 AND id = $2
 
     /// The job a given idempotency key already created (enqueue's dedup fallback).
     pub async fn by_idempotency_key(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         org_id: &str,
         idempotency_key: &str,
     ) -> ::std::result::Result<Vec<super::Job>, ::tokio_postgres::Error> {
@@ -342,6 +387,11 @@ WHERE org_id = $1 AND id = $2
   schedule_id,
   resource_class,
   trace_context,
+  structural_fingerprint,
+  policy_hash,
+  image_digest,
+  clear_number,
+  owner_epoch,
   created_at,
   updated_at,
   started_at,
@@ -370,6 +420,11 @@ WHERE org_id = $1 AND idempotency_key = $2
                 schedule_id: row.get("schedule_id"),
                 resource_class: row.get("resource_class"),
                 trace_context: row.get("trace_context"),
+                structural_fingerprint: row.get("structural_fingerprint"),
+                policy_hash: row.get("policy_hash"),
+                image_digest: row.get("image_digest"),
+                clear_number: row.get("clear_number"),
+                owner_epoch: row.get("owner_epoch"),
                 created_at: row.get("created_at"),
                 updated_at: row.get("updated_at"),
                 started_at: row.get("started_at"),
@@ -380,7 +435,7 @@ WHERE org_id = $1 AND idempotency_key = $2
 
     /// The queue view, newest first, optionally filtered by org and/or state (the operator console).
     pub async fn list(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         org_id: Option<&str>,
         state: Option<&str>,
         limit: i64,
@@ -403,6 +458,11 @@ WHERE org_id = $1 AND idempotency_key = $2
   schedule_id,
   resource_class,
   trace_context,
+  structural_fingerprint,
+  policy_hash,
+  image_digest,
+  clear_number,
+  owner_epoch,
   created_at,
   updated_at,
   started_at,
@@ -437,6 +497,81 @@ LIMIT $3
                 schedule_id: row.get("schedule_id"),
                 resource_class: row.get("resource_class"),
                 trace_context: row.get("trace_context"),
+                structural_fingerprint: row.get("structural_fingerprint"),
+                policy_hash: row.get("policy_hash"),
+                image_digest: row.get("image_digest"),
+                clear_number: row.get("clear_number"),
+                owner_epoch: row.get("owner_epoch"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+                started_at: row.get("started_at"),
+                finished_at: row.get("finished_at"),
+            })
+            .collect())
+    }
+
+    /// Lock the job row for a pass that treats its task rows as a set (readiness, clear, the fused finish-and-advance), so the three serialize on the job row rather than racing under READ COMMITTED.
+    pub async fn lock(
+        client: &impl ::tokio_postgres::GenericClient,
+        job_id: &str,
+    ) -> ::std::result::Result<Vec<super::Job>, ::tokio_postgres::Error> {
+        const SQL: &str = "SELECT
+  id,
+  org_id,
+  kind,
+  params,
+  state,
+  priority,
+  idempotency_key,
+  run_id,
+  attempt,
+  max_attempts,
+  error_class,
+  error_detail,
+  not_before,
+  created_by,
+  schedule_id,
+  resource_class,
+  trace_context,
+  structural_fingerprint,
+  policy_hash,
+  image_digest,
+  clear_number,
+  owner_epoch,
+  created_at,
+  updated_at,
+  started_at,
+  finished_at
+FROM public.jobs
+WHERE id = $1
+FOR UPDATE
+";
+        let rows = client.query(SQL, &[&job_id]).await?;
+        Ok(rows
+            .iter()
+            .map(|row| super::Job {
+                id: row.get("id"),
+                org_id: row.get("org_id"),
+                kind: row.get("kind"),
+                params: row.get("params"),
+                state: row.get("state"),
+                priority: row.get("priority"),
+                idempotency_key: row.get("idempotency_key"),
+                run_id: row.get("run_id"),
+                attempt: row.get("attempt"),
+                max_attempts: row.get("max_attempts"),
+                error_class: row.get("error_class"),
+                error_detail: row.get("error_detail"),
+                not_before: row.get("not_before"),
+                created_by: row.get("created_by"),
+                schedule_id: row.get("schedule_id"),
+                resource_class: row.get("resource_class"),
+                trace_context: row.get("trace_context"),
+                structural_fingerprint: row.get("structural_fingerprint"),
+                policy_hash: row.get("policy_hash"),
+                image_digest: row.get("image_digest"),
+                clear_number: row.get("clear_number"),
+                owner_epoch: row.get("owner_epoch"),
                 created_at: row.get("created_at"),
                 updated_at: row.get("updated_at"),
                 started_at: row.get("started_at"),
@@ -448,9 +583,152 @@ LIMIT $3
 
 pub mod update {
     //! @generated query functions for this entity + operation.
+    /// A new dispatcher epoch takes ownership of every live run at start-up (replicas: 1, Recreate: the old process finished or died), enumerating jobs before their task rows (§6.6).
+    pub async fn adopt(
+        client: &impl ::tokio_postgres::GenericClient,
+        owner_epoch: &str,
+    ) -> ::std::result::Result<Vec<super::Job>, ::tokio_postgres::Error> {
+        const SQL: &str = "UPDATE public.jobs
+SET owner_epoch = $1, updated_at = now()
+WHERE state IN ('running', 'canceling')
+RETURNING
+  id,
+  org_id,
+  kind,
+  params,
+  state,
+  priority,
+  idempotency_key,
+  run_id,
+  attempt,
+  max_attempts,
+  error_class,
+  error_detail,
+  not_before,
+  created_by,
+  schedule_id,
+  resource_class,
+  trace_context,
+  structural_fingerprint,
+  policy_hash,
+  image_digest,
+  clear_number,
+  owner_epoch,
+  created_at,
+  updated_at,
+  started_at,
+  finished_at
+";
+        let rows = client.query(SQL, &[&owner_epoch]).await?;
+        Ok(rows
+            .iter()
+            .map(|row| super::Job {
+                id: row.get("id"),
+                org_id: row.get("org_id"),
+                kind: row.get("kind"),
+                params: row.get("params"),
+                state: row.get("state"),
+                priority: row.get("priority"),
+                idempotency_key: row.get("idempotency_key"),
+                run_id: row.get("run_id"),
+                attempt: row.get("attempt"),
+                max_attempts: row.get("max_attempts"),
+                error_class: row.get("error_class"),
+                error_detail: row.get("error_detail"),
+                not_before: row.get("not_before"),
+                created_by: row.get("created_by"),
+                schedule_id: row.get("schedule_id"),
+                resource_class: row.get("resource_class"),
+                trace_context: row.get("trace_context"),
+                structural_fingerprint: row.get("structural_fingerprint"),
+                policy_hash: row.get("policy_hash"),
+                image_digest: row.get("image_digest"),
+                clear_number: row.get("clear_number"),
+                owner_epoch: row.get("owner_epoch"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+                started_at: row.get("started_at"),
+                finished_at: row.get("finished_at"),
+            })
+            .collect())
+    }
+
+    /// Cancel with the org slot held: a queued job dies directly; a dispatching or running one becomes canceling — still inside the one-active-per-org predicate — until every pod is provably gone (§5.6).
+    pub async fn cancel(
+        client: &impl ::tokio_postgres::GenericClient,
+        job_id: &str,
+        org_id: &str,
+    ) -> ::std::result::Result<Vec<super::Job>, ::tokio_postgres::Error> {
+        const SQL: &str = "UPDATE public.jobs
+SET state = CASE WHEN state = 'queued' THEN 'canceled' ELSE 'canceling' END,
+    finished_at = CASE WHEN state = 'queued' THEN now() ELSE finished_at END,
+    updated_at = now()
+WHERE id = $1 AND org_id = $2 AND state IN ('queued', 'dispatching', 'running')
+RETURNING
+  id,
+  org_id,
+  kind,
+  params,
+  state,
+  priority,
+  idempotency_key,
+  run_id,
+  attempt,
+  max_attempts,
+  error_class,
+  error_detail,
+  not_before,
+  created_by,
+  schedule_id,
+  resource_class,
+  trace_context,
+  structural_fingerprint,
+  policy_hash,
+  image_digest,
+  clear_number,
+  owner_epoch,
+  created_at,
+  updated_at,
+  started_at,
+  finished_at
+";
+        let rows = client.query(SQL, &[&job_id, &org_id]).await?;
+        Ok(rows
+            .iter()
+            .map(|row| super::Job {
+                id: row.get("id"),
+                org_id: row.get("org_id"),
+                kind: row.get("kind"),
+                params: row.get("params"),
+                state: row.get("state"),
+                priority: row.get("priority"),
+                idempotency_key: row.get("idempotency_key"),
+                run_id: row.get("run_id"),
+                attempt: row.get("attempt"),
+                max_attempts: row.get("max_attempts"),
+                error_class: row.get("error_class"),
+                error_detail: row.get("error_detail"),
+                not_before: row.get("not_before"),
+                created_by: row.get("created_by"),
+                schedule_id: row.get("schedule_id"),
+                resource_class: row.get("resource_class"),
+                trace_context: row.get("trace_context"),
+                structural_fingerprint: row.get("structural_fingerprint"),
+                policy_hash: row.get("policy_hash"),
+                image_digest: row.get("image_digest"),
+                clear_number: row.get("clear_number"),
+                owner_epoch: row.get("owner_epoch"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+                started_at: row.get("started_at"),
+                finished_at: row.get("finished_at"),
+            })
+            .collect())
+    }
+
     /// Claim the highest-priority runnable job whose org has no active job (FOR UPDATE SKIP LOCKED); returns the claimed row, or none.
     pub async fn claim(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
     ) -> ::std::result::Result<Vec<super::Job>, ::tokio_postgres::Error> {
         const SQL: &str = "UPDATE public.jobs
 SET state = 'dispatching', started_at = now(), updated_at = now(),
@@ -484,6 +762,11 @@ RETURNING
   schedule_id,
   resource_class,
   trace_context,
+  structural_fingerprint,
+  policy_hash,
+  image_digest,
+  clear_number,
+  owner_epoch,
   created_at,
   updated_at,
   started_at,
@@ -510,6 +793,11 @@ RETURNING
                 schedule_id: row.get("schedule_id"),
                 resource_class: row.get("resource_class"),
                 trace_context: row.get("trace_context"),
+                structural_fingerprint: row.get("structural_fingerprint"),
+                policy_hash: row.get("policy_hash"),
+                image_digest: row.get("image_digest"),
+                clear_number: row.get("clear_number"),
+                owner_epoch: row.get("owner_epoch"),
                 created_at: row.get("created_at"),
                 updated_at: row.get("updated_at"),
                 started_at: row.get("started_at"),
@@ -520,7 +808,7 @@ RETURNING
 
     /// Record a job failure and decide, in one statement, whether it retries: a retryable class with attempts left goes back to queued behind an exponential backoff, anything else fails terminally. One statement rather than a read-then-write so two dispatchers cannot both conclude they are the last attempt.
     pub async fn fail_or_retry(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         retryable: bool,
         error_class: Option<&str>,
         error_detail: Option<&str>,
@@ -560,6 +848,11 @@ RETURNING
   schedule_id,
   resource_class,
   trace_context,
+  structural_fingerprint,
+  policy_hash,
+  image_digest,
+  clear_number,
+  owner_epoch,
   created_at,
   updated_at,
   started_at,
@@ -588,6 +881,11 @@ RETURNING
                 schedule_id: row.get("schedule_id"),
                 resource_class: row.get("resource_class"),
                 trace_context: row.get("trace_context"),
+                structural_fingerprint: row.get("structural_fingerprint"),
+                policy_hash: row.get("policy_hash"),
+                image_digest: row.get("image_digest"),
+                clear_number: row.get("clear_number"),
+                owner_epoch: row.get("owner_epoch"),
                 created_at: row.get("created_at"),
                 updated_at: row.get("updated_at"),
                 started_at: row.get("started_at"),
@@ -598,7 +896,7 @@ RETURNING
 
     /// Record a job's next/terminal state, stamping finished_at for terminal states.
     pub async fn mark(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         state: &str,
         job_id: &str,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
@@ -615,9 +913,244 @@ WHERE id = $2
         client.execute(SQL, &[&state, &job_id]).await
     }
 
+    /// Commit the planning decision (dispatching -> running) in the same transaction as the claim and the task rows: writes run_id = id and both DAG hashes, so dispatching is never a committed state on the DAG path (§4.5).
+    pub async fn plan(
+        client: &impl ::tokio_postgres::GenericClient,
+        structural_fingerprint: &str,
+        policy_hash: &str,
+        image_digest: Option<&str>,
+        owner_epoch: &str,
+        job_id: &str,
+    ) -> ::std::result::Result<Vec<super::Job>, ::tokio_postgres::Error> {
+        const SQL: &str = "UPDATE public.jobs
+SET state = 'running', run_id = id, structural_fingerprint = $1,
+    policy_hash = $2, image_digest = $3, owner_epoch = $4,
+    updated_at = now()
+WHERE id = $5 AND state = 'dispatching'
+RETURNING
+  id,
+  org_id,
+  kind,
+  params,
+  state,
+  priority,
+  idempotency_key,
+  run_id,
+  attempt,
+  max_attempts,
+  error_class,
+  error_detail,
+  not_before,
+  created_by,
+  schedule_id,
+  resource_class,
+  trace_context,
+  structural_fingerprint,
+  policy_hash,
+  image_digest,
+  clear_number,
+  owner_epoch,
+  created_at,
+  updated_at,
+  started_at,
+  finished_at
+";
+        let rows = client
+            .query(
+                SQL,
+                &[
+                    &structural_fingerprint,
+                    &policy_hash,
+                    &image_digest,
+                    &owner_epoch,
+                    &job_id,
+                ],
+            )
+            .await?;
+        Ok(rows
+            .iter()
+            .map(|row| super::Job {
+                id: row.get("id"),
+                org_id: row.get("org_id"),
+                kind: row.get("kind"),
+                params: row.get("params"),
+                state: row.get("state"),
+                priority: row.get("priority"),
+                idempotency_key: row.get("idempotency_key"),
+                run_id: row.get("run_id"),
+                attempt: row.get("attempt"),
+                max_attempts: row.get("max_attempts"),
+                error_class: row.get("error_class"),
+                error_detail: row.get("error_detail"),
+                not_before: row.get("not_before"),
+                created_by: row.get("created_by"),
+                schedule_id: row.get("schedule_id"),
+                resource_class: row.get("resource_class"),
+                trace_context: row.get("trace_context"),
+                structural_fingerprint: row.get("structural_fingerprint"),
+                policy_hash: row.get("policy_hash"),
+                image_digest: row.get("image_digest"),
+                clear_number: row.get("clear_number"),
+                owner_epoch: row.get("owner_epoch"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+                started_at: row.get("started_at"),
+                finished_at: row.get("finished_at"),
+            })
+            .collect())
+    }
+
+    /// A planning refusal (a kind that does not parse, an assembly failure) is terminal in the planning transaction itself: the one statement besides plan.sql that leaves dispatching.
+    pub async fn refuse_plan(
+        client: &impl ::tokio_postgres::GenericClient,
+        error_class: Option<&str>,
+        error_detail: Option<&str>,
+        job_id: &str,
+    ) -> ::std::result::Result<Vec<super::Job>, ::tokio_postgres::Error> {
+        const SQL: &str = "UPDATE public.jobs
+SET state = 'failed', error_class = $1, error_detail = $2,
+    finished_at = now(), updated_at = now()
+WHERE id = $3 AND state = 'dispatching'
+RETURNING
+  id,
+  org_id,
+  kind,
+  params,
+  state,
+  priority,
+  idempotency_key,
+  run_id,
+  attempt,
+  max_attempts,
+  error_class,
+  error_detail,
+  not_before,
+  created_by,
+  schedule_id,
+  resource_class,
+  trace_context,
+  structural_fingerprint,
+  policy_hash,
+  image_digest,
+  clear_number,
+  owner_epoch,
+  created_at,
+  updated_at,
+  started_at,
+  finished_at
+";
+        let rows = client
+            .query(SQL, &[&error_class, &error_detail, &job_id])
+            .await?;
+        Ok(rows
+            .iter()
+            .map(|row| super::Job {
+                id: row.get("id"),
+                org_id: row.get("org_id"),
+                kind: row.get("kind"),
+                params: row.get("params"),
+                state: row.get("state"),
+                priority: row.get("priority"),
+                idempotency_key: row.get("idempotency_key"),
+                run_id: row.get("run_id"),
+                attempt: row.get("attempt"),
+                max_attempts: row.get("max_attempts"),
+                error_class: row.get("error_class"),
+                error_detail: row.get("error_detail"),
+                not_before: row.get("not_before"),
+                created_by: row.get("created_by"),
+                schedule_id: row.get("schedule_id"),
+                resource_class: row.get("resource_class"),
+                trace_context: row.get("trace_context"),
+                structural_fingerprint: row.get("structural_fingerprint"),
+                policy_hash: row.get("policy_hash"),
+                image_digest: row.get("image_digest"),
+                clear_number: row.get("clear_number"),
+                owner_epoch: row.get("owner_epoch"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+                started_at: row.get("started_at"),
+                finished_at: row.get("finished_at"),
+            })
+            .collect())
+    }
+
+    /// The clear's job half: bump clear_number (the fence every pre-clear readiness verdict fails against) and send a finished job back through the existing claim path; planning then inserts nothing (ON CONFLICT) and the cleared rows are found in none.
+    pub async fn reopen(
+        client: &impl ::tokio_postgres::GenericClient,
+        job_id: &str,
+        org_id: &str,
+    ) -> ::std::result::Result<Vec<super::Job>, ::tokio_postgres::Error> {
+        const SQL: &str = "UPDATE public.jobs
+SET clear_number = COALESCE(clear_number, 0) + 1,
+    state = CASE WHEN state IN ('succeeded', 'failed', 'canceled') THEN 'queued' ELSE state END,
+    finished_at = NULL, error_class = NULL, error_detail = NULL, not_before = now(), updated_at = now()
+WHERE id = $1 AND org_id = $2
+RETURNING
+  id,
+  org_id,
+  kind,
+  params,
+  state,
+  priority,
+  idempotency_key,
+  run_id,
+  attempt,
+  max_attempts,
+  error_class,
+  error_detail,
+  not_before,
+  created_by,
+  schedule_id,
+  resource_class,
+  trace_context,
+  structural_fingerprint,
+  policy_hash,
+  image_digest,
+  clear_number,
+  owner_epoch,
+  created_at,
+  updated_at,
+  started_at,
+  finished_at
+";
+        let rows = client.query(SQL, &[&job_id, &org_id]).await?;
+        Ok(rows
+            .iter()
+            .map(|row| super::Job {
+                id: row.get("id"),
+                org_id: row.get("org_id"),
+                kind: row.get("kind"),
+                params: row.get("params"),
+                state: row.get("state"),
+                priority: row.get("priority"),
+                idempotency_key: row.get("idempotency_key"),
+                run_id: row.get("run_id"),
+                attempt: row.get("attempt"),
+                max_attempts: row.get("max_attempts"),
+                error_class: row.get("error_class"),
+                error_detail: row.get("error_detail"),
+                not_before: row.get("not_before"),
+                created_by: row.get("created_by"),
+                schedule_id: row.get("schedule_id"),
+                resource_class: row.get("resource_class"),
+                trace_context: row.get("trace_context"),
+                structural_fingerprint: row.get("structural_fingerprint"),
+                policy_hash: row.get("policy_hash"),
+                image_digest: row.get("image_digest"),
+                clear_number: row.get("clear_number"),
+                owner_epoch: row.get("owner_epoch"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+                started_at: row.get("started_at"),
+                finished_at: row.get("finished_at"),
+            })
+            .collect())
+    }
+
     /// Requeue a failed/canceled job with not_before = now(); a run_id is carried forward as resume_run_id so the next dispatch resumes that run.
     pub async fn resume(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         org_id: &str,
         job_id: &str,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
@@ -629,5 +1162,83 @@ WHERE id = $2
 WHERE org_id = $1 AND id = $2 AND state IN ('failed', 'canceled')
 ";
         client.execute(SQL, &[&org_id, &job_id]).await
+    }
+
+    /// Settle a run from its leaf verdicts once no live task row is non-terminal; carries the state guard mark.sql lacks, so a late settle after a cancel matches zero rows.
+    pub async fn settle(
+        client: &impl ::tokio_postgres::GenericClient,
+        state: &str,
+        error_class: Option<&str>,
+        error_detail: Option<&str>,
+        job_id: &str,
+    ) -> ::std::result::Result<Vec<super::Job>, ::tokio_postgres::Error> {
+        const SQL: &str = "UPDATE public.jobs
+SET state = $1,
+    error_class = CASE WHEN $1 = 'succeeded' THEN NULL ELSE COALESCE($2, error_class) END,
+    error_detail = CASE WHEN $1 = 'succeeded' THEN NULL ELSE COALESCE($3, error_detail) END,
+    finished_at = now(), updated_at = now()
+WHERE id = $4 AND state IN ('running', 'canceling')
+RETURNING
+  id,
+  org_id,
+  kind,
+  params,
+  state,
+  priority,
+  idempotency_key,
+  run_id,
+  attempt,
+  max_attempts,
+  error_class,
+  error_detail,
+  not_before,
+  created_by,
+  schedule_id,
+  resource_class,
+  trace_context,
+  structural_fingerprint,
+  policy_hash,
+  image_digest,
+  clear_number,
+  owner_epoch,
+  created_at,
+  updated_at,
+  started_at,
+  finished_at
+";
+        let rows = client
+            .query(SQL, &[&state, &error_class, &error_detail, &job_id])
+            .await?;
+        Ok(rows
+            .iter()
+            .map(|row| super::Job {
+                id: row.get("id"),
+                org_id: row.get("org_id"),
+                kind: row.get("kind"),
+                params: row.get("params"),
+                state: row.get("state"),
+                priority: row.get("priority"),
+                idempotency_key: row.get("idempotency_key"),
+                run_id: row.get("run_id"),
+                attempt: row.get("attempt"),
+                max_attempts: row.get("max_attempts"),
+                error_class: row.get("error_class"),
+                error_detail: row.get("error_detail"),
+                not_before: row.get("not_before"),
+                created_by: row.get("created_by"),
+                schedule_id: row.get("schedule_id"),
+                resource_class: row.get("resource_class"),
+                trace_context: row.get("trace_context"),
+                structural_fingerprint: row.get("structural_fingerprint"),
+                policy_hash: row.get("policy_hash"),
+                image_digest: row.get("image_digest"),
+                clear_number: row.get("clear_number"),
+                owner_epoch: row.get("owner_epoch"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+                started_at: row.get("started_at"),
+                finished_at: row.get("finished_at"),
+            })
+            .collect())
     }
 }

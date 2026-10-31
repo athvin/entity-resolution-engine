@@ -74,6 +74,21 @@ columns:
   - name: trace_context
     type: varchar
     description: "Propagated trace context."
+  - name: structural_fingerprint
+    type: varchar
+    description: "sha256 over the compiled DAG's shape (names, versions, edges, trigger rules), written at planning; a clear or adoption refuses on mismatch (batch-orchestration-design §3.4)."
+  - name: policy_hash
+    type: varchar
+    description: "sha256 over the compiled DAG's per-node policy (retries, backoff, timeout, class, segment); a divergence proceeds with the diff logged."
+  - name: image_digest
+    type: varchar
+    description: "Image digest the planning dispatcher ran, so a deploy mid-run is legible."
+  - name: clear_number
+    type: bigint
+    description: "Incremented by every clear; fences readiness verdicts composed before the clear. Read as COALESCE(clear_number, 0)."
+  - name: owner_epoch
+    type: varchar
+    description: "The dispatcher process epoch that planned or adopted the run."
   - name: created_at
     type: timestamp
     nullable: false

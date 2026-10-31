@@ -66,7 +66,7 @@ pub mod create {
     //! @generated query functions for this entity + operation.
     /// Record a verdict on one pair, correcting any previous one. An upsert rather than an append because a label is a current belief, not an event log: two contradictory rows for the same pair would make the training set ambiguous and there would be no principled way to pick. `created_at` survives the correction so the first time anyone looked is still recoverable.
     pub async fn record(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         label_id: &str,
         org_id: &str,
         rec_a_key: &str,
@@ -136,7 +136,7 @@ pub mod read {
     //! @generated query functions for this entity + operation.
     /// Every label a tenant has, for the training pass to materialise into the lake and for the labelling queue to exclude from what it offers. Coverage is counted from these rows in Rust rather than aggregated in SQL, because a control-plane read declares `returns: entity` — and reading them whole is what training needs anyway. Deliberately unbounded: labels are human-authored, so the set is thousands at most, and a LIMIT here would silently train on a prefix. Ordered by pair so a trained model's bytes do not depend on Postgres's scan order.
     pub async fn all(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         org_id: &str,
     ) -> ::std::result::Result<Vec<super::PairLabel>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT id, org_id, rec_a_key, rec_b_key, verdict, origin, labeled_by,
@@ -167,7 +167,7 @@ ORDER BY rec_a_key, rec_b_key
 
     /// The tenant's labels, newest first, optionally narrowed to one verdict or one origin. The explicit ::varchar casts are needed because Postgres cannot infer a parameter's type from `$x IS NULL` alone and resolves left to right.
     pub async fn page(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         org_id: &str,
         verdict: Option<&str>,
         origin: Option<&str>,

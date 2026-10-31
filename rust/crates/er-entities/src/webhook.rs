@@ -54,7 +54,7 @@ pub mod create {
     //! @generated query functions for this entity + operation.
     /// Register an outbound webhook; the secret is the HMAC signing key for delivery-time signatures.
     pub async fn create(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         webhook_id: &str,
         org_id: &str,
         url: &str,
@@ -74,7 +74,7 @@ pub mod read {
     //! @generated query functions for this entity + operation.
     /// One active subscription by id, for the outbox drainer to resolve its url and secret at delivery time rather than freezing them into the queued row — so rotating a secret or correcting a URL takes effect on the next attempt. Filters on `active`, which is also how deactivating a webhook stops queued deliveries.
     pub async fn by_id(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         webhook_id: &str,
     ) -> ::std::result::Result<Vec<super::Webhook>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT id, org_id, url, events, secret, active, created_at, updated_at
@@ -99,7 +99,7 @@ WHERE id = $1 AND active
 
     /// The delivery targets for one event: every active webhook subscribed to the type (or subscribed-to-all); includes the secret the delivery signs with.
     pub async fn for_delivery(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         org_id: &str,
         event_type: &str,
     ) -> ::std::result::Result<Vec<super::Webhook>, ::tokio_postgres::Error> {
@@ -135,7 +135,7 @@ ORDER BY created_at
 
     /// An org's active webhooks, oldest first (the listing projection drops the secret).
     pub async fn list_active(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         org_id: &str,
     ) -> ::std::result::Result<Vec<super::Webhook>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT
@@ -172,7 +172,7 @@ pub mod update {
     //! @generated query functions for this entity + operation.
     /// Retire a webhook. A SOFT delete, because `webhook_deliveries.webhook_id` references this row and the delivery log is history a tenant is entitled to keep — the hard DELETE this replaces could not run at all once a subscription had delivered anything, which is every subscription that ever worked, and the foreign-key violation surfaced as an opaque `db: db error`. Every read already filters `AND active`, so deactivating is indistinguishable from deletion to the listing, the delivery lookup and the by-id read, while the history survives. The `AND active` here makes a second retire affect zero rows, so a repeated call honestly reports that nothing changed.
     pub async fn deactivate(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         org_id: &str,
         webhook_id: &str,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {

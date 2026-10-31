@@ -1,0 +1,10 @@
+kind: statement
+operation: update
+mode: partial
+description: "A canceling row settles to canceled when the watch reports the pod gone (or, for a control row, when its body has returned); the org slot is released only then (§5.6)."
+params:
+  - { name: exit_code, type: bigint, nullable: true }
+  - { name: termination_reason, type: varchar, nullable: true }
+  - { name: task_instance_id, type: varchar }
+  - { name: k8s_job_name, type: varchar, nullable: true }
+returns: entity

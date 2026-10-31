@@ -1,0 +1,10 @@
+kind: statement
+operation: update
+mode: partial
+description: "A pod that never ran user code, or was disrupted while running: back to scheduled within the infrastructure budget, no try spent. Zero rows means a stale launch (no-op) or an exhausted budget — the handler re-reads and fails the try with error_class infrastructure at the cap (§4.5)."
+params:
+  - { name: wait_secs, type: bigint }
+  - { name: termination_reason, type: varchar, nullable: true }
+  - { name: task_instance_id, type: varchar }
+  - { name: k8s_job_name, type: varchar }
+returns: entity

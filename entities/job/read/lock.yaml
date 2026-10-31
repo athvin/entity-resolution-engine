@@ -1,0 +1,7 @@
+kind: statement
+operation: read
+mode: partial
+description: "Lock the job row for a pass that treats its task rows as a set (readiness, clear, the fused finish-and-advance), so the three serialize on the job row rather than racing under READ COMMITTED."
+params:
+  - { name: job_id, type: varchar }
+returns: entity

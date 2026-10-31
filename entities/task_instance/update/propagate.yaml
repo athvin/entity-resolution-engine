@@ -1,0 +1,10 @@
+kind: statement
+operation: update
+mode: partial
+description: "The can-never-fire verdict ($state: upstream_failed | upstream_skipped | canceled): a terminal propagation recorded by the readiness pass; the graph is the authority, SQL only records it (§5.3)."
+params:
+  - { name: state, type: varchar }
+  - { name: task_instance_id, type: varchar }
+  - { name: clear_number, type: bigint }
+reads: [job]
+returns: entity

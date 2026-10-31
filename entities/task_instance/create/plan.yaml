@@ -1,0 +1,21 @@
+kind: statement
+operation: create
+mode: partial
+description: "One row per compiled node, inserted in the planning transaction; idempotent on the attempt key, so re-planning after a clear inserts nothing for rows that exist (§4.5)."
+params:
+  - { name: id, type: varchar }
+  - { name: org_id, type: varchar }
+  - { name: job_id, type: varchar }
+  - { name: task_id, type: varchar }
+  - { name: seq, type: bigint }
+  - { name: kind, type: varchar }
+  - { name: trigger_rule, type: varchar }
+  - { name: upstream, type: json }
+  - { name: teardown, type: boolean }
+  - { name: segment, type: varchar, nullable: true }
+  - { name: resource_class, type: varchar, nullable: true }
+  - { name: max_tries, type: bigint }
+  - { name: max_launches, type: bigint }
+  - { name: image_digest, type: varchar, nullable: true }
+  - { name: trace_context, type: varchar, nullable: true }
+returns: entity

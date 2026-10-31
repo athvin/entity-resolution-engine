@@ -60,7 +60,7 @@ pub mod create {
     //! @generated query functions for this entity + operation.
     /// Record a link between two entities, correcting any previous one of the same kind. An upsert rather than an append because a link is a current belief about a relationship, not an event: two rows saying the same pair are a household would make 'is this a household' ambiguous with no principled way to pick. `created_at` survives the correction so when the relationship was first recorded stays recoverable.
     pub async fn upsert(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         link_id: &str,
         org_id: &str,
         parent_entity_id: &str,
@@ -120,7 +120,7 @@ pub mod delete {
     //! @generated query functions for this entity + operation.
     /// Remove one link, scoped by org so a link id learned elsewhere cannot delete another tenant's row. A hard delete rather than a tombstone: the history companion already records what was removed and by whom, so a status column would be a second, weaker record of the same fact.
     pub async fn by_id(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         org_id: &str,
         link_id: &str,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
@@ -135,7 +135,7 @@ pub mod read {
     //! @generated query functions for this entity + operation.
     /// Every link touching one entity, from either side. BOTH sides in one read because the entity view asks one question — 'what is this entity related to' — and answering it with two queries would make the caller decide which side it is on, which is exactly what it does not know yet. The direction is recoverable from the rows: the caller compares the entity id against parent_entity_id.
     pub async fn for_entity(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         org_id: &str,
         entity_id: &str,
     ) -> ::std::result::Result<Vec<super::EntityLink>, ::tokio_postgres::Error> {

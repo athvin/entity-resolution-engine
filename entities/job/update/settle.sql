@@ -1,0 +1,33 @@
+UPDATE public.jobs
+SET state = $state,
+    error_class = CASE WHEN $state = 'succeeded' THEN NULL ELSE COALESCE($error_class, error_class) END,
+    error_detail = CASE WHEN $state = 'succeeded' THEN NULL ELSE COALESCE($error_detail, error_detail) END,
+    finished_at = now(), updated_at = now()
+WHERE id = $job_id AND state IN ('running', 'canceling')
+RETURNING
+  id,
+  org_id,
+  kind,
+  params,
+  state,
+  priority,
+  idempotency_key,
+  run_id,
+  attempt,
+  max_attempts,
+  error_class,
+  error_detail,
+  not_before,
+  created_by,
+  schedule_id,
+  resource_class,
+  trace_context,
+  structural_fingerprint,
+  policy_hash,
+  image_digest,
+  clear_number,
+  owner_epoch,
+  created_at,
+  updated_at,
+  started_at,
+  finished_at

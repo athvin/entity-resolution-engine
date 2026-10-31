@@ -118,6 +118,16 @@ VALUES ($1, $2, $3, $4, $5, $6,
     }
 }
 
+pub mod delete {
+    //! @generated query functions for this entity + operation.
+    /// Pre-image the run's ingest receipts before re-ingesting, paired with raw_record/delete/by_batch (§9.1).
+    pub fn by_run(conn: &::duckdb::Connection, run_id: &str) -> ::duckdb::Result<usize> {
+        const SQL: &str = "DELETE FROM lake.main.ingest_batches WHERE run_id = $1
+";
+        conn.execute(SQL, ::duckdb::params![run_id])
+    }
+}
+
 pub mod read {
     //! @generated query functions for this entity + operation.
     /// One row of `page`: One keyset page of ingest-batch receipts at a pinned snapshot, optionally filtered by source system.

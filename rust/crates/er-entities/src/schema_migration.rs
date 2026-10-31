@@ -54,7 +54,7 @@ pub mod create {
     //! @generated query functions for this entity + operation.
     /// Append one ledger row: an applied statement, or a verification that the live schema was already current under a new catalog version.
     pub async fn record(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
         id: &str,
         catalog_hash: &str,
         kind: &str,
@@ -85,7 +85,7 @@ pub mod read {
     //! @generated query functions for this entity + operation.
     /// The newest ledger row — the schema version the control database is at, as the reconciler and the deploy report read it.
     pub async fn latest(
-        client: &::tokio_postgres::Client,
+        client: &impl ::tokio_postgres::GenericClient,
     ) -> ::std::result::Result<Vec<super::SchemaMigration>, ::tokio_postgres::Error> {
         const SQL: &str =
             "SELECT id, created_at, updated_at, catalog_hash, kind, relation, statement, applied_by
