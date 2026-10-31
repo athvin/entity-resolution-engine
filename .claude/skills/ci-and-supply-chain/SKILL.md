@@ -42,10 +42,27 @@ as it matches, which can SIGPIPE the `git diff` feeding it under `pipefail`, and
 the result is a flaky **false skip** — the worst failure mode available, because
 it skips the gate rather than failing it.
 
-`rust.yml`'s detect skips the compile jobs only for PRs that touch nothing
-outside `.claude/**`. The skip is deliberately that narrow: `docs/` changes
+`rust.yml`'s detect skips the compile jobs for PRs that touch nothing outside
+`.claude/**` and `infra/terraform/**`. Those two and no more — `docs/` changes
 still run the gate, because `entities` verifies `docs/erd.md` and `lint`
 verifies the generated skill references.
+
+Terraform is in that set because nothing in the Rust gate reads it: no crate or
+manifest references `infra/`, and `make check` touches it nowhere. The one real
+coupling is that `skills-check.sh` derives generated skill references *from*
+`infra/terraform/**` — `aws_*` resource counts, IAM users, Pod Identity
+associations, pinned provider versions — so a terraform-only PR can make a
+reference stale. That is covered by the ungated `skills` job rather than by the
+compile jobs, which is precisely why that job exists separately.
+
+Note the asymmetry between the two implementations, because it decides what a
+new entry does. `rust.yml`'s detect is a **denylist** (count paths *not* under
+these trees), so adding a tree there makes the Rust gate stop seeing it — only
+safe for a tree nothing in `make check` reads. `frontend.yml`'s and
+`infra.yml`'s are **allowlists** (count paths *under* `frontend/`, under
+`infra/terraform/`), so a tree they do not name is already skipped. A terraform
+PR skips the frontend gate for free and never reaches `images.yml`, which runs
+on `push` only.
 
 ## Why a job fails when your diff is innocent
 
