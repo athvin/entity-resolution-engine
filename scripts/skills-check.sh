@@ -433,6 +433,14 @@ gen_required_checks() {
 	echo
 	local wf
 	for wf in .github/workflows/*.yml; do
+		# `*.lock.yml` is compiler output from `gh aw compile`, not a
+		# hand-written workflow. It matches this glob, carries a dozen
+		# machine-generated jobs, and is rewritten by every gh-aw version
+		# bump — so enumerating it here would churn this file and fail both
+		# the `skills` job and `lint`'s drift step for no reader's benefit.
+		# The agentic workflows are summarised from their `.md` sources
+		# below instead, which is the file a human actually edits.
+		case "$wf" in *.lock.yml) continue ;; esac
 		echo "### \`$(basename "$wf")\`"
 		echo
 		echo "| Job | Status-check context | Timeout | Condition |"
@@ -482,6 +490,61 @@ gen_required_checks() {
 		' "$wf"
 		echo
 	done
+
+	# Agentic workflows, summarised from the `.md` sources rather than from the
+	# `.lock.yml` the compiler emits. Two columns, because they are the two
+	# questions a reviewer has: what fires it, and what it is permitted to do.
+	# None of these may ever be a required check — they are non-deterministic by
+	# construction, so a required one would make every merge wait on a model.
+	# That is also why they are the only workflows here allowed a `paths:`
+	# filter, which `rust.yml` and `frontend.yml` may not have.
+	if compgen -G ".github/workflows/*.md" >/dev/null; then
+		echo "### Agentic workflows (\`gh aw\`)"
+		echo
+		echo "Compiled to \`*.lock.yml\` by \`gh aw compile\`; edit the \`.md\`. **Never"
+		echo "required checks** — a required check that waits on a model would gate every"
+		echo "merge on a non-deterministic run, which is also why these are the only"
+		echo "workflows in this repo permitted a \`paths:\` filter."
+		echo
+		echo "| Workflow | Triggers | Safe outputs |"
+		echo "|---|---|---|"
+		local awf
+		for awf in .github/workflows/*.md; do
+			awk -v file="$(basename "$awf")" '
+				# Frontmatter only. The body below the closing `---` is prose
+				# and may legitimately contain lines that look like YAML keys.
+				NR == 1 && /^---[[:space:]]*$/ { infm = 1; next }
+				infm && /^---[[:space:]]*$/ { exit }
+				!infm { next }
+				# A column-0 key ends whichever section was being collected.
+				/^[a-z][a-z0-9_-]*:/ {
+					key = $0; sub(/:.*$/, "", key)
+					section = (key == "on" || key == "safe-outputs") ? key : ""
+					# `on: push` — an inline value, so there are no children.
+					if (section == "on" && $0 ~ /^on:[[:space:]]*[^[:space:]]/) {
+						val = $0; sub(/^on:[[:space:]]*/, "", val)
+						add("on", val)
+						section = ""
+					}
+					next
+				}
+				section != "" && /^  [a-z][a-z0-9_-]*:/ {
+					k = $1; sub(/:$/, "", k)
+					add(section, k)
+				}
+				END {
+					printf "| `%s` | %s | %s |\n", file,
+						(trig == "" ? "—" : trig), (out == "" ? "—" : out)
+				}
+				function add(sec, v) {
+					if (sec == "on") trig = trig (trig == "" ? "" : ", ") "`" v "`"
+					else out = out (out == "" ? "" : ", ") "`" v "`"
+				}
+			' "$awf"
+		done
+		echo
+	fi
+
 	echo "### Advisory ignores in \`rust/deny.toml\`"
 	echo
 	echo "Each entry carries a prose justification in the file itself. These gates are"

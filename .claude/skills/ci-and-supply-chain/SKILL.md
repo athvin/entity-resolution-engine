@@ -173,6 +173,40 @@ fails to parse**, indistinguishable from clean.
 The nightly and main-only jobs (coverage, benchmark compile, scale goldens) are
 not required either, by construction.
 
+## Agentic workflows
+
+`.github/workflows/*.md` are [`gh aw`](https://github.github.io/gh-aw/) agentic
+workflows. **Edit the `.md`; `gh aw compile` emits the `.lock.yml` beside it.**
+A `.lock.yml` is compiler output — treat it exactly like any other generated
+file here and never hand-edit it. `references/required-checks.md` tabulates
+which ones exist, what fires each, and what each is permitted to do.
+
+**None of them may ever be a required check.** A model run is non-deterministic
+and rate-limited, so requiring one would gate every merge on a retry. That is
+also the one thing they have that `rust.yml` and `frontend.yml` do not: because
+they are not required, they *are* allowed `paths:` and `if:` filters. The rule
+in CLAUDE.md is about required workflows specifically.
+
+They also hold the repo's only write scopes. `pull-requests: write` and
+`contents: write` appear nowhere else — the four hand-written workflows are
+`contents: read` plus `id-token: write` for OIDC. The agent process itself still
+never writes: gh-aw's **safe outputs** are declared, capped operations
+(`add-comment`, `push-to-pull-request-branch`, …) run by separate jobs after the
+agent exits, so the model's output is data those jobs validate rather than
+commands they obey.
+
+The zero-repository-secrets invariant survives them. `engine: copilot` draws on
+`copilot-requests: write` against the job token, so there is still no
+`secrets.*` reference in any workflow. Swapping to `engine: claude` would need
+an `ANTHROPIC_API_KEY` secret — a deliberate trade to make explicitly, not a
+detail to discover. gh-aw does not accept a Claude subscription OAuth token.
+
+Two interactions with the gates above worth knowing. `rust.yml`'s `detect`
+counts these paths as agent-only, so a prompt edit skips the backend gate —
+which is safe precisely because the always-on `skills` job is not gated on
+`detect` and still catches generated-reference drift. And the SHA-pin rule
+applies to the generated lock files too; `gh aw compile` pins them for you.
+
 ## The supply-chain gates
 
 | Gate | Enforces |
