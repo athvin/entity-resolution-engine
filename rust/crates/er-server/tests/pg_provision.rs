@@ -247,6 +247,7 @@ async fn provisioning_a_tenant_end_to_end() {
             &client,
             &profile,
             &er_server::mail::Mailer::off(),
+            None,
         )
         .await
         .unwrap();

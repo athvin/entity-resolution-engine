@@ -49,7 +49,7 @@ pub async fn plan(
     dag: &Dag,
     owner_epoch: &str,
     image_digest: Option<&str>,
-) -> Result<Job, PgError> {
+) -> Result<Option<Job>, PgError> {
     let tx = client.transaction().await?;
     for (seq, node) in dag.nodes.iter().enumerate() {
         let id = attempt_id(&job.id, node.task_id, 1);
@@ -102,11 +102,16 @@ pub async fn plan(
         &job.id,
     )
     .await?;
+    // Zero rows: the job left `dispatching` under us (plan.sql is guarded), so
+    // the whole transaction's inserts roll back with the commit of nothing —
+    // the caller runs unplanned rather than half-planned.
+    let planned_job = planned.into_iter().next();
+    if planned_job.is_none() {
+        // An insert-only transaction with no job transition must not survive.
+        return Ok(None);
+    }
     tx.commit().await?;
-    Ok(planned
-        .into_iter()
-        .next()
-        .expect("plan.sql matches the job claim.sql just handed out"))
+    Ok(planned_job)
 }
 
 /// A planning refusal — a kind that does not parse, an assembly failure — is

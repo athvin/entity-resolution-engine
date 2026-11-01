@@ -277,6 +277,7 @@ async fn protect_pins_master_and_retract_restores_policy() {
         &oid(&client, "acme").await,
         &env,
         "01PROTECTCORRECT0000000000001",
+        None,
     )
     .await
     .unwrap();
@@ -303,6 +304,7 @@ async fn protect_pins_master_and_retract_restores_policy() {
         &oid(&client, "acme").await,
         &env,
         "01PROTECTCORRECT0000000000002",
+        None,
     )
     .await
     .unwrap();

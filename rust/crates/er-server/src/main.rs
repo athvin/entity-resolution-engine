@@ -94,7 +94,16 @@ async fn async_main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
             match er_server::pg::connect(&dsn).await {
                 Ok(client) => {
                     let http = er_server::webhook::client();
-                    if let Err(e) = er_server::dispatcher::run_loop(&client, &http, &never).await {
+                    let reporter = match er_server::reporter::AttemptReporter::connect(&dsn).await {
+                        Ok(r) => Some(r),
+                        Err(e) => {
+                            eprintln!("in-process attempt reporter disabled (connect failed): {e}");
+                            None
+                        }
+                    };
+                    if let Err(e) =
+                        er_server::dispatcher::run_loop(&client, &http, &never, reporter).await
+                    {
                         eprintln!("in-process dispatcher stopped (control-plane): {e}");
                     }
                 }

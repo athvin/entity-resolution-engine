@@ -58,6 +58,7 @@ pub async fn run_loop(
     client: &tokio_postgres::Client,
     http: &reqwest::Client,
     term: &AtomicBool,
+    mut reporter: Option<crate::reporter::AttemptReporter>,
 ) -> Result<(), tokio_postgres::Error> {
     eprintln!("dispatcher up");
     let mut idle = IDLE_MIN;
@@ -112,7 +113,7 @@ pub async fn run_loop(
             }
         };
 
-        if dispatch_once(client).await? || drained > 0 {
+        if dispatch_once(client, reporter.as_mut()).await? || drained > 0 {
             idle = IDLE_MIN; // did work; poll again immediately
         } else {
             tokio::time::sleep(idle).await; // empty queue; back off (SIGTERM
@@ -395,11 +396,15 @@ struct ActiveModel {
 ///
 /// # Errors
 /// Propagates a Postgres claim/mark/lookup failure.
-pub async fn dispatch_once(client: &tokio_postgres::Client) -> Result<bool, tokio_postgres::Error> {
+pub async fn dispatch_once(
+    client: &tokio_postgres::Client,
+    reporter: Option<&mut crate::reporter::AttemptReporter>,
+) -> Result<bool, tokio_postgres::Error> {
     dispatch_once_with(
         client,
         &crate::provision::Profile::from_env(),
         &crate::mail::Mailer::from_env().await,
+        reporter,
     )
     .await
 }
@@ -415,14 +420,37 @@ pub async fn dispatch_once_with(
     client: &tokio_postgres::Client,
     profile: &Result<Option<crate::provision::Profile>, crate::provision::ProfileError>,
     mailer: &crate::mail::Mailer,
+    reporter: Option<&mut crate::reporter::AttemptReporter>,
 ) -> Result<bool, tokio_postgres::Error> {
     let Some(job) = pg::claim(client).await? else {
         return Ok(false);
     };
-    pg::mark(client, &job.id, "running").await?;
+    // The attempt ledger (batch-orchestration-design §11 Phase 1): plan the
+    // job's task rows in one transaction with the claim. Planning commits the
+    // `dispatching → running` transition itself; an unreported job — no
+    // reporter, an unparseable kind, a reporting-path failure — takes the
+    // legacy mark instead. A reporting failure never fails the job.
+    let mut reporter = reporter;
+    let planned = match reporter.as_deref_mut() {
+        Some(r) => r.plan(&job).await,
+        None => None,
+    };
+    if planned.is_none() {
+        pg::mark(client, &job.id, "running").await?;
+    }
+    let mut report = match (reporter, planned.as_ref()) {
+        (Some(r), Some(p)) => Some(crate::reporter::RunReport {
+            reporter: r,
+            run: p,
+        }),
+        _ => None,
+    };
 
     let Some(org) = pg::get_org_by_id(client, &job.org_id).await? else {
         pg::mark(client, &job.id, "failed").await?;
+        if let Some(rr) = report.as_mut() {
+            rr.settle(false).await;
+        }
         eprintln!("job {} failed: org id '{}' not found", job.id, job.org_id);
         return Ok(true);
     };
@@ -442,6 +470,17 @@ pub async fn dispatch_once_with(
     let schema = if job.kind == "provision" || job.kind == "apply_approved" {
         None
     } else {
+        // The ledger image of the pre-step (§3.5): a kind whose DAG opens with
+        // a `reconcile_schema` node gets it bracketed; a kind whose `init` owns
+        // the reconcile (run_all, correct, apply_corrections) records a
+        // pre-step failure on `init`, because the reconcile is init's first
+        // duty there.
+        let brackets_schema = report
+            .as_ref()
+            .is_some_and(|r| r.has_task("reconcile_schema"));
+        if brackets_schema && let Some(rr) = report.as_mut() {
+            rr.pod_started("reconcile_schema").await;
+        }
         let env = org.env.clone();
         let outcome = tokio::task::spawn_blocking(move || crate::schema::reconcile_lake_env(&env))
             .await
@@ -453,6 +492,18 @@ pub async fn dispatch_once_with(
             && !r.applied.is_empty()
         {
             eprintln!("job {}: lake schema migrated ({})", job.id, r.detail());
+        }
+        if let Some(rr) = report.as_mut() {
+            match &outcome {
+                Ok(_) if brackets_schema => rr.pod_succeeded("reconcile_schema", None).await,
+                Ok(_) => {}
+                Err(e) if brackets_schema => rr.pod_failed("reconcile_schema", e).await,
+                Err(e) => {
+                    if rr.has_task("init") {
+                        rr.pod_failed("init", e).await;
+                    }
+                }
+            }
         }
         Some(outcome)
     };
@@ -476,9 +527,9 @@ pub async fn dispatch_once_with(
         // Async-half too, and for a different reason from the others: its final
         // act is a STATE TRANSITION on the org row, which is what the UI's
         // progress panel is waiting for.
-        provision_tenant(client, &org, &job.id, profile).await
+        provision_tenant(client, &org, &job.id, profile, report.as_mut()).await
     } else if job.kind == "apply_corrections" {
-        drain_and_correct(client, &job.org_id, &env, &job.id).await
+        drain_and_correct(client, &job.org_id, &env, &job.id, report.as_mut()).await
     } else if job.kind == "apply_approved" {
         // A LITERAL, not a constant. `dispatch_coverage` checks that every
         // schedulable kind has an arm by scanning this source for the kind's
@@ -490,7 +541,10 @@ pub async fn dispatch_once_with(
         // plane — it reads the tenant's tags and stages actions, and never
         // opens the lake. The merging itself is the `apply_corrections` job it
         // enqueues, which is the only path that merges anything.
-        match config_from_env(&env) {
+        if let Some(rr) = report.as_mut() {
+            rr.control_started("stage_approved").await;
+        }
+        let staged_outcome = match config_from_env(&env) {
             Ok(config) => apply_approved_merges(client, &job.org_id, &org.name, &config)
                 .await
                 .map(|staged| {
@@ -502,12 +556,19 @@ pub async fn dispatch_once_with(
                     }
                 }),
             Err(e) => Err(e),
+        };
+        if let Some(rr) = report.as_mut() {
+            match &staged_outcome {
+                Ok(()) => rr.control_succeeded("stage_approved", None).await,
+                Err(e) => rr.control_failed("stage_approved", e).await,
+            }
         }
+        staged_outcome
     } else if job.kind == "train" {
         // Also async-half, and for the same reason as `apply_corrections`:
         // training's OUTPUT is a registry row, which needs the Postgres client
         // that `run_job`'s blocking half cannot hold.
-        train_and_register(client, &job.org_id, &env, &job.id).await
+        train_and_register(client, &job.org_id, &env, &job.id, report.as_mut()).await
     } else {
         // The active model comes from the registry, read here because `run_job`
         // is the blocking half and cannot touch the async Postgres client. An
@@ -541,9 +602,15 @@ pub async fn dispatch_once_with(
         // The counts come out beside the outcome rather than inside it: every
         // other arm of this `if` yields `Result<(), _>`, and widening all of
         // them to carry a value only this one can produce would be noise.
-        match tokio::task::spawn_blocking(move || run_job(&jb, &env, drop_root.as_deref(), &models))
-            .await
-            .unwrap_or_else(|e| Err(format!("dispatcher task panicked: {e}")))
+        //
+        // The engine's stage events apply to the ledger LIVE while the blocking
+        // half runs — the reporter's whole point (§11 Phase 1).
+        match crate::reporter::observe_blocking(report.as_mut(), move |events| {
+            tokio::task::spawn_blocking(move || {
+                run_job(&jb, &env, drop_root.as_deref(), &models, events)
+            })
+        })
+        .await
         {
             Ok(counts) => {
                 entity_counts = counts;
@@ -583,6 +650,14 @@ pub async fn dispatch_once_with(
             after
         }
     };
+    // The ledger's settle: the readiness verdicts propagate over whatever the
+    // run left behind. A requeued job is left as it is — its next claim clears
+    // and replans the rows (§5.4's image of the legacy from-scratch retry).
+    if completed.state != "queued"
+        && let Some(rr) = report.as_mut()
+    {
+        rr.settle(completed.state == "succeeded").await;
+    }
     // One webhook per OUTCOME, not per attempt: a job that fails twice and then
     // succeeds is one success to a subscriber, and three notifications for one
     // incident is how an integration learns to ignore them. A requeued job is
@@ -946,10 +1021,23 @@ fn run_job(
     env: &Value,
     drop_root: Option<&str>,
     active_models: &[ActiveModel],
+    events: Option<tokio::sync::mpsc::UnboundedSender<crate::reporter::StageEvent>>,
 ) -> Result<Vec<(String, i64)>, String> {
     let catalog = env_str(env, "ER_LAKE_CATALOG").ok_or("org env missing ER_LAKE_CATALOG")?;
     let data_path = env_str(env, "ER_LAKE_DATA_PATH").ok_or("org env missing ER_LAKE_DATA_PATH")?;
     let session = er_cli::open_lake(catalog, data_path).map_err(|e| format!("open lake: {e:#}"))?;
+    // The engine's stage observer: channel events when the ledger listens, a
+    // no-op otherwise. Built after the lake opens, so an open failure stays a
+    // plain job failure with no stage attributed.
+    let channel;
+    let noop = er_cli::NoopObserver;
+    let observer: &dyn er_cli::StageObserver = match events {
+        Some(tx) => {
+            channel = crate::reporter::ChannelObserver::new(tx);
+            &channel
+        }
+        None => &noop,
+    };
     let run_id = &job.id;
     let now = fmt_epoch(unix_now());
 
@@ -966,13 +1054,23 @@ fn run_job(
         crate::schema::LAKE_MIGRATE_KIND => Ok(()),
         "lake_maintain" => {
             let expire = env_str(env, "ER_EXPIRE_OLDER_THAN").unwrap_or("7 days");
-            er_cli::run_maintain(&session, expire)
-                .map(|_| ())
-                .map_err(|e| format!("{e:#}"))
+            observer.stage_started("maintain");
+            match er_cli::run_maintain(&session, expire) {
+                Ok(_) => {
+                    observer.stage_succeeded("maintain", session.latest_snapshot_version().ok());
+                    Ok(())
+                }
+                Err(e) => {
+                    let detail = format!("{e:#}");
+                    observer.stage_failed("maintain", &detail);
+                    Err(detail)
+                }
+            }
         }
         "correct" => {
             let config = load_config()?;
-            er_cli::run_correct(&session, &config, run_id, &now).map_err(|e| format!("{e:#}"))
+            er_cli::run_correct_observed(&session, &config, run_id, &now, observer)
+                .map_err(|e| format!("{e:#}"))
         }
         "run_all_full" | "run_all_incremental" => {
             let config = load_config()?;
@@ -1172,9 +1270,9 @@ fn run_job(
             // itself — so the single-model path stays one call deep and cannot
             // drift from what it did before ensembles existed.
             if members.is_empty() {
-                er_cli::run_all(&session, &config, &inputs)
+                er_cli::run_all_observed(&session, &config, &inputs, observer)
             } else {
-                er_cli::run_all_ensemble(&session, &config, &inputs, &members)
+                er_cli::run_all_ensemble_observed(&session, &config, &inputs, &members, observer)
             }
             .map_err(|e| format!("{e:#}"))
         }
@@ -1253,7 +1351,69 @@ pub async fn train_and_register(
     org_id: &str,
     env: &Value,
     run_id: &str,
+    mut report: Option<&mut crate::reporter::RunReport<'_>>,
 ) -> Result<(), String> {
+    if let Some(rr) = report.as_mut() {
+        rr.pod_started("train").await;
+    }
+    let trained = match train_half(client, org_id, env, run_id).await {
+        Ok(t) => {
+            if let Some(rr) = report.as_mut() {
+                rr.pod_succeeded("train", None).await;
+            }
+            t
+        }
+        Err(e) => {
+            if let Some(rr) = report.as_mut() {
+                rr.pod_failed("train", &e).await;
+            }
+            return Err(e);
+        }
+    };
+    if let Some(rr) = report.as_mut() {
+        rr.control_started("register_model").await;
+    }
+    match register_half(client, org_id, run_id, &trained).await {
+        Ok(()) => {
+            if let Some(rr) = report.as_mut() {
+                rr.control_succeeded(
+                    "register_model",
+                    Some(serde_json::json!({
+                        "plan": "model_registered",
+                        "doc": { "label": trained.label },
+                    })),
+                )
+                .await;
+            }
+            Ok(())
+        }
+        Err(e) => {
+            if let Some(rr) = report.as_mut() {
+                rr.control_failed("register_model", &e).await;
+            }
+            Err(e)
+        }
+    }
+}
+
+/// What the train half hands the register half.
+struct TrainedArtifacts {
+    model_json: String,
+    label: String,
+    tf_snapshot_id: String,
+    entity_type_person: bool,
+    config_hash: String,
+    labels_used: usize,
+}
+
+/// The lake-and-files half of `train` (the §3.5 `train` task): everything
+/// through the per-snapshot TF append; no registry write.
+async fn train_half(
+    client: &tokio_postgres::Client,
+    org_id: &str,
+    env: &Value,
+    run_id: &str,
+) -> Result<TrainedArtifacts, String> {
     let catalog = env_str(env, "ER_LAKE_CATALOG")
         .ok_or("org env missing ER_LAKE_CATALOG")?
         .to_string();
@@ -1374,38 +1534,57 @@ pub async fn train_and_register(
     // Append this snapshot's rows to the shared frozen-TF CSV, header skipped —
     // see the note above for why appending rather than replacing.
     append_tf_snapshot(&tf_path, &tf_rows)?;
+    Ok(TrainedArtifacts {
+        model_json,
+        label,
+        tf_snapshot_id,
+        entity_type_person: config.entity_type.is_person(),
+        config_hash: er_config::config_hash(&config),
+        labels_used,
+    })
+}
 
+/// The registry half of `train` (the §3.5 `register_model` control task).
+async fn register_half(
+    client: &tokio_postgres::Client,
+    org_id: &str,
+    run_id: &str,
+    trained: &TrainedArtifacts,
+) -> Result<(), String> {
     let provenance = serde_json::json!({
         "source": "train",
         "job_id": run_id,
-        "config_hash": er_config::config_hash(&config),
-        "trained_from": label,
+        "config_hash": trained.config_hash,
+        "trained_from": trained.label,
         // How `m` was estimated, so a version's origin is legible from the
         // registry rather than inferred. Zero means the EM estimate stands —
         // either the tenant has no match verdicts yet, or reading them failed.
         // Counts the labels actually USED, so it excludes `no_match` and
         // `origin = 'llm'` rows: a number that counted suggestions the training
         // then ignored would misdescribe every draft it appears on.
-        "m_from_labels": labels_used,
+        "m_from_labels": trained.labels_used,
     });
     pg::create_model_version(
         client,
         org_id,
         pg::DEFAULT_MODEL_NAME,
-        if config.entity_type.is_person() {
+        if trained.entity_type_person {
             "person"
         } else {
             "account"
         },
-        &model_json,
-        &label,
-        Some(&tf_snapshot_id),
+        &trained.model_json,
+        &trained.label,
+        Some(&trained.tf_snapshot_id),
         &provenance,
         "trainer",
     )
     .await
     .map_err(|e| format!("registering the trained model: {e}"))?;
-    eprintln!("train {run_id}: registered draft version {label} (not activated)");
+    eprintln!(
+        "train {run_id}: registered draft version {} (not activated)",
+        trained.label
+    );
     Ok(())
 }
 
@@ -1463,64 +1642,144 @@ async fn provision_tenant(
     org: &pg::OrgDetail,
     job_id: &str,
     profile: &Result<Option<crate::provision::Profile>, crate::provision::ProfileError>,
+    mut report: Option<&mut crate::reporter::RunReport<'_>>,
 ) -> Result<(), String> {
-    let profile = match profile {
-        Ok(Some(p)) => p,
-        // The job outlives the request that made it, so the profile can have
-        // been switched off in between. Say so rather than panicking.
-        Ok(None) => {
-            return Err(
-                "auto-provisioning is not configured on this dispatcher (ER_PROVISION_MODE)"
-                    .to_string(),
-            );
-        }
-        Err(e) => return Err(format!("auto-provisioning is misconfigured: {e}")),
-    };
-    let plan = profile.plan(&org.name);
-
-    crate::provision::create_workspace(&plan, &profile.config_template)?;
-
-    match profile.mode {
-        crate::provision::Mode::Local => crate::provision::create_local_lake(&plan)?,
-        crate::provision::Mode::Postgres => {
-            let database = plan
-                .tenant
-                .as_deref()
-                .ok_or("postgres mode produced no tenant database name")?;
-            let maint = profile
-                .maint_dsn
-                .as_deref()
-                .ok_or("postgres mode has no ER_PROVISION_MAINT_DSN")?;
-            create_tenant_database(maint, database).await?;
-        }
+    // §3.5's `create_catalog` control task: the workspace and the tenant
+    // database, idempotent (the pg_database probe and create_dir_all are its
+    // idempotency keys). A profile that is off or misconfigured fails HERE —
+    // it is this step's input.
+    if let Some(rr) = report.as_mut() {
+        rr.control_started("create_catalog").await;
     }
+    let catalog_step: Result<&crate::provision::Profile, String> = async {
+        let profile = match profile {
+            Ok(Some(p)) => p,
+            // The job outlives the request that made it, so the profile can
+            // have been switched off in between. Say so rather than panicking.
+            Ok(None) => {
+                return Err(
+                    "auto-provisioning is not configured on this dispatcher (ER_PROVISION_MODE)"
+                        .to_string(),
+                );
+            }
+            Err(e) => return Err(format!("auto-provisioning is misconfigured: {e}")),
+        };
+        let plan = profile.plan(&org.name);
+
+        crate::provision::create_workspace(&plan, &profile.config_template)?;
+
+        match profile.mode {
+            crate::provision::Mode::Local => crate::provision::create_local_lake(&plan)?,
+            crate::provision::Mode::Postgres => {
+                let database = plan
+                    .tenant
+                    .as_deref()
+                    .ok_or("postgres mode produced no tenant database name")?;
+                let maint = profile
+                    .maint_dsn
+                    .as_deref()
+                    .ok_or("postgres mode has no ER_PROVISION_MAINT_DSN")?;
+                create_tenant_database(maint, database).await?;
+            }
+        }
+        Ok(profile)
+    }
+    .await;
+    let profile = match catalog_step {
+        Ok(p) => {
+            if let Some(rr) = report.as_mut() {
+                rr.control_succeeded(
+                    "create_catalog",
+                    Some(serde_json::json!({
+                        "plan": "catalog_created",
+                        "doc": { "tenant": org.name },
+                    })),
+                )
+                .await;
+            }
+            p
+        }
+        Err(e) => {
+            if let Some(rr) = report.as_mut() {
+                rr.control_failed("create_catalog", &e).await;
+            }
+            return Err(e);
+        }
+    };
 
     // The lake's tables, at this binary's catalog version, with the ledger
     // saying so — before the org is promoted, so a tenant never goes active
     // over a lake whose tables its first job would have had to create. Opened
     // from the org ROW's env, which is what every later job opens, rather than
     // from the plan re-derived here.
-    let env = org.env.clone();
-    let schema = tokio::task::spawn_blocking(move || crate::schema::reconcile_lake_env(&env))
-        .await
-        .unwrap_or_else(|e| Err(format!("dispatcher task panicked: {e}")));
-    let (status, hash, detail) = crate::schema::tenant_state(&schema);
-    crate::schema::record_tenant_state(client, &org.id, status, &hash, Some(&detail))
-        .await
-        .map_err(|e| format!("record {}'s schema state: {e}", org.name))?;
-    schema.map_err(|e| format!("provision {}'s lake schema: {e}", org.name))?;
+    // §3.5's `lake_init` pod task: anything opening a lake is a pod task, and
+    // this is the step that does.
+    if let Some(rr) = report.as_mut() {
+        rr.pod_started("lake_init").await;
+    }
+    let lake_step: Result<(), String> = async {
+        let env = org.env.clone();
+        let schema = tokio::task::spawn_blocking(move || crate::schema::reconcile_lake_env(&env))
+            .await
+            .unwrap_or_else(|e| Err(format!("dispatcher task panicked: {e}")));
+        let (status, hash, detail) = crate::schema::tenant_state(&schema);
+        crate::schema::record_tenant_state(client, &org.id, status, &hash, Some(&detail))
+            .await
+            .map_err(|e| format!("record {}'s schema state: {e}", org.name))?;
+        schema
+            .map(|_| ())
+            .map_err(|e| format!("provision {}'s lake schema: {e}", org.name))
+    }
+    .await;
+    match &lake_step {
+        Ok(()) => {
+            if let Some(rr) = report.as_mut() {
+                rr.pod_succeeded("lake_init", None).await;
+            }
+        }
+        Err(e) => {
+            if let Some(rr) = report.as_mut() {
+                rr.pod_failed("lake_init", e).await;
+            }
+        }
+    }
+    lake_step?;
 
     eprintln!(
         "job {job_id}: provisioned {} ({:?})",
         org.name, profile.mode
     );
+    // §3.5's `activate` control task: the state transition the UI's progress
+    // panel is waiting for.
+    if let Some(rr) = report.as_mut() {
+        rr.control_started("activate").await;
+    }
     // Expected-state guarded: `false` means someone else already moved it (a
     // concurrent retry, or an operator suspending mid-provision), which is not
     // this job's problem to force.
-    pg::set_org_state(client, &org.name, "active", "provisioning")
+    let activate = pg::set_org_state(client, &org.name, "active", "provisioning")
         .await
-        .map_err(|e| format!("promote {} to active: {e}", org.name))?;
-    Ok(())
+        .map_err(|e| format!("promote {} to active: {e}", org.name));
+    match &activate {
+        Ok(_) => {
+            if let Some(rr) = report.as_mut() {
+                rr.control_succeeded(
+                    "activate",
+                    Some(serde_json::json!({
+                        "plan": "org_activated",
+                        "doc": { "activated": true },
+                    })),
+                )
+                .await;
+            }
+        }
+        Err(e) => {
+            if let Some(rr) = report.as_mut() {
+                rr.control_failed("activate", e).await;
+            }
+        }
+    }
+    activate.map(|_| ())
 }
 
 /// `CREATE DATABASE <db>` on the maintenance connection, if absent.
@@ -1554,29 +1813,78 @@ pub async fn drain_and_correct(
     org_id: &str,
     env: &Value,
     run_id: &str,
+    mut report: Option<&mut crate::reporter::RunReport<'_>>,
 ) -> Result<(), String> {
-    let pending = pg::pending_actions(client, org_id)
+    // §3.5's `drain_actions` control task: snapshot the pending staged-action
+    // ids — `init`'s upstream in the compiled graph.
+    if let Some(rr) = report.as_mut() {
+        rr.control_started("drain_actions").await;
+    }
+    let pending = match pg::pending_actions(client, org_id)
         .await
-        .map_err(|e| format!("read pending actions: {e}"))?;
+        .map_err(|e| format!("read pending actions: {e}"))
+    {
+        Ok(pending) => {
+            if let Some(rr) = report.as_mut() {
+                let ids: Vec<&str> = pending.iter().map(|a| a.id.as_str()).collect();
+                rr.control_succeeded(
+                    "drain_actions",
+                    Some(serde_json::json!({
+                        "plan": "drained_actions",
+                        "doc": { "action_ids": ids },
+                    })),
+                )
+                .await;
+            }
+            pending
+        }
+        Err(e) => {
+            if let Some(rr) = report.as_mut() {
+                rr.control_failed("drain_actions", &e).await;
+            }
+            return Err(e);
+        }
+    };
     // Cloned for the blocking half, which owns what it is handed; the borrowed
-    // `env` stays live for the write-back below.
+    // `env` stays live for the write-back below. The engine half's stage events
+    // (apply_staged, then the correct pass's init/reconcile/assemble/finish)
+    // apply to the ledger live, exactly as `run_job`'s do.
     let env_owned = env.clone();
     let run_id_owned = run_id.to_string();
     let now = fmt_epoch(unix_now());
+    let (events_tx, events_rx) = tokio::sync::mpsc::unbounded_channel();
+    let events = report.is_some().then_some(events_tx);
+    let handle = tokio::task::spawn_blocking(move || {
+        apply_and_correct(&env_owned, &pending, &run_id_owned, &now, events)
+    });
+    let joined = match report.as_mut() {
+        Some(rr) => {
+            let (joined, ()) = tokio::join!(handle, crate::reporter::drain_events(rr, events_rx));
+            joined
+        }
+        None => handle.await,
+    };
     let DrainOutcome {
         applied,
         labels,
         resolutions,
         correct,
-    } = tokio::task::spawn_blocking(move || {
-        apply_and_correct(&env_owned, &pending, &run_id_owned, &now)
-    })
-    .await
-    .unwrap_or_else(|e| DrainOutcome::failed(format!("drain task panicked: {e}")));
+    } = joined.unwrap_or_else(|e| DrainOutcome::failed(format!("drain task panicked: {e}")));
+    // §3.5's `settle_actions` control task: mark applied, write the reviewer
+    // labels, queue `review.resolved` — all Postgres rows.
+    if let Some(rr) = report.as_mut() {
+        rr.control_started("settle_actions").await;
+    }
     for id in &applied {
-        pg::mark_action_applied(client, id)
+        if let Err(e) = pg::mark_action_applied(client, id)
             .await
-            .map_err(|e| format!("mark action applied {id}: {e}"))?;
+            .map_err(|e| format!("mark action applied {id}: {e}"))
+        {
+            if let Some(rr) = report.as_mut() {
+                rr.control_failed("settle_actions", &e).await;
+            }
+            return Err(e);
+        }
     }
     // A steward's verdict is a training label (E10b-2). Written here because
     // `pair_label` is a POSTGRES table and the apply half holds the lake
@@ -1618,10 +1926,18 @@ pub async fn drain_and_correct(
     // reason: the decision is in the lake and the corpus has been corrected, so
     // failing the drain to report on it would undo real work.
     if !resolutions.is_empty() {
-        let org_name = pg::get_org_by_id(client, org_id)
+        let org_lookup = pg::get_org_by_id(client, org_id)
             .await
-            .map_err(|e| format!("look up org {org_id}: {e}"))?
-            .map_or_else(|| org_id.to_string(), |o| o.name);
+            .map_err(|e| format!("look up org {org_id}: {e}"));
+        let org_name = match org_lookup {
+            Ok(found) => found.map_or_else(|| org_id.to_string(), |o| o.name),
+            Err(e) => {
+                if let Some(rr) = report.as_mut() {
+                    rr.control_failed("settle_actions", &e).await;
+                }
+                return Err(e);
+            }
+        };
         for (review_id, resolution) in &resolutions {
             if let Err(e) = webhook::emit(
                 client,
@@ -1639,6 +1955,16 @@ pub async fn drain_and_correct(
                 eprintln!("review.resolved for {review_id} not queued: {e}");
             }
         }
+    }
+    if let Some(rr) = report.as_mut() {
+        rr.control_succeeded(
+            "settle_actions",
+            Some(serde_json::json!({
+                "plan": "settled_actions",
+                "doc": { "applied": applied.len() },
+            })),
+        )
+        .await;
     }
     // The outbound write-back (O4): the resulting MASTER record, not a
     // notification that one changed.
@@ -1807,7 +2133,19 @@ fn apply_and_correct(
     pending: &[pg::PendingAction],
     run_id: &str,
     now: &str,
+    events: Option<tokio::sync::mpsc::UnboundedSender<crate::reporter::StageEvent>>,
 ) -> DrainOutcome {
+    // The same observer seam `run_job` uses; `apply_staged` is this half's own
+    // stage, and the correct pass reports its stages through `er_cli`.
+    let channel;
+    let noop = er_cli::NoopObserver;
+    let observer: &dyn er_cli::StageObserver = match events {
+        Some(tx) => {
+            channel = crate::reporter::ChannelObserver::new(tx);
+            &channel
+        }
+        None => &noop,
+    };
     let Some(catalog) = env_str(env, "ER_LAKE_CATALOG") else {
         return DrainOutcome::failed("org env missing ER_LAKE_CATALOG".to_string());
     };
@@ -1821,6 +2159,7 @@ fn apply_and_correct(
     let mut applied = Vec::new();
     let mut labels = Vec::new();
     let mut resolutions = Vec::new();
+    observer.stage_started("apply_staged");
     for staged in pending {
         match er_cli::apply_staged_action_labeled(&session, &staged.id, &staged.action, now) {
             // The actor rides along: a label must name the person who decided,
@@ -1829,11 +2168,13 @@ fn apply_and_correct(
                 labels.extend(derived.into_iter().map(|l| (l, staged.created_by.clone())));
             }
             Err(e) => {
+                let detail = format!("apply {}: {e}", staged.id);
+                observer.stage_failed("apply_staged", &detail);
                 return DrainOutcome {
                     applied,
                     labels,
                     resolutions,
-                    correct: Err(format!("apply {}: {e}", staged.id)),
+                    correct: Err(detail),
                 };
             }
         }
@@ -1852,6 +2193,7 @@ fn apply_and_correct(
         }
         applied.push(staged.id.clone());
     }
+    observer.stage_succeeded("apply_staged", session.latest_snapshot_version().ok());
     let config = match env_str(env, "ER_CONFIG_PATH")
         .ok_or_else(|| "org env missing ER_CONFIG_PATH".to_string())
         .and_then(|path| {
@@ -1871,7 +2213,8 @@ fn apply_and_correct(
             };
         }
     };
-    let correct = er_cli::run_correct(&session, &config, run_id, now).map_err(|e| format!("{e:#}"));
+    let correct = er_cli::run_correct_observed(&session, &config, run_id, now, observer)
+        .map_err(|e| format!("{e:#}"));
     DrainOutcome {
         applied,
         labels,

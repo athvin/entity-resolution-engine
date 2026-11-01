@@ -65,7 +65,7 @@ async fn the_sweep_reconciles_every_active_tenant_and_reports_it() {
     assert_eq!(jobs.len(), 1, "only the active org is swept: {jobs:?}");
     assert_eq!(jobs[0].0, "acme");
     assert_eq!(jobs[0].1.kind, schema::LAKE_MIGRATE_KIND);
-    assert!(dispatcher::dispatch_once(&client).await.unwrap());
+    assert!(dispatcher::dispatch_once(&client, None).await.unwrap());
     let report = schema::wait_for_tenant_migrations(&client, &jobs, Duration::from_secs(30))
         .await
         .unwrap();
@@ -86,7 +86,7 @@ async fn the_sweep_reconciles_every_active_tenant_and_reports_it() {
 
     // ---- phase 2: a current lake reports current, and no second ledger row -
     let jobs = schema::enqueue_tenant_migrations(&client).await.unwrap();
-    assert!(dispatcher::dispatch_once(&client).await.unwrap());
+    assert!(dispatcher::dispatch_once(&client, None).await.unwrap());
     let report = schema::wait_for_tenant_migrations(&client, &jobs, Duration::from_secs(30))
         .await
         .unwrap();
@@ -117,7 +117,7 @@ async fn the_sweep_reconciles_every_active_tenant_and_reports_it() {
         .unwrap();
     drop(session);
     let jobs = schema::enqueue_tenant_migrations(&client).await.unwrap();
-    assert!(dispatcher::dispatch_once(&client).await.unwrap());
+    assert!(dispatcher::dispatch_once(&client, None).await.unwrap());
     let report = schema::wait_for_tenant_migrations(&client, &jobs, Duration::from_secs(30))
         .await
         .unwrap();
@@ -141,7 +141,7 @@ async fn the_sweep_reconciles_every_active_tenant_and_reports_it() {
     let run = pg::enqueue(&client, &acme, "lake_maintain", 0, None, None, None)
         .await
         .unwrap();
-    assert!(dispatcher::dispatch_once(&client).await.unwrap());
+    assert!(dispatcher::dispatch_once(&client, None).await.unwrap());
     let run = pg::get_job(&client, &acme, &run.id).await.unwrap().unwrap();
     assert_eq!(run.state, "failed", "every lake job reconciles first");
     assert!(
