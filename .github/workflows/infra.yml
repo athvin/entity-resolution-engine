@@ -348,6 +348,62 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+  # The required status check for the plan tier, and the reason it exists is a
+  # GitHub behaviour worth stating exactly.
+  #
+  # A MATRIX JOB'S PER-LEG NAMES CANNOT BE REQUIRED STATUS CHECKS. When the
+  # matrix runs, `plan` reports one check-run per leg — `plan (core)`,
+  # `plan (dev)`, … — and those look like perfectly good contexts. When the job
+  # is SKIPPED by its `if:`, GitHub reports a single check-run under the literal,
+  # uninterpolated name `plan (${{ matrix.key }})`. So the per-leg contexts never
+  # report at all on a PR that skips the tier, and a required context that never
+  # reports blocks the PR forever — the same failure mode as a `paths:` filter,
+  # which is the whole thing this workflow's `detect` job exists to avoid.
+  #
+  # That is not theoretical: the four `plan (<env>)` contexts were made required,
+  # and the next non-infra PR (#359, agentic workflows) went unmergeable with
+  # them stuck on "Expected". `fmt + validate (credential-free)` was fine
+  # throughout, because it is not a matrix job and reports `skipped` under its
+  # own name.
+  #
+  # So the required context is this single non-matrix job instead. It reports
+  # `skipped` when the tier is skipped, which branch protection accepts, and
+  # fails when any leg failed.
+  plan-gate:
+    name: terraform plan
+    needs: [detect, plan]
+    if: ${{ !cancelled() && needs.detect.outputs.infra == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: every plan leg must have succeeded
+        env:
+          # For a matrix job this is the aggregate: `success` only if every leg
+          # succeeded, `failure` if any did, `skipped` if the whole job was.
+          RESULT: ${{ needs.plan.result }}
+        # `skipped` is accepted, and only one thing produces it here: a fork PR,
+        # which is issued no `id-token` and so cannot assume the plan role at all
+        # (the `plan` job skips itself for exactly that reason). Treating it as a
+        # failure would make every fork PR unmergeable, which is the bug this job
+        # was added to fix, pointed the other way.
+        run: |
+          echo "plan tier result: $RESULT"
+          case "$RESULT" in
+            success)
+              echo "all plan legs succeeded"
+              ;;
+            skipped)
+              # Single quotes: backticks inside a double-quoted string are
+              # command substitution, and the first draft of this line silently
+              # ran `validate` and printed its empty output instead of the word.
+              echo 'plan tier skipped — a fork PR gets no id-token, so fmt + validate is its gate'
+              ;;
+            *)
+              echo "::error::the terraform plan tier did not succeed (result: $RESULT)"
+              exit 1
+              ;;
+          esac
+
   comment:
     name: plan comment
     needs: [detect, plan]

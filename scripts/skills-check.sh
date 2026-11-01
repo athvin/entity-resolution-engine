@@ -424,6 +424,13 @@ gen_required_checks() {
 	echo "protection accepts as satisfied; that is the whole reason the pattern"
 	echo "exists instead of a workflow-level \`paths:\` filter."
 	echo
+	echo "A context below containing \`\${{ matrix.* }}\` is a MATRIX job, and its"
+	echo "per-leg names (\`plan (core)\`, …) **cannot be required**: when the job is"
+	echo "skipped by its \`if:\`, GitHub reports one check-run under the literal,"
+	echo "uninterpolated name shown here, so the per-leg contexts never report and"
+	echo "a PR that skips the tier blocks forever. Require a non-matrix aggregator"
+	echo "job instead — \`terraform plan\` is the worked example."
+	echo
 	local wf
 	for wf in .github/workflows/*.yml; do
 		echo "### \`$(basename "$wf")\`"
