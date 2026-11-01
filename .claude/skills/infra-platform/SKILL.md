@@ -114,6 +114,14 @@ second is what stops a step added elsewhere inheriting secret-read. If you ever
 need a refreshing plan somewhere new, that is a new role, not a widened
 condition.
 
+Both conditions are **exact matches, never wildcards**, and that is enforced by
+AWS rather than by taste: a condition on `sub` or `job_workflow_ref` whose
+pattern *begins* with `*` makes `CreateRole` fail with
+`MalformedPolicyDocument: … which is not scoped to all`, and an exact `sub`
+match sitting beside it does not satisfy the validator. Where the claim's format
+was uncertain, the fix was to list both candidate forms as literals — not to
+wildcard the uncertain part.
+
 `envs/prod` goes through the second hop because `er-ci-tf-apply` is **denied the
 prod state object** — Terraform cannot apply a stack whose state it cannot read,
 so one deny covers the stack without a list of prod resource types to maintain,

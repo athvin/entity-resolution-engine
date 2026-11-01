@@ -402,10 +402,34 @@ resource "aws_iam_role_policy_attachment" "ci_tf_apply_prod_admin" {
 #     on a push, so it is necessary and not sufficient.
 #   - `job_workflow_ref` pinned to `drift.yml` on `main`. This is the claim that
 #     actually narrows it to one file's jobs, so adding a step to some other
-#     workflow does not quietly inherit secret-read. Matched with `StringLike`
-#     and a leading wildcard on purpose: the repository prefix in that claim is
-#     not the customised immutable `sub` prefix, and pinning a format that AWS
-#     and GitHub have to agree on would be a silent never-match.
+#     workflow does not quietly inherit secret-read.
+#
+# THE SECOND CONDITION IS FULLY LITERAL, WITH BOTH FORMS LISTED, and the first
+# attempt at it is why. It was written as `StringLike` on
+# `*/.github/workflows/drift.yml@refs/heads/main` — a leading wildcard, to avoid
+# betting on whether `job_workflow_ref` carries the customised immutable prefix
+# that `sub` does. AWS refused the role outright:
+#
+#   MalformedPolicyDocument: Trust policy with trusted principal
+#   …oidc-provider/token.actions.githubusercontent.com must evaluate, using
+#   StringEquals, StringLike or StringEqualsIgnoreCase,
+#   token.actions.githubusercontent.com:sub or
+#   token.actions.githubusercontent.com:job_workflow_ref which is not scoped to
+#   all.
+#
+# A pattern that STARTS with `*` is "scoped to all" to that validator, and it
+# refuses on any such condition rather than being satisfied by the exact `sub`
+# match sitting beside it. So the uncertainty it was hedging has to be resolved
+# rather than wildcarded — and listing both candidate forms as literals resolves
+# it better than a wildcard did: `StringEquals` values OR together, there is no
+# wildcard to widen, and if GitHub ever changes the format this role stops being
+# assumable LOUDLY at `AssumeRoleWithWebIdentity` instead of quietly matching
+# more than it should.
+#
+# Note the division of labour between the two conditions, because it is why the
+# second one not pinning the repository costs nothing: `sub` already pins owner
+# and repository by their numeric ids, immutably. `job_workflow_ref` only has to
+# answer "which workflow file, on which ref".
 #
 # Still NO write anywhere — not even the state lock, which is why the drift job
 # passes `-lock=false` exactly as the plan tier does. `plan -refresh-only` does
@@ -433,9 +457,16 @@ data "aws_iam_policy_document" "ci_tf_drift_trust" {
     }
 
     condition {
-      test     = "StringLike"
+      test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:job_workflow_ref"
-      values   = ["*/.github/workflows/drift.yml@refs/heads/main"]
+      values = [
+        # The documented form: OWNER/REPO/.github/workflows/FILE@REF.
+        "athvin/entity-resolution-engine/.github/workflows/drift.yml@refs/heads/main",
+        # And the same claim if it ever carries the immutable ids that this
+        # repository's customised `sub` prefix uses. One of these two matches;
+        # listing both costs nothing and removes the guess.
+        "athvin@273880343/entity-resolution-engine@1334344510/.github/workflows/drift.yml@refs/heads/main",
+      ]
     }
   }
 }
