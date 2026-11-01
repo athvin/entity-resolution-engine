@@ -76,17 +76,25 @@ the result is a flaky **false skip** — the worst failure mode available, becau
 it skips the gate rather than failing it.
 
 `rust.yml`'s detect skips the compile jobs for PRs that touch nothing outside
-`.claude/**` and `infra/terraform/**`. Those two and no more — `docs/` changes
-still run the gate, because `entities` verifies `docs/erd.md` and `lint`
-verifies the generated skill references.
+`.claude/**`, `infra/terraform/**`, `scripts/ci/tf-*` and
+`.github/workflows/infra.yml`. That set and no more — `docs/` changes still run
+the gate, because `entities` verifies `docs/erd.md` and `lint` verifies the
+generated skill references.
 
-Terraform is in that set because nothing in the Rust gate reads it: no crate or
+Each entry is there because nothing in the Rust gate reads it: no crate or
 manifest references `infra/`, and `make check` touches it nowhere. The one real
 coupling is that `skills-check.sh` derives generated skill references *from*
 `infra/terraform/**` — `aws_*` resource counts, IAM users, Pod Identity
 associations, pinned provider versions — so a terraform-only PR can make a
 reference stale. That is covered by the ungated `skills` job rather than by the
 compile jobs, which is precisely why that job exists separately.
+
+`infra.yml` is named **file by file**, not as `^\.github/workflows/`, and the
+distinction is load-bearing: `rust.yml` must keep triggering the gate it
+defines, or a change to the gate would stop reporting on exactly the PR most
+likely to break it. `infra.yml` defines no Rust job and cannot affect the
+workspace build, while an infra-only PR was paying the full ~40-minute backend
+gate — `test` plus the DuckLake e2e — to establish that.
 
 Note the asymmetry between the three implementations, because it decides what a
 new entry does. `rust.yml`'s detect is a **denylist** (count paths *not* under

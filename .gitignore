@@ -22,7 +22,7 @@ frontend/test-results/
 frontend/dev/.state/
 
 # Terraform — local state (until migrated to the S3 backend), caches, and
-# tfvars (root emails stay out of a public repo). Lock files ARE committed.
+# tfvars (root emails stay out of version control). Lock files ARE committed.
 infra/**/.terraform/
 infra/**/*.tfstate
 infra/**/*.tfstate.*

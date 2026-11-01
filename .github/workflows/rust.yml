@@ -134,18 +134,26 @@ jobs:
             echo "code=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # `base...head` = what the PR introduces. Count changed paths NOT under
-          # `.claude/` or `infra/terraform/`; any such file means the backend gate
-          # must run. This is a DENYLIST, so a tree added here is one the Rust
-          # gate stops seeing — only add one that nothing in `make check` reads
-          # (the header explains why these two qualify, and why `docs/` does not).
+          # `base...head` = what the PR introduces. Count changed paths NOT in
+          # the exempt set; any such file means the backend gate must run. This
+          # is a DENYLIST, so an entry added here is one the Rust gate stops
+          # seeing — only add something nothing in `make check` reads (the
+          # header explains why each qualifies, and why `docs/` does not).
+          #
+          # `infra.yml` is named FILE-BY-FILE and not as `^\.github/workflows/`,
+          # which matters: `rust.yml` must keep triggering the gate it defines,
+          # or a change to the gate would stop reporting on exactly the PR most
+          # likely to break it. `infra.yml` defines no Rust job and cannot
+          # affect the workspace build, and an infra-only PR was paying the full
+          # ~40-minute backend gate — `test` plus the DuckLake e2e — to prove it.
+          #
           # `grep -c` reads all input (unlike `grep -q`, which closes the pipe
           # early and can SIGPIPE `git diff` under `pipefail` → a flaky false
           # skip); `|| true` absorbs grep's exit-1-on-zero-matches under `set -e`.
           changed="$(git diff --name-only "$BASE_SHA...$HEAD_SHA")"
           printf 'changed paths:\n%s\n' "$changed"
           noncode="$(printf '%s\n' "$changed" \
-                      | grep -cvE '^(\.claude/|infra/terraform/)' || true)"
+                      | grep -cvE '^(\.claude/|infra/terraform/|scripts/ci/tf-|\.github/workflows/infra\.yml$)' || true)"
           if [ "${noncode:-0}" -gt 0 ]; then
             echo "code=true" >> "$GITHUB_OUTPUT"
           else
@@ -236,9 +244,11 @@ jobs:
           done
           exit 1
       # Pushes on main assume the WRITE role; everything else (PRs) the READ
-      # role. The repository is public, so a PR that could write the cache would
-      # be a path for a contributor branch to plant object code a later main
-      # build consumes. The read role still gives PRs the dependency tree, which
+      # role. A PR that could write the cache would be a path for a branch to
+      # plant object code a later main build consumes, and poisoning outlives
+      # the credential that planted it. The repository is private, so that needs
+      # a collaborator rather than anyone at all — narrower, not closed.
+      # The read role still gives PRs the dependency tree, which
       # is nearly all the value. See sccache.tf for the full reasoning and for
       # the measurement showing a denied write is a counted miss, not a failure.
       - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
@@ -392,9 +402,11 @@ jobs:
           done
           exit 1
       # Pushes on main assume the WRITE role; everything else (PRs) the READ
-      # role. The repository is public, so a PR that could write the cache would
-      # be a path for a contributor branch to plant object code a later main
-      # build consumes. The read role still gives PRs the dependency tree, which
+      # role. A PR that could write the cache would be a path for a branch to
+      # plant object code a later main build consumes, and poisoning outlives
+      # the credential that planted it. The repository is private, so that needs
+      # a collaborator rather than anyone at all — narrower, not closed.
+      # The read role still gives PRs the dependency tree, which
       # is nearly all the value. See sccache.tf for the full reasoning and for
       # the measurement showing a denied write is a counted miss, not a failure.
       - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
@@ -510,9 +522,11 @@ jobs:
           done
           exit 1
       # Pushes on main assume the WRITE role; everything else (PRs) the READ
-      # role. The repository is public, so a PR that could write the cache would
-      # be a path for a contributor branch to plant object code a later main
-      # build consumes. The read role still gives PRs the dependency tree, which
+      # role. A PR that could write the cache would be a path for a branch to
+      # plant object code a later main build consumes, and poisoning outlives
+      # the credential that planted it. The repository is private, so that needs
+      # a collaborator rather than anyone at all — narrower, not closed.
+      # The read role still gives PRs the dependency tree, which
       # is nearly all the value. See sccache.tf for the full reasoning and for
       # the measurement showing a denied write is a counted miss, not a failure.
       - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
@@ -640,9 +654,11 @@ jobs:
           done
           exit 1
       # Pushes on main assume the WRITE role; everything else (PRs) the READ
-      # role. The repository is public, so a PR that could write the cache would
-      # be a path for a contributor branch to plant object code a later main
-      # build consumes. The read role still gives PRs the dependency tree, which
+      # role. A PR that could write the cache would be a path for a branch to
+      # plant object code a later main build consumes, and poisoning outlives
+      # the credential that planted it. The repository is private, so that needs
+      # a collaborator rather than anyone at all — narrower, not closed.
+      # The read role still gives PRs the dependency tree, which
       # is nearly all the value. See sccache.tf for the full reasoning and for
       # the measurement showing a denied write is a counted miss, not a failure.
       - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
@@ -729,9 +745,11 @@ jobs:
           done
           exit 1
       # Pushes on main assume the WRITE role; everything else (PRs) the READ
-      # role. The repository is public, so a PR that could write the cache would
-      # be a path for a contributor branch to plant object code a later main
-      # build consumes. The read role still gives PRs the dependency tree, which
+      # role. A PR that could write the cache would be a path for a branch to
+      # plant object code a later main build consumes, and poisoning outlives
+      # the credential that planted it. The repository is private, so that needs
+      # a collaborator rather than anyone at all — narrower, not closed.
+      # The read role still gives PRs the dependency tree, which
       # is nearly all the value. See sccache.tf for the full reasoning and for
       # the measurement showing a denied write is a counted miss, not a failure.
       - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
@@ -795,9 +813,11 @@ jobs:
           done
           exit 1
       # Pushes on main assume the WRITE role; everything else (PRs) the READ
-      # role. The repository is public, so a PR that could write the cache would
-      # be a path for a contributor branch to plant object code a later main
-      # build consumes. The read role still gives PRs the dependency tree, which
+      # role. A PR that could write the cache would be a path for a branch to
+      # plant object code a later main build consumes, and poisoning outlives
+      # the credential that planted it. The repository is private, so that needs
+      # a collaborator rather than anyone at all — narrower, not closed.
+      # The read role still gives PRs the dependency tree, which
       # is nearly all the value. See sccache.tf for the full reasoning and for
       # the measurement showing a denied write is a counted miss, not a failure.
       - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
