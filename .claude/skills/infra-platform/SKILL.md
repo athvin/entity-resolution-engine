@@ -180,9 +180,14 @@ suite is mutation-checked, so breaking a helper does turn it red.
 
 **`er-platform`** — the application. Notable shapes:
 
-- **One merged pod** runs both the Rust control plane and the Next.js BFF, with
-  the dispatcher **in-process** (`ER_DISPATCH_IN_PROCESS=1`). There is no
-  separate dispatcher Deployment and there are no per-run Kubernetes jobs.
+- **One merged pod** runs the Rust control plane and the Next.js BFF. The
+  dispatcher is **its own Deployment** (`er-dispatcher`, replicas 1/Recreate,
+  batch-orchestration-design §6.7): it is the only identity with Job-create
+  RBAC, so it must not sit on the pod serving the API behind the BFF. Kinds
+  listed in `executor.dagKinds` run as per-attempt Kubernetes Jobs rendered
+  from the chart's task-template ConfigMap; everything else still runs
+  in-process inside the dispatcher pod (the legacy arm, deleted in Phase 4).
+  `ER_DISPATCH_IN_PROCESS=1` survives only in local dev (`make run`).
 - Only the web service is exposed; the API service has no load balancer in any
   environment. The browser reaches the BFF, and only the BFF reaches the API —
   the same boundary the frontend-bff skill describes, enforced here by topology.

@@ -1,0 +1,153 @@
+# The per-attempt Job template (batch-orchestration-design §6.2/§6.8), one
+# file per resource class. THE CHART IS THE ONLY PLACE THIS TEMPLATE LIVES: it
+# is mounted into the dispatcher pod as a volume at a fixed path and never read
+# through the API — which is why `configmaps` stays out of the dispatcher's
+# Role. Helm fills the cluster-level values at install; the `${ER_…}`
+# placeholders are the per-attempt fields `er_k8s::manifest::render_job`
+# substitutes at launch, and the result must parse into a typed batch/v1 Job
+# (an unparseable render is a launch-time refusal, not a cluster-side
+# surprise).
+#
+# Phase 2 reads ONE file (ER_TASK_TEMPLATE_PATH names task-template-S.yaml);
+# per-class selection joins the executor with Phase 3's pipeline kinds, which
+# is also when the per-trigger priorityClass choice lands — until then every
+# class renders `executor.priorityClass.scheduled`.
+#
+# What the spec does NOT contain, by design: the tenant's lake DSN, the
+# control-plane DSN, the operator token, any Secret reference. The §6.4
+# fallback credential (ER_ATTEMPT_TOKEN) is injected per launch by the
+# dispatcher, not templated here.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: er-task-template
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "er-platform.labels" . | nindent 4 }}
+data:
+  {{- range $class, $c := .Values.executor.classes }}
+  task-template-{{ $class }}.yaml: |
+    apiVersion: batch/v1
+    kind: Job
+    metadata:
+      name: ${ER_JOB_NAME}
+      namespace: {{ $.Release.Namespace }}
+      labels:
+        er.dupezero.com/managed: task
+        er.dupezero.com/job: "${ER_JOB_ID}"
+        er.dupezero.com/task: "${ER_TASK_ID}"
+        er.dupezero.com/try: "${ER_TRY_NUMBER}"
+        er.dupezero.com/class: "${ER_RESOURCE_CLASS}"
+        er.dupezero.com/owner: "${ER_OWNER_EPOCH}"
+      annotations:
+        er.dupezero.com/task-instance-id: "${ER_TASK_INSTANCE_ID}"
+        er.dupezero.com/task-id: "${ER_TASK_ID}"
+        er.dupezero.com/structural-fingerprint: "${ER_STRUCTURAL_FINGERPRINT}"
+        er.dupezero.com/policy-hash: "${ER_POLICY_HASH}"
+    spec:
+      # INVARIANT: Postgres owns retry (D-JOBSPEC).
+      backoffLimit: 0
+      # The segment's summed timeouts, substituted per attempt.
+      activeDeadlineSeconds: ${ER_ACTIVE_DEADLINE_SECONDS}
+      ttlSecondsAfterFinished: {{ $.Values.executor.ttlSecondsAfterFinished }}
+      template:
+        metadata:
+          labels:
+            er.dupezero.com/managed: task
+            er.dupezero.com/job: "${ER_JOB_ID}"
+            er.dupezero.com/task: "${ER_TASK_ID}"
+            er.dupezero.com/try: "${ER_TRY_NUMBER}"
+            er.dupezero.com/class: "${ER_RESOURCE_CLASS}"
+            er.dupezero.com/owner: "${ER_OWNER_EPOCH}"
+          annotations:
+            # D-DISRUPT: no voluntary disruption of an hour of DuckDB work.
+            karpenter.sh/do-not-disrupt: "true"
+            er.dupezero.com/task-instance-id: "${ER_TASK_INSTANCE_ID}"
+        spec:
+          restartPolicy: Never
+          serviceAccountName: er-runner
+          automountServiceAccountToken: false
+          # SIGTERM -> rollback -> exit 3; must exceed the longest write-back.
+          terminationGracePeriodSeconds: 120
+          priorityClassName: {{ $.Values.executor.priorityClass.scheduled }}
+          tolerations:
+            - key: er.dupezero.com/runner
+              operator: Equal
+              value: "true"
+              effect: NoSchedule
+          nodeSelector:
+            karpenter.sh/nodepool: {{ $c.nodepool }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: task
+              image: {{ include "er-platform.image" (dict "root" $ "image" $.Values.images.api) }}
+              command: ["er-server", "exec-task"]
+              args:
+                - "--attempt"
+                - "${ER_TASK_INSTANCE_ID}"
+                - "--expect-structural"
+                - "${ER_STRUCTURAL_FINGERPRINT}"
+                - "--through"
+                - "${ER_THROUGH_TASK}"
+              env:
+                - name: ER_CONTROL_URL
+                  value: http://er-api.{{ $.Release.Namespace }}.svc.cluster.local:8000
+                # D-SIZING invariants: threads == requests.cpu, DuckDB memory
+                # strictly below limits.memory, all from the one class entry.
+                - name: ER_DUCKDB_THREADS
+                  value: {{ $c.cpu | quote }}
+                - name: ER_DUCKDB_MEMORY_LIMIT
+                  value: {{ $c.duckdbMemory | quote }}
+                - name: ER_DUCKDB_EXTENSION_DIR
+                  value: /opt/duckdb/extensions
+                - name: ER_POD_NAME
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.name
+                - name: ER_POD_UID
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.uid
+                - name: ER_NODE_NAME
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: spec.nodeName
+              resources:
+                # requests == limits; limits.cpu MUST be set — the namespace
+                # LimitRange defaults it to "1" and the quota caps limits.cpu.
+                # The ephemeral request is the anti-stacking lever (D-SPILL).
+                requests:
+                  cpu: {{ $c.cpu | quote }}
+                  memory: {{ $c.memory }}
+                  ephemeral-storage: {{ $c.spill }}
+                limits:
+                  cpu: {{ $c.cpu | quote }}
+                  memory: {{ $c.memory }}
+                  ephemeral-storage: {{ $c.spill }}
+              # The <= 4 KiB terminal record the watch reads from
+              # terminated.message.
+              terminationMessagePath: /dev/termination-log
+              terminationMessagePolicy: File
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                # DuckDB's CWD-relative spill, on Auto Mode's NVMe RAID0.
+                - name: duckdb-tmp
+                  mountPath: /app/.tmp
+                # D-JOBSPEC: configs, drops, models; "fails late if absent".
+                - name: er-efs
+                  mountPath: {{ $.Values.efs.mountPath }}
+          volumes:
+            - name: duckdb-tmp
+              emptyDir:
+                sizeLimit: {{ $c.spill }}
+            - name: er-efs
+              persistentVolumeClaim:
+                claimName: er-efs
+  {{- end }}

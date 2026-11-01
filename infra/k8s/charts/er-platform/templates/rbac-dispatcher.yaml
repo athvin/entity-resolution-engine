@@ -1,0 +1,42 @@
+# One namespaced Role, never a ClusterRole (batch-orchestration-design §6.7 —
+# D-TENANCY's cluster-wide-create argument). Deliberately absent, each
+# load-bearing: `update` (races status), `deletecollection`, `pods/log`,
+# `pods/exec`, `events` get/watch/create (the list is read on demand for a Job
+# with no pod and the pending-age hint — a third watch stream is not worth its
+# own reconnect bug), `nodes`, `secrets`, `configmaps` (the task template is a
+# mounted volume, never read through the API), `cronjobs`, `tokenreviews`,
+# anything cluster-scoped. Pod `patch` is labels-only merge patches
+# (tombstone/owner/revoked).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: er-dispatcher
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "er-platform.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: [create, get, list, watch, patch, delete]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: [get, list, watch, patch]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: [list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: er-dispatcher
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "er-platform.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: er-dispatcher
+subjects:
+  - kind: ServiceAccount
+    name: er-dispatcher
+    namespace: {{ .Release.Namespace }}

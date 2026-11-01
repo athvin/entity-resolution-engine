@@ -1,0 +1,36 @@
+# The three task priorities (batch-orchestration-design §7.1): priority orders
+# the PENDING queue by who is waiting — a UI "Run now" schedules before a
+# nightly maintenance pass — and never kills: all three are
+# `preemptionPolicy: Never`, so a higher class waits for capacity rather than
+# evicting an hour of a running job's DuckDB work (the same argument as
+# D-DISRUPT). Cluster-scoped, so they live beside the NodePools and are applied
+# by `make cluster-objects`, not by the per-namespace charts.
+#
+# The values leave headroom below the system classes (system-cluster-critical
+# is 2000000000) and between one another for a future class.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: er-task-interactive
+value: 1000
+preemptionPolicy: Never
+globalDefault: false
+description: "A user is watching: UI 'Run now' task attempts (batch-orchestration-design §7.1)."
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: er-task-scheduled
+value: 900
+preemptionPolicy: Never
+globalDefault: false
+description: "Schedule- and upload-triggered task attempts; the default class."
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: er-task-maintenance
+value: 800
+preemptionPolicy: Never
+globalDefault: false
+description: "System housekeeping: lake_maintain and the tenant sweeps."

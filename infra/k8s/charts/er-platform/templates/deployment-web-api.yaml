@@ -1,11 +1,13 @@
-# web-api: the merged service — everything except Postgres in one pod.
-#   - er-server (Rust): the control-plane API on :8000 AND the job dispatcher
-#     IN-PROCESS (ER_DISPATCH_IN_PROCESS=1). Internal only (localhost).
+# web-api: the API and the BFF in one pod.
+#   - er-server (Rust): the control-plane API on :8000. Internal only — the
+#     dispatcher is its own Deployment now (deployment-dispatcher.yaml,
+#     batch-orchestration-design §6.7): the identity that creates Jobs must
+#     not sit on the pod serving the API behind the BFF, so
+#     ER_DISPATCH_IN_PROCESS is gone from this pod.
 #   - er-web (Next.js BFF): the browser-facing tier on :3000, talking to the
 #     API over localhost. The only container exposed via the Ingress.
-# One Deployment replaces the former er-api + er-dispatcher + er-web. Postgres
-# stays its own StatefulSet. At replicas 1 the single-dispatcher model holds, so
-# the strategy is Recreate (never two dispatchers mid-rollout).
+# Postgres stays its own StatefulSet. Recreate: the init container migrates the
+# control-plane schema, and no old code may see a migrated schema mid-flight.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -72,8 +74,6 @@ spec:
               containerPort: 8000
           env:
             {{- include "er-platform.erserverEnv" . | nindent 12 }}
-            - name: ER_DISPATCH_IN_PROCESS
-              value: "1"
           envFrom:
             - secretRef:
                 name: er-erserver-env

@@ -28,26 +28,11 @@ images:
     repository: er-web
     tag: ""
     digest: ""
-  # The image the planned runner Job will run, to be resolved to
-  # ERSERVER_RUNNER_IMAGE on the dispatcher; the same tag-pinning rule as above
-  # will apply. NOT IMPLEMENTED today — there are no runner Jobs and
-  # ERSERVER_RUNNER_IMAGE is read nowhere; see the `dispatcher:` block below.
-  #
-  # `er-pipeline` DOES NOT EXIST. It was the Python-era runner; no workflow
-  # builds it (images.yml's header says so), the last tag was pushed
-  # 2026-10-12, and `docker/Dockerfile` went with the Python tree. This comment
-  # claimed "the image itself is real and is built by CI" until 2026-10-24,
-  # which was wrong in both halves.
-  #
-  # When the launcher is built, the value should be `er-api`: that one image now
-  # carries the engine CLI as `er` and the baked DuckDB extensions — the two
-  # things `er-pipeline` was for — in a single multicall binary (rust/Dockerfile).
-  # The repository below is left as-is rather than silently repointed, because
-  # changing it would look like configuration when nothing reads it.
-  runner:
-    repository: er-pipeline
-    tag: ""
-    digest: ""
+  # There is no separate runner image (batch-orchestration-design §6.2): the
+  # task pod runs the SAME er-api multicall image as `er-server exec-task`,
+  # rendered into the task template by configmap-task-template.yaml. The
+  # Python-era `images.runner` (`er-pipeline`) block is gone with the launcher
+  # it described.
 
 externalSecrets:
   # infra/k8s/secrets/cluster-secret-store.yaml, installed in task 1.6.
@@ -92,33 +77,62 @@ api:
     limits: { cpu: "1", memory: 3Gi }
 
 dispatcher:
-  # replicas and strategy are NOT values: §2's reaper assumes it is alone, so
-  # the template hard-codes replicas 1 / Recreate.
+  # The dispatcher is its own Deployment (deployment-dispatcher.yaml): the
+  # `er-dispatcher` multicall arm under the `er-dispatcher` ServiceAccount,
+  # which is the only identity holding Job-create RBAC
+  # (batch-orchestration-design §6.7 — the Role that creates Jobs must not sit
+  # on the pod that serves the API behind the BFF). replicas and strategy are
+  # NOT values: the single-dispatcher model needs exactly one, so the template
+  # hard-codes replicas 1 / Recreate.
   #
-  # NOT IMPLEMENTED — `concurrency` and `launcher` below describe the k8s Job
-  # launcher, which does not exist. The Rust dispatcher runs the matching
-  # `er-cli` op IN-PROCESS and awaits it inline, one job at a time: see the
-  # module header and `dispatch_once` in
-  # `rust/crates/er-server/src/dispatcher.rs`. The workspace has no `kube` or
-  # `k8s-openapi` dependency at all, so it cannot create a Job.
-  #
-  # Neither ERSERVER_CONCURRENCY nor ERSERVER_LAUNCHER is read by any Rust
-  # source or chart template — they appear only in these comments. They are kept
-  # as the shape the planned launcher will take (infrastructure.md §6, listed as
-  # Phase 2 work), NOT as live configuration. infrastructure.md still describes
-  # the seam in terms of `server/src/erserver/dispatcher.py`, which went with the
-  # Python tree, so treat that citation as stale too.
-  #
-  # Consequence worth knowing when debugging: there is no per-run runner pod, so
-  # a stuck run shows nothing in pod events — read the `er-server` container log
-  # in the merged `web-api` pod instead, and look for a stale
-  # `dispatching`/`running` row holding the org's partial unique index.
-  concurrency: 2 # ERSERVER_CONCURRENCY — not read; see above
+  # Legacy kinds still run IN this pod's process (the in-process arms of
+  # dispatcher.rs); kinds listed in executor.dagKinds run as per-attempt
+  # Kubernetes Jobs instead. A stuck legacy run therefore shows nothing in pod
+  # events — read the `er-dispatcher` pod log and look for a stale
+  # `dispatching`/`running` row holding the org's partial unique index; an
+  # executor-kind run shows up as `er-t-…` Jobs and task_instances rows.
   pollSeconds: "" # ERSERVER_POLL_SECONDS; empty keeps the erserver default (2s)
-  launcher: kubernetes # ERSERVER_LAUNCHER — not read; see above
   resources:
-    requests: { cpu: 100m, memory: 256Mi }
-    limits: { cpu: 500m, memory: 1Gi }
+    # The dispatcher runs whole legacy pipelines in-process (DuckDB included),
+    # so it keeps the API container's defensive memory ceiling until Phase 4
+    # deletes the legacy arm.
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { cpu: "1", memory: 3Gi }
+
+# The Kubernetes executor (batch-orchestration-design §6): one Job per task
+# attempt, rendered by the dispatcher from the mounted task template.
+executor:
+  # The rollout allowlist (§11): job kinds the executor runs as Kubernetes
+  # Jobs; everything else stays on the in-process arms. Comma-separated,
+  # EMPTY BY DEFAULT — the executor is inert until a kind is listed here.
+  # Deleted in Phase 4 when the legacy arm goes.
+  dagKinds: ""
+  # Launch gate (§7.2): queued|running pod rows across orgs. Default 1 until
+  # the account's Standard vCPU quotas are raised — with 8 vCPU and 4 consumed
+  # by app+system nodes, a second runner node of any class cannot provision.
+  inFlightCap: 1
+  # §6.2: Postgres is the record; 300 s covers the watch's 5-min resync.
+  ttlSecondsAfterFinished: 300
+  # §4.5's capacity wait, seconds.
+  quotaWaitSeconds: 30
+  # The class table (infrastructure.md §6.5), rendered into the task template:
+  # requests == limits, ER_DUCKDB_THREADS == cpu and duckdbMemory strictly
+  # below memory in the SAME operation (D-SIZING invariants), spill to the
+  # NVMe-backed emptyDir. L requests 12, never 16: a 16-vCPU node's
+  # allocatable can never fit a 16-core request.
+  classes:
+    S: { cpu: "2", memory: 6Gi, duckdbMemory: 4GB, spill: 40Gi, nodepool: runner-sm }
+    M: { cpu: "6", memory: 10Gi, duckdbMemory: 6GB, spill: 150Gi, nodepool: runner-sm }
+    L: { cpu: "12", memory: 14Gi, duckdbMemory: 8GB, spill: 400Gi, nodepool: runner-l }
+  # §7.1: priority orders the pending queue and never kills (all three classes
+  # are preemptionPolicy: Never; infra/k8s/priorityclasses/, applied by
+  # `make cluster-objects` because PriorityClass is cluster-scoped). Phase 2
+  # renders `scheduled` into every template; the per-trigger choice
+  # (interactive for UI "Run now", maintenance for lake_maintain) is Phase 3.
+  priorityClass:
+    interactive: er-task-interactive
+    scheduled: er-task-scheduled
+    maintenance: er-task-maintenance
 
 # The schema reconciliation the deploy drives (entity-framework-design.md,
 # "Upgrades"). The control plane migrates in the web-api pod's init container
