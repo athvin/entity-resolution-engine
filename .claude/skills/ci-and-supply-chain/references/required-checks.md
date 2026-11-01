@@ -42,6 +42,12 @@ uninterpolated name shown here, so the per-leg contexts never report and
 a PR that skips the tier blocks forever. Require a non-matrix aggregator
 job instead — `terraform plan` is the worked example.
 
+### `drift.yml`
+
+| Job | Status-check context | Timeout | Condition |
+|---|---|---|---|
+| `refresh` | drift (${{ matrix.key }}) | 20 | `always` |
+
 ### `frontend.yml`
 
 | Job | Status-check context | Timeout | Condition |

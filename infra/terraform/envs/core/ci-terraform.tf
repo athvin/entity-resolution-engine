@@ -383,8 +383,139 @@ resource "aws_iam_role_policy_attachment" "ci_tf_apply_prod_admin" {
   policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
 }
 
+# --- drift: the one role allowed to refresh -----------------------------------
+#
+# §14.2's plan tier runs `-refresh=false`, and the reason is recorded above: a
+# refreshing plan reads secret VALUES, and `er-ci-tf-plan` is assumable from any
+# PR branch — which can edit the workflow it runs under. Granting that role
+# secret-read would turn drift detection into a credential-exfiltration path.
+#
+# So the cost of that decision is stated honestly in §14.2: out-of-band drift is
+# not detected on a PR. This role pays it back. It CAN refresh, including the two
+# reads `ReadOnlyAccess` deliberately omits, and it is safe to grant them because
+# of who can reach it: scheduled runs of ONE workflow on `main`, and nothing else.
+#
+# WHY THAT IS NOT THE SAME EXPOSURE. Two conditions, and both are needed:
+#
+#   - `sub` pinned to `:ref:refs/heads/main`. No PR branch can mint that claim.
+#     On its own it would still admit any `main`-ref job, including the plan tier
+#     on a push, so it is necessary and not sufficient.
+#   - `job_workflow_ref` pinned to `drift.yml` on `main`. This is the claim that
+#     actually narrows it to one file's jobs, so adding a step to some other
+#     workflow does not quietly inherit secret-read. Matched with `StringLike`
+#     and a leading wildcard on purpose: the repository prefix in that claim is
+#     not the customised immutable `sub` prefix, and pinning a format that AWS
+#     and GitHub have to agree on would be a silent never-match.
+#
+# Still NO write anywhere — not even the state lock, which is why the drift job
+# passes `-lock=false` exactly as the plan tier does. `plan -refresh-only` does
+# not write state; only `apply -refresh-only` would, and nothing here applies.
+data "aws_iam_policy_document" "ci_tf_drift_trust" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [module.github_oidc.oidc_provider_arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = ["${local.ci_tf_repo}:ref:refs/heads/main"]
+    }
+
+    condition {
+      test     = "StringLike"
+      variable = "token.actions.githubusercontent.com:job_workflow_ref"
+      values   = ["*/.github/workflows/drift.yml@refs/heads/main"]
+    }
+  }
+}
+
+resource "aws_iam_role" "ci_tf_drift" {
+  name                 = "er-ci-tf-drift"
+  max_session_duration = 3600
+  assume_role_policy   = data.aws_iam_policy_document.ci_tf_drift_trust.json
+}
+
+resource "aws_iam_role_policy_attachment" "ci_tf_drift_readonly" {
+  role       = aws_iam_role.ci_tf_drift.name
+  policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"
+}
+
+data "aws_iam_policy_document" "ci_tf_drift_refresh" {
+  # The state, read-only, both prefixes — same as the plan role.
+  statement {
+    effect  = "Allow"
+    actions = ["s3:GetObject"]
+    resources = [
+      "${local.tf_state_arn}/envs/*.tfstate",
+      "${local.tf_state_arn}/bootstrap/*.tfstate",
+    ]
+  }
+
+  statement {
+    effect    = "Allow"
+    actions   = ["s3:ListBucket"]
+    resources = [local.tf_state_arn]
+  }
+
+  statement {
+    effect    = "Allow"
+    actions   = ["kms:Decrypt", "kms:DescribeKey"]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "kms:RequestAlias"
+      values   = ["alias/er-terraform-state"]
+    }
+  }
+
+  # THE TWO READS THAT MAKE THIS ROLE DIFFERENT, and the two that broke the very
+  # first run of the plan gate (#354). AWS leaves `GetSecretValue` out of
+  # `ReadOnlyAccess` precisely because reading a secret's VALUE is the sensitive
+  # action — so a refreshing plan over `aws_secretsmanager_secret_version` needs
+  # it named explicitly, and the CUR 2.0 export needs `GetExport`.
+  #
+  # Scoped to this account's own secrets rather than `*`: nothing here refreshes
+  # a secret it does not own, and a wildcard would be a strictly larger grant for
+  # no behaviour.
+  statement {
+    effect  = "Allow"
+    actions = ["secretsmanager:GetSecretValue"]
+    resources = [
+      "arn:aws:secretsmanager:*:${local.mgmt_account_id}:secret:er/*",
+    ]
+  }
+
+  statement {
+    effect    = "Allow"
+    actions   = ["bcm-data-exports:GetExport"]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "ci_tf_drift_refresh" {
+  name   = "terraform-refresh-read"
+  role   = aws_iam_role.ci_tf_drift.id
+  policy = data.aws_iam_policy_document.ci_tf_drift_refresh.json
+}
+
 output "ci_tf_plan_role_arn" {
   value = aws_iam_role.ci_tf_plan.arn
+}
+
+output "ci_tf_drift_role_arn" {
+  value = aws_iam_role.ci_tf_drift.arn
 }
 
 output "ci_tf_apply_prod_role_arn" {

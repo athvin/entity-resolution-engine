@@ -5,8 +5,11 @@ description: Explains this repo's CI topology and dependency gates — the `dete
 
 # CI and the supply chain
 
-Four workflows: `rust`, `frontend`, `infra`, `images`. Jobs across the first
-three are required status checks, so a change is not mergeable until they pass.
+Five workflows: `rust`, `frontend`, `infra`, `images`, `drift`. Jobs across the
+first three are required status checks, so a change is not mergeable until they
+pass. `drift` runs only on a schedule and `workflow_dispatch`, so it can never
+be required — a red run there is information about the account disagreeing with
+its state file, not about a diff.
 Branch protection is repository configuration rather than a file in the tree, so
 `gh api repos/:owner/:repo/branches/main/protection` is the only authority on
 which; the per-job contexts, timeouts and conditions are generated:

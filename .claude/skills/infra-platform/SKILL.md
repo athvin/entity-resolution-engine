@@ -93,13 +93,26 @@ table and the diffs → `apply` on `main` only, unattended. There are no
 repository secrets; every identity is a federated OIDC role. Do not run a
 recurring `terraform apply` by hand — merge is the trigger.
 
-Three roles, and which one applies what is not uniform:
+Four roles, and which one does what is not uniform:
 
-| Role | Reachable from | Applies |
+| Role | Reachable from | Does |
 |---|---|---|
-| `er-ci-tf-plan` | any ref, OIDC | nothing — ReadOnlyAccess + state read |
-| `er-ci-tf-apply` | `main` only, via the `infra-apply-*` environments | `core`, `dev` |
-| `er-ci-tf-apply-prod` | `er-ci-tf-apply`, or `ProdAdmin` break-glass | `prod` |
+| `er-ci-tf-plan` | any ref, OIDC | plans, `-refresh=false` — ReadOnlyAccess + state read |
+| `er-ci-tf-apply` | `main` only, via the `infra-apply-*` environments | applies `core`, `dev` |
+| `er-ci-tf-apply-prod` | `er-ci-tf-apply`, or `ProdAdmin` break-glass | applies `prod` |
+| `er-ci-tf-drift` | `drift.yml` on `main` only | `plan -refresh-only`, daily |
+
+**Only `er-ci-tf-drift` may refresh**, and that is the whole reason it exists.
+The plan tier runs `-refresh=false` because a refreshing plan reads secret
+*values* and `er-ci-tf-plan` is assumable from any PR branch — which can edit
+the workflow it runs under. The drift role holds the two reads `ReadOnlyAccess`
+omits (`secretsmanager:GetSecretValue`, `bcm-data-exports:GetExport`), which is
+safe only because its trust needs **two** conditions: `sub` pinned to
+`refs/heads/main`, *and* `job_workflow_ref` pinned to `drift.yml`. The first
+alone would admit any `main`-ref job including the plan tier on a push; the
+second is what stops a step added elsewhere inheriting secret-read. If you ever
+need a refreshing plan somewhere new, that is a new role, not a widened
+condition.
 
 `envs/prod` goes through the second hop because `er-ci-tf-apply` is **denied the
 prod state object** — Terraform cannot apply a stack whose state it cannot read,
