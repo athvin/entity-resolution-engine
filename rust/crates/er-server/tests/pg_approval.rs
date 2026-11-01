@@ -205,6 +205,7 @@ async fn only_approved_reviews_are_staged_and_only_while_the_tag_lives() {
                 &pg::connect(&dsn).await.unwrap(),
                 &Ok(None),
                 &er_server::mail::Mailer::off(),
+                None,
             )
             .await
             .unwrap()

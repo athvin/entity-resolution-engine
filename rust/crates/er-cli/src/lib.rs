@@ -3661,6 +3661,77 @@ pub fn run_all(session: &Session, config: &Config, inputs: &PipelineInputs) -> R
     )
 }
 
+/// [`run_all`] with a [`StageObserver`]: the one-member wrapper over
+/// [`run_all_ensemble_observed`], the way [`run_all`] wraps
+/// [`run_all_ensemble`].
+///
+/// # Errors
+/// As [`run_all`].
+pub fn run_all_observed(
+    session: &Session,
+    config: &Config,
+    inputs: &PipelineInputs,
+    observer: &dyn StageObserver,
+) -> Result<()> {
+    run_all_ensemble_observed(
+        session,
+        config,
+        inputs,
+        &[EnsembleMember {
+            model: MatchModel { ..*inputs.model },
+            name: SOLE_MEMBER_NAME,
+        }],
+        observer,
+    )
+}
+
+/// A per-stage progress seam for the composed pipeline entries ([`run_all`],
+/// [`run_all_ensemble`], [`run_correct`]): the caller observes stage
+/// boundaries without the engine knowing who listens. Stage names are the
+/// task vocabulary of `er_schema::model::RUN_STAGES` (batch-orchestration-
+/// design §3.1); the dispatcher's attempt reporter is the consumer, and
+/// [`NoopObserver`] is everyone else. Observation must never change a run:
+/// implementations do their own error handling and return nothing.
+pub trait StageObserver {
+    fn stage_started(&self, stage: &str);
+    /// `snapshot_end` is the lake head after the stage's last commit; `None`
+    /// when it could not be read (never fails the stage).
+    fn stage_succeeded(&self, stage: &str, snapshot_end: Option<i64>);
+    fn stage_failed(&self, stage: &str, detail: &str);
+}
+
+/// The observer every caller without a ledger uses: the CLI, the tests, and
+/// every pre-reporter call site.
+pub struct NoopObserver;
+impl StageObserver for NoopObserver {
+    fn stage_started(&self, _stage: &str) {}
+    fn stage_succeeded(&self, _stage: &str, _snapshot_end: Option<i64>) {}
+    fn stage_failed(&self, _stage: &str, _detail: &str) {}
+}
+
+/// Bracket one stage group for the observer: started before, succeeded with
+/// the lake head after, failed with the chain-flattened text on error. The
+/// snapshot read is catalog introspection (one `ducklake_snapshots` probe),
+/// never a relation read.
+fn observed<T>(
+    session: &Session,
+    observer: &dyn StageObserver,
+    stage: &str,
+    f: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    observer.stage_started(stage);
+    match f() {
+        Ok(v) => {
+            observer.stage_succeeded(stage, session.latest_snapshot_version().ok());
+            Ok(v)
+        }
+        Err(e) => {
+            observer.stage_failed(stage, &format!("{e:#}"));
+            Err(e)
+        }
+    }
+}
+
 /// [`run_all`] for an ENSEMBLE: `members` is the published config's `models:`
 /// list resolved against the registry, in config order. A one-member slice is
 /// exactly [`run_all`], which is how the single-model path keeps its behaviour
@@ -3674,97 +3745,126 @@ pub fn run_all_ensemble(
     inputs: &PipelineInputs,
     members: &[EnsembleMember],
 ) -> Result<()> {
+    run_all_ensemble_observed(session, config, inputs, members, &NoopObserver)
+}
+
+/// [`run_all_ensemble`] with a [`StageObserver`]: the stage groups below are
+/// the task vocabulary the dispatcher's attempt ledger records (batch-
+/// orchestration-design §3.1), bracketed so the observer sees every boundary
+/// without the stages knowing it exists.
+///
+/// # Errors
+/// Propagates every stage's error, as [`run_all`] does.
+pub fn run_all_ensemble_observed(
+    session: &Session,
+    config: &Config,
+    inputs: &PipelineInputs,
+    members: &[EnsembleMember],
+    observer: &dyn StageObserver,
+) -> Result<()> {
     assert!(
         !members.is_empty(),
         "a run always scores with at least one member"
     );
-    // The run ledger records the ENSEMBLE's identity, not one member's, because
-    // that string is what the drift guard compares across runs — see
-    // `ensemble_identity`.
-    let (model_version, tf_snapshot_id) = ensemble_identity(members);
-    let resolved = resolve_ensemble(config, members);
-    let resolved_json = resolved.map(|r| serde_json::to_string(&r).unwrap_or_default());
-    write_run_row(
-        session,
-        config,
-        inputs.run_id,
-        inputs.run_at,
-        inputs.mode,
-        &model_version,
-        &tf_snapshot_id,
-        Some(&lexicon_fingerprint(inputs.lexicon)),
-        inputs.rebuild_reason,
-        resolved_json.as_deref(),
-    )?;
-    seed_lexicon(session, inputs.lexicon)?;
-    for (source, csv) in inputs.deliveries {
-        run_ingest(
+    observed(session, observer, "init", || {
+        // The run ledger records the ENSEMBLE's identity, not one member's,
+        // because that string is what the drift guard compares across runs —
+        // see `ensemble_identity`.
+        let (model_version, tf_snapshot_id) = ensemble_identity(members);
+        let resolved = resolve_ensemble(config, members);
+        let resolved_json = resolved.map(|r| serde_json::to_string(&r).unwrap_or_default());
+        write_run_row(
             session,
             config,
-            source,
-            csv,
             inputs.run_id,
-            inputs.ingested_at,
-            false,
+            inputs.run_at,
+            inputs.mode,
+            &model_version,
+            &tf_snapshot_id,
+            Some(&lexicon_fingerprint(inputs.lexicon)),
+            inputs.rebuild_reason,
+            resolved_json.as_deref(),
         )?;
-        write_ingest_batch(
-            session,
-            inputs.run_id,
-            source,
-            source,
-            false,
-            inputs.ingested_at,
-        )?;
-    }
-    run_standardize(session, config, inputs.run_at)?;
-    // Incremental now covers ensembles too (E5b-2b); see
-    // `run_match_ensemble_incremental` for what had to change.
-    if inputs.mode == er_versions::MODE_INCREMENTAL || inputs.segment.is_some() {
-        let deltas = run_match_ensemble_incremental(
-            session,
-            config,
-            members,
-            config.thresholds.review_low,
-            inputs.run_id,
-            inputs.scored_at,
-            inputs.segment.map(|(_, predicate)| predicate),
-        )?;
-        for (member, delta) in members.iter().zip(&deltas) {
-            eprintln!(
-                "run {}: {} match for member '{}' over {}/{} records, {} scores invalidated{}{}",
+        seed_lexicon(session, inputs.lexicon)?;
+        Ok(())
+    })?;
+    observed(session, observer, "ingest", || {
+        for (source, csv) in inputs.deliveries {
+            run_ingest(
+                session,
+                config,
+                source,
+                csv,
                 inputs.run_id,
-                delta.mode,
-                member.name,
-                delta.delta_records,
-                delta.corpus_records,
-                delta.invalidated_scores,
-                inputs
-                    .segment
-                    .map(|(name, _)| format!(", segment {name}"))
-                    .unwrap_or_default(),
-                delta
-                    .full_reason
-                    .as_ref()
-                    .map(|r| format!(" ({r})"))
-                    .unwrap_or_default(),
-            );
+                inputs.ingested_at,
+                false,
+            )?;
+            write_ingest_batch(
+                session,
+                inputs.run_id,
+                source,
+                source,
+                false,
+                inputs.ingested_at,
+            )?;
         }
-    } else {
-        run_match_ensemble(
-            session,
-            config,
-            members,
-            config.thresholds.review_low,
-            inputs.run_id,
-            inputs.scored_at,
-        )?;
-    }
-    // Screening, between match and reconcile: the first moment the verdicts
-    // exist (the receipt is written during ingest, where they cannot) and
-    // before reconcile changes the entity shape they describe.
-    if !inputs.deliveries.is_empty() {
-        screen_deliveries(session, config, inputs);
-    }
+        Ok(())
+    })?;
+    observed(session, observer, "standardize", || {
+        run_standardize(session, config, inputs.run_at)?;
+        Ok(())
+    })?;
+    observed(session, observer, "match", || {
+        // Incremental now covers ensembles too (E5b-2b); see
+        // `run_match_ensemble_incremental` for what had to change.
+        if inputs.mode == er_versions::MODE_INCREMENTAL || inputs.segment.is_some() {
+            let deltas = run_match_ensemble_incremental(
+                session,
+                config,
+                members,
+                config.thresholds.review_low,
+                inputs.run_id,
+                inputs.scored_at,
+                inputs.segment.map(|(_, predicate)| predicate),
+            )?;
+            for (member, delta) in members.iter().zip(&deltas) {
+                eprintln!(
+                    "run {}: {} match for member '{}' over {}/{} records, {} scores invalidated{}{}",
+                    inputs.run_id,
+                    delta.mode,
+                    member.name,
+                    delta.delta_records,
+                    delta.corpus_records,
+                    delta.invalidated_scores,
+                    inputs
+                        .segment
+                        .map(|(name, _)| format!(", segment {name}"))
+                        .unwrap_or_default(),
+                    delta
+                        .full_reason
+                        .as_ref()
+                        .map(|r| format!(" ({r})"))
+                        .unwrap_or_default(),
+                );
+            }
+        } else {
+            run_match_ensemble(
+                session,
+                config,
+                members,
+                config.thresholds.review_low,
+                inputs.run_id,
+                inputs.scored_at,
+            )?;
+        }
+        // Screening, between match and reconcile: the first moment the verdicts
+        // exist (the receipt is written during ingest, where they cannot) and
+        // before reconcile changes the entity shape they describe.
+        if !inputs.deliveries.is_empty() {
+            screen_deliveries(session, config, inputs);
+        }
+        Ok(())
+    })?;
     // Reconcile and golden stay whole-corpus in both modes. That is a choice,
     // not an omission: clustering is a function of the edge set, and connected
     // components over the whole (small) above-threshold graph is linear in edges
@@ -3772,21 +3872,31 @@ pub fn run_all_ensemble(
     // is the QUADRATIC pair generation in match. Re-clustering from the full
     // edge set also means the partition cannot drift from what a full run would
     // produce, which is the property the equivalence gate asserts.
-    run_reconcile(session, config, inputs.run_id, inputs.run_at)?;
-    run_golden(session, config, inputs.run_at)?;
-    write_reviews(session, config, inputs.run_id, inputs.run_at)?;
-    // Metrics last, and best-effort: the run's results are already written, so
-    // a failure to describe them must not fail the run that produced them.
-    if let Err(e) = write_metric_snapshot(session, config, inputs.run_id, inputs.run_at) {
-        eprintln!("run {}: metric snapshot failed: {e:#}", inputs.run_id);
-    }
-    // Quality scoring, when configured. Best-effort: the run's results are
-    // already in the lake, so failing to DESCRIBE them must not fail the run
-    // that produced them.
-    if let Err(e) = write_record_quality(session, config, inputs.run_id, inputs.run_at) {
-        eprintln!("run {}: quality scoring failed: {e:#}", inputs.run_id);
-    }
-    write_run_end(session, inputs.run_id, inputs.run_at)?;
+    observed(session, observer, "reconcile", || {
+        run_reconcile(session, config, inputs.run_id, inputs.run_at)?;
+        Ok(())
+    })?;
+    observed(session, observer, "assemble", || {
+        run_golden(session, config, inputs.run_at)?;
+        write_reviews(session, config, inputs.run_id, inputs.run_at)?;
+        // Metrics last, and best-effort: the run's results are already written,
+        // so a failure to describe them must not fail the run that produced
+        // them.
+        if let Err(e) = write_metric_snapshot(session, config, inputs.run_id, inputs.run_at) {
+            eprintln!("run {}: metric snapshot failed: {e:#}", inputs.run_id);
+        }
+        // Quality scoring, when configured. Best-effort: the run's results are
+        // already in the lake, so failing to DESCRIBE them must not fail the
+        // run that produced them.
+        if let Err(e) = write_record_quality(session, config, inputs.run_id, inputs.run_at) {
+            eprintln!("run {}: quality scoring failed: {e:#}", inputs.run_id);
+        }
+        Ok(())
+    })?;
+    observed(session, observer, "finish", || {
+        write_run_end(session, inputs.run_id, inputs.run_at)?;
+        Ok(())
+    })?;
     Ok(())
 }
 
@@ -3801,49 +3911,76 @@ pub fn run_all_ensemble(
 /// Returns an error if there is no prior run to correct (nothing has been scored
 /// yet); otherwise propagates the reconcile / golden / lake errors.
 pub fn run_correct(session: &Session, config: &Config, run_id: &str, run_at: &str) -> Result<()> {
-    let latest = er_entities::run::read::latest_live(session.connection()).map_err(|e| {
-        if is_missing_table(&e.to_string()) {
-            anyhow::anyhow!("no prior run to correct; run a full run first")
-        } else {
-            e.into()
-        }
-    })?;
-    // A trained run always stamps both; an untrained prior run corrects with
-    // empty identity rather than the old stringified-NULL literal.
-    let (model_version, tf_snapshot_id, resolved) = latest
-        .into_iter()
-        .next()
-        .map(|r| {
-            (
-                r.model_version.unwrap_or_default(),
-                r.tf_snapshot_id.unwrap_or_default(),
-                // E5b-2c: the thresholds travel with the run that applied them.
-                // THIS is why the resolved ensemble is on the run row rather
-                // than looked up from the registry — a correction pass has only
-                // the lake in scope, so a registry lookup is not available to
-                // it, and re-reading today's config would re-cluster yesterday's
-                // scores under a threshold that was never applied to them.
-                r.resolved_ensemble.map(|v| v.to_string()),
-            )
-        })
-        .ok_or_else(|| anyhow::anyhow!("no prior run to correct; run a full run first"))?;
+    run_correct_observed(session, config, run_id, run_at, &NoopObserver)
+}
 
-    write_run_row(
-        session,
-        config,
-        run_id,
-        run_at,
-        "correct",
-        &model_version,
-        &tf_snapshot_id,
-        None,
-        Some(er_versions::REBUILD_CORRECTION_PASS),
-        resolved.as_deref(),
-    )?;
-    run_reconcile(session, config, run_id, run_at)?;
-    run_golden(session, config, run_at)?;
-    write_reviews(session, config, run_id, run_at)?;
-    write_run_end(session, run_id, run_at)?;
+/// [`run_correct`] with a [`StageObserver`]; the stage groups mirror the
+/// `correct` DAG's task vocabulary (init, reconcile, assemble, finish).
+///
+/// # Errors
+/// As [`run_correct`].
+pub fn run_correct_observed(
+    session: &Session,
+    config: &Config,
+    run_id: &str,
+    run_at: &str,
+    observer: &dyn StageObserver,
+) -> Result<()> {
+    observed(session, observer, "init", || {
+        let latest = er_entities::run::read::latest_live(session.connection()).map_err(|e| {
+            if is_missing_table(&e.to_string()) {
+                anyhow::anyhow!("no prior run to correct; run a full run first")
+            } else {
+                e.into()
+            }
+        })?;
+        // A trained run always stamps both; an untrained prior run corrects with
+        // empty identity rather than the old stringified-NULL literal.
+        let (model_version, tf_snapshot_id, resolved) = latest
+            .into_iter()
+            .next()
+            .map(|r| {
+                (
+                    r.model_version.unwrap_or_default(),
+                    r.tf_snapshot_id.unwrap_or_default(),
+                    // E5b-2c: the thresholds travel with the run that applied them.
+                    // THIS is why the resolved ensemble is on the run row rather
+                    // than looked up from the registry — a correction pass has only
+                    // the lake in scope, so a registry lookup is not available to
+                    // it, and re-reading today's config would re-cluster yesterday's
+                    // scores under a threshold that was never applied to them.
+                    r.resolved_ensemble.map(|v| v.to_string()),
+                )
+            })
+            .ok_or_else(|| anyhow::anyhow!("no prior run to correct; run a full run first"))?;
+
+        write_run_row(
+            session,
+            config,
+            run_id,
+            run_at,
+            "correct",
+            &model_version,
+            &tf_snapshot_id,
+            None,
+            Some(er_versions::REBUILD_CORRECTION_PASS),
+            resolved.as_deref(),
+        )?;
+        Ok(())
+    })?;
+    observed(session, observer, "reconcile", || {
+        run_reconcile(session, config, run_id, run_at)?;
+        Ok(())
+    })?;
+    observed(session, observer, "assemble", || {
+        run_golden(session, config, run_at)?;
+        write_reviews(session, config, run_id, run_at)?;
+        Ok(())
+    })?;
+    observed(session, observer, "finish", || {
+        write_run_end(session, run_id, run_at)?;
+        Ok(())
+    })?;
     Ok(())
 }
 

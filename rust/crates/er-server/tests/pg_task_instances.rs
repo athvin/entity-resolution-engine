@@ -82,7 +82,8 @@ async fn the_task_ledger_statements_hold_their_contracts() {
     assert_eq!(claimed.state, "dispatching");
     let planned = taskpg::plan(&mut client, &claimed, &dag, EPOCH, Some("sha256:test"))
         .await
-        .unwrap();
+        .unwrap()
+        .expect("the claim just handed out is plannable");
     assert_eq!(planned.state, "running");
     assert_eq!(planned.run_id.as_deref(), Some(job.id.as_str()));
     assert_eq!(

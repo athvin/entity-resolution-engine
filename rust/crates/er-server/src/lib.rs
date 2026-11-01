@@ -41,6 +41,7 @@ pub mod openapi;
 pub mod pg;
 pub mod provision;
 pub mod read;
+pub mod reporter;
 pub mod s3_ingest;
 pub mod schema;
 pub mod taskpg;

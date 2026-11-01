@@ -228,6 +228,7 @@ async fn entity_events_are_aggregated_per_kind_and_expand_through_the_detail_end
         &client,
         &Ok(None),
         &er_server::mail::Mailer::off(),
+        None,
     )
     .await
     .unwrap();
@@ -351,7 +352,8 @@ async fn entity_events_are_aggregated_per_kind_and_expand_through_the_detail_end
         er_server::dispatcher::dispatch_once_with(
             &client,
             &Ok(None),
-            &er_server::mail::Mailer::off()
+            &er_server::mail::Mailer::off(),
+            None,
         )
         .await
         .unwrap()

@@ -41,6 +41,17 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     pg::set_actor(&client, "er-dispatcher").await?;
     let http = crate::webhook::client();
 
+    // The attempt ledger's reporter (batch-orchestration-design §11 Phase 1),
+    // on its own connection so stage events apply while a run's blocking half
+    // is live. Best-effort from birth: no reporter just means no ledger rows.
+    let reporter = match crate::reporter::AttemptReporter::connect(&dsn).await {
+        Ok(r) => Some(r),
+        Err(e) => {
+            eprintln!("er-dispatcher: attempt reporter disabled (connect failed): {e}");
+            None
+        }
+    };
+
     // SIGTERM -> drain: finish the in-flight job, then exit at the next loop top.
     let term = Arc::new(AtomicBool::new(false));
     {
@@ -55,6 +66,6 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    dispatcher::run_loop(&client, &http, &term).await?;
+    dispatcher::run_loop(&client, &http, &term, reporter).await?;
     Ok(())
 }

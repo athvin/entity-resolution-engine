@@ -35,6 +35,7 @@ mod mcp_manifest;
 mod mock_contract;
 mod multicall;
 mod pg_approval;
+mod pg_attempt_reporter;
 mod pg_auth;
 mod pg_config;
 mod pg_ddl_log;

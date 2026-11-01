@@ -223,6 +223,7 @@ async fn suppress_excludes_a_record_and_retract_restores_it() {
         &oid(&client, "acme").await,
         &env,
         "01OVCORRECT00000000000000001",
+        None,
     )
     .await
     .unwrap();
@@ -254,6 +255,7 @@ async fn suppress_excludes_a_record_and_retract_restores_it() {
         &oid(&client, "acme").await,
         &env,
         "01OVCORRECT00000000000000002",
+        None,
     )
     .await
     .unwrap();

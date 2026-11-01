@@ -148,7 +148,7 @@ async fn training_registers_a_draft_and_leaves_the_active_model_alone() {
 
     // The arm that did not exist. Before this, the job's outcome was
     // "dispatcher does not handle job kind 'train'".
-    dispatcher::train_and_register(&client, &org_id, &env, "01TRAINJOB00000000000000000")
+    dispatcher::train_and_register(&client, &org_id, &env, "01TRAINJOB00000000000000000", None)
         .await
         .expect("training should succeed");
 
@@ -301,7 +301,7 @@ async fn training_registers_a_draft_and_leaves_the_active_model_alone() {
         .expect("a label is recordable");
     }
 
-    dispatcher::train_and_register(&client, &org_id, &env, "01TRAINJOB00000000000000001")
+    dispatcher::train_and_register(&client, &org_id, &env, "01TRAINJOB00000000000000001", None)
         .await
         .expect("training with labels should succeed");
 
