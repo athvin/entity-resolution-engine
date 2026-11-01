@@ -49,7 +49,7 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
 
 ```
   15  aws_iam_role
-  10  aws_iam_role_policy
+  11  aws_iam_role_policy
    7  aws_iam_role_policy_attachment
    6  aws_s3_bucket
    6  aws_s3_bucket_public_access_block

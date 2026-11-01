@@ -89,9 +89,32 @@ also has no builder credential and no secrets stack, which is deliberate.
 `infra.yml` runs four tiers and **CI owns every apply**: `fmt + validate`
 (credential-free, all five stacks) → `plan` per stack under the read-only
 `er-ci-tf-plan` role → one sticky PR comment carrying the add/change/destroy
-table and the diffs → `apply` on `main` only, unattended, under
-`er-ci-tf-apply`. There are no repository secrets; both roles are federated
-OIDC. Do not run a recurring `terraform apply` by hand — merge is the trigger.
+table and the diffs → `apply` on `main` only, unattended. There are no
+repository secrets; every identity is a federated OIDC role. Do not run a
+recurring `terraform apply` by hand — merge is the trigger.
+
+Three roles, and which one applies what is not uniform:
+
+| Role | Reachable from | Applies |
+|---|---|---|
+| `er-ci-tf-plan` | any ref, OIDC | nothing — ReadOnlyAccess + state read |
+| `er-ci-tf-apply` | `main` only, via the `infra-apply-*` environments | `core`, `dev` |
+| `er-ci-tf-apply-prod` | `er-ci-tf-apply`, or `ProdAdmin` break-glass | `prod` |
+
+`envs/prod` goes through the second hop because `er-ci-tf-apply` is **denied the
+prod state object** — Terraform cannot apply a stack whose state it cannot read,
+so one deny covers the stack without a list of prod resource types to maintain,
+and the hop cannot quietly stop being used. That buys legibility (CloudTrail
+records a distinct `AssumeRole` tagged with actor, commit and branch — which is
+why the trust allows `sts:TagSession`, since chaining keeps the session tags
+that the web-identity paths drop) and rules out an *accidental* prod apply from
+the non-prod identity. It is **not** containment: the apply role may assume the
+prod role by design.
+
+Break-glass, when CI cannot do it: assume `ProdAdmin` through SSO, then
+`aws sts assume-role --role-arn arn:aws:iam::797781631727:role/er-ci-tf-apply-prod`
+and run Terraform with those credentials — the same identity and permissions CI
+uses, rather than an improvised one.
 
 Five rules that are easy to break:
 
