@@ -35,6 +35,13 @@ required check. A `detect`-gated job reports `skipped`, which branch
 protection accepts as satisfied; that is the whole reason the pattern
 exists instead of a workflow-level `paths:` filter.
 
+A context below containing `${{ matrix.* }}` is a MATRIX job, and its
+per-leg names (`plan (core)`, …) **cannot be required**: when the job is
+skipped by its `if:`, GitHub reports one check-run under the literal,
+uninterpolated name shown here, so the per-leg contexts never report and
+a PR that skips the tier blocks forever. Require a non-matrix aggregator
+job instead — `terraform plan` is the worked example.
+
 ### `frontend.yml`
 
 | Job | Status-check context | Timeout | Condition |
@@ -63,6 +70,7 @@ exists instead of a workflow-level `paths:` filter.
 | `helpers` | terraform ci helpers (self-test) | 5 | `needs.detect.outputs.infra == 'true'` |
 | `validate` | fmt + validate (credential-free) | 10 | `needs.detect.outputs.infra == 'true'` |
 | `plan` | plan (${{ matrix.key }}) | 20 | `needs.detect.outputs.infra == 'true' && (github.event_name == 'push' \|\| github.event.pul …` |
+| `plan-gate` | terraform plan | 5 | `${{ !cancelled() && needs.detect.outputs.infra == 'true' }}` |
 | `comment` | plan comment | 10 | `${{ !cancelled() && github.event_name == 'pull_request' && needs.detect.outputs.infra == ' …` |
 | `apply` | apply (${{ matrix.key }}) | 60 | `github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.detect.outputs.inf …` |
 

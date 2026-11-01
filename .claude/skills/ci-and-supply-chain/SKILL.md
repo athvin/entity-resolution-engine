@@ -12,12 +12,35 @@ Branch protection is repository configuration rather than a file in the tree, so
 which; the per-job contexts, timeouts and conditions are generated:
 [references/required-checks.md](references/required-checks.md).
 
-**A job's `name:` is its branch-protection context.** Two failure modes follow,
-and both brick `main` rather than merely annoy: renaming a required job silently
-un-protects it, and adding a required context for a job that does not yet exist
-on `main` leaves every PR pending forever. So a split like `entities` out of
-`fmt + clippy + docs` goes in one order only: land the job, let it report green
-on `main`, *then* add the context.
+**A job's `name:` is its branch-protection context.** Three failure modes
+follow, and all brick `main` rather than merely annoy: renaming a required job
+silently un-protects it, and adding a required context for a job that does not
+yet exist on `main` leaves every PR pending forever. So a split like `entities`
+out of `fmt + clippy + docs` goes in one order only: land the job, let it report
+green on `main`, *then* add the context.
+
+> **A matrix job's per-leg names cannot be required status checks.**
+
+The third, and the one that is genuinely surprising. While the matrix runs,
+`plan` reports one check-run per leg — `plan (core)`, `plan (dev)`, … — which
+look like perfectly good contexts. When the job is **skipped by its `if:`**,
+GitHub reports a *single* check-run under the literal, uninterpolated name
+`plan (${{ matrix.key }})`. The per-leg contexts therefore never report at all
+on a PR that skips the tier, and a required context that never reports blocks
+the PR forever — the same failure mode as a `paths:` filter, which is what the
+`detect` pattern exists to avoid.
+
+Measured, not theorised: the four `plan (<env>)` contexts were made required and
+the next non-infra PR went unmergeable with them stuck on "Expected", while
+`fmt + validate (credential-free)` was fine throughout because it is not a
+matrix job and reports `skipped` under its own name.
+
+The fix is an **aggregator job**: one non-matrix job that `needs:` the matrix
+one, inspects `needs.<job>.result` (the aggregate — `success` only if every leg
+succeeded), and is required in the legs' place. `infra.yml`'s `terraform plan`
+job is the worked example. Two details it gets right: it accepts `skipped`,
+because a fork PR legitimately skips the plan tier, and it treats anything it
+does not recognise — including an empty result — as a failure.
 
 ## The `detect` pattern, and the rule that must not be broken
 
