@@ -1,0 +1,100 @@
+# The dispatcher, split out of the web-api pod (batch-orchestration-design
+# §6.7): the Role that creates Jobs — arbitrary code in the namespace under the
+# runner's AWS identity — must not sit on the pod that serves the API behind
+# the BFF. The split is this chart change, not a code change: the image's
+# `er-dispatcher` symlink dispatches on argv[0] (rust/Dockerfile) and runs the
+# same loop ER_DISPATCH_IN_PROCESS=1 used to run inside web-api, legacy
+# in-process arms included, plus the Kubernetes executor for the kinds
+# `executor.dagKinds` lists.
+#
+# replicas 1 / Recreate are hard-coded, not values: the single-dispatcher
+# model (one claim loop, one watcher, adoption on start) assumes it is alone,
+# and Recreate guarantees the old process is gone before the new one adopts.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: er-dispatcher
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: er-dispatcher
+    app.kubernetes.io/component: dispatcher
+    {{- include "er-platform.labels" . | nindent 4 }}
+  annotations:
+    reloader.stakater.com/auto: "true" # §9.1 — roll on secret rotation
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "er-platform.selectorLabels" (dict "root" . "name" "er-dispatcher") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: dispatcher
+        {{- include "er-platform.selectorLabels" (dict "root" . "name" "er-dispatcher") | nindent 8 }}
+        {{- include "er-platform.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: er-dispatcher
+      securityContext:
+        {{- include "er-platform.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: er-dispatcher
+          image: {{ include "er-platform.image" (dict "root" . "image" .Values.images.api) }}
+          command: ["er-dispatcher"]
+          securityContext:
+            {{- include "er-platform.containerSecurityContext" . | nindent 12 }}
+            runAsUser: 1001
+            runAsGroup: 1001
+          env:
+            {{- include "er-platform.erserverEnv" . | nindent 12 }}
+            {{- with .Values.dispatcher.pollSeconds }}
+            - name: ERSERVER_POLL_SECONDS
+              value: {{ . | quote }}
+            {{- end }}
+            # The executor (§6): inert while dagKinds is empty — the env var is
+            # unset and executor::from_env returns None, so only the legacy
+            # in-process arms run.
+            {{- with .Values.executor.dagKinds }}
+            - name: ER_EXECUTOR_DAG_KINDS
+              value: {{ . | quote }}
+            {{- end }}
+            - name: ER_EXECUTOR_IN_FLIGHT_CAP
+              value: {{ .Values.executor.inFlightCap | quote }}
+            - name: ER_TASK_TEMPLATE_PATH
+              value: /etc/er/task-template/task-template-S.yaml
+            - name: ER_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            {{- with .Values.images.api.digest }}
+            - name: ER_IMAGE_DIGEST
+              value: {{ . | quote }}
+            {{- end }}
+          envFrom:
+            - secretRef:
+                name: er-erserver-env
+          resources:
+            {{- toYaml .Values.dispatcher.resources | nindent 12 }}
+          volumeMounts:
+            # The legacy in-process arms and the control tasks read tenant
+            # configs and drops from EFS, exactly as the merged pod did.
+            - name: er-efs
+              mountPath: {{ .Values.efs.mountPath }}
+            - name: duckdb-tmp
+              mountPath: /app/.tmp
+            # The task template (configmap-task-template.yaml): a mounted
+            # file, never read through the API.
+            - name: task-template
+              mountPath: /etc/er/task-template
+              readOnly: true
+      volumes:
+        - name: er-efs
+          persistentVolumeClaim:
+            claimName: er-efs
+        - name: duckdb-tmp
+          emptyDir:
+            sizeLimit: 2Gi
+        - name: task-template
+          configMap:
+            name: er-task-template

@@ -48,14 +48,14 @@ creating two sets of real resources.
 Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
 
 ```
-  16  aws_iam_role
-  12  aws_iam_role_policy
+  17  aws_iam_role
+  13  aws_iam_role_policy
    8  aws_iam_role_policy_attachment
    6  aws_s3_bucket
    6  aws_s3_bucket_public_access_block
+   5  aws_eks_pod_identity_association
    5  aws_s3_bucket_policy
    4  aws_eks_addon
-   4  aws_eks_pod_identity_association
    4  aws_kms_alias
    4  aws_kms_key
    4  aws_s3_bucket_server_side_encryption_configuration
@@ -161,7 +161,7 @@ cannot reach AWS:
 
 | Mechanism | Count |
 |---|---|
-| `aws_eks_pod_identity_association` blocks | 4 |
+| `aws_eks_pod_identity_association` blocks | 5 |
 | `aws_iam_user` blocks (should be the lake key and the builder key only) | 2 |
 | `aws_iam_openid_connect_provider` blocks (GitHub Actions only; never for workloads) | 1 |
 <!-- END GENERATED: aws-footprint -->

@@ -22,15 +22,22 @@ postgres:
   image: postgres:16@sha256:11a9d238fbb48bab14599c57e41123254452b1a2d93c6c8595bce96f346bd082
 
 # §12: what stops one developer's 10M-row run from starving the cluster. The
-# ephemeral-storage quota is what makes §5.3's spill sizing enforceable, and
-# jobs.batch caps runner Jobs (one is the drizzle hook Job during an upgrade;
-# the idle-suspend CronJob holds up to 3 more — one live plus its 1+1 history
-# — which is why this is 10 and not the 8 the 2.3 incident settled on).
+# ephemeral-storage quota is what makes §5.3's spill sizing enforceable.
+#
+# jobs.batch is sized per batch-orchestration-design §7.2: the chart's own
+# batch objects can hold ~7-8 Jobs at once (the drizzle and tenant-migrate
+# hooks while they run, the drift CronJob's 1 live + 1+3 history, the
+# idle-suspend CronJob's 1+1+1, a lingering bootstrap hook), and the executor
+# adds one `er-t-…` Job per in-flight task attempt that then lingers for its
+# 300 s TTL — `>= 8 + cap × (1 + ceil(ttl / mean_segment_seconds))`. With cap 1
+# that computes to 14; 20 buys margin and is recomputed whenever the cap
+# rises. (History: 8 after the 2.3 quota-stall incident, 10 for the
+# idle-suspend history, 20 since the executor.)
 quota:
   requestsMemory: 80Gi
   limitsCpu: "24"
   requestsEphemeralStorage: 900Gi
-  jobs: 10
+  jobs: 20
 # LimitRange defaults — required so pods that omit a resource still pass the
 # quota (a ResourceQuota on a resource rejects any pod with no request for
 # it). Runner Jobs (2.3) always set their own explicit values.

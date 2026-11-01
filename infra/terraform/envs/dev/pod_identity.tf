@@ -63,3 +63,62 @@ output "er_api_pod_role_arn" {
   description = "The role the er-api ServiceAccount assumes via Pod Identity."
   value       = aws_iam_role.er_api_pod.arn
 }
+
+# The `er-runner` task pod's AWS identity (batch-orchestration-design §6.7).
+#
+# The runner pod — one Kubernetes Job per task attempt, `er-server exec-task` —
+# holds no Kubernetes credential at all (automount off, no RBAC) and gets its
+# AWS identity the same way er-api does: Pod Identity, never IRSA. The role
+# carries the lake-prefix S3 policy for when the engine can open an `s3://`
+# lake; today it cannot (the ducklake-lakehouse skill records this), so EFS at
+# /srv/er remains the data path and this role is deliberately ahead of its
+# first use — the association is the part that must exist before the first
+# executor-run Job launches, because there is no node-credential fallback.
+#
+# Same per-namespace list shape as `er_api_pod_namespaces`, same reason: dev
+# namespaces are created by scripts/dev_env.sh/Helm, not Terraform, and Pod
+# Identity has no wildcard.
+
+variable "er_runner_pod_namespaces" {
+  description = <<-EOT
+    Namespaces whose `er-runner` ServiceAccount gets an AWS identity (the
+    lake-prefix S3 access, for when the S3 lake is openable).
+
+    Empty by default, like `er_api_pod_namespaces` and for the same reason.
+  EOT
+  type        = list(string)
+  default     = []
+}
+
+resource "aws_iam_role" "er_runner_pod" {
+  name               = "er-dev-runner-pod"
+  assume_role_policy = data.aws_iam_policy_document.er_api_pod_trust.json
+
+  tags = {
+    Name        = "er-dev-runner-pod"
+    Environment = "dev"
+  }
+}
+
+# The same lake grants the 9.2 interim service user carries (lake.tf) — when
+# that user retires, this role is where the engine's credential-chain access
+# already lives.
+resource "aws_iam_role_policy" "er_runner_lake" {
+  name   = "er-dev-runner-lake"
+  role   = aws_iam_role.er_runner_pod.id
+  policy = data.aws_iam_policy_document.s3_user.json
+}
+
+resource "aws_eks_pod_identity_association" "er_runner" {
+  for_each = toset(var.er_runner_pod_namespaces)
+
+  cluster_name    = module.eks.cluster_name
+  namespace       = each.value
+  service_account = "er-runner"
+  role_arn        = aws_iam_role.er_runner_pod.arn
+}
+
+output "er_runner_pod_role_arn" {
+  description = "The role the er-runner ServiceAccount assumes via Pod Identity."
+  value       = aws_iam_role.er_runner_pod.arn
+}

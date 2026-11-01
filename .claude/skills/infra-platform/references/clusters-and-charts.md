@@ -51,21 +51,29 @@ Two details worth preserving:
   images.tag=<sha>`), and prod promotes by **digest** rather than tag. So the
   chart version and the application version are deliberately decoupled.
 
-## The merged pod, and why
+## The merged pod and the dispatcher split
 
-One Deployment runs the Rust control plane on its port and the Next.js BFF on
-its own, with the dispatcher in-process via `ER_DISPATCH_IN_PROCESS=1`.
+One Deployment (`web-api`) runs the Rust control plane on its port and the
+Next.js BFF on its own; a second (`er-dispatcher`, replicas 1 / Recreate,
+hard-coded) runs the dispatcher under the `er-dispatcher` ServiceAccount — the
+only identity bound to the namespaced Job-create Role
+(batch-orchestration-design §6.7).
 
 What follows from it:
 
 - **The topology enforces the BFF boundary.** The API service has no load
   balancer anywhere, so the only route to the control plane is through the BFF.
   That is the frontend-bff skill's rule, made physical.
-- **No per-run Kubernetes jobs.** The dispatcher runs pipeline work in-process
-  on a blocking thread. Scaling the pod scales both tiers together, which is a
-  known trade — it is one deployable, not a microservice split.
-- A dispatcher crash takes the API with it only if it is fatal; the in-process
-  mode logs and keeps serving. See the er-server-control-plane skill.
+- **Per-task Kubernetes Jobs exist only for kinds on the `executor.dagKinds`
+  allowlist** (empty by default — the executor is inert until a kind is
+  listed, and the account's vCPU quota gates listing any). Every other kind
+  runs in-process inside the dispatcher pod on a blocking thread, exactly as
+  the merged pod used to run it.
+- The task pod template is the chart's `er-task-template` ConfigMap, mounted
+  into the dispatcher as a file — never read through the API, which is why
+  `configmaps` stays out of the dispatcher's Role.
+- A dispatcher crash no longer takes the API down (and vice versa); on
+  restart the new process adopts every live row and running Job.
 
 ## EFS and the static PV
 

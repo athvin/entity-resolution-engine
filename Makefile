@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := check
-.PHONY: build fmt lint doc test check check-e2e entities-check skills-check frontend frontend-audit frontend-coverage run frontend-dev frontend-e2e frontend-baselines frontend-dev-reset image-api nodepools measure-runner-startup dev-up dev-suspend dev-resume dev-down obs-up clean symposium
+.PHONY: build fmt lint doc test check check-e2e entities-check skills-check frontend frontend-audit frontend-coverage run frontend-dev frontend-e2e frontend-baselines frontend-dev-reset image-api cluster-objects nodepools measure-runner-startup dev-up dev-suspend dev-resume dev-down obs-up clean symposium
 
 # --- Rust backend: the application (engine, CLI, control plane) lives in rust/ ---
 #
@@ -171,7 +171,9 @@ image-api:
 
 ER_DEV_CONTEXT ?= er-dev
 
-# Apply the cluster-scoped Karpenter NodePools (app / runner-sm / runner-l).
+# Apply the cluster-scoped objects: the Karpenter NodePools (app / runner-sm /
+# runner-l) and the task PriorityClasses (batch-orchestration-design §7.1 —
+# cluster-scoped, so no per-namespace chart can carry them).
 #
 # These are Kubernetes manifests, not AWS API objects, so Terraform does not own
 # them (infra/terraform/modules/eks/main.tf says so) and no chart renders them.
@@ -183,9 +185,13 @@ ER_DEV_CONTEXT ?= er-dev
 #
 # infra/k8s/nodepools/measure/ is deliberately NOT applied: it holds the
 # throwaway pool scripts/measure_runner_startup.sh creates and deletes.
-nodepools:
+cluster-objects:
 	kubectl --context $(ER_DEV_CONTEXT) apply -f infra/k8s/nodepools/
-	kubectl --context $(ER_DEV_CONTEXT) get nodepools
+	kubectl --context $(ER_DEV_CONTEXT) apply -f infra/k8s/priorityclasses/
+	kubectl --context $(ER_DEV_CONTEXT) get nodepools priorityclasses
+
+# The old name, kept callable because muscle memory and docs point at it.
+nodepools: cluster-objects
 
 # Measure runner startup on the live cluster (docs/infrastructure.md §18.16).
 # Run once per image to build a before/after record:
