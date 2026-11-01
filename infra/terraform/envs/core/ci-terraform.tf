@@ -24,15 +24,18 @@
 # apply`); after that CI owns every subsequent apply, including this file's own
 # future changes. This removes the recurring manual apply, not the first one.
 #
-# --- what §14.2 asks for that this does NOT build yet ------------------------
+# --- §14.2's three roles, and which does what -------------------------------
 #
-# §14.2 also specifies a **prod-scoped** apply role whose trust policy names
-# exactly two principals — the CI apply role and `ProdAdmin` as break-glass —
-# so a prod write is a distinct, separately auditable hop. That second hop is
-# NOT built here: `er-ci-tf-apply` applies all three envs directly. It was
-# briefly covered by a required-reviewer environment on every apply; applies are
-# now UNATTENDED by operator decision, so nothing covers it. This is the
-# remaining defence-in-depth for prod and should land before prod carries data.
+# `er-ci-tf-plan`        read-only, any ref, every PR
+# `er-ci-tf-apply`       `main` only, applies `core` and `dev`
+# `er-ci-tf-apply-prod`  reachable from exactly two principals, applies `prod`
+#
+# The third is §14.2's prod-scoped apply role, built at the bottom of this file.
+# It exists because applies are UNATTENDED: the required-reviewer environment
+# that once covered a prod write stopped requiring anyone in #355, and prod has
+# held an Aurora cluster since #352. Read the comment above the role for what
+# the extra hop does and does not buy — it is narrower than it looks, and
+# overstating it would be worse than not having it.
 
 locals {
   # Same immutable-subject form the github-oidc module pins: owner and repo
@@ -219,8 +222,128 @@ resource "aws_iam_role_policy_attachment" "ci_tf_apply_admin" {
   policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
 }
 
+# --- prod: the second, separately auditable hop ------------------------------
+#
+# §14.2's prod-scoped apply role, which this file has carried a "NOT built yet"
+# note about since the plan/apply gate landed. Applies are unattended, so the
+# note's premise — "briefly covered by a required-reviewer environment" — has
+# been false since #355, and prod has held an Aurora cluster since #352.
+#
+# WHAT THE HOP BUYS, stated honestly, because it is narrower than it looks.
+#
+#   1. Auditability. Every prod write is a distinct `AssumeRole` into a
+#      prod-named role in CloudTrail, rather than being indistinguishable from
+#      a dev write by the same principal, and the chained session carries
+#      configure-aws-credentials' GitHub session tags — Repository, Workflow,
+#      Actor, Commit, Branch — so the trail records who merged what. §8.6 can
+#      alert on it.
+#   2. No ACCIDENTAL prod apply from the non-prod path. The companion PR denies
+#      `er-ci-tf-apply` the prod state object, so a workflow bug that pointed
+#      the ordinary apply role at `envs/prod` fails on state access rather than
+#      reconfiguring production.
+#   3. A break-glass path with the SAME permissions CI uses, so a human
+#      recovering prod by hand is not improvising a different identity.
+#
+# WHAT IT DOES NOT BUY: containment of a compromised `er-ci-tf-apply`. That role
+# can assume this one — that is the entire design — so anyone holding it reaches
+# prod through the front door. The control on that remains its own trust policy
+# (`main`-only, via the three `infra-apply-*` environments) plus branch
+# protection. Do not read this role as a boundary against the apply role; read it
+# as making the prod write legible, and as making the non-prod path unable to
+# touch prod by mistake.
+#
+# AdministratorAccess again, and for a sharper reason than above: narrowing it
+# would buy nothing. The principals that can reach it are `er-ci-tf-apply`
+# (AdministratorAccess) and `ProdAdmin` (AdministratorAccess, by
+# `aws_ssoadmin_managed_policy_attachment.prod_admin`). A tighter policy here
+# would only block Terraform, never an actor, while adding the mid-apply
+# AccessDenied failure mode the comment above rejects.
+data "aws_iam_policy_document" "ci_tf_apply_prod_trust" {
+  # PRINCIPAL 1 of 2 — the CI apply role, named exactly. This is the hop the
+  # `apply (prod)` job chains through.
+  #
+  # `sts:TagSession` alongside `sts:AssumeRole`, and it is load-bearing rather
+  # than boilerplate. The other roles in this file are assumed through OIDC, and
+  # configure-aws-credentials DELETES the session tags on both web-identity
+  # paths (`delete params.Tags` in its assumeRole source) — which is why none of
+  # their trust policies needs this. Role CHAINING takes the plain `AssumeRole`
+  # path, which keeps them, so without this the prod apply fails on an
+  # AccessDenied for TagSession and nothing else explains why.
+  #
+  # Allowing it is also the better end of the trade. The action tags the session
+  # with Repository, Workflow, Actor, Commit and Branch, so the CloudTrail entry
+  # for a prod write records WHO merged WHAT — which is reason 1 for this role
+  # existing. Skipping the tags with `role-skip-session-tagging` would have
+  # worked and would have thrown that away.
+  statement {
+    sid     = "CiApplyRoleChain"
+    effect  = "Allow"
+    actions = ["sts:AssumeRole", "sts:TagSession"]
+
+    principals {
+      type        = "AWS"
+      identifiers = [aws_iam_role.ci_tf_apply.arn]
+    }
+  }
+
+  # PRINCIPAL 2 of 2 — `ProdAdmin`, as break-glass.
+  #
+  # Expressed as the account root plus an `ArnLike` on the CALLING principal,
+  # not as the SSO role's ARN directly, and the difference matters twice over.
+  #
+  # An Identity Center permission set's role is named
+  # `AWSReservedSSO_ProdAdmin_<hash>`; `envs/prod/eks.tf` hardcodes today's
+  # hash, which is fine for an EKS access entry and wrong for a trust policy:
+  # IAM resolves a principal ARN to the role's unique id on write, so once the
+  # permission set is recreated — any change to it does that — the trust policy
+  # holds a dangling id that cannot be read back as a name. The pattern form
+  # survives that.
+  #
+  # This is NOT "anyone in the account". A root principal delegates to identity
+  # policies, and the condition is evaluated against the caller's own ARN, so
+  # the effective set is exactly: principals whose ARN matches a ProdAdmin SSO
+  # session AND that hold `sts:AssumeRole`. `PlatformAdmin` does not match the
+  # pattern; neither does the `er-dev-builder` user's key.
+  statement {
+    sid     = "ProdAdminBreakGlass"
+    effect  = "Allow"
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:aws:iam::${local.mgmt_account_id}:root"]
+    }
+
+    condition {
+      test     = "ArnLike"
+      variable = "aws:PrincipalArn"
+      values = [
+        "arn:aws:iam::${local.mgmt_account_id}:role/aws-reserved/sso.amazonaws.com/*/AWSReservedSSO_ProdAdmin_*",
+      ]
+    }
+  }
+}
+
+resource "aws_iam_role" "ci_tf_apply_prod" {
+  name = "er-ci-tf-apply-prod"
+  # An hour, matching the apply role. A chained session is capped at one hour by
+  # STS regardless of what is set here, so this is the honest value rather than
+  # a longer one that would silently not apply.
+  max_session_duration = 3600
+  assume_role_policy   = data.aws_iam_policy_document.ci_tf_apply_prod_trust.json
+}
+
+resource "aws_iam_role_policy_attachment" "ci_tf_apply_prod_admin" {
+  role       = aws_iam_role.ci_tf_apply_prod.name
+  policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
+}
+
 output "ci_tf_plan_role_arn" {
   value = aws_iam_role.ci_tf_plan.arn
+}
+
+output "ci_tf_apply_prod_role_arn" {
+  value = aws_iam_role.ci_tf_apply_prod.arn
 }
 
 output "ci_tf_apply_role_arn" {
