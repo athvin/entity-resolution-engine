@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   countRoutes,
+  findInternalForwards,
   findUnauthorizedRoutes,
   findUncoveredApiDirs,
 } from "../../scripts/check-bff-authz.mjs";
@@ -159,5 +160,37 @@ describe("every api directory is covered", () => {
     // must be reported; proven here against a root with no `api` at all, which
     // is the degenerate case the walk has to survive.
     expect(findUncoveredApiDirs("/nonexistent")).toEqual([]);
+  });
+});
+
+describe("the BFF never forwards the attempt channel", () => {
+  /**
+   * `/v1/internal/*` is the task pod's machine-to-machine surface
+   * (batch-orchestration-design §6.4): a BFF route naming that prefix would
+   * hand a browser session a path to the pod-credentialed surface. The gate's
+   * property is "nowhere under src/app/api", with no exemption list.
+   */
+  it("fails a route that names /v1/internal, wherever it lives", () => {
+    const dir = tree();
+    route(
+      dir,
+      "src/app/api/orgs/[org]/tasks/route.ts",
+      `
+      import { requireOrgAccess, respond } from "@/lib/bff/proxy";
+      export async function GET(request: Request, { params }: { params: Promise<{ org: string }> }) {
+        return respond(async () => {
+          const { org } = await params;
+          await requireOrgAccess(org, "viewer");
+          return fetch(\`\${process.env.ERSERVER_BASE_URL}/v1/internal/attempts/x\`);
+        });
+      }
+      `,
+    );
+    expect(findInternalForwards(dir)).toEqual(["src/app/api/orgs/[org]/tasks/route.ts"]);
+  });
+
+  it("holds against the real tree — no BFF route names the prefix", () => {
+    const frontend = path.resolve(import.meta.dirname, "..", "..");
+    expect(findInternalForwards(frontend)).toEqual([]);
   });
 });

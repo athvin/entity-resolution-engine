@@ -45,6 +45,7 @@ pub mod provision;
 pub mod read;
 pub mod reporter;
 pub mod s3_ingest;
+pub mod satoken;
 pub mod schema;
 pub mod taskpg;
 pub mod urlguard;
@@ -123,6 +124,10 @@ pub struct AppState {
     /// routes through `job/update/cancel.sql`'s `canceling` for these, because
     /// the org slot must stay held until every pod is provably gone (§5.6).
     executor_kinds: std::collections::BTreeSet<String>,
+    /// The projected-ServiceAccount-token verifier (§6.4), present only when
+    /// this process runs as a pod. `None` leaves the attempt channel
+    /// fallback-token-only, exactly as before.
+    sa_verifier: Option<Arc<satoken::Verifier>>,
 }
 
 impl AppState {
@@ -138,6 +143,7 @@ impl AppState {
             provision: None,
             provision_error: None,
             executor_kinds: std::collections::BTreeSet::new(),
+            sa_verifier: None,
         }
     }
 
@@ -155,6 +161,7 @@ impl AppState {
             provision: None,
             provision_error: None,
             executor_kinds: std::collections::BTreeSet::new(),
+            sa_verifier: None,
         }
     }
 
@@ -162,6 +169,14 @@ impl AppState {
     #[must_use]
     pub fn with_executor_kinds(mut self, kinds: std::collections::BTreeSet<String>) -> Self {
         self.executor_kinds = kinds;
+        self
+    }
+
+    /// Attach the projected-ServiceAccount-token verifier (§6.4). Absent, the
+    /// attempt channel accepts only the per-attempt fallback token.
+    #[must_use]
+    pub fn with_sa_verifier(mut self, verifier: Option<satoken::Verifier>) -> Self {
+        self.sa_verifier = verifier.map(Arc::new);
         self
     }
 
@@ -3131,16 +3146,47 @@ async fn list_job_tasks(
     }
 }
 
-/// Authenticate an attempt-channel call (§6.4, the fallback-token flavour):
-/// the bearer credential is the per-attempt token `claim_launch` minted,
-/// hashed and compared constant-time against the row; the projected
-/// ServiceAccount token replaces it in Phase 2. Returns the retry lineage,
-/// current try first (`task_instance/read/retry_lineage.sql`).
+/// Who the attempt channel authenticated as (§6.4).
+enum AttemptIdentity {
+    /// The per-attempt fallback token: hash match against the row. Pod
+    /// identity then comes from the request body, as before.
+    Fallback,
+    /// The projected ServiceAccount token: Kubernetes proved which pod is
+    /// speaking, and `pod_name`/`pod_uid` come from these claims, never from
+    /// the body (§6.3 step 3).
+    Pod(satoken::PodClaims),
+}
+
+impl AttemptIdentity {
+    /// The fencing `pod_uid`: the claims' when the platform proved it, the
+    /// body's under the fallback token.
+    fn pod_uid<'a>(&'a self, from_body: &'a str) -> &'a str {
+        match self {
+            AttemptIdentity::Pod(claims) => &claims.pod_uid,
+            AttemptIdentity::Fallback => from_body,
+        }
+    }
+}
+
+/// Authenticate an attempt-channel call (§6.4): a bearer SHAPED like a JWT is
+/// verified offline against the cluster key set and bound to this attempt by
+/// the pod name's Job-name prefix — and is never hashed, so a forged token
+/// cannot choose the weaker path. Anything else is the per-attempt fallback
+/// token `claim_launch` minted, hashed and compared constant-time against the
+/// row. Returns the retry lineage, current try first
+/// (`task_instance/read/retry_lineage.sql`), and who the caller proved to be.
 async fn attempt_authorized(
     client: &tokio_postgres::Client,
+    state: &AppState,
     attempt_id: &str,
     headers: &axum::http::HeaderMap,
-) -> Result<Vec<er_entities::task_instance::TaskInstance>, Box<axum::response::Response>> {
+) -> Result<
+    (
+        Vec<er_entities::task_instance::TaskInstance>,
+        AttemptIdentity,
+    ),
+    Box<axum::response::Response>,
+> {
     let token = headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
@@ -3161,6 +3207,39 @@ async fn attempt_authorized(
             "no such attempt",
         )));
     }
+    if satoken::looks_like_jwt(token) {
+        let Some(verifier) = state.sa_verifier.as_deref() else {
+            return Err(Box::new(
+                unauthorized(
+                    "a ServiceAccount token was presented, but this server holds no cluster key set",
+                )
+                .into_response(),
+            ));
+        };
+        let claims = match verifier.verify(token).await {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("satoken: attempt {attempt_id}: {}", errfmt::chain(&e));
+                return Err(Box::new(
+                    unauthorized("the ServiceAccount token does not verify").into_response(),
+                ));
+            }
+        };
+        // Bind the attempt: the Job name is a pure function of the attempt key
+        // (§4.2), a Job's pods are named `<job>-<suffix>`, and the trailing
+        // dash keeps `…-l1` from matching an `…-l10` pod. The reporter's
+        // synthetic 'inproc' rows can never bind — no Job this dispatcher
+        // creates yields a pod named `inproc-…`.
+        let bound = lineage[0].k8s_job_name.as_deref().is_some_and(|job| {
+            job != crate::reporter::INPROC && claims.pod_name.starts_with(&format!("{job}-"))
+        });
+        if !bound {
+            return Err(Box::new(
+                unauthorized("the token's pod is not this attempt's launch").into_response(),
+            ));
+        }
+        return Ok((lineage, AttemptIdentity::Pod(claims)));
+    }
     let presented = pg::hash_secret(token);
     let authorized = lineage[0]
         .token_hash
@@ -3171,7 +3250,7 @@ async fn attempt_authorized(
             unauthorized("the attempt token does not match this attempt").into_response(),
         ));
     }
-    Ok(lineage)
+    Ok((lineage, AttemptIdentity::Fallback))
 }
 
 /// The work order for one claimed attempt
@@ -3194,10 +3273,11 @@ async fn attempt_work_order(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    let lineage = match attempt_authorized(&client, &attempt_id, &headers).await {
-        Ok(l) => l,
-        Err(r) => return *r,
-    };
+    let (lineage, _identity) =
+        match attempt_authorized(&client, &state, &attempt_id, &headers).await {
+            Ok(l) => l,
+            Err(r) => return *r,
+        };
     let current = &lineage[0];
     let job = match pg::get_job(&client, &current.org_id, &current.job_id).await {
         Ok(Some(j)) => j,
@@ -3264,13 +3344,20 @@ async fn attempt_start(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    if let Err(r) = attempt_authorized(&client, &attempt_id, &headers).await {
-        return *r;
-    }
+    let identity = match attempt_authorized(&client, &state, &attempt_id, &headers).await {
+        Ok((_, identity)) => identity,
+        Err(r) => return *r,
+    };
+    // Pod identity comes from the verified claims when the platform proved
+    // it, and from the body only under the fallback token (§6.3 step 3).
+    let (pod_name, pod_uid) = match &identity {
+        AttemptIdentity::Pod(claims) => (Some(claims.pod_name.as_str()), claims.pod_uid.as_str()),
+        AttemptIdentity::Fallback => (body.pod_name.as_deref(), body.pod_uid.as_str()),
+    };
     match er_entities::task_instance::update::start(
         &client,
-        body.pod_name.as_deref(),
-        &body.pod_uid,
+        pod_name,
+        pod_uid,
         body.node_name.as_deref(),
         body.image_digest.as_deref(),
         &attempt_id,
@@ -3319,14 +3406,15 @@ async fn attempt_heartbeat(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    if let Err(r) = attempt_authorized(&client, &attempt_id, &headers).await {
-        return *r;
-    }
+    let identity = match attempt_authorized(&client, &state, &attempt_id, &headers).await {
+        Ok((_, identity)) => identity,
+        Err(r) => return *r,
+    };
     match er_entities::task_instance::update::heartbeat(
         &client,
         body.counters.as_ref(),
         &attempt_id,
-        &body.pod_uid,
+        identity.pod_uid(&body.pod_uid),
     )
     .await
     {
@@ -3392,7 +3480,8 @@ async fn attempt_finish(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    let lineage = match attempt_authorized(&client, &attempt_id, &headers).await {
+    let (lineage, identity) = match attempt_authorized(&client, &state, &attempt_id, &headers).await
+    {
         Ok(l) => l,
         Err(r) => return *r,
     };
@@ -3409,7 +3498,7 @@ async fn attempt_finish(
                 body.counters.as_ref(),
                 body.exit_code,
                 &attempt_id,
-                &body.pod_uid,
+                identity.pod_uid(&body.pod_uid),
             )
             .await
             {
@@ -3501,7 +3590,7 @@ async fn attempt_finish(
                 body.termination_reason.as_deref().unwrap_or("sigterm"),
                 body.counters.as_ref(),
                 &attempt_id,
-                &body.pod_uid,
+                identity.pod_uid(&body.pod_uid),
             )
             .await
             {
@@ -8249,6 +8338,9 @@ pub async fn state_from_env() -> AppState {
         .map(str::to_string)
         .collect();
     let state = state.with_executor_kinds(executor_kinds);
+    // Present only when this process runs as a pod; locally the attempt
+    // channel stays fallback-token-only.
+    let state = state.with_sa_verifier(satoken::Verifier::in_cluster());
     // Async because a SES backend resolves credentials at construction; `off`
     // and `log` do not await anything.
     state

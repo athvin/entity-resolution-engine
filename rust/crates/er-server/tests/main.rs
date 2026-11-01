@@ -64,6 +64,7 @@ mod pg_publish;
 mod pg_record_overlays;
 mod pg_run_all_dag;
 mod pg_s3_ingest;
+mod pg_satoken;
 mod pg_scheduler_tick;
 mod pg_schedules;
 mod pg_schema_coverage;

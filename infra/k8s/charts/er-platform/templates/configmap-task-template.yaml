@@ -14,9 +14,11 @@
 # class renders `executor.priorityClass.scheduled`.
 #
 # What the spec does NOT contain, by design: the tenant's lake DSN, the
-# control-plane DSN, the operator token, any Secret reference. The §6.4
-# fallback credential (ER_ATTEMPT_TOKEN) is injected per launch by the
-# dispatcher, not templated here.
+# control-plane DSN, the operator token, any Secret reference. The pod's
+# credential is the projected, audience-bound ServiceAccount token (§6.4) —
+# the cp-token volume below, which exec-task reads via ER_ATTEMPT_TOKEN_FILE.
+# The per-launch fallback token (ER_ATTEMPT_TOKEN, injected by the dispatcher,
+# never templated here) remains accepted by er-api beside it.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -96,6 +98,10 @@ data:
               env:
                 - name: ER_CONTROL_URL
                   value: http://er-api.{{ $.Release.Namespace }}.svc.cluster.local:8000
+                # The §6.4 credential: the projected token below. exec-task
+                # prefers the file over any injected fallback env token.
+                - name: ER_ATTEMPT_TOKEN_FILE
+                  value: /var/run/er/token
                 # D-SIZING invariants: threads == requests.cpu, DuckDB memory
                 # strictly below limits.memory, all from the one class entry.
                 - name: ER_DUCKDB_THREADS
@@ -143,6 +149,12 @@ data:
                 # D-JOBSPEC: configs, drops, models; "fails late if absent".
                 - name: er-efs
                   mountPath: {{ $.Values.efs.mountPath }}
+                # The projected, audience-bound credential (§6.4): Kubernetes
+                # mints it for THIS pod, er-api verifies it offline against
+                # the cluster key set and binds the attempt by pod name.
+                - name: cp-token
+                  mountPath: /var/run/er
+                  readOnly: true
           volumes:
             - name: duckdb-tmp
               emptyDir:
@@ -150,4 +162,11 @@ data:
             - name: er-efs
               persistentVolumeClaim:
                 claimName: er-efs
+            - name: cp-token
+              projected:
+                sources:
+                  - serviceAccountToken:
+                      audience: er-control-plane
+                      expirationSeconds: 3600
+                      path: token
   {{- end }}

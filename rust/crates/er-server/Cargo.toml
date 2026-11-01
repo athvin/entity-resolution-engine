@@ -130,6 +130,7 @@ er-dag = { version = "0.1.0", path = "../er-dag" }
 er-errors = { version = "0.1.0", path = "../er-errors" }
 signal-hook = "0.4.6"
 er-k8s = { version = "0.1.0", path = "../er-k8s" }
+jsonwebtoken = "9"
 
 [lints]
 workspace = true
