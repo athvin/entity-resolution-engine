@@ -222,6 +222,51 @@ resource "aws_iam_role_policy_attachment" "ci_tf_apply_admin" {
   policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
 }
 
+# THE ONE THING THIS ROLE MAY NOT DO: apply `envs/prod`.
+#
+# An explicit Deny overrides the AdministratorAccess Allow above, and the scope
+# is the prod STATE OBJECT rather than a list of prod resource types. That choice
+# is the whole trick here.
+#
+# Enumerating prod resources would be the instinct and would not work: the prod
+# stack manages a VPC and its subnets, NAT, EKS, Aurora, EFS, S3 and KMS, and
+# §8.2's PlatformAdmin guard — which does enumerate — deliberately covers only
+# the destructive verbs on five services. Copying it here would leave the apply
+# role able to reconfigure prod's network while being unable to delete its
+# database, which is not a boundary anyone can reason about.
+#
+# Terraform cannot apply a stack it cannot read the state of, so denying these
+# two objects denies the whole stack with one statement and no list to keep in
+# step with the prod environment. `.tflock` is the second object because
+# `use_lockfile = true` makes acquiring the lock an S3 write of its own.
+#
+# WHAT THIS IS AND IS NOT. It forces the prod write through
+# `er-ci-tf-apply-prod`, so the audited hop is the only path Terraform has and
+# cannot quietly stop being used — without it the chaining step below would be
+# decorative, and removing that step would silently restore the old direct path.
+# It is NOT containment: this role holds AdministratorAccess and may assume the
+# prod role, so it reaches prod deliberately. What it stops is the accident —
+# a matrix entry, a `-chdir`, or a copied job pointed at `envs/prod` from the
+# non-prod identity now fails on state access instead of reconfiguring
+# production.
+data "aws_iam_policy_document" "ci_tf_apply_no_prod_state" {
+  statement {
+    sid     = "DenyProdStateAccess"
+    effect  = "Deny"
+    actions = ["s3:*"]
+    resources = [
+      "${local.tf_state_arn}/envs/prod.tfstate",
+      "${local.tf_state_arn}/envs/prod.tfstate.tflock",
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "ci_tf_apply_no_prod_state" {
+  name   = "deny-prod-state"
+  role   = aws_iam_role.ci_tf_apply.id
+  policy = data.aws_iam_policy_document.ci_tf_apply_no_prod_state.json
+}
+
 # --- prod: the second, separately auditable hop ------------------------------
 #
 # §14.2's prod-scoped apply role, which this file has carried a "NOT built yet"

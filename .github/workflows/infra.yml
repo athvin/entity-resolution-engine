@@ -32,12 +32,21 @@
 #
 # With applies unattended (operator decision), that trust policy — `sub` pinned
 # to the three `infra-apply-*` environments — plus `main`'s branch protection and
-# PR review IS the control. §14.2's chained prod-scoped apply role is still
-# unbuilt, so there is no second privileged hop. What tier 4 adds below is a
-# DESTROY GUARD: a speed bump, not a substitute. A merged PR touching
-# `infra/terraform/envs/prod` provisions production — 61 resources including an
-# RDS cluster, two instances and EFS — and tiers 2 and 3 are what make that
-# visible BEFORE the merge, which is the only place a human sees it.
+# PR review IS the control. Two things sit behind it, neither a substitute for
+# review:
+#
+#   - a DESTROY GUARD on tier 4, which refuses any non-zero destroy count
+#     unless the commit message carries `ALLOW-DESTROY`. A speed bump.
+#   - §14.2's prod hop: `envs/prod` applies under `er-ci-tf-apply-prod`, chained
+#     into from the ordinary apply role, which is DENIED the prod state object
+#     so the hop cannot stop being used. This makes a prod write legible in
+#     CloudTrail and stops an accidental one from the non-prod path; it is not
+#     containment, because the apply role may assume it by design.
+#
+# A merged PR touching `infra/terraform/envs/prod` still provisions production —
+# 61 resources including an RDS cluster, two instances and EFS — and tiers 2 and
+# 3 are what make that visible BEFORE the merge, which is the only place a human
+# sees it.
 #
 # NO `paths:` FILTER, and it must never come back. The plan tiers are REQUIRED
 # status checks, and a workflow a path filter skips never reports, so a required
@@ -455,6 +464,28 @@ jobs:
         with:
           aws-region: us-east-2
           role-to-assume: arn:aws:iam::797781631727:role/er-ci-tf-apply
+      - name: chain into the prod-scoped apply role
+        # §14.2's second hop, prod only. `er-ci-tf-apply` is DENIED the prod
+        # state object, so this is not an optimisation — without it `terraform
+        # init` for `envs/prod` fails on state access. That is deliberate: it
+        # makes the audited hop the only path Terraform has, so deleting this
+        # step cannot silently restore a direct prod apply.
+        #
+        # `role-chaining: true` makes the action use the credentials the step
+        # above exported rather than a fresh OIDC exchange, which is why the
+        # prod role's trust names `er-ci-tf-apply` instead of the OIDC provider.
+        #
+        # Session tags come along on this path — the web-identity paths drop
+        # them, the plain AssumeRole path does not — so the prod role's trust
+        # allows `sts:TagSession` and CloudTrail records the actor, commit and
+        # branch behind the write. STS caps a chained session at one hour, which
+        # is this job's timeout anyway.
+        if: matrix.key == 'prod'
+        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          aws-region: us-east-2
+          role-to-assume: arn:aws:iam::797781631727:role/er-ci-tf-apply-prod
+          role-chaining: true
       - name: terraform plan (to a file)
         env:
           DIR: ${{ matrix.dir }}
