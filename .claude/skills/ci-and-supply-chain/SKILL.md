@@ -5,8 +5,12 @@ description: Explains this repo's CI topology and dependency gates — the `dete
 
 # CI and the supply chain
 
-Four workflows: `rust`, `frontend`, `infra`, `images`. Jobs across the first
-three are required status checks, so a change is not mergeable until they pass.
+Five workflows: `rust`, `frontend`, `infra`, `images`, `drift`. Jobs across the
+first three are required status checks, so a change is not mergeable until they
+pass. `drift` runs only on a schedule and `workflow_dispatch`, so it can never
+be required — a red run there is information about the account disagreeing with
+its state file, not about a diff.
+
 Branch protection is repository configuration rather than a file in the tree, so
 `gh api repos/:owner/:repo/branches/main/protection` is the only authority on
 which; the per-job contexts, timeouts and conditions are generated:
@@ -76,10 +80,10 @@ the result is a flaky **false skip** — the worst failure mode available, becau
 it skips the gate rather than failing it.
 
 `rust.yml`'s detect skips the compile jobs for PRs that touch nothing outside
-`.claude/**`, `infra/terraform/**`, `scripts/ci/tf-*` and
-`.github/workflows/infra.yml`. That set and no more — `docs/` changes still run
-the gate, because `entities` verifies `docs/erd.md` and `lint` verifies the
-generated skill references.
+`.claude/**`, `infra/terraform/**`, `scripts/ci/tf-*` and the two terraform
+workflows (`infra.yml`, `drift.yml`). That set and no more — `docs/` changes
+still run the gate, because `entities` verifies `docs/erd.md` and `lint`
+verifies the generated skill references.
 
 Each entry is there because nothing in the Rust gate reads it: no crate or
 manifest references `infra/`, and `make check` touches it nowhere. The one real
@@ -89,12 +93,17 @@ associations, pinned provider versions — so a terraform-only PR can make a
 reference stale. That is covered by the ungated `skills` job rather than by the
 compile jobs, which is precisely why that job exists separately.
 
-`infra.yml` is named **file by file**, not as `^\.github/workflows/`, and the
-distinction is load-bearing: `rust.yml` must keep triggering the gate it
-defines, or a change to the gate would stop reporting on exactly the PR most
-likely to break it. `infra.yml` defines no Rust job and cannot affect the
-workspace build, while an infra-only PR was paying the full ~40-minute backend
-gate — `test` plus the DuckLake e2e — to establish that.
+The workflows are named **file by file**, not as `^\.github/workflows/`, and the
+distinction is load-bearing: `rust.yml`, `frontend.yml` and `images.yml` must
+keep triggering the gates they define, or a change to a gate would stop
+reporting on exactly the PR most likely to break it. The terraform workflows
+define no Rust job and cannot affect the workspace build, while an infra-only PR
+was paying the full ~40-minute backend gate — `test` plus the DuckLake e2e — to
+establish that.
+
+Enumerating, rather than exempting the directory and listing exceptions, is the
+**fail-safe** direction: a workflow added later runs the gate until someone
+argues it should not, instead of skipping it until someone notices.
 
 Note the asymmetry between the three implementations, because it decides what a
 new entry does. `rust.yml`'s detect is a **denylist** (count paths *not* under

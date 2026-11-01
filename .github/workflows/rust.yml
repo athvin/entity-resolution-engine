@@ -140,12 +140,18 @@ jobs:
           # seeing — only add something nothing in `make check` reads (the
           # header explains why each qualifies, and why `docs/` does not).
           #
-          # `infra.yml` is named FILE-BY-FILE and not as `^\.github/workflows/`,
-          # which matters: `rust.yml` must keep triggering the gate it defines,
-          # or a change to the gate would stop reporting on exactly the PR most
-          # likely to break it. `infra.yml` defines no Rust job and cannot
-          # affect the workspace build, and an infra-only PR was paying the full
+          # `infra.yml` and `drift.yml` are named FILE BY FILE and not as
+          # `^\.github/workflows/`, which matters: `rust.yml`, `frontend.yml` and
+          # `images.yml` must keep triggering the gates they define, or a change
+          # to a gate would stop reporting on exactly the PR most likely to break
+          # it. The two terraform workflows define no Rust job and cannot affect
+          # the workspace build, and an infra-only PR was paying the full
           # ~40-minute backend gate — `test` plus the DuckLake e2e — to prove it.
+          #
+          # Enumerating rather than exempting the directory and listing
+          # exceptions is the FAIL-SAFE direction: a workflow added later runs
+          # the gate until someone argues it should not, instead of skipping it
+          # until someone notices.
           #
           # `grep -c` reads all input (unlike `grep -q`, which closes the pipe
           # early and can SIGPIPE `git diff` under `pipefail` → a flaky false
@@ -153,7 +159,7 @@ jobs:
           changed="$(git diff --name-only "$BASE_SHA...$HEAD_SHA")"
           printf 'changed paths:\n%s\n' "$changed"
           noncode="$(printf '%s\n' "$changed" \
-                      | grep -cvE '^(\.claude/|infra/terraform/|scripts/ci/tf-|\.github/workflows/infra\.yml$)' || true)"
+                      | grep -cvE '^(\.claude/|infra/terraform/|scripts/ci/tf-|\.github/workflows/(infra|drift)\.yml$)' || true)"
           if [ "${noncode:-0}" -gt 0 ]; then
             echo "code=true" >> "$GITHUB_OUTPUT"
           else
