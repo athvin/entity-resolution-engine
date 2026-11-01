@@ -1,19 +1,26 @@
 #!/usr/bin/env bash
-# Regression tests for the three terraform-CI helpers, so their behaviour is
+# Regression tests for the four terraform-CI helpers, so their behaviour is
 # asserted on every infra PR rather than on the day someone needs it.
 #
-# WHY THIS EXISTS. `tf-destroy-guard.sh` is the only thing standing between a
-# merge and an unattended `terraform apply` that destroys production, and §14.2's
-# prod-scoped apply role is not built yet. Every real apply so far has planned
-# `0 to destroy`, so the guard has never actually refused anything in CI — its
-# refusal path was verified once, by hand, by the person who wrote it. That is
-# exactly the state this repository has been burned by before: a gate nobody has
-# watched fail (semgrep reporting zero findings on a parse error, a Playwright
-# exit code swallowed by `| tail`). A gate whose failure path is unexercised is
-# indistinguishable from a gate that cannot fail.
+# WHY THIS EXISTS. Two of these decide things nobody watches until they matter,
+# and they fail in opposite directions.
 #
-# So the refusal, the token override and the fail-closed branch are asserted
-# here, with fixtures, on every run. No network, no AWS, no terraform binary.
+# `tf-destroy-guard.sh` is the last thing between a merge and an unattended
+# `terraform apply` that destroys production. Every real apply so far has planned
+# `0 to destroy`, so its refusal path has never fired in CI — it was verified
+# once, by hand, by the person who wrote it. That is exactly the state this
+# repository keeps getting burned by: a gate nobody has watched fail (semgrep
+# reporting zero findings on a parse error, a Playwright exit code swallowed by
+# `| tail`). A gate whose failure path is unexercised is indistinguishable from
+# a gate that cannot fail.
+#
+# `tf-drift-classify.sh` carries the opposite risk: its ignore list is what
+# keeps the daily drift schedule from going red on provider noise, so an
+# over-broad entry silently retires drift detection while leaving the workflow
+# in the tree. Both directions are asserted below — artifacts must NOT be
+# drift, and a real attribute change must be.
+#
+# No network, no AWS, no terraform binary.
 #
 # Usage: scripts/ci/tf-helpers-test.sh
 # Exit codes: 0 all assertions held; 1 at least one did not.
@@ -305,6 +312,18 @@ cat >"$tmp/dc-policy-owned.json" <<'EOF'
 ]}
 EOF
 
+# Run 2 (41283281935) surfaced three more of the same sibling-resource class
+# that run 1's truncated text output had hidden.
+cat >"$tmp/dc-siblings.json" <<'EOF'
+{"resource_drift":[
+ {"address":"aws_s3_bucket.state","type":"aws_s3_bucket",
+  "change":{"before":{"versioning":[],"server_side_encryption_configuration":[]},
+            "after":{"versioning":[{"enabled":true}],"server_side_encryption_configuration":[{"rule":[]}]}}},
+ {"address":"aws_iam_role.ci_tf_drift","type":"aws_iam_role",
+  "change":{"before":{"inline_policy":[]},"after":{"inline_policy":[{"name":"terraform-refresh-read"}]}}}
+]}
+EOF
+
 printf 'not json at all {{{\n' >"$tmp/dc-garbage.json"
 
 expect_exit "a clean refresh is not drift"            0 bash "$CLASSIFY" "$tmp/dc-clean.json"
@@ -314,6 +333,9 @@ expect_exit "the measured artifacts are NOT drift"    0 bash "$CLASSIFY" "$tmp/d
 expect_exit "a real attribute change IS drift"        1 bash "$CLASSIFY" "$tmp/dc-real.json"
 expect_exit "real drift beside an artifact"           1 bash "$CLASSIFY" "$tmp/dc-mixed.json"
 expect_exit "policy on a type that owns it IS drift"  1 bash "$CLASSIFY" "$tmp/dc-policy-owned.json"
+# The sibling-resource rule. Ignoring these hides nothing: the resource
+# Terraform actually manages reports the same drift itself.
+expect_exit "deprecated sibling mirrors are NOT drift" 0 bash "$CLASSIFY" "$tmp/dc-siblings.json"
 expect_exit "unparseable JSON fails closed"           2 bash "$CLASSIFY" "$tmp/dc-garbage.json"
 expect_exit "rejects a missing file"                  2 bash "$CLASSIFY" "$tmp/dc-nope.json"
 expect_exit "rejects no arguments"                    2 bash "$CLASSIFY"
