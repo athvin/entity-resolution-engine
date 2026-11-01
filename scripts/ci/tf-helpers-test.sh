@@ -25,8 +25,9 @@ cd "$REPO_ROOT" || exit 1
 GUARD="scripts/ci/tf-destroy-guard.sh"
 META="scripts/ci/tf-plan-meta.sh"
 COMMENT="scripts/ci/tf-plan-comment.sh"
+CLASSIFY="scripts/ci/tf-drift-classify.sh"
 
-for f in "$GUARD" "$META" "$COMMENT"; do
+for f in "$GUARD" "$META" "$COMMENT" "$CLASSIFY"; do
     [ -f "$f" ] || {
         printf 'tf-helpers-test: missing %s\n' "$f" >&2
         exit 1
@@ -254,6 +255,82 @@ mkdir -p "$tmp/arts-empty"
 expect_exit "exit 2 when there are no artifacts" 2 bash "$COMMENT" "$tmp/arts-empty"
 expect_exit "exit 2 for a missing directory" 2 bash "$COMMENT" "$tmp/no-such-dir"
 expect_exit "exit 2 for no arguments" 2 bash "$COMMENT"
+
+# --- tf-drift-classify.sh ---------------------------------------------------
+
+printf '\ntf-drift-classify.sh\n'
+
+# These fixtures are not invented. Every one is modelled on run 41280636155 —
+# the first real `drift.yml` run — which reported "Objects have changed outside
+# of Terraform" on two stacks where nothing had actually changed.
+cat >"$tmp/dc-clean.json" <<'EOF'
+{"format_version":"1.2","resource_changes":[]}
+EOF
+
+# state-backend and core, as measured: `tags` appearing as {} where state holds
+# null, plus attributes that report what a SEPARATE resource manages.
+cat >"$tmp/dc-artifacts.json" <<'EOF'
+{"resource_drift":[
+ {"address":"aws_s3_bucket.state","type":"aws_s3_bucket",
+  "change":{"before":{"id":"b","tags":null,"policy":null},"after":{"id":"b","tags":{},"policy":"{}"}}},
+ {"address":"aws_kms_key.state","type":"aws_kms_key",
+  "change":{"before":{"id":"k","tags":null},"after":{"id":"k","tags":{}}}},
+ {"address":"aws_iam_role.ci_tf_drift","type":"aws_iam_role",
+  "change":{"before":{"id":"r","tags":null,"managed_policy_arns":[]},"after":{"id":"r","tags":{},"managed_policy_arns":["arn:aws:iam::aws:policy/ReadOnlyAccess"]}}}
+]}
+EOF
+
+cat >"$tmp/dc-real.json" <<'EOF'
+{"resource_drift":[
+ {"address":"aws_rds_cluster.prod","type":"aws_rds_cluster",
+  "change":{"before":{"backup_retention_period":7,"tags":null},"after":{"backup_retention_period":1,"tags":{}}}}
+]}
+EOF
+
+cat >"$tmp/dc-mixed.json" <<'EOF'
+{"resource_drift":[
+ {"address":"aws_kms_key.state","type":"aws_kms_key",
+  "change":{"before":{"tags":null},"after":{"tags":{}}}},
+ {"address":"aws_eks_cluster.er_prod","type":"aws_eks_cluster",
+  "change":{"before":{"version":"1.31"},"after":{"version":"1.32"}}}
+]}
+EOF
+
+# `policy` is an artifact only on a type whose sibling resource owns it.
+# Ignoring it globally would hide a real IAM policy-document change.
+cat >"$tmp/dc-policy-owned.json" <<'EOF'
+{"resource_drift":[
+ {"address":"aws_iam_role_policy.x","type":"aws_iam_role_policy",
+  "change":{"before":{"policy":"a"},"after":{"policy":"b"}}}
+]}
+EOF
+
+printf 'not json at all {{{\n' >"$tmp/dc-garbage.json"
+
+expect_exit "a clean refresh is not drift"            0 bash "$CLASSIFY" "$tmp/dc-clean.json"
+# THE ONE THAT MATTERS. If this starts failing, the schedule goes red daily and
+# gets switched off — which is how the check dies.
+expect_exit "the measured artifacts are NOT drift"    0 bash "$CLASSIFY" "$tmp/dc-artifacts.json"
+expect_exit "a real attribute change IS drift"        1 bash "$CLASSIFY" "$tmp/dc-real.json"
+expect_exit "real drift beside an artifact"           1 bash "$CLASSIFY" "$tmp/dc-mixed.json"
+expect_exit "policy on a type that owns it IS drift"  1 bash "$CLASSIFY" "$tmp/dc-policy-owned.json"
+expect_exit "unparseable JSON fails closed"           2 bash "$CLASSIFY" "$tmp/dc-garbage.json"
+expect_exit "rejects a missing file"                  2 bash "$CLASSIFY" "$tmp/dc-nope.json"
+expect_exit "rejects no arguments"                    2 bash "$CLASSIFY"
+
+# Real drift must be NAMED, or the operator cannot act on a red run. Captured
+# and matched, not piped: the classifier exits 1 here, which under `pipefail`
+# would be the pipeline's status and read as the assertion failing.
+verdict="$(bash "$CLASSIFY" "$tmp/dc-mixed.json" 2>&1 || true)"
+case "$verdict" in
+*"aws_eks_cluster.er_prod"*) ok "names the drifted resource" ;;
+*) no "names the drifted resource" "output: $verdict" ;;
+esac
+# And the ignored ones stay visible rather than being silently dropped.
+case "$verdict" in
+*"aws_kms_key.state"*) ok "still reports what it ignored" ;;
+*) no "still reports what it ignored" "output: $verdict" ;;
+esac
 
 # --- verdict ----------------------------------------------------------------
 

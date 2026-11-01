@@ -16,13 +16,20 @@
 # outside Terraform" — never "someone edited a .tf file". That is why this is a
 # separate workflow rather than a flag on `infra.yml`.
 #
-# WHY A THIRD ROLE. `er-ci-tf-drift` holds the two reads `ReadOnlyAccess` omits
-# (`secretsmanager:GetSecretValue`, `bcm-data-exports:GetExport`) which a refresh
-# needs and which the plan role must never have. It is safe here because of who
-# can reach it: its trust pins BOTH `sub` to `refs/heads/main` AND
-# `job_workflow_ref` to this file. No PR branch can mint the first, and no other
-# workflow satisfies the second — so adding a step elsewhere cannot inherit
-# secret-read. See infra/terraform/envs/core/ci-terraform.tf.
+# WHY A THIRD ROLE. `er-ci-tf-drift` holds the reads `ReadOnlyAccess` omits —
+# `secretsmanager:GetSecretValue`, `bcm-data-exports:GetExport` and
+# `bcm-data-exports:ListTagsForResource` — which a refresh needs and the plan
+# role must never have. It is safe here because of who can reach it: its trust
+# pins BOTH `sub` to `refs/heads/main` AND `job_workflow_ref` to this file. No PR
+# branch can mint the first, and no other workflow satisfies the second — so
+# adding a step elsewhere cannot inherit secret-read. See
+# infra/terraform/envs/core/ci-terraform.tf, which also records that this role's
+# secret scope reaches the builder admin key, and why that is bounded.
+#
+# That list grew twice from real runs and may grow again: #354 found
+# `GetExport` by failing on it and then switched the plan tier to
+# `-refresh=false`, so until this workflow existed NOTHING had ever completed a
+# full refresh — `ListTagsForResource` had simply never been reached.
 #
 # NOT A REQUIRED CHECK, and it cannot become one: it never runs on a pull
 # request. A red run here means the account disagrees with its state file, which
@@ -34,6 +41,23 @@
 # `apply -refresh-only` would, and nothing here applies. Drift is reported for a
 # human to resolve, never auto-reconciled: silently writing reality back into
 # state is how a console change becomes permanent without anyone deciding so.
+#
+# WHAT "DRIFT" MEANS HERE IS DECIDED PER ATTRIBUTE, by
+# `scripts/ci/tf-drift-classify.sh`, and the first real run is why. Two signals
+# that look obvious both failed on it:
+#
+#   `-detailed-exitcode`  `dev` and `prod` printed "found no differences" and
+#                         exited 2 anyway. Not a drift signal.
+#   the text sentinel     "Objects have changed outside of Terraform" fired on
+#                         `core` and `state-backend`, and neither was drift —
+#                         `tags = {}` where state holds null, plus attributes
+#                         (`managed_policy_arns`, `aws_s3_bucket.policy`) that
+#                         report what a SEPARATE resource manages.
+#
+# `state-backend` makes that permanent rather than transient: CI plans it and
+# never applies it, so nothing reconciles its state snapshot and it would have
+# reported drift every day forever. The classifier's ignore list is therefore
+# evidence-based — see the script.
 name: drift
 
 on:
@@ -85,75 +109,65 @@ jobs:
           aws-region: us-east-2
           role-to-assume: arn:aws:iam::797781631727:role/er-ci-tf-drift
       - name: terraform plan -refresh-only
-        id: drift
         env:
           DIR: ${{ matrix.dir }}
-        # `-detailed-exitcode`: 0 = state matches reality, 2 = it does not,
-        # 1 = the refresh itself failed. Without it an error and a clean result
-        # share an exit code, which is how a broken check reads as "no drift" —
-        # the same reason the plan tier passes it.
+        # NO `-detailed-exitcode`, and that is the correction rather than an
+        # omission. The first real run used it and treated 2 as drift; `dev` and
+        # `prod` both printed "found no differences" and both exited 2, because a
+        # refresh-only plan has something to persist almost by construction. It
+        # is not a drift signal, and trusting it would have turned the schedule
+        # red every day — the alarm fatigue this gate exists to avoid.
+        #
+        # So the plan is saved and read twice, as the apply tier does: once as
+        # text for a human, once as JSON for the decision.
+        #
+        # `driftplan` AND `driftout/plan.json` CARRY ATTRIBUTE VALUES IN
+        # CLEARTEXT. Neither may be uploaded as an artifact, and the JSON must
+        # never be printed — there is deliberately no upload step in this
+        # workflow. The classifier below emits only addresses and attribute
+        # NAMES; the `show -no-color` text that reaches the summary redacts
+        # values to `(sensitive value)`.
         run: |
           mkdir -p driftout
-          set +e
-          terraform -chdir="$DIR" init -input=false > driftout/out.txt 2>&1
-          code=$?
-          if [ "$code" -eq 0 ]; then
-            terraform -chdir="$DIR" plan -refresh-only \
-              -no-color -lock=false -input=false -detailed-exitcode \
-              > driftout/out.txt 2>&1
-            code=$?
-          else
-            code=1
-          fi
-          set -e
-
+          terraform -chdir="$DIR" init -input=false
+          terraform -chdir="$DIR" plan -refresh-only -out=driftplan \
+            -no-color -lock=false -input=false
+          terraform -chdir="$DIR" show -no-color driftplan > driftout/out.txt
+          terraform -chdir="$DIR" show -json    driftplan > driftout/plan.json
           tail -c 60000 driftout/out.txt
-          case "$code" in
-            0) echo "drifted=false" >> "$GITHUB_OUTPUT" ;;
-            2) echo "drifted=true"  >> "$GITHUB_OUTPUT" ;;
-            *) echo "drifted=error" >> "$GITHUB_OUTPUT" ;;
-          esac
+      - name: classify the refresh
+        # The classifier's own exit code IS the verdict: 0 no real drift, 1 real
+        # drift, 2 unparseable. So this step needs no plumbing — it fails the job
+        # directly, and its stdout names what drifted.
+        #
+        # `set -o pipefail` explicitly: GitHub's default shell is `bash -e` and
+        # adds no pipefail, so `classifier | tee` would return TEE's status and
+        # swallow the verdict entirely. That is the same mistake twice over in
+        # this workflow family, so it is spelled out rather than assumed.
+        run: |
+          set -o pipefail
+          bash scripts/ci/tf-drift-classify.sh driftout/plan.json | tee driftout/verdict.txt
       - name: summary
         if: always()
-        env:
-          DRIFTED: ${{ steps.drift.outputs.drifted }}
+        # After the classifier, so a red job explains itself in the summary
+        # rather than only in the log.
         run: |
           {
             echo "### drift — ${{ matrix.key }}"
             echo ""
-            case "$DRIFTED" in
-              false) echo "State matches reality." ;;
-              true)  echo "**DRIFT: the account disagrees with the state file.**" ;;
-              *)     echo "**The refresh itself failed** — this is not a drift result." ;;
-            esac
+            if [ -s driftout/verdict.txt ]; then
+              echo '```'
+              cat driftout/verdict.txt
+              echo '```'
+            else
+              echo "_The refresh did not complete; this is not a drift result._"
+            fi
+            echo ""
+            echo "<details><summary>refresh-only plan</summary>"
             echo ""
             echo '```terraform'
             tail -c 40000 driftout/out.txt 2>/dev/null || true
             echo '```'
+            echo ""
+            echo "</details>"
           } >> "$GITHUB_STEP_SUMMARY"
-      - name: fail on drift
-        # Deliberately a separate step so the summary above is always written
-        # first — a red job whose summary says why beats a red job you have to
-        # open the log to understand.
-        #
-        # Drift FAILS rather than warns. A scheduled workflow that goes red
-        # notifies; one that warns is a line in a log nobody opens. If an
-        # environment turns out to drift chronically, the answer is to fix the
-        # configuration or record the exception — not to lower this to a warning,
-        # which would retire the check while leaving it in the tree.
-        env:
-          DRIFTED: ${{ steps.drift.outputs.drifted }}
-        run: |
-          case "$DRIFTED" in
-            false)
-              echo "no drift in ${{ matrix.key }}"
-              ;;
-            true)
-              echo "::error::${{ matrix.key }}: state disagrees with reality — see the run summary for the refresh diff"
-              exit 1
-              ;;
-            *)
-              echo "::error::${{ matrix.key }}: the refresh-only plan failed; this is not a clean result"
-              exit 1
-              ;;
-          esac

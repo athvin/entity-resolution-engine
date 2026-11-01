@@ -520,6 +520,23 @@ data "aws_iam_policy_document" "ci_tf_drift_refresh" {
   # Scoped to this account's own secrets rather than `*`: nothing here refreshes
   # a secret it does not own, and a wildcard would be a strictly larger grant for
   # no behaviour.
+  #
+  # SAY THE UNCOMFORTABLE PART. `er/*` covers `er/dev/shared/builder` — the
+  # never-expiring AdministratorAccess key `envs/dev/builder.tf` mints — and
+  # `er/prod/shared/postgres`. So "read-only drift role" reads safer than it is:
+  # a principal that can read that key can become account admin.
+  #
+  # It does not WIDEN anything, which is the only reason it stands. Reaching
+  # this role means a scheduled run of `drift.yml` on `main`, which means a
+  # reviewed PR — and anyone who can merge to `main` can already use
+  # `er-ci-tf-apply`, which holds AdministratorAccess outright. The grant is
+  # inside an existing boundary rather than a new one.
+  #
+  # The policy is deliberately NOT contorted to exclude that one secret: the
+  # dev stack stores the key in a `secretsmanager_secret_version`, so excluding
+  # it would make every dev refresh fail and retire the check. The thing to fix
+  # is the key's existence — see builder.tf, whose own comment says to remove it
+  # when the build loop ends. This is one more argument for doing that.
   statement {
     effect  = "Allow"
     actions = ["secretsmanager:GetSecretValue"]
@@ -528,9 +545,18 @@ data "aws_iam_policy_document" "ci_tf_drift_refresh" {
     ]
   }
 
+  # `ListTagsForResource` alongside `GetExport`, and it is here because the
+  # first real drift run failed on it: refreshing `aws_bcmdataexports_export`
+  # reads its tags as a separate call, and `ReadOnlyAccess` omits that one too.
+  # #354 found `GetExport` by failing on it; nothing had ever completed a full
+  # refresh afterwards, so this one had never been reached. Expect that the next
+  # resource type added to a stack may find a fourth.
   statement {
-    effect    = "Allow"
-    actions   = ["bcm-data-exports:GetExport"]
+    effect = "Allow"
+    actions = [
+      "bcm-data-exports:GetExport",
+      "bcm-data-exports:ListTagsForResource",
+    ]
     resources = ["*"]
   }
 }
