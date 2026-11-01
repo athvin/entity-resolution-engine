@@ -109,20 +109,28 @@ Five rules that are easy to break:
   before it).
 - **`bootstrap/state-backend` is planned and never applied from CI** — it owns
   the bucket its own backend lives in. **`bootstrap/organization` is validated
-  only**: its one required variable is a root account email deliberately absent
-  from this public repository. `terraform validate` needs no variable value,
-  which is exactly why it can sit in that tier and not in the plan tier.
+  only**: its one required variable is a root account email deliberately kept
+  out of version control. `terraform validate` needs no variable value, which is
+  exactly why it can sit in that tier and not in the plan tier.
 - **A saved plan file is sensitive.** The apply tier plans to `tfplan`, shows
   it, guards it and applies that file. `tfplan` must never become an artifact
   and `terraform show -json` must never be printed — both carry sensitive values
   in cleartext, while `show -no-color` redacts them to `(sensitive value)`.
 
-The apply is unattended and §14.2's prod-scoped apply role is still unbuilt, so
-the only thing between a merge and a production teardown is
-`scripts/ci/tf-destroy-guard.sh`: it refuses any apply with a non-zero destroy
-count unless the commit message carries `ALLOW-DESTROY` (the repo squash-merges,
-so that means the PR title). It is a speed bump, not a policy engine — it cannot
-tell a benign replace from losing Aurora, and a *replace* trips it too.
+The apply is unattended, so the only thing between a merge and a production
+teardown is `scripts/ci/tf-destroy-guard.sh`: it refuses any apply with a
+non-zero destroy count unless the commit message carries `ALLOW-DESTROY` (the
+repo squash-merges, so that means the PR title). It is a speed bump, not a
+policy engine — it cannot tell a benign replace from losing Aurora, and a
+*replace* trips it too.
+
+Because that guard matters more than anything else in the file and its refusal
+path has never fired on a real apply, `apply` gates on a
+`terraform ci helpers (self-test)` job that asserts the refusal, the override
+and the fail-closed branch against fixtures
+(`scripts/ci/tf-helpers-test.sh`, runnable locally, no AWS). Changing a helper
+without updating that suite is how the guard silently stops guarding — the
+suite is mutation-checked, so breaking a helper does turn it red.
 
 ## The two Helm charts
 
