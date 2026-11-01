@@ -25,11 +25,16 @@
 # applies it — so nothing would ever reconcile its state snapshot and it would
 # report drift forever.
 #
-# So drift is decided per ATTRIBUTE, from the plan JSON, against a list of
-# known artifacts. The list below is evidence-based: every entry was observed
-# in run 41280636155. Extend it the same way — from a real run that shows the
-# attribute is provider noise — never pre-emptively, because every entry is a
-# place real drift can now hide.
+# The second run (41283281935) cleared `dev` and `prod` and surfaced three more
+# of the same class that the truncated text output had hidden:
+# `aws_s3_bucket.server_side_encryption_configuration`, `.versioning` and
+# `aws_iam_role.inline_policy`. That is what turned the ignore list from a set
+# of observations into a rule.
+#
+# So drift is decided per ATTRIBUTE, from the plan JSON. Add to the lists below
+# only on one of two justifications — the sibling-resource rule stated there, or
+# a real run proving the attribute is normalisation noise. Never on a hunch:
+# every entry without one of those is a place real drift can hide.
 #
 # NOTHING FROM THE JSON IS PRINTED EXCEPT ADDRESSES AND ATTRIBUTE NAMES. A plan
 # JSON carries attribute VALUES in cleartext, which is why the apply tier is
@@ -42,21 +47,42 @@
 # unparseable JSON.
 set -uo pipefail
 
-# Attributes whose appearance or change is a provider artifact rather than
-# drift. Each is here because a real run proved it.
+# Ignored on ANY type: the null-versus-empty normalisation the provider applies
+# to every taggable resource. Observed on three resource types in run 1.
+IGNORE_ANY="tags tags_all"
+
+# Ignored on ONE type, by the SIBLING-RESOURCE RULE: on that type the provider
+# deprecated the attribute in favour of a separate resource, and now computes it
+# from whatever that resource set.
 #
-#   tags                 `{}` where state holds null, on every taggable thing
-#   tags_all             same, the computed sibling
-#   managed_policy_arns  deprecated on aws_iam_role; reports what
-#                        aws_iam_role_policy_attachment manages
-#   policy               on aws_s3_bucket; reports what aws_s3_bucket_policy
-#                        manages. NOTE this name is generic — see the
-#                        per-type guard below, it is not ignored globally.
-IGNORE_ANY="tags tags_all managed_policy_arns"
-# `policy` only counts as an artifact on resource types where a sibling
-# resource owns it. Ignoring `policy` everywhere would hide a real change to,
-# say, an IAM role policy document.
-IGNORE_ON_TYPE="aws_s3_bucket:policy"
+# This is the one rule here that is principled rather than merely observed, and
+# why it hides nothing is the whole point: the sibling resource Terraform
+# actually manages reports the same drift itself. Turn bucket versioning off in
+# the console and `aws_s3_bucket_versioning` drifts — the deprecated
+# `aws_s3_bucket.versioning` mirror saying so too is duplicate noise, not the
+# signal.
+#
+# That rule is also the boundary. An attribute belongs here only when a sibling
+# resource owns it on that type: `policy` is ignored on `aws_s3_bucket` (owned
+# by `aws_s3_bucket_policy`) and NOWHERE else, because a real change to an
+# `aws_iam_role_policy` document must stay loud. There is a test for exactly
+# that.
+IGNORE_ON_TYPE="
+aws_s3_bucket:policy
+aws_s3_bucket:acl
+aws_s3_bucket:grant
+aws_s3_bucket:versioning
+aws_s3_bucket:server_side_encryption_configuration
+aws_s3_bucket:lifecycle_rule
+aws_s3_bucket:logging
+aws_s3_bucket:cors_rule
+aws_s3_bucket:website
+aws_s3_bucket:replication_configuration
+aws_s3_bucket:object_lock_configuration
+aws_s3_bucket:request_payer
+aws_iam_role:managed_policy_arns
+aws_iam_role:inline_policy
+"
 
 die() {
     printf 'tf-drift-classify: %s\n' "$1" >&2
