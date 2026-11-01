@@ -482,18 +482,25 @@ faster on 4 cores.
 important") but is **not reachable by editing `runs-on:`**, so the parallelism
 above was taken first. Any core increase needs an account-level decision.
 
-**Context — what this repo can actually run.** The repository is **public and
-owned by a user account**, not an organisation. That fixes two things:
+**Context — what this repo can actually run.** The repository is **private and
+owned by a user account**, not an organisation (`gh repo view --json visibility`
+→ `PRIVATE`). That fixes two things:
 
-- `ubuntu-latest` is 4 vCPU / 16 GB, and **its minutes are free**, because
-  standard GitHub-hosted runners are free for public repositories. The current
-  bill for all of this CI is zero.
+- `ubuntu-latest` is 4 vCPU / 16 GB, and **its minutes are metered.** An earlier
+  revision of this section claimed they were free "because standard runners are
+  free for public repositories" — that premise was simply wrong about this repo.
+  A private repository draws on a monthly included-minutes allowance and is
+  billed past it, so the CI runtime measured below is a cost rather than only a
+  wait. The allowance and current consumption are account settings, not
+  repository state, so read them from Billing (or
+  `gh api /users/{user}/settings/billing/actions`, which needs the `user` scope)
+  rather than trusting a figure written here.
 - **GitHub "larger runners" are not available.** They are a Team / Enterprise
   Cloud feature, provisioned as a runner group in *organisation* settings, and
-  they are **metered even on public repositories** (~$0.012/min for 4-core
-  Linux, scaling with size). A user-owned repo has no org settings page to
-  create one in. `gh api repos/.../actions/runners` also confirms no self-hosted
-  runner is registered.
+  they are metered (~$0.012/min for 4-core Linux, scaling with size). A
+  user-owned repo has no org settings page to create one in.
+  `gh api repos/.../actions/runners` also confirms no self-hosted runner is
+  registered.
 
 So the failure mode to avoid is writing a label like `ubuntu-latest-8-core` that
 does not resolve: the job then queues forever, and on a **required** check that
@@ -510,15 +517,20 @@ workflow.
    Lowest friction, and the only option that addresses both axes at once.
 2. **An organisation on the Team plan**, which unlocks GitHub larger runners.
    Transfer the repo, create a runner group, then use its label. Keeps everything
-   first-party; costs the plan plus metered larger-runner minutes, and gives up
-   the free-for-public-repos standard-runner minutes for any job moved over.
-3. **Self-hosted runners** on the existing AWS/EKS footprint. **Weigh this
-   carefully on a public repo:** a pull request from a fork can execute arbitrary
-   code on a self-hosted runner, which is why GitHub advises against self-hosted
-   runners on public repositories. It is mitigable (fork PRs gated behind manual
-   approval) but it is a real attack surface on a repo that holds a `security`
-   skill and a pentest programme, and it carries infrastructure cost and
-   maintenance that the other two do not.
+   first-party; costs the plan plus metered larger-runner minutes. Since this
+   repo's standard minutes are already metered, moving a job over trades one
+   metered rate for another rather than giving up a free one — which is a
+   smaller step than the earlier public-repo framing implied.
+3. **Self-hosted runners** on the existing AWS/EKS footprint. The usual
+   objection — a fork PR executing arbitrary code on your runner, which is why
+   GitHub advises against self-hosted runners on *public* repositories — mostly
+   does not apply here, because the repository is private and a fork needs
+   granted access. What remains is ordinary and still real: a compromised
+   collaborator account or a malicious dependency gets code execution on
+   infrastructure inside the AWS account, so the runner wants its own
+   least-privileged identity rather than anything the platform roles can reach.
+   Plus the infrastructure cost and maintenance the other two options do not
+   carry.
 
 **What was done instead, and why it was done first.** Parallelism, which is free:
 `fmt + clippy + docs` and `DuckLake + extensions e2e` were each running
