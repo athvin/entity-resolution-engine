@@ -1,0 +1,6 @@
+kind: statement
+operation: read
+mode: partial
+description: "Every live claimed pod row (the executor's working set): what adoption reconciles against the cluster listing at start-up and on every resync (§6.6), and what the stuck-pending sweep walks (§5.7)."
+params: []
+returns: entity

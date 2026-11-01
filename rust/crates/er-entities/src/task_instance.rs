@@ -688,6 +688,117 @@ ORDER BY seq, try_number
             .collect())
     }
 
+    /// Every live claimed pod row (the executor's working set): what adoption reconciles against the cluster listing at start-up and on every resync (§6.6), and what the stuck-pending sweep walks (§5.7).
+    pub async fn live_claimed_pods(
+        client: &impl ::tokio_postgres::GenericClient,
+    ) -> ::std::result::Result<Vec<super::TaskInstance>, ::tokio_postgres::Error> {
+        const SQL: &str = "SELECT
+  id,
+  org_id,
+  job_id,
+  task_id,
+  seq,
+  try_number,
+  live,
+  archived_reason,
+  kind,
+  state,
+  trigger_rule,
+  upstream,
+  teardown,
+  segment,
+  resource_class,
+  next_resource_class,
+  escalated_from,
+  max_tries,
+  launches,
+  max_launches,
+  not_before,
+  input,
+  output,
+  outcome,
+  exit_code,
+  termination_reason,
+  error_class,
+  error_detail,
+  owner_epoch,
+  k8s_job_name,
+  pod_name,
+  pod_uid,
+  node_name,
+  image_digest,
+  snapshot_start,
+  snapshot_end,
+  counters,
+  trace_context,
+  token_hash,
+  scheduled_at,
+  queued_at,
+  started_at,
+  heartbeat_at,
+  finished_at,
+  created_at,
+  updated_at
+FROM public.task_instances
+WHERE live IS TRUE AND kind = 'pod'
+  AND state IN ('queued', 'running', 'restarting', 'canceling')
+  AND k8s_job_name IS DISTINCT FROM 'inproc'
+ORDER BY job_id, seq
+";
+        let rows = client.query(SQL, &[]).await?;
+        Ok(rows
+            .iter()
+            .map(|row| super::TaskInstance {
+                id: row.get("id"),
+                org_id: row.get("org_id"),
+                job_id: row.get("job_id"),
+                task_id: row.get("task_id"),
+                seq: row.get("seq"),
+                try_number: row.get("try_number"),
+                live: row.get("live"),
+                archived_reason: row.get("archived_reason"),
+                kind: row.get("kind"),
+                state: row.get("state"),
+                trigger_rule: row.get("trigger_rule"),
+                upstream: row.get("upstream"),
+                teardown: row.get("teardown"),
+                segment: row.get("segment"),
+                resource_class: row.get("resource_class"),
+                next_resource_class: row.get("next_resource_class"),
+                escalated_from: row.get("escalated_from"),
+                max_tries: row.get("max_tries"),
+                launches: row.get("launches"),
+                max_launches: row.get("max_launches"),
+                not_before: row.get("not_before"),
+                input: row.get("input"),
+                output: row.get("output"),
+                outcome: row.get("outcome"),
+                exit_code: row.get("exit_code"),
+                termination_reason: row.get("termination_reason"),
+                error_class: row.get("error_class"),
+                error_detail: row.get("error_detail"),
+                owner_epoch: row.get("owner_epoch"),
+                k8s_job_name: row.get("k8s_job_name"),
+                pod_name: row.get("pod_name"),
+                pod_uid: row.get("pod_uid"),
+                node_name: row.get("node_name"),
+                image_digest: row.get("image_digest"),
+                snapshot_start: row.get("snapshot_start"),
+                snapshot_end: row.get("snapshot_end"),
+                counters: row.get("counters"),
+                trace_context: row.get("trace_context"),
+                token_hash: row.get("token_hash"),
+                scheduled_at: row.get("scheduled_at"),
+                queued_at: row.get("queued_at"),
+                started_at: row.get("started_at"),
+                heartbeat_at: row.get("heartbeat_at"),
+                finished_at: row.get("finished_at"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+            })
+            .collect())
+    }
+
     /// The current try plus its archived retry predecessors, walked back contiguously to the first cleared/restarted row or try 1: the lineage whose committed run_stages rows the ledger probe may report from. A cleared predecessor is a lineage boundary, so a clear still re-runs (§4.4).
     pub async fn retry_lineage(
         client: &impl ::tokio_postgres::GenericClient,
@@ -755,6 +866,120 @@ JOIN lineage l ON l.id = ti.id
 ORDER BY ti.try_number DESC
 ";
         let rows = client.query(SQL, &[&task_instance_id]).await?;
+        Ok(rows
+            .iter()
+            .map(|row| super::TaskInstance {
+                id: row.get("id"),
+                org_id: row.get("org_id"),
+                job_id: row.get("job_id"),
+                task_id: row.get("task_id"),
+                seq: row.get("seq"),
+                try_number: row.get("try_number"),
+                live: row.get("live"),
+                archived_reason: row.get("archived_reason"),
+                kind: row.get("kind"),
+                state: row.get("state"),
+                trigger_rule: row.get("trigger_rule"),
+                upstream: row.get("upstream"),
+                teardown: row.get("teardown"),
+                segment: row.get("segment"),
+                resource_class: row.get("resource_class"),
+                next_resource_class: row.get("next_resource_class"),
+                escalated_from: row.get("escalated_from"),
+                max_tries: row.get("max_tries"),
+                launches: row.get("launches"),
+                max_launches: row.get("max_launches"),
+                not_before: row.get("not_before"),
+                input: row.get("input"),
+                output: row.get("output"),
+                outcome: row.get("outcome"),
+                exit_code: row.get("exit_code"),
+                termination_reason: row.get("termination_reason"),
+                error_class: row.get("error_class"),
+                error_detail: row.get("error_detail"),
+                owner_epoch: row.get("owner_epoch"),
+                k8s_job_name: row.get("k8s_job_name"),
+                pod_name: row.get("pod_name"),
+                pod_uid: row.get("pod_uid"),
+                node_name: row.get("node_name"),
+                image_digest: row.get("image_digest"),
+                snapshot_start: row.get("snapshot_start"),
+                snapshot_end: row.get("snapshot_end"),
+                counters: row.get("counters"),
+                trace_context: row.get("trace_context"),
+                token_hash: row.get("token_hash"),
+                scheduled_at: row.get("scheduled_at"),
+                queued_at: row.get("queued_at"),
+                started_at: row.get("started_at"),
+                heartbeat_at: row.get("heartbeat_at"),
+                finished_at: row.get("finished_at"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+            })
+            .collect())
+    }
+
+    /// The zombie sweep's candidates (§5.7): running pod rows of this dispatcher epoch whose heartbeat is older than the bound. The in-process reporter's rows are excluded — the dispatcher IS their process.
+    pub async fn stale_heartbeats(
+        client: &impl ::tokio_postgres::GenericClient,
+        owner_epoch: &str,
+        stale_secs: i64,
+    ) -> ::std::result::Result<Vec<super::TaskInstance>, ::tokio_postgres::Error> {
+        const SQL: &str = "SELECT
+  id,
+  org_id,
+  job_id,
+  task_id,
+  seq,
+  try_number,
+  live,
+  archived_reason,
+  kind,
+  state,
+  trigger_rule,
+  upstream,
+  teardown,
+  segment,
+  resource_class,
+  next_resource_class,
+  escalated_from,
+  max_tries,
+  launches,
+  max_launches,
+  not_before,
+  input,
+  output,
+  outcome,
+  exit_code,
+  termination_reason,
+  error_class,
+  error_detail,
+  owner_epoch,
+  k8s_job_name,
+  pod_name,
+  pod_uid,
+  node_name,
+  image_digest,
+  snapshot_start,
+  snapshot_end,
+  counters,
+  trace_context,
+  token_hash,
+  scheduled_at,
+  queued_at,
+  started_at,
+  heartbeat_at,
+  finished_at,
+  created_at,
+  updated_at
+FROM public.task_instances
+WHERE live IS TRUE AND kind = 'pod' AND state = 'running'
+  AND k8s_job_name IS DISTINCT FROM 'inproc'
+  AND owner_epoch = $1
+  AND heartbeat_at < now() - make_interval(secs => ($2::bigint)::double precision)
+ORDER BY heartbeat_at
+";
+        let rows = client.query(SQL, &[&owner_epoch, &stale_secs]).await?;
         Ok(rows
             .iter()
             .map(|row| super::TaskInstance {
@@ -1916,13 +2141,19 @@ RETURNING
     pub async fn claim_launch(
         client: &impl ::tokio_postgres::GenericClient,
         owner_epoch: &str,
-        k8s_job_name: &str,
+        k8s_job_name: Option<&str>,
         token_hash: Option<&str>,
         in_flight_cap: i64,
     ) -> ::std::result::Result<Vec<super::TaskInstance>, ::tokio_postgres::Error> {
         const SQL: &str = "UPDATE public.task_instances
 SET state = 'queued', queued_at = now(), owner_epoch = $1,
-    launches = task_instances.launches + 1, k8s_job_name = $2,
+    launches = task_instances.launches + 1,
+    -- The Job name is a pure function of the attempt key and the launch count
+    -- (§4.2) — derived HERE because only the statement knows the incremented
+    -- count. The caller override exists for the in-process reporter's
+    -- synthetic 'inproc' identity.
+    k8s_job_name = COALESCE($2,
+        'er-t-' || substr(task_instances.id, 1, 20) || '-l' || (task_instances.launches + 1)::text),
     token_hash = $3, updated_at = now()
 WHERE id = (
   SELECT t.id FROM public.task_instances t
@@ -1935,7 +2166,8 @@ WHERE id = (
                     WHERE a.org_id = t.org_id AND a.live IS TRUE AND a.kind = 'pod'
                       AND a.state IN ('queued', 'running', 'restarting', 'canceling'))
     AND $4 > (SELECT count(*) FROM public.task_instances c
-                          WHERE c.live IS TRUE AND c.kind = 'pod' AND c.state IN ('queued', 'running'))
+                          WHERE c.live IS TRUE AND c.kind = 'pod' AND c.state IN ('queued', 'running')
+                            AND c.k8s_job_name IS DISTINCT FROM 'inproc')
   ORDER BY j.priority DESC, j.id, t.seq
   FOR UPDATE OF t SKIP LOCKED
   LIMIT 1)

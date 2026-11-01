@@ -162,17 +162,22 @@ async fn the_task_ledger_statements_hold_their_contracts() {
     assert_eq!(scheduled.len(), 1);
     let token = "tok-init-1";
     let job_name = format!("er-t-{}-l1", &init_id[..20]);
-    let launched =
-        taskpg::claim_launch(&client, EPOCH, &job_name, Some(&pg::hash_secret(token)), 1)
-            .await
-            .unwrap()
-            .expect("the scheduled init is claimable");
+    let launched = taskpg::claim_launch(
+        &client,
+        EPOCH,
+        Some(&job_name),
+        Some(&pg::hash_secret(token)),
+        1,
+    )
+    .await
+    .unwrap()
+    .expect("the scheduled init is claimable");
     assert_eq!(launched.id, init_id);
     assert_eq!(launched.state, "queued");
     assert_eq!(launched.launches, 1);
     // The org slot is taken: nothing else claims.
     assert!(
-        taskpg::claim_launch(&client, EPOCH, "er-t-x-l1", None, 10)
+        taskpg::claim_launch(&client, EPOCH, Some("er-t-x-l1"), None, 10)
             .await
             .unwrap()
             .is_none()
@@ -340,7 +345,7 @@ async fn the_task_ledger_statements_hold_their_contracts() {
         .await
         .unwrap();
     let ingest_job1 = format!("er-t-{}-l1", &ingest1[..20]);
-    taskpg::claim_launch(&client, EPOCH, &ingest_job1, None, 1)
+    taskpg::claim_launch(&client, EPOCH, Some(&ingest_job1), None, 1)
         .await
         .unwrap()
         .expect("ingest try 1 claims");
@@ -436,7 +441,7 @@ async fn the_task_ledger_statements_hold_their_contracts() {
         .await
         .unwrap();
     let ingest_job2 = format!("er-t-{}-l1", &retry.id[..20]);
-    taskpg::claim_launch(&client, EPOCH, &ingest_job2, None, 1)
+    taskpg::claim_launch(&client, EPOCH, Some(&ingest_job2), None, 1)
         .await
         .unwrap()
         .expect("try 2 claims");
@@ -481,7 +486,7 @@ async fn the_task_ledger_statements_hold_their_contracts() {
         .await
         .unwrap();
     let ingest_job3 = format!("er-t-{}-l1", &retry3.id[..20]);
-    taskpg::claim_launch(&client, EPOCH, &ingest_job3, None, 1)
+    taskpg::claim_launch(&client, EPOCH, Some(&ingest_job3), None, 1)
         .await
         .unwrap()
         .expect("try 3 claims");
@@ -547,7 +552,7 @@ async fn the_task_ledger_statements_hold_their_contracts() {
         .await
         .unwrap();
     let finish_job1 = format!("er-t-{}-l1", &finish1[..20]);
-    taskpg::claim_launch(&client, EPOCH, &finish_job1, None, 1)
+    taskpg::claim_launch(&client, EPOCH, Some(&finish_job1), None, 1)
         .await
         .unwrap()
         .expect("the teardown row claims under a running job");
@@ -690,7 +695,7 @@ async fn the_task_ledger_statements_hold_their_contracts() {
 
     // ---- Phase F: clear-while-live → restarting → complete_restart; cancel -
     let ingest4_job = format!("er-t-{}-l1", &ingest4.id[..20]);
-    taskpg::claim_launch(&client, EPOCH, &ingest4_job, None, 1)
+    taskpg::claim_launch(&client, EPOCH, Some(&ingest4_job), None, 1)
         .await
         .unwrap()
         .expect("ingest try 4 claims");
@@ -752,7 +757,7 @@ async fn the_task_ledger_statements_hold_their_contracts() {
         .await
         .unwrap();
     let std2_job = format!("er-t-{}-l1", &std2[..20]);
-    taskpg::claim_launch(&client, EPOCH, &std2_job, None, 1)
+    taskpg::claim_launch(&client, EPOCH, Some(&std2_job), None, 1)
         .await
         .unwrap()
         .expect("standardize try 2 claims");
@@ -793,7 +798,7 @@ async fn the_task_ledger_statements_hold_their_contracts() {
         .await
         .unwrap();
     let finish2_job = format!("er-t-{}-l1", &finish2_id[..20]);
-    let td = taskpg::claim_launch(&client, EPOCH, &finish2_job, None, 1)
+    let td = taskpg::claim_launch(&client, EPOCH, Some(&finish2_job), None, 1)
         .await
         .unwrap()
         .expect("the teardown row is claimable under canceling");
@@ -860,7 +865,7 @@ async fn the_task_ledger_statements_hold_their_contracts() {
         .await
         .unwrap();
     let schema_job = format!("er-t-{}-l1", &schema1[..20]);
-    taskpg::claim_launch(&client, EPOCH, &schema_job, None, 2)
+    taskpg::claim_launch(&client, EPOCH, Some(&schema_job), None, 2)
         .await
         .unwrap()
         .expect("a control row does not hold the pod slot");
