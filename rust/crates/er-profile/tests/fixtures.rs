@@ -300,3 +300,150 @@ fn a_healthy_column_reports_nothing_at_all() {
         "a healthy column must produce no findings, got {reported:?}"
     );
 }
+
+/// A measured candidate key, for the corpus rules.
+fn candidate(
+    name: &str,
+    rows: i64,
+    covered: i64,
+    expected_pairs: i64,
+) -> dedupe_core::blocking_analysis::CandidateKeyEstimate {
+    dedupe_core::blocking_analysis::CandidateKeyEstimate {
+        key_columns: vec![name.to_string()],
+        rows,
+        covered_rows: covered,
+        distinct_values: 1000,
+        expected_pairs,
+        largest_block_pairs: 10,
+        largest_block_rows: 5,
+        entropy_bits: 9.0,
+        pair_loss_from_nulls: 1.0 - (covered as f64 / rows as f64).powi(2),
+    }
+}
+
+/// Codes the registry reports for a corpus with these candidate keys.
+fn corpus_codes(
+    candidates: &[dedupe_core::blocking_analysis::CandidateKeyEstimate],
+) -> Vec<&'static str> {
+    er_profile::findings_with(&[(healthy("email"), vec![])], candidates)
+        .into_iter()
+        .map(|f| f.code.0)
+        .collect()
+}
+
+#[test]
+fn p009_fires_only_when_no_key_is_viable() {
+    // 100k rows: C(n,2) is ~5e9, so 1e6 pairs eliminates >99.9% — viable.
+    let good = candidate("email", 100_000, 95_000, 1_000_000);
+    assert!(!corpus_codes(&[good]).contains(&"P009"));
+
+    // The same corpus where the best key still leaves 14% of all comparisons.
+    let bad = candidate("addr_city", 100_000, 95_000, 700_000_000);
+    let reported = corpus_codes(&[bad]);
+    assert!(reported.contains(&"P009"), "got {reported:?}");
+}
+
+#[test]
+fn p009_counts_a_cheap_but_empty_key_as_not_viable() {
+    // THE trap this rule exists for: a key can be cheap because its column is
+    // almost entirely NULL, and recommending it would recommend a key that
+    // cannot see the data. 5% covered => 99.75% of pairs unreachable.
+    let cheap_but_blind = candidate("fax", 100_000, 5_000, 1_000);
+    let reported = corpus_codes(&[cheap_but_blind]);
+    assert!(
+        reported.contains(&"P009"),
+        "a key covering 5% of rows is not viable however cheap it looks, got {reported:?}"
+    );
+    assert!(
+        !reported.contains(&"P010"),
+        "and it must not be recommended either, got {reported:?}"
+    );
+}
+
+#[test]
+fn p010_names_the_cheapest_viable_key_not_the_cheapest_overall() {
+    let viable = candidate("email", 100_000, 95_000, 1_000_000);
+    let cheaper_but_blind = candidate("fax", 100_000, 4_000, 500);
+    let found =
+        er_profile::findings_with(&[(healthy("email"), vec![])], &[cheaper_but_blind, viable]);
+    let p010 = found
+        .iter()
+        .find(|f| f.code == Code("P010"))
+        .expect("P010 should name a key");
+    assert_eq!(
+        p010.detail["key"][0], "email",
+        "the cheapest key overall is `fax`, but it is unusable; P010 must name `email`"
+    );
+    assert_eq!(p010.severity, Severity::Info);
+}
+
+#[test]
+fn the_corpus_rules_stay_silent_when_nothing_was_measured() {
+    // An empty candidate list means "tier 2 did not run", NOT "no key is
+    // viable". Reporting P009 here would invent a finding from an absence.
+    let reported = corpus_codes(&[]);
+    assert!(!reported.contains(&"P009"), "got {reported:?}");
+    assert!(!reported.contains(&"P010"), "got {reported:?}");
+}
+
+#[test]
+fn the_corpus_rules_stay_silent_on_a_corpus_too_small_to_block() {
+    // Below ~1000 rows the cartesian product is cheap and "no good key exists"
+    // is true but useless. A warning on every small dataset teaches people to
+    // ignore the panel.
+    let reported = corpus_codes(&[candidate("addr_city", 200, 200, 19_900)]);
+    assert!(!reported.contains(&"P009"), "got {reported:?}");
+    assert!(!reported.contains(&"P010"), "got {reported:?}");
+}
+
+#[test]
+fn severity_grades_wrong_results_apart_from_costs() {
+    // The scale has three levels and must use all three, or it has two levels
+    // and a dead branch. `error` is reserved for a WRONG RESULT; everything
+    // that merely costs recall, runtime or trust is a `warning`.
+    //
+    // P004 (placeholders) and P008 (a colliding identifier) are the two that
+    // corrupt output rather than degrade it: the first merges records that
+    // share nothing but their missing data, the second loses a row to whichever
+    // copy landed last. Both are silent in the result.
+    let by_code: std::collections::BTreeMap<&str, Severity> = er_profile::rule_infos()
+        .iter()
+        .map(|i| (i.code.0, i.severity))
+        .collect();
+
+    assert_eq!(
+        by_code["P004"],
+        Severity::Error,
+        "placeholders cause false merges"
+    );
+    assert_eq!(by_code["P008"], Severity::Error, "id collisions lose rows");
+
+    // P009 is deliberately NOT an error: an unblockable corpus costs runtime or
+    // recall, which is exactly the `warning` definition. It does not corrupt.
+    assert_eq!(by_code["P009"], Severity::Warning);
+
+    // All three levels are in use.
+    let used: std::collections::BTreeSet<&str> = by_code.values().map(|s| s.as_str()).collect();
+    assert_eq!(
+        used,
+        ["error", "info", "warning"].into_iter().collect(),
+        "every severity level must have at least one rule, or the scale is decorative"
+    );
+}
+
+#[test]
+fn the_blocking_rules_gate_on_pairs_not_rows() {
+    // The threshold is about the quadratic blocking defuses, so it is measured
+    // in pairs. 3000 rows is 4.5M pairs — under budget, silent. 4000 rows is
+    // 8M — over, so the rules speak. A row-count floor could not express that.
+    let under = candidate("addr_city", 3_000, 3_000, 4_000_000);
+    assert!(
+        !corpus_codes(&[under]).contains(&"P009"),
+        "4.5M unblocked pairs is still cheap"
+    );
+    let over = candidate("addr_city", 4_000, 4_000, 7_000_000);
+    assert!(
+        corpus_codes(&[over]).contains(&"P009"),
+        "8M unblocked pairs is worth a sentence"
+    );
+}

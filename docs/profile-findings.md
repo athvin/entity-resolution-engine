@@ -10,11 +10,13 @@ A profile describes a corpus; a finding says what about it is worth acting on. N
 | P001 | warning | a profiled column holds at least one value |
 | P002 | warning | a column used for matching is populated in at least half its rows |
 | P003 | warning | no single value covers a large share of a column |
-| P004 | warning | a column holds no placeholder values standing in for absence |
+| P004 | error | a column holds no placeholder values standing in for absence |
 | P005 | warning | a column's values do not collapse substantially under normalization |
 | P006 | info | a text column holding a single consistent type is compared as that type |
 | P007 | warning | a column holds more than one distinct value |
-| P008 | warning | a near-unique column is actually unique |
+| P008 | error | a near-unique column is actually unique |
+| P009 | warning | at least one column is a usable blocking key on its own |
+| P010 | info | the most selective usable blocking key is named with its cost |
 
 ## P001 — a profiled column holds at least one value
 
@@ -48,9 +50,9 @@ Blocking cost is not driven by the average block, it is driven by the largest on
 
 ## P004 — a column holds no placeholder values standing in for absence
 
-*warning*
+*error*
 
-A placeholder is worse than a NULL, because it is a value: `unknown` equals `unknown`, so every record carrying it agrees with every other one. That turns absence into positive evidence of a match — the records block together, score as agreeing on the field, and the resulting cluster is wrong in a way no threshold can fix, because the model was told the truth about what it was given. A NULL, by contrast, is handled correctly everywhere: it fails the equality, lands on the null comparison level, and contributes nothing. So the remedy is almost always to map the placeholder to NULL at standardization rather than to tune anything. The threshold is deliberately low because this is a correctness problem at any volume, and the placeholder list is deliberately short because a longer one starts matching real surnames and place names.
+A placeholder is worse than a NULL, because it is a value: `unknown` equals `unknown`, so every record carrying it agrees with every other one. That turns absence into positive evidence of a match — the records block together, score as agreeing on the field, and the resulting cluster is wrong in a way no threshold can fix, because the model was told the truth about what it was given. A NULL, by contrast, is handled correctly everywhere: it fails the equality, lands on the null comparison level, and contributes nothing. So the remedy is almost always to map the placeholder to NULL at standardization rather than to tune anything. The threshold is deliberately low because this is a correctness problem at any volume, and the placeholder list is deliberately short because a longer one starts matching real surnames and place names. Graded `error` rather than `warning` because the consequence is a WRONG RESULT and not a cost: records sharing nothing but their missing data get merged, and an over-merge is the expensive mistake in entity resolution — far harder to notice, and far harder to undo, than a duplicate left behind.
 
 **Quiet on:** `addr_region`: top values are `CA`, `TX`, `NY` — all real.
 
@@ -88,10 +90,30 @@ A constant column is the degenerate case of skew and deserves naming separately,
 
 ## P008 — a near-unique column is actually unique
 
-*warning*
+*error*
 
-A column that is almost but not quite unique is the signature of a broken record identifier, and it is dangerous precisely because it looks fine: 997 distinct values in 1000 rows reads as a healthy identifier, and the three collisions silently decide which version of a record survives ingest. Reported only when the EXACT distinct count was computed, never from the approximate one — `approx_count_distinct` is a HyperLogLog and is wrong in both directions (measured at 978 on a column of 1000 genuinely distinct ids), so inferring uniqueness from it would both invent collisions that do not exist and miss the handful that do. That is why `ColumnShape::is_unique` returns an Option and this rule stays silent rather than guessing: a false alarm here sends someone hunting duplicates in a clean column, and a missed one leaves records overwriting each other. The near-unique threshold is itself a stand-in for config: which column is MEANT to identify a record is declared, and once this pass can read that declaration the right check is an exact one on that column, where any collision at all is a finding and no threshold is needed.
+A column that is almost but not quite unique is the signature of a broken record identifier, and it is dangerous precisely because it looks fine: 997 distinct values in 1000 rows reads as a healthy identifier, and the three collisions silently decide which version of a record survives ingest. Graded `error` for that reason: the outcome is not a slower run or a missed duplicate but a row that is simply gone, overwritten by whichever copy landed last. Reported only when the EXACT distinct count was computed, never from the approximate one — `approx_count_distinct` is a HyperLogLog and is wrong in both directions (measured at 978 on a column of 1000 genuinely distinct ids), so inferring uniqueness from it would both invent collisions that do not exist and miss the handful that do. That is why `ColumnShape::is_unique` returns an Option and this rule stays silent rather than guessing: a false alarm here sends someone hunting duplicates in a clean column, and a missed one leaves records overwriting each other. The near-unique threshold is itself a stand-in for config: which column is MEANT to identify a record is declared, and once this pass can read that declaration the right check is an exact one on that column, where any collision at all is a finding and no threshold is needed.
 
 **Quiet on:** `surname`: 900 distinct values over 940 rows (96%) — varied, but nobody expected a name to identify a record, so no collision is implied.
 
 **Fires on:** `crm_id`: 997 distinct values over 1000 populated rows (99.7%). Three ids repeat, so the column cannot identify a record and whichever row lands last wins.
+
+## P009 — at least one column is a usable blocking key on its own
+
+*warning*
+
+This is the one question a profile exists to answer before a model is trained, and it cannot be answered one column at a time: whether the corpus is blockable depends on the BEST column, so a per-column rule would either say nothing or say it twelve times. When no single column clears both bars the remedy is a composite key — `surname` plus `addr_postal` where neither alone is selective enough — and knowing that before the first run is the difference between a configuration decision and a three-hour surprise. Two bars rather than one because the failure modes are opposite: a key that eliminates too few comparisons makes the run quadratic, and a key that is cheap because its column is mostly empty makes the run miss most of its pairs. Silent when the candidates were not measured, because an empty candidate list means the tier did not run, not that nothing qualified.
+
+**Quiet on:** `email` eliminates 99.6% of comparisons and loses 8% of pairs to NULLs — a usable key on its own.
+
+**Fires on:** Across 12 measured columns the best key still leaves 14% of all possible comparisons, and the only selective column is 71% empty. No single column will block this corpus; it needs a composite key.
+
+## P010 — the most selective usable blocking key is named with its cost
+
+*info*
+
+A findings panel that only ever reports problems is a panel people learn to dread and then to skip. This one carries the answer: of the columns measured, here is the key to block on and here is what it will cost. It is `info` rather than a warning because nothing is wrong — it exists so the most actionable line in the profile is present whether or not anything else fired. 'Most selective' is the lowest pair count among the keys that clear BOTH bars, never the lowest overall: the cheapest key on a corpus is very often a column that is almost entirely empty, and recommending that would be recommending a key that cannot see the data.
+
+**Quiet on:** (Nothing to report: this rule only speaks when a viable key exists, and what it says is which one.)
+
+**Fires on:** `email` is the most selective usable key: 2,140,882 pairs, 99.6% of comparisons eliminated, 8% of pairs unreachable because the column is NULL.

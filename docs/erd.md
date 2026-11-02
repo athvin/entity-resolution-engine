@@ -657,6 +657,21 @@ erDiagram
         timestamp created_at
         timestamp updated_at
     }
+    candidate_keys {
+        varchar id PK
+        varchar profile_run_id
+        varchar key_columns
+        bigint row_count
+        bigint covered_rows
+        bigint distinct_values
+        bigint expected_pairs
+        bigint largest_block_pairs
+        bigint largest_block_rows
+        double entropy_bits
+        double pair_loss_from_nulls
+        timestamp created_at
+        timestamp updated_at
+    }
     profile_findings {
         varchar id PK
         varchar profile_run_id
@@ -989,6 +1004,7 @@ erDiagram
     acct_golden_lineage }o..|| golden_overrides : "entity_id, attribute"
     acct_golden_lineage }o..|| entity_membership : "source_system, source_record_id"
     column_profiles }o..|| profile_runs : "profile_run_id → id"
+    candidate_keys }o..|| profile_runs : "profile_run_id → id"
     profile_findings }o..|| profile_runs : "profile_run_id → id"
     entity_membership }o..|| entities : "entity_id → id"
     entity_events }o..|| entities : "entity_id → id"
@@ -1021,6 +1037,7 @@ erDiagram
 | `metric_snapshot_sources` | ddl | One run's duplicate attribution, per source system. The corpus-wide duplicate rate says a tenant has a problem; it does not say WHERE the problem comes from, and the answer is nearly always one feed. Retained per run beside metric_snapshots for the same reason that table exists: a live number says what is true now and nothing about whether a source is getting better or worse. |
 | `profile_runs` | ddl | One execution of the dataset profiler over one corpus stage, and the cache key for its result. A profile exists to be looked at repeatedly and compared against the previous delivery, so recomputing it on every view would make the cheap tier expensive for no new information. |
 | `column_profiles` | ddl | One column's shape within one profile run: how full it is, how many distinct values it holds, how long its values are, what types they parse as, and its most frequent values. One row per column rather than per value, because the lake schema language cannot express a partition (there is no partition_by field) and a per-value table would grow with the corpus instead of with the schema. |
+| `candidate_keys` | ddl | What an equi-join on one column would cost as a blocking key, measured against the corpus rather than inferred from a model. Blocking decides the entire cost of a run, and it is chosen before anything is trained — so the question has to be answerable with no model at all, which is why these numbers come from a GROUP BY over the data and not from a settings document. |
 | `profile_findings` | ddl | One coded observation a profile made about a corpus — a column mostly null, a blocking key dominated by one value, a record id that is not unique. Stored rather than derived at read time because the thresholds that produced a finding belong to the run that applied them: re-deriving later against changed thresholds would silently rewrite history, and a finding is the part of a profile a user is most likely to act on. |
 | `record_qualities` | ddl | A per-record data-quality score, 0-100, with the three dimensions kept separately. The dimensions are kept because a single number says a record is bad and not what to do about it: complete-but-invalid, valid-but-empty and simply old are three different jobs. |
 | `entity_membership` | ddl | One membership row per record (S4.4): which resolved entity the record's current version belongs to. |

@@ -16,11 +16,12 @@
 //! appending a second copy — which is what makes the stored profile a cache.
 
 use anyhow::{Context, Result, bail};
+use dedupe_core::blocking_analysis::{CandidateKeyEstimate, rank_candidate_keys};
 use dedupe_core::profile::{
     ColumnShape, ProfileOptions, ValueFrequency, column_shape, read_column_shapes, top_values,
 };
 use dedupe_core::session::{Session, TableHandle};
-use er_profile::{Finding, findings};
+use er_profile::{Finding, findings_with};
 
 use crate::create_ddl_table;
 
@@ -88,7 +89,21 @@ pub struct ProfileReport {
     pub sampled: bool,
     pub duration_ms: i64,
     pub columns: Vec<ColumnShapeOut>,
+    /// Candidate blocking keys, cheapest first. Empty below tier 2.
+    pub candidate_keys: Vec<CandidateKeyOut>,
     pub findings: Vec<FindingOut>,
+}
+
+/// One candidate blocking key's cost, flattened for JSON output.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CandidateKeyOut {
+    pub key_columns: Vec<String>,
+    pub expected_pairs: i64,
+    pub largest_block_pairs: i64,
+    pub distinct_values: i64,
+    pub covered_rows: i64,
+    pub entropy_bits: f64,
+    pub pair_loss_from_nulls: f64,
 }
 
 /// A column's shape, flattened for JSON output.
@@ -133,7 +148,12 @@ pub fn run_profile(
     captured_at: &str,
 ) -> Result<ProfileReport> {
     let started = std::time::Instant::now();
-    for relation in ["profile_runs", "column_profiles", "profile_findings"] {
+    for relation in [
+        "profile_runs",
+        "column_profiles",
+        "profile_findings",
+        "candidate_keys",
+    ] {
         create_ddl_table(session, relation)?;
     }
     let snapshot = session
@@ -163,7 +183,25 @@ pub fn run_profile(
             (s.clone(), mine)
         })
         .collect();
-    let found = findings(&paired);
+
+    // Tier 2: what each plausible column would cost as a blocking key. This is
+    // the half of the profile aimed at the model rather than at the reader, and
+    // it needs no trained model to answer — which is the point, because
+    // blocking is chosen before anything is fit.
+    let candidates = if tier >= TIER_BLOCKING {
+        let (keys, considered) = candidate_columns(&shapes);
+        if considered > keys.len() {
+            eprintln!(
+                "profile: measuring {} of {considered} candidate keys (cap {MAX_CANDIDATE_KEYS}, \
+                 most selective first)",
+                keys.len()
+            );
+        }
+        rank_candidate_keys(session, &input, &keys)?
+    } else {
+        Vec::new()
+    };
+    let found = findings_with(&paired, &candidates);
 
     let row_count = shapes.first().map_or(0, |s| s.row_count);
     let duration_ms = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
@@ -182,7 +220,7 @@ pub fn run_profile(
         corpus_digest: &corpus_digest,
         captured_at,
     };
-    let profile_run_id = write_profile(session, &run, &shapes, &tops, &found)?;
+    let profile_run_id = write_profile(session, &run, &shapes, &tops, &found, &candidates)?;
     // `input` is a snapshot-pinned temp VIEW, not a table, so it is left for the
     // session to reclaim — `drop_table` issues DROP TABLE and errors on it. No
     // caller of `register_lake_table_at_version` drops its handle, for the same
@@ -198,6 +236,18 @@ pub fn run_profile(
         column_count: i64::try_from(shapes.len()).unwrap_or(i64::MAX),
         sampled: options.sample.is_some(),
         duration_ms,
+        candidate_keys: candidates
+            .iter()
+            .map(|c| CandidateKeyOut {
+                key_columns: c.key_columns.clone(),
+                expected_pairs: c.expected_pairs,
+                largest_block_pairs: c.largest_block_pairs,
+                distinct_values: c.distinct_values,
+                covered_rows: c.covered_rows,
+                entropy_bits: c.entropy_bits,
+                pair_loss_from_nulls: c.pair_loss_from_nulls,
+            })
+            .collect(),
         columns: shapes
             .iter()
             .map(|s| ColumnShapeOut {
@@ -222,6 +272,54 @@ pub fn run_profile(
             })
             .collect(),
     })
+}
+
+/// The tier at which candidate blocking keys are measured.
+pub const TIER_BLOCKING: i64 = 2;
+
+/// How many candidate keys to measure, at most.
+///
+/// Each one is its own `GROUP BY`, so an unbounded fan-out over a wide
+/// delivered file would turn a profile into a scan per column. Twenty-five is
+/// well past the number of columns anyone blocks on and bounded enough to stay
+/// a profile; the columns are taken most-selective-first, and the cap is
+/// REPORTED rather than applied silently, because a truncated list that looks
+/// complete is the shape that makes someone trust a key that was never measured.
+const MAX_CANDIDATE_KEYS: usize = 25;
+
+/// Columns worth measuring as a blocking key, most selective first.
+///
+/// Filtered from the tier-1 shape rather than measured blind: a constant column
+/// is the cartesian product and a mostly-empty one cannot reach its pairs, and
+/// both are already reported by their own findings. Spending a `GROUP BY` to
+/// re-discover that would make the deep tier slower for no new information.
+fn candidate_columns(shapes: &[ColumnShape]) -> (Vec<Vec<String>>, usize) {
+    let mut ranked: Vec<(&ColumnShape, f64)> = shapes
+        .iter()
+        .filter(|s| {
+            let populated = s.non_null_count - s.blank_count;
+            // Half, matching P002's threshold: below it the column's own
+            // finding already says a key on it discards most pairs.
+            let usable = s.row_count > 0 && populated * 2 >= s.row_count;
+            // More than one value, or the key is `1=1`.
+            let varied = s.distinct_exact.unwrap_or(s.distinct_approx) > 1;
+            usable && varied
+        })
+        .filter_map(|s| s.cardinality_ratio().map(|r| (s, r)))
+        .collect();
+    // Most selective first, name as the tie-break so the list is stable.
+    ranked.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.0.column_name.cmp(&b.0.column_name))
+    });
+    let considered = ranked.len();
+    let keys = ranked
+        .into_iter()
+        .take(MAX_CANDIDATE_KEYS)
+        .map(|(s, _)| vec![s.column_name.clone()])
+        .collect();
+    (keys, considered)
 }
 
 /// A content digest of the rows about to be profiled — the cache key.
@@ -387,6 +485,7 @@ fn write_profile(
     shapes: &[ColumnShape],
     tops: &[ValueFrequency],
     found: &[Finding],
+    candidates: &[CandidateKeyEstimate],
 ) -> Result<String> {
     let at = run.captured_at.replace('\'', "''");
     let subject = run.subject.replace('\'', "''");
@@ -449,6 +548,7 @@ fn write_profile(
 
     write_column_profiles(session, &id_lit, &at, shapes, tops)?;
     write_findings(session, &id_lit, &at, found)?;
+    write_candidate_keys(session, &id_lit, &at, candidates)?;
     Ok(profile_run_id)
 }
 
@@ -579,6 +679,65 @@ fn write_findings(
     er_entities::profile_finding::create::upsert(session.connection())?;
     session.execute_batch("drop table __profile_finding_src")?;
     Ok(())
+}
+
+/// Stage and MERGE the candidate-key measurements.
+///
+/// `key_columns` is joined with `chr(31)` to match the entity's declared
+/// encoding: the natural key needs a single comparable value, and DuckLake has
+/// no list equality to MERGE on.
+fn write_candidate_keys(
+    session: &Session,
+    profile_run_id: &str,
+    at: &str,
+    candidates: &[CandidateKeyEstimate],
+) -> Result<()> {
+    if candidates.is_empty() {
+        return Ok(());
+    }
+    let arms: Vec<String> = candidates
+        .iter()
+        .map(|c| {
+            let joined = c.key_columns.join("\u{1f}").replace('\'', "''");
+            format!(
+                "select '{run}' as profile_run_id, '{joined}' as key_columns,
+                        cast({rows} as bigint) as row_count,
+                        cast({covered} as bigint) as covered_rows,
+                        cast({distinct_values} as bigint) as distinct_values,
+                        cast({pairs} as bigint) as expected_pairs,
+                        cast({lb_pairs} as bigint) as largest_block_pairs,
+                        cast({lb_rows} as bigint) as largest_block_rows,
+                        cast({entropy} as double) as entropy_bits,
+                        cast({loss} as double) as pair_loss_from_nulls,
+                        cast('{at}' as timestamp) as captured_at",
+                run = profile_run_id,
+                rows = c.rows,
+                covered = c.covered_rows,
+                distinct_values = c.distinct_values,
+                pairs = c.expected_pairs,
+                lb_pairs = c.largest_block_pairs,
+                lb_rows = c.largest_block_rows,
+                entropy = finite(c.entropy_bits),
+                loss = finite(c.pair_loss_from_nulls),
+            )
+        })
+        .collect();
+
+    session.execute_batch("drop table if exists __candidate_key_src")?;
+    session.execute_batch(&format!(
+        "create temp table __candidate_key_src as {}",
+        arms.join("\nUNION ALL\n")
+    ))?;
+    er_entities::candidate_key::create::upsert(session.connection())?;
+    session.execute_batch("drop table __candidate_key_src")?;
+    Ok(())
+}
+
+/// A float safe to interpolate: the columns are NOT NULL, so a NaN or infinity
+/// — which `log2` can produce on a degenerate distribution — has to become a
+/// number rather than a NULL the insert would refuse.
+fn finite(v: f64) -> f64 {
+    if v.is_finite() { v } else { 0.0 }
 }
 
 fn opt_i64(v: Option<i64>) -> String {

@@ -527,6 +527,26 @@ fn ddl_specs() -> Vec<TableSpec> {
             BTreeMap::new(),
         ),
         tspec(
+            "candidate_keys",
+            vec![
+                nn("id", VARCHAR),
+                nn("profile_run_id", VARCHAR),
+                nn("key_columns", VARCHAR),
+                nn("row_count", BIGINT),
+                nn("covered_rows", BIGINT),
+                nn("distinct_values", BIGINT),
+                nn("expected_pairs", BIGINT),
+                nn("largest_block_pairs", BIGINT),
+                nn("largest_block_rows", BIGINT),
+                nn("entropy_bits", DOUBLE),
+                nn("pair_loss_from_nulls", DOUBLE),
+                nn("created_at", TIMESTAMP),
+                nn("updated_at", TIMESTAMP),
+            ],
+            vec![key(&["id"]), key(&["profile_run_id", "key_columns"])],
+            BTreeMap::new(),
+        ),
+        tspec(
             "profile_findings",
             vec![
                 nn("id", VARCHAR),

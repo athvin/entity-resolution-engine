@@ -10,6 +10,7 @@ pub mod api_key;
 pub mod assertion;
 pub mod audit_log;
 pub mod batch;
+pub mod candidate_key;
 pub mod catalog;
 pub mod column_profile;
 pub mod config_version;

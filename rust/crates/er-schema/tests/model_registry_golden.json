@@ -7,6 +7,7 @@
   "metric_snapshot_sources",
   "profile_runs",
   "column_profiles",
+  "candidate_keys",
   "profile_findings",
   "record_qualities",
   "entity_membership",
@@ -396,6 +397,93 @@
       "rec_b_key"
      ],
      "where": "active"
+    }
+   ],
+   "owner": "ddl"
+  },
+  "candidate_keys": {
+   "columns": [
+    {
+     "name": "id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "profile_run_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "key_columns",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "row_count",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "covered_rows",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "distinct_values",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "expected_pairs",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "largest_block_pairs",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "largest_block_rows",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "entropy_bits",
+     "nullable": false,
+     "type": "DOUBLE"
+    },
+    {
+     "name": "pair_loss_from_nulls",
+     "nullable": false,
+     "type": "DOUBLE"
+    },
+    {
+     "name": "created_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "updated_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    }
+   ],
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.candidate_keys (\n  id VARCHAR NOT NULL,\n  profile_run_id VARCHAR NOT NULL,\n  key_columns VARCHAR NOT NULL,\n  row_count BIGINT NOT NULL,\n  covered_rows BIGINT NOT NULL,\n  distinct_values BIGINT NOT NULL,\n  expected_pairs BIGINT NOT NULL,\n  largest_block_pairs BIGINT NOT NULL,\n  largest_block_rows BIGINT NOT NULL,\n  entropy_bits DOUBLE NOT NULL,\n  pair_loss_from_nulls DOUBLE NOT NULL,\n  created_at TIMESTAMP NOT NULL,\n  updated_at TIMESTAMP NOT NULL\n);",
+   "enums": {},
+   "keys": [
+    {
+     "columns": [
+      "id"
+     ],
+     "where": null
+    },
+    {
+     "columns": [
+      "profile_run_id",
+      "key_columns"
+     ],
+     "where": null
     }
    ],
    "owner": "ddl"

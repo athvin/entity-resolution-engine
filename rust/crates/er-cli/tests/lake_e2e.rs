@@ -5152,3 +5152,107 @@ fn profile_findings_name_the_columns_they_are_about() {
         "every reported finding is persisted"
     );
 }
+
+#[test]
+fn tier_two_measures_candidate_blocking_keys() {
+    if !enabled() {
+        return;
+    }
+    let (session, _config, _tmp) = standardized_lake("profile_tier2");
+
+    let tier1 = er_cli::profile::run_profile(
+        &session,
+        er_cli::profile::Subject::Standardized,
+        None,
+        1,
+        &dedupe_core::profile::ProfileOptions {
+            exact_distinct: true,
+            sample: None,
+        },
+        false,
+        "2026-01-03 00:00:00",
+    )
+    .unwrap();
+    assert!(
+        tier1.candidate_keys.is_empty(),
+        "tier 1 is the cheap pass and must not pay for a GROUP BY per column"
+    );
+    assert_eq!(lake_count(&session, "candidate_keys"), 0, "nor write any");
+
+    let tier2 = er_cli::profile::run_profile(
+        &session,
+        er_cli::profile::Subject::Standardized,
+        None,
+        2,
+        &dedupe_core::profile::ProfileOptions {
+            exact_distinct: true,
+            sample: None,
+        },
+        false,
+        "2026-01-04 00:00:00",
+    )
+    .unwrap();
+
+    assert!(
+        !tier2.candidate_keys.is_empty(),
+        "tier 2 measures the plausible columns"
+    );
+    assert_eq!(
+        lake_count(&session, "candidate_keys"),
+        i64::try_from(tier2.candidate_keys.len()).unwrap(),
+        "every measured key is persisted"
+    );
+    // Cheapest first, and every one internally consistent.
+    let pairs: Vec<i64> = tier2
+        .candidate_keys
+        .iter()
+        .map(|c| c.expected_pairs)
+        .collect();
+    let mut sorted = pairs.clone();
+    sorted.sort_unstable();
+    assert_eq!(pairs, sorted, "ranked cheapest first: {pairs:?}");
+    for c in &tier2.candidate_keys {
+        assert!(
+            c.largest_block_pairs <= c.expected_pairs,
+            "{:?}: one block cannot hold more pairs than the key generates",
+            c.key_columns
+        );
+        assert!(
+            c.covered_rows > 0,
+            "{:?}: a measured key covers some rows",
+            c.key_columns
+        );
+        assert!(
+            (0.0..=1.0).contains(&c.pair_loss_from_nulls),
+            "{:?}: pair loss {} is not a share",
+            c.key_columns,
+            c.pair_loss_from_nulls
+        );
+    }
+
+    // Tier is part of the profile_runs key, so tier 1 and tier 2 are two rows
+    // over the same data rather than one overwriting the other.
+    assert_eq!(lake_count(&session, "profile_runs"), 2);
+    assert_ne!(tier1.profile_run_id, tier2.profile_run_id);
+
+    // Re-running tier 2 over unchanged data rewrites the same key rows.
+    let again = er_cli::profile::run_profile(
+        &session,
+        er_cli::profile::Subject::Standardized,
+        None,
+        2,
+        &dedupe_core::profile::ProfileOptions {
+            exact_distinct: true,
+            sample: None,
+        },
+        false,
+        "2026-01-05 00:00:00",
+    )
+    .unwrap();
+    assert_eq!(again.profile_run_id, tier2.profile_run_id);
+    assert_eq!(
+        lake_count(&session, "candidate_keys"),
+        i64::try_from(tier2.candidate_keys.len()).unwrap(),
+        "a re-measure must not duplicate the key rows"
+    );
+}
