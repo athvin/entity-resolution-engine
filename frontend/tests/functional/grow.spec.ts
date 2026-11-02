@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { login, ORG, triageOrg, USERS, wizardOrg } from "./helpers";
+import { hydratedFill, login, ORG, triageOrg, USERS, wizardOrg } from "./helpers";
 
 test.describe("config studio", () => {
   test("renders thresholds over the histogram, survivorship, and rule editors", async ({
@@ -423,7 +423,9 @@ test.describe("assistant", () => {
     await page.goto(`/${ORG}/assistant`);
     await expect(page.getByTestId("assistant-suggestions")).toBeVisible();
 
-    await page.getByTestId("assistant-input").fill("How big is this workspace?");
+    // hydratedFill, not fill: the send button is gated on React state, and a
+    // plain fill can land before hydration and be wiped — see helpers.ts.
+    await hydratedFill(page, "assistant-input", "How big is this workspace?", "assistant-send");
     await page.getByTestId("assistant-send").click();
 
     const answer = page.getByTestId("turn-assistant");
@@ -449,7 +451,12 @@ test.describe("assistant", () => {
     test.skip(isMobile, "the assistant journey runs once, on desktop");
     await login(page, USERS.steward);
     await page.goto(`/${triageOrg("desktop-chromium")}/assistant`);
-    await page.getByTestId("assistant-input").fill("Should I suppress the stale CRM duplicate?");
+    await hydratedFill(
+      page,
+      "assistant-input",
+      "Should I suppress the stale CRM duplicate?",
+      "assistant-send",
+    );
     await page.getByTestId("assistant-send").click();
 
     // A card, not an action: nothing has changed yet.
