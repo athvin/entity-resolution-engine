@@ -49,6 +49,7 @@ pub mod s3_ingest;
 pub mod satoken;
 pub mod schema;
 pub mod taskpg;
+pub mod telemetry;
 pub mod urlguard;
 pub mod webhook;
 
@@ -696,8 +697,73 @@ fn operator_only(p: &Principal) -> Result<(), (StatusCode, Json<Value>)> {
 
 /// Public: liveness (`GET /healthz`) — the only route that never
 /// authenticates (§4.1).
+///
+/// Deliberately a literal: liveness answers "is this process wedged", and a
+/// probe that fails on a *dependency* outage restarts a healthy pod and makes
+/// the outage worse. Readiness is [`readyz`].
 async fn healthz() -> Json<Value> {
     Json(json!({ "status": "ok" }))
+}
+
+/// Public: readiness (`GET /readyz`) — can this process actually serve?
+///
+/// Both chart probes point at `/healthz` today, which is a static literal, so a
+/// Postgres outage leaves the pod reporting ready while every `/v1` request
+/// 500s — the pod stays in the Service and keeps taking traffic it cannot
+/// serve. This is the probe that answers the question readiness is asking.
+///
+/// Anonymous, like `/healthz`: a probe has no credential. It therefore reports
+/// only a boolean, the backing store and a reason class — never a DSN, a host
+/// or an error chain. The endpoint is reachable from anywhere the pod is.
+///
+/// The three keys are always present, `reason` null when ready. An envelope
+/// that changed shape with the outcome is what the generated
+/// `frontend/src/lib/api/envelopes.json` ledger caught here, and it was worth
+/// catching: a body whose keys depend on success is a body every consumer has
+/// to branch on.
+async fn readyz(State(state): State<AppState>) -> (StatusCode, Json<Value>) {
+    // No DSN configured is the in-memory dev/test backend, which is ready by
+    // construction. Reporting "not ready" there would break `make dev`.
+    let Some(dsn) = state.dsn.clone() else {
+        return (
+            StatusCode::OK,
+            Json(json!({ "ready": true, "store": "memory", "reason": null })),
+        );
+    };
+
+    // A fresh connect, bounded: this runs every few seconds, so it must never
+    // be the thing that hangs. connect-per-request is the house pattern
+    // (`pg::connect`), so this is the same cost a real request pays.
+    let probe = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        let client = pg::connect(&dsn).await?;
+        client.simple_query("SELECT 1").await.map(|_| ())
+    })
+    .await;
+
+    match probe {
+        Ok(Ok(())) => (
+            StatusCode::OK,
+            Json(json!({ "ready": true, "store": "postgres", "reason": null })),
+        ),
+        Ok(Err(e)) => {
+            // The chain goes to the log, where it is useful and access-controlled;
+            // the response carries only the class.
+            tracing::warn!(error = %errfmt::chain(&e), "readiness probe: control plane unreachable");
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({ "ready": false, "store": "postgres", "reason": "control-plane" })),
+            )
+        }
+        Err(_) => {
+            tracing::warn!("readiness probe: control plane timed out");
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(
+                    json!({ "ready": false, "store": "postgres", "reason": "control-plane-timeout" }),
+                ),
+            )
+        }
+    }
 }
 
 /// Auto-provision a tenant from the declared profile (D8).
@@ -8830,6 +8896,7 @@ fn build_routes(state: AppState) -> Router {
     let max_import_bytes = state.max_import_bytes;
     Router::new()
         .route("/healthz", get(healthz))
+        .route("/readyz", get(readyz))
         .route("/v1/orgs", get(list_orgs).post(create_org))
         .route("/v1/email", post(send_email))
         .route("/v1/jobs", get(jobs_global))
@@ -9043,6 +9110,25 @@ fn build_routes(state: AppState) -> Router {
             "/v1/orgs/{org}/schedules/{schedule_id}",
             axum::routing::patch(update_schedule).delete(delete_schedule),
         )
+        // INSIDE the router, which is the whole point: `MatchedPath` is
+        // inserted before a route service runs, so a layer here sees the route
+        // TEMPLATE (`/v1/orgs/{org}/jobs`) rather than the populated path. The
+        // `:action` normalizer in `app` is pre-routing and cannot. See the
+        // `telemetry` module.
+        //
+        // Order note: in axum the LAST `.layer` is the outermost, so request-id
+        // minting wraps the trace layer and an id exists before a span is made.
+        .layer(
+            tower_http::trace::TraceLayer::new_for_http()
+                .make_span_with(telemetry::make_span)
+                .on_request(())
+                .on_response(telemetry::on_response)
+                .on_failure(telemetry::on_failure),
+        )
+        .layer(tower_http::request_id::PropagateRequestIdLayer::x_request_id())
+        .layer(tower_http::request_id::SetRequestIdLayer::x_request_id(
+            tower_http::request_id::MakeRequestUuid,
+        ))
         .with_state(state)
 }
 
