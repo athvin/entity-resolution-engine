@@ -154,25 +154,30 @@ jobs:
           pnpm gen:api
           git diff --exit-code -- src/lib/api/schema.d.ts
 
-  # SHARDED three ways, because the suite is big and Playwright's CI default is
-  # ONE worker: run 41461727537 (2026-11-02) measured 579 tests in 15.9m of
-  # strictly serial execution. More workers per runner would be the cheaper fix,
-  # but both webServers (the mock erserver and `next start` with its in-memory
-  # PGlite) are shared mutable state across workers, and the suite has only ever
-  # run at workers=1 in CI — parallel safety is unvalidated. Shards keep one
-  # worker per runner, so they change nothing about test semantics. The
-  # validation that would unlock --workers=2 here accumulates in
-  # frontend-experiments.yml (nightly + dispatch), not in this file.
+  # SHARDED BY ENGINE, at --workers=2 everywhere — every number here is
+  # measured, not guessed. The suite ran 579 tests on ONE worker (Playwright's
+  # CI default) for 15.9m of serial execution (run 41461727537); shards fixed
+  # the wall, and THIRTY full-suite --workers=2 runs in
+  # frontend-experiments.yml then earned the worker bump in two steps:
   #
-  # `--shard=N/3` splits at test granularity across all three device projects
-  # (`fullyParallel: true`), ~193 tests per leg, auto-balanced as tests are
-  # added — unlike per-project legs, which are uneven (desktop carries the
-  # visual suite) and frozen at exactly three.
+  #   - the chromium projects (desktop-chromium, mobile-chrome) never failed
+  #     once across all thirty runs;
+  #   - every failure in the first twenty was mobile-safari — webkit emulation
+  #     is the slowest engine, and pre-hydration interaction under its
+  #     slowness is where the React 19 value-tracker deadlock lived
+  #     (helpers.ts hydratedFill, PRs #400/#404). After that fix, ten of ten
+  #     consecutive runs went green with @visual included — the flip protocol
+  #     this comment used to defer to, satisfied.
+  #
+  # Both webServers (mock erserver, `next start` + in-memory PGlite) are
+  # shared mutable state across workers, which is why the worker count was
+  # evidence-gated at all. The nightly experiment keeps running as the
+  # regression watchdog for exactly that class.
   #
   # The per-leg names can never be required checks (see `e2e-gate` below); the
   # required context rides the gate.
   e2e:
-    name: playwright e2e (shard ${{ matrix.shard }}/3)
+    name: playwright e2e (${{ matrix.leg }})
     needs: detect
     if: needs.detect.outputs.frontend == 'true'
     runs-on: ubuntu-latest
@@ -181,7 +186,24 @@ jobs:
       # A flaky leg can be re-run alone; its siblings' green stands.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        include:
+          # `slug` exists because upload-artifact v4 forbids `/` in names.
+          - leg: chromium 1/2
+            slug: chromium-1
+            args: --project=desktop-chromium --project=mobile-chrome --shard=1/2 --workers=2
+          - leg: chromium 2/2
+            slug: chromium-2
+            args: --project=desktop-chromium --project=mobile-chrome --shard=2/2 --workers=2
+          # webkit in halves: its emulation runs ~2x slower per test than
+          # chromium (7.5m for all 193 at two workers, measured on this PR's
+          # own first run), so one webkit leg would be the tier's 9m pole
+          # while the chromium legs finish in ~5m.
+          - leg: webkit 1/2
+            slug: webkit-1
+            args: --project=mobile-safari --shard=1/2 --workers=2
+          - leg: webkit 2/2
+            slug: webkit-2
+            args: --project=mobile-safari --shard=2/2 --workers=2
     # The same image the committed visual baselines were rendered in; browsers
     # are preinstalled, so there is no `playwright install` step.
     container:
@@ -215,7 +237,7 @@ jobs:
       # CI=true (set by Actions) makes playwright.config.ts take the `next start`
       # branch, so we build explicitly first; `next start` then serves `.next/`.
       - run: pnpm build
-      - run: pnpm test:e2e --shard=${{ matrix.shard }}/3
+      - run: pnpm test:e2e ${{ matrix.args }}
       - name: Upload Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -224,7 +246,7 @@ jobs:
           # name, and two shards can fail in one run. Each report is
           # self-contained for its shard's tests — no merge step needed for
           # the only thing this is used for (reading a failure).
-          name: playwright-report-shard-${{ matrix.shard }}
+          name: playwright-report-${{ matrix.slug }}
           path: frontend/playwright-report/
           retention-days: 7
 
