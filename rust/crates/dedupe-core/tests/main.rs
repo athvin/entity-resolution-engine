@@ -35,6 +35,7 @@ mod golden_incremental_cluster;
 mod golden_link_types;
 mod golden_manifest;
 mod golden_predict;
+mod golden_profile;
 mod golden_settings;
 mod golden_threads;
 mod golden_u;

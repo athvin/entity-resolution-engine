@@ -94,32 +94,202 @@ pub fn count_comparisons_from_blocking_rules(
     Ok(out)
 }
 
+/// Quote an identifier for interpolation, doubling any embedded quote.
+///
+/// The column names reaching the estimators below come from a caller's
+/// candidate list rather than from parsed SQL, so unlike the rest of this
+/// module they are not already known to be bare identifiers.
+fn qi(name: &str) -> String {
+    format!("\"{}\"", name.replace('"', "\"\""))
+}
+
+/// What an equi-join on one candidate key would cost, measured against the
+/// corpus instead of a model.
+///
+/// [`count_comparisons_from_blocking_rules`] answers the same question for rules
+/// a trained model already declares, which means it cannot answer it at all for
+/// a corpus that has never been trained — and that is exactly when the question
+/// matters, because blocking is chosen before anything is fit. These estimates
+/// need only the data: the pair count of an equi-join on key `k` is the sum of
+/// `C(n, 2)` over `k`'s value groups, which one `GROUP BY` yields exactly.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CandidateKeyEstimate {
+    /// The key's columns, in the order supplied.
+    pub key_columns: Vec<String>,
+    /// Rows in the corpus.
+    pub rows: i64,
+    /// Rows where EVERY key column is non-null — the only rows this key can
+    /// block, because an equality is never true of a NULL.
+    pub covered_rows: i64,
+    /// Distinct key values among the covered rows.
+    pub distinct_values: i64,
+    /// Pairs an equi-join on this key generates, exactly: the sum of `C(n, 2)`
+    /// over the value groups. For a rule used first (nothing preceding it to
+    /// dedup against) this equals its `marginal_comparison_count`.
+    pub expected_pairs: i64,
+    /// Pairs contributed by the single largest block, and the rows in it.
+    /// A key can look affordable in total and still be dominated by one value;
+    /// this is the pair of numbers that shows it.
+    pub largest_block_pairs: i64,
+    pub largest_block_rows: i64,
+    /// Shannon entropy of the value distribution, in bits. Higher is a more
+    /// discriminating key; 0 means one value covers everything.
+    pub entropy_bits: f64,
+    /// The fraction of ALL corpus pairs this key can never reach because one
+    /// side or the other is NULL: `1 - (covered_rows / rows)^2`. A key with a
+    /// tractable pair count and a high loss here is buying its cheapness by
+    /// discarding recall.
+    pub pair_loss_from_nulls: f64,
+}
+
+/// Measure one candidate blocking key against the corpus. Reads only.
+///
+/// `key_columns` is the conjunction an equi-join would compare — one entry for
+/// `block_on("email")`, two for `block_on("surname", "city")`.
+///
+/// # Errors
+/// Propagates the lake read. An empty `key_columns` is refused: a key over no
+/// columns is the cartesian product, which is not an estimate anyone wants
+/// returned silently.
+pub fn estimate_candidate_key(
+    session: &Session,
+    concat: &TableHandle,
+    key_columns: &[String],
+) -> Result<CandidateKeyEstimate> {
+    if key_columns.is_empty() {
+        return Err(DedupeError::settings(
+            "estimate_candidate_key needs at least one key column",
+        ));
+    }
+    let keys = key_columns.iter().map(|c| qi(c)).collect::<Vec<_>>();
+    let group_by = keys.join(", ");
+    let not_null = keys
+        .iter()
+        .map(|k| format!("{k} is not null"))
+        .collect::<Vec<_>>()
+        .join(" and ");
+
+    // `//` is integer division: `c * (c - 1)` is always even, so the pair count
+    // stays exact. Float division would start losing integers around c ~ 1e8.
+    let sql = format!(
+        "with g as (\n  select count(*) as c from {c} where {not_null} group by {group_by}\n), \
+         w as (select c, sum(c) over () as t from g)\n\
+         select\n  \
+           cast(coalesce((select sum((c * (c - 1)) // 2) from g), 0) as bigint),\n  \
+           cast(coalesce((select max((c * (c - 1)) // 2) from g), 0) as bigint),\n  \
+           cast(coalesce((select max(c) from g), 0) as bigint),\n  \
+           cast(coalesce((select sum(c) from g), 0) as bigint),\n  \
+           cast((select count(*) from g) as bigint),\n  \
+           cast(coalesce((select -sum((c::double / t) * log2(c::double / t)) from w), 0.0) as double),\n  \
+           cast((select count(*) from {c}) as bigint)",
+        c = concat.physical,
+    );
+    let rows = session.query_strings(&sql)?;
+    let r = rows.first().ok_or_else(|| {
+        DedupeError::settings("candidate-key estimate returned no row".to_string())
+    })?;
+    let num = |i: usize| -> i64 { r[i].parse().unwrap_or(0) };
+    let covered = num(3);
+    let total = num(6);
+    // Both endpoints of a pair must carry the key, so the reachable share is
+    // the SQUARE of the covered share, not the covered share itself.
+    let reachable = if total == 0 {
+        0.0
+    } else {
+        let share = covered as f64 / total as f64;
+        share * share
+    };
+
+    Ok(CandidateKeyEstimate {
+        key_columns: key_columns.to_vec(),
+        rows: total,
+        covered_rows: covered,
+        distinct_values: num(4),
+        expected_pairs: num(0),
+        largest_block_pairs: num(1),
+        largest_block_rows: num(2),
+        entropy_bits: r[5].parse().unwrap_or(0.0),
+        pair_loss_from_nulls: 1.0 - reachable,
+    })
+}
+
+/// Measure several candidate keys and return them cheapest-first.
+///
+/// Ranking by `expected_pairs` ascending is the order a cost decision is made
+/// in, but it is deliberately only the order — `pair_loss_from_nulls` is
+/// returned beside it because the cheapest key is frequently cheap for the
+/// wrong reason, and nothing here is entitled to make that trade for the user.
+///
+/// # Errors
+/// Propagates the first failing estimate.
+pub fn rank_candidate_keys(
+    session: &Session,
+    concat: &TableHandle,
+    candidates: &[Vec<String>],
+) -> Result<Vec<CandidateKeyEstimate>> {
+    let mut out = Vec::with_capacity(candidates.len());
+    for key in candidates {
+        out.push(estimate_candidate_key(session, concat, key)?);
+    }
+    out.sort_by(|a, b| {
+        a.expected_pairs
+            .cmp(&b.expected_pairs)
+            .then_with(|| a.key_columns.cmp(&b.key_columns))
+    });
+    Ok(out)
+}
+
 /// A block (distinct blocking-key value) and its equi-join cardinality.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LargestBlock {
     pub key_values: Vec<String>,
     pub count_l: i64,
     pub count_r: i64,
+    /// `count_l * count_r` — ORDERED pairs including the self-pairs, which is
+    /// the right cardinality for `link_only` (two disjoint sides) and an
+    /// overstatement on the dedupe path, where the pairs a run actually scores
+    /// within a block of `n` rows number `C(n, 2)`. On fake_1000's largest
+    /// surname block that is 4095 against 1638. Use
+    /// [`LargestBlock::dedupe_block_pairs`] when the number has to reconcile
+    /// with a dedupe pair total.
     pub block_count: i64,
 }
 
+impl LargestBlock {
+    /// The pairs a DEDUPE run scores within this block: `C(n, 2)` over the
+    /// block's rows, which is what `uid_l < uid_r` leaves behind.
+    ///
+    /// [`Self::block_count`] cannot be reinterpreted in place — it is pinned by
+    /// `fixtures/golden/fake_1000` and correct as-is for `link_only` — so the
+    /// dedupe-scaled figure is offered alongside it rather than instead of it.
+    #[must_use]
+    pub fn dedupe_block_pairs(&self) -> i64 {
+        let n = self.count_l;
+        n * (n - 1) / 2
+    }
+}
+
 /// The `n` blocking-key values producing the largest equi-join blocks
-/// (`count_l * count_r`). The rule must
-/// be a pure equi-join (a conjunction of column equalities, e.g. `block_on`);
-/// filter conditions are not supported. Dedupe path (both sides = concat).
+/// (`count_l * count_r`). Dedupe path (both sides = concat).
+///
+/// Returns `None` — not an error, and not an empty list — when `rule` is not a
+/// pure equi-join (a conjunction of column equalities, e.g. `block_on`), because
+/// a rule carrying a filter condition has no block breakdown to report. The
+/// distinction is the point: an empty list says "this rule produces no large
+/// blocks", which is a finding, while `None` says "this rule cannot be broken
+/// down", which is a limitation. Collapsing the two into `[]` tells a caller
+/// the rule is safe when nothing was ever measured.
 pub fn n_largest_blocks(
     session: &Session,
     settings: &Settings,
     concat: &TableHandle,
     rule: &str,
     n_largest: usize,
-) -> Result<Vec<LargestBlock>> {
+) -> Result<Option<Vec<LargestBlock>>> {
     let _ = settings;
-    let keys = columns::equi_join_columns(rule, "n_largest_blocks")?.ok_or_else(|| {
-        DedupeError::settings(format!(
-            "n_largest_blocks requires a pure equi-join blocking rule (got `{rule}`)"
-        ))
-    })?;
+    let Some(keys) = columns::equi_join_columns(rule, "n_largest_blocks")? else {
+        return Ok(None);
+    };
     let key_select = keys
         .iter()
         .enumerate()
@@ -147,13 +317,14 @@ pub fn n_largest_blocks(
     );
     let rows = session.query_strings(&sql)?;
     let n_keys = keys.len();
-    Ok(rows
-        .into_iter()
-        .map(|r| LargestBlock {
-            key_values: r[..n_keys].to_vec(),
-            count_l: r[n_keys].parse().unwrap(),
-            count_r: r[n_keys + 1].parse().unwrap(),
-            block_count: r[n_keys + 2].parse().unwrap(),
-        })
-        .collect())
+    Ok(Some(
+        rows.into_iter()
+            .map(|r| LargestBlock {
+                key_values: r[..n_keys].to_vec(),
+                count_l: r[n_keys].parse().unwrap(),
+                count_r: r[n_keys + 1].parse().unwrap(),
+                block_count: r[n_keys + 2].parse().unwrap(),
+            })
+            .collect(),
+    ))
 }

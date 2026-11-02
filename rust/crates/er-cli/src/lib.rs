@@ -579,7 +579,12 @@ pub fn estimate_blocking(
             session, &settings, &concat, rule, n_largest,
         )
         .map(|blocks| {
+            // `None` (not a pure equi-join) and `Ok([])` both render as no
+            // breakdown here, preserving this endpoint's current wire shape.
+            // Telling the two apart on the wire is a response-shape change and
+            // belongs with the contract regen, not in this change.
             blocks
+                .unwrap_or_default()
                 .into_iter()
                 .map(|b| LargestBlockEstimate {
                     key_values: b.key_values,

@@ -150,7 +150,8 @@ fn n_largest_blocks_matches_golden() {
         r#"l."first_name" = r."first_name""#,
         5,
     )
-    .unwrap();
+    .unwrap()
+    .expect("a pure equi-join rule has a block breakdown");
 
     let golden_path = golden_dir().join("n_largest_blocks.parquet");
     let gp = golden_path.to_string_lossy().replace('\'', "''");
