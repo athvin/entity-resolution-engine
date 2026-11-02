@@ -80,6 +80,12 @@ job instead — `terraform plan` is the worked example.
 | `comment` | plan comment | 10 | `${{ !cancelled() && github.event_name == 'pull_request' && needs.detect.outputs.infra == ' …` |
 | `apply` | apply (${{ matrix.key }}) | 60 | `github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.detect.outputs.inf …` |
 
+### `kind.yml`
+
+| Job | Status-check context | Timeout | Condition |
+|---|---|---|---|
+| `probe` | kind probe (executor e2e) | 90 | `always` |
+
 ### `rust.yml`
 
 | Job | Status-check context | Timeout | Condition |
