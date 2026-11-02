@@ -943,8 +943,13 @@ jobs:
         # token runs here and is `--skip`ped in the m-z slice, so the pair is
         # exactly-once by construction. Keep this token list and the skip list
         # below BYTE-IDENTICAL — they are the same twelve strings.
+        #
+        # The tokens sit AFTER `--`: cargo's own CLI takes at most ONE
+        # positional TESTNAME ("error: unexpected argument 'pg_b' found");
+        # multiple OR'd filters are a libtest feature, so they must be passed
+        # through to the harness.
         run: >
-          cargo test -p er-server --test main
+          cargo test -p er-server --test main --
           pg_a pg_b pg_c pg_d pg_e pg_f pg_g pg_h pg_i pg_j pg_k pg_l
       - name: er-server pg suite, modules m-z
         if: matrix.suite == 'pg-mz'
