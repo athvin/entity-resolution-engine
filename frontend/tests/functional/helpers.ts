@@ -108,18 +108,25 @@ export async function login(page: Page, email: string): Promise<void> {
 /**
  * Fill a CONTROLLED input across the hydration boundary.
  *
- * `fill()` sets the DOM value and dispatches `input`, but before React has
- * hydrated there is no listener: component state stays empty, and hydration
- * then re-renders the controlled value — wiping the fill — so a submit button
- * gated on that state (`disabled={!input.trim()}`) never enables and the
- * eventual click times out. SSR'd content being visible proves nothing about
- * hydration, and the race only loses on a slow engine under CPU contention —
- * which is exactly how grow.spec's assistant test failed on mobile-safari in
- * the workers=2 campaign (send button "visible, enabled and stable" × 52 for
- * 30s) while passing everywhere fast.
+ * A fill that lands BEFORE React hydrates deadlocks the input on React 19,
+ * and retrying the same fill cannot escape it. Mechanism, reconstructed from
+ * the workers=2 campaign traces (grow.spec's assistant test, mobile-safari —
+ * the one engine slow enough to lose the race under CPU contention):
  *
- * The retry is the proof: `enablesTestId` becoming enabled is only reachable
- * through React state, so a fill that survives it landed after hydration.
+ *  1. `fill(text)` pre-hydration: the text sits in the DOM, no listener yet.
+ *  2. Hydration completes. React 19 PRESERVES user-entered DOM text rather
+ *     than wiping it to the rendered value — and primes its internal value
+ *     tracker with that DOM text, while component state stays "".
+ *  3. Every later `fill(text)` sets the SAME string, so the tracker sees no
+ *     change, no `onChange` fires, state stays empty, and a submit gated on
+ *     it (`disabled={!input.trim()}`) never enables. The trace shows exactly
+ *     this terminal state: text visible in the input, button disabled, page
+ *     JS demonstrably alive (route prefetches, session fetch).
+ *
+ * The clear-then-fill pair breaks the deadlock: the "" -> text transition
+ * always differs from the tracker, so once hydration has happened one retry
+ * fires `onChange` and the gated control enables — which is the condition
+ * only reachable through React state, hence the inner assertion.
  */
 export async function hydratedFill(
   page: Page,
@@ -128,7 +135,9 @@ export async function hydratedFill(
   enablesTestId: string,
 ): Promise<void> {
   await expect(async () => {
-    await page.getByTestId(inputTestId).fill(text);
+    const box = page.getByTestId(inputTestId);
+    await box.fill("");
+    await box.fill(text);
     await expect(page.getByTestId(enablesTestId)).toBeEnabled({ timeout: 500 });
   }).toPass({ timeout: 15_000 });
 }
