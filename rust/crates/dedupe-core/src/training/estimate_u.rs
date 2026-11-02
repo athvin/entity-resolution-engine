@@ -91,19 +91,43 @@ fn uid_sql_prefixed(settings: &Settings, prefix: &str) -> String {
     }
 }
 
-/// The sample `WHERE` filter (empty when proportion >= 1.0). Matches
-/// `proportion_sample_sql` with the DuckDB `hash(x) % m` bucket.
-fn sample_filter_sql(settings: &Settings, proportion: f64, seed: Option<i64>) -> String {
+/// The deterministic sample predicate over an arbitrary row-id expression,
+/// without a leading connective — `hash(id) % m < threshold`.
+///
+/// Factored out so that everything in the crate which samples rows shares ONE
+/// definition of the scheme. A second implementation would be a second sample:
+/// the threshold's banker's rounding and the modulus are both load-bearing, and
+/// a profile drawn on a near-miss of either would not be the sample a training
+/// run saw. The id EXPRESSION legitimately differs between callers — u
+/// estimation keys on the model's unique-id column, and a profile of delivered
+/// rows has no model to ask — so that is the parameter.
+pub(crate) fn deterministic_sample_predicate(
+    id_expr: &str,
+    proportion: f64,
+    seed: Option<i64>,
+) -> Option<String> {
     if proportion >= 1.0 {
-        return String::new();
+        return None;
     }
-    let mut id = uid_sql_unprefixed(settings);
+    let mut id = id_expr.to_string();
     if let Some(s) = seed {
         id = format!("({id}) || '_{s}'");
     }
     let threshold =
         (round_half_even(proportion * DETERMINISTIC_SAMPLE_MODULUS as f64) as i64).max(1);
-    format!(" AND hash({id}) % {DETERMINISTIC_SAMPLE_MODULUS} < {threshold}")
+    Some(format!(
+        "hash({id}) % {DETERMINISTIC_SAMPLE_MODULUS} < {threshold}"
+    ))
+}
+
+/// The sample `WHERE` filter (empty when proportion >= 1.0). Matches
+/// `proportion_sample_sql` with the DuckDB `hash(x) % m` bucket.
+fn sample_filter_sql(settings: &Settings, proportion: f64, seed: Option<i64>) -> String {
+    let id = uid_sql_unprefixed(settings);
+    match deterministic_sample_predicate(&id, proportion, seed) {
+        Some(pred) => format!(" AND {pred}"),
+        None => String::new(),
+    }
 }
 
 /// RHS-only chunk filter (empty when num_chunks == 1). Matches
