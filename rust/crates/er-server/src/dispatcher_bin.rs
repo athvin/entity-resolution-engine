@@ -66,6 +66,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    dispatcher::run_loop(&client, &http, &term, reporter).await?;
+    // The Kubernetes executor (§6): inert unless the chart lists kinds in
+    // ER_EXECUTOR_DAG_KINDS and the pod carries an in-cluster identity.
+    let (executor, watch_frames) = crate::executor::from_env(&dsn).await;
+    dispatcher::run_loop(&client, &http, &term, reporter, executor, watch_frames).await?;
     Ok(())
 }

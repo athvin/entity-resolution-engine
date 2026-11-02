@@ -385,7 +385,7 @@ pub struct AdvanceArgs<'a> {
 pub async fn claim_launch(
     client: &Client,
     owner_epoch: &str,
-    k8s_job_name: &str,
+    k8s_job_name: Option<&str>,
     token_hash: Option<&str>,
     in_flight_cap: i64,
 ) -> Result<Option<TaskInstance>, PgError> {

@@ -29,6 +29,11 @@
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
+    // `exec-task`: the pod-side verb is synchronous (it owns its own
+    // current-thread runtimes), so it also must not run inside the runtime.
+    if program_name(&args) != "er" && args.get(1).map(String::as_str) == Some("exec-task") {
+        std::process::exit(er_server::exec_task::run(&args[2..]));
+    }
     // `er`: synchronous, so it must not run inside the runtime.
     if program_name(&args) == "er" {
         return er_cli::cli::run().map_err(|e| -> Box<dyn std::error::Error> {
@@ -101,8 +106,16 @@ async fn async_main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
                             None
                         }
                     };
-                    if let Err(e) =
-                        er_server::dispatcher::run_loop(&client, &http, &never, reporter).await
+                    let (executor, watch_frames) = er_server::executor::from_env(&dsn).await;
+                    if let Err(e) = er_server::dispatcher::run_loop(
+                        &client,
+                        &http,
+                        &never,
+                        reporter,
+                        executor,
+                        watch_frames,
+                    )
+                    .await
                     {
                         eprintln!("in-process dispatcher stopped (control-plane): {e}");
                     }

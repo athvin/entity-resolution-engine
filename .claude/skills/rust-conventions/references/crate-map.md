@@ -26,7 +26,7 @@ Bumping `arrow` or `datafusion` alone can never go green; dependabot is
 configured to leave them alone and the unblocker is upstream.
 
 <!-- BEGIN GENERATED: crate-map -->
-**30 crates.** The cargo workspace root is `rust/`, not the repo root.
+**31 crates.** The cargo workspace root is `rust/`, not the repo root.
 
 | Crate | Purpose |
 |---|---|
@@ -49,6 +49,7 @@ configured to leave them alone and the unblocker is upstream.
 | `er-hash` | `content_hash` — the normative S4.1 digest (Rust port of `src/er/ingest/hashing.py`) |
 | `er-ids` | Identity primitives — record keys, pair canonicalisation, ULID minting, redirect resolution (Rust port of `src/er/entities/ids.py`) |
 | `er-ingest` | The ingest stage (port of `src/er/ingest/*`, DesignDoc.md S4.1) |
+| `er-k8s` | The Kubernetes half of `docs/batch-orchestration-design.md` §6: the [`PodApi`] seam the dispatcher launches and watches through (one production implementation over `kube`, one scripted test double in er-server's tests), the per-attempt Job manifest rendering, the watch discipline, and the pure |
 | `er-match` | The matching stage (port of `src/er/matching/*`, DesignDoc.md S4.3) |
 | `er-mcp` | `er-mcp` — an MCP server over the control API, for one tenant (O10) |
 | `er-obs` | Observability: the S5.2 counter vocabulary and structured stage log line (ports of `src/er/obs/counters.py` and `src/er/obs/logging.py`) |

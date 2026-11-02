@@ -36,6 +36,8 @@ pub mod dags;
 pub mod dispatcher;
 pub mod dispatcher_bin;
 pub mod errfmt;
+pub mod exec_task;
+pub mod executor;
 pub mod mail;
 pub mod openapi;
 pub mod pg;
@@ -117,6 +119,10 @@ pub struct AppState {
     /// from `None` on purpose: an operator who opted in and made a typo should
     /// see which variable is wrong, not a 503 that says provisioning is off.
     provision_error: Option<String>,
+    /// Kinds the Kubernetes executor owns (`ER_EXECUTOR_DAG_KINDS`): cancel
+    /// routes through `job/update/cancel.sql`'s `canceling` for these, because
+    /// the org slot must stay held until every pod is provably gone (§5.6).
+    executor_kinds: std::collections::BTreeSet<String>,
 }
 
 impl AppState {
@@ -131,6 +137,7 @@ impl AppState {
             max_import_bytes: DEFAULT_MAX_IMPORT_BYTES,
             provision: None,
             provision_error: None,
+            executor_kinds: std::collections::BTreeSet::new(),
         }
     }
 
@@ -147,7 +154,15 @@ impl AppState {
             max_import_bytes: DEFAULT_MAX_IMPORT_BYTES,
             provision: None,
             provision_error: None,
+            executor_kinds: std::collections::BTreeSet::new(),
         }
+    }
+
+    /// Name the kinds the Kubernetes executor owns, for the cancel route.
+    #[must_use]
+    pub fn with_executor_kinds(mut self, kinds: std::collections::BTreeSet<String>) -> Self {
+        self.executor_kinds = kinds;
+        self
     }
 
     /// Attach a mail backend. Separate from the constructors because building a
@@ -2970,6 +2985,26 @@ async fn cancel_job(
             Err(r) => return *r,
         };
         return match pg::get_job(&client, &org_row.id, &job_id).await {
+            Ok(Some(job)) if state.executor_kinds.contains(&job.kind) => {
+                // The executor path (§5.6): a queued job dies directly; a
+                // dispatching or running one becomes `canceling` — still
+                // inside the one-active-per-org predicate — and the cancel
+                // sweep revokes its pods; the webhook fires once, at settle.
+                match er_entities::job::update::cancel(&client, &job_id, &org_row.id).await {
+                    Ok(rows) => match rows.into_iter().next() {
+                        Some(updated) if updated.state == "canceled" => {
+                            let _ = webhook::emit_job_event(&client, &updated).await;
+                            (StatusCode::OK, Json(json!(updated))).into_response()
+                        }
+                        Some(updated) => (StatusCode::OK, Json(json!(updated))).into_response(),
+                        None => detail_err(
+                            StatusCode::CONFLICT,
+                            "the job is not cancelable (already terminal)",
+                        ),
+                    },
+                    Err(e) => pg_err(e),
+                }
+            }
             Ok(Some(job)) => match pg::mark(&client, &job_id, "canceled").await {
                 Ok(()) => {
                     let canceled = Job {
@@ -3385,7 +3420,38 @@ async fn attempt_finish(
                             "stale finish: the attempt is no longer running as this pod",
                         )
                     },
-                    |row| (StatusCode::OK, Json(json!(row))).into_response(),
+                    |row| {
+                        // The pod holds no control-plane credential (§6.4), so
+                        // a reconcile_schema task's tenant-state report lands
+                        // here, from its output document.
+                        let schema_doc = body
+                            .output
+                            .as_ref()
+                            .filter(|o| o["plan"] == "schema_reconciled")
+                            .map(|o| o["doc"].clone());
+                        if let Some(doc) = schema_doc
+                            && let Some(dsn) = state.dsn.clone()
+                        {
+                            let org_id = row.org_id.clone();
+                            let status = doc["status"].as_str().unwrap_or("errored").to_string();
+                            let hash = doc["catalog_hash"].as_str().unwrap_or("").to_string();
+                            let detail = doc["detail"].as_str().unwrap_or("").to_string();
+                            tokio::spawn(async move {
+                                let Ok(client) = pg::connect(&dsn).await else {
+                                    return;
+                                };
+                                let _ = crate::schema::record_tenant_state(
+                                    &client,
+                                    &org_id,
+                                    &status,
+                                    &hash,
+                                    Some(&detail),
+                                )
+                                .await;
+                            });
+                        }
+                        (StatusCode::OK, Json(json!(row))).into_response()
+                    },
                 ),
                 Err(e) => pg_err(e),
             }
@@ -8175,6 +8241,14 @@ pub async fn state_from_env() -> AppState {
         Ok(dsn) if !dsn.is_empty() => AppState::with_pg(operator, dsn),
         _ => AppState::new(operator),
     };
+    let executor_kinds: std::collections::BTreeSet<String> = std::env::var("ER_EXECUTOR_DAG_KINDS")
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|k| !k.is_empty())
+        .map(str::to_string)
+        .collect();
+    let state = state.with_executor_kinds(executor_kinds);
     // Async because a SES backend resolves credentials at construction; `off`
     // and `log` do not await anything.
     state

@@ -116,6 +116,92 @@ pub fn verify_all() {
     }
 }
 
+/// What one executed pod task hands the attempt channel (§6.3 step 7).
+pub struct PodTaskRun {
+    pub skipped: bool,
+    pub outcome: &'static str,
+    pub output: serde_json::Value,
+    pub counters: Option<serde_json::Value>,
+}
+
+/// Rehydrate the i-th positional input pin from the work order.
+fn pin<T: er_dag::DurableOutput>(
+    ctx: &er_dag::TaskCtx<'_, Session>,
+    index: usize,
+) -> Result<T, er_dag::TaskError> {
+    let slot = ctx
+        .order
+        .input
+        .get("pins")
+        .and_then(|pins| pins.get(index))
+        .ok_or_else(|| {
+            er_dag::TaskError::Failed(er_errors::ErError::precondition(format!(
+                "the work order carries no input pin {index} for {}",
+                T::STABLE_NAME
+            )))
+        })?;
+    T::rehydrate(slot).map_err(|e| {
+        er_dag::TaskError::Failed(er_errors::ErError::precondition(format!(
+            "input pin {index}: {}",
+            crate::errfmt::chain(&e)
+        )))
+    })
+}
+
+fn completed<O: er_dag::DurableOutput>(
+    outcome: er_dag::Outcome<O>,
+) -> Result<PodTaskRun, er_dag::TaskError> {
+    let (skipped, name, output, counters) = match outcome {
+        er_dag::Outcome::Done(o, c) => (false, "done", o.serialize_reference(), Some(c.0)),
+        er_dag::Outcome::NoOp(o) => (false, "no_op", o.serialize_reference(), None),
+    };
+    let output = output.map_err(|e| {
+        er_dag::TaskError::Failed(er_errors::ErError::stage_failure(format!(
+            "serializing the task's output reference: {}",
+            crate::errfmt::chain(&e)
+        )))
+    })?;
+    Ok(PodTaskRun {
+        skipped,
+        outcome: name,
+        output,
+        counters: counters.filter(|v| !v.is_null()),
+    })
+}
+
+/// Run one pod task body by name — the verb's runtime dispatch (§6.3 step 5):
+/// rehydrate the positional inputs, run exactly one try with no retry, backoff
+/// or timeout of its own, serialize the durable output.
+///
+/// Phase 2 runs the maintenance kinds; every other body still refuses, and the
+/// refusal is a `precondition` failure on the row rather than a silent skip.
+///
+/// # Errors
+/// The task's own classified failure, or a malformed input reference.
+pub fn run_pod_task(
+    kind: JobKind,
+    task_id: &str,
+    ctx: &mut er_dag::TaskCtx<'_, Session>,
+) -> Result<PodTaskRun, er_dag::TaskError> {
+    use er_dag::Task as _;
+    match (kind, task_id) {
+        (JobKind::LakeMaintain | JobKind::LakeMigrate | JobKind::Train, "reconcile_schema") => {
+            completed(tasks::ReconcileSchema.run(ctx, ())?)
+        }
+        (JobKind::LakeMaintain, "maintain") => {
+            let schema = pin::<er_dag::Plan<plans::SchemaReconciled>>(ctx, 0)?;
+            completed(tasks::Maintain.run(ctx, (schema,))?)
+        }
+        (kind, task) => Err(er_dag::TaskError::Failed(er_errors::ErError::precondition(
+            format!(
+                "the executor does not yet run task '{task}' of kind '{}' — its body arrives \
+                 with Phase 3 of batch-orchestration-design.md",
+                kind.as_str()
+            ),
+        ))),
+    }
+}
+
 fn run_all() -> Dag {
     let mut d = Builder::new(JobKind::RunAllFull.dag_name());
     let plan = d.source::<Init>();

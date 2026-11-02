@@ -1,6 +1,12 @@
 UPDATE public.task_instances
 SET state = 'queued', queued_at = now(), owner_epoch = $owner_epoch,
-    launches = task_instances.launches + 1, k8s_job_name = $k8s_job_name,
+    launches = task_instances.launches + 1,
+    -- The Job name is a pure function of the attempt key and the launch count
+    -- (§4.2) — derived HERE because only the statement knows the incremented
+    -- count. The caller override exists for the in-process reporter's
+    -- synthetic 'inproc' identity.
+    k8s_job_name = COALESCE($k8s_job_name,
+        'er-t-' || substr(task_instances.id, 1, 20) || '-l' || (task_instances.launches + 1)::text),
     token_hash = $token_hash, updated_at = now()
 WHERE id = (
   SELECT t.id FROM public.task_instances t
@@ -13,7 +19,8 @@ WHERE id = (
                     WHERE a.org_id = t.org_id AND a.live IS TRUE AND a.kind = 'pod'
                       AND a.state IN ('queued', 'running', 'restarting', 'canceling'))
     AND $in_flight_cap > (SELECT count(*) FROM public.task_instances c
-                          WHERE c.live IS TRUE AND c.kind = 'pod' AND c.state IN ('queued', 'running'))
+                          WHERE c.live IS TRUE AND c.kind = 'pod' AND c.state IN ('queued', 'running')
+                            AND c.k8s_job_name IS DISTINCT FROM 'inproc')
   ORDER BY j.priority DESC, j.id, t.seq
   FOR UPDATE OF t SKIP LOCKED
   LIMIT 1)

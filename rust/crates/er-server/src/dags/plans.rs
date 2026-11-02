@@ -43,6 +43,9 @@ impl PlanDoc for DrainedActions {
 pub struct SchemaReconciled {
     pub status: String,
     pub catalog_hash: String,
+    /// The reconciler's human detail, recorded into `tenant_schema_states` by
+    /// the finish handler (the pod holds no control-plane credential, §6.4).
+    pub detail: String,
 }
 impl PlanDoc for SchemaReconciled {
     const STABLE_NAME: &'static str = "schema_reconciled";

@@ -1,0 +1,8 @@
+kind: statement
+operation: read
+mode: partial
+description: "The zombie sweep's candidates (§5.7): running pod rows of this dispatcher epoch whose heartbeat is older than the bound. The in-process reporter's rows are excluded — the dispatcher IS their process."
+params:
+  - { name: owner_epoch, type: varchar }
+  - { name: stale_secs, type: bigint }
+returns: entity

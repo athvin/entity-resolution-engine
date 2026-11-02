@@ -59,7 +59,12 @@ pub async fn run_loop(
     http: &reqwest::Client,
     term: &AtomicBool,
     mut reporter: Option<crate::reporter::AttemptReporter>,
+    mut executor: Option<crate::executor::Executor>,
+    mut watch_frames: Option<tokio::sync::mpsc::UnboundedReceiver<er_k8s::WatchFrame>>,
 ) -> Result<(), tokio_postgres::Error> {
+    if let Some(ex) = executor.as_mut() {
+        ex.adopt().await;
+    }
     eprintln!("dispatcher up");
     let mut idle = IDLE_MIN;
     let mut next_schedule_tick = tokio::time::Instant::now();
@@ -113,7 +118,23 @@ pub async fn run_loop(
             }
         };
 
-        if dispatch_once(client, reporter.as_mut()).await? || drained > 0 {
+        // The executor's machinery (§5.1): watch transitions as they arrived,
+        // then the passes — cancel sweep, readiness, launcher, the two sweeps.
+        let mut executor_worked = false;
+        if let Some(ex) = executor.as_mut() {
+            if let Some(frames) = watch_frames.as_mut() {
+                while let Ok(frame) = frames.try_recv() {
+                    ex.apply_frame(frame).await;
+                    executor_worked = true;
+                }
+            }
+            executor_worked |= ex.passes().await;
+        }
+
+        if dispatch_once(client, reporter.as_mut(), executor.as_mut()).await?
+            || drained > 0
+            || executor_worked
+        {
             idle = IDLE_MIN; // did work; poll again immediately
         } else {
             tokio::time::sleep(idle).await; // empty queue; back off (SIGTERM
@@ -399,14 +420,45 @@ struct ActiveModel {
 pub async fn dispatch_once(
     client: &tokio_postgres::Client,
     reporter: Option<&mut crate::reporter::AttemptReporter>,
+    executor: Option<&mut crate::executor::Executor>,
 ) -> Result<bool, tokio_postgres::Error> {
-    dispatch_once_with(
+    dispatch_once_with_executor(
         client,
         &crate::provision::Profile::from_env(),
         &crate::mail::Mailer::from_env().await,
         reporter,
+        executor,
     )
     .await
+}
+
+/// [`dispatch_once_with`] plus the Kubernetes executor's claim routing: a kind
+/// on the allowlist is PLANNED and returned — its tasks ride the executor's
+/// passes and watch, never the in-process arms (§11's one-executor rule).
+///
+/// # Errors
+/// Propagates a Postgres claim/mark/lookup failure.
+pub async fn dispatch_once_with_executor(
+    client: &tokio_postgres::Client,
+    profile: &Result<Option<crate::provision::Profile>, crate::provision::ProfileError>,
+    mailer: &crate::mail::Mailer,
+    reporter: Option<&mut crate::reporter::AttemptReporter>,
+    executor: Option<&mut crate::executor::Executor>,
+) -> Result<bool, tokio_postgres::Error> {
+    if let Some(ex) = executor {
+        // Peek-claim through the same SKIP LOCKED statement; an executor kind
+        // leaves here planned, everything else falls through to the legacy
+        // arms exactly as before.
+        let Some(job) = pg::claim(client).await? else {
+            return Ok(false);
+        };
+        if ex.handles(&job.kind) {
+            ex.plan_claimed(&job).await;
+            return Ok(true);
+        }
+        return dispatch_claimed(client, profile, mailer, reporter, job).await;
+    }
+    dispatch_once_with(client, profile, mailer, reporter).await
 }
 
 /// [`dispatch_once`] with the provisioning profile handed in rather than read
@@ -425,6 +477,17 @@ pub async fn dispatch_once_with(
     let Some(job) = pg::claim(client).await? else {
         return Ok(false);
     };
+    dispatch_claimed(client, profile, mailer, reporter, job).await
+}
+
+/// The legacy in-process arms for one already-claimed job.
+async fn dispatch_claimed(
+    client: &tokio_postgres::Client,
+    profile: &Result<Option<crate::provision::Profile>, crate::provision::ProfileError>,
+    mailer: &crate::mail::Mailer,
+    reporter: Option<&mut crate::reporter::AttemptReporter>,
+    job: Job,
+) -> Result<bool, tokio_postgres::Error> {
     // The attempt ledger (batch-orchestration-design §11 Phase 1): plan the
     // job's task rows in one transaction with the claim. Planning commits the
     // `dispatching → running` transition itself; an unreported job — no

@@ -488,9 +488,11 @@ jobs:
         # `cargo test --workspace` links a separate debug binary per crate, and
         # with bundled duckdb and full debug info that exceeds ubuntu-latest's
         # ~14 GB of free space — the link step then dies with "No space left on
-        # device" (which reads as an unrelated `linking with cc failed`). Only
-        # this job is affected: `lint` never links, and the e2e/bench/scale jobs
-        # build a `-p`-scoped subset. These preinstalled toolchains are unused
+        # device" (which reads as an unrelated `linking with cc failed`).
+        # `lint` never links and bench/scale build a `-p`-scoped subset, but
+        # `ducklake-e2e` joined this club when the executor added the kube tree
+        # and its tests (its cold build died at the libduckdb `ar` step), so it
+        # carries the same step. These preinstalled toolchains are unused
         # here and return ~25 GB. Written inline rather than pulling a
         # third-party action, to keep every `uses:` in this workflow SHA-pinned.
         # Headroom, not the fix. Measured: this frees the runner from 86 GB to
@@ -639,6 +641,20 @@ jobs:
           --health-retries 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Reclaim runner disk
+        # Same step and same reasoning as `test`: this job's build grew past
+        # the runner's free space when the executor added the kube tree and
+        # er-server's e2e test targets — the cold libduckdb build then died in
+        # `ar` with "No space left on device" (errno 28 masquerading as a
+        # toolchain error). Safe here for the same reason as on `test`: this
+        # job installs Rust with rustup and mold with apt, and reads nothing
+        # from `setup-*`'s hostedtoolcache.
+        run: |
+          df -h / | tail -1
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost /usr/share/swift \
+                      /opt/hostedtoolcache
+          df -h / | tail -1
       - name: Install stable toolchain
         run: rustup update stable --no-self-update && rustup default stable
       - name: Install mold

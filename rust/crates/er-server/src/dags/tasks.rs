@@ -121,16 +121,93 @@ declare_task!(
     policy: NodePolicy { escalate_on_oom: true, ..NodePolicy::default() }
 );
 
-declare_task!(
-    /// The reconcile half of `init` for kinds with no run row (§3.5); for
-    /// `lake_migrate` the reconcile IS the work.
-    ReconcileSchema, "reconcile_schema", (), Plan<SchemaReconciled>, writes: true
-);
+/// The reconcile half of `init` for kinds with no run row (§3.5); for
+/// `lake_migrate` the reconcile IS the work. REAL since Phase 2: the first
+/// body the executor runs.
+#[derive(Default)]
+pub struct ReconcileSchema;
 
-declare_task!(
-    /// `flush_inlined_data` + `merge_adjacent_files` + `expire_snapshots`.
-    Maintain, "maintain", (Plan<SchemaReconciled>,), Plan<MaintenanceReport>, writes: true
-);
+impl Task<Session> for ReconcileSchema {
+    const NAME: &'static str = "reconcile_schema";
+    const VERSION: u32 = 1;
+    type Input = ();
+    type Output = Plan<SchemaReconciled>;
+    const WRITES_LAKE: bool = true;
+
+    fn run(
+        &mut self,
+        ctx: &mut TaskCtx<'_, Session>,
+        (): Self::Input,
+    ) -> Result<Outcome<Self::Output>, TaskError> {
+        // `reconcile_lake_env` opens its own session from the tenant env — the
+        // ctx session stays the probe/ledger handle.
+        let outcome = crate::schema::reconcile_lake_env(&ctx.order.lake_env);
+        let (status, hash, detail) = crate::schema::tenant_state(&outcome);
+        match outcome {
+            Ok(_) => Ok(Outcome::Done(
+                Plan(SchemaReconciled {
+                    status: status.to_string(),
+                    catalog_hash: hash,
+                    detail,
+                }),
+                er_dag::Counters::default(),
+            )),
+            Err(message) => Err(engine_error(&message)),
+        }
+    }
+}
+
+/// `flush_inlined_data` + `merge_adjacent_files` + `expire_snapshots`. REAL
+/// since Phase 2.
+#[derive(Default)]
+pub struct Maintain;
+
+impl Task<Session> for Maintain {
+    const NAME: &'static str = "maintain";
+    const VERSION: u32 = 1;
+    type Input = (Plan<SchemaReconciled>,);
+    type Output = Plan<MaintenanceReport>;
+    const WRITES_LAKE: bool = true;
+
+    fn run(
+        &mut self,
+        ctx: &mut TaskCtx<'_, Session>,
+        _input: Self::Input,
+    ) -> Result<Outcome<Self::Output>, TaskError> {
+        let expire = ctx
+            .order
+            .lake_env
+            .get("ER_EXPIRE_OLDER_THAN")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("7 days")
+            .to_string();
+        match er_cli::run_maintain(ctx.session, &expire) {
+            Ok(report) => Ok(Outcome::Done(
+                Plan(MaintenanceReport { report }),
+                er_dag::Counters::default(),
+            )),
+            Err(e) => Err(engine_error(&format!("{e:#}"))),
+        }
+    }
+}
+
+/// Map an engine failure string onto the er-errors taxonomy the executor's
+/// retry policy reads, through the same classifier the legacy arm uses.
+fn engine_error(message: &str) -> TaskError {
+    let class = crate::pg::FailureClass::classify(message);
+    let err = match class {
+        crate::pg::FailureClass::TransientIo => {
+            er_errors::ErError::stage_failure(message.to_string())
+                .with_class(er_errors::ErrorClass::TransientIo)
+        }
+        crate::pg::FailureClass::Precondition => {
+            er_errors::ErError::precondition(message.to_string())
+        }
+        crate::pg::FailureClass::Config => er_errors::ErError::config(message.to_string()),
+        crate::pg::FailureClass::Internal => er_errors::ErError::stage_failure(message.to_string()),
+    };
+    TaskError::Failed(err)
+}
 
 declare_task!(
     /// Trains and writes `models/<run_id>/{model.json,tf.csv}` on EFS; no lake

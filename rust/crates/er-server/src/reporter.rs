@@ -207,7 +207,7 @@ impl AttemptReporter {
         )
         .await?;
         let claimed =
-            taskpg::claim_launch(&self.client, &self.epoch, INPROC, None, 1_000_000).await?;
+            taskpg::claim_launch(&self.client, &self.epoch, Some(INPROC), None, 1_000_000).await?;
         if let Some(row) = &claimed
             && row.id != id
         {
@@ -269,7 +269,8 @@ impl AttemptReporter {
             run.clear_number,
         )
         .await;
-        let _ = taskpg::claim_launch(&self.client, &self.epoch, INPROC, None, 1_000_000).await;
+        let _ =
+            taskpg::claim_launch(&self.client, &self.epoch, Some(INPROC), None, 1_000_000).await;
         let class = pg::FailureClass::classify(detail);
         let failure = taskpg::TaskFailure {
             terminal_state: "failed",

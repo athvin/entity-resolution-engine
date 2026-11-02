@@ -1,0 +1,1328 @@
+//! The Kubernetes executor's dispatcher half (batch-orchestration-design §5.1,
+//! §6.5, §6.6): planning for allowlisted kinds, the readiness pass, the
+//! launcher's write-ahead claim → create, the cancel/zombie/stuck-pending
+//! sweeps, the watch's verdict application, and adoption on start-up and
+//! resync. Kubernetes owns placement, deadlines and cleanup; Postgres stays
+//! the state of record; this module is the translation layer between
+//! `er_k8s`'s pure verdicts and the §4.5 statements.
+//!
+//! Scope note (Phase 2): kinds join through `ER_EXECUTOR_DAG_KINDS` (the
+//! chart's `executor.dagKinds`), default empty — the executor is inert until a
+//! kind is listed. Fused-segment hand-off, the ledger probe for run-row kinds,
+//! and the projected-token credential land with Phases 2b/3; the fallback
+//! per-attempt token (hash at rest, nulled at finish) is the live credential.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
+use std::time::Instant;
+
+use serde_json::{Value, json};
+use tokio_postgres::Client;
+
+use er_dag::{PassAction, SettleVerdict, TaskState};
+use er_entities::job::Job;
+use er_entities::task_instance::TaskInstance;
+use er_k8s::{
+    JobSnapshot, ObjectKind, PodApi, PodSnapshot, PreStartVerdict, RowState, RowView, Selector,
+    TerminalState, TerminalVerdict, WatchFrame,
+};
+
+use crate::dags::{self, JobKind};
+use crate::{pg, taskpg, webhook};
+
+/// The watch/list selector every managed object carries (§6.5).
+pub const MANAGED_SELECTOR: &str = "er.dupezero.com/managed=task,er.dupezero.com/done!=true";
+/// The zombie bound (§5.7).
+const ZOMBIE_STALE_SECS: i64 = 300;
+/// The capacity wait (§4.5; the chart's `executor.quotaWaitSeconds`).
+const QUOTA_WAIT_SECS: i64 = 30;
+
+/// Configuration, from the chart through the environment.
+pub struct ExecutorConfig {
+    pub dag_kinds: BTreeSet<String>,
+    pub in_flight_cap: i64,
+    /// The Job template (the chart's ConfigMap, mounted as a file).
+    pub template: String,
+    pub image_digest: Option<String>,
+}
+
+impl ExecutorConfig {
+    /// `None` unless `ER_EXECUTOR_DAG_KINDS` names at least one kind — the
+    /// executor is opt-in per kind (§11's rollout allowlist).
+    #[must_use]
+    pub fn from_env() -> Option<Self> {
+        let kinds = std::env::var("ER_EXECUTOR_DAG_KINDS").ok()?;
+        let dag_kinds: BTreeSet<String> = kinds
+            .split(',')
+            .map(str::trim)
+            .filter(|k| !k.is_empty())
+            .filter(|k| {
+                let known = JobKind::parse(k).is_some();
+                if !known {
+                    eprintln!("executor: ignoring unknown kind '{k}' in ER_EXECUTOR_DAG_KINDS");
+                }
+                known
+            })
+            .map(str::to_string)
+            .collect();
+        if dag_kinds.is_empty() {
+            return None;
+        }
+        let in_flight_cap = std::env::var("ER_EXECUTOR_IN_FLIGHT_CAP")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1);
+        let template = match std::env::var("ER_TASK_TEMPLATE_PATH") {
+            Ok(path) => match std::fs::read_to_string(&path) {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("executor: cannot read the task template at {path}: {e}");
+                    return None;
+                }
+            },
+            Err(_) => er_k8s::manifest::REFERENCE_TEMPLATE.to_string(),
+        };
+        Some(ExecutorConfig {
+            dag_kinds,
+            in_flight_cap,
+            template,
+            image_digest: std::env::var("ER_IMAGE_DIGEST")
+                .ok()
+                .filter(|v| !v.is_empty()),
+        })
+    }
+}
+
+/// Build the executor and its watch task from the environment, when
+/// configured: `ER_EXECUTOR_DAG_KINDS` non-empty, a namespace, and an
+/// in-cluster Kubernetes identity. Anything missing disables the executor with
+/// the reason logged — the dispatcher runs legacy-only, exactly as before.
+pub async fn from_env(
+    dsn: &str,
+) -> (
+    Option<Executor>,
+    Option<tokio::sync::mpsc::UnboundedReceiver<WatchFrame>>,
+) {
+    let Some(cfg) = ExecutorConfig::from_env() else {
+        return (None, None);
+    };
+    let namespace = match std::env::var("ER_NAMESPACE") {
+        Ok(ns) if !ns.is_empty() => ns,
+        _ => {
+            match std::fs::read_to_string("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
+            {
+                Ok(ns) => ns.trim().to_string(),
+                Err(e) => {
+                    eprintln!("executor: disabled — no namespace (set ER_NAMESPACE): {e}");
+                    return (None, None);
+                }
+            }
+        }
+    };
+    let api: Arc<dyn PodApi> = match er_k8s::KubeApi::in_cluster(&namespace) {
+        Ok(api) => Arc::new(api),
+        Err(e) => {
+            eprintln!("executor: disabled — no in-cluster Kubernetes identity: {e}");
+            return (None, None);
+        }
+    };
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    {
+        let api = Arc::clone(&api);
+        tokio::spawn(async move {
+            er_k8s::observer::run_watch(api.as_ref(), Selector(MANAGED_SELECTOR.into()), tx).await;
+        });
+    }
+    match Executor::connect(dsn, api, cfg).await {
+        Ok(ex) => (Some(ex), Some(rx)),
+        Err(e) => {
+            eprintln!("executor: disabled — control-plane connect failed: {e}");
+            (None, None)
+        }
+    }
+}
+
+/// The executor: its own Postgres connection (statement composition needs
+/// `&mut Client`), the PodApi, and its process epoch.
+pub struct Executor {
+    client: Client,
+    api: Arc<dyn PodApi>,
+    cfg: ExecutorConfig,
+    epoch: String,
+    /// Per-launch pre-start clocks (first observation of the standing
+    /// evidence); an executor restart re-arms the bounds, which is safe — a
+    /// bound fires later, never earlier.
+    pending_since: BTreeMap<String, Instant>,
+}
+
+impl Executor {
+    /// # Errors
+    /// The executor's own connection could not be established.
+    pub async fn connect(
+        dsn: &str,
+        api: Arc<dyn PodApi>,
+        cfg: ExecutorConfig,
+    ) -> Result<Self, tokio_postgres::Error> {
+        let client = pg::connect(dsn).await?;
+        let _ = pg::set_actor(&client, "executor").await;
+        Ok(Executor {
+            client,
+            api,
+            cfg,
+            epoch: er_ids::new_v7(),
+            pending_since: BTreeMap::new(),
+        })
+    }
+
+    #[must_use]
+    pub fn handles(&self, kind: &str) -> bool {
+        self.cfg.dag_kinds.contains(kind)
+    }
+
+    /// Adoption (§6.6): the new process owns every live row; the watch's first
+    /// `Resync` frame then reconciles against the listing.
+    pub async fn adopt(&mut self) {
+        if let Err(e) = er_entities::job::update::adopt(&self.client, &self.epoch).await {
+            eprintln!("executor: adopting jobs failed: {e}");
+        }
+        if let Err(e) = er_entities::task_instance::update::adopt(&self.client, &self.epoch).await {
+            eprintln!("executor: adopting rows failed: {e}");
+        }
+    }
+
+    /// Plan a freshly-claimed job of an allowlisted kind (§4.5's planning
+    /// transaction). Refusals are terminal in the same breath.
+    pub async fn plan_claimed(&mut self, job: &Job) {
+        let Some(kind) = JobKind::parse(&job.kind) else {
+            let _ = taskpg::refuse_plan(
+                &self.client,
+                &job.id,
+                "config",
+                &format!("kind '{}' does not parse into the DAG registry", job.kind),
+            )
+            .await;
+            return;
+        };
+        let dag = dags::dag_for(kind);
+        if let Some(fp) = job.structural_fingerprint.as_deref()
+            && fp != dag.structural_fingerprint
+        {
+            let _ = taskpg::refuse_plan(
+                &self.client,
+                &job.id,
+                "config",
+                &format!(
+                    "the job was planned against structural fingerprint {fp}; this build compiles \
+                     {} — clear into a new job rather than mixing graphs (§9.4)",
+                    dag.structural_fingerprint
+                ),
+            )
+            .await;
+            return;
+        }
+        match taskpg::plan(
+            &mut self.client,
+            job,
+            &dag,
+            &self.epoch,
+            self.cfg.image_digest.as_deref(),
+        )
+        .await
+        {
+            Ok(Some(_)) => {}
+            Ok(None) => eprintln!("executor: job {} left dispatching mid-plan", job.id),
+            Err(e) => eprintln!("executor: planning job {} failed: {e}", job.id),
+        }
+    }
+
+    /// One scheduler iteration (§5.1's loop steps, between the tick and the
+    /// drain): cancel sweep, readiness, launcher, zombie and stuck-pending
+    /// sweeps. Each failure is logged, never propagated — the loop re-runs.
+    pub async fn passes(&mut self) -> bool {
+        let mut worked = false;
+        for (name, result) in [
+            ("cancel sweep", self.cancel_sweep().await),
+            ("readiness pass", self.readiness_pass().await),
+            ("launcher", self.launch_pass().await),
+            ("zombie sweep", self.zombie_sweep().await),
+            ("stuck-pending sweep", self.stuck_pending_sweep().await),
+        ] {
+            match result {
+                Ok(did) => worked |= did,
+                Err(e) => eprintln!("executor: {name} failed: {e}"),
+            }
+        }
+        worked
+    }
+
+    // ---- readiness + settle -------------------------------------------------
+
+    async fn dag_jobs(&self, state: &str) -> Result<Vec<Job>, tokio_postgres::Error> {
+        let jobs = er_entities::job::read::list(&self.client, None, Some(state), 200).await?;
+        Ok(jobs.into_iter().filter(|j| self.handles(&j.kind)).collect())
+    }
+
+    async fn readiness_pass(&mut self) -> Result<bool, tokio_postgres::Error> {
+        let mut worked = false;
+        let mut jobs = self.dag_jobs("running").await?;
+        jobs.extend(self.dag_jobs("canceling").await?);
+        for job in jobs {
+            match self.readiness_for(&job).await {
+                Ok(did) => worked |= did,
+                Err(e) => eprintln!("executor: readiness for job {} failed: {e}", job.id),
+            }
+        }
+        Ok(worked)
+    }
+
+    #[expect(clippy::too_many_lines, reason = "one transaction, §5.3's whole pass")]
+    async fn readiness_for(&mut self, job: &Job) -> Result<bool, tokio_postgres::Error> {
+        let Some(kind) = JobKind::parse(&job.kind) else {
+            return Ok(false);
+        };
+        let dag = dags::dag_for(kind);
+        let tx = self.client.transaction().await?;
+        let Some(locked) = er_entities::job::read::lock(&tx, &job.id)
+            .await?
+            .into_iter()
+            .next()
+        else {
+            return Ok(false);
+        };
+        let clear_number = locked.clear_number.unwrap_or(0);
+        let rows = er_entities::task_instance::read::by_job(&tx, &job.org_id, &job.id).await?;
+        let live: BTreeMap<&str, &TaskInstance> = rows
+            .iter()
+            .filter(|r| r.live == Some(true))
+            .map(|r| (r.task_id.as_str(), r))
+            .collect();
+        let states: Vec<TaskState> = dag
+            .nodes
+            .iter()
+            .map(|n| {
+                live.get(n.task_id)
+                    .and_then(|r| TaskState::parse(&r.state))
+                    .unwrap_or(TaskState::None)
+            })
+            .collect();
+        let actions = er_dag::pass(&dag, &states);
+        let mut effective = states.clone();
+        let mut worked = !actions.is_empty();
+        for (idx, action) in actions {
+            let node = &dag.nodes[idx];
+            let Some(row) = live.get(node.task_id) else {
+                continue;
+            };
+            match action {
+                PassAction::Schedule => {
+                    let input = compose_input(&dag, idx, &live, job);
+                    let updated = er_entities::task_instance::update::mark_scheduled(
+                        &tx,
+                        &input,
+                        &row.id,
+                        clear_number,
+                    )
+                    .await?;
+                    if updated.is_empty() {
+                        // A zero-row verdict rolls the whole pass back (§4.5).
+                        return Ok(false);
+                    }
+                    // Settle reads the pass's OWN verdicts: a `none` left in
+                    // `effective` here would read as the deadlock branch.
+                    effective[idx] = TaskState::Scheduled;
+                }
+                PassAction::Propagate(state) => {
+                    let updated = er_entities::task_instance::update::propagate(
+                        &tx,
+                        state.as_str(),
+                        &row.id,
+                        clear_number,
+                    )
+                    .await?;
+                    if updated.is_empty() {
+                        return Ok(false);
+                    }
+                    effective[idx] = state;
+                }
+            }
+        }
+        // Settle is the last step of the same pass, reading its own verdicts.
+        let settled = match er_dag::settle(&dag, &effective) {
+            SettleVerdict::NotYet => None,
+            SettleVerdict::Settled(outcome) => {
+                let (class, detail) = failure_text(&dag, &effective, &live);
+                let state = match outcome {
+                    TaskState::Failed => "failed",
+                    TaskState::Canceled => "canceled",
+                    _ => "succeeded",
+                };
+                let rows = er_entities::job::update::settle(
+                    &tx,
+                    state,
+                    class.as_deref(),
+                    detail.as_deref(),
+                    &job.id,
+                )
+                .await?;
+                rows.into_iter().next()
+            }
+            SettleVerdict::Deadlock(idx) => {
+                let rows = er_entities::job::update::settle(
+                    &tx,
+                    "failed",
+                    Some("internal"),
+                    Some(&format!(
+                        "task '{}' is pending with every upstream terminal — a scheduler bug \
+                         (Airflow's deadlock branch)",
+                        dag.nodes[idx].task_id
+                    )),
+                    &job.id,
+                )
+                .await?;
+                rows.into_iter().next()
+            }
+        };
+        tx.commit().await?;
+        if let Some(settled) = settled {
+            worked = true;
+            eprintln!(
+                "executor: job {} ({}) settled {}",
+                settled.id, settled.kind, settled.state
+            );
+            let _ = webhook::emit_job_event(&self.client, &settled).await;
+        }
+        Ok(worked)
+    }
+
+    // ---- the launcher -------------------------------------------------------
+
+    async fn launch_pass(&mut self) -> Result<bool, tokio_postgres::Error> {
+        let mut worked = false;
+        loop {
+            // The fallback credential: minted per launch, hash at rest on the
+            // row, nulled at finish (§6.4's recorded fallback).
+            let token = mint_token();
+            let claimed = taskpg::claim_launch(
+                &self.client,
+                &self.epoch,
+                None,
+                Some(&pg::hash_secret(&token)),
+                self.cfg.in_flight_cap,
+            )
+            .await?;
+            let Some(row) = claimed else {
+                return Ok(worked);
+            };
+            worked = true;
+            // Airflow's stale-workload re-read before every create (§4.5).
+            let fresh = er_entities::task_instance::read::retry_lineage(&self.client, &row.id)
+                .await?
+                .into_iter()
+                .next();
+            let fresh_ok = fresh.as_ref().is_some_and(|f| {
+                f.state == "queued"
+                    && f.try_number == row.try_number
+                    && f.owner_epoch.as_deref() == Some(self.epoch.as_str())
+            });
+            if !fresh_ok {
+                continue;
+            }
+            if let Err(e) = self.create_for(&row, &token).await {
+                eprintln!("executor: creating a Job for {} failed: {e}", row.id);
+            }
+        }
+    }
+
+    async fn create_for(&mut self, row: &TaskInstance, token: &str) -> Result<(), String> {
+        let job_name = row
+            .k8s_job_name
+            .clone()
+            .ok_or("claim_launch always writes the name")?;
+        let Some(kind) = JobKind::parse_row_kind(&self.client, row).await else {
+            return Err(format!("row {} has no parseable job kind", row.id));
+        };
+        let dag = dags::dag_for(kind);
+        let timeout = dag
+            .node_by_task_id(&row.task_id)
+            .and_then(|(_, n)| n.policy.timeout_secs)
+            .unwrap_or(class_default_timeout(row.resource_class.as_deref()));
+        let attempt = er_k8s::RenderAttempt {
+            job_name: job_name.clone(),
+            task_instance_id: row.id.clone(),
+            task_id: row.task_id.clone(),
+            job_id: row.job_id.clone(),
+            try_number: row.try_number,
+            resource_class: row.resource_class.clone().unwrap_or_else(|| "M".into()),
+            owner_epoch: self.epoch.clone(),
+            structural_fingerprint: dag.structural_fingerprint.clone(),
+            policy_hash: dag.policy_hash.clone(),
+            active_deadline_seconds: i64::try_from(timeout).unwrap_or(21_600),
+            through_task: row.task_id.clone(),
+        };
+        let mut manifest = er_k8s::render_job(&self.cfg.template, &attempt)
+            .map_err(|e| format!("render: {}", crate::errfmt::chain(&e)))?;
+        inject_attempt_env(&mut manifest, &job_name, token);
+        match self.api.create_job(&manifest).await {
+            Ok(()) => {
+                self.pending_since.insert(job_name, Instant::now());
+                Ok(())
+            }
+            Err(er_k8s::ApiError::Quota { message }) => {
+                self.capacity_wait(row, &job_name, "quota", &message).await;
+                Ok(())
+            }
+            Err(er_k8s::ApiError::AlreadyExists) => {
+                // §6.5's create-outcome probe: ours → adopt; anything else →
+                // never reuse the name.
+                match self.api.get_job(&job_name).await {
+                    Ok(Some(found))
+                        if found
+                            .annotations
+                            .get(er_k8s::manifest::TASK_INSTANCE_ANNOTATION)
+                            .is_some_and(|id| id == &row.id)
+                            && found
+                                .annotations
+                                .get(er_k8s::manifest::FINGERPRINT_ANNOTATION)
+                                .is_some_and(|fp| fp == &dag.structural_fingerprint)
+                            && !found.deletion_timestamp
+                            && !found.labels.contains_key(er_k8s::manifest::DONE_LABEL) =>
+                    {
+                        let _ = self
+                            .api
+                            .patch_labels(
+                                ObjectKind::Job,
+                                &job_name,
+                                &[(er_k8s::manifest::OWNER_LABEL, Some(&self.epoch))],
+                            )
+                            .await;
+                        Ok(())
+                    }
+                    _ => {
+                        self.requeue(row, &job_name, "foreign_job_name", QUOTA_WAIT_SECS)
+                            .await;
+                        Ok(())
+                    }
+                }
+            }
+            Err(er_k8s::ApiError::RateLimited { retry_after_secs }) => {
+                let wait = retry_after_secs
+                    .and_then(|s| i64::try_from(s).ok())
+                    .unwrap_or(QUOTA_WAIT_SECS);
+                self.requeue(row, &job_name, "rate_limited", wait).await;
+                Ok(())
+            }
+            Err(e) => {
+                // A transport error may have persisted the Job: probe by name.
+                if let Ok(Some(_)) = self.api.get_job(&job_name).await {
+                    Ok(())
+                } else {
+                    self.requeue(row, &job_name, "create_failed", QUOTA_WAIT_SECS)
+                        .await;
+                    Err(format!("create: {}", crate::errfmt::chain(&e)))
+                }
+            }
+        }
+    }
+
+    // ---- sweeps -------------------------------------------------------------
+
+    async fn cancel_sweep(&mut self) -> Result<bool, tokio_postgres::Error> {
+        let jobs = self.dag_jobs("canceling").await?;
+        let mut worked = false;
+        for job in jobs {
+            worked = true;
+            let pending = er_entities::task_instance::update::cancel_pending(
+                &self.client,
+                &job.org_id,
+                &job.id,
+            )
+            .await?;
+            let live =
+                er_entities::task_instance::update::cancel_live(&self.client, &job.org_id, &job.id)
+                    .await?;
+            let _ = pending;
+            for row in live {
+                if row.kind == "control"
+                    || row.k8s_job_name.as_deref() == Some(crate::reporter::INPROC)
+                {
+                    // No pod to wait for: settle at once.
+                    let _ = er_entities::task_instance::update::settle_canceled(
+                        &self.client,
+                        None,
+                        Some("canceled"),
+                        &row.id,
+                        row.k8s_job_name.as_deref(),
+                    )
+                    .await?;
+                } else if let Some(name) = row.k8s_job_name.as_deref() {
+                    self.revoke_and_delete(name).await;
+                }
+            }
+            // Rows already canceling from an earlier sweep whose pods are gone
+            // settle through the watch; the sweep itself stays idempotent.
+        }
+        Ok(worked)
+    }
+
+    async fn zombie_sweep(&mut self) -> Result<bool, tokio_postgres::Error> {
+        let stale = er_entities::task_instance::read::stale_heartbeats(
+            &self.client,
+            &self.epoch,
+            ZOMBIE_STALE_SECS,
+        )
+        .await?;
+        if stale.is_empty() {
+            return Ok(false);
+        }
+        // Stand down while the platform is ending the pod: its evidence lands
+        // on the launch budget, not the try budget (§5.7).
+        let listing = match self.api.list(&Selector(MANAGED_SELECTOR.into())).await {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("executor: zombie sweep could not list pods: {e}");
+                return Ok(false);
+            }
+        };
+        for row in stale {
+            let pod = listing
+                .pods
+                .iter()
+                .find(|p| Some(p.name.as_str()) == row.pod_name.as_deref());
+            if pod.is_some_and(|p| p.node_not_ready || p.disruption_target.is_some()) {
+                continue;
+            }
+            // The write-ahead: the reason lands with no state change, then the
+            // Job is revoked; the watch charges the try once the pod is gone.
+            if let Some(pod_uid) = row.pod_uid.as_deref() {
+                let _ = er_entities::task_instance::update::note_interruption(
+                    &self.client,
+                    "heartbeat_timeout",
+                    None,
+                    &row.id,
+                    pod_uid,
+                )
+                .await;
+            }
+            if let Some(name) = row.k8s_job_name.as_deref() {
+                self.revoke_and_delete(name).await;
+            }
+        }
+        Ok(true)
+    }
+
+    async fn stuck_pending_sweep(&mut self) -> Result<bool, tokio_postgres::Error> {
+        let rows = er_entities::task_instance::read::live_claimed_pods(&self.client).await?;
+        let queued: Vec<&TaskInstance> = rows.iter().filter(|r| r.state == "queued").collect();
+        if queued.is_empty() {
+            return Ok(false);
+        }
+        let listing = match self.api.list(&Selector(MANAGED_SELECTOR.into())).await {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("executor: stuck-pending sweep could not list: {e}");
+                return Ok(false);
+            }
+        };
+        let mut worked = false;
+        for row in queued {
+            let Some(job_name) = row.k8s_job_name.as_deref() else {
+                continue;
+            };
+            let job = listing.jobs.iter().find(|j| j.name == job_name);
+            let pod = listing
+                .pods
+                .iter()
+                .find(|p| p.name.starts_with(job_name) && p.phase == er_k8s::PodPhase::Pending);
+            let age = self
+                .pending_since
+                .get(job_name)
+                .map_or(0, |t| t.elapsed().as_secs());
+            let events;
+            let newest_failed_create = if job.is_some_and(|j| j.active == 0) && pod.is_none() {
+                events = self.api.list_events(job_name).await.unwrap_or_default();
+                events
+                    .iter()
+                    .rev()
+                    .find(|e| e.reason == "FailedCreate")
+                    .map(|e| e.message.clone())
+            } else {
+                None
+            };
+            let verdict = er_k8s::pre_start(
+                pod,
+                &job.cloned().unwrap_or_default(),
+                newest_failed_create.as_deref(),
+                age,
+                age,
+                age,
+            );
+            match verdict {
+                PreStartVerdict::Wait => {}
+                PreStartVerdict::RequeueLaunch { reason, detail } => {
+                    worked = true;
+                    self.api_delete(job_name).await;
+                    let reason =
+                        detail.map_or_else(|| reason.clone(), |d| format!("{reason}: {d}"));
+                    self.requeue(row, job_name, &reason, QUOTA_WAIT_SECS).await;
+                }
+                PreStartVerdict::CapacityWait { reason, detail } => {
+                    worked = true;
+                    self.api_delete(job_name).await;
+                    let text = detail.unwrap_or_else(|| reason.clone());
+                    self.capacity_wait(row, job_name, &reason, &text).await;
+                }
+            }
+        }
+        Ok(worked)
+    }
+
+    // ---- the watch ----------------------------------------------------------
+
+    /// Apply one watch frame — the §6.5 terminal rules through `er_k8s`'s pure
+    /// classifier, plus the zombie write-ahead override.
+    pub async fn apply_frame(&mut self, frame: WatchFrame) {
+        match frame {
+            WatchFrame::Resync => {
+                if let Err(e) = self.reconcile().await {
+                    eprintln!("executor: resync reconcile failed: {e}");
+                }
+            }
+            WatchFrame::Pod(pod) => self.apply_pod(&pod, false).await,
+            WatchFrame::PodDeleted(pod) => self.apply_pod(&pod, true).await,
+            WatchFrame::Job(job) | WatchFrame::JobDeleted(job) => self.apply_job(&job).await,
+        }
+    }
+
+    async fn row_for_annotation(
+        &self,
+        annotations: &BTreeMap<String, String>,
+    ) -> Option<TaskInstance> {
+        let id = annotations.get(er_k8s::manifest::TASK_INSTANCE_ANNOTATION)?;
+        er_entities::task_instance::read::retry_lineage(&self.client, id)
+            .await
+            .ok()?
+            .into_iter()
+            .next()
+    }
+
+    async fn apply_job(&mut self, job: &JobSnapshot) {
+        // The Job stream exists for what a pods-only watch cannot see: the
+        // deadline condition, and a Job that never got a pod (§6.5).
+        if !job.failed_deadline {
+            return;
+        }
+        let Some(row) = self.row_for_annotation(&job.annotations).await else {
+            return;
+        };
+        if row.k8s_job_name.as_deref() != Some(job.name.as_str()) {
+            return; // a stale launch's Job: tombstone only
+        }
+        let Some(view) = row_view(&row) else { return };
+        let verdict = er_k8s::terminal(view, None, job, false, 0);
+        self.apply_verdict(&row, job.name.as_str(), verdict).await;
+    }
+
+    async fn apply_pod(&mut self, pod: &PodSnapshot, deleted: bool) {
+        let Some(row) = self.row_for_annotation(&pod.annotations).await else {
+            return;
+        };
+        let Some(job_name) = row.k8s_job_name.clone() else {
+            return;
+        };
+        if !pod.name.starts_with(job_name.as_str()) {
+            return; // §6.5: a pod whose row carries another launch — stale
+        }
+        if pod.phase == er_k8s::PodPhase::Running {
+            self.pending_since.remove(&job_name);
+        }
+        let Some(view) = row_view(&row) else {
+            // The row already holds a verdict: evidence annotates.
+            if row.state == "succeeded" || row.state == "skipped" {
+                let _ = er_entities::task_instance::update::record_evidence(
+                    &self.client,
+                    pod.terminated_exit_code.map(i64::from),
+                    pod.terminated_reason.as_deref(),
+                    &row.id,
+                    row.pod_uid.as_deref().unwrap_or(&pod.uid),
+                    &job_name,
+                )
+                .await;
+                self.tombstone(&job_name, Some(&pod.name)).await;
+            }
+            return;
+        };
+        let job = self
+            .api
+            .get_job(&job_name)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        let mut verdict = er_k8s::terminal(view, Some(pod), &job, deleted, NO_RECORD_GRACE);
+        // The zombie write-ahead: a revoked pod whose row says heartbeat_timeout
+        // charges the TRY as infrastructure, not the launch (§5.7).
+        if matches!(verdict, TerminalVerdict::Requeue { .. })
+            && row.termination_reason.as_deref() == Some("heartbeat_timeout")
+        {
+            verdict = TerminalVerdict::ApplyRecord(er_k8s::TerminalRecord {
+                v: 1,
+                attempt: row.id.clone(),
+                state: TerminalState::Failed,
+                exit: pod.terminated_exit_code.unwrap_or(1),
+                error_class: Some("infrastructure".into()),
+                termination_reason: Some("heartbeat_timeout".into()),
+                detail: Some(
+                    "no heartbeat for 5 minutes; something ran and the outcome is unknown".into(),
+                ),
+                output: None,
+                snapshot_start: None,
+                snapshot_end: None,
+                counters: None,
+            });
+        }
+        self.apply_verdict(&row, &job_name, verdict).await;
+    }
+
+    #[expect(clippy::too_many_lines, reason = "one arm per §6.5 verdict")]
+    async fn apply_verdict(
+        &mut self,
+        row: &TaskInstance,
+        job_name: &str,
+        verdict: TerminalVerdict,
+    ) {
+        let kind = JobKind::parse_row_kind(&self.client, row).await;
+        match verdict {
+            TerminalVerdict::Wait => {}
+            TerminalVerdict::RecordEvidence { exit_code, reason } => {
+                let _ = er_entities::task_instance::update::record_evidence(
+                    &self.client,
+                    exit_code,
+                    reason.as_deref(),
+                    &row.id,
+                    row.pod_uid.as_deref().unwrap_or_default(),
+                    job_name,
+                )
+                .await;
+                self.tombstone(job_name, None).await;
+            }
+            TerminalVerdict::ApplyRecord(record) => {
+                match record.state {
+                    TerminalState::Succeeded | TerminalState::Skipped => {
+                        // The pod's own finish normally landed this; the record
+                        // is the recovery path (a lost report) — same guarded
+                        // statement, a no-op when already posted.
+                        let _ = er_entities::task_instance::update::finish(
+                            &self.client,
+                            record.state == TerminalState::Skipped,
+                            "done",
+                            record.output.as_ref(),
+                            record.snapshot_start,
+                            record.snapshot_end,
+                            record.counters.as_ref(),
+                            Some(i64::from(record.exit)),
+                            &row.id,
+                            row.pod_uid.as_deref().unwrap_or_default(),
+                        )
+                        .await;
+                    }
+                    TerminalState::Failed => {
+                        let class = record.error_class.as_deref().unwrap_or("internal");
+                        let retryable = matches!(
+                            class,
+                            "transient_io" | "lock_conflict" | "infrastructure" | "resources"
+                        );
+                        let escalate = class == "resources" && escalates(kind, &row.task_id);
+                        let failure = taskpg::TaskFailure {
+                            terminal_state: "failed",
+                            retryable,
+                            escalate,
+                            exit_code: Some(i64::from(record.exit)),
+                            termination_reason: record.termination_reason.as_deref(),
+                            error_class: Some(class),
+                            error_detail: record.detail.as_deref(),
+                            k8s_job_name: Some(job_name),
+                            backoff: taskpg::POD_BACKOFF,
+                        };
+                        let _ =
+                            taskpg::fail_or_retry_task(&mut self.client, &row.id, &failure).await;
+                    }
+                    TerminalState::Interrupted => { /* classify already deferred */ }
+                }
+                self.tombstone(job_name, None).await;
+            }
+            TerminalVerdict::FailNoRecord => {
+                let failure = taskpg::TaskFailure {
+                    terminal_state: "failed",
+                    retryable: false,
+                    escalate: false,
+                    exit_code: None,
+                    termination_reason: Some("no_terminal_record"),
+                    error_class: Some("internal"),
+                    error_detail: Some(
+                        "the pod reached a terminal phase with no terminal record; never a \
+                         success and never retryable (§6.5)",
+                    ),
+                    k8s_job_name: Some(job_name),
+                    backoff: taskpg::POD_BACKOFF,
+                };
+                let _ = taskpg::fail_or_retry_task(&mut self.client, &row.id, &failure).await;
+                self.tombstone(job_name, None).await;
+            }
+            TerminalVerdict::TimedOut => {
+                let failure = taskpg::TaskFailure {
+                    terminal_state: "timed_out",
+                    retryable: false,
+                    escalate: false,
+                    exit_code: None,
+                    termination_reason: Some("DeadlineExceeded"),
+                    error_class: Some("timeout"),
+                    error_detail: Some(
+                        "the Job's activeDeadlineSeconds fired; a longer timeout is a policy \
+                         change the operator applies by clearing (§5.5)",
+                    ),
+                    k8s_job_name: Some(job_name),
+                    backoff: taskpg::POD_BACKOFF,
+                };
+                let _ = taskpg::fail_or_retry_task(&mut self.client, &row.id, &failure).await;
+                self.tombstone(job_name, None).await;
+            }
+            TerminalVerdict::FailResources { reason, detail } => {
+                let escalate =
+                    escalates(kind, &row.task_id) && row.resource_class.as_deref() != Some("L");
+                let failure = taskpg::TaskFailure {
+                    terminal_state: "failed",
+                    retryable: true,
+                    escalate,
+                    exit_code: None,
+                    termination_reason: Some(&reason),
+                    error_class: Some("resources"),
+                    error_detail: detail.as_deref(),
+                    k8s_job_name: Some(job_name),
+                    backoff: taskpg::POD_BACKOFF,
+                };
+                let _ = taskpg::fail_or_retry_task(&mut self.client, &row.id, &failure).await;
+                self.tombstone(job_name, None).await;
+            }
+            TerminalVerdict::Requeue { reason } => {
+                self.api_delete(job_name).await;
+                self.requeue(row, job_name, &reason, QUOTA_WAIT_SECS).await;
+            }
+            TerminalVerdict::SettleCanceled { exit_code, reason } => {
+                let _ = er_entities::task_instance::update::settle_canceled(
+                    &self.client,
+                    exit_code,
+                    reason.as_deref(),
+                    &row.id,
+                    Some(job_name),
+                )
+                .await;
+                self.tombstone(job_name, None).await;
+            }
+            TerminalVerdict::CompleteRestart { exit_code, reason } => {
+                let rotated = er_entities::task_instance::update::archive_restarted(
+                    &self.client,
+                    exit_code,
+                    reason.as_deref(),
+                    &row.id,
+                    Some(job_name),
+                )
+                .await;
+                if let Ok(rows) = rotated
+                    && !rows.is_empty()
+                {
+                    let _ = er_entities::task_instance::create::insert_cleared_try(
+                        &self.client,
+                        None,
+                        2,
+                        self.cfg.image_digest.as_deref(),
+                        &row.id,
+                    )
+                    .await;
+                }
+                self.tombstone(job_name, None).await;
+            }
+        }
+    }
+
+    // ---- adoption / resync --------------------------------------------------
+
+    async fn reconcile(&mut self) -> Result<(), tokio_postgres::Error> {
+        let rows = er_entities::task_instance::read::live_claimed_pods(&self.client).await?;
+        let listing = match self.api.list(&Selector(MANAGED_SELECTOR.into())).await {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("executor: reconcile could not list: {e}");
+                return Ok(());
+            }
+        };
+        let row_names: BTreeSet<&str> = rows
+            .iter()
+            .filter_map(|r| r.k8s_job_name.as_deref())
+            .collect();
+        for row in &rows {
+            let Some(job_name) = row.k8s_job_name.as_deref() else {
+                continue;
+            };
+            let found = listing.jobs.iter().find(|j| j.name == job_name);
+            match (row.state.as_str(), found) {
+                ("restarting", None) => {
+                    let rotated = er_entities::task_instance::update::archive_restarted(
+                        &self.client,
+                        None,
+                        Some("no_pod"),
+                        &row.id,
+                        Some(job_name),
+                    )
+                    .await;
+                    if let Ok(rotated) = rotated
+                        && !rotated.is_empty()
+                    {
+                        let _ = er_entities::task_instance::create::insert_cleared_try(
+                            &self.client,
+                            None,
+                            2,
+                            self.cfg.image_digest.as_deref(),
+                            &row.id,
+                        )
+                        .await;
+                    }
+                }
+                ("canceling", None) => {
+                    let _ = er_entities::task_instance::update::settle_canceled(
+                        &self.client,
+                        None,
+                        Some("vanished"),
+                        &row.id,
+                        Some(job_name),
+                    )
+                    .await;
+                }
+                ("canceling", Some(_)) => self.revoke_and_delete(job_name).await,
+                ("queued" | "running", Some(job)) => {
+                    let ours_fp = JobKind::parse_row_kind(&self.client, row)
+                        .await
+                        .map(|k| dags::dag_for(k).structural_fingerprint);
+                    let theirs = job
+                        .annotations
+                        .get(er_k8s::manifest::FINGERPRINT_ANNOTATION);
+                    if ours_fp.as_ref() == theirs {
+                        // Ours: adopt — never resubmit (a duplicate attempt is
+                        // two lake writers).
+                        let _ = self
+                            .api
+                            .patch_labels(
+                                ObjectKind::Job,
+                                job_name,
+                                &[(er_k8s::manifest::OWNER_LABEL, Some(&self.epoch))],
+                            )
+                            .await;
+                    } else {
+                        // Build skew (§6.6): tombstoned, never attributed.
+                        self.tombstone(job_name, None).await;
+                        let failure = taskpg::TaskFailure {
+                            terminal_state: "failed",
+                            retryable: false,
+                            escalate: false,
+                            exit_code: None,
+                            termination_reason: Some("build_skew"),
+                            error_class: Some("internal"),
+                            error_detail: Some(
+                                "the running Job was launched from a different build's graph",
+                            ),
+                            k8s_job_name: Some(job_name),
+                            backoff: taskpg::POD_BACKOFF,
+                        };
+                        let _ =
+                            taskpg::fail_or_retry_task(&mut self.client, &row.id, &failure).await;
+                    }
+                }
+                ("running", None) => {
+                    // The Job is gone with the row still running: relaunch on
+                    // the infrastructure budget; the ledger probe (Phase 3)
+                    // reports committed work instead of re-running it.
+                    self.requeue(row, job_name, "vanished", QUOTA_WAIT_SECS)
+                        .await;
+                }
+                ("queued", None) => {
+                    // The write-ahead says a launch was intended; the fallback
+                    // token's value died with the old epoch, so relaunch fresh
+                    // rather than recreating under a credential nobody holds.
+                    // (The projected-token path removes this divergence from
+                    // §6.6's same-name recreate.)
+                    self.requeue(row, job_name, "adoption_relaunch", 0).await;
+                }
+                _ => {}
+            }
+        }
+        // Jobs with no live claimed row: a finished attempt whose delete was
+        // lost — tombstone and let TTL take it.
+        for job in &listing.jobs {
+            if !row_names.contains(job.name.as_str())
+                && !job.labels.contains_key(er_k8s::manifest::DONE_LABEL)
+            {
+                self.tombstone(&job.name, None).await;
+            }
+        }
+        Ok(())
+    }
+
+    // ---- helpers ------------------------------------------------------------
+
+    async fn requeue(&mut self, row: &TaskInstance, job_name: &str, reason: &str, wait: i64) {
+        let requeued = er_entities::task_instance::update::requeue_launch(
+            &self.client,
+            wait,
+            Some(reason),
+            &row.id,
+            job_name,
+        )
+        .await;
+        match requeued {
+            Ok(rows) if rows.is_empty() => {
+                // Stale, or the launch budget is spent: re-read and settle.
+                let fresh = er_entities::task_instance::read::retry_lineage(&self.client, &row.id)
+                    .await
+                    .ok()
+                    .and_then(|v| v.into_iter().next());
+                if let Some(fresh) = fresh
+                    && fresh.live == Some(true)
+                    && matches!(fresh.state.as_str(), "queued" | "running")
+                    && fresh.launches >= fresh.max_launches
+                {
+                    let failure = taskpg::TaskFailure {
+                        terminal_state: "failed",
+                        retryable: true,
+                        escalate: false,
+                        exit_code: None,
+                        termination_reason: Some(reason),
+                        error_class: Some("infrastructure"),
+                        error_detail: Some(
+                            "the infrastructure budget is spent: three launches never ran user \
+                             code (§5.5)",
+                        ),
+                        k8s_job_name: Some(job_name),
+                        backoff: taskpg::POD_BACKOFF,
+                    };
+                    let _ = taskpg::fail_or_retry_task(&mut self.client, &row.id, &failure).await;
+                }
+            }
+            Ok(_) => {}
+            Err(e) => eprintln!("executor: requeue of {} failed: {e}", row.id),
+        }
+        self.pending_since.remove(job_name);
+    }
+
+    async fn capacity_wait(
+        &mut self,
+        row: &TaskInstance,
+        job_name: &str,
+        reason: &str,
+        detail: &str,
+    ) {
+        // The delete comes first; the wait is recorded only when the Job is
+        // gone, so a recreate before the delete completed 409s into the launch
+        // budget (§4.5).
+        self.api_delete(job_name).await;
+        let _ = er_entities::task_instance::update::capacity_wait(
+            &self.client,
+            QUOTA_WAIT_SECS,
+            Some(&format!("{reason}: {detail}")),
+            &row.id,
+            job_name,
+        )
+        .await;
+        self.pending_since.remove(job_name);
+        eprintln!("executor: capacity wait ({reason}) for {}", row.id);
+    }
+
+    async fn revoke_and_delete(&self, job_name: &str) {
+        // dagr's two-step: patch-then-delete, so the deletion is legible as
+        // ours (§6.6).
+        let _ = self
+            .api
+            .patch_labels(
+                ObjectKind::Job,
+                job_name,
+                &[(
+                    er_k8s::manifest::OWNER_LABEL,
+                    Some(er_k8s::manifest::REVOKED),
+                )],
+            )
+            .await;
+        self.api_delete(job_name).await;
+    }
+
+    async fn api_delete(&self, job_name: &str) {
+        if let Err(e) = self.api.delete_job(job_name).await {
+            eprintln!("executor: deleting Job {job_name} failed: {e}");
+        }
+    }
+
+    async fn tombstone(&self, job_name: &str, pod_name: Option<&str>) {
+        // After any outcome is consumed, mark done BEFORE relying on TTL, so a
+        // finished attempt is never attributed twice even if the delete is
+        // lost (§6.6).
+        let _ = self
+            .api
+            .patch_labels(
+                ObjectKind::Job,
+                job_name,
+                &[(er_k8s::manifest::DONE_LABEL, Some("true"))],
+            )
+            .await;
+        if let Some(pod) = pod_name {
+            let _ = self
+                .api
+                .patch_labels(
+                    ObjectKind::Pod,
+                    pod,
+                    &[(er_k8s::manifest::DONE_LABEL, Some("true"))],
+                )
+                .await;
+        }
+        self.api_delete(job_name).await;
+    }
+}
+
+/// How long the watch tolerates a terminal pod with no record before
+/// classifying without one — passed as the caller's clock so the classifier
+/// stays pure. Phase 2 applies frames as they arrive and once per loop, so the
+/// bound is approximated by the loop cadence.
+const NO_RECORD_GRACE: u64 = er_k8s::NO_RECORD_BOUND_SECS;
+
+/// The failure class/detail a settle carries, from the first failure-like
+/// leaf's own row.
+fn failure_text(
+    dag: &er_dag::Dag,
+    states: &[TaskState],
+    live: &BTreeMap<&str, &TaskInstance>,
+) -> (Option<String>, Option<String>) {
+    for (idx, state) in states.iter().enumerate() {
+        if state.class() == er_dag::StateClass::FailureLike
+            && let Some(row) = live.get(dag.nodes[idx].task_id)
+        {
+            return (
+                row.error_class.clone().or_else(|| Some("internal".into())),
+                row.error_detail
+                    .clone()
+                    .or_else(|| Some(format!("task '{}' {}", row.task_id, row.state))),
+            );
+        }
+    }
+    (None, None)
+}
+
+fn row_view(row: &TaskInstance) -> Option<RowView> {
+    let state = match row.state.as_str() {
+        "queued" => RowState::Queued,
+        "running" => RowState::Running,
+        "restarting" => RowState::Restarting,
+        "canceling" => RowState::Canceling,
+        "succeeded" | "skipped" => {
+            return Some(RowView {
+                state: RowState::Running,
+                finish_landed: true,
+            });
+        }
+        _ => return None,
+    };
+    Some(RowView {
+        state,
+        finish_landed: false,
+    })
+}
+
+/// Does this task escalate class on a resources failure (§5.5)?
+fn escalates(kind: Option<JobKind>, task_id: &str) -> bool {
+    kind.map(dags::dag_for)
+        .and_then(|dag| {
+            dag.node_by_task_id(task_id)
+                .map(|(_, n)| n.policy.escalate_on_oom)
+        })
+        .unwrap_or(false)
+}
+
+/// The class-default `activeDeadlineSeconds` (infrastructure.md §6.2's sketch).
+fn class_default_timeout(class: Option<&str>) -> u64 {
+    match class {
+        Some("S") => 2 * 3600,
+        Some("L") => 24 * 3600,
+        _ => 6 * 3600,
+    }
+}
+
+/// Compose a scheduled node's work order: the positional upstream pins, the
+/// job's params, and the leaf verdicts for a teardown (§4.5's `input`).
+fn compose_input(
+    dag: &er_dag::Dag,
+    idx: usize,
+    live: &BTreeMap<&str, &TaskInstance>,
+    job: &Job,
+) -> Value {
+    let node = &dag.nodes[idx];
+    let pins: Vec<Value> = node
+        .upstream
+        .iter()
+        .map(|u| {
+            live.get(dag.nodes[u.index()].task_id)
+                .and_then(|r| r.output.clone())
+                .unwrap_or(Value::Null)
+        })
+        .collect();
+    let mut input = json!({ "pins": pins, "params": job.params });
+    if node.teardown {
+        let leaves: BTreeMap<&str, &str> = dag
+            .nodes
+            .iter()
+            .filter(|n| !n.teardown)
+            .filter_map(|n| live.get(n.task_id).map(|r| (n.task_id, r.state.as_str())))
+            .collect();
+        input["leaves"] = serde_json::to_value(leaves).unwrap_or(Value::Null);
+    }
+    input
+}
+
+/// A 256-bit random per-attempt token (the §6.4 fallback credential).
+fn mint_token() -> String {
+    use rand::Rng;
+    let mut bytes = [0u8; 32];
+    rand::rng().fill_bytes(&mut bytes);
+    hex::encode(bytes)
+}
+
+/// Inject the per-attempt credential and launch identity into the rendered
+/// manifest's task container. TODO(Phase 2b): the projected ServiceAccount
+/// token replaces the env credential; an env token is readable by anyone with
+/// `pods get` in the namespace, which is why it must not outlive the spike.
+fn inject_attempt_env(
+    job: &mut er_k8s::k8s_openapi::api::batch::v1::Job,
+    job_name: &str,
+    token: &str,
+) {
+    use er_k8s::k8s_openapi::api::core::v1::EnvVar;
+    if let Some(spec) = job.spec.as_mut()
+        && let Some(pod) = spec.template.spec.as_mut()
+        && let Some(container) = pod.containers.first_mut()
+    {
+        let env = container.env.get_or_insert_with(Vec::new);
+        env.push(EnvVar {
+            name: "ER_ATTEMPT_TOKEN".into(),
+            value: Some(token.to_string()),
+            value_from: None,
+        });
+        env.push(EnvVar {
+            name: "ER_K8S_JOB_NAME".into(),
+            value: Some(job_name.to_string()),
+            value_from: None,
+        });
+    }
+}
+
+impl JobKind {
+    /// The kind behind a task row, read from its job row (the row itself does
+    /// not carry the kind).
+    async fn parse_row_kind(client: &Client, row: &TaskInstance) -> Option<JobKind> {
+        let job = pg::get_job(client, &row.org_id, &row.job_id).await.ok()??;
+        JobKind::parse(&job.kind)
+    }
+}
