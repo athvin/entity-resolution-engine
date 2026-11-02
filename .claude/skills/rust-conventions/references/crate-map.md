@@ -52,7 +52,7 @@ configured to leave them alone and the unblocker is upstream.
 | `er-k8s` | The Kubernetes half of `docs/batch-orchestration-design.md` §6: the [`PodApi`] seam the dispatcher launches and watches through (one production implementation over `kube`, one scripted test double in er-server's tests), the per-attempt Job manifest rendering, the watch discipline, and the pure |
 | `er-match` | The matching stage (port of `src/er/matching/*`, DesignDoc.md S4.3) |
 | `er-mcp` | `er-mcp` — an MCP server over the control API, for one tenant (O10) |
-| `er-obs` | Observability: the S5.2 counter vocabulary and structured stage log line (ports of `src/er/obs/counters.py` and `src/er/obs/logging.py`) |
+| `er-obs` | Observability: installing the subscriber, plus the S5.2 counter vocabulary and structured stage log line (ports of `src/er/obs/counters.py` and `src/er/obs/logging.py`) |
 | `er-pg-tls` | `er-pg-tls` — the TLS connector for every Postgres client in the workspace |
 | `er-reconcile` | The reconcile / entity-resolution stage (port of `src/er/entities/*` + `src/er/review/*`, DesignDoc.md S4.5) |
 | `er-schema` | The S5 schema registry (Rust port of `src/er/lake/*`), dependency-free so `config`/`golden`/tests can consume it without pulling a DB into their graph |

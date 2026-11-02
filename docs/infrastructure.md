@@ -454,7 +454,15 @@ The cost is a dependency, not a credential: `aws-config` + `aws-sdk-sesv2` enter
 
 ## 10. Observability
 
-Nothing currently leaves the box — no metrics endpoint, no tracing, no log aggregation. [backend-design.md](backend-design.md) §14 specifies what should exist (pod logs tagged `tenant/job/run/stage`, API RED metrics, queue depth, dispatch latency, per-class concurrency) and none of it is wired, mostly because there has been no cluster to wire it to. **OpenTelemetry to one collector** is the foundation, exporter swappable (the four system-specific reasons, and the one-collector-but-not-one-backend split, are in D-OTEL).
+Container stdout reaches CloudWatch (a Fluent Bit DaemonSet, task 1.8), and since the telemetry programme began every Rust entry point installs a `tracing` subscriber that writes one structured JSON object per event to stderr — so logs leave the box with a level, fields and a service identity. **No metrics endpoint and no spans yet:** the span pipeline waits on a destination (see §10.5), and the collector's `traces` and `metrics` pipelines still have zero producers. [backend-design.md](backend-design.md) §14 specifies what should exist (pod logs tagged `tenant/job/run/stage`, API RED metrics, queue depth, dispatch latency, per-class concurrency); the log half has a subscriber under it now, and the metric and span halves are still unwired. **OpenTelemetry to one collector** is the foundation, exporter swappable (the four system-specific reasons, and the one-collector-but-not-one-backend split, are in D-OTEL).
+
+Two things in this section have gone stale against the all-Rust cutover and are
+corrected where they appear below: §10.1's table and §10.2's instrumentation
+list name Python modules (`src/er/obs/runctx.py`, `sql_profile.py`) and Python
+libraries (`opentelemetry-instrumentation-fastapi`, `-psycopg`) that no longer
+exist, and §10.6's Phase 1 claims auto-instrumentation that could never have
+attached to a Rust binary. The `Instrumentation` CR the chart still carries is
+inert for the same reason.
 
 ### 10.1 What already exists, and the boundary not to cross
 

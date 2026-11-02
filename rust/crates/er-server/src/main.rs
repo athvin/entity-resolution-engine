@@ -32,16 +32,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // `exec-task`: the pod-side verb is synchronous (it owns its own
     // current-thread runtimes), so it also must not run inside the runtime.
     if program_name(&args) != "er" && args.get(1).map(String::as_str) == Some("exec-task") {
+        // The guard is bound rather than dropped, so it lives as long as the
+        // verb. It will also be the flush point once there is an exporter:
+        // `exec_task::run` funnels all eleven of its early returns through one
+        // wrapper, and a pod exits immediately after its last span, so the tail
+        // of every run — including every failure — depends on flushing here.
+        let _telemetry = er_obs::init(er_obs::Role::Task);
         std::process::exit(er_server::exec_task::run(&args[2..]));
     }
-    // `er`: synchronous, so it must not run inside the runtime.
+    // `er`: synchronous, so it must not run inside the runtime. Note that this
+    // arm has no tokio runtime at all, which is why `init` must never need one.
     if program_name(&args) == "er" {
+        let _telemetry = er_obs::init(er_obs::Role::Cli);
         return er_cli::cli::run().map_err(|e| -> Box<dyn std::error::Error> {
             // anyhow's alternate formatter walks the source chain; `to_string`
             // alone would print only the outermost message.
             format!("{e:#}").into()
         });
     }
+    // The API and the standalone dispatcher are the same executable under
+    // different names, so the role cannot come from the file name alone.
+    let role = if program_name(&args) == "er-dispatcher" {
+        er_obs::Role::Dispatcher
+    } else {
+        er_obs::Role::Api
+    };
+    let _telemetry = er_obs::init(role);
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?
@@ -127,7 +143,10 @@ async fn async_main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
 
     let addr = std::env::var("ER_SERVER_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".to_string());
     let listener = tokio::net::TcpListener::bind(&addr).await?;
-    eprintln!("er-server listening on {addr}");
+    // The first structured event in the workspace. The rest of the migration
+    // off `eprintln!` is its own change; this one ships here so the subscriber
+    // is proven end to end rather than assumed.
+    tracing::info!(addr = %addr, "er-server listening");
     let state = er_server::state_from_env().await;
     axum::serve(listener, er_server::app(state)).await?;
     Ok(())

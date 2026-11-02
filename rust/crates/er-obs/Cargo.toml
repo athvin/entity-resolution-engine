@@ -11,6 +11,8 @@ er-schema = { path = "../er-schema" }
 serde_json.workspace = true
 thiserror.workspace = true
 indexmap = "2"
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "json", "fmt", "registry", "std"] }
 
 [lints]
 workspace = true

@@ -745,6 +745,7 @@ fn run_migrate(
 }
 
 fn main() -> ExitCode {
+    let _telemetry = er_obs::init(er_obs::Role::EntityCli);
     let cli = Cli::parse();
     let result = match &cli.command {
         Command::Gen { root } => run_gen(root).map(|()| true),
