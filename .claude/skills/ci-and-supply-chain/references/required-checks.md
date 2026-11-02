@@ -56,6 +56,7 @@ job instead — `terraform plan` is the worked example.
 | `check` | lint + types + unit | 15 | `needs.detect.outputs.frontend == 'true'` |
 | `e2e` | playwright e2e (shard ${{ matrix.shard }}/3) | 30 | `needs.detect.outputs.frontend == 'true'` |
 | `e2e-gate` | playwright functional tier | 5 | `${{ !cancelled() && needs.detect.outputs.frontend == 'true' }}` |
+| `e2e-workers-experiment` | playwright workers=2 (nightly experiment) | 30 | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` |
 | `audit` | pnpm audit + licenses | 10 | `needs.detect.outputs.frontend == 'true'` |
 | `semgrep` | semgrep (static analysis) | 15 | `needs.detect.outputs.frontend == 'true'` |
 | `coverage` | coverage (vitest) | 15 | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` |
