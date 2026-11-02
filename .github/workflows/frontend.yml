@@ -160,7 +160,9 @@ jobs:
   # but both webServers (the mock erserver and `next start` with its in-memory
   # PGlite) are shared mutable state across workers, and the suite has only ever
   # run at workers=1 in CI — parallel safety is unvalidated. Shards keep one
-  # worker per runner, so they change nothing about test semantics.
+  # worker per runner, so they change nothing about test semantics. The
+  # validation that would unlock --workers=2 here accumulates in
+  # frontend-experiments.yml (nightly + dispatch), not in this file.
   #
   # `--shard=N/3` splits at test granularity across all three device projects
   # (`fullyParallel: true`), ~193 tests per leg, auto-balanced as tests are
@@ -272,62 +274,6 @@ jobs:
               exit 1
               ;;
           esac
-
-  # THE workers=2 EXPERIMENT — nightly + dispatch only, never a required check.
-  #
-  # The PR shards above run one worker each because parallel safety is
-  # UNVALIDATED: both webServers (the mock erserver and `next start` with its
-  # in-memory PGlite) are shared mutable state across workers, and the suite
-  # has only ever run at workers=1 in CI. This job runs the FULL suite at
-  # --workers=2 on the nightly schedule to accumulate that evidence where a
-  # failure costs nothing.
-  #
-  # The protocol before flipping the PR shards: ~10 consecutive nightly greens
-  # here, including the @visual project; triage any cross-test state bleed
-  # (fixture orgs, mock-server call logs) as a test-isolation bug, not a reason
-  # to abandon the lever. The flip itself is then one `--workers=2` on the
-  # shard legs (~5m -> ~3m each), or fewer shards at 2 workers for the same
-  # wall at lower minute cost.
-  e2e-workers-experiment:
-    name: playwright workers=2 (nightly experiment)
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    container:
-      image: mcr.microsoft.com/playwright:v1.63.0-jammy
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
-        with:
-          node-version: 22
-      - name: Enable corepack (pnpm from packageManager)
-        run: corepack enable
-      - name: Resolve pnpm store path
-        run: echo "PNPM_STORE=$(pnpm store path --silent)" >> "$GITHUB_ENV"
-      - name: Cache pnpm store
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ env.PNPM_STORE }}
-          key: pnpm-store-${{ hashFiles('frontend/pnpm-lock.yaml') }}
-          restore-keys: |
-            pnpm-store-
-      - name: Cache Next build
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: frontend/.next/cache
-          key: next-build-${{ hashFiles('frontend/pnpm-lock.yaml') }}-${{ hashFiles('frontend/src/**') }}
-          restore-keys: |
-            next-build-${{ hashFiles('frontend/pnpm-lock.yaml') }}-
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm build
-      - run: pnpm test:e2e --workers=2
-      - name: Upload Playwright report on failure
-        if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: playwright-report-workers-experiment
-          path: frontend/playwright-report/
-          retention-days: 7
 
   # The frontend's mirror of rust.yml's `cargo-deny (advisories + licenses +
   # bans)`. `pnpm audit` is the advisories half; scripts/check-licenses.mjs is
