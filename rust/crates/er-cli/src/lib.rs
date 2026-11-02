@@ -3742,14 +3742,63 @@ fn observed<T>(
     stage: &str,
     f: impl FnOnce() -> Result<T>,
 ) -> Result<T> {
+    // The stage span. Every span the stage creates beneath it — and after the
+    // emitters land, that is one per SQL statement — hangs off this one, which
+    // is how a statement is attributed to its stage and, through the `run`
+    // span above, to its org, dataset and run without any of them being passed
+    // as an argument.
+    //
+    // `tracing` span names must be literals, so the per-stage name rides
+    // `otel.name`. `er.stage` stays bounded: RUN_STAGES has eleven members.
+    let span = tracing::info_span!(
+        "stage",
+        otel.name = %stage,
+        er.stage = %stage,
+        er.duration_ms = tracing::field::Empty,
+        er.outcome = tracing::field::Empty,
+        er.snapshot_end = tracing::field::Empty,
+    );
+    let _entered = span.enter();
+
+    // The stage's own wall clock. `StageObserver` has never carried one, even
+    // though `duration_ms` is one of the eleven promoted counters — the ledger
+    // has been taking its timing from SQL `now()` at each boundary instead.
+    // Measuring it here means the span and the ledger agree.
+    let started = std::time::Instant::now();
     observer.stage_started(stage);
     match f() {
         Ok(v) => {
-            observer.stage_succeeded(stage, session.latest_snapshot_version().ok());
+            let elapsed = started.elapsed();
+            let snapshot_end = session.latest_snapshot_version().ok();
+            span.record("er.duration_ms", elapsed.as_millis());
+            span.record("er.outcome", "ok");
+            if let Some(end) = snapshot_end {
+                span.record("er.snapshot_end", end);
+            }
+            tracing::info!(
+                er.stage = %stage,
+                duration_ms = elapsed.as_millis(),
+                snapshot_end,
+                "stage succeeded"
+            );
+            observer.stage_succeeded(stage, snapshot_end);
             Ok(v)
         }
         Err(e) => {
-            observer.stage_failed(stage, &format!("{e:#}"));
+            let elapsed = started.elapsed();
+            // Flattened with the alternate formatter, which walks the source
+            // chain — `to_string` alone yields only the outermost message, and
+            // an error's Display must never interpolate its own source.
+            let detail = format!("{e:#}");
+            span.record("er.duration_ms", elapsed.as_millis());
+            span.record("er.outcome", "error");
+            tracing::error!(
+                er.stage = %stage,
+                duration_ms = elapsed.as_millis(),
+                error = %detail,
+                "stage failed"
+            );
+            observer.stage_failed(stage, &detail);
             Err(e)
         }
     }
@@ -3789,6 +3838,35 @@ pub fn run_all_ensemble_observed(
         !members.is_empty(),
         "a run always scores with at least one member"
     );
+
+    // The run span, parent of all eleven stage spans and therefore of every
+    // statement span beneath them.
+    //
+    // It carries only what a run knows about ITSELF. Org and dataset are
+    // deliberately absent: the dispatcher already enters a `job` span that
+    // carries them, this span is created inside it, and `tracing` context is
+    // ambient — so they are inherited rather than passed. That is what keeps
+    // `PipelineInputs` (21 struct-literal construction sites) from needing a
+    // new field, and what will keep the 218 generated query functions from
+    // needing one either.
+    let (model_version, tf_snapshot_id) = ensemble_identity(members);
+    let run = tracing::info_span!(
+        "run",
+        er.run_id = %inputs.run_id,
+        er.mode = %inputs.mode,
+        er.model_version = %model_version,
+        er.tf_snapshot_id = %tf_snapshot_id,
+        er.members = members.len(),
+        er.rebuild_reason = inputs.rebuild_reason.unwrap_or(""),
+        er.segment = inputs.segment.map_or("", |(name, _)| name),
+    );
+    let _entered = run.enter();
+    tracing::info!(
+        er.run_id = %inputs.run_id,
+        er.mode = %inputs.mode,
+        "run starting"
+    );
+
     observed(session, observer, "init", || {
         // The run ledger records the ENSEMBLE's identity, not one member's,
         // because that string is what the drift guard compares across runs —
