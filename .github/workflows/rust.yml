@@ -692,7 +692,7 @@ jobs:
           key: duckdb-extensions-${{ hashFiles('rust/Cargo.lock') }}
           restore-keys: |
             duckdb-extensions-
-      - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+      - uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2.88.1
         with:
           tool: cargo-nextest
       - name: DuckLake e2e (er-cli, hash partition)
@@ -1087,7 +1087,7 @@ jobs:
           # rlib. The single-writer rule, the nightly sccache cap and that shrink
           # free enough on their own; check the real number here before
           # considering anything more aggressive.
-      - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+      - uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2.88.1
         with:
           tool: cargo-llvm-cov
       - name: Cache DuckDB extensions
