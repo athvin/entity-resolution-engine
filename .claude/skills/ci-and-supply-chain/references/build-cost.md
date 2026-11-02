@@ -22,6 +22,7 @@ against it.
 - Shipped: the e2e tier split into parallel legs (2026-11-02)
 - Measured: the sharded tiers, same day (2026-11-02)
 - Measured: the second pass, and the workers=2 verdict (2026-11-02, later)
+- Measured: the flake's root cause, the flip, and the buildcache move (2026-11-02, evening)
 
 ## The measured baseline (2026-10-22)
 
@@ -726,3 +727,55 @@ flake that doubles as a PR-gate flake risk does not meet it. The flip is
 gated on fixing that test's flake (it already flakes at 1 worker); the
 nightly experiment keeps accumulating evidence meanwhile. When it flips,
 every playwright shard roughly halves (~5m → ~3m).
+
+(The section below records how that gate was then cleared the same evening.)
+
+## Measured: the flake's root cause, the flip, and the buildcache move (2026-11-02, evening)
+
+**The grow.spec flake took two theories to kill, and the second came from a
+trace, not a guess.** #400 called it a hydration race (pre-hydration `fill`
+wiped by React's controlled re-render) and added `hydratedFill`, which retries
+the fill until the state-gated send button enables. Campaign 2 came back
+**7/10** — all three failures the same test, now failing INSIDE the retry
+loop. The trace of a failing retry told the real story: input visibly holding
+the filled text at failure time, button disabled, and the page's client JS
+demonstrably alive (session/config fetches and router prefetches fired ~1.3s
+in). That combination is React 19 behaviour: a pre-hydration fill leaves text
+in the DOM; React 19 PRESERVES user-entered DOM text at hydration and primes
+its internal value tracker with it while component state stays "" — after
+which filling the SAME string never differs from the tracker, no `onChange`
+fires, and `disabled={!input.trim()}` holds forever. A same-value retry loop
+cannot escape by construction. #404's fix: clear-then-fill inside the retry —
+the `"" -> text` transition always differs from the tracker.
+
+**Campaign 3 (post-#404): 10/10 green.** Thirty full-suite --workers=2 runs
+total across the three campaigns; the chromium projects failed zero times in
+all thirty; every webkit failure predated #404.
+
+**The flip shipped as an engine split (#409), tuned by its own PR runs:**
+
+| Layout | legs | wall |
+|---|---|---|
+| 3 count-shards @ 1 worker (morning) | 5.7 / 9.9 / 3.5m | ~10m |
+| engine split, webkit whole @ w2 | chromium 5.4/4.5m, webkit 9.0m | ~9m |
+| final: chromium 2× + webkit 2×, all @ w2 | 5.7 / 4.6 / 4.7 / 5.8m | **~6m** |
+
+webkit runs ~2x slower per test than chromium (7.5m for its 193 at two
+workers), which is why it needed its own halves. Counts re-verified at the
+final layout: 193+193+97+96 = 579. The nightly `frontend-experiments.yml`
+run continues as the regression watchdog for the shared-webserver class.
+
+**The buildkit layer cache moved to ECR** (#405 terraform + #407 workflow),
+completing what the sccache-on-S3 section above prescribed: `er-buildcache`
+is its own MUTABLE repo (the image repos' IMMUTABLE tags cannot host an
+overwritten cache ref) with an expire-untagged lifecycle, and both image
+builds now `cache-to type=registry` with
+`image-manifest=true,oci-mediatypes=true` (ECR rejects buildkit's default
+cache-manifest media type). The `type=gha` lines survive as transitional
+cache-FROM only, so the Actions-cache budget pressure ended at merge and
+both of `cache-prune`'s budgets are now rollback insurance.
+
+**End-of-day walls** (from 32–35m at the start of the day): rust ~9.8m,
+frontend ~6m, PR turnaround **~10m** — bounded by the `test` tier's rest leg
+and the lake shards, where the next levers (if ever wanted) are a third
+`test` leg and duration-aware partitioning nextest does not offer.
