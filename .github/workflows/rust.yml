@@ -466,12 +466,30 @@ jobs:
           sccache --show-stats || true
           du -sh target || true
 
-  test:
-    name: test
+  # SPLIT in two legs, same measurement-driven shape as the e2e tier below. Run
+  # 41461727505 decomposed this job's 10m36 step as 3m11 of build and ~7m of
+  # test binaries running one after the other — er-match's `tests/main` alone
+  # 264s, er-std's 85s, dedupe-core's 66s. One leg takes er-match, the other
+  # takes the rest; the two land near-equal (~4.5m vs ~3m of tests) and the
+  # split is complementary BY CONSTRUCTION: `--workspace --exclude er-match`
+  # means a new crate's tests default into the `rest` leg, never into no leg.
+  # The required context rides `test-gate` below, which carries the old job's
+  # exact name.
+  test-shard:
+    name: test shard (${{ matrix.slice }})
     needs: detect
     if: needs.detect.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      # A flaky leg can be re-run alone; its sibling's green stands.
+      fail-fast: false
+      matrix:
+        include:
+          - slice: er-match
+            args: -p er-match
+          - slice: rest
+            args: --workspace --exclude er-match
     permissions:
       contents: read
       id-token: write # OIDC exchange for the sccache S3 role
@@ -563,8 +581,11 @@ jobs:
         # cargo 357s vs nextest 453s. nextest wins where tests are few and slow
         # (the Postgres tier), and loses where they are many and fast — which is
         # this job. The way to parallelise here is FEWER, larger test binaries,
-        # so cargo's own in-binary threads do the overlapping.
-        run: cargo test --workspace
+        # so cargo's own in-binary threads do the overlapping — and, since the
+        # split, a second RUNNER for the one binary that dwarfs the rest.
+        # Doctests stay complete across the legs: `-p er-match` runs er-match's,
+        # `--exclude er-match` runs everyone else's.
+        run: cargo test ${{ matrix.args }}
       - name: Build cost (sccache stats, target size)
         # See the `lint` job's copy for why. This job is also where the disk wall
         # shows up, so the `target` size is the number to watch here.
@@ -573,6 +594,46 @@ jobs:
           sccache --show-stats || true
           du -sh target || true
           df -h / | tail -1
+
+  # The required status check for the test tier — the same shape, for the same
+  # reason, as `ducklake-gate` below and infra.yml's `plan-gate`: a matrix
+  # job's per-leg names cannot be required status checks. Carries the old
+  # job's exact `name:` so the context "test" kept reporting and branch
+  # protection never changed.
+  test-gate:
+    name: test
+    needs: [detect, test-shard]
+    # `!cancelled()`: the gate must RUN (and fail) when a leg fails — a gate
+    # skipped because its `needs` failed would read to branch protection as
+    # satisfied.
+    if: ${{ !cancelled() && needs.detect.outputs.code == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: every test leg must have succeeded
+        # No checkout in this job, so the workflow's `working-directory: rust`
+        # default would fail — point the step at the workspace root.
+        working-directory: ${{ github.workspace }}
+        env:
+          # The matrix aggregate: `success` only if every leg succeeded,
+          # `failure` if any failed, `skipped` if the whole job was.
+          RESULT: ${{ needs.test-shard.result }}
+        run: |
+          echo "test tier result: $RESULT"
+          case "$RESULT" in
+            success)
+              echo "all test legs succeeded"
+              ;;
+            skipped)
+              # Defensive only: the legs skip exactly when detect says
+              # code != 'true', and then this gate is itself skipped.
+              echo 'legs reported skipped alongside a running gate'
+              ;;
+            *)
+              echo "::error::a test leg did not succeed (result: $RESULT)"
+              exit 1
+              ;;
+          esac
 
   security:
     name: cargo-deny (advisories + licenses + bans)
