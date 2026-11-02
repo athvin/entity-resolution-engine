@@ -62,6 +62,54 @@ async fn v1_requires_bearer() {
     );
 }
 
+/// The §10.2 hop: a job carries the trace context of the request that asked for
+/// it, so the run the dispatcher starts later is a child of the click rather
+/// than an unrelated trace joined by hand. Asserted end to end through the
+/// router — this is the whole reason the in-memory store sets the column too,
+/// since the Postgres path cannot be exercised without a database.
+#[tokio::test]
+async fn an_enqueued_job_carries_the_requests_trace_context() {
+    const TRACEPARENT: &str = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+
+    let traced = Request::builder()
+        .method("POST")
+        .uri("/v1/orgs/acme/jobs")
+        .header(header::AUTHORIZATION, "Bearer op-secret")
+        .header(header::CONTENT_TYPE, "application/json")
+        .header("traceparent", TRACEPARENT)
+        .body(Body::from(r#"{"kind":"run","priority":0}"#))
+        .unwrap();
+    let resp = test_app().oneshot(traced).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::ACCEPTED);
+    assert_eq!(json_body(resp).await["trace_context"], TRACEPARENT);
+
+    // No header: the column stays null, which is exactly the prior behaviour.
+    let resp = test_app()
+        .oneshot(op_request(
+            "POST",
+            "/v1/orgs/acme/jobs",
+            Body::from(r#"{"kind":"run","priority":0}"#),
+        ))
+        .await
+        .unwrap();
+    assert!(json_body(resp).await["trace_context"].is_null());
+
+    // A malformed context is dropped rather than stored. A trace id nothing can
+    // be joined to is worse than none, and refusing the request would fail an
+    // otherwise valid enqueue over a telemetry header.
+    let bad = Request::builder()
+        .method("POST")
+        .uri("/v1/orgs/acme/jobs")
+        .header(header::AUTHORIZATION, "Bearer op-secret")
+        .header(header::CONTENT_TYPE, "application/json")
+        .header("traceparent", "not-a-traceparent")
+        .body(Body::from(r#"{"kind":"run","priority":0}"#))
+        .unwrap();
+    let resp = test_app().oneshot(bad).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::ACCEPTED);
+    assert!(json_body(resp).await["trace_context"].is_null());
+}
+
 #[tokio::test]
 async fn job_lifecycle_enqueue_list_get_cancel() {
     let app = test_app();

@@ -422,6 +422,30 @@ pub struct Principal {
     pub actor: String,
     pub org: Option<String>,
     pub role: Role,
+    /// The caller's W3C trace context, if it sent a well-formed one. Carried
+    /// here because this is already the one thing extracted from headers on
+    /// every authenticated request, so a handler that enqueues a job has the
+    /// context in scope without new plumbing.
+    ///
+    /// Correlation only — never an authorization input. It is spoofable exactly
+    /// as the acting-user header is, which is tolerable because nothing
+    /// downstream makes a decision on a trace id; `forwarded_traceparent` in
+    /// this module carries the full reasoning.
+    pub trace_context: Option<String>,
+}
+
+impl Principal {
+    /// This caller's job provenance: the recorded actor plus the trace context
+    /// it arrived with. The one place a [`pg::Provenance`] is built from a
+    /// request — everything else is [`pg::Provenance::default`] (no request) or
+    /// [`pg::Provenance::actor`] (an internal caller that names itself).
+    #[must_use]
+    pub fn provenance(&self) -> pg::Provenance<'_> {
+        pg::Provenance {
+            created_by: Some(&self.actor),
+            trace_context: self.trace_context.as_deref(),
+        }
+    }
 }
 
 /// A 401 with the given generic message (auth failures never leak specifics).
@@ -483,6 +507,69 @@ fn acceptable_actor(raw: &str) -> bool {
             .all(|c| c.is_ascii_graphic() && c != '"' && c != '\\')
 }
 
+/// The W3C trace-context header. The BFF sends it so a job enqueued by a
+/// request can be linked back to the click that asked for it; `jobs.trace_context`
+/// stores it verbatim and the dispatcher starts the run's span as its child
+/// (infrastructure.md §10.2).
+const TRACEPARENT_HEADER: &str = "traceparent";
+
+/// A `traceparent` is exactly `00-<32 hex>-<16 hex>-<2 hex>` — 55 characters.
+const TRACEPARENT_LEN: usize = 55;
+
+/// The trace context named by [`TRACEPARENT_HEADER`], if present and well formed.
+///
+/// Spoofable, exactly as [`forwarded_actor`] is: any credential holder can send
+/// any trace id. That is tolerable because a trace id is a correlation handle
+/// and never an authorization input — nothing downstream makes a decision on it.
+/// What a forged value can do is attach this run to someone else's trace, so the
+/// durable attribution stays `created_by`/`audit_log` and this is only ever read
+/// for linking.
+///
+/// Malformed values are ignored rather than refused, for the reason
+/// [`forwarded_actor`] gives: a bad header should not fail an otherwise valid
+/// request, and a null `trace_context` is exactly the pre-existing behaviour.
+fn forwarded_traceparent(parts: &Parts) -> Option<String> {
+    let raw = parts.headers.get(TRACEPARENT_HEADER)?.to_str().ok()?.trim();
+    acceptable_traceparent(raw).then(|| raw.to_string())
+}
+
+/// Whether a trimmed `traceparent` is fit to store: the W3C level-1 shape, with
+/// an all-zero trace or span id rejected (the spec calls both invalid) and
+/// version `ff` rejected (the spec forbids it).
+///
+/// Separate from [`forwarded_traceparent`] so the rule is testable without a
+/// header, which is the same reason [`acceptable_actor`] is split out. Future
+/// versions are deliberately *not* accepted: a `01-` context may carry fields
+/// whose meaning we would be guessing at, and storing one we cannot interpret is
+/// worse than storing nothing.
+fn acceptable_traceparent(raw: &str) -> bool {
+    if raw.len() != TRACEPARENT_LEN {
+        return false;
+    }
+    let mut fields = raw.split('-');
+    let (Some(version), Some(trace_id), Some(span_id), Some(flags), None) = (
+        fields.next(),
+        fields.next(),
+        fields.next(),
+        fields.next(),
+        fields.next(),
+    ) else {
+        return false;
+    };
+    let hex = |s: &str, n: usize| s.len() == n && s.bytes().all(|b| b.is_ascii_hexdigit());
+    // Lowercase only: the spec requires it, and accepting mixed case would let
+    // the same context arrive as two distinct strings.
+    let lower = |s: &str| s.bytes().all(|b| !b.is_ascii_uppercase());
+    hex(version, 2)
+        && version == "00"
+        && hex(trace_id, 32)
+        && trace_id.bytes().any(|b| b != b'0')
+        && hex(span_id, 16)
+        && span_id.bytes().any(|b| b != b'0')
+        && hex(flags, 2)
+        && lower(raw)
+}
+
 /// Compose the recorded actor from the credential and the forwarded human.
 /// `user:<email> via <credential>` is the format `proxy.ts` documents.
 fn compose_actor(credential: &str, user: Option<String>) -> String {
@@ -517,6 +604,7 @@ impl FromRequestParts<AppState> for Principal {
                 actor: compose_actor("operator", forwarded_actor(parts)),
                 org: None,
                 role: Role::Operator,
+                trace_context: forwarded_traceparent(parts),
             });
         }
 
@@ -559,6 +647,7 @@ impl FromRequestParts<AppState> for Principal {
                     actor: compose_actor(&format!("key:{key_id}"), forwarded_actor(parts)),
                     org: Some(org_name),
                     role: Role::parse(&role).unwrap_or(Role::Viewer),
+                    trace_context: forwarded_traceparent(parts),
                 })
             }
             Ok(_) => Err(unauthorized("invalid credential")),
@@ -743,7 +832,7 @@ async fn provision_org(
         0,
         Some(&idem),
         None,
-        Some(&principal.actor),
+        principal.provenance(),
     )
     .await
     {
@@ -2652,7 +2741,7 @@ async fn put_lexicon(
         0,
         Some(&idem),
         Some(&params),
-        Some(&principal.actor),
+        principal.provenance(),
     )
     .await
     {
@@ -2931,7 +3020,7 @@ async fn publish_config_version(
                 0,
                 Some(&train_key),
                 None,
-                Some(&principal.actor),
+                principal.provenance(),
             )
             .await
             {
@@ -2945,7 +3034,7 @@ async fn publish_config_version(
                 0,
                 Some(&rebuild_key),
                 Some(&rebuild_params),
-                Some(&principal.actor),
+                principal.provenance(),
             )
             .await
             {
@@ -2960,7 +3049,7 @@ async fn publish_config_version(
             0,
             Some(&rebuild_key),
             Some(&rebuild_params),
-            Some(&principal.actor),
+            principal.provenance(),
         )
         .await
         {
@@ -3090,7 +3179,7 @@ async fn create_job(
             body.priority,
             None,
             params.as_ref(),
-            Some(&principal.actor),
+            principal.provenance(),
         )
         .await
         {
@@ -3108,13 +3197,36 @@ async fn create_job(
             Err(e) => pg_err(e),
         };
     }
-    let job = enqueue(&state, &org, &body.kind, body.priority);
+    let job = enqueue_traced(
+        &state,
+        &org,
+        &body.kind,
+        body.priority,
+        principal.trace_context.as_deref(),
+    );
     (StatusCode::ACCEPTED, Json(json!(job))).into_response()
 }
 
 /// Enqueue a `queued` job directly (the body of `create_job`, reusable by the
 /// dispatcher and tests). Returns the minted job.
+///
+/// Untraced: delegates to [`enqueue_traced`] with no trace context, which is
+/// what a test or a dispatcher-internal enqueue wants.
 pub fn enqueue(state: &AppState, org: &str, kind: &str, priority: i64) -> Job {
+    enqueue_traced(state, org, kind, priority, None)
+}
+
+/// [`enqueue`], carrying the caller's trace context onto the job so the
+/// in-memory store matches the Postgres path. Kept separate rather than widening
+/// [`enqueue`] so the existing call sites — all of them tests and the
+/// dispatcher, none of which have a request in scope — stay as they are.
+pub fn enqueue_traced(
+    state: &AppState,
+    org: &str,
+    kind: &str,
+    priority: i64,
+    trace_context: Option<&str>,
+) -> Job {
     let mut store = state.store.lock().unwrap();
     let job_id = format!("job-{}", store.next);
     store.next += 1;
@@ -3136,7 +3248,7 @@ pub fn enqueue(state: &AppState, org: &str, kind: &str, priority: i64) -> Job {
         created_by: None,
         schedule_id: None,
         resource_class: None,
-        trace_context: None,
+        trace_context: trace_context.map(str::to_string),
         structural_fingerprint: None,
         policy_hash: None,
         image_digest: None,
@@ -5642,6 +5754,7 @@ pub(crate) struct StagedDelivery<'a> {
 pub(crate) async fn finish_delivery(
     client: &tokio_postgres::Client,
     actor: &str,
+    trace_context: Option<&str>,
     d: &StagedDelivery<'_>,
 ) -> axum::response::Response {
     let StagedDelivery {
@@ -5673,7 +5786,10 @@ pub(crate) async fn finish_delivery(
         0,
         None,
         Some(&json!({ "source": source, "delivery_id": delivery_id })),
-        Some(actor),
+        pg::Provenance {
+            created_by: Some(actor),
+            trace_context,
+        },
     )
     .await
     {
@@ -5846,6 +5962,7 @@ async fn push_records(
     finish_delivery(
         &client,
         &principal.actor,
+        principal.trace_context.as_deref(),
         &StagedDelivery {
             org: &org,
             org_id: &org_row.id,
@@ -6012,6 +6129,7 @@ async fn upload_import(
     finish_delivery(
         &client,
         &principal.actor,
+        principal.trace_context.as_deref(),
         &StagedDelivery {
             org: &org,
             org_id: &org_row.id,
@@ -7455,7 +7573,7 @@ async fn add_assertion(
         0,
         Some(&idem),
         Some(&params),
-        Some(&principal.actor),
+        principal.provenance(),
     )
     .await
     {
@@ -7622,7 +7740,7 @@ async fn record_overlay_action(
         0,
         Some(&idem),
         Some(&params),
-        Some(&principal.actor),
+        principal.provenance(),
     )
     .await
     {
@@ -7965,7 +8083,7 @@ async fn unmerge_entity(
         0,
         Some(&idem),
         Some(&params),
-        Some(&principal.actor),
+        principal.provenance(),
     )
     .await
     {
@@ -8151,7 +8269,7 @@ async fn bulk_resolve_reviews(
             0,
             Some(&idem),
             Some(&params),
-            Some(&principal.actor),
+            principal.provenance(),
         )
         .await
         {
@@ -8286,7 +8404,7 @@ async fn mass_update(
             0,
             Some(&idem),
             Some(&params),
-            Some(&principal.actor),
+            principal.provenance(),
         )
         .await
         {
@@ -8888,7 +9006,10 @@ mod evaluation_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::{ACTING_USER_MAX, compose_actor, forwarded_actor, rewrite_action_path};
+    use super::{
+        ACTING_USER_MAX, acceptable_traceparent, compose_actor, forwarded_actor,
+        forwarded_traceparent, rewrite_action_path,
+    };
 
     /// Build request parts carrying the given `x-acting-user` value.
     fn parts_with(header: Option<&str>) -> axum::http::request::Parts {
@@ -8897,6 +9018,99 @@ mod tests {
             builder = builder.header(super::ACTING_USER_HEADER, value);
         }
         builder.body(()).unwrap().into_parts().0
+    }
+
+    /// Build request parts carrying the given `traceparent` value.
+    fn parts_with_traceparent(header: Option<&str>) -> axum::http::request::Parts {
+        let mut builder = axum::http::Request::builder().uri("/");
+        if let Some(value) = header {
+            builder = builder.header(super::TRACEPARENT_HEADER, value);
+        }
+        builder.body(()).unwrap().into_parts().0
+    }
+
+    /// A well-formed context the BFF would send.
+    const GOOD_TRACEPARENT: &str = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+
+    #[test]
+    fn a_well_formed_traceparent_is_stored_verbatim() {
+        assert_eq!(
+            forwarded_traceparent(&parts_with_traceparent(Some(GOOD_TRACEPARENT))).as_deref(),
+            Some(GOOD_TRACEPARENT)
+        );
+        // Surrounding whitespace is trimmed, not rejected — same rule as the
+        // acting-user header, because the same proxies add the same padding.
+        assert_eq!(
+            forwarded_traceparent(&parts_with_traceparent(Some(
+                "  00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01  "
+            )))
+            .as_deref(),
+            Some(GOOD_TRACEPARENT)
+        );
+        // Absent: a null trace_context, which is exactly today's behaviour.
+        assert!(forwarded_traceparent(&parts_with_traceparent(None)).is_none());
+        // The sampled flag is not interpreted here — an unsampled context is
+        // still a valid parent, and the sampling decision belongs to the
+        // collector, not to whether we record the link.
+        assert!(
+            forwarded_traceparent(&parts_with_traceparent(Some(
+                "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00"
+            )))
+            .is_some()
+        );
+    }
+
+    #[test]
+    fn a_malformed_traceparent_is_ignored_rather_than_stored() {
+        assert!(acceptable_traceparent(GOOD_TRACEPARENT));
+
+        for (bad, why) in [
+            ("", "empty"),
+            ("not-a-traceparent", "wrong shape"),
+            // All-zero trace and span ids are invalid per the W3C spec; storing
+            // one would produce a trace nothing can ever be joined to.
+            (
+                "00-00000000000000000000000000000000-00f067aa0ba902b7-01",
+                "zero trace id",
+            ),
+            (
+                "00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01",
+                "zero span id",
+            ),
+            // `ff` is forbidden by the spec.
+            (
+                "ff-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+                "forbidden version",
+            ),
+            // A future version may carry fields we would be guessing at.
+            (
+                "01-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+                "unknown version",
+            ),
+            // Uppercase hex would let one context arrive as two distinct strings.
+            (
+                "00-4BF92F3577B34DA6A3CE929D0E0E4736-00f067aa0ba902b7-01",
+                "uppercase",
+            ),
+            (
+                "00-4bf92f3577b34da6a3ce929d0e0e473-00f067aa0ba902b7-01",
+                "short trace id",
+            ),
+            (
+                "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01-extra",
+                "trailing field",
+            ),
+            (
+                "00-4bf92f3577b34da6a3ce929d0e0e47g6-00f067aa0ba902b7-01",
+                "non-hex",
+            ),
+        ] {
+            assert!(!acceptable_traceparent(bad), "{why} should be refused");
+            assert!(
+                forwarded_traceparent(&parts_with_traceparent(Some(bad))).is_none(),
+                "{why} should not reach the column"
+            );
+        }
     }
 
     #[test]

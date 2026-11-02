@@ -179,6 +179,33 @@ pub async fn ensure_org(client: &Client, name: &str, config_path: &str) -> Resul
     Ok(())
 }
 
+/// Where a job came from: who asked for it, and the trace they asked from.
+///
+/// Bundled rather than passed as two arguments because they are the same fact
+/// from two angles — `created_by` is the durable attribution a human reads,
+/// `trace_context` the correlation handle a tool follows — and they always
+/// travel together off the same request. [`crate::Principal::provenance`] is
+/// the only thing that should be building one from a request.
+///
+/// [`Default`] is the no-request case (a cron tick, a CLI sweep, the
+/// dispatcher's own drain): no actor to name and no parent to claim.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Provenance<'a> {
+    pub created_by: Option<&'a str>,
+    pub trace_context: Option<&'a str>,
+}
+
+impl<'a> Provenance<'a> {
+    /// Attribution without a trace — an internal caller that still names itself.
+    #[must_use]
+    pub fn actor(created_by: &'a str) -> Self {
+        Self {
+            created_by: Some(created_by),
+            trace_context: None,
+        }
+    }
+}
+
 /// Queue one job, or return the job an identical idempotency key created
 /// (queue.py `enqueue`). The org must exist (FK). `params` is the job's input
 /// map (e.g. `{"skip_ingest": true}` for a publish rebuild); `None` stores `{}`.
@@ -192,7 +219,7 @@ pub async fn enqueue(
     priority: i64,
     idempotency_key: Option<&str>,
     params: Option<&serde_json::Value>,
-    created_by: Option<&str>,
+    provenance: Provenance<'_>,
 ) -> Result<Job, PgError> {
     let job_id = er_ids::new_v7();
     // The statement is an idempotent upsert: a repeat idempotency key returns the
@@ -205,7 +232,8 @@ pub async fn enqueue(
         priority,
         idempotency_key,
         params,
-        created_by,
+        provenance.created_by,
+        provenance.trace_context,
     )
     .await?;
     Ok(jobs
@@ -1104,6 +1132,7 @@ pub async fn enqueue_scheduled(
     idempotency_key: &str,
     params: Option<&serde_json::Value>,
     schedule_id: &str,
+    trace_context: Option<&str>,
 ) -> Result<(Job, bool), PgError> {
     let job_id = er_ids::new_v7();
     let jobs = er_entities::job::create::enqueue_scheduled(
@@ -1115,6 +1144,7 @@ pub async fn enqueue_scheduled(
         Some(idempotency_key),
         params,
         schedule_id,
+        trace_context,
     )
     .await?;
     let job = jobs

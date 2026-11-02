@@ -150,9 +150,17 @@ async fn the_sweep_reconciles_every_active_tenant_and_reports_it() {
     );
     assert_eq!(job.error_class.as_deref(), Some("internal"));
 
-    let run = pg::enqueue(&client, &acme, "lake_maintain", 0, None, None, None)
-        .await
-        .unwrap();
+    let run = pg::enqueue(
+        &client,
+        &acme,
+        "lake_maintain",
+        0,
+        None,
+        None,
+        pg::Provenance::default(),
+    )
+    .await
+    .unwrap();
     assert!(
         dispatcher::dispatch_once(&client, None, None)
             .await

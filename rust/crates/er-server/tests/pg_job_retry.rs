@@ -113,9 +113,17 @@ async fn a_transient_failure_retries_with_backoff_and_a_permanent_one_does_not()
         .get(0);
 
     // ---- a transient failure: retried, with the attempt counted ----
-    let job = pg::enqueue(&client, &org_id, "run_all_full", 0, None, None, None)
-        .await
-        .unwrap();
+    let job = pg::enqueue(
+        &client,
+        &org_id,
+        "run_all_full",
+        0,
+        None,
+        None,
+        pg::Provenance::default(),
+    )
+    .await
+    .unwrap();
     assert_eq!(job.attempt, 0, "a fresh job has made no attempts");
     assert_eq!(job.error_class, None);
 
@@ -204,9 +212,17 @@ async fn a_transient_failure_retries_with_backoff_and_a_permanent_one_does_not()
     }
 
     // ---- a permanent failure: not retried, even on the first attempt ----
-    let job2 = pg::enqueue(&client, &org_id, "correct", 0, None, None, None)
-        .await
-        .unwrap();
+    let job2 = pg::enqueue(
+        &client,
+        &org_id,
+        "correct",
+        0,
+        None,
+        None,
+        pg::Provenance::default(),
+    )
+    .await
+    .unwrap();
     client
         .execute(
             "UPDATE jobs SET not_before = NULL WHERE id = $1",
@@ -241,9 +257,17 @@ async fn a_transient_failure_retries_with_backoff_and_a_permanent_one_does_not()
     // ---- a success clears a stale error ----
     // A job that fails, retries and then succeeds must not still show the
     // failure, because the UI renders error_class whenever it is present.
-    let job3 = pg::enqueue(&client, &org_id, "lake_maintain", 0, None, None, None)
-        .await
-        .unwrap();
+    let job3 = pg::enqueue(
+        &client,
+        &org_id,
+        "lake_maintain",
+        0,
+        None,
+        None,
+        pg::Provenance::default(),
+    )
+    .await
+    .unwrap();
     let _ = pg::fail_or_retry(
         &client,
         &job3.id,

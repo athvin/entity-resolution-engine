@@ -75,9 +75,17 @@ async fn the_task_ledger_statements_hold_their_contracts() {
 
     // ---- Phase A: planning is one transaction with the claim (§4.5) -------
     let dag = dags::dag_for(JobKind::RunAllFull);
-    let job = pg::enqueue(&client, &org_id, "run_all_full", 0, None, None, None)
-        .await
-        .unwrap();
+    let job = pg::enqueue(
+        &client,
+        &org_id,
+        "run_all_full",
+        0,
+        None,
+        None,
+        pg::Provenance::default(),
+    )
+    .await
+    .unwrap();
     let claimed = pg::claim(&client).await.unwrap().expect("claimable");
     assert_eq!(claimed.state, "dispatching");
     let planned = taskpg::plan(&mut client, &claimed, &dag, EPOCH, Some("sha256:test"))
@@ -835,9 +843,17 @@ async fn the_task_ledger_statements_hold_their_contracts() {
 
     // ---- Phase G: the control claim (§3.6) --------------------------------
     let train_dag = dags::dag_for(JobKind::Train);
-    pg::enqueue(&client, &org_id, "train", 0, None, None, None)
-        .await
-        .unwrap();
+    pg::enqueue(
+        &client,
+        &org_id,
+        "train",
+        0,
+        None,
+        None,
+        pg::Provenance::default(),
+    )
+    .await
+    .unwrap();
     let train_job = pg::claim(&client)
         .await
         .unwrap()

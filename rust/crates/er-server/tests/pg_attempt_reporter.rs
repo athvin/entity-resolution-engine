@@ -132,9 +132,17 @@ async fn the_reporter_fills_the_ledger_from_the_legacy_dispatcher() {
     let mailer = er_server::mail::Mailer::off();
 
     // ---- phase 1: a green run_all fills seven succeeded rows ---------------
-    let queued = pg::enqueue(&client, &acme, "run_all_full", 0, None, None, None)
-        .await
-        .unwrap();
+    let queued = pg::enqueue(
+        &client,
+        &acme,
+        "run_all_full",
+        0,
+        None,
+        None,
+        pg::Provenance::default(),
+    )
+    .await
+    .unwrap();
     let ran = dispatcher::dispatch_once_with(&client, &Ok(None), &mailer, Some(&mut reporter))
         .await
         .unwrap();
@@ -182,9 +190,17 @@ async fn the_reporter_fills_the_ledger_from_the_legacy_dispatcher() {
     );
 
     // ---- phase 2: an engine failure lands on its stage and deadens the chain
-    let correct_job = pg::enqueue(&client, &empty, "correct", 0, None, None, None)
-        .await
-        .unwrap();
+    let correct_job = pg::enqueue(
+        &client,
+        &empty,
+        "correct",
+        0,
+        None,
+        None,
+        pg::Provenance::default(),
+    )
+    .await
+    .unwrap();
     dispatcher::dispatch_once_with(&client, &Ok(None), &mailer, Some(&mut reporter))
         .await
         .unwrap();
@@ -220,9 +236,17 @@ async fn the_reporter_fills_the_ledger_from_the_legacy_dispatcher() {
     );
 
     // ---- phase 3: a transient job retry clears and replans, fence advanced -
-    let broken_job = pg::enqueue(&client, &broken, "run_all_full", 0, None, None, None)
-        .await
-        .unwrap();
+    let broken_job = pg::enqueue(
+        &client,
+        &broken,
+        "run_all_full",
+        0,
+        None,
+        None,
+        pg::Provenance::default(),
+    )
+    .await
+    .unwrap();
     // Attempt 1: the lake cannot open — a transient class, so the JOB requeues
     // and the rows are left for the next claim's clear to rotate.
     dispatcher::dispatch_once_with(&client, &Ok(None), &mailer, Some(&mut reporter))

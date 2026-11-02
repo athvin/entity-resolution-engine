@@ -1,7 +1,7 @@
 kind: statement
 operation: create
 mode: partial
-description: "Queue a job, idempotent on the org idempotency key (a repeat key returns the original row via a no-op upsert). `created_by` is the acting principal, so a job can say who asked for it; the column existed and only `enqueue_scheduled` ever wrote it."
+description: "Queue a job, idempotent on the org idempotency key (a repeat key returns the original row via a no-op upsert). `created_by` is the acting principal, so a job can say who asked for it; the column existed and only `enqueue_scheduled` ever wrote it. `trace_context` is the W3C traceparent of the span that asked for the job, so the run the dispatcher starts later is a child of the click rather than an unrelated trace joined by hand (infrastructure.md §10.2)."
 params:
   - { name: job_id, type: varchar }
   - { name: org_id, type: varchar }
@@ -10,4 +10,5 @@ params:
   - { name: idempotency_key, type: varchar, nullable: true }
   - { name: params, type: json, nullable: true }
   - { name: created_by, type: varchar, nullable: true }
+  - { name: trace_context, type: varchar, nullable: true }
 returns: entity
