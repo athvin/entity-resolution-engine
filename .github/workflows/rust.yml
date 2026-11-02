@@ -586,6 +586,26 @@ jobs:
         # Doctests stay complete across the legs: `-p er-match` runs er-match's,
         # `--exclude er-match` runs everyone else's.
         run: cargo test ${{ matrix.args }}
+      - name: Cache DuckDB extensions
+        if: matrix.slice == 'rest'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.duckdb/extensions
+          key: duckdb-extensions-${{ hashFiles('rust/Cargo.lock') }}
+          restore-keys: |
+            duckdb-extensions-
+      - name: Extension loading (splink_udfs) and the engine version label
+        # Moved here from the e2e tier: `cargo test --workspace` above already
+        # BUILT and ran dedupe-core's one test binary, so re-invoking it with
+        # the filter is run-only (~seconds) — where in the e2e rest leg the
+        # same step paid its own 2m15s tree build. The env is STEP-scoped on
+        # purpose: er-compile and er-sql-check also gate tests behind
+        # DEDUPE_E2E_EXTENSIONS, and a job-level env would silently start
+        # running those on every PR.
+        if: matrix.slice == 'rest'
+        env:
+          DEDUPE_E2E_EXTENSIONS: "1"
+        run: cargo test -p dedupe-core --test main extensions
       - name: Build cost (sccache stats, target size)
         # See the `lint` job's copy for why. This job is also where the disk wall
         # shows up, so the `target` size is the number to watch here.
@@ -667,10 +687,16 @@ jobs:
   # service and partition one crate's suite with nextest; the server leg keeps
   # the service, plain `cargo test`, and the extensions step.
   #
-  #   lake-e2e       er-cli only, 3 nextest hash partitions, no pg service
-  #   ducklake-e2e   two slices: pg (er-server's pg_* suite) and rest
-  #                  (dedupe-cli + er-entity-diff + er-server non-pg + extensions)
+  #   lake-e2e       er-cli only, 4 nextest hash partitions, no pg service
+  #   ducklake-e2e   three slices: pg a-l, pg m-z (er-server's pg_* suite,
+  #                  split at the measured time-midpoint) and rest
+  #                  (dedupe-cli + er-entity-diff + er-server non-pg)
   #   ducklake-gate  the required context (see it for why the legs cannot be)
+  #
+  # The extensions step moved to the `test` tier's rest leg (its binary is
+  # already built there); the gate KEEPS the name "DuckLake + extensions e2e"
+  # because a job's name is its branch-protection context and renaming one is
+  # a protection edit — the name is frozen, the coverage note lives here.
   #
   # nextest here, though the `test` job measured it out (357s -> 453s): that tax
   # is process-per-test on thousands of tiny tests. This suite is 44 tests
@@ -693,10 +719,12 @@ jobs:
       # A flaky leg can be re-run alone; its siblings' green stands.
       fail-fast: false
       matrix:
-        # Three, up from two: the first 2-way hash run landed 518s/274s of test
-        # execution (run 41478579329) — count-balanced, duration-skewed. Three
-        # partitions put the expected leg under the server legs' wall.
-        partition: ["1/3", "2/3", "3/3"]
+        # Four, up from three, both times for the same reason: hash
+        # partitioning balances counts, not durations. 2-way landed 518s/274s
+        # of execution (run 41478579329); 3-way landed legs at 9.8/13.0/12.0m
+        # wall (run 41484769012) — the slow tests cluster. nextest has no
+        # duration-aware partition, so the lever is more, smaller shards.
+        partition: ["1/4", "2/4", "3/4", "4/4"]
     permissions:
       contents: read
       id-token: write # OIDC exchange for the sccache S3 role
@@ -786,28 +814,39 @@ jobs:
       # A flaky leg can be re-run alone; its sibling's green stands.
       fail-fast: false
       matrix:
-        # `pg` takes er-server's pg_* suite — the bulk of this tier's execution.
-        # `rest` takes everything else. The split is complementary BY
-        # CONSTRUCTION within er-server's one test binary: every pg module is
-        # named `pg_*`, so the module-path prefix guarantees `pg_` matches it
-        # and `--skip pg_` excludes exactly the same set. er-entity-diff's
-        # Postgres tests (whose FN names carry no `pg_` — they are
-        # `postgres_diff_*`/`the_control_database_*` in the separate pg_diff /
-        # pg_reconcile binaries) run UNFILTERED in the rest leg, so no name
-        # filter can silently drop them. Both legs keep the postgres service:
-        # non-pg_ er-server tests (db_per_test and friends) still reach the DSN.
+        # Three slices. The pg suite measured 423.8s on one leg (run
+        # 41484769012) — the tier's floor — so it splits at the alphabetic
+        # midpoint its module START TIMES put near pg_l/pg_m (~216s vs ~208s).
+        # The split stays complementary BY CONSTRUCTION: `pg a-l` names the
+        # twelve `pg_<letter>` prefix tokens explicitly, and `pg m-z` runs the
+        # full `pg_` filter with `--skip` of EXACTLY those twelve tokens — so
+        # a new pg_* module lands in one slice or the other by its name, never
+        # in neither, and a test matching both boundaries runs exactly once.
+        # er-entity-diff's Postgres tests (whose FN names carry no `pg_` —
+        # they are `postgres_diff_*`/`the_control_database_*` in the separate
+        # pg_diff / pg_reconcile binaries) run UNFILTERED in the rest slice,
+        # so no name filter can silently drop them. All slices keep the
+        # postgres service: non-pg_ er-server tests (db_per_test and friends)
+        # still reach the DSN.
+        #
+        # The extensions step that used to ride the rest slice now rides the
+        # `test` tier's rest leg, where dedupe-core's binary is already built —
+        # it was paying a 2m15s tree build here to run 0.5s of tests.
         include:
-          - slice: pg
-            run_pg_suite: "true"
+          - slice: pg a-l
+            suite: pg-al
+          - slice: pg m-z
+            suite: pg-mz
           - slice: rest
-            run_pg_suite: "false"
+            suite: rest
     permissions:
       contents: read
       id-token: write # OIDC exchange for the sccache S3 role
     env:
       RUSTC_WRAPPER: sccache
       DEDUPE_E2E_DUCKLAKE: "1"
-      DEDUPE_E2E_EXTENSIONS: "1"
+      # No DEDUPE_E2E_EXTENSIONS here any more: the extensions step rides the
+      # `test` tier's rest leg now, with the env scoped to that one step.
       # The er-server control-plane queue gate runs against this service.
       ER_TEST_PG_DSN: "host=localhost port=5432 user=er password=er dbname=er"
     services:
@@ -897,16 +936,34 @@ jobs:
           key: duckdb-extensions-${{ hashFiles('rust/Cargo.lock') }}
           restore-keys: |
             duckdb-extensions-
-      - name: er-server pg suite (pg leg)
-        if: matrix.run_pg_suite == 'true'
-        # er-server's pg_* modules alone — the bulk of this tier. `--test main`
-        # selects only the consolidated integration binary; the module-name
-        # prefix makes `pg_` match every test in those modules and nothing can
-        # be half-in: a test either matches `pg_` (runs here) or it does not
-        # (runs in the rest leg's `--skip pg_` invocation).
-        run: cargo test -p er-server --test main pg_
-      - name: everything else (rest leg)
-        if: matrix.run_pg_suite == 'false'
+      - name: er-server pg suite, modules a-l
+        if: matrix.suite == 'pg-al'
+        # The twelve prefix tokens are OR'd substring filters; `--test main`
+        # selects only the consolidated integration binary. A test matching a
+        # token runs here and is `--skip`ped in the m-z slice, so the pair is
+        # exactly-once by construction. Keep this token list and the skip list
+        # below BYTE-IDENTICAL — they are the same twelve strings.
+        #
+        # The tokens sit AFTER `--`: cargo's own CLI takes at most ONE
+        # positional TESTNAME ("error: unexpected argument 'pg_b' found");
+        # multiple OR'd filters are a libtest feature, so they must be passed
+        # through to the harness.
+        run: >
+          cargo test -p er-server --test main --
+          pg_a pg_b pg_c pg_d pg_e pg_f pg_g pg_h pg_i pg_j pg_k pg_l
+      - name: er-server pg suite, modules m-z
+        if: matrix.suite == 'pg-mz'
+        # The complement: everything matching `pg_` except the a-l tokens. A
+        # NEW pg_* module lands here unless its name starts with one of the
+        # twelve prefixes — in neither-slice is impossible while the two lists
+        # match.
+        run: >
+          cargo test -p er-server --test main pg_ --
+          --skip pg_a --skip pg_b --skip pg_c --skip pg_d --skip pg_e
+          --skip pg_f --skip pg_g --skip pg_h --skip pg_i --skip pg_j
+          --skip pg_k --skip pg_l
+      - name: everything else (rest slice)
+        if: matrix.suite == 'rest'
         # Two invocations: dedupe-cli + er-entity-diff run UNFILTERED (their
         # Postgres tests live in separate binaries with non-pg_ fn names, so a
         # name filter could silently drop them); er-server's remaining targets
@@ -915,13 +972,6 @@ jobs:
         run: |
           cargo test -p dedupe-cli -p er-entity-diff
           cargo test -p er-server -- --skip pg_
-      - name: Extension loading (splink_udfs) and the engine version label
-        if: matrix.run_pg_suite == 'false'
-        # `--test main <filter>`: every file in dedupe-core/tests is a module of
-        # one binary now (autotests = false), so the target is `main` and the old
-        # file name is a name filter. See that crate's tests/main.rs. Rides the
-        # rest leg, the lighter of the two.
-        run: cargo test -p dedupe-core --test main extensions
       - name: Build cost (sccache stats, target size)
         # See the `lint` job's copy for why. The `du`/`df` pair is also the
         # input for deciding whether a leg can drop the disk-reclaim step.
