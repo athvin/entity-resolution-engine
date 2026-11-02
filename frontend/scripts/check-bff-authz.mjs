@@ -32,11 +32,16 @@ const METHOD_EXPORT =
 export const RULES = [
   {
     dir: path.join("src", "app", "api", "orgs"),
-    required: "requireOrgAccess",
+    // EITHER guard: requireDatasetAccess IS requireOrgAccess plus the dataset
+    // slug check, so a dataset-scoped handler under orgs/[org]/datasets/[ds]
+    // satisfies the same invariant through it.
+    required: ["requireOrgAccess", "requireDatasetAccess"],
     hint:
-      "Call requireOrgAccess(org, <minimum role>) inside respond() before forwarding. " +
-      "It resolves membership, enforces the role rank, confines impersonation to its " +
-      "own org, and 404s non-members so they learn nothing (src/lib/bff/proxy.ts).",
+      "Call requireOrgAccess(org, <minimum role>) — or, under datasets/[ds], " +
+      "requireDatasetAccess(org, ds, <minimum role>) — inside respond() before " +
+      "forwarding. It resolves membership, enforces the role rank, confines " +
+      "impersonation to its own org, and 404s non-members so they learn nothing " +
+      "(src/lib/bff/proxy.ts).",
   },
   {
     dir: path.join("src", "app", "api", "admin"),

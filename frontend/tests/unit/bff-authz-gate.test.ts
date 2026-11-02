@@ -66,8 +66,18 @@ describe("BFF authorization gate", () => {
     route(dir, "src/app/api/orgs/[org]/records/route.ts", UNAUTHORIZED_TENANT);
     const violations = findUnauthorizedRoutes(dir);
     expect(violations).toHaveLength(1);
-    expect(violations[0]?.required).toBe("requireOrgAccess");
+    expect(violations[0]?.required).toBe("requireOrgAccess or requireDatasetAccess");
     expect(violations[0]?.methods).toEqual(["GET"]);
+  });
+
+  it("passes a dataset-scoped route that calls requireDatasetAccess", () => {
+    const dir = tree();
+    route(
+      dir,
+      "src/app/api/orgs/[org]/datasets/[ds]/records/route.ts",
+      AUTHORIZED_TENANT.replace("requireOrgAccess", "requireDatasetAccess"),
+    );
+    expect(findUnauthorizedRoutes(dir)).toEqual([]);
   });
 
   it("fails an admin route that only checks the session, not super-admin", () => {

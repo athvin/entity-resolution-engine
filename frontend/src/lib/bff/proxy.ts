@@ -53,6 +53,28 @@ export function requireOrgSlug(org: string): void {
   }
 }
 
+/**
+ * The shape a dataset name is minted in — the same slug grammar as an org,
+ * because a dataset name is a URL path segment interpolated into
+ * `/v1/orgs/${org}/datasets/${ds}/…` exactly the way an org name is.
+ */
+export const DATASET_SLUG = ORG_SLUG;
+
+/** Longest dataset name the provisioning schema accepts. */
+const DATASET_MAX_LENGTH = 128;
+
+/**
+ * Reject a dataset name that is not a slug, before it reaches a URL — the
+ * dataset twin of [`requireOrgSlug`], for the same traversal reason: the
+ * segment is raw-interpolated with the BFF's privileged credential attached.
+ * 404 (not 422) so a malformed probe learns no more than an unauthorized one.
+ */
+export function requireDatasetSlug(dataset: string): void {
+  if (dataset.length > DATASET_MAX_LENGTH || !DATASET_SLUG.test(dataset)) {
+    throw new BffFailure(404, "not_found", "not found");
+  }
+}
+
 export class BffFailure extends Error {
   readonly body: BffError;
   readonly status: number;
@@ -119,12 +141,53 @@ export async function requireOrgAccess(
   throw new BffFailure(404, "not_found", "not found");
 }
 
+/** [`EffectiveOrgAccess`] narrowed to one dataset. Authorization is still the
+ * org membership — a dataset adds scoping, not a second permission system. */
+export interface EffectiveDatasetAccess extends EffectiveOrgAccess {
+  dataset: string;
+}
+
+/**
+ * Resolve what the acting user may do inside `org`, scoped to `dataset`.
+ *
+ * Deliberately nothing more than [`requireOrgAccess`] plus the dataset slug
+ * check: whether the dataset exists is erserver's answer (404 from the
+ * upstream), not a second lookup here. Handlers under
+ * `api/orgs/[org]/datasets/[ds]/…` call this instead of requireOrgAccess and
+ * build upstream paths with [`datasetPath`].
+ */
+export async function requireDatasetAccess(
+  org: string,
+  dataset: string,
+  minimum: Membership["role"],
+): Promise<EffectiveDatasetAccess> {
+  const access = await requireOrgAccess(org, minimum);
+  requireDatasetSlug(dataset);
+  return { ...access, dataset };
+}
+
+/** The one audited place a dataset-scoped upstream path is built:
+ * `/v1/orgs/<org>/datasets/<ds><suffix>`. Both segments were slug-checked when
+ * the access value was minted, so the interpolation cannot traverse. */
+export function datasetPath(access: EffectiveDatasetAccess, suffix: string): string {
+  return `/v1/orgs/${access.org}/datasets/${access.dataset}${suffix}`;
+}
+
+/** The three ways erserver says 409: a held writer lock, a dataset that is not
+ * active, or an org that is not active — told apart by the detail text, which
+ * is the only channel the status carries. */
+function conflictCode(detail: string): BffErrorCode {
+  if (detail.includes("writer lock")) return "writer_locked";
+  if (detail.includes("dataset")) return "dataset_not_active";
+  return "org_not_active";
+}
+
 function mapUpstreamError(status: number, detail: string): BffFailure {
   const table: Record<number, [BffErrorCode, number]> = {
     401: ["internal", 502], // our stored credential was rejected — a BFF fault, not the user's
     403: ["forbidden", 403],
     404: ["not_found", 404],
-    409: [detail.includes("writer lock") ? "writer_locked" : "org_not_active", 409],
+    409: [conflictCode(detail), 409],
     413: ["payload_too_large", 413],
     422: ["validation", 422],
     503: ["lake_unavailable", 503],

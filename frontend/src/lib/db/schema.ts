@@ -201,6 +201,10 @@ export const reviewRecommendations = erweb.table(
   "review_recommendations",
   {
     org: text("org").notNull(),
+    /** Review ids are lake-local, so the dataset is part of the identity.
+     * `'default'` matches the name the backend sweep gives every existing
+     * org's one dataset, which keeps pre-dataset rows addressable. */
+    dataset: text("dataset").notNull().default("default"),
     reviewId: text("review_id").notNull(),
     verdict: text("verdict").notNull(),
     confidence: doublePrecision("confidence").notNull(),
@@ -213,7 +217,7 @@ export const reviewRecommendations = erweb.table(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    primaryKey({ columns: [table.org, table.reviewId] }),
+    primaryKey({ columns: [table.org, table.dataset, table.reviewId] }),
     index("review_recommendations_org_idx").on(table.org),
   ],
 );
@@ -239,6 +243,8 @@ export const usageEvents = erweb.table(
   {
     id: text("id").primaryKey(),
     org: text("org").notNull(),
+    /** Attribution only — billing stays org-level. Null for org-wide acts. */
+    dataset: text("dataset"),
     /** `ai_assistant`, `ai_enrich`, `ai_adjudicate`, … — see lib/usage/kinds. */
     kind: text("kind").notNull(),
     units: doublePrecision("units").notNull(),
@@ -280,6 +286,9 @@ export const savedViews = erweb.table(
   {
     id: text("id").primaryKey(),
     org: text("org").notNull(),
+    /** A filter is over one dataset's rows; `'default'` matches the backend
+     * sweep's name for every pre-dataset org's one dataset. */
+    dataset: text("dataset").notNull().default("default"),
     /** `records` | `duplicates` | `reviews` — the screen this filter belongs to. */
     surface: text("surface").notNull(),
     name: text("name").notNull(),
@@ -288,10 +297,15 @@ export const savedViews = erweb.table(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    // One name per surface per org: two views called "Needs review" on the same
-    // screen is a picker nobody can use.
-    uniqueIndex("saved_views_org_surface_name_idx").on(table.org, table.surface, table.name),
-    index("saved_views_org_surface_idx").on(table.org, table.surface),
+    // One name per surface per dataset: two views called "Needs review" on the
+    // same screen is a picker nobody can use.
+    uniqueIndex("saved_views_org_ds_surface_name_idx").on(
+      table.org,
+      table.dataset,
+      table.surface,
+      table.name,
+    ),
+    index("saved_views_org_ds_surface_idx").on(table.org, table.dataset, table.surface),
   ],
 );
 
@@ -303,13 +317,15 @@ export const segments = erweb.table(
   {
     id: text("id").primaryKey(),
     org: text("org").notNull(),
+    /** A segment names a population in one dataset's golden records. */
+    dataset: text("dataset").notNull().default("default"),
     name: text("name").notNull(),
     definition: jsonb("definition").notNull(),
     createdBy: text("created_by").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index("segments_org_idx").on(table.org)],
+  (table) => [index("segments_org_ds_idx").on(table.org, table.dataset)],
 );
 
 /** Person-level audit, including dual-identity rows while impersonating.

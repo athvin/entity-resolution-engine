@@ -111,7 +111,9 @@ export async function adjudicateReview(
     throw new BffFailure(502, "internal", "the model did not return a usable recommendation");
   }
 
-  return saveRecommendation(org, reviewId, recommendation, {
+  // "default": the sweep's name for every org's one dataset until the
+  // dataset-scoped routes land and thread the real name through here.
+  return saveRecommendation(org, "default", reviewId, recommendation, {
     model: ai.model,
     matchProbability: review.match_probability,
     requestedBy: access.identity.user.email,
