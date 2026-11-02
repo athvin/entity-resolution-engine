@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS public.staged_steward_actions (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
+  dataset_id text REFERENCES datasets(id),
   action jsonb NOT NULL,
   state text NOT NULL DEFAULT 'pending' CHECK (state IN ('pending', 'applied', 'failed')),
   error text,
@@ -11,3 +12,4 @@ CREATE TABLE IF NOT EXISTS public.staged_steward_actions (
   PRIMARY KEY (id)
 );
 CREATE INDEX IF NOT EXISTS staged_pending ON public.staged_steward_actions (org_id, state);
+CREATE INDEX IF NOT EXISTS staged_dataset ON public.staged_steward_actions (dataset_id, state);

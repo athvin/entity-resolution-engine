@@ -132,6 +132,7 @@ async fn webhook_delivery_fires_signed_and_the_guard_refuses_a_blocked_address()
     pg::create_webhook(
         &client,
         &oid(&client, "acme").await,
+        None,
         &hook_url,
         &serde_json::json!(["job.succeeded"]),
         secret,
@@ -142,6 +143,7 @@ async fn webhook_delivery_fires_signed_and_the_guard_refuses_a_blocked_address()
     pg::create_webhook(
         &client,
         &oid(&client, "acme").await,
+        None,
         &other_url,
         &serde_json::json!(["job.failed"]),
         "other-secret",
@@ -158,6 +160,7 @@ async fn webhook_delivery_fires_signed_and_the_guard_refuses_a_blocked_address()
     let queued = webhook::emit(
         &client,
         &org_id,
+        None,
         "acme",
         "job.succeeded",
         &serde_json::json!({
@@ -240,6 +243,7 @@ async fn webhook_delivery_fires_signed_and_the_guard_refuses_a_blocked_address()
     pg::create_webhook(
         &client,
         &org_id,
+        None,
         &format!("https://{addr}/hook"),
         &serde_json::json!(["job.succeeded"]),
         secret,
@@ -250,6 +254,7 @@ async fn webhook_delivery_fires_signed_and_the_guard_refuses_a_blocked_address()
     pg::enqueue(
         &client,
         &org_id,
+        None,
         "run_all_full",
         0,
         None,
@@ -345,6 +350,7 @@ async fn webhook_delivery_fires_signed_and_the_guard_refuses_a_blocked_address()
     pg::create_webhook(
         &client,
         &org_id,
+        None,
         &format!("http://{addr}/flaky"),
         &serde_json::json!(["job.succeeded"]),
         "flaky-secret",
@@ -354,6 +360,7 @@ async fn webhook_delivery_fires_signed_and_the_guard_refuses_a_blocked_address()
     pg::create_webhook(
         &client,
         &org_id,
+        None,
         &format!("http://{addr}/nope"),
         &serde_json::json!(["job.succeeded"]),
         "nope-secret",
@@ -363,7 +370,7 @@ async fn webhook_delivery_fires_signed_and_the_guard_refuses_a_blocked_address()
 
     let queued = webhook::emit(
         &client,
-        &org_id,
+        &org_id, None,
         "acme",
         "job.succeeded",
         &serde_json::json!({ "job_id": "01RETRY0000000000000000000", "kind": "run_all_full", "state": "succeeded" }),

@@ -221,6 +221,7 @@ async fn suppress_excludes_a_record_and_retract_restores_it() {
     dispatcher::drain_and_correct(
         &client,
         &oid(&client, "acme").await,
+        None,
         &env,
         "01OVCORRECT00000000000000001",
         None,
@@ -253,6 +254,7 @@ async fn suppress_excludes_a_record_and_retract_restores_it() {
     dispatcher::drain_and_correct(
         &client,
         &oid(&client, "acme").await,
+        None,
         &env,
         "01OVCORRECT00000000000000002",
         None,

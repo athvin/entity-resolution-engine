@@ -19,6 +19,10 @@ columns:
     nullable: false
     references: { relation: orgs, column: id }
     description: "The tenant whose corpus the pair belongs to; every read is scoped by it."
+  - name: dataset_id
+    type: varchar
+    references: { relation: datasets, column: id }
+    description: "The dataset whose record pair this verdict is about — record keys are lake-local."
   - name: rec_a_key
     type: varchar
     nullable: false
@@ -71,3 +75,6 @@ indexes:
   # "what has this tenant labelled lately", and the training read.
   - name: pair_labels_org_recent
     columns: [org_id, created_at]
+  # V17: the dataset-scoped read path.
+  - name: pair_labels_dataset
+    columns: [dataset_id, created_at]

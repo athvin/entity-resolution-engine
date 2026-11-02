@@ -20,6 +20,10 @@ columns:
     nullable: false
     references: { relation: orgs, column: id }
     description: "The tenant whose subscriber this is for; every read is scoped by it."
+  - name: dataset_id
+    type: varchar
+    references: { relation: datasets, column: id }
+    description: "The dataset the delivered event came from, when it has one (provenance)."
   - name: webhook_id
     type: varchar
     nullable: false
@@ -80,3 +84,6 @@ indexes:
   # The drainer's claim scan: pending rows whose backoff has elapsed.
   - name: webhook_deliveries_claimable
     columns: [state, next_attempt_at]
+  # V17: the dataset-scoped read path.
+  - name: webhook_deliveries_dataset
+    columns: [dataset_id, created_at]

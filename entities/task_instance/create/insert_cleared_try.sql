@@ -1,8 +1,8 @@
 INSERT INTO public.task_instances
-  (id, org_id, job_id, task_id, seq, try_number, live, kind, state, trigger_rule, upstream, teardown, segment,
+  (id, org_id, dataset_id, job_id, task_id, seq, try_number, live, kind, state, trigger_rule, upstream, teardown, segment,
    resource_class, max_tries, max_launches, image_digest, trace_context)
 SELECT encode(sha256(convert_to('task_instances:' || job_id || ':' || task_id || ':' || (try_number + 1)::text, 'UTF8')), 'hex'),
-       org_id, job_id, task_id, seq, try_number + 1, TRUE, kind, 'none', trigger_rule, upstream, teardown, segment,
+       org_id, dataset_id, job_id, task_id, seq, try_number + 1, TRUE, kind, 'none', trigger_rule, upstream, teardown, segment,
        COALESCE($resource_class, next_resource_class, resource_class), try_number + $retries, max_launches,
        $image_digest, trace_context
 FROM public.task_instances
@@ -12,6 +12,7 @@ WHERE id = $task_instance_id AND live IS NULL AND archived_reason IN ('cleared',
 RETURNING
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,

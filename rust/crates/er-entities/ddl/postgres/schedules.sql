@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS public.schedules (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
+  dataset_id text REFERENCES datasets(id),
   kind text NOT NULL,
   params jsonb NOT NULL DEFAULT '{}'::jsonb,
   cron text NOT NULL,
@@ -13,6 +14,7 @@ CREATE TABLE IF NOT EXISTS public.schedules (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS schedules_one_correction_per_org ON public.schedules (org_id) WHERE source = 'config:correction_pass';
 CREATE UNIQUE INDEX IF NOT EXISTS schedules_one_maintenance_per_org ON public.schedules (org_id) WHERE source = 'system:lake_maintain';
+CREATE INDEX IF NOT EXISTS schedules_dataset ON public.schedules (dataset_id, source);
 CREATE TABLE IF NOT EXISTS public.schedules_history (
   history_id bigserial NOT NULL,
   row_id text NOT NULL,

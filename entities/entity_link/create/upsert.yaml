@@ -5,6 +5,7 @@ description: "Record a link between two entities, correcting any previous one of
 params:
   - { name: link_id, type: varchar }
   - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar, nullable: true }
   - { name: parent_entity_id, type: varchar }
   - { name: child_entity_id, type: varchar }
   - { name: kind, type: varchar }

@@ -78,6 +78,7 @@ async fn the_task_ledger_statements_hold_their_contracts() {
     let job = pg::enqueue(
         &client,
         &org_id,
+        None,
         "run_all_full",
         0,
         None,
@@ -129,6 +130,7 @@ async fn the_task_ledger_statements_hold_their_contracts() {
         &client,
         &id_of("init"),
         &org_id,
+        None,
         &job.id,
         "init",
         0,
@@ -846,6 +848,7 @@ async fn the_task_ledger_statements_hold_their_contracts() {
     pg::enqueue(
         &client,
         &org_id,
+        None,
         "train",
         0,
         None,

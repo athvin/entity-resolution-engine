@@ -239,6 +239,13 @@
             "format": "date-time",
             "description": "Wall-clock creation time (database default; `at` remains the domain event stamp)."
           },
+          "dataset": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The dataset the action concerned, by name, when it concerned one — context, like `org`, not a foreign key (this ledger outlives both)."
+          },
           "detail": {
             "description": "Structured detail for the action."
           },
@@ -288,6 +295,13 @@
           "created_by": {
             "type": "string",
             "description": "Principal that created the version."
+          },
+          "dataset_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The dataset this config version belongs to. Backfilled to the org's default dataset; joins the natural key at the clean break."
           },
           "id": {
             "type": "string",
@@ -640,6 +654,13 @@
             ],
             "description": "Principal that created the job."
           },
+          "dataset_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The dataset this job runs against. NULL only for org-level kinds (provision) — every lake-touching job carries it, and the per-dataset writer lock keys on it once the queue is re-scoped."
+          },
           "error_class": {
             "type": [
               "string",
@@ -874,6 +895,13 @@
             "type": "string",
             "description": "The cron expression."
           },
+          "dataset_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The dataset this schedule enqueues for."
+          },
           "enabled": {
             "type": "boolean",
             "description": "Whether the schedule is active."
@@ -945,6 +973,13 @@
             "type": "string",
             "description": "Principal that staged the action."
           },
+          "dataset_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The dataset whose lake this action drains into."
+          },
           "error": {
             "type": [
               "string",
@@ -1007,6 +1042,13 @@
             "type": "string",
             "format": "date-time",
             "description": "Row created."
+          },
+          "dataset_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Copied from the job at planning (NULL for org-level jobs); the per-dataset pod lock keys on it once the executor is re-scoped."
           },
           "error_class": {
             "type": [
@@ -1294,6 +1336,13 @@
             "type": "string",
             "format": "date-time",
             "description": "When the webhook was registered."
+          },
+          "dataset_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional dataset filter: NULL subscribes to every dataset's events."
           },
           "events": {
             "description": "The subscribed event types."

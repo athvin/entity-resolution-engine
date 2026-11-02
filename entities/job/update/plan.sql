@@ -6,6 +6,7 @@ WHERE id = $job_id AND state = 'dispatching'
 RETURNING
   id,
   org_id,
+  dataset_id,
   kind,
   params,
   state,

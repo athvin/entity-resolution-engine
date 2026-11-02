@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS public.webhook_deliveries (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
+  dataset_id text REFERENCES datasets(id),
   webhook_id text NOT NULL REFERENCES webhooks(id),
   event_type text NOT NULL,
   payload jsonb NOT NULL,
@@ -17,3 +18,4 @@ CREATE TABLE IF NOT EXISTS public.webhook_deliveries (
 );
 CREATE INDEX IF NOT EXISTS webhook_deliveries_org_recent ON public.webhook_deliveries (org_id, created_at);
 CREATE INDEX IF NOT EXISTS webhook_deliveries_claimable ON public.webhook_deliveries (state, next_attempt_at);
+CREATE INDEX IF NOT EXISTS webhook_deliveries_dataset ON public.webhook_deliveries (dataset_id, created_at);

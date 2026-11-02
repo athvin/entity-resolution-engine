@@ -5,6 +5,7 @@ description: "One row per compiled node, inserted in the planning transaction; i
 params:
   - { name: id, type: varchar }
   - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar, nullable: true }
   - { name: job_id, type: varchar }
   - { name: task_id, type: varchar }
   - { name: seq, type: bigint }

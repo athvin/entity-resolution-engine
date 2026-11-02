@@ -53,6 +53,7 @@ async fn dispatcher_runs_run_all_over_a_per_org_ducklake() {
     let queued = pg::enqueue(
         &client,
         &oid(&client, "acme").await,
+        None,
         "run_all_full",
         0,
         None,
@@ -151,6 +152,7 @@ async fn dispatcher_runs_run_all_over_a_per_org_ducklake() {
     let _ = pg::enqueue(
         &client,
         &oid(&client, "acme").await,
+        None,
         "run_all_full",
         0,
         None,

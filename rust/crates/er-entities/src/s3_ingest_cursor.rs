@@ -10,6 +10,8 @@ pub struct S3IngestCursor {
     pub id: String,
     /// The tenant whose prefix was polled; every read is scoped by it.
     pub org_id: String,
+    /// The dataset the polled source lands in.
+    pub dataset_id: Option<String>,
     /// The config source this object landed as — the first path segment under the tenant's prefix.
     pub source: String,
     /// The full S3 key of the object last ingested, kept whole so a tenant asking 'which file produced this run' gets the answer rather than a reconstruction.
@@ -42,6 +44,7 @@ impl S3IngestCursor {
         &[
             "id",
             "org_id",
+            "dataset_id",
             "source",
             "object_key",
             "etag",
@@ -60,6 +63,7 @@ pub mod create {
         client: &impl ::tokio_postgres::GenericClient,
         cursor_id: &str,
         org_id: &str,
+        dataset_id: Option<&str>,
         source: &str,
         object_key: &str,
         etag: Option<&str>,
@@ -67,16 +71,17 @@ pub mod create {
         delivery_id: &str,
     ) -> ::std::result::Result<Vec<super::S3IngestCursor>, ::tokio_postgres::Error> {
         const SQL: &str = "INSERT INTO public.s3_ingest_cursors
-  (id, org_id, source, object_key, etag, size_bytes, delivery_id)
+  (id, org_id, dataset_id, source, object_key, etag, size_bytes, delivery_id)
 VALUES
-  ($1, $2, $3, $4, $5, $6, $7)
+  ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (org_id, source) DO UPDATE SET
+  dataset_id = EXCLUDED.dataset_id,
   object_key = EXCLUDED.object_key,
   etag = EXCLUDED.etag,
   size_bytes = EXCLUDED.size_bytes,
   delivery_id = EXCLUDED.delivery_id,
   updated_at = now()
-RETURNING id, org_id, source, object_key, etag, size_bytes, delivery_id,
+RETURNING id, org_id, dataset_id, source, object_key, etag, size_bytes, delivery_id,
           created_at, updated_at
 ";
         let rows = client
@@ -85,6 +90,7 @@ RETURNING id, org_id, source, object_key, etag, size_bytes, delivery_id,
                 &[
                     &cursor_id,
                     &org_id,
+                    &dataset_id,
                     &source,
                     &object_key,
                     &etag,
@@ -98,6 +104,7 @@ RETURNING id, org_id, source, object_key, etag, size_bytes, delivery_id,
             .map(|row| super::S3IngestCursor {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 source: row.get("source"),
                 object_key: row.get("object_key"),
                 etag: row.get("etag"),
@@ -119,7 +126,7 @@ pub mod read {
     ) -> ::std::result::Result<Vec<super::S3IngestCursor>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT
   id,
-  org_id,
+  org_id, dataset_id,
   source,
   object_key,
   etag,
@@ -137,6 +144,7 @@ ORDER BY source
             .map(|row| super::S3IngestCursor {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 source: row.get("source"),
                 object_key: row.get("object_key"),
                 etag: row.get("etag"),
@@ -146,5 +154,20 @@ ORDER BY source
                 updated_at: row.get("updated_at"),
             })
             .collect())
+    }
+}
+
+pub mod update {
+    //! @generated query functions for this entity + operation.
+    /// The dataset_id backfill (fixup 0002): stamp every pre-dataset row with its org's default dataset. Idempotent — only NULL rows are touched, so a re-run after new writes (which stamp themselves) is a no-op.
+    pub async fn backfill_dataset(
+        client: &impl ::tokio_postgres::GenericClient,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str = "UPDATE public.s3_ingest_cursors c
+SET dataset_id = d.id, updated_at = now()
+FROM public.datasets d
+WHERE d.org_id = c.org_id AND d.name = 'default' AND c.dataset_id IS NULL
+";
+        client.execute(SQL, &[]).await
     }
 }

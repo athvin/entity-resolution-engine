@@ -20,6 +20,10 @@ columns:
     nullable: false
     references: { relation: orgs, column: id }
     description: "The tenant this model version belongs to."
+  - name: dataset_id
+    type: varchar
+    references: { relation: datasets, column: id }
+    description: "The dataset whose corpus this model was trained for."
   - name: name
     type: varchar
     nullable: false
@@ -96,3 +100,6 @@ indexes:
     columns: [org_id, name]
     unique: true
     where: "state = 'active'"
+  # V17: the dataset-scoped read path.
+  - name: matching_models_dataset
+    columns: [dataset_id, state]

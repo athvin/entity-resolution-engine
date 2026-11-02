@@ -241,6 +241,7 @@ async fn post(
 pub async fn emit(
     pg_client: &tokio_postgres::Client,
     org_id: &str,
+    dataset_id: Option<&str>,
     org_name: &str,
     event_type: &str,
     data: &Value,
@@ -263,6 +264,7 @@ pub async fn emit(
             pg_client,
             &er_ids::new_v7(),
             org_id,
+            dataset_id,
             &webhook_id,
             event_type,
             &body_doc,
@@ -470,5 +472,13 @@ pub async fn emit_job_event(
     let org_name = crate::pg::get_org_by_id(pg_client, &job.org_id)
         .await?
         .map_or_else(|| job.org_id.clone(), |o| o.name);
-    emit(pg_client, &job.org_id, &org_name, &event_type, &data).await
+    emit(
+        pg_client,
+        &job.org_id,
+        job.dataset_id.as_deref(),
+        &org_name,
+        &event_type,
+        &data,
+    )
+    .await
 }

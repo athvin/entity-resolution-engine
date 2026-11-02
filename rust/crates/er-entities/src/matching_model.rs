@@ -10,6 +10,8 @@ pub struct MatchingModel {
     pub id: String,
     /// The tenant this model version belongs to.
     pub org_id: String,
+    /// The dataset whose corpus this model was trained for.
+    pub dataset_id: Option<String>,
     /// The model's name within the tenant; versions are monotonic within a name, so one tenant can keep several models (a classic rule model beside a trained one) and switch between them.
     pub name: String,
     /// The monotonic version number within (org, name). Versions are immutable: a retrain or a weight override mints the next one rather than editing this.
@@ -54,6 +56,7 @@ impl MatchingModel {
         &[
             "id",
             "org_id",
+            "dataset_id",
             "name",
             "version",
             "entity_type",
@@ -78,6 +81,7 @@ pub mod create {
         client: &impl ::tokio_postgres::GenericClient,
         model_id: &str,
         org_id: &str,
+        dataset_id: Option<&str>,
         name: &str,
         entity_type: &str,
         model_json: &str,
@@ -88,17 +92,18 @@ pub mod create {
         created_by: &str,
     ) -> ::std::result::Result<Vec<super::MatchingModel>, ::tokio_postgres::Error> {
         const SQL: &str = "INSERT INTO public.matching_models
-  (id, org_id, name, version, entity_type, model_json, model_hash,
+  (id, org_id, dataset_id, name, version, entity_type, model_json, model_hash,
    model_version_label, tf_snapshot_id, provenance, created_by)
 VALUES
-  ($1, $2, $3,
+  ($1, $2, $3, $4,
    coalesce((SELECT max(version) FROM public.matching_models
-             WHERE org_id = $2 AND name = $3), 0) + 1,
-   $4, $5, $6,
-   $7, $8, $9, $10)
+             WHERE org_id = $2 AND name = $4), 0) + 1,
+   $5, $6, $7,
+   $8, $9, $10, $11)
 RETURNING
   id,
   org_id,
+  dataset_id,
   name,
   version,
   entity_type,
@@ -119,6 +124,7 @@ RETURNING
                 &[
                     &model_id,
                     &org_id,
+                    &dataset_id,
                     &name,
                     &entity_type,
                     &model_json,
@@ -135,6 +141,7 @@ RETURNING
             .map(|row| super::MatchingModel {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 name: row.get("name"),
                 version: row.get("version"),
                 entity_type: row.get("entity_type"),
@@ -163,6 +170,7 @@ pub mod read {
         const SQL: &str = "SELECT
   id,
   org_id,
+  dataset_id,
   name,
   version,
   entity_type,
@@ -187,6 +195,7 @@ LIMIT 1
             .map(|row| super::MatchingModel {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 name: row.get("name"),
                 version: row.get("version"),
                 entity_type: row.get("entity_type"),
@@ -212,6 +221,7 @@ LIMIT 1
         const SQL: &str = "SELECT
   id,
   org_id,
+  dataset_id,
   name,
   version,
   entity_type,
@@ -235,6 +245,7 @@ ORDER BY name
             .map(|row| super::MatchingModel {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 name: row.get("name"),
                 version: row.get("version"),
                 entity_type: row.get("entity_type"),
@@ -262,6 +273,7 @@ ORDER BY name
         const SQL: &str = "SELECT
   id,
   org_id,
+  dataset_id,
   name,
   version,
   entity_type,
@@ -284,6 +296,7 @@ WHERE org_id = $1 AND name = $2 AND version = $3
             .map(|row| super::MatchingModel {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 name: row.get("name"),
                 version: row.get("version"),
                 entity_type: row.get("entity_type"),
@@ -309,6 +322,7 @@ WHERE org_id = $1 AND name = $2 AND version = $3
         const SQL: &str = "SELECT
   id,
   org_id,
+  dataset_id,
   name,
   version,
   entity_type,
@@ -332,6 +346,7 @@ ORDER BY name, version DESC
             .map(|row| super::MatchingModel {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 name: row.get("name"),
                 version: row.get("version"),
                 entity_type: row.get("entity_type"),
@@ -375,5 +390,17 @@ WHERE org_id = $2
   )
 ";
         client.execute(SQL, &[&model_id, &org_id]).await
+    }
+
+    /// The dataset_id backfill (fixup 0002): stamp every pre-dataset row with its org's default dataset. Idempotent — only NULL rows are touched, so a re-run after new writes (which stamp themselves) is a no-op.
+    pub async fn backfill_dataset(
+        client: &impl ::tokio_postgres::GenericClient,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str = "UPDATE public.matching_models c
+SET dataset_id = d.id, updated_at = now()
+FROM public.datasets d
+WHERE d.org_id = c.org_id AND d.name = 'default' AND c.dataset_id IS NULL
+";
+        client.execute(SQL, &[]).await
     }
 }

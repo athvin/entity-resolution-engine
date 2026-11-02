@@ -192,6 +192,9 @@ pub async fn s3_poll_tick(
         let prefix = org.s3_ingest_prefix.clone().unwrap_or_default();
         let org_name = org.name.clone();
         let org_id = org.id.clone();
+        // Cursors land in the org's one lake — the default dataset's, until
+        // auto-ingest goes per-dataset.
+        let org_dataset = pg::default_dataset_id(client, &org_id).await?;
 
         // One read for every source's cursor, rather than a query per source.
         let cursors: std::collections::HashMap<String, (String, Option<String>)> =
@@ -315,6 +318,7 @@ pub async fn s3_poll_tick(
                 client,
                 &er_ids::new_v7(),
                 &org_id,
+                org_dataset.as_deref(),
                 source,
                 &drop.key,
                 etag.as_deref(),
@@ -386,6 +390,7 @@ pub async fn schedule_tick(
         let (_job, inserted) = pg::enqueue_scheduled(
             client,
             &schedule.org_id,
+            schedule.dataset_id.as_deref(),
             &schedule.kind,
             &key,
             Some(&schedule.params),
@@ -557,8 +562,15 @@ async fn dispatch_claimed(
             .await
             .unwrap_or_else(|e| Err(format!("dispatcher task panicked: {e}")));
         let (status, hash, detail) = crate::schema::tenant_state(&outcome);
-        crate::schema::record_tenant_state(client, &job.org_id, status, &hash, Some(&detail))
-            .await?;
+        crate::schema::record_tenant_state(
+            client,
+            &job.org_id,
+            job.dataset_id.as_deref(),
+            status,
+            &hash,
+            Some(&detail),
+        )
+        .await?;
         if let Ok(r) = &outcome
             && !r.applied.is_empty()
         {
@@ -600,7 +612,15 @@ async fn dispatch_claimed(
         // progress panel is waiting for.
         provision_tenant(client, &org, &job.id, profile, report.as_mut()).await
     } else if job.kind == "apply_corrections" {
-        drain_and_correct(client, &job.org_id, &env, &job.id, report.as_mut()).await
+        drain_and_correct(
+            client,
+            &job.org_id,
+            job.dataset_id.as_deref(),
+            &env,
+            &job.id,
+            report.as_mut(),
+        )
+        .await
     } else if job.kind == "apply_approved" {
         // A LITERAL, not a constant. `dispatch_coverage` checks that every
         // schedulable kind has an arm by scanning this source for the kind's
@@ -616,16 +636,24 @@ async fn dispatch_claimed(
             rr.control_started("stage_approved").await;
         }
         let staged_outcome = match config_from_env(&env) {
-            Ok(config) => apply_approved_merges(client, &job.org_id, &org.name, &config)
-                .await
-                .map(|staged| {
-                    if staged > 0 {
-                        eprintln!(
-                            "approval: staged {staged} approved merge(s) for {}",
-                            org.name
-                        );
-                    }
-                }),
+            Ok(config) => {
+                apply_approved_merges(
+                    client,
+                    &job.org_id,
+                    job.dataset_id.as_deref(),
+                    &org.name,
+                    &config,
+                )
+            }
+            .await
+            .map(|staged| {
+                if staged > 0 {
+                    eprintln!(
+                        "approval: staged {staged} approved merge(s) for {}",
+                        org.name
+                    );
+                }
+            }),
             Err(e) => Err(e),
         };
         if let Some(rr) = report.as_mut() {
@@ -639,7 +667,15 @@ async fn dispatch_claimed(
         // Also async-half, and for the same reason as `apply_corrections`:
         // training's OUTPUT is a registry row, which needs the Postgres client
         // that `run_job`'s blocking half cannot hold.
-        train_and_register(client, &job.org_id, &env, &job.id, report.as_mut()).await
+        train_and_register(
+            client,
+            &job.org_id,
+            job.dataset_id.as_deref(),
+            &env,
+            &job.id,
+            report.as_mut(),
+        )
+        .await
     } else {
         // The active model comes from the registry, read here because `run_job`
         // is the blocking half and cannot touch the async Postgres client. An
@@ -793,6 +829,7 @@ fn config_from_env(env: &Value) -> Result<er_config::Config, String> {
 async fn apply_approved_merges(
     client: &tokio_postgres::Client,
     org_id: &str,
+    dataset_id: Option<&str>,
     org_name: &str,
     config: &er_config::Config,
 ) -> Result<usize, String> {
@@ -824,7 +861,7 @@ async fn apply_approved_merges(
             "review_id": tagging.subject_id,
             "resolution": "match",
         });
-        if let Err(e) = pg::stage_action(client, org_id, &action, &actor).await {
+        if let Err(e) = pg::stage_action(client, org_id, dataset_id, &action, &actor).await {
             // One unstageable review must not strand the rest: the tag stays on
             // it, so the next tick retries exactly that one.
             eprintln!(
@@ -852,6 +889,7 @@ async fn apply_approved_merges(
         if let Err(e) = pg::enqueue(
             client,
             org_id,
+            dataset_id,
             "apply_corrections",
             0,
             Some(&idem),
@@ -1036,7 +1074,16 @@ async fn emit_entity_aggregates(
                 job.id
             ),
         });
-        if let Err(e) = webhook::emit(client, &job.org_id, &org_name, event, &data).await {
+        if let Err(e) = webhook::emit(
+            client,
+            &job.org_id,
+            job.dataset_id.as_deref(),
+            &org_name,
+            event,
+            &data,
+        )
+        .await
+        {
             eprintln!("run {}: {event} not recorded: {e}", job.id);
         }
     }
@@ -1418,6 +1465,7 @@ fn run_job(
 pub async fn train_and_register(
     client: &tokio_postgres::Client,
     org_id: &str,
+    dataset_id: Option<&str>,
     env: &Value,
     run_id: &str,
     mut report: Option<&mut crate::reporter::RunReport<'_>>,
@@ -1442,7 +1490,7 @@ pub async fn train_and_register(
     if let Some(rr) = report.as_mut() {
         rr.control_started("register_model").await;
     }
-    match register_half(client, org_id, run_id, &trained).await {
+    match register_half(client, org_id, dataset_id, run_id, &trained).await {
         Ok(()) => {
             if let Some(rr) = report.as_mut() {
                 rr.control_succeeded(
@@ -1620,6 +1668,7 @@ async fn train_half(
 async fn register_half(
     client: &tokio_postgres::Client,
     org_id: &str,
+    dataset_id: Option<&str>,
     run_id: &str,
     trained: &TrainedArtifacts,
 ) -> Result<(), String> {
@@ -1639,6 +1688,7 @@ async fn register_half(
     pg::create_model_version(
         client,
         org_id,
+        dataset_id,
         pg::DEFAULT_MODEL_NAME,
         if trained.entity_type_person {
             "person"
@@ -1795,7 +1845,7 @@ async fn provision_tenant(
             .await
             .unwrap_or_else(|e| Err(format!("dispatcher task panicked: {e}")));
         let (status, hash, detail) = crate::schema::tenant_state(&schema);
-        crate::schema::record_tenant_state(client, &org.id, status, &hash, Some(&detail))
+        crate::schema::record_tenant_state(client, &org.id, None, status, &hash, Some(&detail))
             .await
             .map_err(|e| format!("record {}'s schema state: {e}", org.name))?;
         schema
@@ -1883,6 +1933,7 @@ async fn create_tenant_database(maint_dsn: &str, database: &str) -> Result<(), S
 pub async fn drain_and_correct(
     client: &tokio_postgres::Client,
     org_id: &str,
+    dataset_id: Option<&str>,
     env: &Value,
     run_id: &str,
     mut report: Option<&mut crate::reporter::RunReport<'_>>,
@@ -1976,6 +2027,7 @@ pub async fn drain_and_correct(
         if let Err(e) = pg::record_reviewer_label(
             client,
             org_id,
+            dataset_id,
             (&label.rec_a_key, &label.rec_b_key),
             label.verdict,
             labeled_by,
@@ -2014,6 +2066,7 @@ pub async fn drain_and_correct(
             if let Err(e) = webhook::emit(
                 client,
                 org_id,
+                dataset_id,
                 &org_name,
                 "review.resolved",
                 &serde_json::json!({
@@ -2047,7 +2100,7 @@ pub async fn drain_and_correct(
     // believe in — the same reason `review.resolved` fires from the drain
     // rather than from the resolve endpoint, one step further along.
     if correct.is_ok() && !labels.is_empty() {
-        write_back_resolutions(client, org_id, env, run_id, &labels).await;
+        write_back_resolutions(client, org_id, dataset_id, env, run_id, &labels).await;
     }
     correct
 }
@@ -2073,6 +2126,7 @@ pub async fn drain_and_correct(
 async fn write_back_resolutions(
     client: &tokio_postgres::Client,
     org_id: &str,
+    dataset_id: Option<&str>,
     env: &Value,
     run_id: &str,
     labels: &[(er_cli::DerivedLabel, String)],
@@ -2149,7 +2203,16 @@ async fn write_back_resolutions(
             "master": detail.get("golden").cloned().unwrap_or(Value::Null),
             "members": detail.get("members").cloned().unwrap_or(Value::Null),
         });
-        if let Err(e) = webhook::emit(client, org_id, &org_name, "entity.write_back", &data).await {
+        if let Err(e) = webhook::emit(
+            client,
+            org_id,
+            dataset_id,
+            &org_name,
+            "entity.write_back",
+            &data,
+        )
+        .await
+        {
             eprintln!("run {run_id}: entity.write_back for {entity_id} not queued: {e}");
         }
     }
@@ -2303,6 +2366,7 @@ mod run_report_tests {
         Job {
             id: "01JOB000000000000000000001".to_string(),
             org_id: "uuid-acme".to_string(),
+            dataset_id: None,
             kind: kind.to_string(),
             params: json!({}),
             state: state.to_string(),

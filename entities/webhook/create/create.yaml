@@ -5,6 +5,7 @@ description: "Register an outbound webhook; the secret is the HMAC signing key f
 params:
   - { name: webhook_id, type: varchar }
   - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar, nullable: true }
   - { name: url, type: varchar }
   - { name: events, type: json }
   - { name: secret, type: varchar }

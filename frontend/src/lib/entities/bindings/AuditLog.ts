@@ -11,6 +11,8 @@ export interface AuditLog {
   actor: string;
   /** The tenant the action applies to, if the action is org-scoped. */
   org: string | null;
+  /** The dataset the action concerned, by name, when it concerned one — context, like `org`, not a foreign key (this ledger outlives both). */
+  dataset: string | null;
   /** The action name (e.g. steward.mass_update). */
   action: string;
   /** Structured detail for the action. */

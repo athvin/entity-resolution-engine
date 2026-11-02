@@ -153,6 +153,7 @@ async fn the_sweep_reconciles_every_active_tenant_and_reports_it() {
     let run = pg::enqueue(
         &client,
         &acme,
+        None,
         "lake_maintain",
         0,
         None,

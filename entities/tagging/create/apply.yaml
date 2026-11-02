@@ -5,6 +5,7 @@ description: "Apply a tag to a subject, idempotently. Applying the same tag twic
 params:
   - { name: tagging_id, type: varchar }
   - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar, nullable: true }
   - { name: tag_id, type: varchar }
   - { name: subject_type, type: varchar }
   - { name: subject_id, type: varchar }

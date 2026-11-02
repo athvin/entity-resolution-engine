@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS public.task_instances (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
+  dataset_id text REFERENCES datasets(id),
   job_id text NOT NULL REFERENCES jobs(id),
   task_id text NOT NULL,
   seq bigint NOT NULL,
@@ -53,3 +54,4 @@ CREATE UNIQUE INDEX IF NOT EXISTS task_instances_live ON public.task_instances (
 CREATE UNIQUE INDEX IF NOT EXISTS task_instances_one_pod_per_org ON public.task_instances (org_id) WHERE live IS TRUE AND kind = 'pod' AND state IN ('queued','running','restarting','canceling');
 CREATE INDEX IF NOT EXISTS task_instances_claimable ON public.task_instances (state, not_before, job_id, seq) WHERE live IS TRUE;
 CREATE INDEX IF NOT EXISTS task_instances_heartbeat ON public.task_instances (heartbeat_at) WHERE live IS TRUE AND state = 'running';
+CREATE INDEX IF NOT EXISTS task_instances_dataset ON public.task_instances (dataset_id, job_id);

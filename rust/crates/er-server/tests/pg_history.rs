@@ -61,6 +61,7 @@ async fn history_companions_capture_row_images_with_the_actor() {
     let webhook_id = pg::create_webhook(
         &client,
         &org_id,
+        None,
         "https://example.test/hook",
         &serde_json::json!(["job.succeeded"]),
         "s3cr3t",
@@ -138,6 +139,7 @@ async fn history_companions_capture_row_images_with_the_actor() {
     let evolved_id = pg::create_webhook(
         &client,
         &org_id,
+        None,
         "https://example.test/evolved",
         &serde_json::json!([]),
         "s3cr3t-2",
@@ -165,6 +167,7 @@ async fn history_companions_capture_row_images_with_the_actor() {
     let anon_id = pg::create_webhook(
         &other,
         &org_id,
+        None,
         "https://example.test/anon",
         &serde_json::json!([]),
         "s3cr3t-3",

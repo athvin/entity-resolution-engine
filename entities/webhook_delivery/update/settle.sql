@@ -17,5 +17,5 @@ SET state = CASE
     delivered_at = CASE WHEN $delivered THEN now() ELSE delivered_at END,
     updated_at = now()
 WHERE id = $delivery_id
-RETURNING id, org_id, webhook_id, event_type, payload, state, attempt, max_attempts,
+RETURNING id, org_id, dataset_id, webhook_id, event_type, payload, state, attempt, max_attempts,
           next_attempt_at, response_code, error, delivered_at, created_at, updated_at

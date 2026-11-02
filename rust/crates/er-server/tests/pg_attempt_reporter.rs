@@ -135,6 +135,7 @@ async fn the_reporter_fills_the_ledger_from_the_legacy_dispatcher() {
     let queued = pg::enqueue(
         &client,
         &acme,
+        None,
         "run_all_full",
         0,
         None,
@@ -193,6 +194,7 @@ async fn the_reporter_fills_the_ledger_from_the_legacy_dispatcher() {
     let correct_job = pg::enqueue(
         &client,
         &empty,
+        None,
         "correct",
         0,
         None,
@@ -239,6 +241,7 @@ async fn the_reporter_fills_the_ledger_from_the_legacy_dispatcher() {
     let broken_job = pg::enqueue(
         &client,
         &broken,
+        None,
         "run_all_full",
         0,
         None,

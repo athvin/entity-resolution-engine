@@ -18,6 +18,10 @@ columns:
     nullable: false
     references: { relation: orgs, column: id }
     description: "The tenant the action applies to."
+  - name: dataset_id
+    type: varchar
+    references: { relation: datasets, column: id }
+    description: "The dataset whose lake this action drains into."
   - name: action
     type: json
     nullable: false
@@ -53,3 +57,6 @@ columns:
 indexes:
   - name: staged_pending
     columns: [org_id, state]
+  # V17: the dataset-scoped read path.
+  - name: staged_dataset
+    columns: [dataset_id, state]

@@ -1,6 +1,7 @@
 SELECT
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,

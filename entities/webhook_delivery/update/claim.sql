@@ -8,5 +8,5 @@ WHERE id = (
   ORDER BY d.created_at, d.id
   FOR UPDATE SKIP LOCKED
   LIMIT 1)
-RETURNING id, org_id, webhook_id, event_type, payload, state, attempt, max_attempts,
+RETURNING id, org_id, dataset_id, webhook_id, event_type, payload, state, attempt, max_attempts,
           next_attempt_at, response_code, error, delivered_at, created_at, updated_at

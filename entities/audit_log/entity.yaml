@@ -27,6 +27,9 @@ columns:
   - name: org
     type: varchar
     description: "The tenant the action applies to, if the action is org-scoped."
+  - name: dataset
+    type: varchar
+    description: "The dataset the action concerned, by name, when it concerned one — context, like `org`, not a foreign key (this ledger outlives both)."
   - name: action
     type: varchar
     nullable: false

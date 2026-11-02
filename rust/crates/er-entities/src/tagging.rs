@@ -10,6 +10,8 @@ pub struct Tagging {
     pub id: String,
     /// The tenant. Denormalised from the tag so every read is scoped by one predicate rather than a join — the same reason every other tenant-scoped relation carries it.
     pub org_id: String,
+    /// The dataset whose subject this tag is applied to — subject ids are lake-local.
+    pub dataset_id: Option<String>,
     /// The tag applied.
     pub tag_id: String,
     /// What was tagged: `entity` (a resolved cluster, by its entity id) or `review` (an open review item). Two kinds rather than two tables, because a filter and a bulk action want one list of 'things tagged X' and a union of two relations would make every such read a join.
@@ -40,6 +42,7 @@ impl Tagging {
         &[
             "id",
             "org_id",
+            "dataset_id",
             "tag_id",
             "subject_type",
             "subject_id",
@@ -57,14 +60,14 @@ pub mod create {
         client: &impl ::tokio_postgres::GenericClient,
         tagging_id: &str,
         org_id: &str,
+        dataset_id: Option<&str>,
         tag_id: &str,
         subject_type: &str,
         subject_id: &str,
         created_by: &str,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
-        const SQL: &str =
-            "INSERT INTO public.taggings (id, org_id, tag_id, subject_type, subject_id, created_by)
-VALUES ($1, $2, $3, $4, $5, $6)
+        const SQL: &str = "INSERT INTO public.taggings (id, org_id, dataset_id, tag_id, subject_type, subject_id, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (org_id, tag_id, subject_type, subject_id) DO NOTHING
 ";
         client
@@ -73,6 +76,7 @@ ON CONFLICT (org_id, tag_id, subject_type, subject_id) DO NOTHING
                 &[
                     &tagging_id,
                     &org_id,
+                    &dataset_id,
                     &tag_id,
                     &subject_type,
                     &subject_id,
@@ -115,7 +119,7 @@ pub mod read {
         subject_type: Option<&str>,
         limit: i64,
     ) -> ::std::result::Result<Vec<super::Tagging>, ::tokio_postgres::Error> {
-        const SQL: &str = "SELECT id, org_id, tag_id, subject_type, subject_id, created_by, created_at, updated_at
+        const SQL: &str = "SELECT id, org_id, dataset_id, tag_id, subject_type, subject_id, created_by, created_at, updated_at
 FROM public.taggings
 WHERE org_id = $1
   AND tag_id = $2
@@ -131,6 +135,7 @@ LIMIT $4
             .map(|row| super::Tagging {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 tag_id: row.get("tag_id"),
                 subject_type: row.get("subject_type"),
                 subject_id: row.get("subject_id"),
@@ -139,5 +144,20 @@ LIMIT $4
                 updated_at: row.get("updated_at"),
             })
             .collect())
+    }
+}
+
+pub mod update {
+    //! @generated query functions for this entity + operation.
+    /// The dataset_id backfill (fixup 0002): stamp every pre-dataset row with its org's default dataset. Idempotent — only NULL rows are touched, so a re-run after new writes (which stamp themselves) is a no-op.
+    pub async fn backfill_dataset(
+        client: &impl ::tokio_postgres::GenericClient,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str = "UPDATE public.taggings c
+SET dataset_id = d.id, updated_at = now()
+FROM public.datasets d
+WHERE d.org_id = c.org_id AND d.name = 'default' AND c.dataset_id IS NULL
+";
+        client.execute(SQL, &[]).await
     }
 }

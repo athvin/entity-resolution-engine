@@ -212,9 +212,11 @@ impl<'a> Provenance<'a> {
 ///
 /// # Errors
 /// Propagates the insert/select error (incl. the FK violation for an unknown org).
+#[allow(clippy::too_many_arguments)] // mirrors the statement's parameter list
 pub async fn enqueue(
     client: &Client,
     org_id: &str,
+    dataset_id: Option<&str>,
     kind: &str,
     priority: i64,
     idempotency_key: Option<&str>,
@@ -228,6 +230,7 @@ pub async fn enqueue(
         client,
         &job_id,
         org_id,
+        dataset_id,
         kind,
         priority,
         idempotency_key,
@@ -728,6 +731,23 @@ pub async fn get_dataset(
     )
 }
 
+/// The org's `default` dataset id, `None` until the convergence sweep has
+/// seen the org (a freshly created org meets it at the next boot, or inline
+/// at creation). The id every org-scoped write stamps its rows with until the
+/// dataset-scoped routes thread a chosen dataset instead.
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn default_dataset_id(client: &Client, org_id: &str) -> Result<Option<String>, PgError> {
+    Ok(
+        er_entities::dataset::read::by_org_and_name(client, org_id, "default")
+            .await?
+            .into_iter()
+            .next()
+            .map(|d| d.id),
+    )
+}
+
 /// Insert a bring-your-own-config dataset, `active`. Returns `false` when a
 /// dataset of that name already exists (the insert is `ON CONFLICT DO
 /// NOTHING`), which the handler maps to 409 — a dataset's shape is not
@@ -847,6 +867,7 @@ pub struct ConfigVersionDetail {
 pub async fn create_config_version(
     client: &Client,
     org_id: &str,
+    dataset_id: Option<&str>,
     yaml: &str,
     config_hash: &str,
     created_by: &str,
@@ -857,6 +878,7 @@ pub async fn create_config_version(
         client,
         &er_ids::new_v7(),
         org_id,
+        dataset_id,
         yaml,
         config_hash,
         created_by,
@@ -927,12 +949,13 @@ pub async fn get_config_version(
 pub async fn stage_action(
     client: &Client,
     org_id: &str,
+    dataset_id: Option<&str>,
     action: &serde_json::Value,
     created_by: &str,
 ) -> Result<String, PgError> {
     let action_id = er_ids::new_v7();
     er_entities::staged_steward_action::create::stage(
-        client, &action_id, org_id, action, created_by,
+        client, &action_id, org_id, dataset_id, action, created_by,
     )
     .await?;
     Ok(action_id)
@@ -981,6 +1004,7 @@ pub struct PendingAction {
 pub async fn record_reviewer_label(
     client: &Client,
     org_id: &str,
+    dataset_id: Option<&str>,
     pair: (&str, &str),
     verdict: &str,
     labeled_by: &str,
@@ -989,6 +1013,7 @@ pub async fn record_reviewer_label(
         client,
         &er_ids::new_v7(),
         org_id,
+        dataset_id,
         pair.0,
         pair.1,
         verdict,
@@ -1032,10 +1057,11 @@ pub async fn audit(
     client: &Client,
     actor: &str,
     org: Option<&str>,
+    dataset: Option<&str>,
     action: &str,
     detail: &serde_json::Value,
 ) -> Result<(), PgError> {
-    er_entities::audit_log::create::append(client, actor, org, action, detail).await?;
+    er_entities::audit_log::create::append(client, actor, org, dataset, action, detail).await?;
     Ok(())
 }
 
@@ -1086,12 +1112,22 @@ pub struct ScheduleRow {
 pub async fn create_schedule(
     client: &Client,
     org_id: &str,
+    dataset_id: Option<&str>,
     kind: &str,
     cron: &str,
     params: &serde_json::Value,
 ) -> Result<String, PgError> {
     let schedule_id = er_ids::new_v7();
-    er_entities::schedule::create::create(client, &schedule_id, org_id, kind, params, cron).await?;
+    er_entities::schedule::create::create(
+        client,
+        &schedule_id,
+        org_id,
+        dataset_id,
+        kind,
+        params,
+        cron,
+    )
+    .await?;
     Ok(schedule_id)
 }
 
@@ -1128,6 +1164,7 @@ pub async fn list_schedules(client: &Client, org_id: &str) -> Result<Vec<Schedul
 pub async fn enqueue_scheduled(
     client: &Client,
     org_id: &str,
+    dataset_id: Option<&str>,
     kind: &str,
     idempotency_key: &str,
     params: Option<&serde_json::Value>,
@@ -1139,6 +1176,7 @@ pub async fn enqueue_scheduled(
         client,
         &job_id,
         org_id,
+        dataset_id,
         kind,
         0,
         Some(idempotency_key),
@@ -1176,6 +1214,7 @@ pub fn model_hash(model_json: &str) -> String {
 pub async fn create_model_version(
     client: &Client,
     org_id: &str,
+    dataset_id: Option<&str>,
     name: &str,
     entity_type: &str,
     model_json: &str,
@@ -1188,6 +1227,7 @@ pub async fn create_model_version(
         client,
         &er_ids::new_v7(),
         org_id,
+        dataset_id,
         name,
         entity_type,
         model_json,
@@ -1294,6 +1334,7 @@ pub const CORRECTION_PASS_SOURCE: &str = "config:correction_pass";
 pub async fn ensure_correction_schedule(
     client: &Client,
     org_id: &str,
+    dataset_id: Option<&str>,
     cadence: &str,
 ) -> Result<(), PgError> {
     er_entities::schedule::update::set_config_cron(client, cadence, org_id, CORRECTION_PASS_SOURCE)
@@ -1302,6 +1343,7 @@ pub async fn ensure_correction_schedule(
         client,
         &er_ids::new_v7(),
         org_id,
+        dataset_id,
         "correct",
         cadence,
         CORRECTION_PASS_SOURCE,
@@ -1378,12 +1420,22 @@ pub struct WebhookRow {
 pub async fn create_webhook(
     client: &Client,
     org_id: &str,
+    dataset_id: Option<&str>,
     url: &str,
     events: &serde_json::Value,
     secret: &str,
 ) -> Result<String, PgError> {
     let webhook_id = er_ids::new_v7();
-    er_entities::webhook::create::create(client, &webhook_id, org_id, url, events, secret).await?;
+    er_entities::webhook::create::create(
+        client,
+        &webhook_id,
+        org_id,
+        dataset_id,
+        url,
+        events,
+        secret,
+    )
+    .await?;
     Ok(webhook_id)
 }
 
@@ -1567,6 +1619,7 @@ pub async fn retire_tag(client: &Client, org_id: &str, tag_id: &str) -> Result<b
 pub async fn apply_tag(
     client: &Client,
     org_id: &str,
+    dataset_id: Option<&str>,
     tag_id: &str,
     subject_type: &str,
     subject_id: &str,
@@ -1583,6 +1636,7 @@ pub async fn apply_tag(
         client,
         &tagging_id,
         org_id,
+        dataset_id,
         tag_id,
         subject_type,
         subject_id,

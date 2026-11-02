@@ -30,7 +30,7 @@ statements is read or written only through the engine's own stage SQL, not
 through a typed query function.
 
 <!-- BEGIN GENERATED: entities-index -->
-**44 entities, 225 declared statements.**
+**44 entities, 236 declared statements.**
 
 | Entity | Relation | Store | Key | Natural key | History |
 |---|---|---|---|---|---|
@@ -89,11 +89,11 @@ Declared statements per entity and operation:
 | `api_key` | 1 | 1 | 1 | 0 |
 | `assertion` | 2 | 3 | 1 | 0 |
 | `audit_log` | 1 | 1 | 0 | 0 |
-| `config_version` | 1 | 2 | 1 | 0 |
+| `config_version` | 1 | 2 | 2 | 0 |
 | `dataset` | 1 | 2 | 2 | 0 |
 | `ddl_log` | 0 | 1 | 0 | 0 |
 | `entity_event` | 1 | 3 | 0 | 1 |
-| `entity_link` | 1 | 1 | 0 | 1 |
+| `entity_link` | 1 | 1 | 1 | 1 |
 | `entity_membership` | 0 | 7 | 1 | 1 |
 | `fixup` | 1 | 1 | 0 | 0 |
 | `golden_lineage` | 0 | 1 | 0 | 0 |
@@ -101,14 +101,14 @@ Declared statements per entity and operation:
 | `golden_record` | 0 | 5 | 11 | 0 |
 | `ingest_batch` | 1 | 2 | 1 | 1 |
 | `int_std_record` | 0 | 5 | 0 | 0 |
-| `job` | 2 | 4 | 10 | 0 |
+| `job` | 2 | 4 | 11 | 0 |
 | `lake_schema_migration` | 1 | 1 | 0 | 0 |
 | `match_score` | 0 | 5 | 3 | 0 |
-| `matching_model` | 1 | 4 | 1 | 0 |
+| `matching_model` | 1 | 4 | 2 | 0 |
 | `metric_snapshot` | 1 | 1 | 0 | 0 |
 | `metric_snapshot_source` | 1 | 1 | 0 | 0 |
 | `org` | 2 | 4 | 3 | 0 |
-| `pair_label` | 1 | 2 | 0 | 0 |
+| `pair_label` | 1 | 2 | 1 | 0 |
 | `raw_record` | 0 | 2 | 0 | 1 |
 | `record_overlay` | 1 | 2 | 1 | 1 |
 | `record_quality` | 1 | 2 | 0 | 1 |
@@ -116,15 +116,15 @@ Declared statements per entity and operation:
 | `review` | 0 | 5 | 3 | 0 |
 | `run` | 1 | 4 | 2 | 1 |
 | `run_stage` | 1 | 1 | 1 | 0 |
-| `s3_ingest_cursor` | 1 | 1 | 0 | 0 |
-| `schedule` | 2 | 2 | 3 | 1 |
+| `s3_ingest_cursor` | 1 | 1 | 1 | 0 |
+| `schedule` | 2 | 2 | 4 | 1 |
 | `schema_migration` | 1 | 1 | 0 | 0 |
 | `scored_record` | 0 | 2 | 1 | 2 |
-| `staged_steward_action` | 1 | 1 | 1 | 0 |
+| `staged_steward_action` | 1 | 1 | 2 | 0 |
 | `tag` | 1 | 3 | 1 | 0 |
-| `tagging` | 1 | 1 | 0 | 1 |
-| `task_instance` | 3 | 4 | 22 | 0 |
-| `tenant_schema_state` | 1 | 1 | 0 | 0 |
+| `tagging` | 1 | 1 | 1 | 1 |
+| `task_instance` | 3 | 4 | 23 | 0 |
+| `tenant_schema_state` | 1 | 1 | 1 | 0 |
 | `webhook` | 1 | 3 | 1 | 0 |
 | `webhook_delivery` | 1 | 1 | 2 | 0 |
 <!-- END GENERATED: entities-index -->

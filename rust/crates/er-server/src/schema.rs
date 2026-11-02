@@ -112,6 +112,7 @@ pub fn tenant_state(
 pub async fn record_tenant_state(
     client: &tokio_postgres::Client,
     org_id: &str,
+    dataset_id: Option<&str>,
     status: &str,
     catalog_hash: &str,
     detail: Option<&str>,
@@ -120,6 +121,7 @@ pub async fn record_tenant_state(
         client,
         &er_ids::new_v7(),
         org_id,
+        dataset_id,
         catalog_hash,
         status,
         detail,
@@ -171,9 +173,13 @@ pub async fn enqueue_tenant_migrations(
         if org.state != "active" {
             continue;
         }
+        // The deploy sweep reconciles the org's one lake; until the fan-out
+        // goes per-dataset (PR5) that lake is the default dataset's.
+        let dataset_id = pg::default_dataset_id(client, &org.id).await?;
         let job = pg::enqueue(
             client,
             &org.id,
+            dataset_id.as_deref(),
             LAKE_MIGRATE_KIND,
             LAKE_MIGRATE_PRIORITY,
             None,

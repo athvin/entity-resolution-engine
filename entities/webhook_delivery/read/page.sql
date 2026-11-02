@@ -1,4 +1,4 @@
-SELECT id, org_id, webhook_id, event_type, payload, state, attempt, max_attempts,
+SELECT id, org_id, dataset_id, webhook_id, event_type, payload, state, attempt, max_attempts,
        next_attempt_at, response_code, error, delivered_at, created_at, updated_at
 FROM public.webhook_deliveries
 WHERE org_id = $org_id

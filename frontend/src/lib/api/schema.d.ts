@@ -111,6 +111,8 @@ export interface components {
              * @description Wall-clock creation time (database default; `at` remains the domain event stamp).
              */
             created_at: string;
+            /** @description The dataset the action concerned, by name, when it concerned one — context, like `org`, not a foreign key (this ledger outlives both). */
+            dataset?: string | null;
             /** @description Structured detail for the action. */
             detail: unknown;
             /**
@@ -137,6 +139,8 @@ export interface components {
             created_at: string;
             /** @description Principal that created the version. */
             created_by: string;
+            /** @description The dataset this config version belongs to. Backfilled to the org's default dataset; joins the natural key at the clean break. */
+            dataset_id?: string | null;
             /** @description The version row's unique id (UUIDv7, minted at draft). */
             id: string;
             /** @description The tenant this config version belongs to. */
@@ -300,6 +304,8 @@ export interface components {
             created_at: string;
             /** @description Principal that created the job. */
             created_by?: string | null;
+            /** @description The dataset this job runs against. NULL only for org-level kinds (provision) — every lake-touching job carries it, and the per-dataset writer lock keys on it once the queue is re-scoped. */
+            dataset_id?: string | null;
             /** @description Why the job failed, as a class the UI can act on: precondition (an input is missing — expected during onboarding), transient_io (worth retrying), config (the tenant config is wrong), internal (a bug). Null until a failure. */
             error_class?: string | null;
             /** @description The failure's human text, already chain-flattened. Kept beside error_class so a steward sees the reason without reading pod logs. */
@@ -406,6 +412,8 @@ export interface components {
             created_at: string;
             /** @description The cron expression. */
             cron: string;
+            /** @description The dataset this schedule enqueues for. */
+            dataset_id?: string | null;
             /** @description Whether the schedule is active. */
             enabled: boolean;
             /** @description The schedule's unique id. */
@@ -445,6 +453,8 @@ export interface components {
             created_at: string;
             /** @description Principal that staged the action. */
             created_by: string;
+            /** @description The dataset whose lake this action drains into. */
+            dataset_id?: string | null;
             /** @description The failure reason, if the action failed. */
             error?: string | null;
             /** @description The staged action's unique id. */
@@ -470,6 +480,8 @@ export interface components {
              * @description Row created.
              */
             created_at: string;
+            /** @description Copied from the job at planning (NULL for org-level jobs); the per-dataset pod lock keys on it once the executor is re-scoped. */
+            dataset_id?: string | null;
             /** @description er-errors' seven classes plus the executor's four. */
             error_class?: string | null;
             /** @description Chain-flattened text (errfmt::chain), truncated to 2000 chars. */
@@ -611,6 +623,8 @@ export interface components {
              * @description When the webhook was registered.
              */
             created_at: string;
+            /** @description Optional dataset filter: NULL subscribes to every dataset's events. */
+            dataset_id?: string | null;
             /** @description The subscribed event types. */
             events: unknown;
             /** @description The webhook's unique id. */

@@ -10,6 +10,8 @@ pub struct Webhook {
     pub id: String,
     /// The tenant that owns the webhook.
     pub org_id: String,
+    /// Optional dataset filter: NULL subscribes to every dataset's events.
+    pub dataset_id: Option<String>,
     /// The delivery URL.
     pub url: String,
     /// The subscribed event types.
@@ -40,6 +42,7 @@ impl Webhook {
         &[
             "id",
             "org_id",
+            "dataset_id",
             "url",
             "events",
             "secret",
@@ -57,15 +60,20 @@ pub mod create {
         client: &impl ::tokio_postgres::GenericClient,
         webhook_id: &str,
         org_id: &str,
+        dataset_id: Option<&str>,
         url: &str,
         events: &::serde_json::Value,
         secret: &str,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
-        const SQL: &str = "INSERT INTO public.webhooks (id, org_id, url, events, secret)
-VALUES ($1, $2, $3, $4, $5)
+        const SQL: &str =
+            "INSERT INTO public.webhooks (id, org_id, dataset_id, url, events, secret)
+VALUES ($1, $2, $3, $4, $5, $6)
 ";
         client
-            .execute(SQL, &[&webhook_id, &org_id, &url, &events, &secret])
+            .execute(
+                SQL,
+                &[&webhook_id, &org_id, &dataset_id, &url, &events, &secret],
+            )
             .await
     }
 }
@@ -77,7 +85,8 @@ pub mod read {
         client: &impl ::tokio_postgres::GenericClient,
         webhook_id: &str,
     ) -> ::std::result::Result<Vec<super::Webhook>, ::tokio_postgres::Error> {
-        const SQL: &str = "SELECT id, org_id, url, events, secret, active, created_at, updated_at
+        const SQL: &str =
+            "SELECT id, org_id, dataset_id, url, events, secret, active, created_at, updated_at
 FROM public.webhooks
 WHERE id = $1 AND active
 ";
@@ -87,6 +96,7 @@ WHERE id = $1 AND active
             .map(|row| super::Webhook {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 url: row.get("url"),
                 events: row.get("events"),
                 secret: row.get("secret"),
@@ -106,6 +116,7 @@ WHERE id = $1 AND active
         const SQL: &str = "SELECT
   id,
   org_id,
+  dataset_id,
   url,
   events,
   secret,
@@ -123,6 +134,7 @@ ORDER BY created_at
             .map(|row| super::Webhook {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 url: row.get("url"),
                 events: row.get("events"),
                 secret: row.get("secret"),
@@ -140,7 +152,7 @@ ORDER BY created_at
     ) -> ::std::result::Result<Vec<super::Webhook>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT
   id,
-  org_id,
+  org_id, dataset_id,
   url,
   events,
   secret,
@@ -157,6 +169,7 @@ ORDER BY created_at
             .map(|row| super::Webhook {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 url: row.get("url"),
                 events: row.get("events"),
                 secret: row.get("secret"),

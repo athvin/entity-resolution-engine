@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS public.audit_log (
   at timestamptz NOT NULL DEFAULT now(),
   actor text NOT NULL,
   org text,
+  dataset text,
   action text NOT NULL,
   detail jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now(),

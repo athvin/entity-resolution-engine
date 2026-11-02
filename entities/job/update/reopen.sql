@@ -6,6 +6,7 @@ WHERE id = $job_id AND org_id = $org_id
 RETURNING
   id,
   org_id,
+  dataset_id,
   kind,
   params,
   state,

@@ -10,6 +10,8 @@ pub struct PairLabel {
     pub id: String,
     /// The tenant whose corpus the pair belongs to; every read is scoped by it.
     pub org_id: String,
+    /// The dataset whose record pair this verdict is about — record keys are lake-local.
+    pub dataset_id: Option<String>,
     /// The pair's lower record key, canonical order — the same ordering match_scores uses, so a label and a score describe the same pair.
     pub rec_a_key: String,
     /// The pair's higher record key, canonical order.
@@ -48,6 +50,7 @@ impl PairLabel {
         &[
             "id",
             "org_id",
+            "dataset_id",
             "rec_a_key",
             "rec_b_key",
             "verdict",
@@ -69,6 +72,7 @@ pub mod create {
         client: &impl ::tokio_postgres::GenericClient,
         label_id: &str,
         org_id: &str,
+        dataset_id: Option<&str>,
         rec_a_key: &str,
         rec_b_key: &str,
         verdict: &str,
@@ -79,12 +83,13 @@ pub mod create {
         note: Option<&str>,
     ) -> ::std::result::Result<Vec<super::PairLabel>, ::tokio_postgres::Error> {
         const SQL: &str = "INSERT INTO public.pair_labels
-  (id, org_id, rec_a_key, rec_b_key, verdict, origin, labeled_by,
+  (id, org_id, dataset_id, rec_a_key, rec_b_key, verdict, origin, labeled_by,
    model_version, score_at_label, note)
 VALUES
-  ($1, $2, $3, $4, $5, $6, $7,
-   $8, $9, $10)
+  ($1, $2, $3, $4, $5, $6, $7, $8,
+   $9, $10, $11)
 ON CONFLICT (org_id, rec_a_key, rec_b_key) DO UPDATE SET
+  dataset_id = EXCLUDED.dataset_id,
   verdict = EXCLUDED.verdict,
   origin = EXCLUDED.origin,
   labeled_by = EXCLUDED.labeled_by,
@@ -92,7 +97,7 @@ ON CONFLICT (org_id, rec_a_key, rec_b_key) DO UPDATE SET
   score_at_label = EXCLUDED.score_at_label,
   note = EXCLUDED.note,
   updated_at = now()
-RETURNING id, org_id, rec_a_key, rec_b_key, verdict, origin, labeled_by,
+RETURNING id, org_id, dataset_id, rec_a_key, rec_b_key, verdict, origin, labeled_by,
           model_version, score_at_label, note, created_at, updated_at
 ";
         let rows = client
@@ -101,6 +106,7 @@ RETURNING id, org_id, rec_a_key, rec_b_key, verdict, origin, labeled_by,
                 &[
                     &label_id,
                     &org_id,
+                    &dataset_id,
                     &rec_a_key,
                     &rec_b_key,
                     &verdict,
@@ -117,6 +123,7 @@ RETURNING id, org_id, rec_a_key, rec_b_key, verdict, origin, labeled_by,
             .map(|row| super::PairLabel {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 rec_a_key: row.get("rec_a_key"),
                 rec_b_key: row.get("rec_b_key"),
                 verdict: row.get("verdict"),
@@ -139,7 +146,8 @@ pub mod read {
         client: &impl ::tokio_postgres::GenericClient,
         org_id: &str,
     ) -> ::std::result::Result<Vec<super::PairLabel>, ::tokio_postgres::Error> {
-        const SQL: &str = "SELECT id, org_id, rec_a_key, rec_b_key, verdict, origin, labeled_by,
+        const SQL: &str =
+            "SELECT id, org_id, dataset_id, rec_a_key, rec_b_key, verdict, origin, labeled_by,
        model_version, score_at_label, note, created_at, updated_at
 FROM public.pair_labels
 WHERE org_id = $1
@@ -151,6 +159,7 @@ ORDER BY rec_a_key, rec_b_key
             .map(|row| super::PairLabel {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 rec_a_key: row.get("rec_a_key"),
                 rec_b_key: row.get("rec_b_key"),
                 verdict: row.get("verdict"),
@@ -173,7 +182,8 @@ ORDER BY rec_a_key, rec_b_key
         origin: Option<&str>,
         limit: i64,
     ) -> ::std::result::Result<Vec<super::PairLabel>, ::tokio_postgres::Error> {
-        const SQL: &str = "SELECT id, org_id, rec_a_key, rec_b_key, verdict, origin, labeled_by,
+        const SQL: &str =
+            "SELECT id, org_id, dataset_id, rec_a_key, rec_b_key, verdict, origin, labeled_by,
        model_version, score_at_label, note, created_at, updated_at
 FROM public.pair_labels
 WHERE org_id = $1
@@ -190,6 +200,7 @@ LIMIT $4
             .map(|row| super::PairLabel {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 rec_a_key: row.get("rec_a_key"),
                 rec_b_key: row.get("rec_b_key"),
                 verdict: row.get("verdict"),
@@ -202,5 +213,20 @@ LIMIT $4
                 updated_at: row.get("updated_at"),
             })
             .collect())
+    }
+}
+
+pub mod update {
+    //! @generated query functions for this entity + operation.
+    /// The dataset_id backfill (fixup 0002): stamp every pre-dataset row with its org's default dataset. Idempotent — only NULL rows are touched, so a re-run after new writes (which stamp themselves) is a no-op.
+    pub async fn backfill_dataset(
+        client: &impl ::tokio_postgres::GenericClient,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str = "UPDATE public.pair_labels c
+SET dataset_id = d.id, updated_at = now()
+FROM public.datasets d
+WHERE d.org_id = c.org_id AND d.name = 'default' AND c.dataset_id IS NULL
+";
+        client.execute(SQL, &[]).await
     }
 }

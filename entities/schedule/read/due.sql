@@ -1,6 +1,6 @@
 SELECT
   s.id,
-  s.org_id,
+  s.org_id, dataset_id,
   s.kind,
   s.params,
   s.cron,

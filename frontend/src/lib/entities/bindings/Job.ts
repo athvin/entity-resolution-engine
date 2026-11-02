@@ -7,6 +7,8 @@ export interface Job {
   id: string;
   /** The tenant this job runs for. */
   org_id: string;
+  /** The dataset this job runs against. NULL only for org-level kinds (provision) — every lake-touching job carries it, and the per-dataset writer lock keys on it once the queue is re-scoped. */
+  dataset_id: string | null;
   /** The job kind (run_all, correct, maintain, train, ...). */
   kind: string;
   /** Kind-specific parameters. */

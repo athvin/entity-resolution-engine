@@ -4,6 +4,7 @@ WHERE live IS TRUE AND state IN ('queued', 'running', 'restarting', 'canceling')
 RETURNING
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,

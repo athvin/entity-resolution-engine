@@ -10,7 +10,7 @@ WITH RECURSIVE lineage AS (
 )
 SELECT
   ti.id,
-  ti.org_id,
+  ti.org_id, dataset_id,
   ti.job_id,
   ti.task_id,
   ti.seq,

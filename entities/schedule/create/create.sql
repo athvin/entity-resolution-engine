@@ -1,2 +1,2 @@
-INSERT INTO public.schedules (id, org_id, kind, params, cron, source)
-VALUES ($schedule_id, $org_id, $kind, $params, $cron, 'api')
+INSERT INTO public.schedules (id, org_id, dataset_id, kind, params, cron, source)
+VALUES ($schedule_id, $org_id, $dataset_id, $kind, $params, $cron, 'api')

@@ -5,6 +5,7 @@ description: "Record an event for one subscriber, before anything is sent. This 
 params:
   - { name: id, type: varchar }
   - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar, nullable: true }
   - { name: webhook_id, type: varchar }
   - { name: event_type, type: varchar }
   - { name: payload, type: json }

@@ -5,6 +5,7 @@ description: "Mint the next version of a named model for a tenant. The version n
 params:
   - { name: model_id, type: varchar }
   - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar, nullable: true }
   - { name: name, type: varchar }
   - { name: entity_type, type: varchar }
   - { name: model_json, type: varchar }

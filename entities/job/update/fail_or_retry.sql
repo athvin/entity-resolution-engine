@@ -17,6 +17,7 @@ WHERE id = $job_id
 RETURNING
   id,
   org_id,
+  dataset_id,
   kind,
   params,
   state,

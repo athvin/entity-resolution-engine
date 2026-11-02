@@ -10,6 +10,8 @@ pub struct TaskInstance {
     pub id: String,
     /// Tenant.
     pub org_id: String,
+    /// Copied from the job at planning (NULL for org-level jobs); the per-dataset pod lock keys on it once the executor is re-scoped.
+    pub dataset_id: Option<String>,
     /// The run (jobs.id == run_id).
     pub job_id: String,
     /// Task::NAME, stable across renames.
@@ -116,6 +118,7 @@ impl TaskInstance {
         &[
             "id",
             "org_id",
+            "dataset_id",
             "job_id",
             "task_id",
             "seq",
@@ -175,10 +178,10 @@ pub mod create {
         task_instance_id: &str,
     ) -> ::std::result::Result<Vec<super::TaskInstance>, ::tokio_postgres::Error> {
         const SQL: &str = "INSERT INTO public.task_instances
-  (id, org_id, job_id, task_id, seq, try_number, live, kind, state, trigger_rule, upstream, teardown, segment,
+  (id, org_id, dataset_id, job_id, task_id, seq, try_number, live, kind, state, trigger_rule, upstream, teardown, segment,
    resource_class, max_tries, max_launches, image_digest, trace_context)
 SELECT encode(sha256(convert_to('task_instances:' || job_id || ':' || task_id || ':' || (try_number + 1)::text, 'UTF8')), 'hex'),
-       org_id, job_id, task_id, seq, try_number + 1, TRUE, kind, 'none', trigger_rule, upstream, teardown, segment,
+       org_id, dataset_id, job_id, task_id, seq, try_number + 1, TRUE, kind, 'none', trigger_rule, upstream, teardown, segment,
        COALESCE($1, next_resource_class, resource_class), try_number + $2, max_launches,
        $3, trace_context
 FROM public.task_instances
@@ -188,6 +191,7 @@ WHERE id = $4 AND live IS NULL AND archived_reason IN ('cleared', 'restarted')
 RETURNING
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,
@@ -244,6 +248,7 @@ RETURNING
             .map(|row| super::TaskInstance {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 job_id: row.get("job_id"),
                 task_id: row.get("task_id"),
                 seq: row.get("seq"),
@@ -301,10 +306,10 @@ RETURNING
         task_instance_id: &str,
     ) -> ::std::result::Result<Vec<super::TaskInstance>, ::tokio_postgres::Error> {
         const SQL: &str = "INSERT INTO public.task_instances
-  (id, org_id, job_id, task_id, seq, try_number, live, kind, state, trigger_rule, upstream, teardown, segment,
+  (id, org_id, dataset_id, job_id, task_id, seq, try_number, live, kind, state, trigger_rule, upstream, teardown, segment,
    resource_class, escalated_from, max_tries, max_launches, not_before, input, image_digest, trace_context)
 SELECT encode(sha256(convert_to('task_instances:' || job_id || ':' || task_id || ':' || (try_number + 1)::text, 'UTF8')), 'hex'),
-       org_id, job_id, task_id, seq, try_number + 1, TRUE, kind, 'up_for_retry', trigger_rule, upstream, teardown,
+       org_id, dataset_id, job_id, task_id, seq, try_number + 1, TRUE, kind, 'up_for_retry', trigger_rule, upstream, teardown,
        CASE WHEN $1 THEN NULL ELSE segment END,
        CASE WHEN $1 AND resource_class = 'S' THEN 'M'
             WHEN $1 AND resource_class = 'M' THEN 'L' ELSE resource_class END,
@@ -322,6 +327,7 @@ WHERE id = $4 AND live IS NULL AND archived_reason = 'retry'
 RETURNING
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,
@@ -378,6 +384,7 @@ RETURNING
             .map(|row| super::TaskInstance {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 job_id: row.get("job_id"),
                 task_id: row.get("task_id"),
                 seq: row.get("seq"),
@@ -431,6 +438,7 @@ RETURNING
         client: &impl ::tokio_postgres::GenericClient,
         id: &str,
         org_id: &str,
+        dataset_id: Option<&str>,
         job_id: &str,
         task_id: &str,
         seq: i64,
@@ -446,14 +454,15 @@ RETURNING
         trace_context: Option<&str>,
     ) -> ::std::result::Result<Vec<super::TaskInstance>, ::tokio_postgres::Error> {
         const SQL: &str = "INSERT INTO public.task_instances
-  (id, org_id, job_id, task_id, seq, try_number, live, kind, state, trigger_rule, upstream, teardown,
+  (id, org_id, dataset_id, job_id, task_id, seq, try_number, live, kind, state, trigger_rule, upstream, teardown,
    segment, resource_class, max_tries, max_launches, image_digest, trace_context)
-VALUES ($1, $2, $3, $4, $5, 1, TRUE, $6, 'none', $7, $8, $9,
-   $10, $11, $12, $13, $14, $15)
+VALUES ($1, $2, $3, $4, $5, $6, 1, TRUE, $7, 'none', $8, $9, $10,
+   $11, $12, $13, $14, $15, $16)
 ON CONFLICT (job_id, task_id, try_number) DO NOTHING
 RETURNING
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,
@@ -505,6 +514,7 @@ RETURNING
                 &[
                     &id,
                     &org_id,
+                    &dataset_id,
                     &job_id,
                     &task_id,
                     &seq,
@@ -526,6 +536,7 @@ RETURNING
             .map(|row| super::TaskInstance {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 job_id: row.get("job_id"),
                 task_id: row.get("task_id"),
                 seq: row.get("seq"),
@@ -585,7 +596,7 @@ pub mod read {
     ) -> ::std::result::Result<Vec<super::TaskInstance>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT
   id,
-  org_id,
+  org_id, dataset_id,
   job_id,
   task_id,
   seq,
@@ -640,6 +651,7 @@ ORDER BY seq, try_number
             .map(|row| super::TaskInstance {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 job_id: row.get("job_id"),
                 task_id: row.get("task_id"),
                 seq: row.get("seq"),
@@ -695,6 +707,7 @@ ORDER BY seq, try_number
         const SQL: &str = "SELECT
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,
@@ -751,6 +764,7 @@ ORDER BY job_id, seq
             .map(|row| super::TaskInstance {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 job_id: row.get("job_id"),
                 task_id: row.get("task_id"),
                 seq: row.get("seq"),
@@ -816,7 +830,7 @@ ORDER BY job_id, seq
 )
 SELECT
   ti.id,
-  ti.org_id,
+  ti.org_id, dataset_id,
   ti.job_id,
   ti.task_id,
   ti.seq,
@@ -871,6 +885,7 @@ ORDER BY ti.try_number DESC
             .map(|row| super::TaskInstance {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 job_id: row.get("job_id"),
                 task_id: row.get("task_id"),
                 seq: row.get("seq"),
@@ -928,6 +943,7 @@ ORDER BY ti.try_number DESC
         const SQL: &str = "SELECT
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,
@@ -985,6 +1001,7 @@ ORDER BY heartbeat_at
             .map(|row| super::TaskInstance {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 job_id: row.get("job_id"),
                 task_id: row.get("task_id"),
                 seq: row.get("seq"),
@@ -1047,6 +1064,7 @@ WHERE live IS TRUE AND state IN ('queued', 'running', 'restarting', 'canceling')
 RETURNING
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,
@@ -1098,6 +1116,7 @@ RETURNING
             .map(|row| super::TaskInstance {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 job_id: row.get("job_id"),
                 task_id: row.get("task_id"),
                 seq: row.get("seq"),
@@ -1173,6 +1192,7 @@ WHERE id = $8 AND live IS TRUE AND kind = 'pod' AND state = 'none'
 RETURNING
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,
@@ -1242,6 +1262,7 @@ RETURNING
             .map(|row| super::TaskInstance {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 job_id: row.get("job_id"),
                 task_id: row.get("task_id"),
                 seq: row.get("seq"),
@@ -1305,6 +1326,7 @@ WHERE org_id = $1 AND job_id = $2 AND live IS TRUE
 RETURNING
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,
@@ -1356,6 +1378,7 @@ RETURNING
             .map(|row| super::TaskInstance {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 job_id: row.get("job_id"),
                 task_id: row.get("task_id"),
                 seq: row.get("seq"),
@@ -1420,6 +1443,7 @@ WHERE id = $3 AND live IS TRUE AND state = 'restarting'
 RETURNING
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,
@@ -1481,6 +1505,7 @@ RETURNING
             .map(|row| super::TaskInstance {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 job_id: row.get("job_id"),
                 task_id: row.get("task_id"),
                 seq: row.get("seq"),
@@ -1554,6 +1579,7 @@ WHERE id = $7 AND live IS TRUE AND state IN ('queued', 'running')
 RETURNING
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,
@@ -1619,6 +1645,7 @@ RETURNING
             .map(|row| super::TaskInstance {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 job_id: row.get("job_id"),
                 task_id: row.get("task_id"),
                 seq: row.get("seq"),
@@ -1667,6 +1694,18 @@ RETURNING
             .collect())
     }
 
+    /// The dataset_id backfill (fixup 0002): stamp every pre-dataset row with its org's default dataset. Idempotent — only NULL rows are touched, so a re-run after new writes (which stamp themselves) is a no-op.
+    pub async fn backfill_dataset(
+        client: &impl ::tokio_postgres::GenericClient,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str = "UPDATE public.task_instances c
+SET dataset_id = d.id, updated_at = now()
+FROM public.datasets d
+WHERE d.org_id = c.org_id AND d.name = 'default' AND c.dataset_id IS NULL
+";
+        client.execute(SQL, &[]).await
+    }
+
     /// The cancel sweep's live arm: the write-ahead marker before a row's Job is revoked and deleted; settled to canceled only when the watch reports the pod gone (§5.6).
     pub async fn cancel_live(
         client: &impl ::tokio_postgres::GenericClient,
@@ -1680,6 +1719,7 @@ WHERE org_id = $1 AND job_id = $2 AND live IS TRUE
 RETURNING
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,
@@ -1731,6 +1771,7 @@ RETURNING
             .map(|row| super::TaskInstance {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 job_id: row.get("job_id"),
                 task_id: row.get("task_id"),
                 seq: row.get("seq"),
@@ -1792,6 +1833,7 @@ WHERE org_id = $1 AND job_id = $2 AND live IS TRUE
 RETURNING
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,
@@ -1843,6 +1885,7 @@ RETURNING
             .map(|row| super::TaskInstance {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 job_id: row.get("job_id"),
                 task_id: row.get("task_id"),
                 seq: row.get("seq"),
@@ -1908,6 +1951,7 @@ WHERE id = $3 AND live IS TRUE AND state = 'queued' AND k8s_job_name = $4
 RETURNING
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,
@@ -1969,6 +2013,7 @@ RETURNING
             .map(|row| super::TaskInstance {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 job_id: row.get("job_id"),
                 task_id: row.get("task_id"),
                 seq: row.get("seq"),
@@ -2038,6 +2083,7 @@ WHERE id = (
 RETURNING
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,
@@ -2089,6 +2135,7 @@ RETURNING
             .map(|row| super::TaskInstance {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 job_id: row.get("job_id"),
                 task_id: row.get("task_id"),
                 seq: row.get("seq"),
@@ -2174,6 +2221,7 @@ WHERE id = (
 RETURNING
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,
@@ -2230,6 +2278,7 @@ RETURNING
             .map(|row| super::TaskInstance {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 job_id: row.get("job_id"),
                 task_id: row.get("task_id"),
                 seq: row.get("seq"),
@@ -2300,6 +2349,7 @@ WHERE id = $8 AND live IS TRUE AND state = 'running' AND pod_uid = $9
 RETURNING
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,
@@ -2366,6 +2416,7 @@ RETURNING
             .map(|row| super::TaskInstance {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 job_id: row.get("job_id"),
                 task_id: row.get("task_id"),
                 seq: row.get("seq"),
@@ -2433,6 +2484,7 @@ WHERE id = $5 AND live IS TRUE AND state = 'running'
 RETURNING
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,
@@ -2496,6 +2548,7 @@ RETURNING
             .map(|row| super::TaskInstance {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 job_id: row.get("job_id"),
                 task_id: row.get("task_id"),
                 seq: row.get("seq"),
@@ -2557,6 +2610,7 @@ WHERE id = $2 AND live IS TRUE AND state = 'running' AND pod_uid = $3
 RETURNING
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,
@@ -2610,6 +2664,7 @@ RETURNING
             .map(|row| super::TaskInstance {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 job_id: row.get("job_id"),
                 task_id: row.get("task_id"),
                 seq: row.get("seq"),
@@ -2672,6 +2727,7 @@ WHERE id = $2 AND live IS TRUE AND state = 'none'
 RETURNING
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,
@@ -2725,6 +2781,7 @@ RETURNING
             .map(|row| super::TaskInstance {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 job_id: row.get("job_id"),
                 task_id: row.get("task_id"),
                 seq: row.get("seq"),
@@ -2788,6 +2845,7 @@ WHERE id = $3 AND live IS TRUE AND state IN ('running', 'restarting', 'canceling
 RETURNING
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,
@@ -2844,6 +2902,7 @@ RETURNING
             .map(|row| super::TaskInstance {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 job_id: row.get("job_id"),
                 task_id: row.get("task_id"),
                 seq: row.get("seq"),
@@ -2906,6 +2965,7 @@ WHERE id = $2 AND live IS TRUE AND state = 'none'
 RETURNING
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,
@@ -2959,6 +3019,7 @@ RETURNING
             .map(|row| super::TaskInstance {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 job_id: row.get("job_id"),
                 task_id: row.get("task_id"),
                 seq: row.get("seq"),
@@ -3023,6 +3084,7 @@ WHERE id = $3 AND pod_uid = $4 AND k8s_job_name = $5
 RETURNING
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,
@@ -3085,6 +3147,7 @@ RETURNING
             .map(|row| super::TaskInstance {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 job_id: row.get("job_id"),
                 task_id: row.get("task_id"),
                 seq: row.get("seq"),
@@ -3150,6 +3213,7 @@ WHERE id = $3 AND live IS TRUE AND state IN ('queued', 'running')
 RETURNING
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,
@@ -3211,6 +3275,7 @@ RETURNING
             .map(|row| super::TaskInstance {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 job_id: row.get("job_id"),
                 task_id: row.get("task_id"),
                 seq: row.get("seq"),
@@ -3278,6 +3343,7 @@ WHERE org_id = $4 AND job_id = $5 AND live IS TRUE AND state IN ('none', 'schedu
 RETURNING
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,
@@ -3341,6 +3407,7 @@ RETURNING
             .map(|row| super::TaskInstance {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 job_id: row.get("job_id"),
                 task_id: row.get("task_id"),
                 seq: row.get("seq"),
@@ -3404,6 +3471,7 @@ WHERE org_id = $2 AND job_id = $3 AND live IS TRUE AND state IN ('queued', 'runn
 RETURNING
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,
@@ -3457,6 +3525,7 @@ RETURNING
             .map(|row| super::TaskInstance {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 job_id: row.get("job_id"),
                 task_id: row.get("task_id"),
                 seq: row.get("seq"),
@@ -3521,6 +3590,7 @@ WHERE id = $3 AND live IS TRUE AND state = 'canceling'
 RETURNING
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,
@@ -3582,6 +3652,7 @@ RETURNING
             .map(|row| super::TaskInstance {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 job_id: row.get("job_id"),
                 task_id: row.get("task_id"),
                 seq: row.get("seq"),
@@ -3647,6 +3718,7 @@ WHERE id = $5 AND live IS TRUE AND state = 'queued' AND k8s_job_name = $6
 RETURNING
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,
@@ -3710,6 +3782,7 @@ RETURNING
             .map(|row| super::TaskInstance {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 job_id: row.get("job_id"),
                 task_id: row.get("task_id"),
                 seq: row.get("seq"),

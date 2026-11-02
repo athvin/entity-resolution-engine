@@ -7,6 +7,8 @@ export interface Schedule {
   id: string;
   /** The tenant this schedule runs for. */
   org_id: string;
+  /** The dataset this schedule enqueues for. */
+  dataset_id: string | null;
   /** The job kind the schedule enqueues. */
   kind: string;
   /** Kind-specific parameters. */

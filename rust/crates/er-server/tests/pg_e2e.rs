@@ -34,6 +34,7 @@ async fn queue_lifecycle_over_postgres() {
     let high = pg::enqueue(
         &client,
         &oid(&client, "acme").await,
+        None,
         "run",
         5,
         None,
@@ -45,6 +46,7 @@ async fn queue_lifecycle_over_postgres() {
     let _low = pg::enqueue(
         &client,
         &oid(&client, "acme").await,
+        None,
         "run",
         0,
         None,
@@ -78,6 +80,7 @@ async fn queue_lifecycle_over_postgres() {
     let a = pg::enqueue(
         &client,
         &oid(&client, "acme").await,
+        None,
         "run",
         0,
         Some("k1"),
@@ -89,6 +92,7 @@ async fn queue_lifecycle_over_postgres() {
     let b = pg::enqueue(
         &client,
         &oid(&client, "acme").await,
+        None,
         "run",
         0,
         Some("k1"),

@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS public.webhooks (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
+  dataset_id text REFERENCES datasets(id),
   url text NOT NULL,
   events jsonb NOT NULL DEFAULT '[]'::jsonb,
   secret text NOT NULL,
@@ -9,6 +10,7 @@ CREATE TABLE IF NOT EXISTS public.webhooks (
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (id)
 );
+CREATE INDEX IF NOT EXISTS webhooks_dataset ON public.webhooks (dataset_id);
 CREATE TABLE IF NOT EXISTS public.webhooks_history (
   history_id bigserial NOT NULL,
   row_id text NOT NULL,

@@ -116,6 +116,7 @@ async fn a_transient_failure_retries_with_backoff_and_a_permanent_one_does_not()
     let job = pg::enqueue(
         &client,
         &org_id,
+        None,
         "run_all_full",
         0,
         None,
@@ -215,6 +216,7 @@ async fn a_transient_failure_retries_with_backoff_and_a_permanent_one_does_not()
     let job2 = pg::enqueue(
         &client,
         &org_id,
+        None,
         "correct",
         0,
         None,
@@ -260,6 +262,7 @@ async fn a_transient_failure_retries_with_backoff_and_a_permanent_one_does_not()
     let job3 = pg::enqueue(
         &client,
         &org_id,
+        None,
         "lake_maintain",
         0,
         None,

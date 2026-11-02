@@ -1,6 +1,7 @@
 SELECT
   id,
   org_id,
+  dataset_id,
   parent_entity_id,
   child_entity_id,
   kind,
