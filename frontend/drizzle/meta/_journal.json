@@ -50,6 +50,13 @@
       "when": 1793107298299,
       "tag": "0006_early_molten_man",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793627353780,
+      "tag": "0007_thick_cyclops",
+      "breakpoints": true
     }
   ]
 }

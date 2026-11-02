@@ -409,6 +409,7 @@ erDiagram
     review_recommendations {
         double confidence
         timestamptz created_at
+        text dataset PK
         double match_probability
         text model
         text org PK
@@ -420,6 +421,7 @@ erDiagram
     saved_views {
         timestamptz created_at
         text created_by
+        text dataset
         jsonb definition
         text id PK
         text name
@@ -429,6 +431,7 @@ erDiagram
     segments {
         timestamptz created_at
         text created_by
+        text dataset
         jsonb definition
         text id PK
         text name
@@ -448,6 +451,7 @@ erDiagram
     }
     usage_events {
         timestamptz at
+        text dataset
         text detail
         text id PK
         text kind

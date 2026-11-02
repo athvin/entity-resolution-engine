@@ -39,6 +39,7 @@ function toWire(row: typeof schema.reviewRecommendations.$inferSelect): StoredRe
  */
 export async function saveRecommendation(
   org: string,
+  dataset: string,
   reviewId: string,
   recommendation: Recommendation,
   meta: { model: string; matchProbability: number | null; requestedBy: string },
@@ -46,6 +47,7 @@ export async function saveRecommendation(
   const database = await db();
   const values = {
     org,
+    dataset,
     reviewId,
     verdict: recommendation.verdict,
     confidence: recommendation.confidence,
@@ -59,7 +61,11 @@ export async function saveRecommendation(
     .insert(schema.reviewRecommendations)
     .values(values)
     .onConflictDoUpdate({
-      target: [schema.reviewRecommendations.org, schema.reviewRecommendations.reviewId],
+      target: [
+        schema.reviewRecommendations.org,
+        schema.reviewRecommendations.dataset,
+        schema.reviewRecommendations.reviewId,
+      ],
       set: values,
     })
     .returning();
@@ -79,6 +85,7 @@ export async function saveRecommendation(
  */
 export async function recommendationsFor(
   org: string,
+  dataset: string,
   reviewIds: string[],
 ): Promise<Record<string, StoredRecommendation>> {
   if (reviewIds.length === 0) return {};
@@ -89,6 +96,7 @@ export async function recommendationsFor(
     .where(
       and(
         eq(schema.reviewRecommendations.org, org),
+        eq(schema.reviewRecommendations.dataset, dataset),
         inArray(schema.reviewRecommendations.reviewId, reviewIds),
       ),
     );

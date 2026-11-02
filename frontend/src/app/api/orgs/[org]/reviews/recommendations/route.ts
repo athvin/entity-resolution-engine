@@ -48,6 +48,8 @@ export async function GET(
     }
     // De-duplicated so a repeated id cannot inflate the query, and because the
     // response is keyed by id anyway — duplicates could never be distinguished.
-    return NextResponse.json(await recommendationsFor(org, [...new Set(ids)]));
+    // "default": the one dataset every org has until the dataset-scoped routes
+    // land and this route moves under datasets/[ds].
+    return NextResponse.json(await recommendationsFor(org, "default", [...new Set(ids)]));
   });
 }
