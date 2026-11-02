@@ -72,6 +72,7 @@ data:
           # SIGTERM -> rollback -> exit 3; must exceed the longest write-back.
           terminationGracePeriodSeconds: 120
           priorityClassName: {{ $.Values.executor.priorityClass.scheduled }}
+          {{- if $c.nodepool }}
           tolerations:
             - key: er.dupezero.com/runner
               operator: Equal
@@ -79,6 +80,7 @@ data:
               effect: NoSchedule
           nodeSelector:
             karpenter.sh/nodepool: {{ $c.nodepool }}
+          {{- end }}
           securityContext:
             runAsNonRoot: true
             runAsUser: 1001

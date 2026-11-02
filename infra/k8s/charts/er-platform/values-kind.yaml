@@ -1,0 +1,38 @@
+# The kind profile (batch-orchestration-design §11 Phase 2's probe): the
+# er-platform chart with every AWS edge swapped for a local equivalent, and the
+# executor ON for the two Phase 2 kinds. Installed by scripts/kind_env.sh as
+# `-f values-kind.yaml`; the image coordinates ride --set from the script.
+#
+# What this profile proves that no unit tier can: a real pod's projected token
+# against a real API server's JWKS, adoption across a dispatcher restart, and
+# cancel-through-canceling against a live DuckDB.
+developer: er-kind
+environment: kind
+
+externalSecrets:
+  # kind has no Secrets Manager; kind_env.sh creates er-erserver-env directly.
+  enabled: false
+
+web:
+  # The probe exercises the orchestration stack; the BFF buys nothing here.
+  enabled: false
+
+efs:
+  # The kind node's extraMount (infra/k8s/kind/cluster.yaml).
+  hostPath: /mnt/er
+
+erserver:
+  email:
+    backend: log
+
+executor:
+  # The whole point: lake_maintain and lake_migrate run as per-attempt
+  # Kubernetes Jobs, on the one kind node, with no nodepool pinning.
+  dagKinds: "lake_maintain,lake_migrate"
+  inFlightCap: 2
+  # Sized for a laptop's docker VM, not for EKS; every class identical and
+  # unpinned because kind has one node and no Karpenter.
+  classes:
+    S: { cpu: "1", memory: 1Gi, duckdbMemory: 500MB, spill: 2Gi, nodepool: "" }
+    M: { cpu: "1", memory: 1Gi, duckdbMemory: 500MB, spill: 2Gi, nodepool: "" }
+    L: { cpu: "1", memory: 1Gi, duckdbMemory: 500MB, spill: 2Gi, nodepool: "" }

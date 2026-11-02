@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := check
-.PHONY: build fmt lint doc test check check-e2e entities-check skills-check frontend frontend-audit frontend-coverage run frontend-dev frontend-e2e frontend-baselines frontend-dev-reset image-api cluster-objects nodepools measure-runner-startup dev-up dev-suspend dev-resume dev-down obs-up clean symposium
+.PHONY: build fmt lint doc test check check-e2e entities-check skills-check frontend frontend-audit frontend-coverage run frontend-dev frontend-e2e frontend-baselines frontend-dev-reset image-api cluster-objects nodepools kind-up kind-down check-kind measure-runner-startup dev-up dev-suspend dev-resume dev-down obs-up clean symposium
 
 # --- Rust backend: the application (engine, CLI, control plane) lives in rust/ ---
 #
@@ -192,6 +192,20 @@ cluster-objects:
 
 # The old name, kept callable because muscle memory and docs point at it.
 nodepools: cluster-objects
+
+# The kind probe (batch-orchestration-design §11 Phase 2): the executor end to
+# end on a local cluster — real pods, real projected tokens against the real
+# API server's JWKS, adoption across a dispatcher restart, cancel. kind-up
+# builds the er-api image locally (long on first run; ER_KIND_SKIP_BUILD=1
+# reuses it); check-kind drives the four probe phases.
+kind-up:
+	bash scripts/kind_env.sh up
+
+kind-down:
+	bash scripts/kind_env.sh down
+
+check-kind:
+	bash scripts/check_kind.sh
 
 # Measure runner startup on the live cluster (docs/infrastructure.md §18.16).
 # Run once per image to build a before/after record:

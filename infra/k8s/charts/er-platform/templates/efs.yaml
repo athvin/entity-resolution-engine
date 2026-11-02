@@ -27,9 +27,17 @@ spec:
   claimRef:
     namespace: {{ .Release.Namespace }}
     name: er-efs
+  {{- if .Values.efs.hostPath }}
+  # The kind profile: the shared filesystem is a directory on the (single)
+  # kind node, mounted in by the cluster config's extraMounts.
+  hostPath:
+    path: {{ .Values.efs.hostPath }}
+    type: DirectoryOrCreate
+  {{- else }}
   csi:
     driver: efs.csi.aws.com
     volumeHandle: {{ required "efs.fileSystemId is required (fs-…)" .Values.efs.fileSystemId }}::{{ required "efs.accessPointId is required (fsap-…)" .Values.efs.accessPointId }}
+  {{- end }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

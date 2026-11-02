@@ -74,6 +74,14 @@ spec:
               containerPort: 8000
           env:
             {{- include "er-platform.erserverEnv" . | nindent 12 }}
+            # The cancel route needs to know which kinds the EXECUTOR runs
+            # (cancel-through-canceling vs the legacy arm); this populates
+            # AppState.executor_kinds only — the API process never builds an
+            # executor, that is the dispatcher Deployment's job.
+            {{- with .Values.executor.dagKinds }}
+            - name: ER_EXECUTOR_DAG_KINDS
+              value: {{ . | quote }}
+            {{- end }}
           envFrom:
             - secretRef:
                 name: er-erserver-env
@@ -103,6 +111,7 @@ spec:
             - name: api-server-token
               mountPath: /var/run/secrets/kubernetes.io/serviceaccount
               readOnly: true
+        {{- if .Values.web.enabled }}
         # --- the Next.js BFF (browser-facing) ---
         - name: er-web
           image: {{ include "er-platform.image" (dict "root" . "image" .Values.images.web) }}
@@ -139,6 +148,7 @@ spec:
             periodSeconds: 10
           resources:
             {{- toYaml .Values.web.resources | nindent 12 }}
+        {{- end }}
       volumes:
         - name: er-efs
           persistentVolumeClaim:

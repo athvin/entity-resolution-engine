@@ -19,11 +19,22 @@
 # relative path broke every image build while `make check` stayed green.
 FROM rust:1-bookworm AS build
 WORKDIR /src
+# mold is the LINKER FIX, not an optimisation: on aarch64-linux, GNU ld fails
+# this link with `undefined reference to duckdb_register_static_extensions` —
+# libduckdb-sys's whole-archive extension-autoregister object lands AFTER the
+# rlib group on the command line, and single-pass ld never extracts the
+# defining member from the bundled libduckdb. mold resolves symbols globally
+# regardless of archive order (amd64 happens to link either way, and CI's
+# `test` job has linked with mold for weeks), so one unconditional linker keeps
+# the two architectures' builds identical. Observed 2026-11-02 building the
+# kind-probe image on an arm64 host.
+RUN apt-get update && apt-get install -y --no-install-recommends mold \
+    && rm -rf /var/lib/apt/lists/*
 COPY . .
 # DuckDB is compiled from sources vendored inside the `libduckdb-sys` crate (the
 # `bundled` feature untars them and builds with cc), so the only network the
 # build stage needs is crates.io — it does NOT fetch a prebuilt library.
-RUN cargo build --release --bin er-server
+RUN RUSTFLAGS="-C link-arg=-fuse-ld=mold" cargo build --release --bin er-server
 RUN strip target/release/er-server || true
 
 # Bake the DuckDB extensions, using the binary just built.

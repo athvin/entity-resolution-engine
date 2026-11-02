@@ -36,6 +36,10 @@ images:
 
 externalSecrets:
   # infra/k8s/secrets/cluster-secret-store.yaml, installed in task 1.6.
+  # `enabled: false` (the kind profile) skips the ExternalSecrets entirely —
+  # the install script then creates er-erserver-env/er-erweb-env directly,
+  # because kind has no Secrets Manager to project from.
+  enabled: true
   clusterSecretStore: aws-secrets-manager
   refreshInterval: 1h
 
@@ -47,6 +51,10 @@ efs:
   fileSystemId: "" # fs-…       (required to install; the PV cannot mount without it)
   accessPointId: "" # fsap-…    (posix user 1001:1001 — the er uid in Dockerfile.api)
   mountPath: /srv/er
+  # The kind profile: a node-local directory instead of EFS. When set, the PV
+  # is a hostPath under the kind node's extraMount and the fs/accessPoint ids
+  # are not required — batch-orchestration-design §11 Phase 2's kind probe.
+  hostPath: ""
 
 erserver:
   # s3://{lake.bucket}/{lake.prefix}/{ns}/ — §7.3's nonprod layout. prefix
@@ -154,6 +162,10 @@ tenantMigrate:
     schedule: "17 4 * * *"
 
 web:
+  # `enabled: false` (the kind profile) drops the er-web container, its
+  # Service and the drizzle hook: the kind probe exercises the orchestration
+  # stack, and building the web image for a throwaway cluster buys nothing.
+  enabled: true
   replicas: 1
   resources:
     requests: { cpu: 100m, memory: 256Mi }

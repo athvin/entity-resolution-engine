@@ -8,6 +8,7 @@
 # sit in CreateContainerConfigError until ESO's first sync lands the
 # er-erweb-env Secret. The kubelet retries container-config resolution without
 # consuming backoffLimit; the deadline below bounds the wait.
+{{- if .Values.web.enabled }}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -53,3 +54,4 @@ spec:
           resources:
             requests: { cpu: 100m, memory: 128Mi }
             limits: { cpu: 500m, memory: 512Mi }
+{{- end }}

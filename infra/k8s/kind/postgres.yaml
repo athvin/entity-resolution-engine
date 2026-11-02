@@ -1,0 +1,60 @@
+# The kind probe's control-plane Postgres: deliberately ephemeral (emptyDir —
+# `kind delete cluster` is the teardown, there is nothing to retain) and
+# deliberately NOT the er-dev-namespace chart, whose StatefulSet comes with
+# ExternalSecrets, quotas and PSS labels the probe does not need. Same image
+# family as the CI service container in rust.yml's ducklake-e2e job.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: er-postgres
+  namespace: er-kind
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: er-postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: er-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          env:
+            - name: POSTGRES_USER
+              value: er
+            - name: POSTGRES_PASSWORD
+              value: er
+            - name: POSTGRES_DB
+              value: er
+          ports:
+            - containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "er"]
+            initialDelaySeconds: 3
+            periodSeconds: 3
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: "1", memory: 1Gi }
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: er-postgres
+  namespace: er-kind
+spec:
+  selector:
+    app.kubernetes.io/name: er-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
