@@ -190,7 +190,26 @@ pub async fn enqueue_tenant_migrations(
         if org.state != "active" {
             continue;
         }
-        for dataset in pg::list_datasets(client, &org.id).await? {
+        let datasets = pg::list_datasets(client, &org.id).await?;
+        if datasets.is_empty() {
+            // An org the convergence sweep has not met yet (created since the
+            // last boot) still has an org-level lake position: sweep it as one
+            // org-level job, which the dispatcher runs on the org env.
+            let job = pg::enqueue(
+                client,
+                &org.id,
+                None,
+                LAKE_MIGRATE_KIND,
+                LAKE_MIGRATE_PRIORITY,
+                None,
+                None,
+                pg::Provenance::actor("er-server migrate-tenants"),
+            )
+            .await?;
+            jobs.push((org.name, job));
+            continue;
+        }
+        for dataset in datasets {
             if dataset.state != "active" {
                 continue;
             }
