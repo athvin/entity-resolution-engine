@@ -51,18 +51,19 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
   17  aws_iam_role
   13  aws_iam_role_policy
    8  aws_iam_role_policy_attachment
-   6  aws_s3_bucket
-   6  aws_s3_bucket_public_access_block
+   7  aws_s3_bucket
+   7  aws_s3_bucket_public_access_block
    5  aws_eks_pod_identity_association
    5  aws_s3_bucket_policy
+   5  aws_s3_bucket_server_side_encryption_configuration
    4  aws_eks_addon
    4  aws_kms_alias
    4  aws_kms_key
-   4  aws_s3_bucket_server_side_encryption_configuration
    4  aws_secretsmanager_secret
    4  aws_secretsmanager_secret_version
    4  aws_ssoadmin_account_assignment
    4  aws_ssoadmin_permission_set
+   3  aws_s3_bucket_lifecycle_configuration
    3  aws_s3_bucket_versioning
    3  aws_security_group
    3  aws_ssoadmin_managed_policy_attachment
@@ -79,9 +80,9 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
    2  aws_route
    2  aws_route_table
    2  aws_route_table_association
-   2  aws_s3_bucket_lifecycle_configuration
    2  aws_ssoadmin_permission_set_inline_policy
    2  aws_subnet
+   1  aws_athena_workgroup
    1  aws_bcmdataexports_export
    1  aws_bedrock_foundation_model_agreement
    1  aws_bedrock_use_case_for_model_access
@@ -98,6 +99,8 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
    1  aws_eks_access_entry
    1  aws_eks_access_policy_association
    1  aws_eks_cluster
+   1  aws_glue_catalog_database
+   1  aws_glue_catalog_table
    1  aws_iam_openid_connect_provider
    1  aws_iam_service_linked_role
    1  aws_iam_user_policy_attachment
