@@ -49,6 +49,22 @@ erDiagram
         timestamp published_at
         timestamp updated_at
     }
+    datasets {
+        varchar id PK
+        varchar org_id FK
+        varchar name
+        varchar display_name
+        varchar entity_type "in {account, person}"
+        varchar config_path
+        json env
+        varchar drop_root
+        varchar s3_ingest_bucket
+        varchar s3_ingest_prefix
+        bigint active_config_version
+        varchar state "in {active, provisioning, purging, suspended}"
+        timestamp created_at
+        timestamp updated_at
+    }
     ddl_log {
         bigint id PK
         timestamp created_at
@@ -69,6 +85,13 @@ erDiagram
         varchar origin "in {llm, manual, rule}"
         varchar note
         varchar created_by
+        timestamp created_at
+        timestamp updated_at
+    }
+    fixups {
+        varchar id PK
+        varchar name
+        varchar applied_by
         timestamp created_at
         timestamp updated_at
     }
@@ -294,6 +317,7 @@ erDiagram
     }
     api_keys }o--|| orgs : "org_id → id"
     config_versions }o--|| orgs : "org_id → id"
+    datasets }o--|| orgs : "org_id → id"
     entity_links }o--|| orgs : "org_id → id"
     jobs }o--|| orgs : "org_id → id"
     matching_models }o--|| orgs : "org_id → id"
@@ -317,8 +341,10 @@ erDiagram
 | `api_keys` | An org-scoped API key: its role and the at-rest hash of the secret. |
 | `audit_log` | The append-only audit ledger: one row per authenticated mutation (actor, action, optional org scope, and structured detail). |
 | `config_versions` | A versioned config document for a tenant: its YAML, hash and publish state. |
+| `datasets` | One of a tenant's resolution domains: its own lake location, config pointer, entity type and lifecycle state. The lake env points at a DuckLake catalog of its own (a METADATA_SCHEMA inside the org's metadata database, or a file catalog locally), so two datasets never share tables. |
 | `ddl_log` | The DDL ledger: one row per DDL command executed against the control database, captured by the er_ddl_audit event triggers (migrations, operator DDL — boot replays are suppressed). |
 | `entity_links` | A relationship between two resolved entities that is NOT a merge: a household, a corporate hierarchy, a 'these are related but distinct' note. The product has one answer to 'these two records belong together' — merge them — and that answer is wrong for a husband and wife at one address, or a subsidiary and its parent. Merging them loses the distinction and no later run can recover it; refusing to record anything loses the relationship. A link records it without collapsing either side. |
+| `fixups` | The control-plane fixup ledger: one row per named, idempotent data/constraint fixup ensure_schema has applied. Fixups are what the declarative reconciler deliberately never does — backfills, constraint swaps, natural-key changes, NOT NULL tightening — expressed as ordered Rust steps that run semantics-once between the baseline replay and the reconcile pass. |
 | `jobs` | A unit of work on the dispatcher's queue: its kind, params, lifecycle state and retry bookkeeping. |
 | `matching_models` | An immutable version of a tenant's matching model: the settings document the engine scores against, its hash, provenance and activation state. |
 | `orgs` | A tenant: its config pointer, lake env, lifecycle state and active config version. |

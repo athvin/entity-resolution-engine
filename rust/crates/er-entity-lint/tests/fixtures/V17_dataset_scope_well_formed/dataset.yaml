@@ -1,0 +1,39 @@
+kind: entity
+version: 1
+name: dataset
+relation: datasets
+description: "The dataset registry, present so references can resolve."
+key: [id]
+natural_key: [org_id, name]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "The dataset's id (UUIDv7)."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant the dataset belongs to."
+  - name: name
+    type: varchar
+    nullable: false
+    description: "The dataset's name."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the dataset was created."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Wall-clock last-write time."
+indexes:
+  - name: datasets_org_name_fixture
+    columns: [org_id, name]

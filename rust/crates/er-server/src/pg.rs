@@ -89,6 +89,9 @@ pub async fn ensure_schema(client: &mut Client) -> Result<(), SchemaError> {
     tx.commit().await?;
     // The reconciler's ADD COLUMNs are real migrations: ledgered, and visible
     // to the DDL event triggers.
+    // Constraint surgery the reconciler would refuse (a SET NOT NULL against a
+    // tightened declaration) runs before it; see `crate::fixups`.
+    crate::fixups::apply_fixups(client, crate::fixups::Phase::BeforeReconcile).await?;
     let reconciled = er_entity_diff::reconcile_postgres(
         client,
         &er_entities::catalog::catalog(),
@@ -107,6 +110,9 @@ pub async fn ensure_schema(client: &mut Client) -> Result<(), SchemaError> {
             ahead.relation, ahead.message
         );
     }
+    // Data work that needs the reconciler's ADD COLUMNs (backfills, sweeps)
+    // runs after it.
+    crate::fixups::apply_fixups(client, crate::fixups::Phase::AfterReconcile).await?;
     Ok(())
 }
 
@@ -619,6 +625,149 @@ pub async fn set_org_state(
 ) -> Result<bool, PgError> {
     let n = er_entities::org::update::set_state(client, new_state, name, expected).await?;
     Ok(n == 1)
+}
+
+/// A dataset's detail view: one resolution domain of a tenant. `env` is the
+/// raw lake settings map, handed to the engine verbatim and never echoed to
+/// tenants by the handlers.
+pub struct DatasetDetail {
+    pub id: String,
+    pub org_id: String,
+    pub name: String,
+    pub display_name: Option<String>,
+    pub entity_type: String,
+    pub config_path: String,
+    pub env: serde_json::Value,
+    pub drop_root: Option<String>,
+    pub s3_ingest_bucket: Option<String>,
+    pub s3_ingest_prefix: Option<String>,
+    pub active_config_version: Option<i64>,
+    pub state: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl From<er_entities::dataset::Dataset> for DatasetDetail {
+    fn from(d: er_entities::dataset::Dataset) -> Self {
+        Self {
+            id: d.id,
+            org_id: d.org_id,
+            name: d.name,
+            display_name: d.display_name,
+            entity_type: d.entity_type,
+            config_path: d.config_path,
+            env: d.env,
+            drop_root: d.drop_root,
+            s3_ingest_bucket: d.s3_ingest_bucket,
+            s3_ingest_prefix: d.s3_ingest_prefix,
+            active_config_version: d.active_config_version,
+            state: d.state,
+            created_at: ts(&d.created_at),
+            updated_at: ts(&d.updated_at),
+        }
+    }
+}
+
+/// An org's datasets, name-ordered.
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn list_datasets(client: &Client, org_id: &str) -> Result<Vec<DatasetDetail>, PgError> {
+    Ok(er_entities::dataset::read::list_for_org(client, org_id)
+        .await?
+        .into_iter()
+        .map(DatasetDetail::from)
+        .collect())
+}
+
+/// One dataset by its org and name (the dataset-or-404 lookup), `None` if
+/// absent.
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn get_dataset(
+    client: &Client,
+    org_id: &str,
+    name: &str,
+) -> Result<Option<DatasetDetail>, PgError> {
+    Ok(
+        er_entities::dataset::read::by_org_and_name(client, org_id, name)
+            .await?
+            .into_iter()
+            .next()
+            .map(DatasetDetail::from),
+    )
+}
+
+/// Insert a bring-your-own-config dataset, `active`. Returns `false` when a
+/// dataset of that name already exists (the insert is `ON CONFLICT DO
+/// NOTHING`), which the handler maps to 409 — a dataset's shape is not
+/// silently refreshed the way an org replay is, because its lake location must
+/// never move under it.
+///
+/// # Errors
+/// Propagates the insert error.
+#[allow(clippy::too_many_arguments)] // mirrors the entity's column list, like upsert_org_byo
+pub async fn create_dataset_byo(
+    client: &Client,
+    org_id: &str,
+    name: &str,
+    display_name: Option<&str>,
+    entity_type: &str,
+    config_path: &str,
+    env: &serde_json::Value,
+    drop_root: Option<&str>,
+    s3_ingest_bucket: Option<&str>,
+    s3_ingest_prefix: Option<&str>,
+) -> Result<bool, PgError> {
+    let n = er_entities::dataset::create::ensure(
+        client,
+        &er_ids::new_v7(),
+        org_id,
+        name,
+        display_name,
+        entity_type,
+        config_path,
+        env,
+        drop_root,
+        s3_ingest_bucket,
+        s3_ingest_prefix,
+        None,
+        "active",
+    )
+    .await?;
+    Ok(n == 1)
+}
+
+/// Transition a dataset's `state` only from `expected`: returns `true` iff a
+/// row changed; `false` (wrong current state) maps to 409.
+///
+/// # Errors
+/// Propagates the update error.
+pub async fn set_dataset_state(
+    client: &Client,
+    org_id: &str,
+    name: &str,
+    new_state: &str,
+    expected: &str,
+) -> Result<bool, PgError> {
+    let n =
+        er_entities::dataset::update::set_state(client, new_state, org_id, name, expected).await?;
+    Ok(n == 1)
+}
+
+/// Set a dataset's human label (the routing `name` never changes).
+///
+/// # Errors
+/// Propagates the update error.
+pub async fn set_dataset_display_name(
+    client: &Client,
+    org_id: &str,
+    name: &str,
+    display_name: Option<&str>,
+) -> Result<(), PgError> {
+    er_entities::dataset::update::set_display_name(client, display_name, org_id, name).await?;
+    Ok(())
 }
 
 /// The publish-time context for an org: `(config_path, state,

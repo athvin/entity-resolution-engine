@@ -1,0 +1,9 @@
+kind: statement
+operation: create
+mode: partial
+description: "Record that a named fixup ran. The conflict arm covers two boots racing past the applied-check; the loser's work was identical and idempotent."
+params:
+  - { name: id, type: varchar }
+  - { name: name, type: varchar }
+  - { name: applied_by, type: varchar }
+returns: none

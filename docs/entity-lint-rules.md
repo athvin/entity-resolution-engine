@@ -25,6 +25,7 @@ in `er-sql-check`.
 | [V14](#v14) | error | no declared relation collides with a `history: true` entity's `<relation>_history` companion |
 | [V15](#v15) | warning | a control-plane entity with an `org_id` column declares a non-partial index leading with `org_id` |
 | [V16](#v16) | error | an entity generating for `typescript` declares an arrow or json `wire` |
+| [V17](#v17) | warning | a control-plane entity with a `dataset_id` column references `datasets(id)`, keeps `org_id` beside it, and declares a non-partial index leading with `dataset_id` |
 
 ## V1
 
@@ -453,4 +454,40 @@ Violating:
 generate:
   stores: [postgres]
   languages: [rust, typescript]
+```
+
+## V17
+
+a control-plane entity with a `dataset_id` column references `datasets(id)`, keeps `org_id` beside it, and declares a non-partial index leading with `dataset_id`
+
+`dataset_id` scopes a row to one resolution domain inside a tenant. Three things keep that scope honest. The reference to `datasets(id)` makes it a real foreign key rather than a string that drifts when a dataset is purged. `org_id` stays beside it, denormalized on purpose: handlers resolve the org first, V15's index keeps that read cheap, and history rows stay legible without a join through `datasets`. And as with V15, essentially every read of such a table filters on `dataset_id`, which Postgres can only serve from a non-partial index whose leading column is `dataset_id` — a partial unique like one-active-per-dataset enforces an invariant and should stay, but it cannot serve the general lookup.
+
+Severity: **warning**
+
+Conforming:
+
+```yaml
+columns:
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "…"
+  - name: dataset_id
+    type: varchar
+    references: { relation: datasets, column: id }
+    description: "…"
+indexes:
+  - name: things_dataset_state
+    columns: [dataset_id, state]
+```
+
+Violating:
+
+```yaml
+columns:
+  - name: dataset_id
+    type: varchar
+    description: "…"
+# no references, no org_id beside it, and no dataset_id-leading index
 ```

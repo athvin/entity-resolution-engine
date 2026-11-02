@@ -1,0 +1,18 @@
+kind: statement
+operation: create
+mode: partial
+description: "Insert a dataset idempotently: a replay — including the migration sweep re-running at every boot — is a no-op. The natural key (org_id, name) is the conflict target."
+params:
+  - { name: id, type: varchar }
+  - { name: org_id, type: varchar }
+  - { name: name, type: varchar }
+  - { name: display_name, type: varchar, nullable: true }
+  - { name: entity_type, type: varchar }
+  - { name: config_path, type: varchar }
+  - { name: env, type: json }
+  - { name: drop_root, type: varchar, nullable: true }
+  - { name: s3_ingest_bucket, type: varchar, nullable: true }
+  - { name: s3_ingest_prefix, type: varchar, nullable: true }
+  - { name: active_config_version, type: bigint, nullable: true }
+  - { name: state, type: varchar }
+returns: none

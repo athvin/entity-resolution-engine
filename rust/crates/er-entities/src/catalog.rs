@@ -441,6 +441,87 @@ columns:
 "#,
     ),
     (
+        "dataset",
+        r#"kind: entity
+version: 1
+name: dataset
+relation: datasets
+description: "One of a tenant's resolution domains: its own lake location, config pointer, entity type and lifecycle state. The lake env points at a DuckLake catalog of its own (a METADATA_SCHEMA inside the org's metadata database, or a file catalog locally), so two datasets never share tables."
+key: [id]
+natural_key: [org_id, name]
+generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+  wire: [json]
+  history: true
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "The dataset's unique id (UUIDv7, minted at creation)."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant this dataset belongs to."
+  - name: name
+    type: varchar
+    nullable: false
+    description: "The dataset's name, unique within its org (the routing handle; URLs are name-based, same slug grammar as an org name). The migration sweep names every existing org's one dataset `default`."
+  - name: display_name
+    type: varchar
+    description: "Optional human label; the name stays the stable routing handle."
+  - name: entity_type
+    type: varchar
+    nullable: false
+    default: "'person'"
+    accepted_values: [person, account]
+    description: "The one entity type this dataset's lake resolves. Fixed at creation: the lake's std/golden tables are per-type, so changing it would orphan the corpus. Publish refuses a config whose entity_type differs."
+  - name: config_path
+    type: varchar
+    nullable: false
+    description: "Path to the dataset's config document."
+  - name: env
+    type: json
+    nullable: false
+    default: "'{}'::jsonb"
+    description: "Lake connection env (catalog, catalog schema, data path, config/model/TF/lexicon paths). Handed to the engine verbatim; the derived location keys always win over operator extras."
+  - name: drop_root
+    type: varchar
+    description: "Delivery landing directory; one `<source>.csv` per config source."
+  - name: s3_ingest_bucket
+    type: varchar
+    description: "Bucket the auto-ingest poller watches for this dataset. Null means auto-ingest is off — the feature has to be opted into, because a poller that starts reading a bucket nobody pointed at it would be ingesting data on its own initiative."
+  - name: s3_ingest_prefix
+    type: varchar
+    description: "Key prefix under `s3_ingest_bucket`, with one directory per config source beneath it. A column rather than a key in `env` deliberately, for the same reason as the org's: `env` is handed to the engine subprocess, while this is read by the control plane itself."
+  - name: active_config_version
+    type: bigint
+    description: "The currently published config version, if any."
+  - name: state
+    type: varchar
+    nullable: false
+    default: "'active'"
+    accepted_values: [provisioning, active, suspended, purging]
+    description: "Dataset lifecycle state. The org's own state gates the whole tenant above this."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the dataset was created."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Wall-clock last-write time (database default; advanced by mutations once the entity migrates)."
+indexes:
+  - name: datasets_org_state
+    columns: [org_id, state]
+"#,
+    ),
+    (
         "ddl_log",
         r#"kind: entity
 version: 1
@@ -674,6 +755,45 @@ columns:
     type: timestamp
     nullable: false
     description: "Run-logical last-write time (the latest assigning run's clock)."
+"#,
+    ),
+    (
+        "fixup",
+        r#"kind: entity
+version: 1
+name: fixup
+relation: fixups
+description: "The control-plane fixup ledger: one row per named, idempotent data/constraint fixup ensure_schema has applied. Fixups are what the declarative reconciler deliberately never does — backfills, constraint swaps, natural-key changes, NOT NULL tightening — expressed as ordered Rust steps that run semantics-once between the baseline replay and the reconcile pass."
+key: [id]
+natural_key: [name]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "The ledger row's unique id (UUIDv7, minted when the fixup runs)."
+  - name: name
+    type: varchar
+    nullable: false
+    description: "The fixup's stable name (`0001_default_datasets`). Ordered by prefix; append-only, like lint codes — a retired fixup keeps its name in the ledger."
+  - name: applied_by
+    type: varchar
+    nullable: false
+    description: "The binary that ran the fixup: name and code version."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the fixup ran."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Row update stamp; equals created_at (the ledger is append-only)."
 "#,
     ),
     (

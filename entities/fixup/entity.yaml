@@ -1,0 +1,35 @@
+kind: entity
+version: 1
+name: fixup
+relation: fixups
+description: "The control-plane fixup ledger: one row per named, idempotent data/constraint fixup ensure_schema has applied. Fixups are what the declarative reconciler deliberately never does — backfills, constraint swaps, natural-key changes, NOT NULL tightening — expressed as ordered Rust steps that run semantics-once between the baseline replay and the reconcile pass."
+key: [id]
+natural_key: [name]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "The ledger row's unique id (UUIDv7, minted when the fixup runs)."
+  - name: name
+    type: varchar
+    nullable: false
+    description: "The fixup's stable name (`0001_default_datasets`). Ordered by prefix; append-only, like lint codes — a retired fixup keeps its name in the ledger."
+  - name: applied_by
+    type: varchar
+    nullable: false
+    description: "The binary that ran the fixup: name and code version."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the fixup ran."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Row update stamp; equals created_at (the ledger is append-only)."

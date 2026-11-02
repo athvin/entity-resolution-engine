@@ -37,6 +37,7 @@ pub mod dispatcher;
 pub mod dispatcher_bin;
 pub mod errfmt;
 pub mod exec_task;
+pub(crate) mod fixups;
 pub mod executor;
 pub mod mail;
 pub mod openapi;
@@ -1228,6 +1229,374 @@ async fn resume_org(
 ) -> impl IntoResponse {
     let msg = format!("org '{org}' is not suspended; nothing to resume");
     transition_org(&principal, &state, &org, "active", "suspended", &msg).await
+}
+
+/// Resolve a dataset by its org row and name, or the scope-safe 404 (the same
+/// shape a wrong org gets, so probing dataset names learns nothing).
+async fn dataset_or_404(
+    client: &tokio_postgres::Client,
+    org_row: &pg::OrgDetail,
+    ds: &str,
+) -> Result<pg::DatasetDetail, Box<axum::response::Response>> {
+    match pg::get_dataset(client, &org_row.id, ds).await {
+        Ok(Some(row)) => Ok(row),
+        Ok(None) => Err(Box::new(
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "detail": format!("no dataset '{ds}' in org '{}'", org_row.name) })),
+            )
+                .into_response(),
+        )),
+        Err(e) => Err(Box::new(pg_err(e))),
+    }
+}
+
+/// The tenant-facing dataset shape. `env` and `config_path` stay server-side:
+/// they are lake plumbing the engine reads, not product state.
+fn dataset_json(d: &pg::DatasetDetail) -> Value {
+    json!({
+        "name": d.name,
+        "display_name": d.display_name,
+        "entity_type": d.entity_type,
+        "state": d.state,
+        "active_config_version": d.active_config_version,
+        "created_at": d.created_at,
+        "updated_at": d.updated_at,
+    })
+}
+
+/// Dataset names the frontend's static path segments own; a dataset wearing
+/// one would be unroutable in the app even though the API could serve it.
+const RESERVED_DATASET_NAMES: &[&str] = &["datasets", "settings"];
+
+/// Viewer+: an org's datasets (`GET /v1/orgs/{org}/datasets`).
+async fn list_datasets_route(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(json!({ "detail": "org registry requires Postgres" })),
+        )
+            .into_response();
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
+    match pg::list_datasets(&client, &org_row.id).await {
+        Ok(rows) => {
+            let out: Vec<Value> = rows.iter().map(dataset_json).collect();
+            Json(json!(out)).into_response()
+        }
+        Err(e) => pg_err(e),
+    }
+}
+
+#[derive(Deserialize)]
+struct DatasetIn {
+    name: String,
+    #[serde(default)]
+    display_name: Option<String>,
+    /// `person` (default) or `account` — fixed at creation; publish and model
+    /// activation enforce agreement from then on.
+    #[serde(default)]
+    entity_type: Option<String>,
+    #[serde(default)]
+    config_path: Option<String>,
+    #[serde(default)]
+    env: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    drop_root: Option<String>,
+    #[serde(default)]
+    s3_ingest_bucket: Option<String>,
+    #[serde(default)]
+    s3_ingest_prefix: Option<String>,
+}
+
+/// Operator: create a dataset (`POST /v1/orgs/{org}/datasets`), bring-your-own
+/// config only for now — the caller supplies `config_path` and the lake env.
+/// Auto-provisioning (derive the lake, seed a starter config, run the
+/// provision job) arrives with the `dataset_provision` job kind; until then an
+/// omitted `config_path` is the honest 503, exactly as org auto-provisioning
+/// was before it existed.
+async fn create_dataset(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Json(body): Json<DatasetIn>,
+) -> impl IntoResponse {
+    if let Err(e) = operator_only(&principal) {
+        return e.into_response();
+    }
+    if !valid_org_name(&body.name) {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("invalid dataset name '{}'", body.name),
+        );
+    }
+    if RESERVED_DATASET_NAMES.contains(&body.name.as_str()) {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("'{}' is a reserved dataset name", body.name),
+        );
+    }
+    let entity_type = body.entity_type.as_deref().unwrap_or("person");
+    if !matches!(entity_type, "person" | "account") {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("entity_type must be 'person' or 'account', not '{entity_type}'"),
+        );
+    }
+    let Some(dsn) = &state.dsn else {
+        return (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(json!({ "detail": "org registry requires Postgres" })),
+        )
+            .into_response();
+    };
+    let Some(config_path) = body.config_path.as_deref() else {
+        return detail_err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "dataset auto-provisioning is not available yet; pass config_path and the lake env",
+        );
+    };
+    // The same one-source-of-truth rule create_org enforces: config_path and
+    // env.ER_CONFIG_PATH must name the same file, because publish writes to the
+    // column while every run reads the env.
+    let mut env_map = body.env;
+    match env_map.get(ER_CONFIG_PATH_KEY) {
+        None => {
+            env_map.insert(ER_CONFIG_PATH_KEY.to_string(), config_path.to_string());
+        }
+        Some(from_env) if from_env != config_path => {
+            return detail_err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!(
+                    "config_path '{config_path}' and env.{ER_CONFIG_PATH_KEY} '{from_env}' must \
+                     name the same file"
+                ),
+            );
+        }
+        Some(_) => {}
+    }
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
+    if let Err(r) = refuse_unless_active(&org_row, "create a dataset") {
+        return *r;
+    }
+    let env_json = json!(env_map);
+    let _ = pg::set_actor(&client, &principal.actor).await;
+    match pg::create_dataset_byo(
+        &client,
+        &org_row.id,
+        &body.name,
+        body.display_name.as_deref(),
+        entity_type,
+        config_path,
+        &env_json,
+        body.drop_root.as_deref(),
+        body.s3_ingest_bucket.as_deref(),
+        body.s3_ingest_prefix.as_deref(),
+    )
+    .await
+    {
+        Ok(true) => {
+            let _ = pg::audit(
+                &client,
+                &principal.actor,
+                Some(&org),
+                "dataset.create",
+                &json!({ "dataset": body.name, "entity_type": entity_type }),
+            )
+            .await;
+            (
+                StatusCode::CREATED,
+                Json(json!({ "name": body.name, "state": "active" })),
+            )
+                .into_response()
+        }
+        Ok(false) => detail_err(
+            StatusCode::CONFLICT,
+            format!("dataset '{}' already exists in org '{org}'", body.name),
+        ),
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Viewer+: one dataset's detail (`GET /v1/orgs/{org}/datasets/{ds}`).
+async fn get_dataset_route(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds)): Path<(String, String)>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(json!({ "detail": "org registry requires Postgres" })),
+        )
+            .into_response();
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
+    match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => Json(dataset_json(&row)).into_response(),
+        Err(r) => *r,
+    }
+}
+
+#[derive(Deserialize)]
+struct DatasetPatch {
+    /// The only mutable display field; `null` clears it. The `name` is the
+    /// routing handle and never changes.
+    display_name: Option<String>,
+}
+
+/// Admin: update a dataset's display fields (`PATCH /v1/orgs/{org}/datasets/{ds}`).
+async fn update_dataset(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds)): Path<(String, String)>,
+    Json(body): Json<DatasetPatch>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Admin) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(json!({ "detail": "org registry requires Postgres" })),
+        )
+            .into_response();
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
+    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
+        return *r;
+    }
+    let _ = pg::set_actor(&client, &principal.actor).await;
+    match pg::set_dataset_display_name(&client, &org_row.id, &ds, body.display_name.as_deref())
+        .await
+    {
+        Ok(()) => match dataset_or_404(&client, &org_row, &ds).await {
+            Ok(row) => Json(dataset_json(&row)).into_response(),
+            Err(r) => *r,
+        },
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Transition a dataset's lifecycle state (the shared body of dataset
+/// suspend/resume): scope-safe 404s, 409 if not in `expected`.
+async fn transition_dataset(
+    principal: &Principal,
+    state: &AppState,
+    org: &str,
+    ds: &str,
+    new_state: &str,
+    expected: &str,
+    not_in_expected: &str,
+) -> axum::response::Response {
+    if let Err(e) = guard(principal, org, Role::Admin) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(json!({ "detail": "org registry requires Postgres" })),
+        )
+            .into_response();
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, org).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
+    if let Err(r) = dataset_or_404(&client, &org_row, ds).await {
+        return *r;
+    }
+    let _ = pg::set_actor(&client, &principal.actor).await;
+    match pg::set_dataset_state(&client, &org_row.id, ds, new_state, expected).await {
+        Ok(true) => {
+            let action = if new_state == "suspended" {
+                "dataset.suspend"
+            } else {
+                "dataset.resume"
+            };
+            let _ = pg::audit(
+                &client,
+                &principal.actor,
+                Some(org),
+                action,
+                &json!({ "dataset": ds }),
+            )
+            .await;
+            (
+                StatusCode::OK,
+                Json(json!({ "name": ds, "state": new_state })),
+            )
+                .into_response()
+        }
+        Ok(false) => (
+            StatusCode::CONFLICT,
+            Json(json!({ "detail": not_in_expected })),
+        )
+            .into_response(),
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Admin: suspend an active dataset (`POST /v1/orgs/{org}/datasets/{ds}/suspend`).
+async fn suspend_dataset(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds)): Path<(String, String)>,
+) -> impl IntoResponse {
+    let msg = format!("dataset '{ds}' is not active; only active datasets suspend");
+    transition_dataset(&principal, &state, &org, &ds, "suspended", "active", &msg).await
+}
+
+/// Admin: resume a suspended dataset (`POST /v1/orgs/{org}/datasets/{ds}/resume`).
+async fn resume_dataset(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds)): Path<(String, String)>,
+) -> impl IntoResponse {
+    let msg = format!("dataset '{ds}' is not suspended; nothing to resume");
+    transition_dataset(&principal, &state, &org, &ds, "active", "suspended", &msg).await
 }
 
 #[derive(Deserialize)]
@@ -8058,6 +8427,16 @@ fn build_routes(state: AppState) -> Router {
         // (matchit forbids a param+literal in one segment, as with job cancel).
         .route("/v1/orgs/{org}/suspend", post(suspend_org))
         .route("/v1/orgs/{org}/resume", post(resume_org))
+        .route(
+            "/v1/orgs/{org}/datasets",
+            get(list_datasets_route).post(create_dataset),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}",
+            get(get_dataset_route).patch(update_dataset),
+        )
+        .route("/v1/orgs/{org}/datasets/{ds}/suspend", post(suspend_dataset))
+        .route("/v1/orgs/{org}/datasets/{ds}/resume", post(resume_dataset))
         .route("/v1/orgs/{org}/jobs", post(create_job).get(list_jobs))
         .route("/v1/orgs/{org}/jobs/{job_id}", get(get_job))
         // axum/matchit requires a param to be a whole segment, so the Python

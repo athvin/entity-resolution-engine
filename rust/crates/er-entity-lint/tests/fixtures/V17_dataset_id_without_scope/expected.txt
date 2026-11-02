@@ -1,0 +1,3 @@
+[V17] widget: dataset_id does not declare `references: { relation: datasets, column: id }`, so the scope is a loose string rather than a foreign key
+[V17] widget: dataset_id is dataset scope but no non-partial index leads with it, so every dataset-scoped read is a full scan
+[V17] widget: dataset_id without org_id beside it: the tenant scope is resolved first and must not require a join through datasets

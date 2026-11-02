@@ -1,0 +1,9 @@
+kind: statement
+operation: update
+mode: partial
+description: "Rename a dataset's human label. The name itself never changes — it is the routing handle URLs and lake derivations hang off."
+params:
+  - { name: display_name, type: varchar, nullable: true }
+  - { name: org_id, type: varchar }
+  - { name: name, type: varchar }
+returns: none
