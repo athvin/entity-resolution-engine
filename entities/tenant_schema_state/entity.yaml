@@ -18,6 +18,10 @@ columns:
     nullable: false
     references: { relation: orgs, column: id }
     description: "The tenant whose lake this row describes."
+  - name: dataset_id
+    type: varchar
+    references: { relation: datasets, column: id }
+    description: "The dataset whose lake position this row caches; one row per dataset once per-dataset reconciliation lands."
   - name: catalog_hash
     type: varchar
     nullable: false
@@ -51,3 +55,6 @@ columns:
 indexes:
   - name: tenant_schema_states_org
     columns: [org_id]
+  # V17: the dataset-scoped read path.
+  - name: tenant_schema_states_dataset
+    columns: [dataset_id]

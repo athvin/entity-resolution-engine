@@ -19,6 +19,10 @@ columns:
     nullable: false
     references: { relation: orgs, column: id }
     description: "Tenant."
+  - name: dataset_id
+    type: varchar
+    references: { relation: datasets, column: id }
+    description: "Copied from the job at planning (NULL for org-level jobs); the per-dataset pod lock keys on it once the executor is re-scoped."
   - name: job_id
     type: varchar
     nullable: false
@@ -214,3 +218,6 @@ indexes:
   - name: task_instances_heartbeat
     columns: [heartbeat_at]
     where: "live IS TRUE AND state = 'running'"
+  # V17: the dataset-scoped read path.
+  - name: task_instances_dataset
+    columns: [dataset_id, job_id]

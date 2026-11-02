@@ -1,0 +1,7 @@
+kind: statement
+operation: update
+mode: partial
+description: "The dataset_id backfill (fixup 0002): stamp every pre-dataset row with its org's default dataset. Idempotent — only NULL rows are touched, so a re-run after new writes (which stamp themselves) is a no-op."
+params: []
+reads: [dataset]
+returns: none

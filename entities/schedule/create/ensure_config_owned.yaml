@@ -5,6 +5,7 @@ description: "Create a config-owned schedule (source like 'config:correction_pas
 params:
   - { name: schedule_id, type: varchar }
   - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar, nullable: true }
   - { name: kind, type: varchar }
   - { name: cron, type: varchar }
   - { name: source, type: varchar }

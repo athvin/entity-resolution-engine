@@ -20,6 +20,10 @@ columns:
     nullable: false
     references: { relation: orgs, column: id }
     description: "The tenant this config version belongs to."
+  - name: dataset_id
+    type: varchar
+    references: { relation: datasets, column: id }
+    description: "The dataset this config version belongs to. Backfilled to the org's default dataset; joins the natural key at the clean break."
   - name: version
     type: bigint
     nullable: false
@@ -60,3 +64,7 @@ columns:
     default: "now()"
     volatile: true
     description: "Wall-clock last-write time (database default; advanced by mutations once the entity migrates)."
+indexes:
+  # V17: the dataset-scoped read path.
+  - name: config_versions_dataset
+    columns: [dataset_id, version]

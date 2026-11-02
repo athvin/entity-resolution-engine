@@ -3,6 +3,7 @@ SELECT
   at,
   actor,
   org,
+  dataset,
   action,
   detail,
   created_at,

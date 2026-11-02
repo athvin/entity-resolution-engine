@@ -77,6 +77,7 @@ pub async fn plan(
             &tx,
             &id,
             &job.org_id,
+            job.dataset_id.as_deref(),
             &job.id,
             node.task_id,
             i64::try_from(seq).expect("a DAG is at most a few nodes"),

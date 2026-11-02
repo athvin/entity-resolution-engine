@@ -100,42 +100,13 @@ CREATE OR REPLACE TRIGGER er_history_api_keys
   at timestamptz NOT NULL DEFAULT now(),
   actor text NOT NULL,
   org text,
+  dataset text,
   action text NOT NULL,
   detail jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (id)
 );"#,
-    r#"CREATE TABLE IF NOT EXISTS public.config_versions (
-  id text NOT NULL,
-  org_id text NOT NULL REFERENCES orgs(id),
-  version bigint NOT NULL,
-  yaml text NOT NULL,
-  config_hash text NOT NULL,
-  state text NOT NULL DEFAULT 'draft' CHECK (state IN ('draft', 'published')),
-  tier text,
-  created_by text NOT NULL,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  published_at timestamptz,
-  updated_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (id),
-  UNIQUE (org_id, version)
-);
-CREATE TABLE IF NOT EXISTS public.config_versions_history (
-  history_id bigserial NOT NULL,
-  row_id text NOT NULL,
-  op text NOT NULL CHECK (op IN ('insert', 'update', 'delete')),
-  changed_at timestamptz NOT NULL DEFAULT now(),
-  actor text NOT NULL,
-  old_row jsonb,
-  new_row jsonb,
-  PRIMARY KEY (history_id)
-);
-CREATE INDEX IF NOT EXISTS config_versions_history_row_id ON public.config_versions_history (row_id);
-CREATE INDEX IF NOT EXISTS config_versions_history_changed_at ON public.config_versions_history (changed_at);
-CREATE OR REPLACE TRIGGER er_history_config_versions
-  AFTER INSERT OR UPDATE OR DELETE ON public.config_versions
-  FOR EACH ROW EXECUTE FUNCTION public.er_history('config_versions_history');"#,
     r#"CREATE TABLE IF NOT EXISTS public.datasets (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
@@ -170,6 +141,38 @@ CREATE INDEX IF NOT EXISTS datasets_history_changed_at ON public.datasets_histor
 CREATE OR REPLACE TRIGGER er_history_datasets
   AFTER INSERT OR UPDATE OR DELETE ON public.datasets
   FOR EACH ROW EXECUTE FUNCTION public.er_history('datasets_history');"#,
+    r#"CREATE TABLE IF NOT EXISTS public.config_versions (
+  id text NOT NULL,
+  org_id text NOT NULL REFERENCES orgs(id),
+  dataset_id text REFERENCES datasets(id),
+  version bigint NOT NULL,
+  yaml text NOT NULL,
+  config_hash text NOT NULL,
+  state text NOT NULL DEFAULT 'draft' CHECK (state IN ('draft', 'published')),
+  tier text,
+  created_by text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  published_at timestamptz,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (id),
+  UNIQUE (org_id, version)
+);
+CREATE INDEX IF NOT EXISTS config_versions_dataset ON public.config_versions (dataset_id, version);
+CREATE TABLE IF NOT EXISTS public.config_versions_history (
+  history_id bigserial NOT NULL,
+  row_id text NOT NULL,
+  op text NOT NULL CHECK (op IN ('insert', 'update', 'delete')),
+  changed_at timestamptz NOT NULL DEFAULT now(),
+  actor text NOT NULL,
+  old_row jsonb,
+  new_row jsonb,
+  PRIMARY KEY (history_id)
+);
+CREATE INDEX IF NOT EXISTS config_versions_history_row_id ON public.config_versions_history (row_id);
+CREATE INDEX IF NOT EXISTS config_versions_history_changed_at ON public.config_versions_history (changed_at);
+CREATE OR REPLACE TRIGGER er_history_config_versions
+  AFTER INSERT OR UPDATE OR DELETE ON public.config_versions
+  FOR EACH ROW EXECUTE FUNCTION public.er_history('config_versions_history');"#,
     r#"CREATE TABLE IF NOT EXISTS public.ddl_log (
   id bigserial NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -186,6 +189,7 @@ CREATE INDEX IF NOT EXISTS ddl_log_created_at ON public.ddl_log (created_at);"#,
     r#"CREATE TABLE IF NOT EXISTS public.entity_links (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
+  dataset_id text REFERENCES datasets(id),
   parent_entity_id text NOT NULL,
   child_entity_id text NOT NULL,
   kind text NOT NULL CHECK (kind IN ('household', 'company', 'related')),
@@ -199,6 +203,7 @@ CREATE INDEX IF NOT EXISTS ddl_log_created_at ON public.ddl_log (created_at);"#,
 );
 CREATE UNIQUE INDEX IF NOT EXISTS entity_links_org_pair_kind ON public.entity_links (org_id, parent_entity_id, child_entity_id, kind);
 CREATE INDEX IF NOT EXISTS entity_links_org_child ON public.entity_links (org_id, child_entity_id);
+CREATE INDEX IF NOT EXISTS entity_links_dataset ON public.entity_links (dataset_id, child_entity_id);
 CREATE TABLE IF NOT EXISTS public.entity_links_history (
   history_id bigserial NOT NULL,
   row_id text NOT NULL,
@@ -226,6 +231,7 @@ CREATE OR REPLACE TRIGGER er_history_entity_links
     r#"CREATE TABLE IF NOT EXISTS public.jobs (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
+  dataset_id text REFERENCES datasets(id),
   kind text NOT NULL,
   params jsonb NOT NULL DEFAULT '{}'::jsonb,
   state text NOT NULL DEFAULT 'queued',
@@ -254,10 +260,12 @@ CREATE OR REPLACE TRIGGER er_history_entity_links
 );
 CREATE UNIQUE INDEX IF NOT EXISTS jobs_idempotency ON public.jobs (org_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS jobs_one_active_per_org ON public.jobs (org_id) WHERE state IN ('dispatching','running','canceling');
-CREATE INDEX IF NOT EXISTS jobs_claimable ON public.jobs (state, not_before, priority, id);"#,
+CREATE INDEX IF NOT EXISTS jobs_claimable ON public.jobs (state, not_before, priority, id);
+CREATE INDEX IF NOT EXISTS jobs_dataset ON public.jobs (dataset_id, state);"#,
     r#"CREATE TABLE IF NOT EXISTS public.matching_models (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
+  dataset_id text REFERENCES datasets(id),
   name text NOT NULL,
   version bigint NOT NULL,
   entity_type text NOT NULL DEFAULT 'person' CHECK (entity_type IN ('person', 'account')),
@@ -277,6 +285,7 @@ CREATE INDEX IF NOT EXISTS jobs_claimable ON public.jobs (state, not_before, pri
 CREATE UNIQUE INDEX IF NOT EXISTS matching_models_org_name_version ON public.matching_models (org_id, name, version);
 CREATE INDEX IF NOT EXISTS matching_models_org_state ON public.matching_models (org_id, state);
 CREATE UNIQUE INDEX IF NOT EXISTS matching_models_one_active_per_name ON public.matching_models (org_id, name) WHERE state = 'active';
+CREATE INDEX IF NOT EXISTS matching_models_dataset ON public.matching_models (dataset_id, state);
 CREATE TABLE IF NOT EXISTS public.matching_models_history (
   history_id bigserial NOT NULL,
   row_id text NOT NULL,
@@ -295,6 +304,7 @@ CREATE OR REPLACE TRIGGER er_history_matching_models
     r#"CREATE TABLE IF NOT EXISTS public.pair_labels (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
+  dataset_id text REFERENCES datasets(id),
   rec_a_key text NOT NULL,
   rec_b_key text NOT NULL,
   verdict text NOT NULL CHECK (verdict IN ('match', 'no_match')),
@@ -309,10 +319,12 @@ CREATE OR REPLACE TRIGGER er_history_matching_models
   UNIQUE (org_id, rec_a_key, rec_b_key)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS pair_labels_org_pair ON public.pair_labels (org_id, rec_a_key, rec_b_key);
-CREATE INDEX IF NOT EXISTS pair_labels_org_recent ON public.pair_labels (org_id, created_at);"#,
+CREATE INDEX IF NOT EXISTS pair_labels_org_recent ON public.pair_labels (org_id, created_at);
+CREATE INDEX IF NOT EXISTS pair_labels_dataset ON public.pair_labels (dataset_id, created_at);"#,
     r#"CREATE TABLE IF NOT EXISTS public.s3_ingest_cursors (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
+  dataset_id text REFERENCES datasets(id),
   source text NOT NULL,
   object_key text NOT NULL,
   etag text,
@@ -323,10 +335,12 @@ CREATE INDEX IF NOT EXISTS pair_labels_org_recent ON public.pair_labels (org_id,
   PRIMARY KEY (id),
   UNIQUE (org_id, source)
 );
-CREATE UNIQUE INDEX IF NOT EXISTS s3_ingest_cursors_org_source ON public.s3_ingest_cursors (org_id, source);"#,
+CREATE UNIQUE INDEX IF NOT EXISTS s3_ingest_cursors_org_source ON public.s3_ingest_cursors (org_id, source);
+CREATE INDEX IF NOT EXISTS s3_ingest_cursors_dataset ON public.s3_ingest_cursors (dataset_id, source);"#,
     r#"CREATE TABLE IF NOT EXISTS public.schedules (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
+  dataset_id text REFERENCES datasets(id),
   kind text NOT NULL,
   params jsonb NOT NULL DEFAULT '{}'::jsonb,
   cron text NOT NULL,
@@ -339,6 +353,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS s3_ingest_cursors_org_source ON public.s3_inge
 );
 CREATE UNIQUE INDEX IF NOT EXISTS schedules_one_correction_per_org ON public.schedules (org_id) WHERE source = 'config:correction_pass';
 CREATE UNIQUE INDEX IF NOT EXISTS schedules_one_maintenance_per_org ON public.schedules (org_id) WHERE source = 'system:lake_maintain';
+CREATE INDEX IF NOT EXISTS schedules_dataset ON public.schedules (dataset_id, source);
 CREATE TABLE IF NOT EXISTS public.schedules_history (
   history_id bigserial NOT NULL,
   row_id text NOT NULL,
@@ -369,6 +384,7 @@ CREATE INDEX IF NOT EXISTS schema_migrations_created_at ON public.schema_migrati
     r#"CREATE TABLE IF NOT EXISTS public.staged_steward_actions (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
+  dataset_id text REFERENCES datasets(id),
   action jsonb NOT NULL,
   state text NOT NULL DEFAULT 'pending' CHECK (state IN ('pending', 'applied', 'failed')),
   error text,
@@ -378,7 +394,8 @@ CREATE INDEX IF NOT EXISTS schema_migrations_created_at ON public.schema_migrati
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (id)
 );
-CREATE INDEX IF NOT EXISTS staged_pending ON public.staged_steward_actions (org_id, state);"#,
+CREATE INDEX IF NOT EXISTS staged_pending ON public.staged_steward_actions (org_id, state);
+CREATE INDEX IF NOT EXISTS staged_dataset ON public.staged_steward_actions (dataset_id, state);"#,
     r#"CREATE TABLE IF NOT EXISTS public.tags (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
@@ -410,6 +427,7 @@ CREATE OR REPLACE TRIGGER er_history_tags
     r#"CREATE TABLE IF NOT EXISTS public.taggings (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
+  dataset_id text REFERENCES datasets(id),
   tag_id text NOT NULL REFERENCES tags(id),
   subject_type text NOT NULL,
   subject_id text NOT NULL,
@@ -421,6 +439,7 @@ CREATE OR REPLACE TRIGGER er_history_tags
 CREATE INDEX IF NOT EXISTS taggings_org_tag ON public.taggings (org_id, tag_id);
 CREATE INDEX IF NOT EXISTS taggings_org_subject ON public.taggings (org_id, subject_type, subject_id);
 CREATE UNIQUE INDEX IF NOT EXISTS taggings_unique_application ON public.taggings (org_id, tag_id, subject_type, subject_id);
+CREATE INDEX IF NOT EXISTS taggings_dataset ON public.taggings (dataset_id, tag_id);
 CREATE TABLE IF NOT EXISTS public.taggings_history (
   history_id bigserial NOT NULL,
   row_id text NOT NULL,
@@ -439,6 +458,7 @@ CREATE OR REPLACE TRIGGER er_history_taggings
     r#"CREATE TABLE IF NOT EXISTS public.task_instances (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
+  dataset_id text REFERENCES datasets(id),
   job_id text NOT NULL REFERENCES jobs(id),
   task_id text NOT NULL,
   seq bigint NOT NULL,
@@ -490,10 +510,12 @@ CREATE INDEX IF NOT EXISTS task_instances_org_job ON public.task_instances (org_
 CREATE UNIQUE INDEX IF NOT EXISTS task_instances_live ON public.task_instances (job_id, task_id) WHERE live IS TRUE;
 CREATE UNIQUE INDEX IF NOT EXISTS task_instances_one_pod_per_org ON public.task_instances (org_id) WHERE live IS TRUE AND kind = 'pod' AND state IN ('queued','running','restarting','canceling');
 CREATE INDEX IF NOT EXISTS task_instances_claimable ON public.task_instances (state, not_before, job_id, seq) WHERE live IS TRUE;
-CREATE INDEX IF NOT EXISTS task_instances_heartbeat ON public.task_instances (heartbeat_at) WHERE live IS TRUE AND state = 'running';"#,
+CREATE INDEX IF NOT EXISTS task_instances_heartbeat ON public.task_instances (heartbeat_at) WHERE live IS TRUE AND state = 'running';
+CREATE INDEX IF NOT EXISTS task_instances_dataset ON public.task_instances (dataset_id, job_id);"#,
     r#"CREATE TABLE IF NOT EXISTS public.tenant_schema_states (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
+  dataset_id text REFERENCES datasets(id),
   catalog_hash text NOT NULL,
   status text NOT NULL CHECK (status IN ('current', 'migrated', 'breaking', 'error')),
   detail text,
@@ -503,10 +525,12 @@ CREATE INDEX IF NOT EXISTS task_instances_heartbeat ON public.task_instances (he
   PRIMARY KEY (id),
   UNIQUE (org_id)
 );
-CREATE INDEX IF NOT EXISTS tenant_schema_states_org ON public.tenant_schema_states (org_id);"#,
+CREATE INDEX IF NOT EXISTS tenant_schema_states_org ON public.tenant_schema_states (org_id);
+CREATE INDEX IF NOT EXISTS tenant_schema_states_dataset ON public.tenant_schema_states (dataset_id);"#,
     r#"CREATE TABLE IF NOT EXISTS public.webhooks (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
+  dataset_id text REFERENCES datasets(id),
   url text NOT NULL,
   events jsonb NOT NULL DEFAULT '[]'::jsonb,
   secret text NOT NULL,
@@ -515,6 +539,7 @@ CREATE INDEX IF NOT EXISTS tenant_schema_states_org ON public.tenant_schema_stat
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (id)
 );
+CREATE INDEX IF NOT EXISTS webhooks_dataset ON public.webhooks (dataset_id);
 CREATE TABLE IF NOT EXISTS public.webhooks_history (
   history_id bigserial NOT NULL,
   row_id text NOT NULL,
@@ -533,6 +558,7 @@ CREATE OR REPLACE TRIGGER er_history_webhooks
     r#"CREATE TABLE IF NOT EXISTS public.webhook_deliveries (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
+  dataset_id text REFERENCES datasets(id),
   webhook_id text NOT NULL REFERENCES webhooks(id),
   event_type text NOT NULL,
   payload jsonb NOT NULL,
@@ -548,7 +574,8 @@ CREATE OR REPLACE TRIGGER er_history_webhooks
   PRIMARY KEY (id)
 );
 CREATE INDEX IF NOT EXISTS webhook_deliveries_org_recent ON public.webhook_deliveries (org_id, created_at);
-CREATE INDEX IF NOT EXISTS webhook_deliveries_claimable ON public.webhook_deliveries (state, next_attempt_at);"#,
+CREATE INDEX IF NOT EXISTS webhook_deliveries_claimable ON public.webhook_deliveries (state, next_attempt_at);
+CREATE INDEX IF NOT EXISTS webhook_deliveries_dataset ON public.webhook_deliveries (dataset_id, created_at);"#,
 ];
 
 /// The DDL-ledger event triggers (functions + CREATE EVENT TRIGGER), applied

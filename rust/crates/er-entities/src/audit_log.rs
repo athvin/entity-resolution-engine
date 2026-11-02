@@ -14,6 +14,8 @@ pub struct AuditLog {
     pub actor: String,
     /// The tenant the action applies to, if the action is org-scoped.
     pub org: Option<String>,
+    /// The dataset the action concerned, by name, when it concerned one — context, like `org`, not a foreign key (this ledger outlives both).
+    pub dataset: Option<String>,
     /// The action name (e.g. steward.mass_update).
     pub action: String,
     /// Structured detail for the action.
@@ -42,6 +44,7 @@ impl AuditLog {
             "at",
             "actor",
             "org",
+            "dataset",
             "action",
             "detail",
             "created_at",
@@ -57,13 +60,16 @@ pub mod create {
         client: &impl ::tokio_postgres::GenericClient,
         actor: &str,
         org: Option<&str>,
+        dataset: Option<&str>,
         action: &str,
         detail: &::serde_json::Value,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
-        const SQL: &str = "INSERT INTO public.audit_log (actor, org, action, detail)
-VALUES ($1, $2, $3, $4)
+        const SQL: &str = "INSERT INTO public.audit_log (actor, org, dataset, action, detail)
+VALUES ($1, $2, $3, $4, $5)
 ";
-        client.execute(SQL, &[&actor, &org, &action, &detail]).await
+        client
+            .execute(SQL, &[&actor, &org, &dataset, &action, &detail])
+            .await
     }
 }
 
@@ -82,6 +88,7 @@ pub mod read {
   at,
   actor,
   org,
+  dataset,
   action,
   detail,
   created_at,
@@ -103,6 +110,7 @@ LIMIT $4
                 at: row.get("at"),
                 actor: row.get("actor"),
                 org: row.get("org"),
+                dataset: row.get("dataset"),
                 action: row.get("action"),
                 detail: row.get("detail"),
                 created_at: row.get("created_at"),

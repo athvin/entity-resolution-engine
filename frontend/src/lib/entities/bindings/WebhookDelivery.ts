@@ -7,6 +7,8 @@ export interface WebhookDelivery {
   id: string;
   /** The tenant whose subscriber this is for; every read is scoped by it. */
   org_id: string;
+  /** The dataset the delivered event came from, when it has one (provenance). */
+  dataset_id: string | null;
   /** The subscription being delivered to. */
   webhook_id: string;
   /** The catalogued event (webhook::EVENT_CATALOG), e.g. job.succeeded. */

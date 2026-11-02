@@ -20,6 +20,10 @@ columns:
     nullable: false
     references: { relation: orgs, column: id }
     description: "The tenant. Every read is scoped by it."
+  - name: dataset_id
+    type: varchar
+    references: { relation: datasets, column: id }
+    description: "The dataset whose entities this link relates — entity ids are lake-local."
   - name: parent_entity_id
     type: varchar
     nullable: false
@@ -68,3 +72,6 @@ indexes:
   # served by the unique index above, which leads with org_id + parent.
   - name: entity_links_org_child
     columns: [org_id, child_entity_id]
+  # V17: the dataset-scoped read path.
+  - name: entity_links_dataset
+    columns: [dataset_id, child_entity_id]

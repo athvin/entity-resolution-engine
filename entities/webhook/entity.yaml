@@ -19,6 +19,10 @@ columns:
     nullable: false
     references: { relation: orgs, column: id }
     description: "The tenant that owns the webhook."
+  - name: dataset_id
+    type: varchar
+    references: { relation: datasets, column: id }
+    description: "Optional dataset filter: NULL subscribes to every dataset's events."
   - name: url
     type: varchar
     nullable: false
@@ -49,3 +53,7 @@ columns:
     default: "now()"
     volatile: true
     description: "Wall-clock last-write time (database default; advanced by mutations once the entity migrates)."
+indexes:
+  # V17: the dataset-scoped read path.
+  - name: webhooks_dataset
+    columns: [dataset_id]

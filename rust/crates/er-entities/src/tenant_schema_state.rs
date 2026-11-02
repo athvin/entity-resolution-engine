@@ -10,6 +10,8 @@ pub struct TenantSchemaState {
     pub id: String,
     /// The tenant whose lake this row describes.
     pub org_id: String,
+    /// The dataset whose lake position this row caches; one row per dataset once per-dataset reconciliation lands.
+    pub dataset_id: Option<String>,
     /// The catalog version the lake was reconciled toward on the last attempt.
     pub catalog_hash: String,
     /// `current`: nothing was pending; `migrated`: safe statements were applied; `breaking`: the lake differs in a way the reconciler refuses to auto-apply (a rebuild is needed); `error`: the lake could not be opened or the apply failed.
@@ -40,6 +42,7 @@ impl TenantSchemaState {
         &[
             "id",
             "org_id",
+            "dataset_id",
             "catalog_hash",
             "status",
             "detail",
@@ -57,14 +60,15 @@ pub mod create {
         client: &impl ::tokio_postgres::GenericClient,
         id: &str,
         org_id: &str,
+        dataset_id: Option<&str>,
         catalog_hash: &str,
         status: &str,
         detail: Option<&str>,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
-        const SQL: &str =
-            "INSERT INTO public.tenant_schema_states (id, org_id, catalog_hash, status, detail)
-VALUES ($1, $2, $3, $4, $5)
+        const SQL: &str = "INSERT INTO public.tenant_schema_states (id, org_id, dataset_id, catalog_hash, status, detail)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (org_id) DO UPDATE SET
+  dataset_id = EXCLUDED.dataset_id,
   catalog_hash = EXCLUDED.catalog_hash,
   status = EXCLUDED.status,
   detail = EXCLUDED.detail,
@@ -72,7 +76,10 @@ ON CONFLICT (org_id) DO UPDATE SET
   updated_at = now()
 ";
         client
-            .execute(SQL, &[&id, &org_id, &catalog_hash, &status, &detail])
+            .execute(
+                SQL,
+                &[&id, &org_id, &dataset_id, &catalog_hash, &status, &detail],
+            )
             .await
     }
 }
@@ -83,8 +90,7 @@ pub mod read {
     pub async fn list(
         client: &impl ::tokio_postgres::GenericClient,
     ) -> ::std::result::Result<Vec<super::TenantSchemaState>, ::tokio_postgres::Error> {
-        const SQL: &str =
-            "SELECT id, org_id, catalog_hash, status, detail, checked_at, created_at, updated_at
+        const SQL: &str = "SELECT id, org_id, dataset_id, catalog_hash, status, detail, checked_at, created_at, updated_at
 FROM public.tenant_schema_states
 ORDER BY org_id
 ";
@@ -94,6 +100,7 @@ ORDER BY org_id
             .map(|row| super::TenantSchemaState {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 catalog_hash: row.get("catalog_hash"),
                 status: row.get("status"),
                 detail: row.get("detail"),
@@ -102,5 +109,20 @@ ORDER BY org_id
                 updated_at: row.get("updated_at"),
             })
             .collect())
+    }
+}
+
+pub mod update {
+    //! @generated query functions for this entity + operation.
+    /// The dataset_id backfill (fixup 0002): stamp every pre-dataset row with its org's default dataset. Idempotent — only NULL rows are touched, so a re-run after new writes (which stamp themselves) is a no-op.
+    pub async fn backfill_dataset(
+        client: &impl ::tokio_postgres::GenericClient,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str = "UPDATE public.tenant_schema_states c
+SET dataset_id = d.id, updated_at = now()
+FROM public.datasets d
+WHERE d.org_id = c.org_id AND d.name = 'default' AND c.dataset_id IS NULL
+";
+        client.execute(SQL, &[]).await
     }
 }

@@ -5,6 +5,7 @@ description: "Record that an object has been ingested for this source, replacing
 params:
   - { name: cursor_id, type: varchar }
   - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar, nullable: true }
   - { name: source, type: varchar }
   - { name: object_key, type: varchar }
   - { name: etag, type: varchar, nullable: true }

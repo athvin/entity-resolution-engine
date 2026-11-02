@@ -4,6 +4,7 @@ WHERE state IN ('running', 'canceling')
 RETURNING
   id,
   org_id,
+  dataset_id,
   kind,
   params,
   state,

@@ -7,6 +7,8 @@ export interface TaskInstance {
   id: string;
   /** Tenant. */
   org_id: string;
+  /** Copied from the job at planning (NULL for org-level jobs); the per-dataset pod lock keys on it once the executor is re-scoped. */
+  dataset_id: string | null;
   /** The run (jobs.id == run_id). */
   job_id: string;
   /** Task::NAME, stable across renames. */

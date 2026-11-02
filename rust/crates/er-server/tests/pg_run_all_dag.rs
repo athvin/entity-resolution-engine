@@ -103,6 +103,7 @@ async fn lake_maintain_runs_end_to_end_through_the_executor() {
     let queued = pg::enqueue(
         &client,
         &org_id,
+        None,
         "lake_maintain",
         0,
         None,
@@ -179,6 +180,7 @@ async fn lake_maintain_runs_end_to_end_through_the_executor() {
     let second = pg::enqueue(
         &client,
         &org_id,
+        None,
         "lake_maintain",
         0,
         None,
@@ -258,6 +260,7 @@ async fn lake_maintain_runs_end_to_end_through_the_executor() {
     let third = pg::enqueue(
         &client,
         &org_id,
+        None,
         "lake_maintain",
         0,
         None,
@@ -300,6 +303,7 @@ async fn lake_maintain_runs_end_to_end_through_the_executor() {
     let fourth = pg::enqueue(
         &client,
         &org_id,
+        None,
         "lake_maintain",
         0,
         None,

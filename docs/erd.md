@@ -31,6 +31,7 @@ erDiagram
         timestamp at
         varchar actor
         varchar org
+        varchar dataset
         varchar action
         json detail
         timestamp created_at
@@ -39,6 +40,7 @@ erDiagram
     config_versions {
         varchar id PK
         varchar org_id FK
+        varchar dataset_id FK
         bigint version
         varchar yaml
         varchar config_hash
@@ -79,6 +81,7 @@ erDiagram
     entity_links {
         varchar id PK
         varchar org_id FK
+        varchar dataset_id FK
         varchar parent_entity_id
         varchar child_entity_id
         varchar kind "in {company, household, related}"
@@ -98,6 +101,7 @@ erDiagram
     jobs {
         varchar id PK
         varchar org_id FK
+        varchar dataset_id FK
         varchar kind
         json params
         varchar state
@@ -126,6 +130,7 @@ erDiagram
     matching_models {
         varchar id PK
         varchar org_id FK
+        varchar dataset_id FK
         varchar name
         bigint version
         varchar entity_type "in {account, person}"
@@ -156,6 +161,7 @@ erDiagram
     pair_labels {
         varchar id PK
         varchar org_id FK
+        varchar dataset_id FK
         varchar rec_a_key
         varchar rec_b_key
         varchar verdict "in {match, no_match}"
@@ -170,6 +176,7 @@ erDiagram
     s3_ingest_cursors {
         varchar id PK
         varchar org_id FK
+        varchar dataset_id FK
         varchar source
         varchar object_key
         varchar etag
@@ -181,6 +188,7 @@ erDiagram
     schedules {
         varchar id PK
         varchar org_id FK
+        varchar dataset_id FK
         varchar kind
         json params
         varchar cron
@@ -203,6 +211,7 @@ erDiagram
     staged_steward_actions {
         varchar id PK
         varchar org_id FK
+        varchar dataset_id FK
         json action
         varchar state "in {applied, failed, pending}"
         varchar error
@@ -224,6 +233,7 @@ erDiagram
     taggings {
         varchar id PK
         varchar org_id FK
+        varchar dataset_id FK
         varchar tag_id FK
         varchar subject_type
         varchar subject_id
@@ -234,6 +244,7 @@ erDiagram
     task_instances {
         varchar id PK
         varchar org_id FK
+        varchar dataset_id FK
         varchar job_id FK
         varchar task_id
         bigint seq
@@ -282,6 +293,7 @@ erDiagram
     tenant_schema_states {
         varchar id PK
         varchar org_id FK
+        varchar dataset_id FK
         varchar catalog_hash
         varchar status "in {breaking, current, error, migrated}"
         varchar detail
@@ -292,6 +304,7 @@ erDiagram
     webhooks {
         varchar id PK
         varchar org_id FK
+        varchar dataset_id FK
         varchar url
         json events
         varchar secret
@@ -302,6 +315,7 @@ erDiagram
     webhook_deliveries {
         varchar id PK
         varchar org_id FK
+        varchar dataset_id FK
         varchar webhook_id FK
         varchar event_type
         json payload
@@ -317,22 +331,35 @@ erDiagram
     }
     api_keys }o--|| orgs : "org_id → id"
     config_versions }o--|| orgs : "org_id → id"
+    config_versions }o..|| datasets : "dataset_id → id"
     datasets }o--|| orgs : "org_id → id"
     entity_links }o--|| orgs : "org_id → id"
+    entity_links }o..|| datasets : "dataset_id → id"
     jobs }o--|| orgs : "org_id → id"
+    jobs }o..|| datasets : "dataset_id → id"
     matching_models }o--|| orgs : "org_id → id"
+    matching_models }o..|| datasets : "dataset_id → id"
     pair_labels }o--|| orgs : "org_id → id"
+    pair_labels }o..|| datasets : "dataset_id → id"
     s3_ingest_cursors }o--|| orgs : "org_id → id"
+    s3_ingest_cursors }o..|| datasets : "dataset_id → id"
     schedules }o--|| orgs : "org_id → id"
+    schedules }o..|| datasets : "dataset_id → id"
     staged_steward_actions }o--|| orgs : "org_id → id"
+    staged_steward_actions }o..|| datasets : "dataset_id → id"
     tags }o--|| orgs : "org_id → id"
     taggings }o--|| orgs : "org_id → id"
+    taggings }o..|| datasets : "dataset_id → id"
     taggings }o--|| tags : "tag_id → id"
     task_instances }o--|| orgs : "org_id → id"
+    task_instances }o..|| datasets : "dataset_id → id"
     task_instances }o--|| jobs : "job_id → id"
     tenant_schema_states }o--|| orgs : "org_id → id"
+    tenant_schema_states }o..|| datasets : "dataset_id → id"
     webhooks }o--|| orgs : "org_id → id"
+    webhooks }o..|| datasets : "dataset_id → id"
     webhook_deliveries }o--|| orgs : "org_id → id"
+    webhook_deliveries }o..|| datasets : "dataset_id → id"
     webhook_deliveries }o--|| webhooks : "webhook_id → id"
 ```
 

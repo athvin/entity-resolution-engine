@@ -10,6 +10,8 @@ pub struct WebhookDelivery {
     pub id: String,
     /// The tenant whose subscriber this is for; every read is scoped by it.
     pub org_id: String,
+    /// The dataset the delivered event came from, when it has one (provenance).
+    pub dataset_id: Option<String>,
     /// The subscription being delivered to.
     pub webhook_id: String,
     /// The catalogued event (webhook::EVENT_CATALOG), e.g. job.succeeded.
@@ -52,6 +54,7 @@ impl WebhookDelivery {
         &[
             "id",
             "org_id",
+            "dataset_id",
             "webhook_id",
             "event_type",
             "payload",
@@ -75,15 +78,16 @@ pub mod create {
         client: &impl ::tokio_postgres::GenericClient,
         id: &str,
         org_id: &str,
+        dataset_id: Option<&str>,
         webhook_id: &str,
         event_type: &str,
         payload: &::serde_json::Value,
         max_attempts: i64,
     ) -> ::std::result::Result<Vec<super::WebhookDelivery>, ::tokio_postgres::Error> {
         const SQL: &str = "INSERT INTO public.webhook_deliveries
-  (id, org_id, webhook_id, event_type, payload, state, attempt, max_attempts)
-VALUES ($1, $2, $3, $4, $5, 'pending', 0, $6)
-RETURNING id, org_id, webhook_id, event_type, payload, state, attempt, max_attempts,
+  (id, org_id, dataset_id, webhook_id, event_type, payload, state, attempt, max_attempts)
+VALUES ($1, $2, $3, $4, $5, $6, 'pending', 0, $7)
+RETURNING id, org_id, dataset_id, webhook_id, event_type, payload, state, attempt, max_attempts,
           next_attempt_at, response_code, error, delivered_at, created_at, updated_at
 ";
         let rows = client
@@ -92,6 +96,7 @@ RETURNING id, org_id, webhook_id, event_type, payload, state, attempt, max_attem
                 &[
                     &id,
                     &org_id,
+                    &dataset_id,
                     &webhook_id,
                     &event_type,
                     &payload,
@@ -104,6 +109,7 @@ RETURNING id, org_id, webhook_id, event_type, payload, state, attempt, max_attem
             .map(|row| super::WebhookDelivery {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 webhook_id: row.get("webhook_id"),
                 event_type: row.get("event_type"),
                 payload: row.get("payload"),
@@ -131,8 +137,7 @@ pub mod read {
         state: Option<&str>,
         limit: i64,
     ) -> ::std::result::Result<Vec<super::WebhookDelivery>, ::tokio_postgres::Error> {
-        const SQL: &str =
-            "SELECT id, org_id, webhook_id, event_type, payload, state, attempt, max_attempts,
+        const SQL: &str = "SELECT id, org_id, dataset_id, webhook_id, event_type, payload, state, attempt, max_attempts,
        next_attempt_at, response_code, error, delivered_at, created_at, updated_at
 FROM public.webhook_deliveries
 WHERE org_id = $1
@@ -154,6 +159,7 @@ LIMIT $4
             .map(|row| super::WebhookDelivery {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 webhook_id: row.get("webhook_id"),
                 event_type: row.get("event_type"),
                 payload: row.get("payload"),
@@ -187,7 +193,7 @@ WHERE id = (
   ORDER BY d.created_at, d.id
   FOR UPDATE SKIP LOCKED
   LIMIT 1)
-RETURNING id, org_id, webhook_id, event_type, payload, state, attempt, max_attempts,
+RETURNING id, org_id, dataset_id, webhook_id, event_type, payload, state, attempt, max_attempts,
           next_attempt_at, response_code, error, delivered_at, created_at, updated_at
 ";
         let rows = client.query(SQL, &[]).await?;
@@ -196,6 +202,7 @@ RETURNING id, org_id, webhook_id, event_type, payload, state, attempt, max_attem
             .map(|row| super::WebhookDelivery {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 webhook_id: row.get("webhook_id"),
                 event_type: row.get("event_type"),
                 payload: row.get("payload"),
@@ -240,7 +247,7 @@ SET state = CASE
     delivered_at = CASE WHEN $1 THEN now() ELSE delivered_at END,
     updated_at = now()
 WHERE id = $5
-RETURNING id, org_id, webhook_id, event_type, payload, state, attempt, max_attempts,
+RETURNING id, org_id, dataset_id, webhook_id, event_type, payload, state, attempt, max_attempts,
           next_attempt_at, response_code, error, delivered_at, created_at, updated_at
 ";
         let rows = client
@@ -254,6 +261,7 @@ RETURNING id, org_id, webhook_id, event_type, payload, state, attempt, max_attem
             .map(|row| super::WebhookDelivery {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 webhook_id: row.get("webhook_id"),
                 event_type: row.get("event_type"),
                 payload: row.get("payload"),

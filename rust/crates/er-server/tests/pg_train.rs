@@ -125,6 +125,7 @@ async fn training_registers_a_draft_and_leaves_the_active_model_alone() {
     let seeded = pg::create_model_version(
         &client,
         &org_id,
+        None,
         pg::DEFAULT_MODEL_NAME,
         "person",
         &starter,
@@ -148,9 +149,16 @@ async fn training_registers_a_draft_and_leaves_the_active_model_alone() {
 
     // The arm that did not exist. Before this, the job's outcome was
     // "dispatcher does not handle job kind 'train'".
-    dispatcher::train_and_register(&client, &org_id, &env, "01TRAINJOB00000000000000000", None)
-        .await
-        .expect("training should succeed");
+    dispatcher::train_and_register(
+        &client,
+        &org_id,
+        None,
+        &env,
+        "01TRAINJOB00000000000000000",
+        None,
+    )
+    .await
+    .expect("training should succeed");
 
     // A registry version, not a file nobody reads.
     let versions = pg::list_model_versions(&client, &org_id).await.unwrap();
@@ -288,6 +296,7 @@ async fn training_registers_a_draft_and_leaves_the_active_model_alone() {
             &client,
             &format!("01JLABEL000000000000000{i:03}"),
             &org_id,
+            None,
             a,
             b,
             verdict,
@@ -301,9 +310,16 @@ async fn training_registers_a_draft_and_leaves_the_active_model_alone() {
         .expect("a label is recordable");
     }
 
-    dispatcher::train_and_register(&client, &org_id, &env, "01TRAINJOB00000000000000001", None)
-        .await
-        .expect("training with labels should succeed");
+    dispatcher::train_and_register(
+        &client,
+        &org_id,
+        None,
+        &env,
+        "01TRAINJOB00000000000000001",
+        None,
+    )
+    .await
+    .expect("training with labels should succeed");
 
     let with_labels = pg::list_model_versions(&client, &org_id)
         .await

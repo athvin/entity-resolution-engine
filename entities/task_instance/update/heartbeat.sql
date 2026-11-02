@@ -4,6 +4,7 @@ WHERE id = $task_instance_id AND live IS TRUE AND state = 'running' AND pod_uid 
 RETURNING
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,

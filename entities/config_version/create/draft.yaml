@@ -5,6 +5,7 @@ description: "Insert a new draft config version, allocating max(version)+1 atomi
 params:
   - { name: id, type: varchar }
   - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar, nullable: true }
   - { name: yaml, type: varchar }
   - { name: config_hash, type: varchar }
   - { name: created_by, type: varchar }

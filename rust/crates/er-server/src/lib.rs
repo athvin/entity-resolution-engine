@@ -800,15 +800,32 @@ async fn provision_org(
         Err(e) => return pg_err(e),
     };
 
+    // The org's one dataset exists from its first moment rather than at the
+    // next boot's convergence sweep, so everything below can stamp it.
+    if let Err(e) = fixups::ensure_default_dataset_by_name(&client, name).await {
+        return detail_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("creating the default dataset: {e}"),
+        );
+    }
+    let ds = stamp_dataset(&client, &org_row.id).await;
+
     // The starter config as version 1, published so the tenant has an active
     // config from the start — the wizard and the upload path both require one.
     let hash = config_hash(&config);
-    let version =
-        match pg::create_config_version(&client, &org_row.id, &yaml, &hash, &principal.actor).await
-        {
-            Ok(v) => v,
-            Err(e) => return pg_err(e),
-        };
+    let version = match pg::create_config_version(
+        &client,
+        &org_row.id,
+        ds.as_deref(),
+        &yaml,
+        &hash,
+        &principal.actor,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => return pg_err(e),
+    };
     if let Err(e) = provision::create_workspace(&plan, &profile.config_template) {
         return detail_err(StatusCode::INTERNAL_SERVER_ERROR, e);
     }
@@ -825,9 +842,11 @@ async fn provision_org(
     };
 
     let idem = format!("provision:{name}");
+    // Org-level by design: the provision job creates the tenant itself.
     let job = match pg::enqueue(
         &client,
         &org_row.id,
+        None,
         "provision",
         0,
         Some(&idem),
@@ -843,6 +862,7 @@ async fn provision_org(
         &client,
         &principal.actor,
         Some(name),
+        None,
         "org.provision",
         &json!({ "job_id": job.id, "mode": format!("{:?}", profile.mode).to_lowercase() }),
     )
@@ -992,10 +1012,19 @@ async fn create_org(
                 &client,
                 &principal.actor,
                 Some(&body.name),
+                None,
                 "org.upsert",
                 &json!({}),
             )
             .await;
+            // The org's one dataset exists from its first moment rather than
+            // at the next boot's convergence sweep.
+            if let Err(e) = fixups::ensure_default_dataset_by_name(&client, &body.name).await {
+                return detail_err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("creating the default dataset: {e}"),
+                );
+            }
             let seeded = seed_starter_model(&client, &body.name, &env, &principal.actor).await;
             (
                 StatusCode::CREATED,
@@ -1064,9 +1093,11 @@ async fn seed_starter_model(
         "model_version_env": env.get("ER_MODEL_VERSION"),
         "by": actor,
     });
+    let ds = stamp_dataset(client, &org_row.id).await;
     let created = pg::create_model_version(
         client,
         &org_row.id,
+        ds.as_deref(),
         pg::DEFAULT_MODEL_NAME,
         entity_type,
         &model_json,
@@ -1283,7 +1314,15 @@ async fn transition_org(
             } else {
                 "org.resume"
             };
-            let _ = pg::audit(&client, &principal.actor, Some(org), action, &json!({})).await;
+            let _ = pg::audit(
+                &client,
+                &principal.actor,
+                Some(org),
+                None,
+                action,
+                &json!({}),
+            )
+            .await;
             (
                 StatusCode::OK,
                 Json(json!({ "name": org, "state": new_state })),
@@ -1352,6 +1391,16 @@ fn dataset_json(d: &pg::DatasetDetail) -> Value {
         "created_at": d.created_at,
         "updated_at": d.updated_at,
     })
+}
+
+/// The org's default-dataset id, as a best-effort stamp for org-scoped
+/// writes. `None` on a read error as well as on a genuinely missing dataset,
+/// deliberately: the column is nullable by design, the convergence sweep and
+/// the backfill heal NULLs, and failing a whole request over a stamp the
+/// schema does not require would invert the feature's priorities. The
+/// dataset-scoped routes pass their resolved dataset instead of this.
+async fn stamp_dataset(client: &tokio_postgres::Client, org_id: &str) -> Option<String> {
+    pg::default_dataset_id(client, org_id).await.ok().flatten()
 }
 
 /// Dataset names the frontend's static path segments own; a dataset wearing
@@ -1510,6 +1559,7 @@ async fn create_dataset(
                 &client,
                 &principal.actor,
                 Some(&org),
+                Some(&body.name),
                 "dataset.create",
                 &json!({ "dataset": body.name, "entity_type": entity_type }),
             )
@@ -1649,6 +1699,7 @@ async fn transition_dataset(
                 &client,
                 &principal.actor,
                 Some(org),
+                Some(ds),
                 action,
                 &json!({ "dataset": ds }),
             )
@@ -1731,7 +1782,16 @@ async fn create_config_version(
     };
     // History images record the acting principal (er.actor).
     let _ = pg::set_actor(&client, &principal.actor).await;
-    match pg::create_config_version(&client, &org_row.id, &body.yaml, &hash, &principal.actor).await
+    let ds = stamp_dataset(&client, &org_row.id).await;
+    match pg::create_config_version(
+        &client,
+        &org_row.id,
+        ds.as_deref(),
+        &body.yaml,
+        &hash,
+        &principal.actor,
+    )
+    .await
     {
         Ok(version) => (
             StatusCode::CREATED,
@@ -1882,9 +1942,11 @@ async fn compile_model_version(
         "by": principal.actor,
     });
     let _ = pg::set_actor(&client, &principal.actor).await;
+    let ds = stamp_dataset(&client, &org_row.id).await;
     match pg::create_model_version(
         &client,
         &org_row.id,
+        ds.as_deref(),
         pg::DEFAULT_MODEL_NAME,
         entity_type,
         &compiled.model_json,
@@ -1900,6 +1962,7 @@ async fn compile_model_version(
                 &client,
                 &principal.actor,
                 Some(&org),
+                None,
                 "model.version.compile",
                 &json!({ "name": m.name, "version": m.version, "model_hash": m.model_hash }),
             )
@@ -2045,9 +2108,11 @@ async fn create_model_version(
         .provenance
         .unwrap_or_else(|| json!({ "origin": "uploaded", "by": principal.actor }));
     let _ = pg::set_actor(&client, &principal.actor).await;
+    let ds = stamp_dataset(&client, &org_row.id).await;
     match pg::create_model_version(
         &client,
         &org_row.id,
+        ds.as_deref(),
         &name,
         entity_type,
         &body.model_json,
@@ -2063,6 +2128,7 @@ async fn create_model_version(
                 &client,
                 &principal.actor,
                 Some(&org),
+                None,
                 "model.version.create",
                 &json!({ "name": m.name, "version": m.version, "model_hash": m.model_hash }),
             )
@@ -2371,6 +2437,7 @@ async fn activate_model_version(
         &client,
         &principal.actor,
         Some(&org),
+        None,
         "model.version.activate",
         &json!({ "name": name, "version": version, "model_hash": target.model_hash }),
     )
@@ -2734,9 +2801,11 @@ async fn put_lexicon(
 
     let idem = format!("lexicon-apply:{}", er_ids::new_v7());
     let params = json!({ "skip_ingest": true });
+    let ds = stamp_dataset(&client, &org_row.id).await;
     let apply_job = match pg::enqueue(
         &client,
         &org_row.id,
+        ds.as_deref(),
         "run_all_full",
         0,
         Some(&idem),
@@ -2752,6 +2821,7 @@ async fn put_lexicon(
         &client,
         &principal.actor,
         Some(&org),
+        None,
         "lexicon.update",
         &json!({ "pairs": set.len() }),
     )
@@ -2996,13 +3066,18 @@ async fn publish_config_version(
     if let Err(e) = pg::publish_config_version(&client, &org_row.id, &org, version, tier).await {
         return pg_err(e);
     }
+    let ds = stamp_dataset(&client, &org_row.id).await;
     // The published document's `correction_pass.cadence` becomes a real
     // schedule. It had been stored by every tenant config and read by nothing,
     // so the periodic correction pass it describes never ran.
     if let Ok(config) = load_config_str(&detail.yaml)
-        && let Err(e) =
-            pg::ensure_correction_schedule(&client, &org_row.id, &config.correction_pass.cadence)
-                .await
+        && let Err(e) = pg::ensure_correction_schedule(
+            &client,
+            &org_row.id,
+            ds.as_deref(),
+            &config.correction_pass.cadence,
+        )
+        .await
     {
         return pg_err(e);
     }
@@ -3016,6 +3091,7 @@ async fn publish_config_version(
             match pg::enqueue(
                 &client,
                 &org_row.id,
+                ds.as_deref(),
                 "train",
                 0,
                 Some(&train_key),
@@ -3030,6 +3106,7 @@ async fn publish_config_version(
             match pg::enqueue(
                 &client,
                 &org_row.id,
+                ds.as_deref(),
                 "run_all_full",
                 0,
                 Some(&rebuild_key),
@@ -3045,6 +3122,7 @@ async fn publish_config_version(
         Some("A" | "B") => match pg::enqueue(
             &client,
             &org_row.id,
+            ds.as_deref(),
             "run_all_full",
             0,
             Some(&rebuild_key),
@@ -3063,6 +3141,7 @@ async fn publish_config_version(
         &client,
         &principal.actor,
         Some(&org),
+        None,
         "config.publish",
         &json!({ "version": version, "tier": tier }),
     )
@@ -3077,6 +3156,7 @@ async fn publish_config_version(
     if let Err(e) = webhook::emit(
         &client,
         &org_row.id,
+        ds.as_deref(),
         &org,
         "config.published",
         &json!({
@@ -3172,9 +3252,11 @@ async fn create_job(
             }
             params = Some(json!({ "segment": name }));
         }
+        let ds = stamp_dataset(&client, &org_row.id).await;
         return match pg::enqueue(
             &client,
             &org_row.id,
+            ds.as_deref(),
             &body.kind,
             body.priority,
             None,
@@ -3188,6 +3270,7 @@ async fn create_job(
                     &client,
                     &principal.actor,
                     Some(&org),
+                    None,
                     "job.submit",
                     &json!({ "job_id": job.id, "kind": body.kind, "segment": body.segment }),
                 )
@@ -3234,6 +3317,7 @@ pub fn enqueue_traced(
     let job = Job {
         id: job_id,
         org_id: org.to_string(),
+        dataset_id: None,
         kind: kind.to_string(),
         params: serde_json::json!({}),
         state: "queued".to_string(),
@@ -3577,6 +3661,7 @@ async fn resume_job(
                 &client,
                 &principal.actor,
                 Some(&org),
+                None,
                 "job.resume",
                 &json!({ "job_id": job_id }),
             )
@@ -4003,6 +4088,7 @@ async fn attempt_finish(
                             && let Some(dsn) = state.dsn.clone()
                         {
                             let org_id = row.org_id.clone();
+                            let dataset_id = row.dataset_id.clone();
                             let status = doc["status"].as_str().unwrap_or("errored").to_string();
                             let hash = doc["catalog_hash"].as_str().unwrap_or("").to_string();
                             let detail = doc["detail"].as_str().unwrap_or("").to_string();
@@ -4013,6 +4099,7 @@ async fn attempt_finish(
                                 let _ = crate::schema::record_tenant_state(
                                     &client,
                                     &org_id,
+                                    dataset_id.as_deref(),
                                     &status,
                                     &hash,
                                     Some(&detail),
@@ -4993,9 +5080,11 @@ async fn create_label(
         Ok(r) => r,
         Err(r) => return *r,
     };
+    let ds = stamp_dataset(&client, &org_row.id).await;
     match record_label(
         &client,
         &org_row.id,
+        ds.as_deref(),
         (&a, &b),
         &body.verdict,
         "human",
@@ -5011,6 +5100,7 @@ async fn create_label(
                 &client,
                 &principal.actor,
                 Some(&org),
+                None,
                 "label.record",
                 &json!({ "pair": [a, b], "verdict": body.verdict }),
             )
@@ -5080,6 +5170,7 @@ fn canonical_pair(a: &str, b: &str) -> (String, String) {
 async fn record_label(
     client: &tokio_postgres::Client,
     org_id: &str,
+    dataset_id: Option<&str>,
     pair: (&str, &str),
     verdict: &str,
     origin: &str,
@@ -5092,6 +5183,7 @@ async fn record_label(
         client,
         &er_ids::new_v7(),
         org_id,
+        dataset_id,
         pair.0,
         pair.1,
         verdict,
@@ -5779,9 +5871,11 @@ pub(crate) async fn finish_delivery(
     }
     // No idempotency key: two deliveries of the same source are two deliveries
     // and must run twice, so an upsert on a per-source key would be wrong.
+    let ds = stamp_dataset(client, org_id).await;
     let job = match pg::enqueue(
         client,
         org_id,
+        ds.as_deref(),
         "run_all_incremental",
         0,
         None,
@@ -5800,6 +5894,7 @@ pub(crate) async fn finish_delivery(
         client,
         actor,
         Some(org),
+        None,
         action,
         &json!({
             "source": source,
@@ -5820,6 +5915,7 @@ pub(crate) async fn finish_delivery(
     if let Err(e) = webhook::emit(
         client,
         org_id,
+        ds.as_deref(),
         org,
         "import.received",
         &json!({
@@ -6509,7 +6605,17 @@ async fn create_schedule(
     let params = body.params.unwrap_or_else(|| json!({}));
     // History images record the acting principal (er.actor).
     let _ = pg::set_actor(&client, &principal.actor).await;
-    match pg::create_schedule(&client, &org_row.id, &body.kind, &body.cron, &params).await {
+    let ds = stamp_dataset(&client, &org_row.id).await;
+    match pg::create_schedule(
+        &client,
+        &org_row.id,
+        ds.as_deref(),
+        &body.kind,
+        &body.cron,
+        &params,
+    )
+    .await
+    {
         Ok(schedule_id) => (
             StatusCode::CREATED,
             Json(json!({ "id": schedule_id, "kind": body.kind, "cron": body.cron })),
@@ -6827,12 +6933,13 @@ async fn create_webhook(
     let events = json!(body.events);
     // History images record the acting principal (er.actor).
     let _ = pg::set_actor(&client, &principal.actor).await;
-    match pg::create_webhook(&client, &org_row.id, &body.url, &events, &secret).await {
+    match pg::create_webhook(&client, &org_row.id, None, &body.url, &events, &secret).await {
         Ok(webhook_id) => {
             let _ = pg::audit(
                 &client,
                 &principal.actor,
                 Some(&org),
+                None,
                 "webhook.create",
                 &json!({ "webhook_id": webhook_id, "url": body.url }),
             )
@@ -7121,10 +7228,12 @@ async fn create_entity_link(
         Err(r) => return *r,
     };
     let _ = pg::set_actor(&client, &principal.actor).await;
+    let ds = stamp_dataset(&client, &org_row.id).await;
     match er_entities::entity_link::create::upsert(
         &client,
         &er_ids::new_v7(),
         &org_row.id,
+        ds.as_deref(),
         parent,
         child,
         &body.kind,
@@ -7143,6 +7252,7 @@ async fn create_entity_link(
                 &client,
                 &principal.actor,
                 Some(&org),
+                None,
                 "entity.link",
                 &json!({ "parent": parent, "child": child, "kind": body.kind }),
             )
@@ -7212,6 +7322,7 @@ async fn delete_entity_link(
                 &client,
                 &principal.actor,
                 Some(&org),
+                None,
                 "entity.unlink",
                 &json!({ "link_id": link_id }),
             )
@@ -7291,9 +7402,11 @@ async fn tag_application(
     };
     let _ = pg::set_actor(&client, &principal.actor).await;
     let outcome = if apply {
+        let ds = stamp_dataset(&client, &org_row.id).await;
         pg::apply_tag(
             &client,
             &org_row.id,
+            ds.as_deref(),
             &tag_id,
             &body.subject_type,
             &body.subject_id,
@@ -7405,6 +7518,7 @@ async fn delete_webhook(
                     &client,
                     &principal.actor,
                     Some(&org),
+                    None,
                     "webhook.delete",
                     &json!({ "webhook_id": webhook_id }),
                 )
@@ -7451,13 +7565,15 @@ async fn steward_stage(
         .and_then(Value::as_str)
         .unwrap_or("unknown")
         .to_string();
-    let action_id = pg::stage_action(client, &detail.id, action, actor)
+    let ds = stamp_dataset(client, &detail.id).await;
+    let action_id = pg::stage_action(client, &detail.id, ds.as_deref(), action, actor)
         .await
         .map_err(|e| Box::new(pg_err(e)))?;
     let _ = pg::audit(
         client,
         actor,
         Some(org),
+        None,
         &format!("steward.{action_type}"),
         &json!({ "action_id": action_id, "status": "staged" }),
     )
@@ -7566,9 +7682,11 @@ async fn add_assertion(
     if let Err(e) = refuse_unless_active(&org_row, "assertions") {
         return *e;
     }
+    let ds = stamp_dataset(&client, &org_row.id).await;
     match pg::enqueue(
         &client,
         &org_row.id,
+        ds.as_deref(),
         "apply_corrections",
         0,
         Some(&idem),
@@ -7733,9 +7851,11 @@ async fn record_overlay_action(
     if let Err(e) = refuse_unless_active(&org_row, "steward actions") {
         return *e;
     }
+    let ds = stamp_dataset(&client, &org_row.id).await;
     match pg::enqueue(
         &client,
         &org_row.id,
+        ds.as_deref(),
         "apply_corrections",
         0,
         Some(&idem),
@@ -8076,9 +8196,11 @@ async fn unmerge_entity(
         Ok(r) => r,
         Err(r) => return *r,
     };
+    let ds = stamp_dataset(&client, &org_row.id).await;
     match pg::enqueue(
         &client,
         &org_row.id,
+        ds.as_deref(),
         "apply_corrections",
         0,
         Some(&idem),
@@ -8238,6 +8360,7 @@ async fn bulk_resolve_reviews(
         Ok(None) => return detail_err(StatusCode::NOT_FOUND, format!("no org '{org}'")),
         Err(e) => return pg_err(e),
     };
+    let ds = stamp_dataset(&client, &org_row.id).await;
     let mut action_ids = Vec::new();
     for item in &body.items {
         let action = json!({
@@ -8245,7 +8368,15 @@ async fn bulk_resolve_reviews(
             "review_id": item.review_id,
             "resolution": item.resolution,
         });
-        match pg::stage_action(&client, &org_row.id, &action, &principal.actor).await {
+        match pg::stage_action(
+            &client,
+            &org_row.id,
+            ds.as_deref(),
+            &action,
+            &principal.actor,
+        )
+        .await
+        {
             Ok(id) => action_ids.push(id),
             Err(e) => return pg_err(e),
         }
@@ -8254,6 +8385,7 @@ async fn bulk_resolve_reviews(
         &client,
         &principal.actor,
         Some(&org),
+        None,
         "steward.bulk_resolve",
         &json!({ "count": action_ids.len() }),
     )
@@ -8265,6 +8397,7 @@ async fn bulk_resolve_reviews(
         match pg::enqueue(
             &client,
             &org_row.id,
+            ds.as_deref(),
             "apply_corrections",
             0,
             Some(&idem),
@@ -8364,6 +8497,7 @@ async fn mass_update(
         Ok(None) => return detail_err(StatusCode::NOT_FOUND, format!("no org '{org}'")),
         Err(e) => return pg_err(e),
     };
+    let ds = stamp_dataset(&client, &org_row.id).await;
     let mut action_ids = Vec::new();
     for item in &body.items {
         let action = if item.clear {
@@ -8380,7 +8514,15 @@ async fn mass_update(
                 "value": item.value,
             })
         };
-        match pg::stage_action(&client, &org_row.id, &action, &principal.actor).await {
+        match pg::stage_action(
+            &client,
+            &org_row.id,
+            ds.as_deref(),
+            &action,
+            &principal.actor,
+        )
+        .await
+        {
             Ok(id) => action_ids.push(id),
             Err(e) => return pg_err(e),
         }
@@ -8389,6 +8531,7 @@ async fn mass_update(
         &client,
         &principal.actor,
         Some(&org),
+        None,
         "steward.mass_update",
         &json!({ "count": action_ids.len() }),
     )
@@ -8400,6 +8543,7 @@ async fn mass_update(
         match pg::enqueue(
             &client,
             &org_row.id,
+            ds.as_deref(),
             "apply_corrections",
             0,
             Some(&idem),
@@ -8462,6 +8606,7 @@ async fn create_key(
                 &client,
                 &principal.actor,
                 Some(&org),
+                None,
                 "key.issue",
                 &json!({ "key_id": key_id, "role": role.as_str() }),
             )
@@ -8509,6 +8654,7 @@ async fn revoke_key(
                 &client,
                 &principal.actor,
                 Some(&org),
+                None,
                 "key.revoke",
                 &json!({ "key_id": key_id, "revoked": revoked }),
             )
@@ -8858,6 +9004,7 @@ mod evaluation_tests {
         PairLabel {
             id: format!("l-{verdict}-{origin}-{score:?}"),
             org_id: "o1".into(),
+            dataset_id: None,
             rec_a_key: "a".into(),
             rec_b_key: "b".into(),
             verdict: verdict.into(),

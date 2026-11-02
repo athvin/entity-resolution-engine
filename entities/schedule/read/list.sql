@@ -1,6 +1,6 @@
 SELECT
   id,
-  org_id,
+  org_id, dataset_id,
   kind,
   params,
   cron,

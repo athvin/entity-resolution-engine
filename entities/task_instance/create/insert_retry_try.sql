@@ -1,8 +1,8 @@
 INSERT INTO public.task_instances
-  (id, org_id, job_id, task_id, seq, try_number, live, kind, state, trigger_rule, upstream, teardown, segment,
+  (id, org_id, dataset_id, job_id, task_id, seq, try_number, live, kind, state, trigger_rule, upstream, teardown, segment,
    resource_class, escalated_from, max_tries, max_launches, not_before, input, image_digest, trace_context)
 SELECT encode(sha256(convert_to('task_instances:' || job_id || ':' || task_id || ':' || (try_number + 1)::text, 'UTF8')), 'hex'),
-       org_id, job_id, task_id, seq, try_number + 1, TRUE, kind, 'up_for_retry', trigger_rule, upstream, teardown,
+       org_id, dataset_id, job_id, task_id, seq, try_number + 1, TRUE, kind, 'up_for_retry', trigger_rule, upstream, teardown,
        CASE WHEN $escalate THEN NULL ELSE segment END,
        CASE WHEN $escalate AND resource_class = 'S' THEN 'M'
             WHEN $escalate AND resource_class = 'M' THEN 'L' ELSE resource_class END,
@@ -20,6 +20,7 @@ WHERE id = $task_instance_id AND live IS NULL AND archived_reason = 'retry'
 RETURNING
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,

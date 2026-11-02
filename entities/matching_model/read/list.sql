@@ -1,6 +1,7 @@
 SELECT
   id,
   org_id,
+  dataset_id,
   name,
   version,
   entity_type,

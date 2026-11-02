@@ -10,6 +10,8 @@ pub struct Schedule {
     pub id: String,
     /// The tenant this schedule runs for.
     pub org_id: String,
+    /// The dataset this schedule enqueues for.
+    pub dataset_id: Option<String>,
     /// The job kind the schedule enqueues.
     pub kind: String,
     /// Kind-specific parameters.
@@ -44,6 +46,7 @@ impl Schedule {
         &[
             "id",
             "org_id",
+            "dataset_id",
             "kind",
             "params",
             "cron",
@@ -63,15 +66,20 @@ pub mod create {
         client: &impl ::tokio_postgres::GenericClient,
         schedule_id: &str,
         org_id: &str,
+        dataset_id: Option<&str>,
         kind: &str,
         params: &::serde_json::Value,
         cron: &str,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
-        const SQL: &str = "INSERT INTO public.schedules (id, org_id, kind, params, cron, source)
-VALUES ($1, $2, $3, $4, $5, 'api')
+        const SQL: &str =
+            "INSERT INTO public.schedules (id, org_id, dataset_id, kind, params, cron, source)
+VALUES ($1, $2, $3, $4, $5, $6, 'api')
 ";
         client
-            .execute(SQL, &[&schedule_id, &org_id, &kind, &params, &cron])
+            .execute(
+                SQL,
+                &[&schedule_id, &org_id, &dataset_id, &kind, &params, &cron],
+            )
             .await
     }
 
@@ -80,19 +88,24 @@ VALUES ($1, $2, $3, $4, $5, 'api')
         client: &impl ::tokio_postgres::GenericClient,
         schedule_id: &str,
         org_id: &str,
+        dataset_id: Option<&str>,
         kind: &str,
         cron: &str,
         source: &str,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
-        const SQL: &str = "INSERT INTO public.schedules (id, org_id, kind, params, cron, source)
-SELECT $1, $2, $3, '{}'::jsonb, $4, $5
+        const SQL: &str =
+            "INSERT INTO public.schedules (id, org_id, dataset_id, kind, params, cron, source)
+SELECT $1, $2, $3, $4, '{}'::jsonb, $5, $6
 WHERE NOT EXISTS (
   SELECT 1 FROM public.schedules
-  WHERE org_id = $2 AND source = $5
+  WHERE org_id = $2 AND source = $6
 )
 ";
         client
-            .execute(SQL, &[&schedule_id, &org_id, &kind, &cron, &source])
+            .execute(
+                SQL,
+                &[&schedule_id, &org_id, &dataset_id, &kind, &cron, &source],
+            )
             .await
     }
 }
@@ -119,7 +132,7 @@ pub mod read {
     ) -> ::std::result::Result<Vec<super::Schedule>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT
   s.id,
-  s.org_id,
+  s.org_id, dataset_id,
   s.kind,
   s.params,
   s.cron,
@@ -139,6 +152,7 @@ ORDER BY s.id
             .map(|row| super::Schedule {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 kind: row.get("kind"),
                 params: row.get("params"),
                 cron: row.get("cron"),
@@ -158,7 +172,7 @@ ORDER BY s.id
     ) -> ::std::result::Result<Vec<super::Schedule>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT
   id,
-  org_id,
+  org_id, dataset_id,
   kind,
   params,
   cron,
@@ -177,6 +191,7 @@ ORDER BY created_at
             .map(|row| super::Schedule {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 kind: row.get("kind"),
                 params: row.get("params"),
                 cron: row.get("cron"),
@@ -192,6 +207,18 @@ ORDER BY created_at
 
 pub mod update {
     //! @generated query functions for this entity + operation.
+    /// The dataset_id backfill (fixup 0002): stamp every pre-dataset row with its org's default dataset. Idempotent — only NULL rows are touched, so a re-run after new writes (which stamp themselves) is a no-op.
+    pub async fn backfill_dataset(
+        client: &impl ::tokio_postgres::GenericClient,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str = "UPDATE public.schedules c
+SET dataset_id = d.id, updated_at = now()
+FROM public.datasets d
+WHERE d.org_id = c.org_id AND d.name = 'default' AND c.dataset_id IS NULL
+";
+        client.execute(SQL, &[]).await
+    }
+
     /// Record that the scheduler tick enqueued this schedule's job. Observability only — the firing itself is made exactly-once by the job's idempotency key, not by this column.
     pub async fn mark_enqueued(
         client: &impl ::tokio_postgres::GenericClient,

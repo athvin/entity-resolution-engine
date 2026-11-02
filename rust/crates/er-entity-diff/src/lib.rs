@@ -263,6 +263,7 @@ mod tests {
         [
             ("id", "text", false),
             ("org_id", "text", false),
+            ("dataset_id", "text", true),
             ("kind", "text", false),
             ("params", "jsonb", false),
             ("state", "text", false),

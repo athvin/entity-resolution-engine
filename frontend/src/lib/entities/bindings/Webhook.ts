@@ -7,6 +7,8 @@ export interface Webhook {
   id: string;
   /** The tenant that owns the webhook. */
   org_id: string;
+  /** Optional dataset filter: NULL subscribes to every dataset's events. */
+  dataset_id: string | null;
   /** The delivery URL. */
   url: string;
   /** The subscribed event types. */

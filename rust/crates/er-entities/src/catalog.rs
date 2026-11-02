@@ -351,6 +351,9 @@ columns:
   - name: org
     type: varchar
     description: "The tenant the action applies to, if the action is org-scoped."
+  - name: dataset
+    type: varchar
+    description: "The dataset the action concerned, by name, when it concerned one — context, like `org`, not a foreign key (this ledger outlives both)."
   - name: action
     type: varchar
     nullable: false
@@ -398,6 +401,10 @@ columns:
     nullable: false
     references: { relation: orgs, column: id }
     description: "The tenant this config version belongs to."
+  - name: dataset_id
+    type: varchar
+    references: { relation: datasets, column: id }
+    description: "The dataset this config version belongs to. Backfilled to the org's default dataset; joins the natural key at the clean break."
   - name: version
     type: bigint
     nullable: false
@@ -438,6 +445,10 @@ columns:
     default: "now()"
     volatile: true
     description: "Wall-clock last-write time (database default; advanced by mutations once the entity migrates)."
+indexes:
+  # V17: the dataset-scoped read path.
+  - name: config_versions_dataset
+    columns: [dataset_id, version]
 "#,
     ),
     (
@@ -656,6 +667,10 @@ columns:
     nullable: false
     references: { relation: orgs, column: id }
     description: "The tenant. Every read is scoped by it."
+  - name: dataset_id
+    type: varchar
+    references: { relation: datasets, column: id }
+    description: "The dataset whose entities this link relates — entity ids are lake-local."
   - name: parent_entity_id
     type: varchar
     nullable: false
@@ -704,6 +719,9 @@ indexes:
   # served by the unique index above, which leads with org_id + parent.
   - name: entity_links_org_child
     columns: [org_id, child_entity_id]
+  # V17: the dataset-scoped read path.
+  - name: entity_links_dataset
+    columns: [dataset_id, child_entity_id]
 "#,
     ),
     (
@@ -1176,6 +1194,10 @@ columns:
     nullable: false
     references: { relation: orgs, column: id }
     description: "The tenant this job runs for."
+  - name: dataset_id
+    type: varchar
+    references: { relation: datasets, column: id }
+    description: "The dataset this job runs against. NULL only for org-level kinds (provision) — every lake-touching job carries it, and the per-dataset writer lock keys on it once the queue is re-scoped."
   - name: kind
     type: varchar
     nullable: false
@@ -1278,6 +1300,9 @@ indexes:
     where: "state IN ('dispatching','running','canceling')"
   - name: jobs_claimable
     columns: [state, not_before, priority, id]
+  # V17: the dataset-scoped read path (and PR5's per-dataset claim predicate).
+  - name: jobs_dataset
+    columns: [dataset_id, state]
 "#,
     ),
     (
@@ -1428,6 +1453,10 @@ columns:
     nullable: false
     references: { relation: orgs, column: id }
     description: "The tenant this model version belongs to."
+  - name: dataset_id
+    type: varchar
+    references: { relation: datasets, column: id }
+    description: "The dataset whose corpus this model was trained for."
   - name: name
     type: varchar
     nullable: false
@@ -1504,6 +1533,9 @@ indexes:
     columns: [org_id, name]
     unique: true
     where: "state = 'active'"
+  # V17: the dataset-scoped read path.
+  - name: matching_models_dataset
+    columns: [dataset_id, state]
 "#,
     ),
     (
@@ -1718,6 +1750,10 @@ columns:
     nullable: false
     references: { relation: orgs, column: id }
     description: "The tenant whose corpus the pair belongs to; every read is scoped by it."
+  - name: dataset_id
+    type: varchar
+    references: { relation: datasets, column: id }
+    description: "The dataset whose record pair this verdict is about — record keys are lake-local."
   - name: rec_a_key
     type: varchar
     nullable: false
@@ -1770,6 +1806,9 @@ indexes:
   # "what has this tenant labelled lately", and the training read.
   - name: pair_labels_org_recent
     columns: [org_id, created_at]
+  # V17: the dataset-scoped read path.
+  - name: pair_labels_dataset
+    columns: [dataset_id, created_at]
 "#,
     ),
     (
@@ -2252,6 +2291,10 @@ columns:
     nullable: false
     references: { relation: orgs, column: id }
     description: "The tenant whose prefix was polled; every read is scoped by it."
+  - name: dataset_id
+    type: varchar
+    references: { relation: datasets, column: id }
+    description: "The dataset the polled source lands in."
   - name: source
     type: varchar
     nullable: false
@@ -2288,6 +2331,9 @@ indexes:
   - name: s3_ingest_cursors_org_source
     columns: [org_id, source]
     unique: true
+  # V17: the dataset-scoped read path.
+  - name: s3_ingest_cursors_dataset
+    columns: [dataset_id, source]
 "#,
     ),
     (
@@ -2313,6 +2359,10 @@ columns:
     nullable: false
     references: { relation: orgs, column: id }
     description: "The tenant this schedule runs for."
+  - name: dataset_id
+    type: varchar
+    references: { relation: datasets, column: id }
+    description: "The dataset this schedule enqueues for."
   - name: kind
     type: varchar
     nullable: false
@@ -2360,6 +2410,9 @@ indexes:
     columns: [org_id]
     unique: true
     where: "source = 'system:lake_maintain'"
+  # V17: the dataset-scoped read path.
+  - name: schedules_dataset
+    columns: [dataset_id, source]
 "#,
     ),
     (
@@ -2487,6 +2540,10 @@ columns:
     nullable: false
     references: { relation: orgs, column: id }
     description: "The tenant the action applies to."
+  - name: dataset_id
+    type: varchar
+    references: { relation: datasets, column: id }
+    description: "The dataset whose lake this action drains into."
   - name: action
     type: json
     nullable: false
@@ -2522,6 +2579,9 @@ columns:
 indexes:
   - name: staged_pending
     columns: [org_id, state]
+  # V17: the dataset-scoped read path.
+  - name: staged_dataset
+    columns: [dataset_id, state]
 "#,
     ),
     (
@@ -2611,6 +2671,10 @@ columns:
     nullable: false
     references: { relation: orgs, column: id }
     description: "The tenant. Denormalised from the tag so every read is scoped by one predicate rather than a join — the same reason every other tenant-scoped relation carries it."
+  - name: dataset_id
+    type: varchar
+    references: { relation: datasets, column: id }
+    description: "The dataset whose subject this tag is applied to — subject ids are lake-local."
   - name: tag_id
     type: varchar
     nullable: false
@@ -2653,6 +2717,9 @@ indexes:
   - name: taggings_unique_application
     columns: [org_id, tag_id, subject_type, subject_id]
     unique: true
+  # V17: the dataset-scoped read path.
+  - name: taggings_dataset
+    columns: [dataset_id, tag_id]
 "#,
     ),
     (
@@ -2678,6 +2745,10 @@ columns:
     nullable: false
     references: { relation: orgs, column: id }
     description: "Tenant."
+  - name: dataset_id
+    type: varchar
+    references: { relation: datasets, column: id }
+    description: "Copied from the job at planning (NULL for org-level jobs); the per-dataset pod lock keys on it once the executor is re-scoped."
   - name: job_id
     type: varchar
     nullable: false
@@ -2873,6 +2944,9 @@ indexes:
   - name: task_instances_heartbeat
     columns: [heartbeat_at]
     where: "live IS TRUE AND state = 'running'"
+  # V17: the dataset-scoped read path.
+  - name: task_instances_dataset
+    columns: [dataset_id, job_id]
 "#,
     ),
     (
@@ -2897,6 +2971,10 @@ columns:
     nullable: false
     references: { relation: orgs, column: id }
     description: "The tenant whose lake this row describes."
+  - name: dataset_id
+    type: varchar
+    references: { relation: datasets, column: id }
+    description: "The dataset whose lake position this row caches; one row per dataset once per-dataset reconciliation lands."
   - name: catalog_hash
     type: varchar
     nullable: false
@@ -2930,6 +3008,9 @@ columns:
 indexes:
   - name: tenant_schema_states_org
     columns: [org_id]
+  # V17: the dataset-scoped read path.
+  - name: tenant_schema_states_dataset
+    columns: [dataset_id]
 "#,
     ),
     (
@@ -2955,6 +3036,10 @@ columns:
     nullable: false
     references: { relation: orgs, column: id }
     description: "The tenant that owns the webhook."
+  - name: dataset_id
+    type: varchar
+    references: { relation: datasets, column: id }
+    description: "Optional dataset filter: NULL subscribes to every dataset's events."
   - name: url
     type: varchar
     nullable: false
@@ -2985,6 +3070,10 @@ columns:
     default: "now()"
     volatile: true
     description: "Wall-clock last-write time (database default; advanced by mutations once the entity migrates)."
+indexes:
+  # V17: the dataset-scoped read path.
+  - name: webhooks_dataset
+    columns: [dataset_id]
 "#,
     ),
     (
@@ -3011,6 +3100,10 @@ columns:
     nullable: false
     references: { relation: orgs, column: id }
     description: "The tenant whose subscriber this is for; every read is scoped by it."
+  - name: dataset_id
+    type: varchar
+    references: { relation: datasets, column: id }
+    description: "The dataset the delivered event came from, when it has one (provenance)."
   - name: webhook_id
     type: varchar
     nullable: false
@@ -3071,6 +3164,9 @@ indexes:
   # The drainer's claim scan: pending rows whose backoff has elapsed.
   - name: webhook_deliveries_claimable
     columns: [state, next_attempt_at]
+  # V17: the dataset-scoped read path.
+  - name: webhook_deliveries_dataset
+    columns: [dataset_id, created_at]
 "#,
     ),
 ];

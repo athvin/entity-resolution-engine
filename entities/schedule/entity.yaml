@@ -19,6 +19,10 @@ columns:
     nullable: false
     references: { relation: orgs, column: id }
     description: "The tenant this schedule runs for."
+  - name: dataset_id
+    type: varchar
+    references: { relation: datasets, column: id }
+    description: "The dataset this schedule enqueues for."
   - name: kind
     type: varchar
     nullable: false
@@ -66,3 +70,6 @@ indexes:
     columns: [org_id]
     unique: true
     where: "source = 'system:lake_maintain'"
+  # V17: the dataset-scoped read path.
+  - name: schedules_dataset
+    columns: [dataset_id, source]

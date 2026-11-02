@@ -5,6 +5,7 @@ description: "Record a verdict on one pair, correcting any previous one. An upse
 params:
   - { name: label_id, type: varchar }
   - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar, nullable: true }
   - { name: rec_a_key, type: varchar }
   - { name: rec_b_key, type: varchar }
   - { name: verdict, type: varchar }

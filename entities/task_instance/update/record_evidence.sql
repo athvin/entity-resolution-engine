@@ -5,6 +5,7 @@ WHERE id = $task_instance_id AND pod_uid = $pod_uid AND k8s_job_name = $k8s_job_
 RETURNING
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,

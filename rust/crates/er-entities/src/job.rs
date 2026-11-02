@@ -10,6 +10,8 @@ pub struct Job {
     pub id: String,
     /// The tenant this job runs for.
     pub org_id: String,
+    /// The dataset this job runs against. NULL only for org-level kinds (provision) — every lake-touching job carries it, and the per-dataset writer lock keys on it once the queue is re-scoped.
+    pub dataset_id: Option<String>,
     /// The job kind (run_all, correct, maintain, train, ...).
     pub kind: String,
     /// Kind-specific parameters.
@@ -76,6 +78,7 @@ impl Job {
         &[
             "id",
             "org_id",
+            "dataset_id",
             "kind",
             "params",
             "state",
@@ -111,6 +114,7 @@ pub mod create {
         client: &impl ::tokio_postgres::GenericClient,
         job_id: &str,
         org_id: &str,
+        dataset_id: Option<&str>,
         kind: &str,
         priority: i64,
         idempotency_key: Option<&str>,
@@ -118,15 +122,16 @@ pub mod create {
         created_by: Option<&str>,
         trace_context: Option<&str>,
     ) -> ::std::result::Result<Vec<super::Job>, ::tokio_postgres::Error> {
-        const SQL: &str = "INSERT INTO public.jobs (id, org_id, kind, priority, idempotency_key, params, created_by,
+        const SQL: &str = "INSERT INTO public.jobs (id, org_id, dataset_id, kind, priority, idempotency_key, params, created_by,
                          trace_context)
-VALUES ($1, $2, $3, $4, $5, coalesce($6, '{}'::jsonb),
-        $7, $8)
+VALUES ($1, $2, $3, $4, $5, $6, coalesce($7, '{}'::jsonb),
+        $8, $9)
 ON CONFLICT (org_id, idempotency_key) WHERE idempotency_key IS NOT NULL
   DO UPDATE SET kind = jobs.kind, updated_at = now()
 RETURNING
   id,
   org_id,
+  dataset_id,
   kind,
   params,
   state,
@@ -158,6 +163,7 @@ RETURNING
                 &[
                     &job_id,
                     &org_id,
+                    &dataset_id,
                     &kind,
                     &priority,
                     &idempotency_key,
@@ -172,6 +178,7 @@ RETURNING
             .map(|row| super::Job {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 kind: row.get("kind"),
                 params: row.get("params"),
                 state: row.get("state"),
@@ -205,6 +212,7 @@ RETURNING
         client: &impl ::tokio_postgres::GenericClient,
         job_id: &str,
         org_id: &str,
+        dataset_id: Option<&str>,
         kind: &str,
         priority: i64,
         idempotency_key: Option<&str>,
@@ -213,16 +221,17 @@ RETURNING
         trace_context: Option<&str>,
     ) -> ::std::result::Result<Vec<super::Job>, ::tokio_postgres::Error> {
         const SQL: &str = "INSERT INTO public.jobs
-  (id, org_id, kind, priority, idempotency_key, params, schedule_id, created_by,
+  (id, org_id, dataset_id, kind, priority, idempotency_key, params, schedule_id, created_by,
    trace_context)
 VALUES
-  ($1, $2, $3, $4, $5, coalesce($6, '{}'::jsonb),
-   $7, 'scheduler', $8)
+  ($1, $2, $3, $4, $5, $6, coalesce($7, '{}'::jsonb),
+   $8, 'scheduler', $9)
 ON CONFLICT (org_id, idempotency_key) WHERE idempotency_key IS NOT NULL
   DO UPDATE SET kind = jobs.kind, updated_at = now()
 RETURNING
   id,
   org_id,
+  dataset_id,
   kind,
   params,
   state,
@@ -254,6 +263,7 @@ RETURNING
                 &[
                     &job_id,
                     &org_id,
+                    &dataset_id,
                     &kind,
                     &priority,
                     &idempotency_key,
@@ -268,6 +278,7 @@ RETURNING
             .map(|row| super::Job {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 kind: row.get("kind"),
                 params: row.get("params"),
                 state: row.get("state"),
@@ -308,6 +319,7 @@ pub mod read {
         const SQL: &str = "SELECT
   id,
   org_id,
+  dataset_id,
   kind,
   params,
   state,
@@ -341,6 +353,7 @@ WHERE org_id = $1 AND id = $2
             .map(|row| super::Job {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 kind: row.get("kind"),
                 params: row.get("params"),
                 state: row.get("state"),
@@ -378,6 +391,7 @@ WHERE org_id = $1 AND id = $2
         const SQL: &str = "SELECT
   id,
   org_id,
+  dataset_id,
   kind,
   params,
   state,
@@ -411,6 +425,7 @@ WHERE org_id = $1 AND idempotency_key = $2
             .map(|row| super::Job {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 kind: row.get("kind"),
                 params: row.get("params"),
                 state: row.get("state"),
@@ -449,6 +464,7 @@ WHERE org_id = $1 AND idempotency_key = $2
         const SQL: &str = "SELECT
   id,
   org_id,
+  dataset_id,
   kind,
   params,
   state,
@@ -488,6 +504,7 @@ LIMIT $3
             .map(|row| super::Job {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 kind: row.get("kind"),
                 params: row.get("params"),
                 state: row.get("state"),
@@ -524,6 +541,7 @@ LIMIT $3
         const SQL: &str = "SELECT
   id,
   org_id,
+  dataset_id,
   kind,
   params,
   state,
@@ -558,6 +576,7 @@ FOR UPDATE
             .map(|row| super::Job {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 kind: row.get("kind"),
                 params: row.get("params"),
                 state: row.get("state"),
@@ -600,6 +619,7 @@ WHERE state IN ('running', 'canceling')
 RETURNING
   id,
   org_id,
+  dataset_id,
   kind,
   params,
   state,
@@ -631,6 +651,7 @@ RETURNING
             .map(|row| super::Job {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 kind: row.get("kind"),
                 params: row.get("params"),
                 state: row.get("state"),
@@ -659,6 +680,18 @@ RETURNING
             .collect())
     }
 
+    /// The dataset_id backfill (fixup 0002): stamp every pre-dataset row with its org's default dataset. Idempotent — only NULL rows are touched, so a re-run after new writes (which stamp themselves) is a no-op.
+    pub async fn backfill_dataset(
+        client: &impl ::tokio_postgres::GenericClient,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str = "UPDATE public.jobs c
+SET dataset_id = d.id, updated_at = now()
+FROM public.datasets d
+WHERE d.org_id = c.org_id AND d.name = 'default' AND c.dataset_id IS NULL
+";
+        client.execute(SQL, &[]).await
+    }
+
     /// Cancel with the org slot held: a queued job dies directly; a dispatching or running one becomes canceling — still inside the one-active-per-org predicate — until every pod is provably gone (§5.6).
     pub async fn cancel(
         client: &impl ::tokio_postgres::GenericClient,
@@ -673,6 +706,7 @@ WHERE id = $1 AND org_id = $2 AND state IN ('queued', 'dispatching', 'running')
 RETURNING
   id,
   org_id,
+  dataset_id,
   kind,
   params,
   state,
@@ -704,6 +738,7 @@ RETURNING
             .map(|row| super::Job {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 kind: row.get("kind"),
                 params: row.get("params"),
                 state: row.get("state"),
@@ -753,6 +788,7 @@ WHERE id = (
 RETURNING
   id,
   org_id,
+  dataset_id,
   kind,
   params,
   state,
@@ -784,6 +820,7 @@ RETURNING
             .map(|row| super::Job {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 kind: row.get("kind"),
                 params: row.get("params"),
                 state: row.get("state"),
@@ -839,6 +876,7 @@ WHERE id = $4
 RETURNING
   id,
   org_id,
+  dataset_id,
   kind,
   params,
   state,
@@ -872,6 +910,7 @@ RETURNING
             .map(|row| super::Job {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 kind: row.get("kind"),
                 params: row.get("params"),
                 state: row.get("state"),
@@ -936,6 +975,7 @@ WHERE id = $5 AND state = 'dispatching'
 RETURNING
   id,
   org_id,
+  dataset_id,
   kind,
   params,
   state,
@@ -978,6 +1018,7 @@ RETURNING
             .map(|row| super::Job {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 kind: row.get("kind"),
                 params: row.get("params"),
                 state: row.get("state"),
@@ -1020,6 +1061,7 @@ WHERE id = $3 AND state = 'dispatching'
 RETURNING
   id,
   org_id,
+  dataset_id,
   kind,
   params,
   state,
@@ -1053,6 +1095,7 @@ RETURNING
             .map(|row| super::Job {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 kind: row.get("kind"),
                 params: row.get("params"),
                 state: row.get("state"),
@@ -1095,6 +1138,7 @@ WHERE id = $1 AND org_id = $2
 RETURNING
   id,
   org_id,
+  dataset_id,
   kind,
   params,
   state,
@@ -1126,6 +1170,7 @@ RETURNING
             .map(|row| super::Job {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 kind: row.get("kind"),
                 params: row.get("params"),
                 state: row.get("state"),
@@ -1187,6 +1232,7 @@ WHERE id = $4 AND state IN ('running', 'canceling')
 RETURNING
   id,
   org_id,
+  dataset_id,
   kind,
   params,
   state,
@@ -1220,6 +1266,7 @@ RETURNING
             .map(|row| super::Job {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 kind: row.get("kind"),
                 params: row.get("params"),
                 state: row.get("state"),

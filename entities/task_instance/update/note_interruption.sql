@@ -5,6 +5,7 @@ WHERE id = $task_instance_id AND live IS TRUE AND state IN ('running', 'restarti
 RETURNING
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,

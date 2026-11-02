@@ -19,6 +19,10 @@ columns:
     nullable: false
     references: { relation: orgs, column: id }
     description: "The tenant whose prefix was polled; every read is scoped by it."
+  - name: dataset_id
+    type: varchar
+    references: { relation: datasets, column: id }
+    description: "The dataset the polled source lands in."
   - name: source
     type: varchar
     nullable: false
@@ -55,3 +59,6 @@ indexes:
   - name: s3_ingest_cursors_org_source
     columns: [org_id, source]
     unique: true
+  # V17: the dataset-scoped read path.
+  - name: s3_ingest_cursors_dataset
+    columns: [dataset_id, source]

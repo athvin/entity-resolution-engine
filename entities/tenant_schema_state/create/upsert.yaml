@@ -5,6 +5,7 @@ description: "Record a tenant lake's schema position after a reconciliation or c
 params:
   - { name: id, type: varchar }
   - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar, nullable: true }
   - { name: catalog_hash, type: varchar }
   - { name: status, type: varchar }
   - { name: detail, type: varchar, nullable: true }

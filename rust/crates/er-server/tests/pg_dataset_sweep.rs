@@ -113,6 +113,7 @@ async fn every_org_converges_to_a_default_dataset() {
         &client,
         &er_ids::new_v7(),
         &orgs_inc,
+        None,
         ACCOUNT_YAML,
         "deadbeef",
         "pg_dataset_sweep",
@@ -134,4 +135,55 @@ async fn every_org_converges_to_a_default_dataset() {
         .expect("swept");
     assert_eq!(ds.entity_type, "account", "read from the published config");
     assert_eq!(ds.active_config_version, Some(version));
+
+    // ---- phase 4: the 0002 backfill stamps pre-dataset rows -----------------
+    // The fixup ran (and was ledgered) on this database's very first
+    // ensure_schema, when there was nothing to stamp — which is exactly what
+    // happens on a fresh deployment. A row created WITHOUT a dataset_id (as
+    // every row predating the column was) is healed by the backfill statement
+    // itself, which is what the fixup replays on a pre-dataset database.
+    let ledgered = er_entities::fixup::read::by_name(&client, "0002_backfill_dataset_ids")
+        .await
+        .unwrap();
+    assert_eq!(
+        ledgered.len(),
+        1,
+        "the backfill fixup is ledgered semantics-once"
+    );
+
+    let acme = pg::org_id_by_name(&client, "acme").await.unwrap().unwrap();
+    let orphan = pg::enqueue(
+        &client,
+        &acme,
+        None,
+        "run_all_full",
+        0,
+        None,
+        None,
+        pg::Provenance::default(),
+    )
+    .await
+    .unwrap();
+    assert!(
+        orphan.dataset_id.is_none(),
+        "created as a pre-dataset row would be"
+    );
+    er_entities::job::update::backfill_dataset(&client)
+        .await
+        .unwrap();
+    let healed = er_entities::job::read::by_id(&client, &acme, &orphan.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .next()
+        .unwrap();
+    let default_id = pg::default_dataset_id(&client, &acme)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        healed.dataset_id.as_deref(),
+        Some(default_id.as_str()),
+        "the backfill stamps a NULL row with its org's default dataset"
+    );
 }

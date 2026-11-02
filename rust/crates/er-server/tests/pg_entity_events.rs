@@ -224,6 +224,7 @@ async fn entity_events_are_aggregated_per_kind_and_expand_through_the_detail_end
     let queued = pg::enqueue(
         &client,
         &org_id,
+        None,
         "run_all_full",
         0,
         None,
@@ -356,6 +357,7 @@ async fn entity_events_are_aggregated_per_kind_and_expand_through_the_detail_end
     let second = pg::enqueue(
         &client,
         &org_id,
+        None,
         "run_all_full",
         0,
         None,

@@ -10,6 +10,8 @@ pub struct ConfigVersion {
     pub id: String,
     /// The tenant this config version belongs to.
     pub org_id: String,
+    /// The dataset this config version belongs to. Backfilled to the org's default dataset; joins the natural key at the clean break.
+    pub dataset_id: Option<String>,
     /// The monotonic version number within the tenant.
     pub version: i64,
     /// The config document source.
@@ -46,6 +48,7 @@ impl ConfigVersion {
         &[
             "id",
             "org_id",
+            "dataset_id",
             "version",
             "yaml",
             "config_hash",
@@ -66,16 +69,18 @@ pub mod create {
         client: &impl ::tokio_postgres::GenericClient,
         id: &str,
         org_id: &str,
+        dataset_id: Option<&str>,
         yaml: &str,
         config_hash: &str,
         created_by: &str,
     ) -> ::std::result::Result<Vec<super::ConfigVersion>, ::tokio_postgres::Error> {
-        const SQL: &str = "INSERT INTO public.config_versions (id, org_id, version, yaml, config_hash, created_by)
-SELECT $1, $2, coalesce(max(version), 0) + 1, $3, $4, $5
+        const SQL: &str = "INSERT INTO public.config_versions (id, org_id, dataset_id, version, yaml, config_hash, created_by)
+SELECT $1, $2, $3, coalesce(max(version), 0) + 1, $4, $5, $6
 FROM public.config_versions WHERE org_id = $2
 RETURNING
   id,
   org_id,
+  dataset_id,
   version,
   yaml,
   config_hash,
@@ -87,13 +92,17 @@ RETURNING
   updated_at
 ";
         let rows = client
-            .query(SQL, &[&id, &org_id, &yaml, &config_hash, &created_by])
+            .query(
+                SQL,
+                &[&id, &org_id, &dataset_id, &yaml, &config_hash, &created_by],
+            )
             .await?;
         Ok(rows
             .iter()
             .map(|row| super::ConfigVersion {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 version: row.get("version"),
                 yaml: row.get("yaml"),
                 config_hash: row.get("config_hash"),
@@ -119,6 +128,7 @@ pub mod read {
         const SQL: &str = "SELECT
   id,
   org_id,
+  dataset_id,
   version,
   yaml,
   config_hash,
@@ -137,6 +147,7 @@ WHERE org_id = $1 AND version = $2
             .map(|row| super::ConfigVersion {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 version: row.get("version"),
                 yaml: row.get("yaml"),
                 config_hash: row.get("config_hash"),
@@ -158,6 +169,7 @@ WHERE org_id = $1 AND version = $2
         const SQL: &str = "SELECT
   id,
   org_id,
+  dataset_id,
   version,
   yaml,
   config_hash,
@@ -177,6 +189,7 @@ ORDER BY version DESC
             .map(|row| super::ConfigVersion {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 version: row.get("version"),
                 yaml: row.get("yaml"),
                 config_hash: row.get("config_hash"),
@@ -193,6 +206,18 @@ ORDER BY version DESC
 
 pub mod update {
     //! @generated query functions for this entity + operation.
+    /// The dataset_id backfill (fixup 0002): stamp every pre-dataset row with its org's default dataset. Idempotent — only NULL rows are touched, so a re-run after new writes (which stamp themselves) is a no-op.
+    pub async fn backfill_dataset(
+        client: &impl ::tokio_postgres::GenericClient,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str = "UPDATE public.config_versions c
+SET dataset_id = d.id, updated_at = now()
+FROM public.datasets d
+WHERE d.org_id = c.org_id AND d.name = 'default' AND c.dataset_id IS NULL
+";
+        client.execute(SQL, &[]).await
+    }
+
     /// Mark a version published with its rollout tier (the config_versions half of publish).
     pub async fn publish(
         client: &impl ::tokio_postgres::GenericClient,

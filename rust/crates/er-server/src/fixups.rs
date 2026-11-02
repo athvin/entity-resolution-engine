@@ -45,10 +45,8 @@ pub(crate) enum Phase {
 }
 
 /// The ordered fixup list. Append only; a retired fixup keeps its ledger row,
-/// so its name is never reused. (Empty until the first dataset_id backfill
-/// lands — the framework ships ahead of its first passenger so the sweep test
-/// pins the semantics it will rely on.)
-const FIXUPS: &[(&str, Phase)] = &[];
+/// so its name is never reused.
+const FIXUPS: &[(&str, Phase)] = &[("0002_backfill_dataset_ids", Phase::AfterReconcile)];
 
 /// Run every not-yet-applied fixup of `phase`, each in its own transaction
 /// under the schema-bootstrap advisory lock (two boots racing: the loser waits,
@@ -75,7 +73,7 @@ pub(crate) async fn apply_fixups(client: &mut Client, phase: Phase) -> Result<()
             tx.rollback().await?;
             continue;
         }
-        run_fixup(&tx, name)?;
+        run_fixup(&tx, name).await?;
         er_entities::fixup::create::record(&tx, &er_ids::new_v7(), name, &applied_by()).await?;
         tx.commit().await?;
         eprintln!("er-server: fixup {name} applied");
@@ -84,13 +82,38 @@ pub(crate) async fn apply_fixups(client: &mut Client, phase: Phase) -> Result<()
 }
 
 /// One fixup's body, dispatched by its ledger name — a new fixup is one arm
-/// here plus one line in [`FIXUPS`]. (Becomes `async` with its first real
-/// body; a placeholder `async` would be an `unused_async` lint.)
-fn run_fixup(_tx: &tokio_postgres::Transaction<'_>, name: &str) -> Result<(), SchemaError> {
-    // No ledgered fixup exists yet; the first dataset_id backfill adds the
-    // first arm. Reaching this is a FIXUPS entry without a body — a bug in
-    // this module, not in any database.
-    unreachable!("fixup {name} is listed but has no body")
+/// here plus one line in [`FIXUPS`].
+async fn run_fixup(tx: &tokio_postgres::Transaction<'_>, name: &str) -> Result<(), SchemaError> {
+    match name {
+        "0002_backfill_dataset_ids" => backfill_dataset_ids(tx).await,
+        // Reaching this is a FIXUPS entry without a body — a bug in this
+        // module, not in any database.
+        other => unreachable!("fixup {other} is listed but has no body"),
+    }
+}
+
+/// `0002_backfill_dataset_ids` — stamp every pre-dataset row with its org's
+/// `default` dataset. One declared statement per table; each touches only
+/// rows whose `dataset_id` is NULL, so the fixup is idempotent and rows
+/// written after the column landed (which stamp themselves) are never
+/// rewritten. Runs after [`ensure_default_datasets`] has ever converged?
+/// No — ordering inside one boot is: reconcile adds the columns, this
+/// backfill runs, then the convergence sweep runs. An org whose default
+/// dataset does not exist yet simply has no match here and is picked up the
+/// next boot; its children stay NULL until then, exactly as nullable means.
+async fn backfill_dataset_ids(tx: &tokio_postgres::Transaction<'_>) -> Result<(), SchemaError> {
+    er_entities::config_version::update::backfill_dataset(tx).await?;
+    er_entities::matching_model::update::backfill_dataset(tx).await?;
+    er_entities::job::update::backfill_dataset(tx).await?;
+    er_entities::task_instance::update::backfill_dataset(tx).await?;
+    er_entities::schedule::update::backfill_dataset(tx).await?;
+    er_entities::s3_ingest_cursor::update::backfill_dataset(tx).await?;
+    er_entities::pair_label::update::backfill_dataset(tx).await?;
+    er_entities::tenant_schema_state::update::backfill_dataset(tx).await?;
+    er_entities::entity_link::update::backfill_dataset(tx).await?;
+    er_entities::tagging::update::backfill_dataset(tx).await?;
+    er_entities::staged_steward_action::update::backfill_dataset(tx).await?;
+    Ok(())
 }
 
 fn applied_by() -> String {
@@ -121,35 +144,62 @@ pub(crate) async fn ensure_default_datasets(client: &mut Client) -> Result<(), S
     .await?;
     let orgs = er_entities::org::read::list(&tx).await?;
     for org in orgs {
-        let entity_type = match org.active_config_version {
-            Some(version) => er_entities::config_version::read::by_version(&tx, &org.id, version)
-                .await?
-                .into_iter()
-                .next()
-                .and_then(|row| er_config::load_config_str(&row.yaml).ok())
-                .map_or("person", |c| match c.entity_type {
-                    er_config::EntityType::Person => "person",
-                    er_config::EntityType::Account => "account",
-                }),
-            None => "person",
-        };
-        er_entities::dataset::create::ensure(
-            &tx,
-            &er_ids::new_v7(),
-            &org.id,
-            "default",
-            None,
-            entity_type,
-            &org.config_path,
-            &org.env,
-            org.drop_root.as_deref(),
-            org.s3_ingest_bucket.as_deref(),
-            org.s3_ingest_prefix.as_deref(),
-            org.active_config_version,
-            &org.state,
-        )
-        .await?;
+        ensure_default_dataset_for(&tx, &org).await?;
     }
     tx.commit().await?;
+    Ok(())
+}
+
+/// The per-org body of [`ensure_default_datasets`], also run inline where an
+/// org is created so its dataset exists from the first moment rather than at
+/// the next boot.
+pub(crate) async fn ensure_default_dataset_for(
+    client: &impl tokio_postgres::GenericClient,
+    org: &er_entities::org::Org,
+) -> Result<(), SchemaError> {
+    let entity_type = match org.active_config_version {
+        Some(version) => er_entities::config_version::read::by_version(client, &org.id, version)
+            .await?
+            .into_iter()
+            .next()
+            .and_then(|row| er_config::load_config_str(&row.yaml).ok())
+            .map_or("person", |c| match c.entity_type {
+                er_config::EntityType::Person => "person",
+                er_config::EntityType::Account => "account",
+            }),
+        None => "person",
+    };
+    er_entities::dataset::create::ensure(
+        client,
+        &er_ids::new_v7(),
+        &org.id,
+        "default",
+        None,
+        entity_type,
+        &org.config_path,
+        &org.env,
+        org.drop_root.as_deref(),
+        org.s3_ingest_bucket.as_deref(),
+        org.s3_ingest_prefix.as_deref(),
+        org.active_config_version,
+        &org.state,
+    )
+    .await?;
+    Ok(())
+}
+
+/// [`ensure_default_dataset_for`] by org name — the create-org handlers'
+/// entry, which hold the name rather than the generated row.
+pub(crate) async fn ensure_default_dataset_by_name(
+    client: &Client,
+    name: &str,
+) -> Result<(), SchemaError> {
+    if let Some(org) = er_entities::org::read::by_name(client, name)
+        .await?
+        .into_iter()
+        .next()
+    {
+        ensure_default_dataset_for(client, &org).await?;
+    }
     Ok(())
 }

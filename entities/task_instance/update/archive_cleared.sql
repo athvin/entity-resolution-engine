@@ -6,6 +6,7 @@ WHERE org_id = $org_id AND job_id = $job_id AND live IS TRUE
 RETURNING
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,

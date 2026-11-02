@@ -10,6 +10,8 @@ pub struct EntityLink {
     pub id: String,
     /// The tenant. Every read is scoped by it.
     pub org_id: String,
+    /// The dataset whose entities this link relates — entity ids are lake-local.
+    pub dataset_id: Option<String>,
     /// The entity on the owning side — the household, the parent company. Deliberately NOT a foreign key, for the reason `taggings.subject_id` gives: an entity lives in the LAKE and this table is Postgres, so a database-level reference would point at a row this store does not own. The id is stable across runs because reconcile carries ids forward by membership overlap (INV-PERM) rather than re-deriving them, and an entity that loses that contest records `merged_into` — so a link survives its entity gaining members, and a merged-away side is followable rather than dangling.
     pub parent_entity_id: String,
     /// The entity on the member side — the person in the household, the subsidiary.
@@ -44,6 +46,7 @@ impl EntityLink {
         &[
             "id",
             "org_id",
+            "dataset_id",
             "parent_entity_id",
             "child_entity_id",
             "kind",
@@ -63,6 +66,7 @@ pub mod create {
         client: &impl ::tokio_postgres::GenericClient,
         link_id: &str,
         org_id: &str,
+        dataset_id: Option<&str>,
         parent_entity_id: &str,
         child_entity_id: &str,
         kind: &str,
@@ -71,16 +75,17 @@ pub mod create {
         created_by: &str,
     ) -> ::std::result::Result<Vec<super::EntityLink>, ::tokio_postgres::Error> {
         const SQL: &str = "INSERT INTO public.entity_links
-  (id, org_id, parent_entity_id, child_entity_id, kind, origin, note, created_by)
+  (id, org_id, dataset_id, parent_entity_id, child_entity_id, kind, origin, note, created_by)
 VALUES
-  ($1, $2, $3, $4, $5, $6,
-   $7, $8)
+  ($1, $2, $3, $4, $5, $6, $7,
+   $8, $9)
 ON CONFLICT (org_id, parent_entity_id, child_entity_id, kind) DO UPDATE SET
+  dataset_id = EXCLUDED.dataset_id,
   origin = EXCLUDED.origin,
   note = EXCLUDED.note,
   created_by = EXCLUDED.created_by,
   updated_at = now()
-RETURNING id, org_id, parent_entity_id, child_entity_id, kind, origin, note,
+RETURNING id, org_id, dataset_id, parent_entity_id, child_entity_id, kind, origin, note,
           created_by, created_at, updated_at
 ";
         let rows = client
@@ -89,6 +94,7 @@ RETURNING id, org_id, parent_entity_id, child_entity_id, kind, origin, note,
                 &[
                     &link_id,
                     &org_id,
+                    &dataset_id,
                     &parent_entity_id,
                     &child_entity_id,
                     &kind,
@@ -103,6 +109,7 @@ RETURNING id, org_id, parent_entity_id, child_entity_id, kind, origin, note,
             .map(|row| super::EntityLink {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 parent_entity_id: row.get("parent_entity_id"),
                 child_entity_id: row.get("child_entity_id"),
                 kind: row.get("kind"),
@@ -142,6 +149,7 @@ pub mod read {
         const SQL: &str = "SELECT
   id,
   org_id,
+  dataset_id,
   parent_entity_id,
   child_entity_id,
   kind,
@@ -161,6 +169,7 @@ ORDER BY kind, parent_entity_id, child_entity_id
             .map(|row| super::EntityLink {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 parent_entity_id: row.get("parent_entity_id"),
                 child_entity_id: row.get("child_entity_id"),
                 kind: row.get("kind"),
@@ -171,5 +180,20 @@ ORDER BY kind, parent_entity_id, child_entity_id
                 updated_at: row.get("updated_at"),
             })
             .collect())
+    }
+}
+
+pub mod update {
+    //! @generated query functions for this entity + operation.
+    /// The dataset_id backfill (fixup 0002): stamp every pre-dataset row with its org's default dataset. Idempotent — only NULL rows are touched, so a re-run after new writes (which stamp themselves) is a no-op.
+    pub async fn backfill_dataset(
+        client: &impl ::tokio_postgres::GenericClient,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str = "UPDATE public.entity_links c
+SET dataset_id = d.id, updated_at = now()
+FROM public.datasets d
+WHERE d.org_id = c.org_id AND d.name = 'default' AND c.dataset_id IS NULL
+";
+        client.execute(SQL, &[]).await
     }
 }

@@ -18,6 +18,10 @@ columns:
     nullable: false
     references: { relation: orgs, column: id }
     description: "The tenant this job runs for."
+  - name: dataset_id
+    type: varchar
+    references: { relation: datasets, column: id }
+    description: "The dataset this job runs against. NULL only for org-level kinds (provision) — every lake-touching job carries it, and the per-dataset writer lock keys on it once the queue is re-scoped."
   - name: kind
     type: varchar
     nullable: false
@@ -120,3 +124,6 @@ indexes:
     where: "state IN ('dispatching','running','canceling')"
   - name: jobs_claimable
     columns: [state, not_before, priority, id]
+  # V17: the dataset-scoped read path (and PR5's per-dataset claim predicate).
+  - name: jobs_dataset
+    columns: [dataset_id, state]

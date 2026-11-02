@@ -10,6 +10,8 @@ pub struct StagedStewardAction {
     pub id: String,
     /// The tenant the action applies to.
     pub org_id: String,
+    /// The dataset whose lake this action drains into.
+    pub dataset_id: Option<String>,
     /// The action payload.
     pub action: ::serde_json::Value,
     /// Whether the action is pending, applied or failed.
@@ -42,6 +44,7 @@ impl StagedStewardAction {
         &[
             "id",
             "org_id",
+            "dataset_id",
             "action",
             "state",
             "error",
@@ -60,15 +63,19 @@ pub mod create {
         client: &impl ::tokio_postgres::GenericClient,
         action_id: &str,
         org_id: &str,
+        dataset_id: Option<&str>,
         action: &::serde_json::Value,
         created_by: &str,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
         const SQL: &str =
-            "INSERT INTO public.staged_steward_actions (id, org_id, action, created_by)
-VALUES ($1, $2, $3, $4)
+            "INSERT INTO public.staged_steward_actions (id, org_id, dataset_id, action, created_by)
+VALUES ($1, $2, $3, $4, $5)
 ";
         client
-            .execute(SQL, &[&action_id, &org_id, &action, &created_by])
+            .execute(
+                SQL,
+                &[&action_id, &org_id, &dataset_id, &action, &created_by],
+            )
             .await
     }
 }
@@ -82,7 +89,7 @@ pub mod read {
     ) -> ::std::result::Result<Vec<super::StagedStewardAction>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT
   id,
-  org_id,
+  org_id, dataset_id,
   action,
   state,
   error,
@@ -100,6 +107,7 @@ ORDER BY created_at, id
             .map(|row| super::StagedStewardAction {
                 id: row.get("id"),
                 org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
                 action: row.get("action"),
                 state: row.get("state"),
                 error: row.get("error"),
@@ -114,6 +122,18 @@ ORDER BY created_at, id
 
 pub mod update {
     //! @generated query functions for this entity + operation.
+    /// The dataset_id backfill (fixup 0002): stamp every pre-dataset row with its org's default dataset. Idempotent — only NULL rows are touched, so a re-run after new writes (which stamp themselves) is a no-op.
+    pub async fn backfill_dataset(
+        client: &impl ::tokio_postgres::GenericClient,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str = "UPDATE public.staged_steward_actions c
+SET dataset_id = d.id, updated_at = now()
+FROM public.datasets d
+WHERE d.org_id = c.org_id AND d.name = 'default' AND c.dataset_id IS NULL
+";
+        client.execute(SQL, &[]).await
+    }
+
     /// Mark a staged action applied after the dispatcher drains it to the lake.
     pub async fn mark_applied(
         client: &impl ::tokio_postgres::GenericClient,

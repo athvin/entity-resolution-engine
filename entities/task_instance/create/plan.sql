@@ -1,12 +1,13 @@
 INSERT INTO public.task_instances
-  (id, org_id, job_id, task_id, seq, try_number, live, kind, state, trigger_rule, upstream, teardown,
+  (id, org_id, dataset_id, job_id, task_id, seq, try_number, live, kind, state, trigger_rule, upstream, teardown,
    segment, resource_class, max_tries, max_launches, image_digest, trace_context)
-VALUES ($id, $org_id, $job_id, $task_id, $seq, 1, TRUE, $kind, 'none', $trigger_rule, $upstream, $teardown,
+VALUES ($id, $org_id, $dataset_id, $job_id, $task_id, $seq, 1, TRUE, $kind, 'none', $trigger_rule, $upstream, $teardown,
    $segment, $resource_class, $max_tries, $max_launches, $image_digest, $trace_context)
 ON CONFLICT (job_id, task_id, try_number) DO NOTHING
 RETURNING
   id,
   org_id,
+  dataset_id,
   job_id,
   task_id,
   seq,
