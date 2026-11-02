@@ -146,11 +146,78 @@ aws athena start-query-execution \
   --query-string "$(cat query.sql)"
 ```
 
-### The three probes — run these before writing any production query
+**Or skip Athena entirely for one-off work.** The export is Parquet and the
+whole of October is under a megabyte, so `duckdb` answers the same questions
+locally for nothing — no scan charge, no result bucket, and the partition key
+comes through as a column:
+
+```sh
+aws s3 cp s3://er-cur-797781631727/cur2/er-cur2/data/ /tmp/cur/ \
+  --recursive --exclude '*' --include '*.parquet'
+duckdb -c "SELECT BILLING_PERIOD, round(sum(line_item_unblended_cost),2) AS usd
+           FROM read_parquet('/tmp/cur/**/*.parquet', hive_partitioning=true)
+           GROUP BY 1 ORDER BY 1;"
+```
+
+Every probe answer below was obtained this way. Athena earns its keep once the
+history is large enough that downloading it stops being trivial, or when a
+query needs to run from a job rather than a laptop.
+
+### The three probes — and their answers as of 2026-11-02
 
 The design in [infrastructure.md](infrastructure.md) §16.2 assumes things about
-the CUR's shape that only a real billing month can confirm. Run these first and
-let the answers shape the queries, rather than assuming and finding out later.
+the CUR's shape that only a real billing month can confirm. These were run
+against the delivered October and November partitions; **one of the three came
+back badly and is why the per-pod cost model cannot be built yet.**
+
+> **P1 — split cost allocation produces NOTHING.** All eleven
+> `split_line_item_*` columns are present and **every value is NULL across
+> 56,816 October rows**. The columns exist because `cur.tf` sets
+> `INCLUDE_SPLIT_COST_ALLOCATION_DATA = "TRUE"` on the export; the data is
+> absent because **split cost allocation has a second switch** — an
+> account-level opt-in under *Billing → Cost Management Preferences* — which
+> has never been enabled. The export flag includes the columns; the preference
+> generates the data.
+>
+> It is free, it takes up to 24 hours, and like cost allocation tags it is
+> **computed going forward and does not backfill**. So §16.2's "per-tenant
+> compute cost is tractable because §6 makes a run a dedicated single-tenant
+> pod" rests on data that is not being produced, and every day unenabled is a
+> day of pod-level cost that cannot be recovered. **Enable it before building
+> any per-run cost model.**
+
+> **P2 — the Auto Mode fee is separately itemized, and therefore not split.**
+> It bills as its own usage type, `USE2-EKS-Auto:<instance>-management-hours`
+> ($9.15 across three instance types in October, ~12% of instance cost as
+> D-AUTOMODE states). Because it is a distinct line rather than part of the
+> instance's cost, it will **not** appear inside a per-pod split row once
+> splitting is on — so a per-pod figure understates by roughly that 12% unless
+> the fee is apportioned by `split_line_item_split_usage_ratio` separately.
+
+> **P3 — the user tags are fine; the EKS ones are not.** `Project`,
+> `Environment` and `ManagedBy` were activated 2026-10-11 and appear on all
+> 42,502 tagged rows as `user_project` / `user_environment` /
+> `user_managed_by`, so the §16.1 non-backfill warning was heeded for those.
+> Two gaps remain: **`Developer` is on no resource at all** (`default_tags` in
+> `envs/{core,dev}/versions.tf` never set it), so §16.1's "per-developer cost
+> comes free" is false; and **`aws:eks:cluster-name` is `Inactive`** while the
+> other five `aws:eks:*` keys the design expects do not exist as activatable
+> tags at all — they only materialise once split cost allocation is on.
+
+Two further observations worth recording, because the design's numbers assume
+otherwise:
+
+- **October was $184.23**, against the ~$190/mo dev estimate in §16 — the
+  estimate was good. Top lines: EKS control plane $55.17 (554 h, a partial
+  month), EC2 instances ~$47, NAT $31.87, RDS $19.87, EBS gp3 $11.39.
+- **No runner-pool usage has happened yet.** §6.5 names `c6id` for the runner
+  pools; October billed **0.3 hours** of `c6id.xlarge` in total. What actually
+  ran is `c6g.large` (Graviton, $0.068/h), `m6a.large` and `m6i.large` — all
+  **2-vCPU** instances, not the 8-vCPU `*.2xlarge` the sizing assumes. So the
+  blended per-class rate the cost model needs **cannot be calibrated from this
+  data**; it needs a month with real runs on it.
+
+Re-run them with the queries below after changing anything.
 
 **P1 — what do split rows actually key on?** The design joins a pod to its run
 through `task_instances.pod_uid`. This shows what identity the split rows
