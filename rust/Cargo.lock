@@ -1990,6 +1990,7 @@ dependencies = [
  "er-versions",
  "serde",
  "serde_json",
+ "tracing",
 ]
 
 [[package]]
@@ -2225,6 +2226,7 @@ dependencies = [
  "indexmap",
  "serde_json",
  "thiserror",
+ "tokio",
  "tracing",
  "tracing-subscriber",
 ]

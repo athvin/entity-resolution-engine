@@ -156,11 +156,20 @@ pub fn init(role: Role) -> Guard {
     let filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(DEFAULT_FILTER));
 
+    // `with_span_list` is what makes a record self-describing. Without it a
+    // line carries only its innermost span, so a statement-level event says
+    // which stage it was in and nothing about which run, job, tenant or dataset
+    // — which is the attribution the whole exercise exists for. With it, every
+    // record carries its full ancestry: process -> job -> run -> stage.
+    //
+    // It costs bytes, and the lever against that is the filter rather than
+    // throwing away the ancestry, because a cheap line nobody can attribute is
+    // not actually cheap.
     let json = tracing_subscriber::fmt::layer()
         .json()
         .flatten_event(true)
         .with_current_span(true)
-        .with_span_list(false)
+        .with_span_list(true)
         .with_target(true)
         .with_writer(std::io::stderr);
 

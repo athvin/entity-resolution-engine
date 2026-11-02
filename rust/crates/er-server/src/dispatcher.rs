@@ -501,6 +501,37 @@ async fn dispatch_claimed(
     reporter: Option<&mut crate::reporter::AttemptReporter>,
     job: Job,
 ) -> Result<bool, tokio_postgres::Error> {
+    // The job span: the single place org and dataset enter the trace, and the
+    // ancestor of the `run` span, its eleven stage spans, and every statement
+    // span beneath them. Every claimed job funnels through here, so one span
+    // site covers the whole dispatch path.
+    //
+    // Nothing downstream is passed an org — `tracing` context is ambient, so a
+    // generated query function three layers down is attributed to this tenant
+    // without taking an argument. That is what keeps the 218 generated
+    // signatures untouched.
+    let job_span = tracing::info_span!(
+        "job",
+        otel.name = %format_args!("job {}", job.kind),
+        er.job_id = %job.id,
+        er.org = %job.org_id,
+        er.job_kind = %job.kind,
+        er.attempt = job.attempt,
+        // The §10.2 hop, half-closed: the enqueue side writes this (the
+        // traceparent of the request that asked for the job) and it is recorded
+        // here so a log search joins the two. Making this span a true CHILD of
+        // that context needs the OTel context propagator, which arrives with
+        // the exporter — at which point this field becomes `set_parent`.
+        er.trace_context = job.trace_context.as_deref().unwrap_or(""),
+    );
+    let _entered = job_span.enter();
+    tracing::info!(
+        er.job_id = %job.id,
+        er.org = %job.org_id,
+        er.job_kind = %job.kind,
+        er.attempt = job.attempt,
+        "job claimed"
+    );
     // The attempt ledger (batch-orchestration-design §11 Phase 1): plan the
     // job's task rows in one transaction with the claim. Planning commits the
     // `dispatching → running` transition itself; an unreported job — no
@@ -580,9 +611,10 @@ async fn dispatch_claimed(
             rr.pod_started("reconcile_schema").await;
         }
         let env = lake_env.clone();
-        let outcome = tokio::task::spawn_blocking(move || crate::schema::reconcile_lake_env(&env))
-            .await
-            .unwrap_or_else(|e| Err(format!("dispatcher task panicked: {e}")));
+        let outcome =
+            er_obs::spawn_blocking_in_span(move || crate::schema::reconcile_lake_env(&env))
+                .await
+                .unwrap_or_else(|e| Err(format!("dispatcher task panicked: {e}")));
         let (status, hash, detail) = crate::schema::tenant_state(&outcome);
         crate::schema::record_tenant_state(
             client,
@@ -739,7 +771,7 @@ async fn dispatch_claimed(
         // The engine's stage events apply to the ledger LIVE while the blocking
         // half runs — the reporter's whole point (§11 Phase 1).
         match crate::reporter::observe_blocking(report.as_mut(), move |events| {
-            tokio::task::spawn_blocking(move || {
+            er_obs::spawn_blocking_in_span(move || {
                 run_job(&jb, &env, drop_root.as_deref(), &models, events)
             })
         })
@@ -1638,7 +1670,7 @@ async fn train_half(
         let snap = tf_snapshot_id.clone();
         let training = config.training.clone();
         let match_labels = match_labels.clone();
-        tokio::task::spawn_blocking(move || -> Result<(String, String), String> {
+        er_obs::spawn_blocking_in_span(move || -> Result<(String, String), String> {
             let session = er_cli::open_lake_with(&catalog, &data_path, catalog_schema.as_deref())
                 .map_err(|e| format!("open lake: {e:#}"))?;
             let dir = std::env::temp_dir().join(format!("er_train_{label}"));
@@ -1867,9 +1899,10 @@ async fn provision_tenant(
     }
     let lake_step: Result<(), String> = async {
         let env = org.env.clone();
-        let schema = tokio::task::spawn_blocking(move || crate::schema::reconcile_lake_env(&env))
-            .await
-            .unwrap_or_else(|e| Err(format!("dispatcher task panicked: {e}")));
+        let schema =
+            er_obs::spawn_blocking_in_span(move || crate::schema::reconcile_lake_env(&env))
+                .await
+                .unwrap_or_else(|e| Err(format!("dispatcher task panicked: {e}")));
         let (status, hash, detail) = crate::schema::tenant_state(&schema);
         crate::schema::record_tenant_state(client, &org.id, None, status, &hash, Some(&detail))
             .await
@@ -2003,7 +2036,7 @@ pub async fn drain_and_correct(
     let now = fmt_epoch(unix_now());
     let (events_tx, events_rx) = tokio::sync::mpsc::unbounded_channel();
     let events = report.is_some().then_some(events_tx);
-    let handle = tokio::task::spawn_blocking(move || {
+    let handle = er_obs::spawn_blocking_in_span(move || {
         apply_and_correct(&env_owned, &pending, &run_id_owned, &now, events)
     });
     let joined = match report.as_mut() {
@@ -2272,7 +2305,7 @@ async fn provision_dataset(
         rr.pod_started("lake_init").await;
     }
     let env = ds.env.clone();
-    let outcome = tokio::task::spawn_blocking(move || crate::schema::reconcile_lake_env(&env))
+    let outcome = er_obs::spawn_blocking_in_span(move || crate::schema::reconcile_lake_env(&env))
         .await
         .unwrap_or_else(|e| Err(format!("dispatcher task panicked: {e}")));
     let (status, hash, detail) = crate::schema::tenant_state(&outcome);
