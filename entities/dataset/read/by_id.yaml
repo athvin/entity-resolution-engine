@@ -1,0 +1,7 @@
+kind: statement
+operation: read
+mode: full
+description: "One dataset by its id — the dispatcher's lookup from a claimed job's dataset_id."
+params:
+  - { name: id, type: varchar }
+returns: entity

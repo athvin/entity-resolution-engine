@@ -462,7 +462,7 @@ pub async fn dispatch_once_with_executor(
         // Peek-claim through the same SKIP LOCKED statement; an executor kind
         // leaves here planned, everything else falls through to the legacy
         // arms exactly as before.
-        let Some(job) = pg::claim(client).await? else {
+        let Some(job) = pg::claim(client, pg::org_job_cap()).await? else {
             return Ok(false);
         };
         if ex.handles(&job.kind) {
@@ -487,7 +487,7 @@ pub async fn dispatch_once_with(
     mailer: &crate::mail::Mailer,
     reporter: Option<&mut crate::reporter::AttemptReporter>,
 ) -> Result<bool, tokio_postgres::Error> {
-    let Some(job) = pg::claim(client).await? else {
+    let Some(job) = pg::claim(client, pg::org_job_cap()).await? else {
         return Ok(false);
     };
     dispatch_claimed(client, profile, mailer, reporter, job).await
@@ -531,6 +531,25 @@ async fn dispatch_claimed(
         return Ok(true);
     };
 
+    // The env and delivery root the job runs against: its DATASET's when it
+    // names one — each dataset is its own lake — and the org's for org-level
+    // kinds (provision) and pre-dataset rows, exactly as before. The default
+    // dataset's copies are kept in step by the explicit-mutation fan-out
+    // (`pg::merge_dataset_envs`), never by a boot rewrite.
+    let (lake_env, lake_drop_root) = if let Some(ds_id) = job.dataset_id.as_deref() {
+        let Some(ds) = pg::get_dataset_by_id(client, ds_id).await? else {
+            pg::mark(client, &job.id, "failed").await?;
+            if let Some(rr) = report.as_mut() {
+                rr.settle(false).await;
+            }
+            eprintln!("job {} failed: dataset id '{ds_id}' not found", job.id);
+            return Ok(true);
+        };
+        (ds.env, ds.drop_root)
+    } else {
+        (org.env.clone(), org.drop_root.clone())
+    };
+
     // Every lake job reconciles its lake first, under the one-active-job-per-org
     // rule it already holds: the catalog compiled into this binary against the
     // tenant's live tables, safe statements applied and ledgered, a breaking
@@ -543,7 +562,10 @@ async fn dispatch_claimed(
     // the merging is the `apply_corrections` job it enqueues. Reconciling for it
     // would buy nothing and would mean a tenant whose lake is unreachable could
     // not even record approvals, which is the opposite of useful.
-    let schema = if job.kind == "provision" || job.kind == "apply_approved" {
+    let schema = if job.kind == "provision"
+        || job.kind == "dataset_provision"
+        || job.kind == "apply_approved"
+    {
         None
     } else {
         // The ledger image of the pre-step (§3.5): a kind whose DAG opens with
@@ -557,7 +579,7 @@ async fn dispatch_claimed(
         if brackets_schema && let Some(rr) = report.as_mut() {
             rr.pod_started("reconcile_schema").await;
         }
-        let env = org.env.clone();
+        let env = lake_env.clone();
         let outcome = tokio::task::spawn_blocking(move || crate::schema::reconcile_lake_env(&env))
             .await
             .unwrap_or_else(|e| Err(format!("dispatcher task panicked: {e}")));
@@ -596,7 +618,7 @@ async fn dispatch_claimed(
     // drains the org's pending staged actions into the lake and corrects (reusing
     // the existing scores), which needs the async Postgres client, so it does not
     // go through the blocking `run_job`.
-    let env = org.env.clone();
+    let env = lake_env.clone();
     // Per-kind entity-event counts, for the webhook aggregate (O3c-2). Only a
     // reconciling run produces any; every other kind leaves this empty, which
     // is the honest "nothing to announce".
@@ -611,6 +633,10 @@ async fn dispatch_claimed(
         // act is a STATE TRANSITION on the org row, which is what the UI's
         // progress panel is waiting for.
         provision_tenant(client, &org, &job.id, profile, report.as_mut()).await
+    } else if job.kind == "dataset_provision" {
+        // Same reason as provision: ends on the dataset's provisioning→active
+        // transition, which is what the create-dataset flow polls.
+        provision_dataset(client, &org, &job, report.as_mut()).await
     } else if job.kind == "apply_corrections" {
         drain_and_correct(
             client,
@@ -705,7 +731,7 @@ async fn dispatch_claimed(
             }
         };
         let jb = job.clone();
-        let drop_root = org.drop_root.clone();
+        let drop_root = lake_drop_root.clone();
         // The counts come out beside the outcome rather than inside it: every
         // other arm of this `if` yields `Result<(), _>`, and widening all of
         // them to carry a value only this one can produce would be noise.
@@ -2216,6 +2242,79 @@ async fn write_back_resolutions(
             eprintln!("run {run_id}: entity.write_back for {entity_id} not queued: {e}");
         }
     }
+}
+
+/// The `dataset_provision` job: reconcile the dataset's lake into existence
+/// (the first attach creates its catalog — a `METADATA_SCHEMA` in the org's
+/// metadata database, or a local file whose directories the API made), record
+/// its schema position, and flip the dataset `provisioning → active`. The row,
+/// its env and its config version were created by `POST /datasets`; this is
+/// the slow half, exactly as `provision_tenant` is for an org.
+async fn provision_dataset(
+    client: &tokio_postgres::Client,
+    org: &pg::OrgDetail,
+    job: &Job,
+    mut report: Option<&mut crate::reporter::RunReport<'_>>,
+) -> Result<(), String> {
+    let Some(ds_id) = job.dataset_id.as_deref() else {
+        return Err("dataset_provision job carries no dataset_id".to_string());
+    };
+    let ds = pg::get_dataset_by_id(client, ds_id)
+        .await
+        .map_err(|e| format!("reading dataset {ds_id}: {e}"))?
+        .ok_or_else(|| format!("dataset id '{ds_id}' not found"))?;
+
+    // The ledger's create_catalog node: nothing to create — the org's metadata
+    // database (or directory) exists — so it succeeds as the no-op it is.
+    if let Some(rr) = report.as_mut() {
+        rr.control_started("create_catalog").await;
+        rr.control_succeeded("create_catalog", None).await;
+        rr.pod_started("lake_init").await;
+    }
+    let env = ds.env.clone();
+    let outcome = tokio::task::spawn_blocking(move || crate::schema::reconcile_lake_env(&env))
+        .await
+        .unwrap_or_else(|e| Err(format!("dispatcher task panicked: {e}")));
+    let (status, hash, detail) = crate::schema::tenant_state(&outcome);
+    crate::schema::record_tenant_state(client, &org.id, Some(&ds.id), status, &hash, Some(&detail))
+        .await
+        .map_err(|e| format!("record {}/{}'s schema state: {e}", org.name, ds.name))?;
+    match &outcome {
+        Ok(_) => {
+            if let Some(rr) = report.as_mut() {
+                rr.pod_succeeded("lake_init", None).await;
+            }
+        }
+        Err(e) => {
+            if let Some(rr) = report.as_mut() {
+                rr.pod_failed("lake_init", e).await;
+            }
+            return Err(format!("provision {}/{}'s lake: {e}", org.name, ds.name));
+        }
+    }
+
+    if let Some(rr) = report.as_mut() {
+        rr.control_started("activate").await;
+    }
+    let activated = pg::set_dataset_state(client, &org.id, &ds.name, "active", "provisioning")
+        .await
+        .map_err(|e| format!("activate {}/{}: {e}", org.name, ds.name))?;
+    // A replayed job finds the dataset already active: that is success, not a
+    // lost race — the transition it exists to make has been made.
+    if !activated && ds.state != "active" && ds.state != "provisioning" {
+        let e = format!(
+            "dataset {}/{} is {}; only a provisioning dataset activates",
+            org.name, ds.name, ds.state
+        );
+        if let Some(rr) = report.as_mut() {
+            rr.control_failed("activate", &e).await;
+        }
+        return Err(e);
+    }
+    if let Some(rr) = report.as_mut() {
+        rr.control_succeeded("activate", None).await;
+    }
+    Ok(())
 }
 
 /// What the blocking half of [`drain_and_correct`] produced.

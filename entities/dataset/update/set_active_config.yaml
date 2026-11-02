@@ -1,0 +1,8 @@
+kind: statement
+operation: update
+mode: partial
+description: "Repoint a dataset's active config version (the dataset-scoped half of publish; the org-scoped publish path retires with the route switchover)."
+params:
+  - { name: version, type: bigint }
+  - { name: dataset_id, type: varchar }
+returns: none

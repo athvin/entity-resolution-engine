@@ -842,6 +842,14 @@
             "type": "string",
             "description": "The tenant's unique id (UUIDv7, minted at creation)."
           },
+          "max_concurrent_jobs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "How many of this org's jobs may be active at once, across its datasets (the noisy-neighbor cap). NULL inherits the server default (ER_ORG_JOB_CAP, which ships as 1 — the pre-dataset single-writer profile). The per-DATASET writer lock is separate and absolute."
+          },
           "name": {
             "type": "string",
             "description": "The tenant's unique name (the routing handle; URLs stay name-based)."

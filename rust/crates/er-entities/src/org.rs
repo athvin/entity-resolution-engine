@@ -24,6 +24,8 @@ pub struct Org {
     pub active_config_version: Option<i64>,
     /// Tenant lifecycle state.
     pub state: String,
+    /// How many of this org's jobs may be active at once, across its datasets (the noisy-neighbor cap). NULL inherits the server default (ER_ORG_JOB_CAP, which ships as 1 — the pre-dataset single-writer profile). The per-DATASET writer lock is separate and absolute.
+    pub max_concurrent_jobs: Option<i64>,
     /// When the tenant was created.
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
     /// Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
@@ -53,6 +55,7 @@ impl Org {
             "s3_ingest_prefix",
             "active_config_version",
             "state",
+            "max_concurrent_jobs",
             "created_at",
             "updated_at",
         ]
@@ -130,6 +133,7 @@ pub mod read {
   s3_ingest_prefix,
   active_config_version,
   state,
+  max_concurrent_jobs,
   created_at,
   updated_at
 FROM public.orgs
@@ -148,6 +152,7 @@ WHERE id = $1
                 s3_ingest_prefix: row.get("s3_ingest_prefix"),
                 active_config_version: row.get("active_config_version"),
                 state: row.get("state"),
+                max_concurrent_jobs: row.get("max_concurrent_jobs"),
                 created_at: row.get("created_at"),
                 updated_at: row.get("updated_at"),
             })
@@ -169,6 +174,7 @@ WHERE id = $1
   s3_ingest_prefix,
   active_config_version,
   state,
+  max_concurrent_jobs,
   created_at,
   updated_at
 FROM public.orgs
@@ -187,6 +193,7 @@ WHERE name = $1
                 s3_ingest_prefix: row.get("s3_ingest_prefix"),
                 active_config_version: row.get("active_config_version"),
                 state: row.get("state"),
+                max_concurrent_jobs: row.get("max_concurrent_jobs"),
                 created_at: row.get("created_at"),
                 updated_at: row.get("updated_at"),
             })
@@ -207,6 +214,7 @@ WHERE name = $1
   s3_ingest_prefix,
   active_config_version,
   state,
+  max_concurrent_jobs,
   created_at,
   updated_at
 FROM public.orgs
@@ -225,6 +233,7 @@ ORDER BY name
                 s3_ingest_prefix: row.get("s3_ingest_prefix"),
                 active_config_version: row.get("active_config_version"),
                 state: row.get("state"),
+                max_concurrent_jobs: row.get("max_concurrent_jobs"),
                 created_at: row.get("created_at"),
                 updated_at: row.get("updated_at"),
             })
@@ -245,6 +254,7 @@ ORDER BY name
   s3_ingest_prefix,
   active_config_version,
   state,
+  max_concurrent_jobs,
   created_at,
   updated_at
 FROM public.orgs
@@ -265,6 +275,7 @@ ORDER BY name
                 s3_ingest_prefix: row.get("s3_ingest_prefix"),
                 active_config_version: row.get("active_config_version"),
                 state: row.get("state"),
+                max_concurrent_jobs: row.get("max_concurrent_jobs"),
                 created_at: row.get("created_at"),
                 updated_at: row.get("updated_at"),
             })

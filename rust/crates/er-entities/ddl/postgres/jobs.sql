@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS public.jobs (
   PRIMARY KEY (id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS jobs_idempotency ON public.jobs (org_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS jobs_one_active_per_org ON public.jobs (org_id) WHERE state IN ('dispatching','running','canceling');
+CREATE UNIQUE INDEX IF NOT EXISTS jobs_one_active_per_dataset ON public.jobs (dataset_id) WHERE state IN ('dispatching','running','canceling');
+CREATE UNIQUE INDEX IF NOT EXISTS jobs_one_active_org_level ON public.jobs (org_id) WHERE state IN ('dispatching','running','canceling') AND dataset_id IS NULL;
 CREATE INDEX IF NOT EXISTS jobs_claimable ON public.jobs (state, not_before, priority, id);
 CREATE INDEX IF NOT EXISTS jobs_dataset ON public.jobs (dataset_id, state);

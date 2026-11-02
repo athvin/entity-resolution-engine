@@ -40,12 +40,13 @@ pub enum JobKind {
     LakeMaintain,
     LakeMigrate,
     Provision,
+    DatasetProvision,
     ApplyCorrections,
     ApplyApproved,
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 9] = [
+    pub const ALL: [JobKind; 10] = [
         JobKind::RunAllFull,
         JobKind::RunAllIncremental,
         JobKind::Correct,
@@ -53,6 +54,7 @@ impl JobKind {
         JobKind::LakeMaintain,
         JobKind::LakeMigrate,
         JobKind::Provision,
+        JobKind::DatasetProvision,
         JobKind::ApplyCorrections,
         JobKind::ApplyApproved,
     ];
@@ -67,6 +69,7 @@ impl JobKind {
             JobKind::LakeMaintain => "lake_maintain",
             JobKind::LakeMigrate => "lake_migrate",
             JobKind::Provision => "provision",
+            JobKind::DatasetProvision => "dataset_provision",
             JobKind::ApplyCorrections => "apply_corrections",
             JobKind::ApplyApproved => "apply_approved",
         }
@@ -103,6 +106,7 @@ pub fn dag_for(kind: JobKind) -> Dag {
         JobKind::LakeMaintain => lake_maintain(),
         JobKind::LakeMigrate => lake_migrate(),
         JobKind::Provision => provision(),
+        JobKind::DatasetProvision => dataset_provision(),
         JobKind::ApplyCorrections => apply_corrections(),
         JobKind::ApplyApproved => apply_approved(),
     }
@@ -251,6 +255,18 @@ fn provision() -> Dag {
     let lake = d.then::<LakeInit>((catalog,));
     let _ = d.control::<Activate>((lake,));
     d.build().expect("the provision DAG assembles")
+}
+
+fn dataset_provision() -> Dag {
+    // The provision shape, re-ledgered per dataset. CreateCatalog is
+    // idempotent on the org's existing metadata database; the dataset's own
+    // catalog (a METADATA_SCHEMA inside it, or a local file) is created by the
+    // lake's first attach inside LakeInit.
+    let mut d = Builder::new(JobKind::DatasetProvision.dag_name());
+    let catalog = d.control::<CreateCatalog>(());
+    let lake = d.then::<LakeInit>((catalog,));
+    let _ = d.control::<Activate>((lake,));
+    d.build().expect("the dataset_provision DAG assembles")
 }
 
 fn apply_corrections() -> Dag {

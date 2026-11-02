@@ -208,10 +208,16 @@ indexes:
     where: "live IS TRUE"
   # One live pod per tenant — the DB-level image of the assembly single-writer
   # check; control rows are exempt (they hold no org slot).
-  - name: task_instances_one_pod_per_org
-    columns: [org_id]
+  # One live pod per DATASET (the lake being written); org-level rows keep a
+  # per-org slot. The old per-org index is dropped by fixup 0003.
+  - name: task_instances_one_pod_per_dataset
+    columns: [dataset_id]
     unique: true
     where: "live IS TRUE AND kind = 'pod' AND state IN ('queued','running','restarting','canceling')"
+  - name: task_instances_one_pod_org_level
+    columns: [org_id]
+    unique: true
+    where: "live IS TRUE AND kind = 'pod' AND state IN ('queued','running','restarting','canceling') AND dataset_id IS NULL"
   - name: task_instances_claimable
     columns: [state, not_before, job_id, seq]
     where: "live IS TRUE"

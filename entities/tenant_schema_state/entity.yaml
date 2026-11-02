@@ -4,7 +4,6 @@ name: tenant_schema_state
 relation: tenant_schema_states
 description: "The control plane's cache of each tenant lake's schema position: the catalog version the lake was last reconciled or checked against and how that went. The lake's own schema_migrations ledger is authoritative; this row is what the deploy report and the drift check read without opening every lake."
 key: [id]
-natural_key: [org_id]
 generate:
   stores: [postgres]
   languages: [rust]
@@ -55,6 +54,19 @@ columns:
 indexes:
   - name: tenant_schema_states_org
     columns: [org_id]
+  # One cached position per dataset; org-level reconciliations (provisioning,
+  # pre-dataset rows) keep one row per org. Two partial uniques rather than a
+  # natural key: a plain UNIQUE(dataset_id) treats NULLs as distinct, which
+  # would let org-level rows accumulate unboundedly. The old in-table
+  # UNIQUE(org_id) constraint is dropped by fixup 0003.
+  - name: tenant_schema_states_dataset_unique
+    columns: [dataset_id]
+    unique: true
+    where: "dataset_id IS NOT NULL"
+  - name: tenant_schema_states_org_level
+    columns: [org_id]
+    unique: true
+    where: "dataset_id IS NULL"
   # V17: the dataset-scoped read path.
   - name: tenant_schema_states_dataset
     columns: [dataset_id]

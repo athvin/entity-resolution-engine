@@ -57,19 +57,22 @@ async fn queue_lifecycle_over_postgres() {
     .unwrap();
     assert_eq!(high.state, "queued");
 
-    let claimed = pg::claim(&client).await.unwrap().expect("a job to claim");
+    let claimed = pg::claim(&client, 1)
+        .await
+        .unwrap()
+        .expect("a job to claim");
     assert_eq!(claimed.id, high.id);
     assert_eq!(claimed.state, "dispatching");
 
     // One active job per org: the second claim finds nothing while `high` runs.
     assert!(
-        pg::claim(&client).await.unwrap().is_none(),
+        pg::claim(&client, 1).await.unwrap().is_none(),
         "one-active-per-org must block the second claim"
     );
 
     // Finish the first; now the low-priority job is claimable.
     pg::mark(&client, &high.id, "succeeded").await.unwrap();
-    let next = pg::claim(&client)
+    let next = pg::claim(&client, 1)
         .await
         .unwrap()
         .expect("low job now claimable");

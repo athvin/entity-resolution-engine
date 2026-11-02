@@ -1,6 +1,8 @@
 kind: statement
 operation: update
 mode: partial
-description: "Claim the highest-priority runnable job whose org has no active job (FOR UPDATE SKIP LOCKED); returns the claimed row, or none."
-params: []
+description: "Claim the highest-priority runnable job whose DATASET has no active job and whose org is under its concurrency cap (FOR UPDATE SKIP LOCKED); returns the claimed row, or none. The cap's COUNT is race-free only under the claim advisory lock the pg wrapper holds; the per-dataset partial unique is the database backstop."
+params:
+  - { name: default_cap, type: bigint }
+reads: [org]
 returns: entity

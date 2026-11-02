@@ -55,20 +55,19 @@ impl TenantSchemaState {
 
 pub mod create {
     //! @generated query functions for this entity + operation.
-    /// Record a tenant lake's schema position after a reconciliation or check: insert the row, or on a repeat for the same tenant replace its catalog version, status, detail and check time.
+    /// Record a DATASET lake's schema position after a reconciliation or check: insert the row, or on a repeat for the same dataset replace its catalog version, status, detail and check time. Org-level reconciliations (no dataset) go through upsert_org_level — the two conflict targets are different partial uniques.
     pub async fn upsert(
         client: &impl ::tokio_postgres::GenericClient,
         id: &str,
         org_id: &str,
-        dataset_id: Option<&str>,
+        dataset_id: &str,
         catalog_hash: &str,
         status: &str,
         detail: Option<&str>,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
         const SQL: &str = "INSERT INTO public.tenant_schema_states (id, org_id, dataset_id, catalog_hash, status, detail)
 VALUES ($1, $2, $3, $4, $5, $6)
-ON CONFLICT (org_id) DO UPDATE SET
-  dataset_id = EXCLUDED.dataset_id,
+ON CONFLICT (dataset_id) WHERE dataset_id IS NOT NULL DO UPDATE SET
   catalog_hash = EXCLUDED.catalog_hash,
   status = EXCLUDED.status,
   detail = EXCLUDED.detail,
@@ -80,6 +79,30 @@ ON CONFLICT (org_id) DO UPDATE SET
                 SQL,
                 &[&id, &org_id, &dataset_id, &catalog_hash, &status, &detail],
             )
+            .await
+    }
+
+    /// Record an ORG-LEVEL lake reconciliation (provisioning, a pre-dataset position): one row per org among the rows whose dataset_id is NULL.
+    pub async fn upsert_org_level(
+        client: &impl ::tokio_postgres::GenericClient,
+        id: &str,
+        org_id: &str,
+        catalog_hash: &str,
+        status: &str,
+        detail: Option<&str>,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str =
+            "INSERT INTO public.tenant_schema_states (id, org_id, catalog_hash, status, detail)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (org_id) WHERE dataset_id IS NULL DO UPDATE SET
+  catalog_hash = EXCLUDED.catalog_hash,
+  status = EXCLUDED.status,
+  detail = EXCLUDED.detail,
+  checked_at = now(),
+  updated_at = now()
+";
+        client
+            .execute(SQL, &[&id, &org_id, &catalog_hash, &status, &detail])
             .await
     }
 }

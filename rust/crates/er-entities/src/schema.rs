@@ -50,6 +50,7 @@ $fn$;"#,
   s3_ingest_prefix text,
   active_config_version bigint,
   state text NOT NULL DEFAULT 'active' CHECK (state IN ('provisioning', 'active', 'suspended', 'purging')),
+  max_concurrent_jobs bigint,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (id),
@@ -259,7 +260,8 @@ CREATE OR REPLACE TRIGGER er_history_entity_links
   PRIMARY KEY (id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS jobs_idempotency ON public.jobs (org_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS jobs_one_active_per_org ON public.jobs (org_id) WHERE state IN ('dispatching','running','canceling');
+CREATE UNIQUE INDEX IF NOT EXISTS jobs_one_active_per_dataset ON public.jobs (dataset_id) WHERE state IN ('dispatching','running','canceling');
+CREATE UNIQUE INDEX IF NOT EXISTS jobs_one_active_org_level ON public.jobs (org_id) WHERE state IN ('dispatching','running','canceling') AND dataset_id IS NULL;
 CREATE INDEX IF NOT EXISTS jobs_claimable ON public.jobs (state, not_before, priority, id);
 CREATE INDEX IF NOT EXISTS jobs_dataset ON public.jobs (dataset_id, state);"#,
     r#"CREATE TABLE IF NOT EXISTS public.matching_models (
@@ -508,7 +510,8 @@ CREATE OR REPLACE TRIGGER er_history_taggings
 );
 CREATE INDEX IF NOT EXISTS task_instances_org_job ON public.task_instances (org_id, job_id);
 CREATE UNIQUE INDEX IF NOT EXISTS task_instances_live ON public.task_instances (job_id, task_id) WHERE live IS TRUE;
-CREATE UNIQUE INDEX IF NOT EXISTS task_instances_one_pod_per_org ON public.task_instances (org_id) WHERE live IS TRUE AND kind = 'pod' AND state IN ('queued','running','restarting','canceling');
+CREATE UNIQUE INDEX IF NOT EXISTS task_instances_one_pod_per_dataset ON public.task_instances (dataset_id) WHERE live IS TRUE AND kind = 'pod' AND state IN ('queued','running','restarting','canceling');
+CREATE UNIQUE INDEX IF NOT EXISTS task_instances_one_pod_org_level ON public.task_instances (org_id) WHERE live IS TRUE AND kind = 'pod' AND state IN ('queued','running','restarting','canceling') AND dataset_id IS NULL;
 CREATE INDEX IF NOT EXISTS task_instances_claimable ON public.task_instances (state, not_before, job_id, seq) WHERE live IS TRUE;
 CREATE INDEX IF NOT EXISTS task_instances_heartbeat ON public.task_instances (heartbeat_at) WHERE live IS TRUE AND state = 'running';
 CREATE INDEX IF NOT EXISTS task_instances_dataset ON public.task_instances (dataset_id, job_id);"#,
@@ -522,10 +525,11 @@ CREATE INDEX IF NOT EXISTS task_instances_dataset ON public.task_instances (data
   checked_at timestamptz NOT NULL DEFAULT now(),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (id),
-  UNIQUE (org_id)
+  PRIMARY KEY (id)
 );
 CREATE INDEX IF NOT EXISTS tenant_schema_states_org ON public.tenant_schema_states (org_id);
+CREATE UNIQUE INDEX IF NOT EXISTS tenant_schema_states_dataset_unique ON public.tenant_schema_states (dataset_id) WHERE dataset_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS tenant_schema_states_org_level ON public.tenant_schema_states (org_id) WHERE dataset_id IS NULL;
 CREATE INDEX IF NOT EXISTS tenant_schema_states_dataset ON public.tenant_schema_states (dataset_id);"#,
     r#"CREATE TABLE IF NOT EXISTS public.webhooks (
   id text NOT NULL,

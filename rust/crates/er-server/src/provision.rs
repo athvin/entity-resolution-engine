@@ -192,6 +192,103 @@ impl Profile {
             env,
         }
     }
+
+    /// The paths and env a DATASET will get — the per-dataset twin of
+    /// [`Profile::plan`], equally pure. New datasets nest under the org
+    /// directory; the org's original flat layout remains the `default`
+    /// dataset's, by the convergence sweep's verbatim copy.
+    ///
+    /// Postgres mode shares the org's one catalog database and separates
+    /// datasets by DuckLake's `METADATA_SCHEMA` (`ER_LAKE_CATALOG_SCHEMA`,
+    /// `ds_<dataset>`); the data path substitutes `{dataset}` when the
+    /// template declares it and otherwise nests `<dataset>/` under the org's
+    /// substituted path. Local mode gives each dataset its own catalog file —
+    /// the file is the isolation, so no schema option is set.
+    #[must_use]
+    pub fn plan_dataset(&self, org: &str, dataset: &str) -> Plan {
+        let dir = self.root.join(org).join(dataset);
+        let config_path = dir.join("config.yaml");
+        let drop_root = dir.join("drop");
+        let (catalog, data_path, tenant, catalog_schema) = match self.mode {
+            Mode::Local => (
+                path_string(&dir.join("lake").join("catalog.ducklake")),
+                path_string(&dir.join("lake").join("data")),
+                None,
+                None,
+            ),
+            Mode::Postgres => {
+                let database = tenant_database(org);
+                let template = self.data_template.as_deref().unwrap_or_default();
+                let data = if template.contains("{dataset}") {
+                    template.replace("{org}", org).replace("{dataset}", dataset)
+                } else {
+                    format!(
+                        "{}/{dataset}",
+                        template.replace("{org}", org).trim_end_matches('/')
+                    )
+                };
+                (
+                    catalog_dsn(self.maint_dsn.as_deref().unwrap_or_default(), &database),
+                    data,
+                    Some(database),
+                    Some(dataset_schema(dataset)),
+                )
+            }
+        };
+
+        // env_extra values may carry {org}/{dataset} so per-dataset artifact
+        // paths (ER_TF_PATH, ER_MODEL_PATH, ER_LEXICON_PATH) need declaring
+        // once. Derived keys still win, for the same isolation reason as
+        // `plan`'s.
+        let mut env: Map<String, Value> = self
+            .env_extra
+            .iter()
+            .map(|(k, v)| {
+                let v = match v.as_str() {
+                    Some(text) => json!(text.replace("{org}", org).replace("{dataset}", dataset)),
+                    None => v.clone(),
+                };
+                (k.clone(), v)
+            })
+            .collect();
+        for (key, value) in [
+            ("ER_CONFIG_PATH", path_string(&config_path)),
+            ("ER_LAKE_CATALOG", catalog),
+            ("ER_LAKE_DATA_PATH", data_path),
+        ] {
+            env.insert(key.to_string(), json!(value));
+        }
+        if let Some(schema) = catalog_schema {
+            env.insert("ER_LAKE_CATALOG_SCHEMA".to_string(), json!(schema));
+        }
+
+        Plan {
+            org: org.to_string(),
+            dir,
+            config_path,
+            drop_root,
+            tenant,
+            env,
+        }
+    }
+}
+
+/// `ds_<dataset>`, folded like [`tenant_database`]: the DuckLake
+/// `METADATA_SCHEMA` holding one dataset's catalog tables inside the org's
+/// shared metadata database.
+#[must_use]
+pub fn dataset_schema(dataset: &str) -> String {
+    let safe: String = dataset
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    format!("ds_{safe}")
 }
 
 /// What provisioning one tenant will create.

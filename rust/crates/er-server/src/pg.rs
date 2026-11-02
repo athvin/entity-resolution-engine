@@ -252,10 +252,41 @@ pub async fn enqueue(
 ///
 /// # Errors
 /// Propagates a non-unique-violation query error.
-pub async fn claim(client: &Client) -> Result<Option<Job>, PgError> {
-    match er_entities::job::update::claim(client).await {
+/// The server-default org concurrency cap: `ER_ORG_JOB_CAP`, shipping as 1 —
+/// the pre-dataset single-writer profile. An org row's `max_concurrent_jobs`
+/// overrides it per org; raising the env raises every org that has not set one.
+#[must_use]
+pub fn org_job_cap() -> i64 {
+    std::env::var("ER_ORG_JOB_CAP")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|cap| *cap >= 1)
+        .unwrap_or(1)
+}
+
+pub async fn claim(client: &Client, default_cap: i64) -> Result<Option<Job>, PgError> {
+    // The org cap's COUNT cannot be index-enforced, so claims are serialized
+    // across dispatchers with an advisory lock. Session-scoped (the claim is
+    // not a transaction of its own): the unlock below runs on either outcome,
+    // and a dropped connection releases it anyway. Claims are milliseconds;
+    // serializing them is cheap and makes the cap exact.
+    client
+        .execute(
+            "SELECT pg_advisory_lock(hashtext('erserver.claim'), 0)",
+            &[],
+        )
+        .await?;
+    let claimed = er_entities::job::update::claim(client, default_cap).await;
+    let _ = client
+        .execute(
+            "SELECT pg_advisory_unlock(hashtext('erserver.claim'), 0)",
+            &[],
+        )
+        .await;
+    match claimed {
         Ok(jobs) => Ok(jobs.into_iter().next()),
-        // A lost one-active-per-org race surfaces as a unique violation -> None.
+        // A lost writer-lock race surfaces as a unique violation -> None (the
+        // per-dataset partial unique is the database-level backstop).
         Err(e) if e.code() == Some(&tokio_postgres::error::SqlState::UNIQUE_VIOLATION) => Ok(None),
         Err(e) => Err(e),
     }
@@ -746,6 +777,37 @@ pub async fn default_dataset_id(client: &Client, org_id: &str) -> Result<Option<
             .next()
             .map(|d| d.id),
     )
+}
+
+/// Merge a settings patch into every dataset env of one org — the fan-out for
+/// org-level knobs (DuckDB resources, a lexicon path) now that runs read the
+/// DATASET env. The convergence sweep deliberately never rewrites an existing
+/// dataset, so explicit mutations propagate here instead.
+///
+/// # Errors
+/// Propagates the update error.
+pub async fn merge_dataset_envs(
+    client: &Client,
+    org_id: &str,
+    patch: &serde_json::Value,
+) -> Result<(), PgError> {
+    er_entities::dataset::update::merge_env(client, patch, org_id).await?;
+    Ok(())
+}
+
+/// One dataset by its id — the dispatcher's lookup from a claimed job.
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn get_dataset_by_id(
+    client: &Client,
+    id: &str,
+) -> Result<Option<DatasetDetail>, PgError> {
+    Ok(er_entities::dataset::read::by_id(client, id)
+        .await?
+        .into_iter()
+        .next()
+        .map(DatasetDetail::from))
 }
 
 /// Insert a bring-your-own-config dataset, `active`. Returns `false` when a

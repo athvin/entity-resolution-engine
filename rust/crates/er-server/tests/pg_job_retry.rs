@@ -131,7 +131,7 @@ async fn a_transient_failure_retries_with_backoff_and_a_permanent_one_does_not()
     // Claiming counts the attempt as it hands it out — so a worker that dies
     // without reporting has still used one, which is what stops an infinite
     // retry loop.
-    let claimed = pg::claim(&client)
+    let claimed = pg::claim(&client, 1)
         .await
         .unwrap()
         .expect("the job is claimable");
@@ -170,7 +170,7 @@ async fn a_transient_failure_retries_with_backoff_and_a_permanent_one_does_not()
 
     // And the backoff is real: the job is NOT immediately claimable.
     assert!(
-        pg::claim(&client).await.unwrap().is_none(),
+        pg::claim(&client, 1).await.unwrap().is_none(),
         "a backed-off job must not be claimable yet — otherwise the retry is a \
          hot loop, not a backoff"
     );
@@ -185,7 +185,7 @@ async fn a_transient_failure_retries_with_backoff_and_a_permanent_one_does_not()
             )
             .await
             .unwrap();
-        let claimed = pg::claim(&client)
+        let claimed = pg::claim(&client, 1)
             .await
             .unwrap()
             .expect("the job is claimable once its backoff has passed");
@@ -232,7 +232,7 @@ async fn a_transient_failure_retries_with_backoff_and_a_permanent_one_does_not()
         )
         .await
         .unwrap();
-    let claimed = pg::claim(&client)
+    let claimed = pg::claim(&client, 1)
         .await
         .unwrap()
         .expect("job2 is claimable");
