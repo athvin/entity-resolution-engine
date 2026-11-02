@@ -2305,6 +2305,7 @@ dependencies = [
  "tokio",
  "tokio-postgres",
  "tower",
+ "tower-http",
  "tracing",
  "utoipa",
 ]
@@ -5185,6 +5186,7 @@ dependencies = [
  "tower-service",
  "tracing",
  "url",
+ "uuid",
 ]
 
 [[package]]

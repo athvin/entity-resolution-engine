@@ -133,6 +133,7 @@ er-k8s = { version = "0.1.0", path = "../er-k8s" }
 jsonwebtoken = "9"
 er-obs = { version = "0.1.0", path = "../er-obs" }
 tracing.workspace = true
+tower-http = { version = "0.6", default-features = false, features = ["trace", "request-id"] }
 
 [lints]
 workspace = true

@@ -7,6 +7,7 @@
     { "name": "delete_orgs_by_org_tags_by_tag_id", "method": "DELETE", "path": "/v1/orgs/{org}/tags/{tag_id}", "role": "admin", "params": ["org", "tag_id"], "needs_body": false, "body": null, "summary": "retire a tag" },
     { "name": "delete_orgs_by_org_webhooks_by_webhook_id", "method": "DELETE", "path": "/v1/orgs/{org}/webhooks/{webhook_id}", "role": "admin", "params": ["org", "webhook_id"], "needs_body": false, "body": null, "summary": "delete a webhook" },
     { "name": "get_healthz", "method": "GET", "path": "/healthz", "role": "public", "params": [], "needs_body": false, "body": null, "summary": "liveness" },
+    { "name": "get_readyz", "method": "GET", "path": "/readyz", "role": "public", "params": [], "needs_body": false, "body": null, "summary": "readiness" },
     { "name": "get_audit", "method": "GET", "path": "/v1/audit", "role": "operator", "params": [], "needs_body": false, "body": null, "summary": "the cross-tenant audit feed" },
     { "name": "get_jobs", "method": "GET", "path": "/v1/jobs", "role": "operator", "params": [], "needs_body": false, "body": null, "summary": "the cross-org queue view" },
     { "name": "get_orgs", "method": "GET", "path": "/v1/orgs", "role": "operator", "params": [], "needs_body": false, "body": null, "summary": "list all orgs" },

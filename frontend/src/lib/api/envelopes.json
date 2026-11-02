@@ -1,5 +1,6 @@
 {
   "GET /healthz": { "envelope": "wrapped", "key": "status" },
+  "GET /readyz": { "envelope": "record", "keys": ["ready", "store", "reason"] },
   "GET /v1/audit": { "envelope": "bare" },
   "GET /v1/internal/attempts/{attempt_id}": { "envelope": "bare" },
   "GET /v1/jobs": { "envelope": "bare" },
