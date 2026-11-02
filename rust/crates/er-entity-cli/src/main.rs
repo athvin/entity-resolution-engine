@@ -480,10 +480,13 @@ fn run_verify(root: &Path) -> Result<bool> {
 }
 
 /// How a lake is reached from the command line: explicit flags, else the env the
-/// org row carries (`ER_LAKE_CATALOG` / `ER_LAKE_DATA_PATH`).
+/// org row carries (`ER_LAKE_CATALOG` / `ER_LAKE_DATA_PATH`, plus
+/// `ER_LAKE_CATALOG_SCHEMA` for a lake whose DuckLake catalog tables live in
+/// their own schema of a shared Postgres metadata database).
 struct LakeTarget {
     catalog: String,
     data_path: Option<String>,
+    catalog_schema: Option<String>,
 }
 
 impl LakeTarget {
@@ -495,13 +498,26 @@ impl LakeTarget {
         let data_path = data_path
             .map(ToString::to_string)
             .or_else(|| std::env::var("ER_LAKE_DATA_PATH").ok());
-        Ok(Self { catalog, data_path })
+        let catalog_schema = std::env::var("ER_LAKE_CATALOG_SCHEMA")
+            .ok()
+            .filter(|s| !s.is_empty());
+        Ok(Self {
+            catalog,
+            data_path,
+            catalog_schema,
+        })
     }
 
     fn open(&self, read_only: bool) -> Result<duckdb::Connection> {
         let conn = duckdb::Connection::open_in_memory().context("opening DuckDB")?;
-        er_entity_diff::attach_lake(&conn, &self.catalog, self.data_path.as_deref(), read_only)
-            .with_context(|| format!("attaching the lake {}", self.catalog))?;
+        er_entity_diff::attach_lake(
+            &conn,
+            &self.catalog,
+            self.data_path.as_deref(),
+            self.catalog_schema.as_deref(),
+            read_only,
+        )
+        .with_context(|| format!("attaching the lake {}", self.catalog))?;
         Ok(conn)
     }
 }

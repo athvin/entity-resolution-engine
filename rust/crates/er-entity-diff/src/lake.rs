@@ -18,12 +18,18 @@ use crate::LiveColumn;
 /// container either. Keeping the two in step is the whole reason this duplication
 /// is called out above rather than left to be discovered.
 ///
+/// `metadata_schema` is DuckLake's `METADATA_SCHEMA` attach option — the
+/// schema inside a shared Postgres metadata database holding this lake's own
+/// catalog tables (how several datasets share one tenant database as disjoint
+/// lakes). `None` omits it; file catalogs take no such option.
+///
 /// # Errors
 /// Propagates the extension load or the ATTACH error.
 pub fn attach_lake(
     conn: &duckdb::Connection,
     metadata: &str,
     data_path: Option<&str>,
+    metadata_schema: Option<&str>,
     read_only: bool,
 ) -> duckdb::Result<()> {
     let baked = std::env::var("ER_DUCKDB_EXTENSION_DIR")
@@ -41,6 +47,9 @@ pub fn attach_lake(
     let mut options = Vec::new();
     if let Some(dp) = data_path {
         options.push(format!("DATA_PATH '{}'", dp.replace('\'', "''")));
+    }
+    if let Some(ms) = metadata_schema {
+        options.push(format!("METADATA_SCHEMA '{}'", ms.replace('\'', "''")));
     }
     if read_only {
         options.push("READ_ONLY".to_string());

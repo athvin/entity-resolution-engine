@@ -51,6 +51,7 @@ mod pg_http;
 mod pg_imports;
 mod pg_job_retry;
 mod pg_labels;
+mod pg_lake_catalog_schema;
 mod pg_lexicon;
 mod pg_mass_update;
 mod pg_migrate_tenants;

@@ -64,7 +64,9 @@ fn like_contains(s: &str) -> String {
 /// (`readapi.open_lake`): `ER_LAKE_CATALOG` is the post-`ducklake:` metadata
 /// (a file catalog locally, `postgres:<dsn>` in production), `ER_LAKE_DATA_PATH`
 /// the Parquet location, `ER_LAKE_METADATA_SCHEMA` the lake schema (default
-/// `main`).
+/// `main`), and `ER_LAKE_CATALOG_SCHEMA` DuckLake's `METADATA_SCHEMA` — the
+/// per-lake schema of catalog tables inside a shared Postgres metadata
+/// database (unset for file catalogs).
 ///
 /// # Errors
 /// Returns a message if `env` lacks the catalog or the attach fails (the
@@ -80,6 +82,10 @@ pub fn open_org_lake(env: &Value) -> Result<Session, String> {
         .get("ER_LAKE_METADATA_SCHEMA")
         .and_then(Value::as_str)
         .unwrap_or("main");
+    let catalog_schema = env
+        .get("ER_LAKE_CATALOG_SCHEMA")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty());
     let mut session =
         Session::open_in_memory(SessionOptions::deterministic().with_baked_extensions())
             .map_err(|e| crate::errfmt::chain(&e))?;
@@ -87,6 +93,7 @@ pub fn open_org_lake(env: &Value) -> Result<Session, String> {
         .attach_ducklake(&DuckLakeConfig {
             metadata: catalog.to_string(),
             data_path: data_path.map(str::to_string),
+            metadata_schema: catalog_schema.map(str::to_string),
             schema: schema.to_string(),
             read_only: true,
             ..DuckLakeConfig::default()

@@ -47,8 +47,28 @@ pub fn lake_catalog_hash() -> String {
     )
 }
 
+/// Open a lake read-write from a stored env blob: `ER_LAKE_CATALOG` (ATTACH
+/// metadata) + `ER_LAKE_DATA_PATH` (Parquet location), plus the optional
+/// `ER_LAKE_CATALOG_SCHEMA` — DuckLake's `METADATA_SCHEMA`, the per-lake
+/// schema of catalog tables inside a shared Postgres metadata database. (Not
+/// `ER_LAKE_METADATA_SCHEMA`, which despite its name is where the *user
+/// tables* live and belongs to the read path.) Blocking: call it from
+/// `spawn_blocking`. Errors use the dispatcher's "open lake: ..." convention
+/// so failure classification is unchanged.
+///
+/// # Errors
+/// A missing env key, or a lake that will not open.
+pub(crate) fn open_lake_env(env: &Value) -> Result<dedupe_core::Session, String> {
+    let catalog = env_str(env, "ER_LAKE_CATALOG").ok_or("org env missing ER_LAKE_CATALOG")?;
+    let data_path = env_str(env, "ER_LAKE_DATA_PATH").ok_or("org env missing ER_LAKE_DATA_PATH")?;
+    let catalog_schema = env_str(env, "ER_LAKE_CATALOG_SCHEMA").filter(|s| !s.is_empty());
+    er_cli::open_lake_with(catalog, data_path, catalog_schema)
+        .map_err(|e| format!("open lake: {e:#}"))
+}
+
 /// Reconcile an org's lake, opened from its env (`ER_LAKE_CATALOG` +
-/// `ER_LAKE_DATA_PATH`), to the compiled-in catalog. Blocking: call it from
+/// `ER_LAKE_DATA_PATH`, plus `ER_LAKE_CATALOG_SCHEMA` when the lake shares a
+/// metadata database), to the compiled-in catalog. Blocking: call it from
 /// `spawn_blocking`. Returns the job-failure text on any failure, in the
 /// dispatcher's convention: "open lake: ..." (transient, retried) or
 /// "ERR_SCHEMA_BREAKING: ..." (terminal; a rebuild is needed).
@@ -57,9 +77,7 @@ pub fn lake_catalog_hash() -> String {
 /// A missing env key, a lake that will not open, a breaking difference, or a
 /// DDL/ledger failure — each as a message a `FailureClass` can classify.
 pub fn reconcile_lake_env(env: &Value) -> Result<er_entity_diff::Reconciled, String> {
-    let catalog = env_str(env, "ER_LAKE_CATALOG").ok_or("org env missing ER_LAKE_CATALOG")?;
-    let data_path = env_str(env, "ER_LAKE_DATA_PATH").ok_or("org env missing ER_LAKE_DATA_PATH")?;
-    let session = er_cli::open_lake(catalog, data_path).map_err(|e| format!("open lake: {e:#}"))?;
+    let session = open_lake_env(env)?;
     er_entity_diff::reconcile_lake(
         session.connection(),
         &er_entities::catalog::catalog(),

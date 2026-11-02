@@ -1023,9 +1023,7 @@ fn run_job(
     active_models: &[ActiveModel],
     events: Option<tokio::sync::mpsc::UnboundedSender<crate::reporter::StageEvent>>,
 ) -> Result<Vec<(String, i64)>, String> {
-    let catalog = env_str(env, "ER_LAKE_CATALOG").ok_or("org env missing ER_LAKE_CATALOG")?;
-    let data_path = env_str(env, "ER_LAKE_DATA_PATH").ok_or("org env missing ER_LAKE_DATA_PATH")?;
-    let session = er_cli::open_lake(catalog, data_path).map_err(|e| format!("open lake: {e:#}"))?;
+    let session = crate::schema::open_lake_env(env)?;
     // The engine's stage observer: channel events when the ledger listens, a
     // no-op otherwise. Built after the lake opens, so an open failure stays a
     // plain job failure with no stage attributed.
@@ -1420,6 +1418,9 @@ async fn train_half(
     let data_path = env_str(env, "ER_LAKE_DATA_PATH")
         .ok_or("org env missing ER_LAKE_DATA_PATH")?
         .to_string();
+    let catalog_schema = env_str(env, "ER_LAKE_CATALOG_SCHEMA")
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
     let config_path = env_str(env, "ER_CONFIG_PATH").ok_or("org env missing ER_CONFIG_PATH")?;
     let tf_path = env_str(env, "ER_TF_PATH")
         .ok_or("org env missing ER_TF_PATH")?
@@ -1493,8 +1494,8 @@ async fn train_half(
         let training = config.training.clone();
         let match_labels = match_labels.clone();
         tokio::task::spawn_blocking(move || -> Result<(String, String), String> {
-            let session =
-                er_cli::open_lake(&catalog, &data_path).map_err(|e| format!("open lake: {e:#}"))?;
+            let session = er_cli::open_lake_with(&catalog, &data_path, catalog_schema.as_deref())
+                .map_err(|e| format!("open lake: {e:#}"))?;
             let dir = std::env::temp_dir().join(format!("er_train_{label}"));
             std::fs::create_dir_all(&dir).map_err(|e| format!("train scratch dir: {e}"))?;
             let out_model = dir.join("model.json");
@@ -2015,23 +2016,15 @@ async fn write_back_resolutions(
             return;
         }
     }
-    let Some(catalog) = env_str(env, "ER_LAKE_CATALOG") else {
-        eprintln!("run {run_id}: write-back skipped: org env missing ER_LAKE_CATALOG");
-        return;
-    };
-    let Some(data_path) = env_str(env, "ER_LAKE_DATA_PATH") else {
-        eprintln!("run {run_id}: write-back skipped: org env missing ER_LAKE_DATA_PATH");
-        return;
-    };
     let entity_type = crate::entity_type_from_env(env);
 
     // A fresh session at the LATEST snapshot: the blocking half has committed,
     // so this is the first point at which the corrected corpus is readable.
     let (payloads, org_name) = {
-        let session = match er_cli::open_lake(catalog, data_path) {
+        let session = match crate::schema::open_lake_env(env) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("run {run_id}: write-back skipped: open lake: {e:#}");
+                eprintln!("run {run_id}: write-back skipped: {e}");
                 return;
             }
         };
@@ -2146,15 +2139,9 @@ fn apply_and_correct(
         }
         None => &noop,
     };
-    let Some(catalog) = env_str(env, "ER_LAKE_CATALOG") else {
-        return DrainOutcome::failed("org env missing ER_LAKE_CATALOG".to_string());
-    };
-    let Some(data_path) = env_str(env, "ER_LAKE_DATA_PATH") else {
-        return DrainOutcome::failed("org env missing ER_LAKE_DATA_PATH".to_string());
-    };
-    let session = match er_cli::open_lake(catalog, data_path) {
+    let session = match crate::schema::open_lake_env(env) {
         Ok(s) => s,
-        Err(e) => return DrainOutcome::failed(format!("open lake: {e}")),
+        Err(e) => return DrainOutcome::failed(e),
     };
     let mut applied = Vec::new();
     let mut labels = Vec::new();
