@@ -70,6 +70,8 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
    2  aws_budgets_budget
    2  aws_cloudwatch_log_group
    2  aws_db_subnet_group
+   2  aws_ecr_lifecycle_policy
+   2  aws_ecr_repository
    2  aws_iam_access_key
    2  aws_iam_user
    2  aws_iam_user_policy
@@ -90,8 +92,6 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
    1  aws_config_configuration_recorder
    1  aws_config_configuration_recorder_status
    1  aws_config_delivery_channel
-   1  aws_ecr_lifecycle_policy
-   1  aws_ecr_repository
    1  aws_efs_backup_policy
    1  aws_efs_file_system
    1  aws_efs_mount_target
