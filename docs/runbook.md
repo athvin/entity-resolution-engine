@@ -130,3 +130,73 @@ dispatcher, UI, per-developer namespace on the dev EKS cluster with Aurora
 control plane and S3 lakes — is `make dev-up DEV=<name> TAG=<git sha>` (and
 `dev-suspend` / `dev-resume` / `dev-down`); see
 [infrastructure.md](infrastructure.md).
+
+## Querying the cost report
+
+`envs/core/athena.tf` puts a Glue table (`er_cur.cur2`) and a workgroup
+(`er-cost`) over the CUR 2.0 export `cur.tf` has been delivering since Phase 0.
+Query it with `AWS_PROFILE=er-mgmt`, always filtering on `billing_period` — the
+workgroup caps a query at 10 GiB scanned, so an unfiltered query fails rather
+than bills.
+
+```sh
+aws athena start-query-execution \
+  --work-group er-cost \
+  --query-execution-context Database=er_cur \
+  --query-string "$(cat query.sql)"
+```
+
+### The three probes — run these before writing any production query
+
+The design in [infrastructure.md](infrastructure.md) §16.2 assumes things about
+the CUR's shape that only a real billing month can confirm. Run these first and
+let the answers shape the queries, rather than assuming and finding out later.
+
+**P1 — what do split rows actually key on?** The design joins a pod to its run
+through `task_instances.pod_uid`. This shows what identity the split rows
+actually carry and in what format.
+
+```sql
+SELECT line_item_resource_id, split_line_item_parent_resource_id, resource_tags,
+       line_item_usage_type, split_line_item_split_usage_ratio,
+       split_line_item_split_cost, split_line_item_unused_cost
+FROM er_cur.cur2
+WHERE billing_period = '2026-10' AND split_line_item_split_cost IS NOT NULL
+LIMIT 25;
+```
+
+**P2 — is the EKS Auto Mode fee split per pod?** It is ~12% of on-demand per
+instance-hour and is charged *even on Spot* (D-AUTOMODE). If it is not split,
+per-pod billed cost understates by roughly that much, and the allocated model
+has to apportion it by `split_line_item_split_usage_ratio`.
+
+```sql
+SELECT line_item_usage_type, count(*) AS rows, sum(line_item_unblended_cost) AS cost,
+       sum(CASE WHEN split_line_item_split_cost IS NULL THEN 0 ELSE 1 END) AS split_rows
+FROM er_cur.cur2
+WHERE billing_period = '2026-10'
+  AND line_item_product_code IN ('AmazonEKS', 'AmazonEC2')
+GROUP BY 1 ORDER BY cost DESC;
+```
+
+**P3 — which cost allocation tags are actually populated? Run this one first.**
+§16.1: activation "takes up to 24 hours and *does not backfill*. Activate them
+late and the first weeks of spend are permanently unattributable." The CUR has
+been delivering since Phase 0, so an empty result for the `aws:eks:*` keys means
+spend is being lost to attribution right now, and every day of delay loses more.
+
+```sql
+SELECT k, count(*) AS rows
+FROM er_cur.cur2
+CROSS JOIN UNNEST(map_keys(resource_tags)) AS t(k)
+WHERE billing_period = '2026-10'
+GROUP BY 1 ORDER BY 2 DESC;
+```
+
+Two known gaps to check against the result: `default_tags` in
+`envs/{core,dev}/versions.tf` sets only `Project` / `Environment` / `ManagedBy`,
+so the `Developer` tag §16.1 names for per-developer attribution is **not** on
+any resource; and `Project` is `entity-resolution`, not the `er` that §16.1's
+prose claims. Activation itself is a Billing console action — check whether
+`aws_ce_cost_allocation_tag` can manage the AWS-generated `aws:eks:*` keys
+before putting it on a path that applies unattended on `main`.
